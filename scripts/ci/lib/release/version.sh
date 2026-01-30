@@ -51,16 +51,17 @@ bump_version() {
 
 	case "$bump_type" in
 	major)
-		MAJOR=$((MAJOR + 1))
+		# Force base-10 to avoid octal parsing of leading zeros
+		MAJOR=$((10#$MAJOR + 1))
 		MINOR=0
 		PATCH=0
 		;;
 	minor)
-		MINOR=$((MINOR + 1))
+		MINOR=$((10#$MINOR + 1))
 		PATCH=0
 		;;
 	patch)
-		PATCH=$((PATCH + 1))
+		PATCH=$((10#$PATCH + 1))
 		;;
 	*)
 		echo "Invalid bump type: $bump_type (expected: major, minor, patch)" >&2
