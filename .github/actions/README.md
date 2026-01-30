@@ -173,6 +173,137 @@ Network egress configuration and reporting scaffolding.
 
 ---
 
+## PR & Comment Actions
+
+### post-pr-comment
+
+Create or update PR comments with upsert behavior using unique markers.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@main
+  with:
+    marker: 'lighthouse-results'  # unique identifier for this comment
+    body: |
+      ## Results
+      Your content here...
+    mode: 'upsert'                # 'upsert', 'create', or 'update'
+```
+
+**Features:**
+- Upsert behavior: updates existing comment or creates new one
+- Marker-based identification using hidden HTML comments
+- Auto-detects PR number from context
+- Optional delete-on-empty behavior
+
+**Outputs:**
+- `comment-id` - ID of the created/updated comment
+- `comment-url` - URL of the comment
+- `action-taken` - "created", "updated", "deleted", or "skipped"
+
+---
+
+### semantic-pr-title
+
+Validate PR title follows conventional commit format.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/semantic-pr-title@main
+  with:
+    types: 'feat,fix,docs,chore'  # optional, allowed types
+    require-scope: 'false'         # optional
+    max-length: '72'               # optional
+```
+
+**Features:**
+- Validates conventional commit format (`type(scope): description`)
+- Configurable allowed types and scopes
+- Length validation
+- Extracts type, scope, and description
+
+**Outputs:**
+- `valid` - Whether the title is valid
+- `type` - Extracted commit type
+- `scope` - Extracted scope
+- `description` - Extracted description
+
+---
+
+### generate-lighthouse-comment
+
+Generate formatted PR comment from Lighthouse CI results.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-lighthouse-comment@main
+  with:
+    results-path: 'lighthouse-results/'
+    report-url: 'https://example.github.io/lighthouse/'
+    threshold-performance: '80'
+```
+
+**Features:**
+- Parses Lighthouse JSON results
+- Color-coded score indicators
+- Configurable thresholds
+- Links to full report
+
+**Outputs:**
+- `comment-body` - Generated Markdown comment
+- `performance-score`, `accessibility-score`, etc.
+- `passed` - Whether all thresholds are met
+
+---
+
+### generate-playwright-comment
+
+Generate formatted PR comment from Playwright test results.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-playwright-comment@main
+  with:
+    results-path: 'playwright-report/results.json'
+    report-url: 'https://example.github.io/playwright/'
+    show-failed-tests: 'true'
+```
+
+**Features:**
+- Parses Playwright JSON results
+- Shows pass/fail/skip counts
+- Lists failed tests (collapsible)
+- Links to full report
+
+**Outputs:**
+- `comment-body` - Generated Markdown comment
+- `total-tests`, `passed-tests`, `failed-tests`, `skipped-tests`
+- `success` - Whether all tests passed
+
+---
+
+### generate-coverage-comment
+
+Generate formatted PR comment from code coverage results.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-comment@main
+  with:
+    coverage-file: 'coverage/coverage-summary.json'
+    format: 'auto'                 # 'istanbul', 'coverage-py', or 'auto'
+    threshold-lines: '80'
+    threshold-branches: '70'
+```
+
+**Features:**
+- Supports Istanbul (JS) and coverage.py (Python) formats
+- Color-coded coverage indicators
+- Configurable thresholds
+- Links to full report
+
+**Outputs:**
+- `comment-body` - Generated Markdown comment
+- `lines-coverage`, `branches-coverage`, `functions-coverage`
+- `passed` - Whether all thresholds are met
+
+---
+
 ## Usage Example
 
 ```yaml

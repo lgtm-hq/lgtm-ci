@@ -1,0 +1,151 @@
+name: 'Post PR Comment'
+description: 'Create or update a PR comment with a unique marker for upsert behavior'
+author: 'lgtm-hq'
+
+inputs:
+  token:
+    description: 'GitHub token for API access'
+    required: false
+    default: ${{ github.token }}
+  pr-number:
+    description: 'Pull request number (auto-detected from context if not provided)'
+    required: false
+    default: ''
+  marker:
+    description: 'Unique marker to identify this comment for updates (e.g., "lighthouse-results")'
+    required: true
+  body:
+    description: 'Comment body content (Markdown supported)'
+    required: true
+  mode:
+    description: 'Comment mode: "upsert" (create or update), "create" (always new), "update" (only update existing)'
+    required: false
+    default: 'upsert'
+  delete-on-empty:
+    description: 'Delete existing comment if body is empty'
+    required: false
+    default: 'false'
+
+outputs:
+  comment-id:
+    description: 'ID of the created or updated comment'
+    value: ${{ steps.post.outputs.comment-id }}
+  comment-url:
+    description: 'URL of the comment'
+    value: ${{ steps.post.outputs.comment-url }}
+  action-taken:
+    description: 'Action taken: "created", "updated", "deleted", or "skipped"'
+    value: ${{ steps.post.outputs.action-taken }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine PR number
+      id: pr-number
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+      run: |
+        PR_NUMBER="${{ inputs['pr-number'] }}"
+
+        if [[ -z "$PR_NUMBER" ]]; then
+          # Try to get from event context
+          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "pull_request_target" ]]; then
+            PR_NUMBER="${{ github.event.pull_request.number }}"
+          elif [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+            PR_NUMBER="${{ github.event.issue.number }}"
+          else
+            # Try to find PR for current commit
+            PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
+          fi
+        fi
+
+        if [[ -z "$PR_NUMBER" ]]; then
+          echo "::error::Could not determine PR number"
+          exit 1
+        fi
+
+        echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+        echo "PR number: $PR_NUMBER"
+
+    - name: Post or update comment
+      id: post
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        COMMENT_BODY: ${{ inputs.body }}
+      run: |
+        PR_NUMBER="${{ steps.pr-number.outputs.number }}"
+        MARKER="${{ inputs.marker }}"
+        MODE="${{ inputs.mode }}"
+        DELETE_ON_EMPTY="${{ inputs['delete-on-empty'] }}"
+
+        # Create marker comment (hidden in rendered markdown)
+        MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
+
+        # Find existing comment with this marker
+        EXISTING_COMMENT_ID=$(gh api \
+          -H "Accept: application/vnd.github+json" \
+          "/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+          --jq ".[] | select(.body | contains(\"${MARKER_TAG}\")) | .id" \
+          2>/dev/null | head -1 || echo "")
+
+        # Handle empty body
+        if [[ -z "$COMMENT_BODY" || "$COMMENT_BODY" == "" ]]; then
+          if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
+            gh api \
+              -X DELETE \
+              "/repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}"
+            echo "action-taken=deleted" >> "$GITHUB_OUTPUT"
+            echo "Deleted comment $EXISTING_COMMENT_ID"
+            exit 0
+          else
+            echo "action-taken=skipped" >> "$GITHUB_OUTPUT"
+            echo "Skipped: empty body"
+            exit 0
+          fi
+        fi
+
+        # Prepare full comment body with marker
+        FULL_BODY="${MARKER_TAG}
+        ${COMMENT_BODY}"
+
+        # Perform action based on mode
+        if [[ "$MODE" == "create" || ( "$MODE" == "upsert" && -z "$EXISTING_COMMENT_ID" ) ]]; then
+          # Create new comment
+          RESPONSE=$(gh api \
+            -X POST \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/issues/${PR_NUMBER}/comments" \
+            -f body="$FULL_BODY")
+
+          COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
+          COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
+          echo "action-taken=created" >> "$GITHUB_OUTPUT"
+          echo "Created comment $COMMENT_ID"
+
+        elif [[ "$MODE" == "update" || "$MODE" == "upsert" ]] && [[ -n "$EXISTING_COMMENT_ID" ]]; then
+          # Update existing comment
+          RESPONSE=$(gh api \
+            -X PATCH \
+            -H "Accept: application/vnd.github+json" \
+            "/repos/${{ github.repository }}/issues/comments/${EXISTING_COMMENT_ID}" \
+            -f body="$FULL_BODY")
+
+          COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
+          COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
+          echo "action-taken=updated" >> "$GITHUB_OUTPUT"
+          echo "Updated comment $COMMENT_ID"
+
+        else
+          echo "action-taken=skipped" >> "$GITHUB_OUTPUT"
+          echo "Skipped: no existing comment to update"
+          exit 0
+        fi
+
+        echo "comment-id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
+        echo "comment-url=$COMMENT_URL" >> "$GITHUB_OUTPUT"
+
+branding:
+  icon: 'message-square'
+  color: 'blue'

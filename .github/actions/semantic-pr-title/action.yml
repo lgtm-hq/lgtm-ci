@@ -1,0 +1,147 @@
+name: 'Semantic PR Title'
+description: 'Validate PR title follows conventional commit format'
+author: 'lgtm-hq'
+
+inputs:
+  title:
+    description: 'PR title to validate (auto-detected from context if not provided)'
+    required: false
+    default: ''
+  types:
+    description: 'Allowed commit types (comma-separated)'
+    required: false
+    default: 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert'
+  scopes:
+    description: 'Allowed scopes (comma-separated, empty for any scope)'
+    required: false
+    default: ''
+  require-scope:
+    description: 'Require a scope in the title'
+    required: false
+    default: 'false'
+  max-length:
+    description: 'Maximum title length (0 for no limit)'
+    required: false
+    default: '72'
+  fail-on-invalid:
+    description: 'Fail the action if title is invalid'
+    required: false
+    default: 'true'
+
+outputs:
+  valid:
+    description: 'Whether the title is valid'
+    value: ${{ steps.validate.outputs.valid }}
+  type:
+    description: 'Extracted commit type'
+    value: ${{ steps.validate.outputs.type }}
+  scope:
+    description: 'Extracted scope (if any)'
+    value: ${{ steps.validate.outputs.scope }}
+  description:
+    description: 'Extracted description'
+    value: ${{ steps.validate.outputs.description }}
+  error:
+    description: 'Error message if invalid'
+    value: ${{ steps.validate.outputs.error }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate PR title
+      id: validate
+      shell: bash
+      run: |
+        TITLE="${{ inputs.title }}"
+
+        # Auto-detect title from PR context
+        if [[ -z "$TITLE" ]]; then
+          TITLE="${{ github.event.pull_request.title }}"
+        fi
+
+        if [[ -z "$TITLE" ]]; then
+          echo "::error::No PR title provided or detected"
+          echo "valid=false" >> "$GITHUB_OUTPUT"
+          echo "error=No PR title provided" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs['fail-on-invalid'] }}" == "true" ]]; then
+            exit 1
+          fi
+          exit 0
+        fi
+
+        echo "Validating: $TITLE"
+
+        # Parse allowed types
+        IFS=',' read -ra ALLOWED_TYPES <<< "${{ inputs.types }}"
+        TYPES_PATTERN=$(IFS='|'; echo "${ALLOWED_TYPES[*]}")
+
+        # Build regex pattern
+        # Format: type(scope)?: description or type: description
+        if [[ "${{ inputs['require-scope'] }}" == "true" ]]; then
+          PATTERN="^(${TYPES_PATTERN})\(([a-zA-Z0-9_-]+)\)!?: .+"
+        else
+          PATTERN="^(${TYPES_PATTERN})(\([a-zA-Z0-9_-]+\))?!?: .+"
+        fi
+
+        # Check format
+        if ! [[ "$TITLE" =~ $PATTERN ]]; then
+          echo "::error::PR title does not match conventional commit format"
+          echo "Expected format: type(scope): description"
+          echo "Allowed types: ${{ inputs.types }}"
+          echo "valid=false" >> "$GITHUB_OUTPUT"
+          echo "error=Title does not match format: type(scope): description" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs['fail-on-invalid'] }}" == "true" ]]; then
+            exit 1
+          fi
+          exit 0
+        fi
+
+        # Extract components
+        TYPE=$(echo "$TITLE" | sed -E 's/^([a-z]+).*/\1/')
+        SCOPE=$(echo "$TITLE" | sed -nE 's/^[a-z]+\(([^)]+)\).*/\1/p')
+        DESC=$(echo "$TITLE" | sed -E 's/^[a-z]+(\([^)]+\))?!?: //')
+
+        echo "type=$TYPE" >> "$GITHUB_OUTPUT"
+        echo "scope=$SCOPE" >> "$GITHUB_OUTPUT"
+        echo "description=$DESC" >> "$GITHUB_OUTPUT"
+
+        # Check scope allowlist if provided
+        ALLOWED_SCOPES="${{ inputs.scopes }}"
+        if [[ -n "$ALLOWED_SCOPES" && -n "$SCOPE" ]]; then
+          IFS=',' read -ra SCOPES_ARRAY <<< "$ALLOWED_SCOPES"
+          SCOPE_VALID=false
+          for allowed in "${SCOPES_ARRAY[@]}"; do
+            if [[ "$SCOPE" == "$allowed" ]]; then
+              SCOPE_VALID=true
+              break
+            fi
+          done
+          if [[ "$SCOPE_VALID" == "false" ]]; then
+            echo "::error::Scope '$SCOPE' is not in allowed list: $ALLOWED_SCOPES"
+            echo "valid=false" >> "$GITHUB_OUTPUT"
+            echo "error=Scope '$SCOPE' not allowed" >> "$GITHUB_OUTPUT"
+            if [[ "${{ inputs['fail-on-invalid'] }}" == "true" ]]; then
+              exit 1
+            fi
+            exit 0
+          fi
+        fi
+
+        # Check length
+        MAX_LENGTH="${{ inputs['max-length'] }}"
+        if [[ "$MAX_LENGTH" -gt 0 && ${#TITLE} -gt $MAX_LENGTH ]]; then
+          echo "::error::PR title exceeds maximum length of $MAX_LENGTH characters (${#TITLE})"
+          echo "valid=false" >> "$GITHUB_OUTPUT"
+          echo "error=Title exceeds $MAX_LENGTH characters" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs['fail-on-invalid'] }}" == "true" ]]; then
+            exit 1
+          fi
+          exit 0
+        fi
+
+        echo "valid=true" >> "$GITHUB_OUTPUT"
+        echo "::notice::PR title is valid: $TYPE${SCOPE:+($SCOPE)}: $DESC"
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
