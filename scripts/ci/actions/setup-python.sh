@@ -38,7 +38,11 @@ deps)
 			UV_ARGS=()
 			IFS=',' read -ra EXTRA_ARRAY <<<"$EXTRAS"
 			for extra in "${EXTRA_ARRAY[@]}"; do
-				UV_ARGS+=("--extra" "${extra// /}")
+				# Trim whitespace and skip empty values
+				trimmed="${extra// /}"
+				if [[ -n "$trimmed" ]]; then
+					UV_ARGS+=("--extra" "$trimmed")
+				fi
 			done
 			uv sync "${UV_ARGS[@]}"
 		else

@@ -105,9 +105,18 @@ summary)
 	# Get JSON output for parsing
 	set +e
 	OUTPUT=$(shellcheck --format=json "${SHELL_FILES[@]}" 2>/dev/null)
+	EXIT_CODE=$?
 	set -e
 
-	if [[ -z "$OUTPUT" || "$OUTPUT" == "[]" ]]; then
+	# Exit codes: 0=no issues, 1=issues found, >=2=error
+	if [[ $EXIT_CODE -ge 2 ]]; then
+		echo "## Shellcheck Summary"
+		echo ""
+		echo "❌ shellcheck failed with exit code $EXIT_CODE"
+		exit $EXIT_CODE
+	fi
+
+	if [[ -z "$OUTPUT" || "$OUTPUT" == "[]" ]] && [[ $EXIT_CODE -eq 0 ]]; then
 		echo "## Shellcheck Summary"
 		echo ""
 		echo "✅ No issues found in ${#SHELL_FILES[@]} files"

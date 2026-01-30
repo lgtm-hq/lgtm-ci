@@ -36,11 +36,18 @@ install)
 		exit 0
 	fi
 
-	# Try go install first
+	# Pinned version for reproducibility (matches ACTIONLINT_SHA below)
+	ACTIONLINT_VERSION="v1.7.7"
+
+	# Try go install first with pinned version
 	if command -v go &>/dev/null; then
-		go install github.com/rhysd/actionlint/cmd/actionlint@latest
-		log_success "actionlint installed via go"
-		exit 0
+		go install "github.com/rhysd/actionlint/cmd/actionlint@${ACTIONLINT_VERSION}"
+		# Verify installation succeeded and binary is on PATH
+		if command -v actionlint &>/dev/null; then
+			log_success "actionlint installed via go"
+			exit 0
+		fi
+		log_warn "go install completed but actionlint not found on PATH, falling back to download"
 	fi
 
 	# Fallback to download script
