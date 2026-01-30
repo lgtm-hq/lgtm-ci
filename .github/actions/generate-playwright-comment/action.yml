@@ -1,0 +1,61 @@
+---
+name: 'Generate Playwright Comment'
+description: 'Generate a formatted PR comment from Playwright test results'
+author: 'lgtm-hq'
+
+inputs:
+  results-path:
+    description: 'Path to Playwright JSON results file'
+    required: false
+    default: 'playwright-report/results.json'
+  report-url:
+    description: 'URL to full Playwright report (e.g., GitHub Pages URL)'
+    required: false
+    default: ''
+  show-failed-tests:
+    description: 'Show list of failed tests in comment'
+    required: false
+    default: 'true'
+  max-failed-tests:
+    description: 'Maximum number of failed tests to show'
+    required: false
+    default: '10'
+
+outputs:
+  comment-body:
+    description: 'Generated comment body in Markdown'
+    value: ${{ steps.generate.outputs.body }}
+  total-tests:
+    description: 'Total number of tests'
+    value: ${{ steps.generate.outputs.total }}
+  passed-tests:
+    description: 'Number of passed tests'
+    value: ${{ steps.generate.outputs.passed }}
+  failed-tests:
+    description: 'Number of failed tests'
+    value: ${{ steps.generate.outputs.failed }}
+  skipped-tests:
+    description: 'Number of skipped tests'
+    value: ${{ steps.generate.outputs.skipped }}
+  success:
+    description: 'Whether all tests passed'
+    value: ${{ steps.generate.outputs.success }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate comment
+      id: generate
+      shell: bash
+      env:
+        RESULTS_PATH: ${{ inputs['results-path'] }}
+        REPORT_URL: ${{ inputs['report-url'] }}
+        SHOW_FAILED: ${{ inputs['show-failed-tests'] }}
+        MAX_FAILED: ${{ inputs['max-failed-tests'] }}
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/generate-playwright-comment.sh
+
+branding:
+  icon: 'play-circle'
+  color: 'green'

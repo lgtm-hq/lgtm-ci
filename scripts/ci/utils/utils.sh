@@ -21,44 +21,44 @@ _LGTM_CI_LIB_DIR="${_LGTM_CI_UTILS_DIR}/../lib"
 
 # Core logging (no dependencies)
 if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
-  # shellcheck source=../lib/log.sh
-  source "$_LGTM_CI_LIB_DIR/log.sh"
+	# shellcheck source=../lib/log.sh
+	source "$_LGTM_CI_LIB_DIR/log.sh"
 fi
 
 # Platform detection (no dependencies)
 if [[ -f "$_LGTM_CI_LIB_DIR/platform.sh" ]]; then
-  # shellcheck source=../lib/platform.sh
-  source "$_LGTM_CI_LIB_DIR/platform.sh"
+	# shellcheck source=../lib/platform.sh
+	source "$_LGTM_CI_LIB_DIR/platform.sh"
 fi
 
 # File system utilities (depends on log.sh)
 if [[ -f "$_LGTM_CI_LIB_DIR/fs.sh" ]]; then
-  # shellcheck source=../lib/fs.sh
-  source "$_LGTM_CI_LIB_DIR/fs.sh"
+	# shellcheck source=../lib/fs.sh
+	source "$_LGTM_CI_LIB_DIR/fs.sh"
 fi
 
 # Git utilities (no dependencies)
 if [[ -f "$_LGTM_CI_LIB_DIR/git.sh" ]]; then
-  # shellcheck source=../lib/git.sh
-  source "$_LGTM_CI_LIB_DIR/git.sh"
+	# shellcheck source=../lib/git.sh
+	source "$_LGTM_CI_LIB_DIR/git.sh"
 fi
 
 # GitHub Actions utilities (no dependencies)
 if [[ -f "$_LGTM_CI_LIB_DIR/github.sh" ]]; then
-  # shellcheck source=../lib/github.sh
-  source "$_LGTM_CI_LIB_DIR/github.sh"
+	# shellcheck source=../lib/github.sh
+	source "$_LGTM_CI_LIB_DIR/github.sh"
 fi
 
 # Network utilities (depends on log.sh, fs.sh)
 if [[ -f "$_LGTM_CI_LIB_DIR/network.sh" ]]; then
-  # shellcheck source=../lib/network.sh
-  source "$_LGTM_CI_LIB_DIR/network.sh"
+	# shellcheck source=../lib/network.sh
+	source "$_LGTM_CI_LIB_DIR/network.sh"
 fi
 
 # Installer framework (depends on all above)
 if [[ -f "$_LGTM_CI_LIB_DIR/installer.sh" ]]; then
-  # shellcheck source=../lib/installer.sh
-  source "$_LGTM_CI_LIB_DIR/installer.sh"
+	# shellcheck source=../lib/installer.sh
+	source "$_LGTM_CI_LIB_DIR/installer.sh"
 fi
 
 # =============================================================================
@@ -68,10 +68,10 @@ fi
 # Display standardized help message
 # Usage: show_help "script_name" "description" "usage_pattern"
 show_help() {
-  local script_name="$1"
-  local description="$2"
-  local usage="${3:-}"
-  cat <<EOF
+	local script_name="$1"
+	local description="$2"
+	local usage="${3:-}"
+	cat <<EOF
 Usage: $script_name $usage
 
 $description

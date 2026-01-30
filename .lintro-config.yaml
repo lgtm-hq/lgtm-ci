@@ -9,6 +9,10 @@ execution:
   fail_fast: false
   parallel: true
   max_workers: 4
+  exclude:
+    - '.lintro/'
+    - '.venv/'
+    - 'node_modules/'
 
 # Cross-cutting enforcement settings
 enforce:

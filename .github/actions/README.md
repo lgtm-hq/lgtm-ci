@@ -11,17 +11,19 @@ Configure common CI environment variables and PATH.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main
   with:
-    bin-dir: '${{ github.workspace }}/.local/bin'  # optional
-    add-to-path: '/custom/path1, /custom/path2'    # optional
+    bin-dir: '${{ github.workspace }}/.local/bin' # optional
+    add-to-path: '/custom/path1, /custom/path2' # optional
 ```
 
 **Outputs:**
+
 - `platform` - Detected platform (e.g., `linux-x86_64`, `darwin-arm64`)
 - `os` - Detected OS (`linux`, `darwin`, `windows`)
 - `arch` - Detected architecture (`x86_64`, `arm64`)
 - `bin-dir` - The configured binary directory
 
 **Environment variables set:**
+
 - `CI=true`
 - `NONINTERACTIVE=1`
 - `DO_NOT_TRACK=1`
@@ -36,19 +38,22 @@ Setup Python with [uv](https://github.com/astral-sh/uv) package manager.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
   with:
-    python-version: '3.12'        # optional, default: 3.12
-    uv-version: 'latest'          # optional
-    cache: 'true'                 # optional, default: true
-    install-dependencies: 'true'  # optional, default: true
+    python-version: '3.12' # optional, default: 3.12
+    uv-version: 'latest' # optional
+    cache: 'true' # optional, default: true
+    install-dependencies: 'true' # optional, default: true
 ```
 
 **Outputs:**
+
 - `python-version` - Installed Python version
 - `uv-version` - Installed uv version
 - `cache-hit` - Whether the cache was hit
 
 **Features:**
-- Automatic dependency installation from `pyproject.toml`, `uv.lock`, or `requirements.txt`
+
+- Automatic dependency installation from `pyproject.toml`, `uv.lock`, or
+  `requirements.txt`
 - Caching of uv dependencies and virtual environments
 - Uses [astral-sh/setup-uv](https://github.com/astral-sh/setup-uv) under the hood
 
@@ -61,19 +66,21 @@ Setup Node.js with [bun](https://bun.sh) package manager.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@main
   with:
-    node-version: '22'            # optional, default: 22
-    bun-version: 'latest'         # optional
-    cache: 'true'                 # optional, default: true
-    install-dependencies: 'true'  # optional, default: true
-    frozen-lockfile: 'true'       # optional, default: true
+    node-version: '22' # optional, default: 22
+    bun-version: 'latest' # optional
+    cache: 'true' # optional, default: true
+    install-dependencies: 'true' # optional, default: true
+    frozen-lockfile: 'true' # optional, default: true
 ```
 
 **Outputs:**
+
 - `node-version` - Installed Node.js version
 - `bun-version` - Installed bun version
 - `cache-hit` - Whether the cache was hit
 
 **Features:**
+
 - Automatic dependency installation with `bun install`
 - `--frozen-lockfile` by default for reproducible CI builds
 - Caching of bun cache directory and node_modules
@@ -87,22 +94,25 @@ Setup Rust toolchain with cargo caching.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-rust@main
   with:
-    toolchain: 'stable'           # optional, default: stable
+    toolchain: 'stable' # optional, default: stable
     components: 'clippy, rustfmt' # optional
-    targets: 'wasm32-unknown-unknown'  # optional
-    cache: 'true'                 # optional, default: true
+    targets: 'wasm32-unknown-unknown' # optional
+    cache: 'true' # optional, default: true
 ```
 
 **Outputs:**
+
 - `rustc-version` - Installed rustc version
 - `cargo-version` - Installed cargo version
 - `cache-hit` - Whether the cache was hit
 
 **Features:**
+
 - Automatic cargo-binstall installation for faster binary installs
 - Sparse registry protocol enabled by default
 - Caching of cargo registry, git deps, and target directory
-- Uses [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) under the hood
+- Uses [dtolnay/rust-toolchain](https://github.com/dtolnay/rust-toolchain) under the
+  hood
 
 ---
 
@@ -115,11 +125,12 @@ Security hardening using [StepSecurity](https://stepsecurity.io).
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
   with:
-    egress-policy: 'audit'        # or 'block' to enforce allowlist
-    disable-sudo: 'false'         # optional
+    egress-policy: 'audit' # or 'block' to enforce allowlist
+    disable-sudo: 'false' # optional
 ```
 
 **Features:**
+
 - Network egress monitoring and blocking
 - Optional sudo disabling
 - Integrates with StepSecurity dashboard
@@ -133,16 +144,18 @@ Security-hardened repository checkout with sensible defaults.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
   with:
-    persist-credentials: 'false'  # default: false (secure)
-    fetch-depth: '1'              # default: 1 (shallow clone)
+    persist-credentials: 'false' # default: false (secure)
+    fetch-depth: '1' # default: 1 (shallow clone)
 ```
 
 **Security defaults:**
+
 - `persist-credentials: false` - Credentials not stored in git config
 - Checkout integrity verification
 - All standard checkout options supported
 
 **Outputs:**
+
 - `ref` - The resolved ref that was checked out
 - `commit` - The commit SHA that was checked out
 
@@ -155,21 +168,164 @@ Network egress configuration and reporting scaffolding.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/egress-audit@main
   with:
-    mode: 'audit'                 # 'audit', 'report', or 'block'
-    report-format: 'summary'      # 'summary', 'json', or 'none'
+    mode: 'audit' # 'audit', 'report', or 'block'
+    report-format: 'summary' # 'summary', 'json', or 'none'
 ```
 
 **Features:**
+
 - Pre-configured allowlist for common package registries
 - GitHub Step Summary report generation
 - Works alongside harden-runner for enforcement
 
 **Default allowed domains:**
+
 - GitHub (`github.com`, `api.github.com`, `ghcr.io`, etc.)
 - npm (`registry.npmjs.org`)
 - PyPI (`pypi.org`, `files.pythonhosted.org`)
 - Crates.io (`crates.io`, `static.crates.io`)
 - RubyGems (`rubygems.org`)
+
+---
+
+## PR & Comment Actions
+
+### post-pr-comment
+
+Create or update PR comments with upsert behavior using unique markers.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@main
+  with:
+    marker: 'lighthouse-results' # unique identifier for this comment
+    body: |
+      ## Results
+      Your content here...
+    mode: 'upsert' # 'upsert', 'create', or 'update'
+```
+
+**Features:**
+
+- Upsert behavior: updates existing comment or creates new one
+- Marker-based identification using hidden HTML comments
+- Auto-detects PR number from context
+- Optional delete-on-empty behavior
+
+**Outputs:**
+
+- `comment-id` - ID of the created/updated comment
+- `comment-url` - URL of the comment
+- `action-taken` - "created", "updated", "deleted", or "skipped"
+
+---
+
+### semantic-pr-title
+
+Validate PR title follows conventional commit format.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/semantic-pr-title@main
+  with:
+    types: 'feat,fix,docs,chore' # optional, allowed types
+    require-scope: 'false' # optional
+    max-length: '72' # optional
+```
+
+**Features:**
+
+- Validates conventional commit format (`type(scope): description`)
+- Configurable allowed types and scopes
+- Length validation
+- Extracts type, scope, and description
+
+**Outputs:**
+
+- `valid` - Whether the title is valid
+- `type` - Extracted commit type
+- `scope` - Extracted scope
+- `description` - Extracted description
+
+---
+
+### generate-lighthouse-comment
+
+Generate formatted PR comment from Lighthouse CI results.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-lighthouse-comment@main
+  with:
+    results-path: 'lighthouse-results/'
+    report-url: 'https://example.github.io/lighthouse/'
+    threshold-performance: '80'
+```
+
+**Features:**
+
+- Parses Lighthouse JSON results
+- Color-coded score indicators
+- Configurable thresholds
+- Links to full report
+
+**Outputs:**
+
+- `comment-body` - Generated Markdown comment
+- `performance-score`, `accessibility-score`, etc.
+- `passed` - Whether all thresholds are met
+
+---
+
+### generate-playwright-comment
+
+Generate formatted PR comment from Playwright test results.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-playwright-comment@main
+  with:
+    results-path: 'playwright-report/results.json'
+    report-url: 'https://example.github.io/playwright/'
+    show-failed-tests: 'true'
+```
+
+**Features:**
+
+- Parses Playwright JSON results
+- Shows pass/fail/skip counts
+- Lists failed tests (collapsible)
+- Links to full report
+
+**Outputs:**
+
+- `comment-body` - Generated Markdown comment
+- `total-tests`, `passed-tests`, `failed-tests`, `skipped-tests`
+- `success` - Whether all tests passed
+
+---
+
+### generate-coverage-comment
+
+Generate formatted PR comment from code coverage results.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-comment@main
+  with:
+    coverage-file: 'coverage/coverage-summary.json'
+    format: 'auto' # 'istanbul', 'coverage-py', or 'auto'
+    threshold-lines: '80'
+    threshold-branches: '70'
+```
+
+**Features:**
+
+- Supports Istanbul (JS) and coverage.py (Python) formats
+- Color-coded coverage indicators
+- Configurable thresholds
+- Links to full report
+
+**Outputs:**
+
+- `comment-body` - Generated Markdown comment
+- `lines-coverage`, `branches-coverage`, `functions-coverage`
+- `passed` - Whether all thresholds are met
 
 ---
 

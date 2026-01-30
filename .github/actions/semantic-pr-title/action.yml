@@ -1,0 +1,67 @@
+---
+name: 'Semantic PR Title'
+description: 'Validate PR title follows conventional commit format'
+author: 'lgtm-hq'
+
+inputs:
+  title:
+    description: >-
+      PR title to validate (auto-detected from context if not provided)
+    required: false
+    default: ''
+  types:
+    description: 'Allowed commit types (comma-separated)'
+    required: false
+    default: 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert'
+  scopes:
+    description: 'Allowed scopes (comma-separated, empty for any scope)'
+    required: false
+    default: ''
+  require-scope:
+    description: 'Require a scope in the title'
+    required: false
+    default: 'false'
+  max-length:
+    description: 'Maximum title length (0 for no limit)'
+    required: false
+    default: '72'
+  fail-on-invalid:
+    description: 'Fail the action if title is invalid'
+    required: false
+    default: 'true'
+
+outputs:
+  valid:
+    description: 'Whether the title is valid'
+    value: ${{ steps.validate.outputs.valid }}
+  type:
+    description: 'Extracted commit type'
+    value: ${{ steps.validate.outputs.type }}
+  scope:
+    description: 'Extracted scope (if any)'
+    value: ${{ steps.validate.outputs.scope }}
+  description:
+    description: 'Extracted description'
+    value: ${{ steps.validate.outputs.description }}
+  error:
+    description: 'Error message if invalid'
+    value: ${{ steps.validate.outputs.error }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate PR title
+      id: validate
+      shell: bash
+      env:
+        TITLE: ${{ inputs.title || github.event.pull_request.title }}
+        ALLOWED_TYPES: ${{ inputs.types }}
+        ALLOWED_SCOPES: ${{ inputs.scopes }}
+        REQUIRE_SCOPE: ${{ inputs['require-scope'] }}
+        MAX_LENGTH: ${{ inputs['max-length'] }}
+        FAIL_ON_INVALID: ${{ inputs['fail-on-invalid'] }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/semantic-pr-title.sh
+
+branding:
+  icon: 'check-circle'
+  color: 'green'

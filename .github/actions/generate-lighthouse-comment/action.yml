@@ -1,0 +1,70 @@
+---
+name: 'Generate Lighthouse Comment'
+description: 'Generate a formatted PR comment from Lighthouse CI results'
+author: 'lgtm-hq'
+
+inputs:
+  results-path:
+    description: 'Path to Lighthouse results JSON file or directory'
+    required: true
+  report-url:
+    description: 'URL to full Lighthouse report (e.g., GitHub Pages URL)'
+    required: false
+    default: ''
+  threshold-performance:
+    description: 'Minimum performance score (0-100)'
+    required: false
+    default: '80'
+  threshold-accessibility:
+    description: 'Minimum accessibility score (0-100)'
+    required: false
+    default: '90'
+  threshold-best-practices:
+    description: 'Minimum best practices score (0-100)'
+    required: false
+    default: '80'
+  threshold-seo:
+    description: 'Minimum SEO score (0-100)'
+    required: false
+    default: '80'
+
+outputs:
+  comment-body:
+    description: 'Generated comment body in Markdown'
+    value: ${{ steps.generate.outputs.body }}
+  performance-score:
+    description: 'Performance score'
+    value: ${{ steps.generate.outputs.performance }}
+  accessibility-score:
+    description: 'Accessibility score'
+    value: ${{ steps.generate.outputs.accessibility }}
+  best-practices-score:
+    description: 'Best practices score'
+    value: ${{ steps.generate.outputs.best-practices }}
+  seo-score:
+    description: 'SEO score'
+    value: ${{ steps.generate.outputs.seo }}
+  passed:
+    description: 'Whether all scores meet thresholds'
+    value: ${{ steps.generate.outputs.passed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate comment
+      id: generate
+      shell: bash
+      env:
+        RESULTS_PATH: ${{ inputs['results-path'] }}
+        REPORT_URL: ${{ inputs['report-url'] }}
+        THRESHOLD_PERFORMANCE: ${{ inputs['threshold-performance'] }}
+        THRESHOLD_ACCESSIBILITY: ${{ inputs['threshold-accessibility'] }}
+        THRESHOLD_BEST_PRACTICES: ${{ inputs['threshold-best-practices'] }}
+        THRESHOLD_SEO: ${{ inputs['threshold-seo'] }}
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/generate-lighthouse-comment.sh
+
+branding:
+  icon: 'zap'
+  color: 'orange'

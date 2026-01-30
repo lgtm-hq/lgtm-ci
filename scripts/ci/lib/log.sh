@@ -20,6 +20,7 @@ readonly LGTM_CI_BLUE='\033[0;34m'
 readonly LGTM_CI_NC='\033[0m' # No Color
 
 # Export for compatibility with scripts expecting these names
+# SC2034: These appear unused but are exported for scripts that source this file
 # shellcheck disable=SC2034
 readonly RED="${LGTM_CI_RED}"
 # shellcheck disable=SC2034
@@ -36,35 +37,37 @@ readonly NC="${LGTM_CI_NC}"
 # =============================================================================
 
 log_info() {
-  echo -e "${LGTM_CI_BLUE}[INFO]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_BLUE}[INFO]${LGTM_CI_NC} $*" >&2
 }
 
 log_success() {
-  echo -e "${LGTM_CI_GREEN}[SUCCESS]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_GREEN}[SUCCESS]${LGTM_CI_NC} $*" >&2
 }
 
 log_warn() {
-  echo -e "${LGTM_CI_YELLOW}[WARN]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_YELLOW}[WARN]${LGTM_CI_NC} $*" >&2
 }
 
 # Alias for backwards compatibility
 log_warning() {
-  log_warn "$@"
+	log_warn "$@"
 }
 
 log_error() {
-  echo -e "${LGTM_CI_RED}[ERROR]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_RED}[ERROR]${LGTM_CI_NC} $*" >&2
 }
 
 log_verbose() {
-  # Use string comparison to handle non-numeric VERBOSE values
-  [[ "${VERBOSE:-}" == "1" || "${VERBOSE,,:-}" == "true" ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
+	# Use string comparison to handle non-numeric VERBOSE values
+	# Check for "1" first, then lowercase the value to check for "true"
+	local verbose_val="${VERBOSE:-}"
+	[[ "$verbose_val" == "1" || "${verbose_val,,}" == "true" ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
 }
 
 # Exit with error message
 die() {
-  log_error "$@"
-  exit 1
+	log_error "$@"
+	exit 1
 }
 
 # =============================================================================

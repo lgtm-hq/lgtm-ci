@@ -1,0 +1,81 @@
+---
+name: 'Generate Coverage Comment'
+description: 'Generate a formatted PR comment from code coverage results'
+author: 'lgtm-hq'
+
+inputs:
+  coverage-file:
+    description: 'Path to coverage summary JSON file'
+    required: false
+    default: 'coverage/coverage-summary.json'
+  format:
+    description: 'Format: istanbul (JS), coverage-py (Python), lcov, or auto'
+    required: false
+    default: 'auto'
+  report-url:
+    description: 'URL to full coverage report (e.g., GitHub Pages URL)'
+    required: false
+    default: ''
+  threshold-lines:
+    description: 'Minimum line coverage percentage'
+    required: false
+    default: '80'
+  threshold-branches:
+    description: 'Minimum branch coverage percentage'
+    required: false
+    default: '70'
+  threshold-functions:
+    description: 'Minimum function coverage percentage'
+    required: false
+    default: '80'
+  show-file-coverage:
+    description: 'Show per-file coverage breakdown'
+    required: false
+    default: 'false'
+  max-files:
+    description: 'Maximum number of files to show in breakdown'
+    required: false
+    default: '10'
+
+outputs:
+  comment-body:
+    description: 'Generated comment body in Markdown'
+    value: ${{ steps.generate.outputs.body }}
+  lines-coverage:
+    description: 'Line coverage percentage'
+    value: ${{ steps.generate.outputs.lines }}
+  branches-coverage:
+    description: 'Branch coverage percentage'
+    value: ${{ steps.generate.outputs.branches }}
+  functions-coverage:
+    description: 'Function coverage percentage'
+    value: ${{ steps.generate.outputs.functions }}
+  statements-coverage:
+    description: 'Statement coverage percentage'
+    value: ${{ steps.generate.outputs.statements }}
+  passed:
+    description: 'Whether coverage meets all thresholds'
+    value: ${{ steps.generate.outputs.passed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate comment
+      id: generate
+      shell: bash
+      env:
+        COVERAGE_FILE: ${{ inputs['coverage-file'] }}
+        FORMAT: ${{ inputs.format }}
+        REPORT_URL: ${{ inputs['report-url'] }}
+        THRESHOLD_LINES: ${{ inputs['threshold-lines'] }}
+        THRESHOLD_BRANCHES: ${{ inputs['threshold-branches'] }}
+        THRESHOLD_FUNCTIONS: ${{ inputs['threshold-functions'] }}
+        SHOW_FILE_COVERAGE: ${{ inputs['show-file-coverage'] }}
+        MAX_FILES: ${{ inputs['max-files'] }}
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/generate-coverage-comment.sh
+
+branding:
+  icon: 'percent'
+  color: 'purple'

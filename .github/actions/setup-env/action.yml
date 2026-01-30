@@ -1,3 +1,4 @@
+---
 name: 'Setup Environment'
 description: 'Configure common CI environment variables and PATH'
 author: 'lgtm-hq'
@@ -18,77 +19,24 @@ outputs:
     value: ${{ inputs.bin-dir }}
   platform:
     description: 'Detected platform (linux-x86_64, darwin-arm64, etc.)'
-    value: ${{ steps.detect.outputs.platform }}
+    value: ${{ steps.setup.outputs.platform }}
   os:
     description: 'Detected OS (linux, darwin, windows)'
-    value: ${{ steps.detect.outputs.os }}
+    value: ${{ steps.setup.outputs.os }}
   arch:
     description: 'Detected architecture (x86_64, arm64)'
-    value: ${{ steps.detect.outputs.arch }}
+    value: ${{ steps.setup.outputs.arch }}
 
 runs:
   using: 'composite'
   steps:
-    - name: Detect platform
-      id: detect
+    - name: Setup environment
+      id: setup
       shell: bash
-      run: |
-        # Detect OS
-        os=$(uname -s | tr '[:upper:]' '[:lower:]')
-        case "$os" in
-          mingw*|msys*|cygwin*) os="windows" ;;
-        esac
-
-        # Detect architecture
-        arch=$(uname -m)
-        case "$arch" in
-          x86_64|amd64) arch="x86_64" ;;
-          aarch64|arm64) arch="arm64" ;;
-          i386|i686) arch="x86" ;;
-        esac
-
-        platform="${os}-${arch}"
-
-        echo "os=$os" >> "$GITHUB_OUTPUT"
-        echo "arch=$arch" >> "$GITHUB_OUTPUT"
-        echo "platform=$platform" >> "$GITHUB_OUTPUT"
-        echo "Detected platform: $platform"
-
-    - name: Setup bin directory
-      shell: bash
-      run: |
-        BIN_DIR="${{ inputs.bin-dir }}"
-        mkdir -p "$BIN_DIR"
-        echo "$BIN_DIR" >> "$GITHUB_PATH"
-        echo "BIN_DIR=$BIN_DIR" >> "$GITHUB_ENV"
-        echo "Added $BIN_DIR to PATH"
-
-    - name: Add extra paths
-      if: inputs.add-to-path != ''
-      shell: bash
-      run: |
-        IFS=',' read -ra PATHS <<< "${{ inputs.add-to-path }}"
-        for path in "${PATHS[@]}"; do
-          path=$(echo "$path" | xargs)  # trim whitespace
-          if [[ -n "$path" ]]; then
-            mkdir -p "$path"
-            echo "$path" >> "$GITHUB_PATH"
-            echo "Added $path to PATH"
-          fi
-        done
-
-    - name: Set common environment variables
-      shell: bash
-      run: |
-        # Disable interactive prompts
-        echo "CI=true" >> "$GITHUB_ENV"
-        echo "NONINTERACTIVE=1" >> "$GITHUB_ENV"
-
-        # Disable telemetry for common tools
-        echo "DO_NOT_TRACK=1" >> "$GITHUB_ENV"
-        echo "HOMEBREW_NO_ANALYTICS=1" >> "$GITHUB_ENV"
-        echo "DOTNET_CLI_TELEMETRY_OPTOUT=1" >> "$GITHUB_ENV"
-        echo "NEXT_TELEMETRY_DISABLED=1" >> "$GITHUB_ENV"
+      env:
+        BIN_DIR: ${{ inputs['bin-dir'] }}
+        ADD_TO_PATH: ${{ inputs['add-to-path'] }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-env.sh
 
 branding:
   icon: 'settings'

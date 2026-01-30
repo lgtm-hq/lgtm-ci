@@ -38,6 +38,6 @@ assignees: ''
 
 ## Logs
 
-```
+```text
 <!-- Relevant logs or error messages -->
 ```
