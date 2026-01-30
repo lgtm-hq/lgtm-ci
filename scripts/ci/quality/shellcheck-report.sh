@@ -27,6 +27,22 @@ else
 	log_success() { echo "[SUCCESS] $*"; }
 fi
 
+# Discover shell files in given paths
+# Usage: discover_shell_files result_array_name path1 path2 ...
+discover_shell_files() {
+	local -n files_ref=$1
+	shift
+	for path in "$@"; do
+		if [[ -d "$path" ]]; then
+			while IFS= read -r -d '' file; do
+				files_ref+=("$file")
+			done < <(find "$path" -type f \( -name "*.sh" -o -name "*.bash" \) -print0 2>/dev/null)
+		elif [[ -f "$path" ]]; then
+			files_ref+=("$path")
+		fi
+	done
+}
+
 case "$STEP" in
 check)
 	: "${PATHS:=scripts/}"
@@ -43,15 +59,8 @@ check)
 
 	# Find all shell scripts
 	SHELL_FILES=()
-	for path in $PATHS; do
-		if [[ -d "$path" ]]; then
-			while IFS= read -r -d '' file; do
-				SHELL_FILES+=("$file")
-			done < <(find "$path" -type f \( -name "*.sh" -o -name "*.bash" \) -print0 2>/dev/null)
-		elif [[ -f "$path" ]]; then
-			SHELL_FILES+=("$path")
-		fi
-	done
+	# shellcheck disable=SC2086 # Word splitting intended for PATHS
+	discover_shell_files SHELL_FILES $PATHS
 
 	if [[ ${#SHELL_FILES[@]} -eq 0 ]]; then
 		log_info "No shell files found to check"
@@ -85,15 +94,8 @@ summary)
 
 	# Count issues by severity
 	SHELL_FILES=()
-	for path in $PATHS; do
-		if [[ -d "$path" ]]; then
-			while IFS= read -r -d '' file; do
-				SHELL_FILES+=("$file")
-			done < <(find "$path" -type f \( -name "*.sh" -o -name "*.bash" \) -print0 2>/dev/null)
-		elif [[ -f "$path" ]]; then
-			SHELL_FILES+=("$path")
-		fi
-	done
+	# shellcheck disable=SC2086 # Word splitting intended for PATHS
+	discover_shell_files SHELL_FILES $PATHS
 
 	if [[ ${#SHELL_FILES[@]} -eq 0 ]]; then
 		echo "No shell files found"
@@ -112,10 +114,15 @@ summary)
 	else
 		# Count by level using jq if available
 		if command -v jq &>/dev/null; then
-			ERRORS=$(echo "$OUTPUT" | jq '[.[] | select(.level == "error")] | length')
-			WARNINGS=$(echo "$OUTPUT" | jq '[.[] | select(.level == "warning")] | length')
-			INFOS=$(echo "$OUTPUT" | jq '[.[] | select(.level == "info")] | length')
-			STYLES=$(echo "$OUTPUT" | jq '[.[] | select(.level == "style")] | length')
+			# Single jq invocation for all counts (performance optimization)
+			read -r ERRORS WARNINGS INFOS STYLES < <(echo "$OUTPUT" | jq -r '
+				[
+					[.[] | select(.level == "error")] | length,
+					[.[] | select(.level == "warning")] | length,
+					[.[] | select(.level == "info")] | length,
+					[.[] | select(.level == "style")] | length
+				] | @tsv
+			')
 
 			echo "## Shellcheck Summary"
 			echo ""

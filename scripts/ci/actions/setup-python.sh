@@ -30,9 +30,20 @@ python-version)
 	;;
 
 deps)
+	: "${EXTRAS:=}"
 	if [[ -f "pyproject.toml" ]] || [[ -f "uv.lock" ]]; then
 		echo "Installing dependencies with uv sync..."
-		uv sync
+		if [[ -n "$EXTRAS" ]]; then
+			# Convert comma-separated extras to multiple --extra flags
+			UV_ARGS=()
+			IFS=',' read -ra EXTRA_ARRAY <<<"$EXTRAS"
+			for extra in "${EXTRA_ARRAY[@]}"; do
+				UV_ARGS+=("--extra" "${extra// /}")
+			done
+			uv sync "${UV_ARGS[@]}"
+		else
+			uv sync
+		fi
 	elif [[ -f "requirements.txt" ]]; then
 		echo "Installing from requirements.txt..."
 		uv pip install -r requirements.txt

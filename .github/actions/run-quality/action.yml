@@ -52,9 +52,15 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: check
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
       run: |
         if command -v actionlint &>/dev/null; then
-          ${{ github.action_path }}/../../../scripts/ci/quality/actionlint-check.sh || true
+          ${{ github.action_path }}/../../../scripts/ci/quality/actionlint-check.sh
+          EXIT_CODE=$?
+          if [[ "$FAIL_ON_ERROR" != "true" ]]; then
+            exit 0
+          fi
+          exit $EXIT_CODE
         fi
 
 branding:

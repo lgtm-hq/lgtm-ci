@@ -44,10 +44,18 @@ install)
 	fi
 
 	# Fallback to download script
+	# Pinned to specific commit SHA for supply chain security
 	BIN_DIR="${BIN_DIR:-$HOME/.local/bin}"
 	mkdir -p "$BIN_DIR"
 
-	curl -fsSL https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash | bash -s -- -b "$BIN_DIR"
+	# Download script to temp file first, then execute (avoid curl | bash)
+	DOWNLOAD_SCRIPT=$(mktemp)
+	# Using v1.7.7 release commit - update SHA when upgrading actionlint version
+	ACTIONLINT_SHA="89e27498febc6e0b2c6ff7a24063bd8cc18f1903"
+	curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_SHA}/scripts/download-actionlint.bash" \
+		-o "$DOWNLOAD_SCRIPT"
+	bash "$DOWNLOAD_SCRIPT" -b "$BIN_DIR"
+	rm -f "$DOWNLOAD_SCRIPT"
 
 	if [[ -x "$BIN_DIR/actionlint" ]]; then
 		log_success "actionlint installed to $BIN_DIR"
@@ -88,11 +96,13 @@ check)
 		;;
 	esac
 
-	# Run actionlint
+	# Run actionlint (disable errexit to capture exit code)
+	set +e
 	# shellcheck disable=SC2086 # Word splitting intended for PATHS
 	actionlint "${ACTIONLINT_ARGS[@]}" $PATHS
-
 	EXIT_CODE=$?
+	set -e
+
 	if [[ $EXIT_CODE -eq 0 ]]; then
 		log_success "All GitHub Actions validated"
 	else

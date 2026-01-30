@@ -3,7 +3,7 @@
 # Purpose: Run lintro quality checks with configurable options
 #
 # Required environment variables:
-#   STEP - Which step to run: check, format, or report
+#   STEP - Which step to run: check or format
 #
 # Optional environment variables:
 #   TOOLS - Comma-separated list of tools to run (empty = all)

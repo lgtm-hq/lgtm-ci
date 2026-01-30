@@ -341,14 +341,25 @@ Run lintro quality checks with optional actionlint validation.
     tools: '' # optional, comma-separated list (empty = all)
     mode: 'check' # 'check' or 'format'
     fail-on-error: 'true' # optional
+    run-actionlint: 'true' # optional, run actionlint on GitHub Actions
+    working-directory: '.' # optional, working directory for linting
 ```
+
+**Inputs:**
+
+- `tools` - Comma-separated list of lintro tools to run (empty = all)
+- `mode` - Mode: 'check' (lint only) or 'format' (auto-fix)
+- `fail-on-error` - Fail workflow if linting errors found (default: true)
+- `run-actionlint` - Run actionlint validation on GitHub Actions (default: true)
+- `working-directory` - Working directory for linting (default: '.')
 
 **Features:**
 
 - Runs all configured lintro tools (shellcheck, shfmt, prettier, yamllint, etc.)
-- Optional actionlint validation for GitHub Actions
+- Optional actionlint validation for GitHub Actions workflows
 - Support for check mode (lint only) or format mode (auto-fix)
 - Configurable tool selection
+- Respects fail-on-error for both lintro and actionlint
 
 **Outputs:**
 
