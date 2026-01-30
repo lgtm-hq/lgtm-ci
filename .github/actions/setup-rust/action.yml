@@ -76,7 +76,6 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ${{ inputs.working-directory }}/target/
-        # Cache key must be single line - includes toolchain for invalidation
         # Cache key includes toolchain for proper invalidation
         key:
           cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{

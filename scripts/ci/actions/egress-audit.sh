@@ -24,7 +24,8 @@ setup)
 
 	# Parse allowed domains into a normalized list
 	# Convert to newline-separated, remove empty lines and whitespace
-	ALLOWED_DOMAINS=$(echo "$ALLOWED_DOMAINS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -u)
+	# Use sed instead of grep -v to avoid exit code 1 on empty input under set -e
+	ALLOWED_DOMAINS=$(echo "$ALLOWED_DOMAINS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | sed '/^$/d' | sort -u)
 
 	# Save allowed domains for later steps
 	echo "$ALLOWED_DOMAINS" >"$EGRESS_LOG_DIR/allowed-domains.txt"

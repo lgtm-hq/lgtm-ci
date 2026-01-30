@@ -85,8 +85,8 @@ runs:
         path: |
           ~/.cache/uv
           ${{ inputs.working-directory }}/.venv
-        # Cache key must be single line - includes version for invalidation
         # Cache key includes version for proper invalidation
+        # yamllint disable-line rule:line-length
         key:
           uv-${{ runner.os }}-${{ inputs.python-version }}-${{
           hashFiles(inputs.cache-dependency-path) }}

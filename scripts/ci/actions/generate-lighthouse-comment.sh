@@ -20,8 +20,9 @@ set -euo pipefail
 : "${THRESHOLD_SEO:=80}"
 
 # Find the results file
+# Sort for deterministic selection when directory contains multiple JSON files
 if [[ -d "$RESULTS_PATH" ]]; then
-	RESULTS_FILE=$(find "$RESULTS_PATH" -name "*.json" -type f | head -1)
+	RESULTS_FILE=$(find "$RESULTS_PATH" -name "*.json" -type f | sort | head -1)
 else
 	RESULTS_FILE="$RESULTS_PATH"
 fi
@@ -53,12 +54,15 @@ PASSED=true
 } >>"$GITHUB_OUTPUT"
 
 # Helper function for score emoji
+# Green if meets threshold, yellow if within 10 points, red otherwise
 score_emoji() {
 	local score=$1
 	local threshold=$2
-	if [[ $score -ge 90 ]]; then
+	local warn=$((threshold - 10))
+	((warn < 0)) && warn=0
+	if [[ $score -ge $threshold ]]; then
 		echo "🟢"
-	elif [[ $score -ge $threshold ]]; then
+	elif [[ $score -ge $warn ]]; then
 		echo "🟡"
 	else
 		echo "🔴"

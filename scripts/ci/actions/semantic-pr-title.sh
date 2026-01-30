@@ -53,12 +53,6 @@ TYPE=$(echo "$TITLE" | sed -E 's/^([a-z]+).*/\1/')
 SCOPE=$(echo "$TITLE" | sed -nE 's/^[a-z]+\(([^)]+)\).*/\1/p')
 DESC=$(echo "$TITLE" | sed -E 's/^[a-z]+(\([^)]+\))?!?: //')
 
-{
-	echo "type=$TYPE"
-	echo "scope=$SCOPE"
-	echo "description=$DESC"
-} >>"$GITHUB_OUTPUT"
-
 # Check scope allowlist if provided
 if [[ -n "$ALLOWED_SCOPES" && -n "$SCOPE" ]]; then
 	IFS=',' read -ra SCOPES_ARRAY <<<"$ALLOWED_SCOPES"
@@ -80,7 +74,11 @@ if [[ -n "$ALLOWED_SCOPES" && -n "$SCOPE" ]]; then
 	fi
 fi
 
-# Check length
+# Check length - validate MAX_LENGTH is numeric first
+if ! [[ "$MAX_LENGTH" =~ ^[0-9]+$ ]]; then
+	echo "::warning::MAX_LENGTH '$MAX_LENGTH' is not a valid number, skipping length check"
+	MAX_LENGTH=0
+fi
 if [[ "$MAX_LENGTH" -gt 0 && ${#TITLE} -gt $MAX_LENGTH ]]; then
 	echo "::error::PR title exceeds maximum length of $MAX_LENGTH characters (${#TITLE})"
 	echo "valid=false" >>"$GITHUB_OUTPUT"
@@ -90,6 +88,13 @@ if [[ "$MAX_LENGTH" -gt 0 && ${#TITLE} -gt $MAX_LENGTH ]]; then
 	fi
 	exit 0
 fi
+
+# Output extracted components after all validations pass
+{
+	echo "type=$TYPE"
+	echo "scope=$SCOPE"
+	echo "description=$DESC"
+} >>"$GITHUB_OUTPUT"
 
 echo "valid=true" >>"$GITHUB_OUTPUT"
 echo "::notice::PR title is valid: $TYPE${SCOPE:+($SCOPE)}: $DESC"

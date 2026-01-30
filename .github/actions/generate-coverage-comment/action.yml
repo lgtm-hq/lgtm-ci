@@ -70,6 +70,8 @@ runs:
         THRESHOLD_LINES: ${{ inputs['threshold-lines'] }}
         THRESHOLD_BRANCHES: ${{ inputs['threshold-branches'] }}
         THRESHOLD_FUNCTIONS: ${{ inputs['threshold-functions'] }}
+        SHOW_FILE_COVERAGE: ${{ inputs['show-file-coverage'] }}
+        MAX_FILES: ${{ inputs['max-files'] }}
       run:
         ${{ github.action_path
         }}/../../../scripts/ci/actions/generate-coverage-comment.sh

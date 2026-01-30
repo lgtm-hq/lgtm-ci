@@ -33,13 +33,17 @@ installer_fallback_go() {
 	fi
 
 	log_info "Trying go install..."
-	local status
+	local status output
 	if [[ "${VERBOSE:-}" == "1" ]]; then
 		go install "$package"
 		status=$?
 	else
-		go install "$package" 2>/dev/null
+		# Capture stderr to show on failure
+		output=$(go install "$package" 2>&1) || true
 		status=$?
+		if [[ $status -ne 0 ]]; then
+			echo "$output" >&2
+		fi
 	fi
 
 	if [[ $status -eq 0 ]]; then
@@ -67,13 +71,17 @@ installer_fallback_brew() {
 	[[ "$cask_flag" == "--cask" ]] && brew_args+=("--cask")
 	brew_args+=("$formula")
 
-	local status
+	local status output
 	if [[ "${VERBOSE:-}" == "1" ]]; then
 		brew "${brew_args[@]}"
 		status=$?
 	else
-		brew "${brew_args[@]}" 2>/dev/null
+		# Capture stderr to show on failure
+		output=$(brew "${brew_args[@]}" 2>&1) || true
 		status=$?
+		if [[ $status -ne 0 ]]; then
+			echo "$output" >&2
+		fi
 	fi
 
 	if [[ $status -eq 0 ]]; then
@@ -105,13 +113,17 @@ installer_fallback_cargo() {
 	fi
 
 	log_info "Trying cargo install..."
-	local status
+	local status output
 	if [[ "${VERBOSE:-}" == "1" ]]; then
 		cargo "${cargo_args[@]}"
 		status=$?
 	else
-		cargo "${cargo_args[@]}" 2>/dev/null
+		# Capture stderr to show on failure
+		output=$(cargo "${cargo_args[@]}" 2>&1) || true
 		status=$?
+		if [[ $status -ne 0 ]]; then
+			echo "$output" >&2
+		fi
 	fi
 
 	if [[ $status -eq 0 ]]; then

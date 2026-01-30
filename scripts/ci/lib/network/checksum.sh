@@ -47,7 +47,8 @@ verify_checksum() {
 			shift
 			;;
 		-*)
-			# Unknown option, skip
+			# Unknown option - warn and skip to help catch typos
+			log_warn "Unknown option ignored: $1"
 			shift
 			;;
 		*)

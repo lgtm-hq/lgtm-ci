@@ -60,14 +60,15 @@ installer_init() {
 	# Fallback for missing network/download.sh
 	if ! declare -f download_with_retries &>/dev/null; then
 		download_with_retries() {
-			local url="$1" out="$2" attempts="${3:-3}" delay_ms=500 i
+			local url="$1" out="$2" attempts="${3:-3}" delay=0.5 i
 			for ((i = 1; i <= attempts; i++)); do
 				if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" 2>/dev/null; then
 					return 0
 				fi
 				if [[ $i -lt $attempts ]]; then
-					sleep "$(awk "BEGIN {printf \"%.1f\", $delay_ms/1000}")"
-					delay_ms=$((delay_ms * 2))
+					sleep "$delay"
+					# Use -v to pass shell variable to awk safely
+					delay=$(awk -v d="$delay" 'BEGIN{ printf "%.2f", d*2 }')
 				fi
 			done
 			return 1

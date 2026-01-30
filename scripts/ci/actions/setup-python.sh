@@ -3,9 +3,8 @@
 # Purpose: Setup Python environment with uv
 #
 # Required environment variables:
-#   PYTHON_VERSION - Python version to install
-#   INSTALL_DEPS - Whether to install dependencies (true/false)
-#   STEP - Which step to run: version, install, or deps
+#   STEP - Which step to run: uv-version, python-install, python-version, or deps
+#   PYTHON_VERSION - Python version to install (required for python-install step)
 
 set -euo pipefail
 

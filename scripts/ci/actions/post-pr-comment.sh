@@ -64,11 +64,11 @@ fi
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
 
 # Find existing comment with this marker
+# Use jq --arg to safely pass marker and avoid command injection
 EXISTING_COMMENT_ID=$(gh api \
 	-H "Accept: application/vnd.github+json" \
 	"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-	--jq ".[] | select(.body | contains(\"${MARKER_TAG}\")) | .id" \
-	2>/dev/null | head -1 || echo "")
+	2>/dev/null | jq -r --arg marker "$MARKER_TAG" '.[] | select(.body | contains($marker)) | .id' | head -1 || echo "")
 
 # Handle empty body
 if [[ -z "${COMMENT_BODY:-}" ]]; then
@@ -99,8 +99,12 @@ if [[ "$MODE" == "create" || ("$MODE" == "upsert" && -z "$EXISTING_COMMENT_ID") 
 		"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
 		-f body="$FULL_BODY")
 
-	COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
-	COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
+	COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+	COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url // empty')
+	if [[ -z "$COMMENT_ID" ]]; then
+		echo "::error::Failed to create comment - invalid API response"
+		exit 1
+	fi
 	echo "action-taken=created" >>"$GITHUB_OUTPUT"
 	echo "Created comment $COMMENT_ID"
 
@@ -112,8 +116,12 @@ elif [[ "$MODE" == "update" || "$MODE" == "upsert" ]] && [[ -n "$EXISTING_COMMEN
 		"/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT_ID}" \
 		-f body="$FULL_BODY")
 
-	COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
-	COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
+	COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id // empty')
+	COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url // empty')
+	if [[ -z "$COMMENT_ID" ]]; then
+		echo "::error::Failed to update comment - invalid API response"
+		exit 1
+	fi
 	echo "action-taken=updated" >>"$GITHUB_OUTPUT"
 	echo "Updated comment $COMMENT_ID"
 
