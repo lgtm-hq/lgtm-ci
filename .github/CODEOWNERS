@@ -1,11 +1,11 @@
 # lgtm-ci Code Owners
 # These owners will be requested for review on all PRs
 
-# Default owners for everything
-* @lgtm-hq/maintainers
+# Default owners for everything - team for reviews, user for auto-assignment
+* @lgtm-hq/maintainers @TurboCoder13
 
 # Shell scripts and CI utilities
-/scripts/ @lgtm-hq/maintainers
+/scripts/ @lgtm-hq/maintainers @TurboCoder13
 
 # GitHub Actions and workflows
-/.github/ @lgtm-hq/maintainers
+/.github/ @lgtm-hq/maintainers @TurboCoder13
