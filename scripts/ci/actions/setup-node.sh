@@ -24,7 +24,12 @@ bun-version)
 	;;
 
 bun-cache)
-	cache_dir=$(bun pm cache)
+	# bun pm cache requires package.json, use default if not present
+	if [[ -f "package.json" ]]; then
+		cache_dir=$(bun pm cache)
+	else
+		cache_dir="${HOME}/.bun/install/cache"
+	fi
 	echo "dir=$cache_dir" >>"$GITHUB_OUTPUT"
 	;;
 

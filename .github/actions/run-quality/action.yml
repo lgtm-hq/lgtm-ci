@@ -1,0 +1,68 @@
+---
+name: 'Run Quality Checks'
+description: 'Run lintro quality checks with configurable tools'
+author: 'lgtm-hq'
+
+inputs:
+  tools:
+    description: 'Comma-separated list of lintro tools to run (empty = all)'
+    required: false
+    default: ''
+  mode:
+    description: 'Mode: check (lint only) or format (auto-fix)'
+    required: false
+    default: 'check'
+  fail-on-error:
+    description: 'Fail if linting errors found'
+    required: false
+    default: 'true'
+  run-actionlint:
+    description: 'Also run actionlint on GitHub Actions'
+    required: false
+    default: 'true'
+  working-directory:
+    description: 'Working directory for linting'
+    required: false
+    default: '.'
+
+outputs:
+  exit-code:
+    description: 'Exit code from lintro'
+    value: ${{ steps.lint.outputs.exit-code }}
+  status:
+    description: 'Status: passed or failed'
+    value: ${{ steps.lint.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run lintro quality checks
+      id: lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: ${{ inputs.mode }}
+        TOOLS: ${{ inputs.tools }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: ${{ github.action_path }}/../../../scripts/ci/quality/lint-check.sh
+
+    - name: Run actionlint
+      if: inputs.run-actionlint == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: check
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: |
+        if command -v actionlint &>/dev/null; then
+          ${{ github.action_path }}/../../../scripts/ci/quality/actionlint-check.sh
+          EXIT_CODE=$?
+          if [[ "$FAIL_ON_ERROR" != "true" ]]; then
+            exit 0
+          fi
+          exit $EXIT_CODE
+        fi
+
+branding:
+  icon: 'check-circle'
+  color: 'green'

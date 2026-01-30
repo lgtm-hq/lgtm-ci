@@ -75,6 +75,8 @@ steps:
 | `generate-coverage-comment`   | Coverage report PR comments                 |
 | `generate-playwright-comment` | E2E test result comments                    |
 | `generate-lighthouse-comment` | Performance metric comments                 |
+| `run-quality`                 | Lintro quality checks with actionlint       |
+| `egress-audit`                | Network egress monitoring and reporting     |
 
 ### Reusable Workflows
 

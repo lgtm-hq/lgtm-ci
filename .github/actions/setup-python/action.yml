@@ -31,6 +31,10 @@ inputs:
     description: 'Run uv sync to install dependencies'
     required: false
     default: 'true'
+  install-extras:
+    description: 'Comma-separated list of extras to install (e.g., "dev,test")'
+    required: false
+    default: ''
 
 outputs:
   python-version:
@@ -100,6 +104,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: deps
+        EXTRAS: ${{ inputs.install-extras }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-python.sh
 
 branding:
