@@ -106,6 +106,73 @@ Setup Rust toolchain with cargo caching.
 
 ---
 
+## Security Actions
+
+### harden-runner
+
+Security hardening using [StepSecurity](https://stepsecurity.io).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
+  with:
+    egress-policy: 'audit'        # or 'block' to enforce allowlist
+    disable-sudo: 'false'         # optional
+```
+
+**Features:**
+- Network egress monitoring and blocking
+- Optional sudo disabling
+- Integrates with StepSecurity dashboard
+
+---
+
+### secure-checkout
+
+Security-hardened repository checkout with sensible defaults.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
+  with:
+    persist-credentials: 'false'  # default: false (secure)
+    fetch-depth: '1'              # default: 1 (shallow clone)
+```
+
+**Security defaults:**
+- `persist-credentials: false` - Credentials not stored in git config
+- Checkout integrity verification
+- All standard checkout options supported
+
+**Outputs:**
+- `ref` - The resolved ref that was checked out
+- `commit` - The commit SHA that was checked out
+
+---
+
+### egress-audit
+
+Network egress configuration and reporting scaffolding.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/egress-audit@main
+  with:
+    mode: 'audit'                 # 'audit', 'report', or 'block'
+    report-format: 'summary'      # 'summary', 'json', or 'none'
+```
+
+**Features:**
+- Pre-configured allowlist for common package registries
+- GitHub Step Summary report generation
+- Works alongside harden-runner for enforcement
+
+**Default allowed domains:**
+- GitHub (`github.com`, `api.github.com`, `ghcr.io`, etc.)
+- npm (`registry.npmjs.org`)
+- PyPI (`pypi.org`, `files.pythonhosted.org`)
+- Crates.io (`crates.io`, `static.crates.io`)
+- RubyGems (`rubygems.org`)
+
+---
+
 ## Usage Example
 
 ```yaml
@@ -120,8 +187,15 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      # Security hardening (should be first)
+      - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
+        with:
+          egress-policy: audit
 
+      # Secure checkout (replaces actions/checkout)
+      - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
+
+      # Environment setup
       - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main
 
       - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main

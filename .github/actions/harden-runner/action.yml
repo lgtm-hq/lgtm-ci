@@ -1,0 +1,42 @@
+name: 'Harden Runner'
+description: 'Security hardening for GitHub Actions runners using StepSecurity'
+author: 'lgtm-hq'
+
+inputs:
+  egress-policy:
+    description: 'Egress traffic policy: "audit" (log only) or "block" (enforce allowlist)'
+    required: false
+    default: 'audit'
+  allowed-endpoints:
+    description: 'Allowed network endpoints when egress-policy is "block" (newline-separated)'
+    required: false
+    default: ''
+  disable-sudo:
+    description: 'Disable sudo access for the runner'
+    required: false
+    default: 'false'
+  disable-telemetry:
+    description: 'Disable StepSecurity telemetry'
+    required: false
+    default: 'false'
+
+outputs:
+  harden-runner-agent-log:
+    description: 'Path to the harden-runner agent log'
+    value: ${{ steps.harden.outputs['harden-runner-agent-log'] }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Harden Runner
+      id: harden
+      uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+      with:
+        egress-policy: ${{ inputs['egress-policy'] }}
+        allowed-endpoints: ${{ inputs['allowed-endpoints'] }}
+        disable-sudo: ${{ inputs['disable-sudo'] }}
+        disable-telemetry: ${{ inputs['disable-telemetry'] }}
+
+branding:
+  icon: 'shield'
+  color: 'red'
