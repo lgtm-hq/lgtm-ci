@@ -46,12 +46,14 @@ analyze_commits_for_bump() {
 
 		if is_breaking_change "$full_message"; then
 			has_breaking=true
+			continue
 		fi
 
 		# Parse conventional commit
 		if parse_conventional_commit "$subject"; then
 			if [[ -n "$CC_BREAKING" ]]; then
 				has_breaking=true
+				continue
 			fi
 
 			local type_bump
@@ -83,6 +85,7 @@ readonly FIELD_SEP=$'\x1F'
 # Usage: get_commits_by_type "v1.0.0" "HEAD"
 # Output: Sections separated by markers for changelog generation
 # Fields are delimited by ASCII unit separator (0x1F) to handle | in descriptions
+# Note: Empty sections will have only the marker with no commits between them
 get_commits_by_type() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
