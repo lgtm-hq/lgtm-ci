@@ -23,7 +23,7 @@ inputs:
 outputs:
   harden-runner-agent-log:
     description: 'Path to the harden-runner agent log'
-    value: ${{ steps.harden.outputs.harden-runner-agent-log }}
+    value: ${{ steps.harden.outputs['harden-runner-agent-log'] }}
 
 runs:
   using: 'composite'
@@ -32,10 +32,10 @@ runs:
       id: harden
       uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
       with:
-        egress-policy: ${{ inputs.egress-policy }}
-        allowed-endpoints: ${{ inputs.allowed-endpoints }}
-        disable-sudo: ${{ inputs.disable-sudo }}
-        disable-telemetry: ${{ inputs.disable-telemetry }}
+        egress-policy: ${{ inputs['egress-policy'] }}
+        allowed-endpoints: ${{ inputs['allowed-endpoints'] }}
+        disable-sudo: ${{ inputs['disable-sudo'] }}
+        disable-telemetry: ${{ inputs['disable-telemetry'] }}
 
 branding:
   icon: 'shield'
