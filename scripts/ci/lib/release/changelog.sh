@@ -154,12 +154,20 @@ generate_release_notes() {
 	local to_ref="${2:-HEAD}"
 	local version="${3:-}"
 
-	# Counts
+	# Counts - parse key=value output safely
 	local counts
 	counts=$(count_commits_by_type "$from_ref" "$to_ref")
 
-	local breaking features fixes docs other
-	eval "$counts"
+	local breaking=0 features=0 fixes=0 docs=0 other=0
+	while IFS='=' read -r key value; do
+		case "$key" in
+		breaking) breaking="$value" ;;
+		features) features="$value" ;;
+		fixes) fixes="$value" ;;
+		docs) docs="$value" ;;
+		other) other="$value" ;;
+		esac
+	done <<<"$counts"
 
 	# Summary line
 	local summary_parts=()

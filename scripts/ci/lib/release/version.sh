@@ -36,8 +36,6 @@ parse_version() {
 	local rest="${core#*.}"
 	MINOR="${rest%%.*}"
 	PATCH="${rest#*.}"
-
-	export MAJOR MINOR PATCH
 }
 
 # Bump version based on bump type
@@ -73,7 +71,91 @@ bump_version() {
 	echo "${MAJOR}.${MINOR}.${PATCH}"
 }
 
-# Compare two versions
+# Compare two prerelease identifiers according to SemVer
+# Returns: 0 if equal, 1 if id1 > id2, 2 if id1 < id2
+_compare_prerelease_id() {
+	local id1="${1:-}"
+	local id2="${2:-}"
+
+	# Both numeric - compare numerically
+	if [[ "$id1" =~ ^[0-9]+$ ]] && [[ "$id2" =~ ^[0-9]+$ ]]; then
+		if ((id1 > id2)); then
+			return 1
+		elif ((id1 < id2)); then
+			return 2
+		fi
+		return 0
+	fi
+
+	# Numeric has lower precedence than non-numeric
+	if [[ "$id1" =~ ^[0-9]+$ ]]; then
+		return 2
+	fi
+	if [[ "$id2" =~ ^[0-9]+$ ]]; then
+		return 1
+	fi
+
+	# Both non-numeric - compare lexically
+	if [[ "$id1" > "$id2" ]]; then
+		return 1
+	elif [[ "$id1" < "$id2" ]]; then
+		return 2
+	fi
+	return 0
+}
+
+# Compare two prerelease strings according to SemVer
+# Empty prerelease (release version) > any prerelease
+# Returns: 0 if equal, 1 if pre1 > pre2, 2 if pre1 < pre2
+_compare_prerelease() {
+	local pre1="${1:-}"
+	local pre2="${2:-}"
+
+	# Both empty - equal
+	if [[ -z "$pre1" ]] && [[ -z "$pre2" ]]; then
+		return 0
+	fi
+
+	# Empty prerelease (release) > any prerelease
+	if [[ -z "$pre1" ]]; then
+		return 1
+	fi
+	if [[ -z "$pre2" ]]; then
+		return 2
+	fi
+
+	# Split by dots and compare identifiers
+	local IFS='.'
+	read -ra ids1 <<<"$pre1"
+	read -ra ids2 <<<"$pre2"
+
+	local len1=${#ids1[@]}
+	local len2=${#ids2[@]}
+	local max_len=$((len1 > len2 ? len1 : len2))
+
+	for ((i = 0; i < max_len; i++)); do
+		local id1="${ids1[$i]:-}"
+		local id2="${ids2[$i]:-}"
+
+		# Fewer identifiers = lower precedence
+		if [[ -z "$id1" ]]; then
+			return 2
+		fi
+		if [[ -z "$id2" ]]; then
+			return 1
+		fi
+
+		_compare_prerelease_id "$id1" "$id2"
+		local result=$?
+		if ((result != 0)); then
+			return $result
+		fi
+	done
+
+	return 0
+}
+
+# Compare two versions (SemVer-aware including prerelease)
 # Returns: 0 if equal, 1 if v1 > v2, 2 if v1 < v2
 # Usage: compare_versions "1.2.3" "1.2.4" -> returns 2
 compare_versions() {
@@ -88,6 +170,22 @@ compare_versions() {
 		return 0
 	fi
 
+	# Strip build metadata (ignored in comparison per SemVer)
+	v1="${v1%%+*}"
+	v2="${v2%%+*}"
+
+	# Extract prerelease parts
+	local pre1="" pre2=""
+	if [[ "$v1" == *-* ]]; then
+		pre1="${v1#*-}"
+		v1="${v1%%-*}"
+	fi
+	if [[ "$v2" == *-* ]]; then
+		pre2="${v2#*-}"
+		v2="${v2%%-*}"
+	fi
+
+	# Compare major.minor.patch
 	local IFS='.'
 	read -ra v1_parts <<<"$v1"
 	read -ra v2_parts <<<"$v2"
@@ -96,12 +194,6 @@ compare_versions() {
 		local p1="${v1_parts[$i]:-0}"
 		local p2="${v2_parts[$i]:-0}"
 
-		# Strip any prerelease/build metadata from patch
-		p1="${p1%%-*}"
-		p1="${p1%%+*}"
-		p2="${p2%%-*}"
-		p2="${p2%%+*}"
-
 		if ((p1 > p2)); then
 			return 1
 		elif ((p1 < p2)); then
@@ -109,7 +201,8 @@ compare_versions() {
 		fi
 	done
 
-	return 0
+	# Major.minor.patch are equal - compare prerelease
+	_compare_prerelease "$pre1" "$pre2"
 }
 
 # Get the higher of two bump types

@@ -19,10 +19,10 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../lib/github.sh
+source "$LIB_DIR/github.sh"
 # shellcheck source=../lib/release.sh
 source "$LIB_DIR/release.sh"
-# shellcheck source=../lib/github/output.sh
-source "$LIB_DIR/github/output.sh"
 
 : "${VERSION:?VERSION is required}"
 : "${TAG_PREFIX:=v}"
@@ -37,7 +37,7 @@ TAG_NAME="${TAG_PREFIX}${CLEAN_VERSION}"
 log_info "Creating tag: $TAG_NAME"
 
 # Check if tag already exists
-if git tag -l "$TAG_NAME" | grep -q "^${TAG_NAME}$"; then
+if git rev-parse --verify --quiet "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
 	log_error "Tag $TAG_NAME already exists"
 	exit 1
 fi
