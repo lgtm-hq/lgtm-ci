@@ -58,7 +58,7 @@ install)
 	# Download script to temp file first, then execute (avoid curl | bash)
 	DOWNLOAD_SCRIPT=$(mktemp)
 	# Using v1.7.7 release commit - update SHA when upgrading actionlint version
-	ACTIONLINT_SHA="89e27498febc6e0b2c6ff7a24063bd8cc18f1903"
+	ACTIONLINT_SHA="03d0035246f3e81f36aed592ffb4bebf33a03106"
 	curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_SHA}/scripts/download-actionlint.bash" \
 		-o "$DOWNLOAD_SCRIPT"
 	bash "$DOWNLOAD_SCRIPT" -b "$BIN_DIR"
