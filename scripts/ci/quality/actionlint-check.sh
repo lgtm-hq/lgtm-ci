@@ -61,7 +61,8 @@ install)
 	ACTIONLINT_SHA="03d0035246f3e81f36aed592ffb4bebf33a03106"
 	curl -fsSL "https://raw.githubusercontent.com/rhysd/actionlint/${ACTIONLINT_SHA}/scripts/download-actionlint.bash" \
 		-o "$DOWNLOAD_SCRIPT"
-	bash "$DOWNLOAD_SCRIPT" -b "$BIN_DIR"
+	# Script usage: bash download-actionlint.bash [VERSION] [DIR]
+	bash "$DOWNLOAD_SCRIPT" "${ACTIONLINT_VERSION#v}" "$BIN_DIR"
 	rm -f "$DOWNLOAD_SCRIPT"
 
 	if [[ -x "$BIN_DIR/actionlint" ]]; then
