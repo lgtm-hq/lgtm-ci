@@ -46,9 +46,10 @@ fi
 if jq -e '.stats' "$RESULTS_PATH" >/dev/null 2>&1; then
 	# Standard report format
 	# Include timedOut and interrupted in FAILED count (these are test failures)
-	TOTAL=$(jq -r '.stats.expected + .stats.unexpected + .stats.flaky + .stats.skipped + (.stats.timedOut // 0) + (.stats.interrupted // 0) // 0' "$RESULTS_PATH")
+	# All fields default to 0 to handle missing stats gracefully
+	TOTAL=$(jq -r '((.stats.expected // 0) + (.stats.unexpected // 0) + (.stats.flaky // 0) + (.stats.skipped // 0) + (.stats.timedOut // 0) + (.stats.interrupted // 0))' "$RESULTS_PATH")
 	PASSED=$(jq -r '.stats.expected // 0' "$RESULTS_PATH")
-	FAILED=$(jq -r '(.stats.unexpected // 0) + (.stats.timedOut // 0) + (.stats.interrupted // 0)' "$RESULTS_PATH")
+	FAILED=$(jq -r '((.stats.unexpected // 0) + (.stats.timedOut // 0) + (.stats.interrupted // 0))' "$RESULTS_PATH")
 	SKIPPED=$(jq -r '.stats.skipped // 0' "$RESULTS_PATH")
 	FLAKY=$(jq -r '.stats.flaky // 0' "$RESULTS_PATH")
 	DURATION=$(jq -r '.stats.duration // 0' "$RESULTS_PATH")

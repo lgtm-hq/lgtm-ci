@@ -103,27 +103,33 @@ format_score_with_color() {
 		return
 	fi
 
-	# Validate score is numeric
-	if ! [[ "$score" =~ ^-?[0-9]+$ ]]; then
+	# Validate score is numeric (integer or float, like score_emoji)
+	if ! [[ "$score" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
 		echo "⚪ N/A"
 		return
 	fi
 
+	# Preserve original for display, truncate for comparison
+	local display_score="$score"
+	score="${score%.*}"
+	threshold="${threshold%.*}"
 	local warn=$((threshold - 10))
 	((warn < 0)) && warn=0
 
 	if [[ "$score" -ge "$threshold" ]]; then
-		echo "🟢 $score"
+		echo "🟢 $display_score"
 	elif [[ "$score" -ge "$warn" ]]; then
-		echo "🟡 $score"
+		echo "🟡 $display_score"
 	else
-		echo "🔴 $score"
+		echo "🔴 $display_score"
 	fi
 }
 
 # Format a percentage with color-coded emoji indicator
 # Usage: format_percentage_with_color 95.5 -> "🟢 95.5%"
+# Thresholds: 🟢 >= threshold, 🟡 >= threshold-10, 🔴 < threshold-10
 # Note: Uses awk for float comparisons (POSIX-compatible, no bc dependency)
+# Note: Uses same dynamic threshold semantics as score_emoji for consistency
 format_percentage_with_color() {
 	local pct="$1"
 	local threshold="${2:-80}"
@@ -146,9 +152,10 @@ format_percentage_with_color() {
 	fi
 
 	# Use awk -v to safely pass variables (POSIX-compatible, no shell injection)
-	if awk -v pct="$pct" 'BEGIN { exit !(pct + 0 >= 90) }' 2>/dev/null; then
+	# Dynamic thresholds: green >= threshold, yellow >= threshold-10, red otherwise
+	if awk -v pct="$pct" -v threshold="$threshold" 'BEGIN { exit !(pct + 0 >= threshold + 0) }' 2>/dev/null; then
 		echo "🟢 ${pct}%"
-	elif awk -v pct="$pct" -v threshold="$threshold" 'BEGIN { exit !(pct + 0 >= threshold + 0) }' 2>/dev/null; then
+	elif awk -v pct="$pct" -v threshold="$threshold" 'BEGIN { exit !(pct + 0 >= (threshold - 10) + 0) }' 2>/dev/null; then
 		echo "🟡 ${pct}%"
 	else
 		echo "🔴 ${pct}%"
