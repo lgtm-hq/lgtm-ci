@@ -26,9 +26,11 @@ detect_platform() {
 	i386 | i686) arch="x86" ;;
 	esac
 
-	echo "os=$os" >>"$GITHUB_OUTPUT"
-	echo "arch=$arch" >>"$GITHUB_OUTPUT"
-	echo "platform=${os}-${arch}" >>"$GITHUB_OUTPUT"
+	{
+		echo "os=$os"
+		echo "arch=$arch"
+		echo "platform=${os}-${arch}"
+	} >>"$GITHUB_OUTPUT"
 	echo "Detected platform: ${os}-${arch}"
 }
 
@@ -57,15 +59,17 @@ add_extra_paths() {
 
 # Set common environment variables
 set_common_env() {
-	# Disable interactive prompts
-	echo "CI=true" >>"$GITHUB_ENV"
-	echo "NONINTERACTIVE=1" >>"$GITHUB_ENV"
+	{
+		# Disable interactive prompts
+		echo "CI=true"
+		echo "NONINTERACTIVE=1"
 
-	# Disable telemetry for common tools
-	echo "DO_NOT_TRACK=1" >>"$GITHUB_ENV"
-	echo "HOMEBREW_NO_ANALYTICS=1" >>"$GITHUB_ENV"
-	echo "DOTNET_CLI_TELEMETRY_OPTOUT=1" >>"$GITHUB_ENV"
-	echo "NEXT_TELEMETRY_DISABLED=1" >>"$GITHUB_ENV"
+		# Disable telemetry for common tools
+		echo "DO_NOT_TRACK=1"
+		echo "HOMEBREW_NO_ANALYTICS=1"
+		echo "DOTNET_CLI_TELEMETRY_OPTOUT=1"
+		echo "NEXT_TELEMETRY_DISABLED=1"
+	} >>"$GITHUB_ENV"
 }
 
 # Main

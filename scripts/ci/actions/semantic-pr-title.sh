@@ -53,9 +53,11 @@ TYPE=$(echo "$TITLE" | sed -E 's/^([a-z]+).*/\1/')
 SCOPE=$(echo "$TITLE" | sed -nE 's/^[a-z]+\(([^)]+)\).*/\1/p')
 DESC=$(echo "$TITLE" | sed -E 's/^[a-z]+(\([^)]+\))?!?: //')
 
-echo "type=$TYPE" >>"$GITHUB_OUTPUT"
-echo "scope=$SCOPE" >>"$GITHUB_OUTPUT"
-echo "description=$DESC" >>"$GITHUB_OUTPUT"
+{
+	echo "type=$TYPE"
+	echo "scope=$SCOPE"
+	echo "description=$DESC"
+} >>"$GITHUB_OUTPUT"
 
 # Check scope allowlist if provided
 if [[ -n "$ALLOWED_SCOPES" && -n "$SCOPE" ]]; then

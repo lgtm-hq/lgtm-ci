@@ -1,17 +1,15 @@
+---
 name: 'Egress Audit'
-description:
-  'Audit and optionally restrict network egress from GitHub Actions workflows'
+description: 'Audit and restrict network egress from workflows'
 author: 'lgtm-hq'
 
 inputs:
   mode:
-    description:
-      'Operation mode: "audit" (log traffic), "report" (generate summary), or "block"
-      (enforce allowlist)'
+    description: 'Mode: audit (log), report (summary), or block (enforce)'
     required: false
     default: 'audit'
   allowed-domains:
-    description: 'Allowed domains when mode is "block" (newline or comma-separated)'
+    description: 'Allowed domains when mode is block (newline-separated)'
     required: false
     default: |
       github.com
@@ -33,8 +31,7 @@ inputs:
     required: false
     default: 'summary'
   fail-on-violation:
-    description:
-      'Fail the workflow if unauthorized egress is detected (only in block mode)'
+    description: 'Fail workflow on unauthorized egress (block mode only)'
     required: false
     default: 'false'
 

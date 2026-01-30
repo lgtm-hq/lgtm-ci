@@ -28,12 +28,12 @@ if [[ ! -f "$COVERAGE_FILE" ]]; then
 		echo ""
 		echo "⚠️ No coverage data found"
 		echo "EOF_MISSING"
+		echo "lines=0"
+		echo "branches=0"
+		echo "functions=0"
+		echo "statements=0"
+		echo "passed=false"
 	} >>"$GITHUB_OUTPUT"
-	echo "lines=0" >>"$GITHUB_OUTPUT"
-	echo "branches=0" >>"$GITHUB_OUTPUT"
-	echo "functions=0" >>"$GITHUB_OUTPUT"
-	echo "statements=0" >>"$GITHUB_OUTPUT"
-	echo "passed=false" >>"$GITHUB_OUTPUT"
 	exit 0
 fi
 
@@ -74,17 +74,23 @@ BRANCHES=$(printf "%.0f" "$BRANCHES")
 FUNCTIONS=$(printf "%.0f" "$FUNCTIONS")
 STATEMENTS=$(printf "%.0f" "$STATEMENTS")
 
-echo "lines=$LINES" >>"$GITHUB_OUTPUT"
-echo "branches=$BRANCHES" >>"$GITHUB_OUTPUT"
-echo "functions=$FUNCTIONS" >>"$GITHUB_OUTPUT"
-echo "statements=$STATEMENTS" >>"$GITHUB_OUTPUT"
+{
+	echo "lines=$LINES"
+	echo "branches=$BRANCHES"
+	echo "functions=$FUNCTIONS"
+	echo "statements=$STATEMENTS"
+} >>"$GITHUB_OUTPUT"
 
 # Check thresholds
 PASSED=true
 [[ $LINES -lt $THRESHOLD_LINES ]] && PASSED=false
 [[ $BRANCHES -lt $THRESHOLD_BRANCHES ]] && PASSED=false
 [[ $FUNCTIONS -lt $THRESHOLD_FUNCTIONS ]] && PASSED=false
-echo "passed=$PASSED" >>"$GITHUB_OUTPUT"
+
+# Output pass status (grouped with metrics above if needed)
+{
+	echo "passed=$PASSED"
+} >>"$GITHUB_OUTPUT"
 
 # Helper function for score emoji
 score_emoji() {

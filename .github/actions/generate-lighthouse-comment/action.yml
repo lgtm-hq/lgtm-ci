@@ -1,3 +1,4 @@
+---
 name: 'Generate Lighthouse Comment'
 description: 'Generate a formatted PR comment from Lighthouse CI results'
 author: 'lgtm-hq'

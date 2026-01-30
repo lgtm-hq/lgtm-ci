@@ -1,5 +1,7 @@
+---
 name: 'Post PR Comment'
-description: 'Create or update a PR comment with a unique marker for upsert behavior'
+description: >-
+  Create or update a PR comment with unique marker for upsert behavior
 author: 'lgtm-hq'
 
 inputs:
@@ -8,20 +10,20 @@ inputs:
     required: false
     default: ${{ github.token }}
   pr-number:
-    description: 'Pull request number (auto-detected from context if not provided)'
+    description: >-
+      Pull request number (auto-detected from context if not provided)
     required: false
     default: ''
   marker:
-    description:
-      'Unique marker to identify this comment for updates (e.g., "lighthouse-results")'
+    description: >-
+      Unique marker to identify this comment for updates
     required: true
   body:
     description: 'Comment body content (Markdown supported)'
     required: true
   mode:
-    description:
-      'Comment mode: "upsert" (create or update), "create" (always new), "update" (only
-      update existing)'
+    description: >-
+      Comment mode: upsert (create or update), create, or update
     required: false
     default: 'upsert'
   delete-on-empty:
@@ -48,12 +50,14 @@ runs:
       shell: bash
       env:
         GH_TOKEN: ${{ inputs.token }}
+      # yamllint disable rule:line-length
       run: |
         PR_NUMBER="${{ inputs['pr-number'] }}"
         if [[ -z "$PR_NUMBER" ]]; then
-          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "pull_request_target" ]]; then
+          EVENT="${{ github.event_name }}"
+          if [[ "$EVENT" == "pull_request" || "$EVENT" == "pull_request_target" ]]; then
             PR_NUMBER="${{ github.event.pull_request.number }}"
-          elif [[ "${{ github.event_name }}" == "issue_comment" ]]; then
+          elif [[ "$EVENT" == "issue_comment" ]]; then
             PR_NUMBER="${{ github.event.issue.number }}"
           else
             PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
@@ -64,6 +68,7 @@ runs:
           exit 1
         fi
         echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+      # yamllint enable rule:line-length
 
     - name: Post or update comment
       id: post
@@ -76,7 +81,8 @@ runs:
         MARKER: ${{ inputs.marker }}
         MODE: ${{ inputs.mode }}
         DELETE_ON_EMPTY: ${{ inputs['delete-on-empty'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
+      run: >-
+        ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
 
 branding:
   icon: 'message-square'

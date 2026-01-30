@@ -31,6 +31,7 @@ setup)
 
 	echo "Egress audit mode: $MODE"
 	echo "Allowed domains:"
+	# shellcheck disable=SC2001 # sed is appropriate for multiline prefix
 	echo "$ALLOWED_DOMAINS" | sed 's/^/  - /'
 	;;
 
@@ -40,8 +41,10 @@ audit)
 	EGRESS_LOG_DIR="${RUNNER_TEMP}/egress-audit"
 	EGRESS_LOG="$EGRESS_LOG_DIR/egress.log"
 	touch "$EGRESS_LOG"
-	echo "egress-log=$EGRESS_LOG" >>"$GITHUB_OUTPUT"
-	echo "violations-detected=false" >>"$GITHUB_OUTPUT"
+	{
+		echo "egress-log=$EGRESS_LOG"
+		echo "violations-detected=false"
+	} >>"$GITHUB_OUTPUT"
 
 	if [[ "$MODE" == "block" ]]; then
 		echo "::notice::Egress blocking is configured via harden-runner action"

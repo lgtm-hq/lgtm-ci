@@ -1,10 +1,12 @@
+---
 name: 'Semantic PR Title'
 description: 'Validate PR title follows conventional commit format'
 author: 'lgtm-hq'
 
 inputs:
   title:
-    description: 'PR title to validate (auto-detected from context if not provided)'
+    description: >-
+      PR title to validate (auto-detected from context if not provided)
     required: false
     default: ''
   types:
@@ -58,6 +60,7 @@ runs:
         REQUIRE_SCOPE: ${{ inputs['require-scope'] }}
         MAX_LENGTH: ${{ inputs['max-length'] }}
         FAIL_ON_INVALID: ${{ inputs['fail-on-invalid'] }}
+      # yamllint disable-line rule:line-length
       run: ${{ github.action_path }}/../../../scripts/ci/actions/semantic-pr-title.sh
 
 branding:

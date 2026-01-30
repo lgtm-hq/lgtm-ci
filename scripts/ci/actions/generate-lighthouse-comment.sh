@@ -37,11 +37,6 @@ A11Y=$(jq -r '.categories.accessibility.score // 0 | . * 100 | floor' "$RESULTS_
 BP=$(jq -r '.categories["best-practices"].score // 0 | . * 100 | floor' "$RESULTS_FILE")
 SEO=$(jq -r '.categories.seo.score // 0 | . * 100 | floor' "$RESULTS_FILE")
 
-echo "performance=$PERF" >>"$GITHUB_OUTPUT"
-echo "accessibility=$A11Y" >>"$GITHUB_OUTPUT"
-echo "best-practices=$BP" >>"$GITHUB_OUTPUT"
-echo "seo=$SEO" >>"$GITHUB_OUTPUT"
-
 # Check thresholds
 PASSED=true
 [[ $PERF -lt $THRESHOLD_PERFORMANCE ]] && PASSED=false
@@ -49,7 +44,13 @@ PASSED=true
 [[ $BP -lt $THRESHOLD_BEST_PRACTICES ]] && PASSED=false
 [[ $SEO -lt $THRESHOLD_SEO ]] && PASSED=false
 
-echo "passed=$PASSED" >>"$GITHUB_OUTPUT"
+{
+	echo "performance=$PERF"
+	echo "accessibility=$A11Y"
+	echo "best-practices=$BP"
+	echo "seo=$SEO"
+	echo "passed=$PASSED"
+} >>"$GITHUB_OUTPUT"
 
 # Helper function for score emoji
 score_emoji() {

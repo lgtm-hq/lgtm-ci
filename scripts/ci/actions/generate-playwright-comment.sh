@@ -24,12 +24,12 @@ if [[ ! -f "$RESULTS_PATH" ]]; then
 		echo ""
 		echo "⚠️ No test results found"
 		echo "EOF_MISSING"
+		echo "total=0"
+		echo "passed=0"
+		echo "failed=0"
+		echo "skipped=0"
+		echo "success=false"
 	} >>"$GITHUB_OUTPUT"
-	echo "total=0" >>"$GITHUB_OUTPUT"
-	echo "passed=0" >>"$GITHUB_OUTPUT"
-	echo "failed=0" >>"$GITHUB_OUTPUT"
-	echo "skipped=0" >>"$GITHUB_OUTPUT"
-	echo "success=false" >>"$GITHUB_OUTPUT"
 	exit 0
 fi
 
@@ -52,14 +52,16 @@ else
 	DURATION=0
 fi
 
-echo "total=$TOTAL" >>"$GITHUB_OUTPUT"
-echo "passed=$PASSED" >>"$GITHUB_OUTPUT"
-echo "failed=$FAILED" >>"$GITHUB_OUTPUT"
-echo "skipped=$SKIPPED" >>"$GITHUB_OUTPUT"
-
 SUCCESS="true"
 [[ $FAILED -gt 0 ]] && SUCCESS="false"
-echo "success=$SUCCESS" >>"$GITHUB_OUTPUT"
+
+{
+	echo "total=$TOTAL"
+	echo "passed=$PASSED"
+	echo "failed=$FAILED"
+	echo "skipped=$SKIPPED"
+	echo "success=$SUCCESS"
+} >>"$GITHUB_OUTPUT"
 
 # Calculate pass rate
 if [[ $TOTAL -gt 0 ]]; then

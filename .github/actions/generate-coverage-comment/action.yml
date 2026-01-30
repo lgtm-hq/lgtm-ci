@@ -1,3 +1,4 @@
+---
 name: 'Generate Coverage Comment'
 description: 'Generate a formatted PR comment from code coverage results'
 author: 'lgtm-hq'
@@ -8,8 +9,7 @@ inputs:
     required: false
     default: 'coverage/coverage-summary.json'
   format:
-    description:
-      'Coverage file format: "istanbul" (JS), "coverage-py" (Python), "lcov", or "auto"'
+    description: 'Format: istanbul (JS), coverage-py (Python), lcov, or auto'
     required: false
     default: 'auto'
   report-url:

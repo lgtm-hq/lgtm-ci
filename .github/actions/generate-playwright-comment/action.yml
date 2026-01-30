@@ -1,3 +1,4 @@
+---
 name: 'Generate Playwright Comment'
 description: 'Generate a formatted PR comment from Playwright test results'
 author: 'lgtm-hq'
