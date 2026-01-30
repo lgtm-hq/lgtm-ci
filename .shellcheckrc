@@ -1,0 +1,6 @@
+# Shellcheck configuration for lgtm-ci
+
+# Disable checks that conflict with our patterns
+disable=SC1091  # Don't follow sourced files (relative paths)
+disable=SC2034  # Unused variables (may be exported)
+disable=SC2329  # Unused functions (utility library)
