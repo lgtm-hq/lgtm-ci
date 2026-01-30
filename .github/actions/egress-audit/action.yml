@@ -1,10 +1,13 @@
 name: 'Egress Audit'
-description: 'Audit and optionally restrict network egress from GitHub Actions workflows'
+description:
+  'Audit and optionally restrict network egress from GitHub Actions workflows'
 author: 'lgtm-hq'
 
 inputs:
   mode:
-    description: 'Operation mode: "audit" (log traffic), "report" (generate summary), or "block" (enforce allowlist)'
+    description:
+      'Operation mode: "audit" (log traffic), "report" (generate summary), or "block"
+      (enforce allowlist)'
     required: false
     default: 'audit'
   allowed-domains:
@@ -30,7 +33,8 @@ inputs:
     required: false
     default: 'summary'
   fail-on-violation:
-    description: 'Fail the workflow if unauthorized egress is detected (only in block mode)'
+    description:
+      'Fail the workflow if unauthorized egress is detected (only in block mode)'
     required: false
     default: 'false'
 
@@ -48,78 +52,28 @@ runs:
     - name: Setup egress monitoring
       id: setup
       shell: bash
-      run: |
-        # Create log directory
-        EGRESS_LOG_DIR="${RUNNER_TEMP}/egress-audit"
-        mkdir -p "$EGRESS_LOG_DIR"
-        echo "log-dir=$EGRESS_LOG_DIR" >> "$GITHUB_OUTPUT"
-
-        # Parse allowed domains into a normalized list
-        ALLOWED_DOMAINS="${{ inputs.allowed-domains }}"
-        # Convert to newline-separated, remove empty lines and whitespace
-        ALLOWED_DOMAINS=$(echo "$ALLOWED_DOMAINS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' | sort -u)
-
-        # Save allowed domains for later steps
-        echo "$ALLOWED_DOMAINS" > "$EGRESS_LOG_DIR/allowed-domains.txt"
-
-        echo "Egress audit mode: ${{ inputs.mode }}"
-        echo "Allowed domains:"
-        echo "$ALLOWED_DOMAINS" | sed 's/^/  - /'
+      env:
+        STEP: setup
+        MODE: ${{ inputs.mode }}
+        ALLOWED_DOMAINS: ${{ inputs['allowed-domains'] }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
 
     - name: Configure egress policy
       id: audit
       shell: bash
-      run: |
-        EGRESS_LOG_DIR="${RUNNER_TEMP}/egress-audit"
-        EGRESS_LOG="$EGRESS_LOG_DIR/egress.log"
-        touch "$EGRESS_LOG"
-        echo "egress-log=$EGRESS_LOG" >> "$GITHUB_OUTPUT"
-        echo "violations-detected=false" >> "$GITHUB_OUTPUT"
-
-        if [[ "${{ inputs.mode }}" == "block" ]]; then
-          echo "::notice::Egress blocking is configured via harden-runner action"
-          echo "Use the harden-runner action with egress-policy: block for enforcement"
-        fi
-
-        # Note: Actual traffic monitoring requires harden-runner or similar tooling
-        # This action provides configuration and reporting scaffolding
-        echo "Egress audit initialized. Log: $EGRESS_LOG"
+      env:
+        STEP: audit
+        MODE: ${{ inputs.mode }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
 
     - name: Generate egress report
       if: inputs.report-format != 'none'
       shell: bash
-      run: |
-        EGRESS_LOG_DIR="${RUNNER_TEMP}/egress-audit"
-
-        if [[ "${{ inputs.report-format }}" == "summary" ]] && [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-          {
-            echo "## Egress Audit Report"
-            echo ""
-            echo "**Mode:** ${{ inputs.mode }}"
-            echo ""
-            echo "### Allowed Domains"
-            echo ""
-            echo '```'
-            cat "$EGRESS_LOG_DIR/allowed-domains.txt"
-            echo '```'
-            echo ""
-            echo "> **Note:** For comprehensive egress monitoring, use this action with \`harden-runner\`."
-            echo "> StepSecurity's harden-runner provides actual network traffic auditing and blocking."
-          } >> "$GITHUB_STEP_SUMMARY"
-        fi
-
-        if [[ "${{ inputs.report-format }}" == "json" ]]; then
-          {
-            echo "{"
-            echo "  \"mode\": \"${{ inputs.mode }}\","
-            echo "  \"allowed_domains\": ["
-            cat "$EGRESS_LOG_DIR/allowed-domains.txt" | sed 's/^/    "/;s/$/"/' | paste -sd ',' -
-            echo "  ],"
-            echo "  \"violations_detected\": false"
-            echo "}"
-          } > "$EGRESS_LOG_DIR/report.json"
-          echo "JSON report: $EGRESS_LOG_DIR/report.json"
-        fi
+      env:
+        STEP: report
+        MODE: ${{ inputs.mode }}
+        REPORT_FORMAT: ${{ inputs['report-format'] }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
 
 branding:
   icon: 'wifi'

@@ -25,24 +25,24 @@ log_success() { echo "[SUCCESS] $*" >&2; }
 # Note: Only matches strict semver X.Y.Z format. Versions like 1.0.0-rc1,
 #       v1.0.0, or 1.0 will be partially captured or missed.
 installer_check_version() {
-  local tool_cmd="$1"
-  local desired_version="$2"
-  local version_cmd="${3:---version}"
+	local tool_cmd="$1"
+	local desired_version="$2"
+	local version_cmd="${3:---version}"
 
-  if ! command_exists "$tool_cmd"; then
-    return 1
-  fi
+	if ! command_exists "$tool_cmd"; then
+		return 1
+	fi
 
-  local current_version
-  current_version=$("$tool_cmd" "$version_cmd" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
+	local current_version
+	current_version=$("$tool_cmd" "$version_cmd" 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || echo "unknown")
 
-  if [[ "$current_version" == "$desired_version" ]]; then
-    log_success "${tool_cmd} ${desired_version} already installed"
-    return 0
-  fi
+	if [[ "$current_version" == "$desired_version" ]]; then
+		log_success "${tool_cmd} ${desired_version} already installed"
+		return 0
+	fi
 
-  log_info "Found ${tool_cmd} ${current_version}, need ${desired_version}"
-  return 1
+	log_info "Found ${tool_cmd} ${current_version}, need ${desired_version}"
+	return 1
 }
 
 # =============================================================================

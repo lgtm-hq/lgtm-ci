@@ -4,11 +4,13 @@ author: 'lgtm-hq'
 
 inputs:
   egress-policy:
-    description: 'Egress traffic policy: "audit" (log only) or "block" (enforce allowlist)'
+    description:
+      'Egress traffic policy: "audit" (log only) or "block" (enforce allowlist)'
     required: false
     default: 'audit'
   allowed-endpoints:
-    description: 'Allowed network endpoints when egress-policy is "block" (newline-separated)'
+    description:
+      'Allowed network endpoints when egress-policy is "block" (newline-separated)'
     required: false
     default: ''
   disable-sudo:

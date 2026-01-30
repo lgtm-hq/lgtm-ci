@@ -12,13 +12,16 @@ inputs:
     required: false
     default: ''
   marker:
-    description: 'Unique marker to identify this comment for updates (e.g., "lighthouse-results")'
+    description:
+      'Unique marker to identify this comment for updates (e.g., "lighthouse-results")'
     required: true
   body:
     description: 'Comment body content (Markdown supported)'
     required: true
   mode:
-    description: 'Comment mode: "upsert" (create or update), "create" (always new), "update" (only update existing)'
+    description:
+      'Comment mode: "upsert" (create or update), "create" (always new), "update" (only
+      update existing)'
     required: false
     default: 'upsert'
   delete-on-empty:

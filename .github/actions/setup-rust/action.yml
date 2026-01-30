@@ -8,7 +8,8 @@ inputs:
     required: false
     default: 'stable'
   components:
-    description: 'Additional components to install (comma-separated, e.g., "clippy, rustfmt")'
+    description:
+      'Additional components to install (comma-separated, e.g., "clippy, rustfmt")'
     required: false
     default: ''
   targets:
@@ -52,23 +53,15 @@ runs:
     - name: Get Rust versions
       id: rust-version
       shell: bash
-      run: |
-        rustc_version=$(rustc --version | awk '{print $2}')
-        cargo_version=$(cargo --version | awk '{print $2}')
-        echo "rustc=$rustc_version" >> "$GITHUB_OUTPUT"
-        echo "cargo=$cargo_version" >> "$GITHUB_OUTPUT"
-        echo "rustc version: $rustc_version"
-        echo "cargo version: $cargo_version"
+      env:
+        STEP: version
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-rust.sh
 
     - name: Configure cargo for CI
       shell: bash
-      run: |
-        # Use sparse registry protocol for faster downloads
-        echo "CARGO_REGISTRIES_CRATES_IO_PROTOCOL=sparse" >> "$GITHUB_ENV"
-        # Incremental compilation is not useful in CI
-        echo "CARGO_INCREMENTAL=0" >> "$GITHUB_ENV"
-        # More readable backtraces
-        echo "RUST_BACKTRACE=short" >> "$GITHUB_ENV"
+      env:
+        STEP: cargo-env
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-rust.sh
 
     - name: Cache cargo registry and build
       if: inputs.cache == 'true'
@@ -81,20 +74,18 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ${{ inputs.working-directory }}/target/
-        key: cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles(inputs.cache-dependency-path) }}
+        key:
+          cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{
+          hashFiles(inputs.cache-dependency-path) }}
         restore-keys: |
           cargo-${{ runner.os }}-${{ inputs.toolchain }}-
           cargo-${{ runner.os }}-
 
     - name: Install cargo-binstall
       shell: bash
-      run: |
-        if ! command -v cargo-binstall &> /dev/null; then
-          echo "Installing cargo-binstall..."
-          curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
-        else
-          echo "cargo-binstall already installed"
-        fi
+      env:
+        STEP: binstall
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-rust.sh
 
 branding:
   icon: 'cpu'

@@ -21,51 +21,51 @@ set -euo pipefail
 
 # Check if coverage file exists
 if [[ ! -f "$COVERAGE_FILE" ]]; then
-  echo "::warning::Coverage file not found at $COVERAGE_FILE"
-  {
-    echo "body<<EOF_MISSING"
-    echo "## Coverage Report"
-    echo ""
-    echo "⚠️ No coverage data found"
-    echo "EOF_MISSING"
-  } >> "$GITHUB_OUTPUT"
-  echo "lines=0" >> "$GITHUB_OUTPUT"
-  echo "branches=0" >> "$GITHUB_OUTPUT"
-  echo "functions=0" >> "$GITHUB_OUTPUT"
-  echo "statements=0" >> "$GITHUB_OUTPUT"
-  echo "passed=false" >> "$GITHUB_OUTPUT"
-  exit 0
+	echo "::warning::Coverage file not found at $COVERAGE_FILE"
+	{
+		echo "body<<EOF_MISSING"
+		echo "## Coverage Report"
+		echo ""
+		echo "⚠️ No coverage data found"
+		echo "EOF_MISSING"
+	} >>"$GITHUB_OUTPUT"
+	echo "lines=0" >>"$GITHUB_OUTPUT"
+	echo "branches=0" >>"$GITHUB_OUTPUT"
+	echo "functions=0" >>"$GITHUB_OUTPUT"
+	echo "statements=0" >>"$GITHUB_OUTPUT"
+	echo "passed=false" >>"$GITHUB_OUTPUT"
+	exit 0
 fi
 
 # Auto-detect format
 if [[ "$FORMAT" == "auto" ]]; then
-  if jq -e '.total' "$COVERAGE_FILE" > /dev/null 2>&1; then
-    FORMAT="istanbul"
-  elif jq -e '.totals' "$COVERAGE_FILE" > /dev/null 2>&1; then
-    FORMAT="coverage-py"
-  else
-    FORMAT="istanbul"
-  fi
+	if jq -e '.total' "$COVERAGE_FILE" >/dev/null 2>&1; then
+		FORMAT="istanbul"
+	elif jq -e '.totals' "$COVERAGE_FILE" >/dev/null 2>&1; then
+		FORMAT="coverage-py"
+	else
+		FORMAT="istanbul"
+	fi
 fi
 
 # Extract coverage based on format
 case "$FORMAT" in
-  istanbul)
-    LINES=$(jq -r '.total.lines.pct // 0' "$COVERAGE_FILE")
-    BRANCHES=$(jq -r '.total.branches.pct // 0' "$COVERAGE_FILE")
-    FUNCTIONS=$(jq -r '.total.functions.pct // 0' "$COVERAGE_FILE")
-    STATEMENTS=$(jq -r '.total.statements.pct // 0' "$COVERAGE_FILE")
-    ;;
-  coverage-py)
-    LINES=$(jq -r '.totals.percent_covered // 0' "$COVERAGE_FILE")
-    BRANCHES=$(jq -r '.totals.percent_covered_branches // .totals.percent_covered // 0' "$COVERAGE_FILE")
-    FUNCTIONS=$LINES  # Python coverage doesn't track functions separately
-    STATEMENTS=$LINES
-    ;;
-  *)
-    echo "::error::Unknown coverage format: $FORMAT"
-    exit 1
-    ;;
+istanbul)
+	LINES=$(jq -r '.total.lines.pct // 0' "$COVERAGE_FILE")
+	BRANCHES=$(jq -r '.total.branches.pct // 0' "$COVERAGE_FILE")
+	FUNCTIONS=$(jq -r '.total.functions.pct // 0' "$COVERAGE_FILE")
+	STATEMENTS=$(jq -r '.total.statements.pct // 0' "$COVERAGE_FILE")
+	;;
+coverage-py)
+	LINES=$(jq -r '.totals.percent_covered // 0' "$COVERAGE_FILE")
+	BRANCHES=$(jq -r '.totals.percent_covered_branches // .totals.percent_covered // 0' "$COVERAGE_FILE")
+	FUNCTIONS=$LINES # Python coverage doesn't track functions separately
+	STATEMENTS=$LINES
+	;;
+*)
+	echo "::error::Unknown coverage format: $FORMAT"
+	exit 1
+	;;
 esac
 
 # Round to integers
@@ -74,29 +74,29 @@ BRANCHES=$(printf "%.0f" "$BRANCHES")
 FUNCTIONS=$(printf "%.0f" "$FUNCTIONS")
 STATEMENTS=$(printf "%.0f" "$STATEMENTS")
 
-echo "lines=$LINES" >> "$GITHUB_OUTPUT"
-echo "branches=$BRANCHES" >> "$GITHUB_OUTPUT"
-echo "functions=$FUNCTIONS" >> "$GITHUB_OUTPUT"
-echo "statements=$STATEMENTS" >> "$GITHUB_OUTPUT"
+echo "lines=$LINES" >>"$GITHUB_OUTPUT"
+echo "branches=$BRANCHES" >>"$GITHUB_OUTPUT"
+echo "functions=$FUNCTIONS" >>"$GITHUB_OUTPUT"
+echo "statements=$STATEMENTS" >>"$GITHUB_OUTPUT"
 
 # Check thresholds
 PASSED=true
 [[ $LINES -lt $THRESHOLD_LINES ]] && PASSED=false
 [[ $BRANCHES -lt $THRESHOLD_BRANCHES ]] && PASSED=false
 [[ $FUNCTIONS -lt $THRESHOLD_FUNCTIONS ]] && PASSED=false
-echo "passed=$PASSED" >> "$GITHUB_OUTPUT"
+echo "passed=$PASSED" >>"$GITHUB_OUTPUT"
 
 # Helper function for score emoji
 score_emoji() {
-  local score=$1
-  local threshold=$2
-  if [[ $score -ge 90 ]]; then
-    echo "🟢"
-  elif [[ $score -ge $threshold ]]; then
-    echo "🟡"
-  else
-    echo "🔴"
-  fi
+	local score=$1
+	local threshold=$2
+	if [[ $score -ge 90 ]]; then
+		echo "🟢"
+	elif [[ $score -ge $threshold ]]; then
+		echo "🟡"
+	else
+		echo "🔴"
+	fi
 }
 
 # Generate comment body
@@ -110,17 +110,17 @@ BODY="## Coverage Report
 | Statements | **${STATEMENTS}%** | - |"
 
 if [[ -n "$REPORT_URL" ]]; then
-  BODY="${BODY}
+	BODY="${BODY}
 
 [View Full Report](${REPORT_URL})"
 fi
 
 if [[ "$PASSED" == "true" ]]; then
-  BODY="${BODY}
+	BODY="${BODY}
 
 ✅ Coverage meets all thresholds"
 else
-  BODY="${BODY}
+	BODY="${BODY}
 
 ⚠️ Coverage is below some thresholds"
 fi
@@ -128,7 +128,7 @@ fi
 # Output body (handle multiline)
 EOF_MARKER="EOF_$(date +%s)"
 {
-  echo "body<<$EOF_MARKER"
-  echo "$BODY"
-  echo "$EOF_MARKER"
-} >> "$GITHUB_OUTPUT"
+	echo "body<<$EOF_MARKER"
+	echo "$BODY"
+	echo "$EOF_MARKER"
+} >>"$GITHUB_OUTPUT"

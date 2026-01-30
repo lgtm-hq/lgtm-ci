@@ -36,35 +36,35 @@ readonly NC="${LGTM_CI_NC}"
 # =============================================================================
 
 log_info() {
-  echo -e "${LGTM_CI_BLUE}[INFO]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_BLUE}[INFO]${LGTM_CI_NC} $*" >&2
 }
 
 log_success() {
-  echo -e "${LGTM_CI_GREEN}[SUCCESS]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_GREEN}[SUCCESS]${LGTM_CI_NC} $*" >&2
 }
 
 log_warn() {
-  echo -e "${LGTM_CI_YELLOW}[WARN]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_YELLOW}[WARN]${LGTM_CI_NC} $*" >&2
 }
 
 # Alias for backwards compatibility
 log_warning() {
-  log_warn "$@"
+	log_warn "$@"
 }
 
 log_error() {
-  echo -e "${LGTM_CI_RED}[ERROR]${LGTM_CI_NC} $*" >&2
+	echo -e "${LGTM_CI_RED}[ERROR]${LGTM_CI_NC} $*" >&2
 }
 
 log_verbose() {
-  # Use string comparison to handle non-numeric VERBOSE values
-  [[ "${VERBOSE:-}" == "1" || "${VERBOSE,,:-}" == "true" ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
+	# Use string comparison to handle non-numeric VERBOSE values
+	[[ "${VERBOSE:-}" == "1" || "${VERBOSE,,:-}" == "true" ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
 }
 
 # Exit with error message
 die() {
-  log_error "$@"
-  exit 1
+	log_error "$@"
+	exit 1
 }
 
 # =============================================================================

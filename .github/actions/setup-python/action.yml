@@ -49,32 +49,30 @@ runs:
       uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.1.0
       with:
         version: ${{ inputs.uv-version }}
-        # Disable setup-uv's cache - we use actions/cache below to also cache .venv
         enable-cache: false
 
     - name: Get uv version
       id: uv-version
       shell: bash
-      run: |
-        version=$(uv --version | awk '{print $2}')
-        echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "uv version: $version"
+      env:
+        STEP: uv-version
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-python.sh
 
     - name: Setup Python
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: |
-        uv python install "${{ inputs.python-version }}"
-        echo "Python ${{ inputs.python-version }} installed"
+      env:
+        STEP: python-install
+        PYTHON_VERSION: ${{ inputs.python-version }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-python.sh
 
     - name: Get Python version
       id: python-version
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: |
-        version=$(uv run python --version | awk '{print $2}')
-        echo "version=$version" >> "$GITHUB_OUTPUT"
-        echo "Python version: $version"
+      env:
+        STEP: python-version
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-python.sh
 
     - name: Cache uv dependencies
       if: inputs.cache == 'true'
@@ -84,7 +82,9 @@ runs:
         path: |
           ~/.cache/uv
           ${{ inputs.working-directory }}/.venv
-        key: uv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles(inputs.cache-dependency-path) }}
+        key:
+          uv-${{ runner.os }}-${{ inputs.python-version }}-${{
+          hashFiles(inputs.cache-dependency-path) }}
         restore-keys: |
           uv-${{ runner.os }}-${{ inputs.python-version }}-
           uv-${{ runner.os }}-
@@ -93,16 +93,9 @@ runs:
       if: inputs.install-dependencies == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
-      run: |
-        if [[ -f "pyproject.toml" ]] || [[ -f "uv.lock" ]]; then
-          echo "Installing dependencies with uv sync..."
-          uv sync
-        elif [[ -f "requirements.txt" ]]; then
-          echo "Installing from requirements.txt..."
-          uv pip install -r requirements.txt
-        else
-          echo "No dependency file found, skipping install"
-        fi
+      env:
+        STEP: deps
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-python.sh
 
 branding:
   icon: 'code'

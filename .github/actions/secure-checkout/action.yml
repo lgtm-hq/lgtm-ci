@@ -113,34 +113,20 @@ runs:
     - name: Determine checkout directory
       id: repo-dir
       shell: bash
-      run: |
-        if [[ -n "${{ inputs.path }}" ]]; then
-          echo "path=${{ github.workspace }}/${{ inputs.path }}" >> "$GITHUB_OUTPUT"
-        else
-          echo "path=${{ github.workspace }}" >> "$GITHUB_OUTPUT"
-        fi
+      env:
+        STEP: repo-dir
+        WORKSPACE: ${{ github.workspace }}
+        CHECKOUT_PATH: ${{ inputs.path }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/secure-checkout.sh
 
     - name: Verify checkout integrity
       shell: bash
       working-directory: ${{ steps.repo-dir.outputs.path }}
-      run: |
-        # Verify we're in a git repository
-        if ! git rev-parse --git-dir > /dev/null 2>&1; then
-          echo "::error::Checkout verification failed - not a git repository"
-          exit 1
-        fi
-
-        # Log checkout info
-        echo "Repository: ${{ inputs.repository }}"
-        echo "Commit: $(git rev-parse HEAD)"
-        echo "Ref: $(git symbolic-ref -q --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)"
-
-        # Verify credentials are not persisted (unless explicitly requested)
-        if [[ "${{ inputs['persist-credentials'] }}" != "true" ]]; then
-          if git config --get credential.helper > /dev/null 2>&1; then
-            echo "::warning::Credential helper is configured despite persist-credentials=false"
-          fi
-        fi
+      env:
+        STEP: verify
+        REPOSITORY: ${{ inputs.repository }}
+        PERSIST_CREDENTIALS: ${{ inputs['persist-credentials'] }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/secure-checkout.sh
 
 branding:
   icon: 'download'

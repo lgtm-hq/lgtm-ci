@@ -22,27 +22,30 @@ set -euo pipefail
 echo "Validating: $TITLE"
 
 # Parse allowed types
-IFS=',' read -ra TYPES_ARRAY <<< "$ALLOWED_TYPES"
-TYPES_PATTERN=$(IFS='|'; echo "${TYPES_ARRAY[*]}")
+IFS=',' read -ra TYPES_ARRAY <<<"$ALLOWED_TYPES"
+TYPES_PATTERN=$(
+	IFS='|'
+	echo "${TYPES_ARRAY[*]}"
+)
 
 # Build regex pattern
 if [[ "$REQUIRE_SCOPE" == "true" ]]; then
-  PATTERN="^(${TYPES_PATTERN})\(([a-zA-Z0-9_-]+)\)!?: .+"
+	PATTERN="^(${TYPES_PATTERN})\(([a-zA-Z0-9_-]+)\)!?: .+"
 else
-  PATTERN="^(${TYPES_PATTERN})(\([a-zA-Z0-9_-]+\))?!?: .+"
+	PATTERN="^(${TYPES_PATTERN})(\([a-zA-Z0-9_-]+\))?!?: .+"
 fi
 
 # Check format
 if ! [[ "$TITLE" =~ $PATTERN ]]; then
-  echo "::error::PR title does not match conventional commit format"
-  echo "Expected format: type(scope): description"
-  echo "Allowed types: $ALLOWED_TYPES"
-  echo "valid=false" >> "$GITHUB_OUTPUT"
-  echo "error=Title does not match format: type(scope): description" >> "$GITHUB_OUTPUT"
-  if [[ "$FAIL_ON_INVALID" == "true" ]]; then
-    exit 1
-  fi
-  exit 0
+	echo "::error::PR title does not match conventional commit format"
+	echo "Expected format: type(scope): description"
+	echo "Allowed types: $ALLOWED_TYPES"
+	echo "valid=false" >>"$GITHUB_OUTPUT"
+	echo "error=Title does not match format: type(scope): description" >>"$GITHUB_OUTPUT"
+	if [[ "$FAIL_ON_INVALID" == "true" ]]; then
+		exit 1
+	fi
+	exit 0
 fi
 
 # Extract components
@@ -50,41 +53,41 @@ TYPE=$(echo "$TITLE" | sed -E 's/^([a-z]+).*/\1/')
 SCOPE=$(echo "$TITLE" | sed -nE 's/^[a-z]+\(([^)]+)\).*/\1/p')
 DESC=$(echo "$TITLE" | sed -E 's/^[a-z]+(\([^)]+\))?!?: //')
 
-echo "type=$TYPE" >> "$GITHUB_OUTPUT"
-echo "scope=$SCOPE" >> "$GITHUB_OUTPUT"
-echo "description=$DESC" >> "$GITHUB_OUTPUT"
+echo "type=$TYPE" >>"$GITHUB_OUTPUT"
+echo "scope=$SCOPE" >>"$GITHUB_OUTPUT"
+echo "description=$DESC" >>"$GITHUB_OUTPUT"
 
 # Check scope allowlist if provided
 if [[ -n "$ALLOWED_SCOPES" && -n "$SCOPE" ]]; then
-  IFS=',' read -ra SCOPES_ARRAY <<< "$ALLOWED_SCOPES"
-  SCOPE_VALID=false
-  for allowed in "${SCOPES_ARRAY[@]}"; do
-    if [[ "$SCOPE" == "$allowed" ]]; then
-      SCOPE_VALID=true
-      break
-    fi
-  done
-  if [[ "$SCOPE_VALID" == "false" ]]; then
-    echo "::error::Scope '$SCOPE' is not in allowed list: $ALLOWED_SCOPES"
-    echo "valid=false" >> "$GITHUB_OUTPUT"
-    echo "error=Scope '$SCOPE' not allowed" >> "$GITHUB_OUTPUT"
-    if [[ "$FAIL_ON_INVALID" == "true" ]]; then
-      exit 1
-    fi
-    exit 0
-  fi
+	IFS=',' read -ra SCOPES_ARRAY <<<"$ALLOWED_SCOPES"
+	SCOPE_VALID=false
+	for allowed in "${SCOPES_ARRAY[@]}"; do
+		if [[ "$SCOPE" == "$allowed" ]]; then
+			SCOPE_VALID=true
+			break
+		fi
+	done
+	if [[ "$SCOPE_VALID" == "false" ]]; then
+		echo "::error::Scope '$SCOPE' is not in allowed list: $ALLOWED_SCOPES"
+		echo "valid=false" >>"$GITHUB_OUTPUT"
+		echo "error=Scope '$SCOPE' not allowed" >>"$GITHUB_OUTPUT"
+		if [[ "$FAIL_ON_INVALID" == "true" ]]; then
+			exit 1
+		fi
+		exit 0
+	fi
 fi
 
 # Check length
 if [[ "$MAX_LENGTH" -gt 0 && ${#TITLE} -gt $MAX_LENGTH ]]; then
-  echo "::error::PR title exceeds maximum length of $MAX_LENGTH characters (${#TITLE})"
-  echo "valid=false" >> "$GITHUB_OUTPUT"
-  echo "error=Title exceeds $MAX_LENGTH characters" >> "$GITHUB_OUTPUT"
-  if [[ "$FAIL_ON_INVALID" == "true" ]]; then
-    exit 1
-  fi
-  exit 0
+	echo "::error::PR title exceeds maximum length of $MAX_LENGTH characters (${#TITLE})"
+	echo "valid=false" >>"$GITHUB_OUTPUT"
+	echo "error=Title exceeds $MAX_LENGTH characters" >>"$GITHUB_OUTPUT"
+	if [[ "$FAIL_ON_INVALID" == "true" ]]; then
+		exit 1
+	fi
+	exit 0
 fi
 
-echo "valid=true" >> "$GITHUB_OUTPUT"
+echo "valid=true" >>"$GITHUB_OUTPUT"
 echo "::notice::PR title is valid: $TYPE${SCOPE:+($SCOPE)}: $DESC"

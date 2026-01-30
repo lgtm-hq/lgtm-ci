@@ -25,25 +25,25 @@ MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
 
 # Find existing comment with this marker
 EXISTING_COMMENT_ID=$(gh api \
-  -H "Accept: application/vnd.github+json" \
-  "/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-  --jq ".[] | select(.body | contains(\"${MARKER_TAG}\")) | .id" \
-  2>/dev/null | head -1 || echo "")
+	-H "Accept: application/vnd.github+json" \
+	"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+	--jq ".[] | select(.body | contains(\"${MARKER_TAG}\")) | .id" \
+	2>/dev/null | head -1 || echo "")
 
 # Handle empty body
 if [[ -z "${COMMENT_BODY:-}" ]]; then
-  if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
-    gh api \
-      -X DELETE \
-      "/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT_ID}"
-    echo "action-taken=deleted" >> "$GITHUB_OUTPUT"
-    echo "Deleted comment $EXISTING_COMMENT_ID"
-    exit 0
-  else
-    echo "action-taken=skipped" >> "$GITHUB_OUTPUT"
-    echo "Skipped: empty body"
-    exit 0
-  fi
+	if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
+		gh api \
+			-X DELETE \
+			"/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT_ID}"
+		echo "action-taken=deleted" >>"$GITHUB_OUTPUT"
+		echo "Deleted comment $EXISTING_COMMENT_ID"
+		exit 0
+	else
+		echo "action-taken=skipped" >>"$GITHUB_OUTPUT"
+		echo "Skipped: empty body"
+		exit 0
+	fi
 fi
 
 # Prepare full comment body with marker
@@ -51,37 +51,37 @@ FULL_BODY="${MARKER_TAG}
 ${COMMENT_BODY}"
 
 # Perform action based on mode
-if [[ "$MODE" == "create" || ( "$MODE" == "upsert" && -z "$EXISTING_COMMENT_ID" ) ]]; then
-  # Create new comment
-  RESPONSE=$(gh api \
-    -X POST \
-    -H "Accept: application/vnd.github+json" \
-    "/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-    -f body="$FULL_BODY")
+if [[ "$MODE" == "create" || ("$MODE" == "upsert" && -z "$EXISTING_COMMENT_ID") ]]; then
+	# Create new comment
+	RESPONSE=$(gh api \
+		-X POST \
+		-H "Accept: application/vnd.github+json" \
+		"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
+		-f body="$FULL_BODY")
 
-  COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
-  COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
-  echo "action-taken=created" >> "$GITHUB_OUTPUT"
-  echo "Created comment $COMMENT_ID"
+	COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
+	COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
+	echo "action-taken=created" >>"$GITHUB_OUTPUT"
+	echo "Created comment $COMMENT_ID"
 
 elif [[ "$MODE" == "update" || "$MODE" == "upsert" ]] && [[ -n "$EXISTING_COMMENT_ID" ]]; then
-  # Update existing comment
-  RESPONSE=$(gh api \
-    -X PATCH \
-    -H "Accept: application/vnd.github+json" \
-    "/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT_ID}" \
-    -f body="$FULL_BODY")
+	# Update existing comment
+	RESPONSE=$(gh api \
+		-X PATCH \
+		-H "Accept: application/vnd.github+json" \
+		"/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT_ID}" \
+		-f body="$FULL_BODY")
 
-  COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
-  COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
-  echo "action-taken=updated" >> "$GITHUB_OUTPUT"
-  echo "Updated comment $COMMENT_ID"
+	COMMENT_ID=$(echo "$RESPONSE" | jq -r '.id')
+	COMMENT_URL=$(echo "$RESPONSE" | jq -r '.html_url')
+	echo "action-taken=updated" >>"$GITHUB_OUTPUT"
+	echo "Updated comment $COMMENT_ID"
 
 else
-  echo "action-taken=skipped" >> "$GITHUB_OUTPUT"
-  echo "Skipped: no existing comment to update"
-  exit 0
+	echo "action-taken=skipped" >>"$GITHUB_OUTPUT"
+	echo "Skipped: no existing comment to update"
+	exit 0
 fi
 
-echo "comment-id=$COMMENT_ID" >> "$GITHUB_OUTPUT"
-echo "comment-url=$COMMENT_URL" >> "$GITHUB_OUTPUT"
+echo "comment-id=$COMMENT_ID" >>"$GITHUB_OUTPUT"
+echo "comment-url=$COMMENT_URL" >>"$GITHUB_OUTPUT"

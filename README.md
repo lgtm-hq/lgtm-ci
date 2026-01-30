@@ -1,18 +1,18 @@
 # lgtm-ci
 
-Reusable CI/CD components for GitHub Actions - composite actions, reusable
-workflows, and shell utilities.
+Reusable CI/CD components for GitHub Actions - composite actions, reusable workflows,
+and shell utilities.
 
 ## Overview
 
 **lgtm-ci** provides a collection of production-ready CI/CD building blocks:
 
-- **Composite Actions** - Reusable actions for environment setup, security
-  hardening, PR comments, and more
-- **Reusable Workflows** - Complete workflow templates for quality gates,
-  releases, and publishing
-- **Shell Libraries** - Modular bash utilities for logging, platform detection,
-  GitHub integration, and downloads
+- **Composite Actions** - Reusable actions for environment setup, security hardening, PR
+  comments, and more
+- **Reusable Workflows** - Complete workflow templates for quality gates, releases, and
+  publishing
+- **Shell Libraries** - Modular bash utilities for logging, platform detection, GitHub
+  integration, and downloads
 
 ## Quick Start
 
@@ -61,43 +61,43 @@ steps:
 
 ### Composite Actions
 
-| Action | Description |
-|--------|-------------|
-| `setup-env` | Unified Python/Node/Ruby environment setup |
-| `setup-python` | Python + uv setup with caching |
-| `setup-node` | Node.js + Bun setup with Playwright caching |
-| `setup-rust` | Rust toolchain setup |
-| `harden-runner` | Security hardening with egress presets |
-| `secure-checkout` | Hardened git checkout |
-| `post-pr-comment` | Marker-based PR commenting |
-| `semantic-pr-title` | Conventional commits validation |
-| `extract-version` | Version extraction from multiple sources |
-| `generate-coverage-comment` | Coverage report PR comments |
-| `generate-playwright-comment` | E2E test result comments |
-| `generate-lighthouse-comment` | Performance metric comments |
+| Action                        | Description                                 |
+| ----------------------------- | ------------------------------------------- |
+| `setup-env`                   | Unified Python/Node/Ruby environment setup  |
+| `setup-python`                | Python + uv setup with caching              |
+| `setup-node`                  | Node.js + Bun setup with Playwright caching |
+| `setup-rust`                  | Rust toolchain setup                        |
+| `harden-runner`               | Security hardening with egress presets      |
+| `secure-checkout`             | Hardened git checkout                       |
+| `post-pr-comment`             | Marker-based PR commenting                  |
+| `semantic-pr-title`           | Conventional commits validation             |
+| `extract-version`             | Version extraction from multiple sources    |
+| `generate-coverage-comment`   | Coverage report PR comments                 |
+| `generate-playwright-comment` | E2E test result comments                    |
+| `generate-lighthouse-comment` | Performance metric comments                 |
 
 ### Reusable Workflows
 
-| Workflow | Description |
-|----------|-------------|
-| `reusable-quality.yml` | Lintro + shellcheck + action pinning |
-| `reusable-sbom.yml` | SBOM generation with Cosign signing |
-| `reusable-release.yml` | Semantic release automation |
-| `reusable-publish-pypi.yml` | PyPI publishing with OIDC |
+| Workflow                    | Description                          |
+| --------------------------- | ------------------------------------ |
+| `reusable-quality.yml`      | Lintro + shellcheck + action pinning |
+| `reusable-sbom.yml`         | SBOM generation with Cosign signing  |
+| `reusable-release.yml`      | Semantic release automation          |
+| `reusable-publish-pypi.yml` | PyPI publishing with OIDC            |
 
 ### Shell Libraries
 
 Located in `scripts/ci/lib/`:
 
-| Library | Description |
-|---------|-------------|
-| `log.sh` | Colored logging functions |
-| `platform.sh` | OS and architecture detection |
-| `fs.sh` | File system utilities |
-| `git.sh` | Git helper functions |
-| `github.sh` | GitHub Actions integration |
-| `network.sh` | Download and checksum utilities |
-| `installer.sh` | Tool installation framework |
+| Library        | Description                     |
+| -------------- | ------------------------------- |
+| `log.sh`       | Colored logging functions       |
+| `platform.sh`  | OS and architecture detection   |
+| `fs.sh`        | File system utilities           |
+| `git.sh`       | Git helper functions            |
+| `github.sh`    | GitHub Actions integration      |
+| `network.sh`   | Download and checksum utilities |
+| `installer.sh` | Tool installation framework     |
 
 ## Versioning
 

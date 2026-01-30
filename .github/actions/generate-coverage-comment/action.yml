@@ -8,7 +8,8 @@ inputs:
     required: false
     default: 'coverage/coverage-summary.json'
   format:
-    description: 'Coverage file format: "istanbul" (JS), "coverage-py" (Python), "lcov", or "auto"'
+    description:
+      'Coverage file format: "istanbul" (JS), "coverage-py" (Python), "lcov", or "auto"'
     required: false
     default: 'auto'
   report-url:
@@ -69,7 +70,9 @@ runs:
         THRESHOLD_LINES: ${{ inputs['threshold-lines'] }}
         THRESHOLD_BRANCHES: ${{ inputs['threshold-branches'] }}
         THRESHOLD_FUNCTIONS: ${{ inputs['threshold-functions'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-comment.sh
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/generate-coverage-comment.sh
 
 branding:
   icon: 'percent'

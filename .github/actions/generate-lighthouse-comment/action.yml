@@ -60,7 +60,9 @@ runs:
         THRESHOLD_ACCESSIBILITY: ${{ inputs['threshold-accessibility'] }}
         THRESHOLD_BEST_PRACTICES: ${{ inputs['threshold-best-practices'] }}
         THRESHOLD_SEO: ${{ inputs['threshold-seo'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-lighthouse-comment.sh
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/generate-lighthouse-comment.sh
 
 branding:
   icon: 'zap'

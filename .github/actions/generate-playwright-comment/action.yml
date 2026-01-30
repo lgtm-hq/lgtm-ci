@@ -51,7 +51,9 @@ runs:
         REPORT_URL: ${{ inputs['report-url'] }}
         SHOW_FAILED: ${{ inputs['show-failed-tests'] }}
         MAX_FAILED: ${{ inputs['max-failed-tests'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-playwright-comment.sh
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/generate-playwright-comment.sh
 
 branding:
   icon: 'play-circle'
