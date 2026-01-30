@@ -1,0 +1,114 @@
+name: 'Setup Node.js'
+description: 'Setup Node.js with bun package manager and caching'
+author: 'lgtm-hq'
+
+inputs:
+  node-version:
+    description: 'Node.js version to install (e.g., "20", "22", "lts/*")'
+    required: false
+    default: '22'
+  bun-version:
+    description: 'Bun version to install (e.g., "1.1.0", "latest")'
+    required: false
+    default: 'latest'
+  cache:
+    description: 'Enable bun cache'
+    required: false
+    default: 'true'
+  cache-dependency-path:
+    description: 'Path to lockfile for cache key'
+    required: false
+    default: '**/bun.lockb'
+  working-directory:
+    description: 'Working directory for bun commands'
+    required: false
+    default: '.'
+  install-dependencies:
+    description: 'Run bun install to install dependencies'
+    required: false
+    default: 'true'
+  frozen-lockfile:
+    description: 'Use --frozen-lockfile for installs (recommended for CI)'
+    required: false
+    default: 'true'
+
+outputs:
+  node-version:
+    description: 'Installed Node.js version'
+    value: ${{ steps.node-version.outputs.version }}
+  bun-version:
+    description: 'Installed bun version'
+    value: ${{ steps.bun-version.outputs.version }}
+  cache-hit:
+    description: 'Whether the cache was hit'
+    value: ${{ steps.cache.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Get Node.js version
+      id: node-version
+      shell: bash
+      run: |
+        version=$(node --version | sed 's/^v//')
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "Node.js version: $version"
+
+    - name: Setup Bun
+      uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Get Bun version
+      id: bun-version
+      shell: bash
+      run: |
+        version=$(bun --version)
+        echo "version=$version" >> "$GITHUB_OUTPUT"
+        echo "Bun version: $version"
+
+    - name: Get bun cache directory
+      id: bun-cache
+      if: inputs.cache == 'true'
+      shell: bash
+      run: |
+        cache_dir=$(bun pm cache)
+        echo "dir=$cache_dir" >> "$GITHUB_OUTPUT"
+
+    - name: Cache bun dependencies
+      if: inputs.cache == 'true'
+      id: cache
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          ${{ steps.bun-cache.outputs.dir }}
+          ${{ inputs.working-directory }}/node_modules
+        key: bun-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(inputs.cache-dependency-path) }}
+        restore-keys: |
+          bun-${{ runner.os }}-${{ inputs.node-version }}-
+          bun-${{ runner.os }}-
+
+    - name: Install dependencies
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if [[ -f "bun.lockb" ]] || [[ -f "package.json" ]]; then
+          echo "Installing dependencies with bun..."
+          if [[ "${{ inputs.frozen-lockfile }}" == "true" ]] && [[ -f "bun.lockb" ]]; then
+            bun install --frozen-lockfile
+          else
+            bun install
+          fi
+        else
+          echo "No package.json found, skipping install"
+        fi
+
+branding:
+  icon: 'package'
+  color: 'green'
