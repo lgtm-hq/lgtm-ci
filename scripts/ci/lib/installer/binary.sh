@@ -46,6 +46,7 @@ verify_checksum() {
 # Download, verify, and install a binary
 # Usage: installer_download_binary URL CHECKSUM_URL ARCHIVE_TYPE [BINARY_NAME]
 # ARCHIVE_TYPE: "tar.gz", "tar.xz", "zip", or "binary" (raw binary)
+# BINARY_NAME defaults to $TOOL_NAME if not provided
 # Returns: 0 on success, 1 on failure
 # Note: Uses subshell with trap for automatic cleanup on any exit
 installer_download_binary() {

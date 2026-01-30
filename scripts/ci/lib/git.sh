@@ -70,6 +70,7 @@ get_tags() {
 # Check if a tag exists
 tag_exists() {
   local tag="$1"
+  [[ -n "$tag" ]] || return 1
   git rev-parse "refs/tags/$tag" >/dev/null 2>&1
 }
 

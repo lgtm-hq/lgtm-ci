@@ -49,6 +49,8 @@ port_available() {
 
 # Wait for port to become available
 # Usage: wait_for_port 4000 10 0.5
+# Note: Returns 0 even on timeout (logs warning, continues anyway) for CI resilience.
+#       If strict port-free verification is needed, check the log output.
 wait_for_port() {
   local port="${1:-4000}"
   local timeout="${2:-5}"

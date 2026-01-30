@@ -16,7 +16,7 @@
       "automergeType": "branch"
     }
   ],
-  "schedule": ["after 22:00", "before 06:00"],
+  "schedule": ["* 22-23,0-5 * * *"],
   "timezone": "UTC",
   "labels": ["dependencies"],
   "semanticCommits": "enabled",
