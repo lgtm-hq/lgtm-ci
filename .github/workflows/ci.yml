@@ -24,9 +24,13 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Install dependencies
+        shell: bash
+        run: uv sync --extra dev
+
       - name: Run lintro quality checks
         shell: bash
-        run: lintro chk
+        run: uv run lintro chk
 
       - name: Run actionlint
         shell: bash
