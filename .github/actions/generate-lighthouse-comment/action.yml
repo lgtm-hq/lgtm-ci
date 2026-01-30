@@ -53,92 +53,14 @@ runs:
     - name: Generate comment
       id: generate
       shell: bash
-      run: |
-        RESULTS_PATH="${{ inputs['results-path'] }}"
-        REPORT_URL="${{ inputs['report-url'] }}"
-
-        # Find the results file
-        if [[ -d "$RESULTS_PATH" ]]; then
-          RESULTS_FILE=$(find "$RESULTS_PATH" -name "*.json" -type f | head -1)
-        else
-          RESULTS_FILE="$RESULTS_PATH"
-        fi
-
-        if [[ ! -f "$RESULTS_FILE" ]]; then
-          echo "::error::Lighthouse results not found at $RESULTS_PATH"
-          exit 1
-        fi
-
-        # Extract scores (multiply by 100 for percentage)
-        PERF=$(jq -r '.categories.performance.score // 0 | . * 100 | floor' "$RESULTS_FILE")
-        A11Y=$(jq -r '.categories.accessibility.score // 0 | . * 100 | floor' "$RESULTS_FILE")
-        BP=$(jq -r '.categories["best-practices"].score // 0 | . * 100 | floor' "$RESULTS_FILE")
-        SEO=$(jq -r '.categories.seo.score // 0 | . * 100 | floor' "$RESULTS_FILE")
-
-        echo "performance=$PERF" >> "$GITHUB_OUTPUT"
-        echo "accessibility=$A11Y" >> "$GITHUB_OUTPUT"
-        echo "best-practices=$BP" >> "$GITHUB_OUTPUT"
-        echo "seo=$SEO" >> "$GITHUB_OUTPUT"
-
-        # Check thresholds
-        PASSED=true
-        PERF_TH="${{ inputs['threshold-performance'] }}"
-        A11Y_TH="${{ inputs['threshold-accessibility'] }}"
-        BP_TH="${{ inputs['threshold-best-practices'] }}"
-        SEO_TH="${{ inputs['threshold-seo'] }}"
-
-        [[ $PERF -lt $PERF_TH ]] && PASSED=false
-        [[ $A11Y -lt $A11Y_TH ]] && PASSED=false
-        [[ $BP -lt $BP_TH ]] && PASSED=false
-        [[ $SEO -lt $SEO_TH ]] && PASSED=false
-
-        echo "passed=$PASSED" >> "$GITHUB_OUTPUT"
-
-        # Helper function for score emoji
-        score_emoji() {
-          local score=$1
-          local threshold=$2
-          if [[ $score -ge 90 ]]; then
-            echo "🟢"
-          elif [[ $score -ge $threshold ]]; then
-            echo "🟡"
-          else
-            echo "🔴"
-          fi
-        }
-
-        # Generate comment body
-        BODY="## Lighthouse Results
-
-        | Category | Score | Threshold |
-        |----------|-------|-----------|
-        | $(score_emoji $PERF $PERF_TH) Performance | **${PERF}** | ${PERF_TH} |
-        | $(score_emoji $A11Y $A11Y_TH) Accessibility | **${A11Y}** | ${A11Y_TH} |
-        | $(score_emoji $BP $BP_TH) Best Practices | **${BP}** | ${BP_TH} |
-        | $(score_emoji $SEO $SEO_TH) SEO | **${SEO}** | ${SEO_TH} |
-        "
-
-        if [[ -n "$REPORT_URL" ]]; then
-          BODY="${BODY}
-
-        [View Full Report](${REPORT_URL})"
-        fi
-
-        if [[ "$PASSED" == "true" ]]; then
-          BODY="${BODY}
-
-        ✅ All scores meet thresholds"
-        else
-          BODY="${BODY}
-
-        ⚠️ Some scores are below thresholds"
-        fi
-
-        # Output body (handle multiline)
-        EOF_MARKER="EOF_$(date +%s)"
-        echo "body<<$EOF_MARKER" >> "$GITHUB_OUTPUT"
-        echo "$BODY" >> "$GITHUB_OUTPUT"
-        echo "$EOF_MARKER" >> "$GITHUB_OUTPUT"
+      env:
+        RESULTS_PATH: ${{ inputs['results-path'] }}
+        REPORT_URL: ${{ inputs['report-url'] }}
+        THRESHOLD_PERFORMANCE: ${{ inputs['threshold-performance'] }}
+        THRESHOLD_ACCESSIBILITY: ${{ inputs['threshold-accessibility'] }}
+        THRESHOLD_BEST_PRACTICES: ${{ inputs['threshold-best-practices'] }}
+        THRESHOLD_SEO: ${{ inputs['threshold-seo'] }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-lighthouse-comment.sh
 
 branding:
   icon: 'zap'
