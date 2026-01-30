@@ -1,0 +1,136 @@
+name: 'Secure Checkout'
+description: 'Checkout repository with security-hardened defaults'
+author: 'lgtm-hq'
+
+inputs:
+  repository:
+    description: 'Repository name with owner (e.g., owner/repo)'
+    required: false
+    default: ${{ github.repository }}
+  ref:
+    description: 'The branch, tag or SHA to checkout'
+    required: false
+    default: ''
+  token:
+    description: 'Personal access token (PAT) for authentication'
+    required: false
+    default: ${{ github.token }}
+  ssh-key:
+    description: 'SSH key for authentication'
+    required: false
+    default: ''
+  ssh-known-hosts:
+    description: 'Known hosts for SSH'
+    required: false
+    default: ''
+  ssh-strict:
+    description: 'Enable strict SSH host key checking'
+    required: false
+    default: 'true'
+  persist-credentials:
+    description: 'Persist credentials in git config (disabled by default for security)'
+    required: false
+    default: 'false'
+  path:
+    description: 'Relative path under $GITHUB_WORKSPACE to place the repository'
+    required: false
+    default: ''
+  clean:
+    description: 'Whether to clean the repository before checkout'
+    required: false
+    default: 'true'
+  filter:
+    description: 'Partially clone using git sparse-checkout'
+    required: false
+    default: ''
+  sparse-checkout:
+    description: 'Paths for sparse checkout'
+    required: false
+    default: ''
+  sparse-checkout-cone-mode:
+    description: 'Use cone mode for sparse checkout'
+    required: false
+    default: 'true'
+  fetch-depth:
+    description: 'Number of commits to fetch (0 for full history)'
+    required: false
+    default: '1'
+  fetch-tags:
+    description: 'Fetch tags'
+    required: false
+    default: 'false'
+  show-progress:
+    description: 'Show progress during checkout'
+    required: false
+    default: 'true'
+  lfs:
+    description: 'Download LFS files'
+    required: false
+    default: 'false'
+  submodules:
+    description: 'Checkout submodules (true, recursive, or false)'
+    required: false
+    default: 'false'
+  set-safe-directory:
+    description: 'Add path to git safe.directory'
+    required: false
+    default: 'true'
+
+outputs:
+  ref:
+    description: 'The resolved ref that was checked out'
+    value: ${{ steps.checkout.outputs.ref }}
+  commit:
+    description: 'The commit SHA that was checked out'
+    value: ${{ steps.checkout.outputs.commit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout repository
+      id: checkout
+      uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      with:
+        repository: ${{ inputs.repository }}
+        ref: ${{ inputs.ref }}
+        token: ${{ inputs.token }}
+        ssh-key: ${{ inputs.ssh-key }}
+        ssh-known-hosts: ${{ inputs.ssh-known-hosts }}
+        ssh-strict: ${{ inputs.ssh-strict }}
+        persist-credentials: ${{ inputs.persist-credentials }}
+        path: ${{ inputs.path }}
+        clean: ${{ inputs.clean }}
+        filter: ${{ inputs.filter }}
+        sparse-checkout: ${{ inputs.sparse-checkout }}
+        sparse-checkout-cone-mode: ${{ inputs.sparse-checkout-cone-mode }}
+        fetch-depth: ${{ inputs.fetch-depth }}
+        fetch-tags: ${{ inputs.fetch-tags }}
+        show-progress: ${{ inputs.show-progress }}
+        lfs: ${{ inputs.lfs }}
+        submodules: ${{ inputs.submodules }}
+        set-safe-directory: ${{ inputs.set-safe-directory }}
+
+    - name: Verify checkout integrity
+      shell: bash
+      run: |
+        # Verify we're in a git repository
+        if ! git rev-parse --git-dir > /dev/null 2>&1; then
+          echo "::error::Checkout verification failed - not a git repository"
+          exit 1
+        fi
+
+        # Log checkout info
+        echo "Repository: ${{ inputs.repository }}"
+        echo "Commit: $(git rev-parse HEAD)"
+        echo "Ref: $(git symbolic-ref -q --short HEAD 2>/dev/null || git describe --tags --exact-match 2>/dev/null || git rev-parse --short HEAD)"
+
+        # Verify credentials are not persisted (unless explicitly requested)
+        if [[ "${{ inputs.persist-credentials }}" != "true" ]]; then
+          if git config --get credential.helper > /dev/null 2>&1; then
+            echo "::warning::Credential helper is configured despite persist-credentials=false"
+          fi
+        fi
+
+branding:
+  icon: 'download'
+  color: 'blue'
