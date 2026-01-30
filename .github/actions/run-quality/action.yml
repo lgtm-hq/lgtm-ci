@@ -16,6 +16,10 @@ inputs:
     description: 'Fail if linting errors found'
     required: false
     default: 'true'
+  run-actionlint:
+    description: 'Also run actionlint on GitHub Actions'
+    required: false
+    default: 'true'
   working-directory:
     description: 'Working directory for linting'
     required: false
@@ -32,7 +36,7 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - name: Run quality checks
+    - name: Run lintro quality checks
       id: lint
       shell: bash
       working-directory: ${{ inputs.working-directory }}
@@ -40,43 +44,17 @@ runs:
         STEP: ${{ inputs.mode }}
         TOOLS: ${{ inputs.tools }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-      run: |
-        set +e
-
-        LINTRO_ARGS=("$STEP")
-
-        if [[ -n "$TOOLS" ]]; then
-          LINTRO_ARGS+=("--tools" "$TOOLS")
-        fi
-
-        echo "::group::Running lintro ${LINTRO_ARGS[*]}"
-        uv run lintro "${LINTRO_ARGS[@]}"
-        EXIT_CODE=$?
-        echo "::endgroup::"
-
-        {
-          echo "exit-code=$EXIT_CODE"
-          if [[ $EXIT_CODE -eq 0 ]]; then
-            echo "status=passed"
-          else
-            echo "status=failed"
-          fi
-        } >> "$GITHUB_OUTPUT"
-
-        if [[ $EXIT_CODE -ne 0 && "$FAIL_ON_ERROR" == "true" ]]; then
-          echo "::error::Quality checks failed with exit code $EXIT_CODE"
-          exit $EXIT_CODE
-        fi
+      run: ${{ github.action_path }}/../../../scripts/ci/quality/lint-check.sh
 
     - name: Run actionlint
-      if: inputs.tools == '' || contains(inputs.tools, 'actionlint')
+      if: inputs.run-actionlint == 'true'
       shell: bash
       working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: check
       run: |
         if command -v actionlint &>/dev/null; then
-          echo "::group::Running actionlint"
-          actionlint -color || true
-          echo "::endgroup::"
+          ${{ github.action_path }}/../../../scripts/ci/quality/actionlint-check.sh || true
         fi
 
 branding:

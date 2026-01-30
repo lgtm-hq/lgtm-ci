@@ -24,6 +24,11 @@ on:
         required: false
         type: boolean
         default: true
+      run-actionlint:
+        description: 'Run actionlint on GitHub Actions'
+        required: false
+        type: boolean
+        default: true
       upload-report:
         description: 'Upload linting report as artifact'
         required: false
@@ -72,61 +77,21 @@ jobs:
           node-version: ${{ inputs.node-version }}
           cache: 'true'
 
-      - name: Install linting tools
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          # Install actionlint
-          if command -v go &>/dev/null; then
-            go install github.com/rhysd/actionlint/cmd/actionlint@latest
-          else
-            # Download pre-built binary
-            curl -fsSL \
-              https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
-              | bash -s -- -b ~/.local/bin
-          fi
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-
-      - name: Run lintro quality checks
-        id: lintro
+      - name: Install actionlint
+        if: inputs.run-actionlint
         shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
-          LINTRO_TOOLS: ${{ inputs.lintro-tools }}
-          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-        run: |
-          set +e
+          STEP: install
+        run: ${{ github.workspace }}/scripts/ci/quality/actionlint-check.sh
 
-          LINTRO_ARGS=("chk")
-
-          if [[ -n "$LINTRO_TOOLS" ]]; then
-            LINTRO_ARGS+=("--tools" "$LINTRO_TOOLS")
-          fi
-
-          echo "::group::Running lintro ${LINTRO_ARGS[*]}"
-          uv run lintro "${LINTRO_ARGS[@]}"
-          EXIT_CODE=$?
-          echo "::endgroup::"
-
-          echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
-
-          if [[ $EXIT_CODE -ne 0 && "$FAIL_ON_ERROR" == "true" ]]; then
-            echo "::error::Linting failed with exit code $EXIT_CODE"
-            exit $EXIT_CODE
-          fi
-
-      - name: Run actionlint
-        if: inputs.lintro-tools == '' || contains(inputs.lintro-tools, 'actionlint')
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        run: |
-          echo "::group::Running actionlint"
-          if command -v actionlint &>/dev/null; then
-            actionlint -color
-          else
-            echo "::warning::actionlint not available"
-          fi
-          echo "::endgroup::"
+      - name: Run quality checks
+        uses: ./.github/actions/run-quality
+        with:
+          tools: ${{ inputs.lintro-tools }}
+          fail-on-error: ${{ inputs.fail-on-error }}
+          run-actionlint: ${{ inputs.run-actionlint }}
+          working-directory: ${{ inputs.working-directory }}
 
       - name: Upload linting report
         if: inputs.upload-report && always()

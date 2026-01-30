@@ -7,7 +7,7 @@
 #
 # Optional environment variables:
 #   TOOLS - Comma-separated list of tools to run (empty = all)
-#   FIX - Set to "true" to auto-fix issues (format step only)
+#   FAIL_ON_ERROR - Set to "true" to exit non-zero on errors (default: true)
 #   VERBOSE - Set to "true" for verbose output
 
 set -euo pipefail
@@ -30,6 +30,7 @@ fi
 case "$STEP" in
 check)
 	: "${TOOLS:=}"
+	: "${FAIL_ON_ERROR:=true}"
 	: "${VERBOSE:=false}"
 
 	LINTRO_ARGS=("chk")
@@ -39,25 +40,40 @@ check)
 	fi
 
 	log_info "Running lintro check..."
+
+	set +e
 	if [[ "$VERBOSE" == "true" ]]; then
 		uv run lintro "${LINTRO_ARGS[@]}"
 	else
 		uv run lintro "${LINTRO_ARGS[@]}" 2>&1
 	fi
-
 	EXIT_CODE=$?
+	set -e
+
+	# Set output for GitHub Actions if available
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		{
+			echo "exit-code=$EXIT_CODE"
+			if [[ $EXIT_CODE -eq 0 ]]; then
+				echo "status=passed"
+			else
+				echo "status=failed"
+			fi
+		} >>"$GITHUB_OUTPUT"
+	fi
+
 	if [[ $EXIT_CODE -eq 0 ]]; then
 		log_success "All quality checks passed"
 	else
 		log_error "Quality checks failed with exit code $EXIT_CODE"
+		if [[ "$FAIL_ON_ERROR" == "true" ]]; then
+			exit $EXIT_CODE
+		fi
 	fi
-
-	exit $EXIT_CODE
 	;;
 
 format)
 	: "${TOOLS:=}"
-	: "${FIX:=false}"
 
 	LINTRO_ARGS=("fmt")
 
@@ -78,45 +94,9 @@ format)
 	exit $EXIT_CODE
 	;;
 
-report)
-	: "${TOOLS:=}"
-
-	# Generate lintro report
-	LINTRO_ARGS=("chk")
-
-	if [[ -n "$TOOLS" ]]; then
-		LINTRO_ARGS+=("--tools" "$TOOLS")
-	fi
-
-	log_info "Generating quality report..."
-
-	# Run lintro and capture output (don't fail on lint errors for report)
-	set +e
-	OUTPUT=$(uv run lintro "${LINTRO_ARGS[@]}" 2>&1)
-	EXIT_CODE=$?
-	set -e
-
-	# Output for CI consumption
-	echo "$OUTPUT"
-
-	# Set output for GitHub Actions if available
-	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-		{
-			echo "exit-code=$EXIT_CODE"
-			if [[ $EXIT_CODE -eq 0 ]]; then
-				echo "status=passed"
-			else
-				echo "status=failed"
-			fi
-		} >>"$GITHUB_OUTPUT"
-	fi
-
-	exit $EXIT_CODE
-	;;
-
 *)
 	log_error "Unknown step: $STEP"
-	echo "Usage: STEP=<check|format|report> $0"
+	echo "Usage: STEP=<check|format> $0"
 	exit 1
 	;;
 esac
