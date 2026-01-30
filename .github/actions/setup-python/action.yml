@@ -49,7 +49,8 @@ runs:
       uses: astral-sh/setup-uv@0c5e2b8115b80b4c7c5ddf6ffdd634974642d182 # v5.1.0
       with:
         version: ${{ inputs.uv-version }}
-        enable-cache: ${{ inputs.cache }}
+        # Disable setup-uv's cache - we use actions/cache below to also cache .venv
+        enable-cache: false
 
     - name: Get uv version
       id: uv-version

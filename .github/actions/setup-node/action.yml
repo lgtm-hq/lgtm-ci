@@ -88,8 +88,9 @@ runs:
         path: |
           ${{ steps.bun-cache.outputs.dir }}
           ${{ inputs.working-directory }}/node_modules
-        key: bun-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles(inputs.cache-dependency-path) }}
+        key: bun-${{ runner.os }}-${{ inputs.node-version }}-${{ inputs.bun-version }}-${{ hashFiles(inputs.cache-dependency-path) }}
         restore-keys: |
+          bun-${{ runner.os }}-${{ inputs.node-version }}-${{ inputs.bun-version }}-
           bun-${{ runner.os }}-${{ inputs.node-version }}-
           bun-${{ runner.os }}-
 
