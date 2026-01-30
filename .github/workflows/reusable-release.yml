@@ -1,0 +1,149 @@
+---
+name: Reusable Release Workflow
+
+on:
+  workflow_call:
+    inputs:
+      max-bump:
+        description: 'Maximum bump type allowed (major, minor, patch)'
+        required: false
+        type: string
+        default: 'major'
+      tag-prefix:
+        description: 'Prefix for version tags'
+        required: false
+        type: string
+        default: 'v'
+      draft:
+        description: 'Create release as draft'
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: 'Mark release as prerelease'
+        required: false
+        type: boolean
+        default: false
+      generate-notes:
+        description: "Use GitHub's auto-generated release notes"
+        required: false
+        type: boolean
+        default: false
+      dry-run:
+        description: 'Run without creating tag or release'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      released:
+        description: 'Whether a release was created'
+        value: ${{ jobs.release.outputs.released }}
+      version:
+        description: 'Released version (without prefix)'
+        value: ${{ jobs.release.outputs.version }}
+      tag:
+        description: 'Created tag name'
+        value: ${{ jobs.release.outputs.tag }}
+      release-url:
+        description: 'URL of the GitHub release'
+        value: ${{ jobs.release.outputs.release-url }}
+
+jobs:
+  release:
+    name: Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      released: ${{ steps.check.outputs.release-needed }}
+      version: ${{ steps.version.outputs.next-version }}
+      tag: ${{ steps.tag.outputs.tag-name }}
+      release-url: ${{ steps.github-release.outputs.release-url }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+
+      - name: Calculate next version
+        id: version
+        uses: ./.github/actions/calculate-version
+        with:
+          max-bump: ${{ inputs.max-bump }}
+
+      - name: Check if release needed
+        id: check
+        shell: bash
+        run: |
+          if [[ "${{ steps.version.outputs.release-needed }}" == "true" ]]; then
+            echo "release-needed=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::Release needed: ${{ steps.version.outputs.next-version }}"
+          else
+            echo "release-needed=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::No release needed"
+          fi
+
+      - name: Generate changelog
+        if: steps.check.outputs.release-needed == 'true'
+        id: changelog
+        uses: ./.github/actions/generate-changelog
+        with:
+          version: ${{ steps.version.outputs.next-version }}
+
+      - name: Create release tag
+        if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == false
+        id: tag
+        uses: ./.github/actions/create-release-tag
+        with:
+          version: ${{ steps.version.outputs.next-version }}
+          tag-prefix: ${{ inputs.tag-prefix }}
+          push: 'true'
+
+      - name: Create GitHub release
+        # yamllint disable-line rule:line-length
+        if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == false
+        id: github-release
+        uses: ./.github/actions/create-github-release
+        with:
+          tag: ${{ steps.tag.outputs.tag-name }}
+          body: ${{ steps.changelog.outputs.changelog }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          generate-notes: ${{ inputs.generate-notes }}
+
+      - name: Dry run summary
+        if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == true
+        shell: bash
+        run: |
+          {
+            echo "## Dry Run Summary"
+            echo ""
+            echo "Would create release:"
+            echo "- **Version:** ${{ steps.version.outputs.next-version }}"
+            echo "- **Tag:** ${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}"
+            echo "- **Bump type:** ${{ steps.version.outputs.bump-type }}"
+            echo ""
+            echo "### Changelog Preview"
+            echo ""
+            echo '${{ steps.changelog.outputs.changelog }}'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Release summary
+        if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == false
+        shell: bash
+        run: |
+          {
+            echo "## Release Created"
+            echo ""
+            echo "- **Version:** ${{ steps.version.outputs.next-version }}"
+            echo "- **Tag:** ${{ steps.tag.outputs.tag-name }}"
+            echo "- **Release:** ${{ steps.github-release.outputs.release-url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

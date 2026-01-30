@@ -1,0 +1,48 @@
+---
+name: 'Calculate Next Version'
+description: 'Calculate the next semantic version based on conventional commits'
+author: 'lgtm-hq'
+
+inputs:
+  max-bump:
+    description: 'Maximum bump type allowed (major, minor, patch)'
+    required: false
+    default: 'major'
+  from-ref:
+    description: 'Git reference to start analysis from (default: latest tag)'
+    required: false
+    default: ''
+  to-ref:
+    description: 'Git reference to end analysis at'
+    required: false
+    default: 'HEAD'
+
+outputs:
+  current-version:
+    description: 'Current version (from latest tag or 0.0.0)'
+    value: ${{ steps.calculate.outputs.current-version }}
+  next-version:
+    description: 'Calculated next version (empty if no release needed)'
+    value: ${{ steps.calculate.outputs.next-version }}
+  bump-type:
+    description: 'Detected bump type (major, minor, patch, or none)'
+    value: ${{ steps.calculate.outputs.bump-type }}
+  release-needed:
+    description: 'Whether a release is needed (true/false)'
+    value: ${{ steps.calculate.outputs.release-needed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Calculate next version
+      id: calculate
+      shell: bash
+      env:
+        MAX_BUMP: ${{ inputs.max-bump }}
+        FROM_REF: ${{ inputs.from-ref }}
+        TO_REF: ${{ inputs.to-ref }}
+      run: ${{ github.action_path }}/../../../scripts/ci/release/calculate-version.sh
+
+branding:
+  icon: 'tag'
+  color: 'blue'

@@ -1,0 +1,68 @@
+---
+name: 'Create GitHub Release'
+description: 'Create a GitHub release with changelog and optional assets'
+author: 'lgtm-hq'
+
+inputs:
+  tag:
+    description: 'Tag name for the release'
+    required: true
+  title:
+    description: 'Release title (default: tag name)'
+    required: false
+    default: ''
+  body:
+    description: 'Release body/notes (default: auto-generated)'
+    required: false
+    default: ''
+  draft:
+    description: 'Create as draft release'
+    required: false
+    default: 'false'
+  prerelease:
+    description: 'Mark as prerelease'
+    required: false
+    default: 'false'
+  generate-notes:
+    description: "Use GitHub's auto-generated release notes"
+    required: false
+    default: 'false'
+  files:
+    description: 'Space-separated list of files to attach'
+    required: false
+    default: ''
+  repo:
+    description: 'Repository in owner/repo format (default: current repo)'
+    required: false
+    default: ''
+
+outputs:
+  release-url:
+    description: 'URL of the created release'
+    value: ${{ steps.release.outputs.release-url }}
+  release-id:
+    description: 'ID of the created release'
+    value: ${{ steps.release.outputs.release-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create GitHub release
+      id: release
+      shell: bash
+      env:
+        TAG: ${{ inputs.tag }}
+        TITLE: ${{ inputs.title || inputs.tag }}
+        BODY: ${{ inputs.body }}
+        DRAFT: ${{ inputs.draft }}
+        PRERELEASE: ${{ inputs.prerelease }}
+        GENERATE_NOTES: ${{ inputs.generate-notes }}
+        FILES: ${{ inputs.files }}
+        REPO: ${{ inputs.repo }}
+        GH_TOKEN: ${{ github.token }}
+      run:
+        ${{ github.action_path }}/../../../scripts/ci/release/create-github-release.sh
+
+branding:
+  icon: 'package'
+  color: 'orange'
