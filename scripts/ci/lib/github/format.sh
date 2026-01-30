@@ -85,15 +85,27 @@ format_percentage_with_color() {
   local pct="$1"
   local threshold="${2:-80}"
 
+  # Handle N/A or empty
   if [[ "$pct" == "N/A" || -z "$pct" ]]; then
     echo "⚪ N/A"
     return
   fi
 
-  # Use awk for float comparison (POSIX-compatible)
-  if awk "BEGIN { exit !($pct >= 90) }" 2>/dev/null; then
+  # Validate inputs - pct must be numeric (integer or float)
+  if ! [[ "$pct" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+    echo "⚪ N/A"
+    return
+  fi
+
+  # Validate threshold is numeric
+  if ! [[ "$threshold" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+    threshold=80
+  fi
+
+  # Use awk -v to safely pass variables (POSIX-compatible, no shell injection)
+  if awk -v pct="$pct" 'BEGIN { exit !(pct + 0 >= 90) }' 2>/dev/null; then
     echo "🟢 ${pct}%"
-  elif awk "BEGIN { exit !($pct >= $threshold) }" 2>/dev/null; then
+  elif awk -v pct="$pct" -v threshold="$threshold" 'BEGIN { exit !(pct + 0 >= threshold + 0) }' 2>/dev/null; then
     echo "🟡 ${pct}%"
   else
     echo "🔴 ${pct}%"

@@ -13,6 +13,9 @@ readonly _LGTM_CI_NETWORK_LOADED=1
 _LGTM_CI_NETWORK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/network" && pwd)"
 
 # Source all network modules
+# shellcheck source=network/port.sh
 [[ -f "$_LGTM_CI_NETWORK_DIR/port.sh" ]] && source "$_LGTM_CI_NETWORK_DIR/port.sh"
+# shellcheck source=network/checksum.sh
 [[ -f "$_LGTM_CI_NETWORK_DIR/checksum.sh" ]] && source "$_LGTM_CI_NETWORK_DIR/checksum.sh"
+# shellcheck source=network/download.sh
 [[ -f "$_LGTM_CI_NETWORK_DIR/download.sh" ]] && source "$_LGTM_CI_NETWORK_DIR/download.sh"

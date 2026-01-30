@@ -22,6 +22,8 @@ log_success() { echo "[SUCCESS] $*" >&2; }
 # Check if tool is already installed with correct version
 # Usage: installer_check_version "tool_cmd" "desired_version" [version_cmd]
 # Returns: 0 if correct version installed, 1 otherwise
+# Note: Only matches strict semver X.Y.Z format. Versions like 1.0.0-rc1,
+#       v1.0.0, or 1.0 will be partially captured or missed.
 installer_check_version() {
   local tool_cmd="$1"
   local desired_version="$2"

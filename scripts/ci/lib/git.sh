@@ -40,7 +40,13 @@ is_git_repo() {
 }
 
 # Check if the working directory is clean
+# Returns false if not in a git repo or if there are uncommitted changes
 is_git_clean() {
+  # First check if we're in a git repo
+  if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+    return 1  # Not in a repo = not clean
+  fi
+  # Then check for uncommitted changes
   [[ -z "$(git status --porcelain 2>/dev/null)" ]]
 }
 

@@ -29,16 +29,21 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 # =============================================================================
 
 # Check if port is available (not in use)
+# Note: nc fallback only checks localhost (127.0.0.1). Ports bound to
+# 0.0.0.0 or specific interfaces may be missed when lsof is unavailable.
 port_available() {
   local port="$1"
   if command_exists lsof; then
     ! lsof -Pi :"$port" -sTCP:LISTEN -t >/dev/null 2>&1
   elif command_exists nc; then
+    # Note: Only checks localhost binding; may miss ports on other interfaces
     ! nc -z 127.0.0.1 "$port" 2>/dev/null
   elif command_exists ss; then
     ! ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "(:|])${port}$"
   else
-    return 0 # Assume available if no tools found
+    # No port-checking tool available - log warning and assume available
+    log_warn "No port-checking tool available (lsof, nc, ss), assuming port $port is available"
+    return 0
   fi
 }
 

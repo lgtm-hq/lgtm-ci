@@ -12,7 +12,7 @@ readonly _LGTM_CI_INSTALLER_FALLBACKS_LOADED=1
 
 # Fallbacks
 command_exists() { command -v "$1" >/dev/null 2>&1; }
-log_verbose() { [[ "${VERBOSE:-0}" -eq 1 ]] && echo "[VERBOSE] $*" >&2 || true; }
+log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
 log_info() { echo "[INFO] $*" >&2; }
 log_warn() { echo "[WARN] $*" >&2; }
 log_success() { echo "[SUCCESS] $*" >&2; }
@@ -88,10 +88,12 @@ installer_fallback_cargo() {
 
 # Run a chain of installation methods until one succeeds
 # Usage: installer_run_chain "method1" "method2" "method3" ...
+# Note: Methods should be function names (not commands with args) to avoid eval
 installer_run_chain() {
   local method
   for method in "$@"; do
-    if eval "$method"; then
+    # Direct function invocation instead of eval for safety
+    if "$method"; then
       return 0
     fi
   done

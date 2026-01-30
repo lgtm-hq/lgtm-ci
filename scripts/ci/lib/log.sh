@@ -57,7 +57,8 @@ log_error() {
 }
 
 log_verbose() {
-  [[ "${VERBOSE:-0}" -eq 1 ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
+  # Use string comparison to handle non-numeric VERBOSE values
+  [[ "${VERBOSE:-}" == "1" || "${VERBOSE,,:-}" == "true" ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
 }
 
 # Exit with error message

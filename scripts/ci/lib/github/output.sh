@@ -31,7 +31,9 @@ set_github_output_multiline() {
   local value="$2"
   if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     # Use unique delimiter to prevent content collision
-    local delimiter="LGTM_CI_EOF_$$_$(date +%s)"
+    # Separate declaration and assignment to avoid SC2155
+    local delimiter
+    delimiter="LGTM_CI_EOF_$$_$(date +%s)"
     {
       echo "$key<<$delimiter"
       echo "$value"

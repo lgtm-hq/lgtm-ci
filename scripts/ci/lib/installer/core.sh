@@ -29,7 +29,7 @@ installer_init() {
     log_success() { echo "[${TOOL_NAME:-installer}] SUCCESS: $*"; }
     log_warn() { echo "[${TOOL_NAME:-installer}] WARN: $*" >&2; }
     log_error() { echo "[${TOOL_NAME:-installer}] ERROR: $*" >&2; }
-    log_verbose() { [[ "${VERBOSE:-0}" -eq 1 ]] && echo "[${TOOL_NAME:-installer}] $*" >&2 || true; }
+    log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[${TOOL_NAME:-installer}] $*" >&2 || true; }
   fi
 
   if [[ -f "$INSTALLER_LIB_DIR/platform.sh" ]]; then
@@ -38,10 +38,12 @@ installer_init() {
   fi
 
   if [[ -f "$INSTALLER_LIB_DIR/network/download.sh" ]]; then
+    # shellcheck source=../network/download.sh
     source "$INSTALLER_LIB_DIR/network/download.sh"
   fi
 
   if [[ -f "$INSTALLER_LIB_DIR/network/checksum.sh" ]]; then
+    # shellcheck source=../network/checksum.sh
     source "$INSTALLER_LIB_DIR/network/checksum.sh"
   fi
 

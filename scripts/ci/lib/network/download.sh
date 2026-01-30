@@ -16,7 +16,7 @@ if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
   # shellcheck source=../log.sh
   source "$_LGTM_CI_LIB_DIR/log.sh"
 else
-  log_verbose() { [[ "${VERBOSE:-0}" -eq 1 ]] && echo "[VERBOSE] $*" >&2 || true; }
+  log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
   log_warn() { echo "[WARN] $*" >&2; }
   log_error() { echo "[ERROR] $*" >&2; }
 fi
@@ -51,16 +51,29 @@ download_with_retries() {
 # Download and execute installer script securely
 # Downloads to temp file first, then executes (avoids curl|bash pattern)
 # Note: Uses subshell for cleanup to avoid overwriting caller's traps
-# Usage: download_and_run_installer "url" [args...]
+# Usage: download_and_run_installer "url" [expected_checksum] [args...]
+# If expected_checksum is provided, verifies the download before execution
 download_and_run_installer() {
   local url="$1"
   shift
-  local args=("$@")
+  local expected_checksum=""
+  local args=()
+
+  # Check if first arg looks like a checksum (64 hex chars for sha256)
+  if [[ $# -gt 0 && "$1" =~ ^[a-fA-F0-9]{64}$ ]]; then
+    expected_checksum="$1"
+    shift
+  fi
+  args=("$@")
 
   # Use subshell to avoid overwriting caller's traps
   (
     local tmpdir
-    tmpdir=$(mktemp -d)
+    # Use portable mktemp with template (works on BSD/macOS/GNU)
+    tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/lgtm-installer.XXXXXXXXXX") || {
+      log_error "Failed to create temporary directory"
+      exit 1
+    }
     trap 'rm -rf "$tmpdir"' EXIT
 
     local script_file="$tmpdir/installer.sh"
@@ -71,8 +84,21 @@ download_and_run_installer() {
       exit 1
     fi
 
-    # Basic validation - check it's a shell script
-    if ! head -1 "$script_file" | grep -qE '^#!.*sh'; then
+    # Verify checksum if provided
+    if [[ -n "$expected_checksum" ]]; then
+      if declare -f verify_checksum &>/dev/null; then
+        if ! verify_checksum "$script_file" "$expected_checksum" sha256; then
+          log_error "Checksum verification failed for installer script"
+          exit 1
+        fi
+        log_verbose "Installer checksum verified"
+      else
+        log_warn "verify_checksum not available, skipping integrity check"
+      fi
+    fi
+
+    # Basic validation - check it's a shell script (bash or sh)
+    if ! head -1 "$script_file" | grep -qE '^#!/.*(ba)?sh'; then
       log_warn "Downloaded file may not be a shell script"
     fi
 

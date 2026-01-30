@@ -16,7 +16,7 @@ if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
   # shellcheck source=../log.sh
   source "$_LGTM_CI_LIB_DIR/log.sh"
 else
-  log_verbose() { [[ "${VERBOSE:-0}" -eq 1 ]] && echo "[VERBOSE] $*" >&2 || true; }
+  log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
   log_warn() { echo "[WARN] $*" >&2; }
   log_error() { echo "[ERROR] $*" >&2; }
 fi
@@ -34,17 +34,38 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 # By default, fails if no checksum tool is available
 # Pass --skip-if-unavailable to skip verification when no tool is found
 verify_checksum() {
-  local file="$1"
-  local expected="$2"
-  local algorithm="${3:-sha256}"
+  local file=""
+  local expected=""
+  local algorithm="sha256"
   local skip_if_unavailable=0
 
-  # Check for --skip-if-unavailable flag in any position
-  for arg in "$@"; do
-    if [[ "$arg" == "--skip-if-unavailable" ]]; then
-      skip_if_unavailable=1
-      break
-    fi
+  # Parse arguments: consume options first, then positional args
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --skip-if-unavailable)
+        skip_if_unavailable=1
+        shift
+        ;;
+      -*)
+        # Unknown option, skip
+        shift
+        ;;
+      *)
+        # Positional argument
+        if [[ -z "$file" ]]; then
+          file="$1"
+        elif [[ -z "$expected" ]]; then
+          expected="$1"
+        else
+          # Third positional is algorithm (validate it)
+          case "$1" in
+            sha256|sha512) algorithm="$1" ;;
+            *) ;; # Ignore invalid, keep default
+          esac
+        fi
+        shift
+        ;;
+    esac
   done
 
   if [[ ! -f "$file" ]]; then

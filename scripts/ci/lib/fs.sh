@@ -17,6 +17,14 @@ if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
   source "$_LGTM_CI_LIB_DIR/log.sh"
 fi
 
+# Fallback die function if log.sh wasn't sourced or doesn't provide die
+if ! declare -f die &>/dev/null; then
+  die() {
+    echo "[ERROR] $*" >&2
+    exit 1
+  }
+fi
+
 # =============================================================================
 # File system helpers
 # =============================================================================
@@ -97,11 +105,27 @@ check_dir_exists() {
 
 # Create a temporary directory with automatic cleanup on exit
 # Usage: tmpdir=$(create_temp_dir)
+# Note: Preserves existing EXIT traps and uses portable mktemp
 create_temp_dir() {
   local tmpdir
-  tmpdir=$(mktemp -d)
+  # Use portable mktemp with template (works on BSD/macOS/GNU)
+  tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/lgtm-ci.XXXXXXXXXX") || {
+    echo "[ERROR] Failed to create temporary directory" >&2
+    return 1
+  }
+
+  # Capture existing EXIT trap to preserve it
+  local existing_trap
+  existing_trap=$(trap -p EXIT | sed "s/trap -- '\(.*\)' EXIT/\1/" || true)
+
+  # Install new trap that cleans up tmpdir and calls existing handler
   # shellcheck disable=SC2064
-  trap "rm -rf '$tmpdir'" EXIT
+  if [[ -n "$existing_trap" ]]; then
+    trap "rm -rf '$tmpdir'; $existing_trap" EXIT
+  else
+    trap "rm -rf '$tmpdir'" EXIT
+  fi
+
   echo "$tmpdir"
 }
 

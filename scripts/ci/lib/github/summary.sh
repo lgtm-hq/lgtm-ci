@@ -25,6 +25,11 @@ add_github_summary() {
 # Add a markdown table row to the step summary
 # Usage: add_github_summary_row "col1" "col2" "col3"
 add_github_summary_row() {
+  # Early return if no columns provided (avoids shift error under set -e)
+  if [[ $# -eq 0 ]]; then
+    return
+  fi
+
   if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     local row="| $1"
     shift

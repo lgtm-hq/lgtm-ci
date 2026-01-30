@@ -26,7 +26,7 @@ detect_os() {
 }
 
 # Detect architecture (normalized)
-# Returns: x86_64, arm64
+# Returns: x86_64, arm64, or x86
 detect_arch() {
   local arch
   arch=$(uname -m)
