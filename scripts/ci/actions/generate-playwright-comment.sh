@@ -75,9 +75,9 @@ SUCCESS="true"
 	echo "success=$SUCCESS"
 } >>"$GITHUB_OUTPUT"
 
-# Calculate pass rate
+# Calculate pass rate (use awk for float precision with small suites)
 if [[ $TOTAL -gt 0 ]]; then
-	PASS_RATE=$(((PASSED * 100) / TOTAL))
+	PASS_RATE=$(awk -v p="$PASSED" -v t="$TOTAL" 'BEGIN { printf "%.1f", (p*100)/t }')
 else
 	PASS_RATE=0
 fi

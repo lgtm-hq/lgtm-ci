@@ -74,6 +74,11 @@ score_emoji() {
 		return
 	fi
 
+	# Validate threshold is numeric, default to 80 if invalid
+	if [[ -z "$threshold" ]] || ! [[ "$threshold" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+		threshold=80
+	fi
+
 	# Truncate to integers for bash comparison (handles fractional values)
 	score="${score%.*}"
 	threshold="${threshold%.*}"
@@ -107,6 +112,11 @@ format_score_with_color() {
 	if ! [[ "$score" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
 		echo "⚪ N/A"
 		return
+	fi
+
+	# Validate threshold is numeric, default to 80 if invalid
+	if [[ -z "$threshold" ]] || ! [[ "$threshold" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+		threshold=80
 	fi
 
 	# Preserve original for display, truncate for comparison
