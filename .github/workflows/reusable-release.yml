@@ -5,7 +5,7 @@ on:
   workflow_call:
     inputs:
       max-bump:
-        description: 'Maximum bump type allowed (major, minor, patch)'
+        description: 'Maximum bump type allowed. Valid values: major, minor, patch'
         required: false
         type: string
         default: 'major'

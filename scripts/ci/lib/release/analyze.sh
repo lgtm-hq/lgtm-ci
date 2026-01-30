@@ -76,9 +76,13 @@ analyze_commits_for_bump() {
 	fi
 }
 
+# ASCII Unit Separator for safe field delimiting (avoids | in commit messages)
+readonly FIELD_SEP=$'\x1F'
+
 # Get commits grouped by type
 # Usage: get_commits_by_type "v1.0.0" "HEAD"
 # Output: Sections separated by markers for changelog generation
+# Fields are delimited by ASCII unit separator (0x1F) to handle | in descriptions
 get_commits_by_type() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
@@ -113,7 +117,8 @@ get_commits_by_type() {
 		fi
 
 		if parse_conventional_commit "$subject"; then
-			local entry="${sha}|${CC_TYPE}|${CC_SCOPE}|${CC_DESCRIPTION}"
+			# Use unit separator to safely handle | in descriptions
+			local entry="${sha}${FIELD_SEP}${CC_TYPE}${FIELD_SEP}${CC_SCOPE}${FIELD_SEP}${CC_DESCRIPTION}"
 
 			if $is_breaking || [[ -n "$CC_BREAKING" ]]; then
 				breaking_commits+=("$entry")
@@ -135,7 +140,7 @@ get_commits_by_type() {
 			esac
 		else
 			# Non-conventional commit
-			other_commits+=("${sha}|other||${subject}")
+			other_commits+=("${sha}${FIELD_SEP}other${FIELD_SEP}${FIELD_SEP}${subject}")
 		fi
 	done < <(git log --oneline "$range" 2>/dev/null)
 

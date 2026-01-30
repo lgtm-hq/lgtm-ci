@@ -34,22 +34,48 @@ EOF
 		local temp_file
 		temp_file=$(mktemp "${file_dir}/.changelog.XXXXXX")
 
-		# Ensure cleanup on exit
-		trap 'rm -f "$temp_file"' EXIT
+		# Save existing EXIT trap and set cleanup trap
+		local prev_trap
+		prev_trap=$(trap -p EXIT | sed "s/trap -- '\\(.*\\)' EXIT/\\1/" || true)
+
+		cleanup_temp() {
+			rm -f "$temp_file"
+			# Restore previous trap if it existed
+			if [[ -n "$prev_trap" ]]; then
+				eval "$prev_trap"
+			fi
+		}
+		trap cleanup_temp EXIT
 
 		# Find insertion point (after header section)
+		# Handle case where file starts with version header (## [x.y.z])
 		local header_end=0
 		local line_num=0
+		local first_line_is_version=false
 
 		while IFS= read -r line; do
 			((line_num++))
-			if [[ "$line" =~ ^##[[:space:]] ]] && ((line_num > 1)); then
-				header_end=$((line_num - 1))
-				break
+			if [[ "$line" =~ ^##[[:space:]] ]]; then
+				if ((line_num == 1)); then
+					# First line is a version header - prepend new content
+					first_line_is_version=true
+					break
+				else
+					# Found version header after header section
+					header_end=$((line_num - 1))
+					break
+				fi
 			fi
 		done <"$file"
 
-		if ((header_end == 0)); then
+		if $first_line_is_version; then
+			# File starts with version header - prepend new content
+			{
+				echo "$new_content"
+				echo ""
+				cat "$file"
+			} >"$temp_file"
+		elif ((header_end == 0)); then
 			# No existing version sections, append after file
 			cat "$file" >"$temp_file"
 			echo "" >>"$temp_file"
@@ -69,8 +95,12 @@ EOF
 
 		mv "$temp_file" "$file"
 
-		# Clear trap since file was successfully moved
+		# Restore previous trap (cleanup trap no longer needed)
 		trap - EXIT
+		if [[ -n "$prev_trap" ]]; then
+			# shellcheck disable=SC2064 # Intentional: restore saved trap content
+			trap "$prev_trap" EXIT
+		fi
 	fi
 }
 

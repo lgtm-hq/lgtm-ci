@@ -50,6 +50,7 @@ format_commit_entry() {
 
 # Generate changelog section from commits
 # Usage: generate_changelog_section "Features" "feat_commits_data"
+# Note: commits_data uses ASCII unit separator (0x1F) between fields
 generate_changelog_section() {
 	local title="${1:-}"
 	local commits_data="${2:-}"
@@ -60,7 +61,8 @@ generate_changelog_section() {
 	local has_content=false
 	local output=""
 
-	while IFS='|' read -r sha type scope description; do
+	# Use unit separator (from analyze.sh) to safely handle | in descriptions
+	while IFS=$'\x1F' read -r sha type scope description; do
 		[[ -z "$sha" ]] && continue
 		has_content=true
 		output+="$(format_commit_entry "$sha" "$type" "$scope" "$description" "$format")"$'\n'
