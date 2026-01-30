@@ -15,7 +15,7 @@ readonly _LGTM_CI_INSTALLER_CORE_LOADED=1
 # =============================================================================
 
 # Initialize installer environment - sources all required libraries
-# Sets INSTALLER_LIB_DIR and INSTALLER_SCRIPT_DIR
+# Sets INSTALLER_LIB_DIR for use by callers
 installer_init() {
 	INSTALLER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -24,10 +24,11 @@ installer_init() {
 		# shellcheck source=../log.sh
 		source "$INSTALLER_LIB_DIR/log.sh"
 	else
-		# Minimal fallback logging
+		# Minimal fallback logging (matches log.sh API)
 		log_info() { echo "[${TOOL_NAME:-installer}] $*"; }
 		log_success() { echo "[${TOOL_NAME:-installer}] SUCCESS: $*"; }
 		log_warn() { echo "[${TOOL_NAME:-installer}] WARN: $*" >&2; }
+		log_warning() { log_warn "$@"; } # Alias for backwards compatibility
 		log_error() { echo "[${TOOL_NAME:-installer}] ERROR: $*" >&2; }
 		log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[${TOOL_NAME:-installer}] $*" >&2 || true; }
 	fi

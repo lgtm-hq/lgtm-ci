@@ -33,6 +33,32 @@ fi
 : "${THRESHOLD_BEST_PRACTICES:=80}"
 : "${THRESHOLD_SEO:=80}"
 
+# Validate and normalize threshold variables
+# Strip trailing %, whitespace, ensure numeric integer in 0-100 range
+validate_threshold() {
+	local name="$1"
+	local value="$2"
+	# Strip whitespace and trailing %
+	value="${value%\%}"
+	value="${value// /}"
+	# Check if numeric integer
+	if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+		echo "::error::$name must be a numeric integer, got: '$value'"
+		exit 1
+	fi
+	# Check range
+	if [[ "$value" -lt 0 || "$value" -gt 100 ]]; then
+		echo "::error::$name must be between 0 and 100, got: $value"
+		exit 1
+	fi
+	echo "$value"
+}
+
+THRESHOLD_PERFORMANCE=$(validate_threshold "THRESHOLD_PERFORMANCE" "$THRESHOLD_PERFORMANCE")
+THRESHOLD_ACCESSIBILITY=$(validate_threshold "THRESHOLD_ACCESSIBILITY" "$THRESHOLD_ACCESSIBILITY")
+THRESHOLD_BEST_PRACTICES=$(validate_threshold "THRESHOLD_BEST_PRACTICES" "$THRESHOLD_BEST_PRACTICES")
+THRESHOLD_SEO=$(validate_threshold "THRESHOLD_SEO" "$THRESHOLD_SEO")
+
 # Find the results file
 # Sort for deterministic selection when directory contains multiple JSON files
 if [[ -d "$RESULTS_PATH" ]]; then

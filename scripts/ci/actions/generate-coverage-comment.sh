@@ -62,19 +62,19 @@ if [[ "$FORMAT" == "auto" ]]; then
 	fi
 fi
 
-# Extract coverage based on format
+# Extract coverage based on format (raw float values)
 case "$FORMAT" in
 istanbul)
-	LINES=$(jq -r '.total.lines.pct // 0' "$COVERAGE_FILE")
-	BRANCHES=$(jq -r '.total.branches.pct // 0' "$COVERAGE_FILE")
-	FUNCTIONS=$(jq -r '.total.functions.pct // 0' "$COVERAGE_FILE")
-	STATEMENTS=$(jq -r '.total.statements.pct // 0' "$COVERAGE_FILE")
+	LINES_RAW=$(jq -r '.total.lines.pct // 0' "$COVERAGE_FILE")
+	BRANCHES_RAW=$(jq -r '.total.branches.pct // 0' "$COVERAGE_FILE")
+	FUNCTIONS_RAW=$(jq -r '.total.functions.pct // 0' "$COVERAGE_FILE")
+	STATEMENTS_RAW=$(jq -r '.total.statements.pct // 0' "$COVERAGE_FILE")
 	;;
 coverage-py)
-	LINES=$(jq -r '.totals.percent_covered // 0' "$COVERAGE_FILE")
-	BRANCHES=$(jq -r '.totals.percent_covered_branches // .totals.percent_covered // 0' "$COVERAGE_FILE")
-	FUNCTIONS=$LINES # Python coverage doesn't track functions separately
-	STATEMENTS=$LINES
+	LINES_RAW=$(jq -r '.totals.percent_covered // 0' "$COVERAGE_FILE")
+	BRANCHES_RAW=$(jq -r '.totals.percent_covered_branches // .totals.percent_covered // 0' "$COVERAGE_FILE")
+	FUNCTIONS_RAW=$LINES_RAW # Python coverage doesn't track functions separately
+	STATEMENTS_RAW=$LINES_RAW
 	;;
 *)
 	echo "::error::Unknown coverage format: $FORMAT"
@@ -82,11 +82,24 @@ coverage-py)
 	;;
 esac
 
-# Round to integers
-LINES=$(printf "%.0f" "$LINES")
-BRANCHES=$(printf "%.0f" "$BRANCHES")
-FUNCTIONS=$(printf "%.0f" "$FUNCTIONS")
-STATEMENTS=$(printf "%.0f" "$STATEMENTS")
+# Check thresholds using raw float values to avoid false positives from rounding
+# Use awk for float comparison (POSIX-compatible)
+PASSED=true
+if ! awk -v val="$LINES_RAW" -v thresh="$THRESHOLD_LINES" 'BEGIN { exit !(val >= thresh) }'; then
+	PASSED=false
+fi
+if ! awk -v val="$BRANCHES_RAW" -v thresh="$THRESHOLD_BRANCHES" 'BEGIN { exit !(val >= thresh) }'; then
+	PASSED=false
+fi
+if ! awk -v val="$FUNCTIONS_RAW" -v thresh="$THRESHOLD_FUNCTIONS" 'BEGIN { exit !(val >= thresh) }'; then
+	PASSED=false
+fi
+
+# Round to integers for display
+LINES=$(printf "%.0f" "$LINES_RAW")
+BRANCHES=$(printf "%.0f" "$BRANCHES_RAW")
+FUNCTIONS=$(printf "%.0f" "$FUNCTIONS_RAW")
+STATEMENTS=$(printf "%.0f" "$STATEMENTS_RAW")
 
 {
 	echo "lines=$LINES"
@@ -94,12 +107,6 @@ STATEMENTS=$(printf "%.0f" "$STATEMENTS")
 	echo "functions=$FUNCTIONS"
 	echo "statements=$STATEMENTS"
 } >>"$GITHUB_OUTPUT"
-
-# Check thresholds
-PASSED=true
-[[ $LINES -lt $THRESHOLD_LINES ]] && PASSED=false
-[[ $BRANCHES -lt $THRESHOLD_BRANCHES ]] && PASSED=false
-[[ $FUNCTIONS -lt $THRESHOLD_FUNCTIONS ]] && PASSED=false
 
 # Output pass status (grouped with metrics above if needed)
 {

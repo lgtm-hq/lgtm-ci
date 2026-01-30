@@ -79,15 +79,15 @@ report)
 	fi
 
 	if [[ "$REPORT_FORMAT" == "json" ]]; then
-		{
-			echo "{"
-			echo "  \"mode\": \"$MODE\","
-			echo "  \"allowed_domains\": ["
-			sed 's/^/    "/;s/$/"/' "$EGRESS_LOG_DIR/allowed-domains.txt" | paste -sd ',' -
-			echo "  ],"
-			echo "  \"violations_detected\": false"
-			echo "}"
-		} >"$EGRESS_LOG_DIR/report.json"
+		# Use jq for safe JSON generation (handles special characters in mode/domains)
+		jq -n \
+			--arg mode "$MODE" \
+			--rawfile domains "$EGRESS_LOG_DIR/allowed-domains.txt" \
+			'{
+				mode: $mode,
+				allowed_domains: ($domains | split("\n") | map(select(length > 0))),
+				violations_detected: false
+			}' >"$EGRESS_LOG_DIR/report.json"
 		echo "JSON report: $EGRESS_LOG_DIR/report.json"
 	fi
 	;;

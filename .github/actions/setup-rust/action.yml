@@ -77,6 +77,7 @@ runs:
           ~/.cargo/git/db/
           ${{ inputs.working-directory }}/target/
         # Cache key includes toolchain for proper invalidation
+        # yamllint disable-line rule:line-length
         key:
           cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{
           hashFiles(inputs.cache-dependency-path) }}
