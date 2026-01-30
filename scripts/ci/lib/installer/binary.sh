@@ -62,6 +62,11 @@ if ! declare -f verify_checksum &>/dev/null; then
 		elif command -v shasum &>/dev/null; then
 			actual=$(shasum -a 256 "$file" | awk '{print $1}')
 		else
+			# No checksum tool available - honor ALLOW_UNVERIFIED
+			if [[ "${ALLOW_UNVERIFIED:-0}" == "1" ]]; then
+				log_warn "No checksum tool available, skipping verification (ALLOW_UNVERIFIED=1)"
+				return 0
+			fi
 			return 1
 		fi
 		[[ "$actual" == "$expected" ]]

@@ -62,9 +62,13 @@ get_github_pages_url() {
 # Get score emoji based on threshold
 # Usage: score_emoji 85 80 -> "🟢" (score meets threshold)
 # Returns: 🟢 if >= threshold, 🟡 if within 10 points, 🔴 otherwise
+# Note: Handles fractional thresholds by truncating to integers
 score_emoji() {
 	local score="$1"
 	local threshold="${2:-80}"
+	# Truncate to integers for bash comparison (handles fractional thresholds)
+	score="${score%.*}"
+	threshold="${threshold%.*}"
 	local warn=$((threshold - 10))
 	((warn < 0)) && warn=0
 

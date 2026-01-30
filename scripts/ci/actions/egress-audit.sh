@@ -61,6 +61,12 @@ report)
 
 	EGRESS_LOG_DIR="${RUNNER_TEMP}/egress-audit"
 
+	# Validate that setup step ran first
+	if [[ ! -f "$EGRESS_LOG_DIR/allowed-domains.txt" ]]; then
+		echo "::error::Setup step must run before report. Missing: $EGRESS_LOG_DIR/allowed-domains.txt"
+		exit 1
+	fi
+
 	if [[ "$REPORT_FORMAT" == "summary" ]] && [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		{
 			echo "## Egress Audit Report"

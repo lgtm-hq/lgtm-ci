@@ -45,17 +45,19 @@ fi
 # Extract test counts from Playwright JSON report
 if jq -e '.stats' "$RESULTS_PATH" >/dev/null 2>&1; then
 	# Standard report format
-	TOTAL=$(jq -r '.stats.expected + .stats.unexpected + .stats.flaky + .stats.skipped // 0' "$RESULTS_PATH")
+	# Include timedOut and interrupted in FAILED count (these are test failures)
+	TOTAL=$(jq -r '.stats.expected + .stats.unexpected + .stats.flaky + .stats.skipped + (.stats.timedOut // 0) + (.stats.interrupted // 0) // 0' "$RESULTS_PATH")
 	PASSED=$(jq -r '.stats.expected // 0' "$RESULTS_PATH")
-	FAILED=$(jq -r '.stats.unexpected // 0' "$RESULTS_PATH")
+	FAILED=$(jq -r '(.stats.unexpected // 0) + (.stats.timedOut // 0) + (.stats.interrupted // 0)' "$RESULTS_PATH")
 	SKIPPED=$(jq -r '.stats.skipped // 0' "$RESULTS_PATH")
 	FLAKY=$(jq -r '.stats.flaky // 0' "$RESULTS_PATH")
 	DURATION=$(jq -r '.stats.duration // 0' "$RESULTS_PATH")
 else
 	# Fallback: count from suites
+	# Include timedOut and interrupted statuses as failures
 	TOTAL=$(jq '[.. | .tests? // [] | .[]] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
 	PASSED=$(jq '[.. | .tests? // [] | .[] | select(.status == "passed")] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
-	FAILED=$(jq '[.. | .tests? // [] | .[] | select(.status == "failed")] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
+	FAILED=$(jq '[.. | .tests? // [] | .[] | select(.status == "failed" or .status == "timedOut" or .status == "interrupted")] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
 	SKIPPED=$(jq '[.. | .tests? // [] | .[] | select(.status == "skipped")] | length' "$RESULTS_PATH" 2>/dev/null || echo "0")
 	FLAKY=0
 	DURATION=0
