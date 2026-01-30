@@ -77,11 +77,11 @@ _compare_prerelease_id() {
 	local id1="${1:-}"
 	local id2="${2:-}"
 
-	# Both numeric - compare numerically
+	# Both numeric - compare numerically (force base-10 to avoid octal parsing)
 	if [[ "$id1" =~ ^[0-9]+$ ]] && [[ "$id2" =~ ^[0-9]+$ ]]; then
-		if ((id1 > id2)); then
+		if ((10#$id1 > 10#$id2)); then
 			return 1
-		elif ((id1 < id2)); then
+		elif ((10#$id1 < 10#$id2)); then
 			return 2
 		fi
 		return 0
