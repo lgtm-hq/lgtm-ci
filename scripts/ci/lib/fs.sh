@@ -119,6 +119,8 @@ create_temp_dir() {
 	existing_trap=$(trap -p EXIT | sed "s/trap -- '\(.*\)' EXIT/\1/" || true)
 
 	# Install new trap that cleans up tmpdir and calls existing handler
+	# SC2064: We intentionally expand $tmpdir NOW (at definition time) so the
+	# trap removes the correct directory, not whatever $tmpdir might be later
 	# shellcheck disable=SC2064
 	if [[ -n "$existing_trap" ]]; then
 		trap "rm -rf '$tmpdir'; $existing_trap" EXIT

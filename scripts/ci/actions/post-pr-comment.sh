@@ -2,18 +2,58 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Post or update a PR comment with marker-based identification
 #
-# Required environment variables:
+# Environment variables:
+#   STEP - Which step to run: pr-number or post
 #   GH_TOKEN - GitHub token for API access
 #   GITHUB_REPOSITORY - Repository in owner/repo format
 #   COMMENT_BODY - Comment body content
-#   PR_NUMBER - Pull request number
+#   PR_NUMBER - Pull request number (for post step)
+#   INPUT_PR_NUMBER - User-provided PR number override
+#   EVENT_NAME - GitHub event name (for pr-number step)
+#   EVENT_PR_NUMBER - PR number from event context
+#   EVENT_ISSUE_NUMBER - Issue number from event context
 #   MARKER - Unique marker for this comment
 #   MODE - Comment mode: upsert, create, or update
 #   DELETE_ON_EMPTY - Whether to delete comment if body is empty
 
 set -euo pipefail
 
+: "${STEP:=post}"
 : "${GH_TOKEN:?GH_TOKEN is required}"
+
+# -----------------------------------------------------------------------------
+# Step: pr-number - Determine PR number from context
+# -----------------------------------------------------------------------------
+if [[ "$STEP" == "pr-number" ]]; then
+	PR_NUMBER="${INPUT_PR_NUMBER:-}"
+
+	if [[ -z "$PR_NUMBER" ]]; then
+		case "${EVENT_NAME:-}" in
+		pull_request | pull_request_target)
+			PR_NUMBER="${EVENT_PR_NUMBER:-}"
+			;;
+		issue_comment)
+			PR_NUMBER="${EVENT_ISSUE_NUMBER:-}"
+			;;
+		*)
+			# Try to detect from current branch
+			PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
+			;;
+		esac
+	fi
+
+	if [[ -z "$PR_NUMBER" ]]; then
+		echo "::error::Could not determine PR number"
+		exit 1
+	fi
+
+	echo "number=$PR_NUMBER" >>"$GITHUB_OUTPUT"
+	exit 0
+fi
+
+# -----------------------------------------------------------------------------
+# Step: post - Post or update comment
+# -----------------------------------------------------------------------------
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
 : "${MARKER:?MARKER is required}"

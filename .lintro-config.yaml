@@ -4,7 +4,7 @@
 
 # Execution settings
 execution:
-  enabled_tools: []  # empty = all tools
+  enabled_tools: [] # empty = all tools
   tool_order: 'priority'
   fail_fast: false
   parallel: true

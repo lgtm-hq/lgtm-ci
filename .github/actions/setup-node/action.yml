@@ -48,8 +48,8 @@ runs:
   using: 'composite'
   steps:
     - name: Setup Node.js
-      # yamllint disable-line rule:line-length
-      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0
+      # Pinned to SHA for supply chain security - line exceeds 80 but under 120 limit
+      uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
       with:
         node-version: ${{ inputs.node-version }}
 
@@ -61,8 +61,8 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-node.sh
 
     - name: Setup Bun
-      # yamllint disable-line rule:line-length
-      uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76  # v2.0.2
+      # Pinned to SHA for supply chain security - line exceeds 80 but under 120 limit
+      uses: oven-sh/setup-bun@735343b667d3e6f658f44d0eca948eb6282f2b76 # v2.0.2
       with:
         bun-version: ${{ inputs.bun-version }}
 
@@ -84,20 +84,22 @@ runs:
     - name: Cache bun dependencies
       if: inputs.cache == 'true'
       id: cache
-      # yamllint disable-line rule:line-length
-      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+      # Pinned to SHA for supply chain security - line exceeds 80 but under 120 limit
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: |
           ${{ steps.bun-cache.outputs.dir }}
           ${{ inputs.working-directory }}/node_modules
+        # Cache key must include all version vars for proper invalidation
         # yamllint disable-line rule:line-length
-        key: bun-${{ runner.os }}-${{ inputs.node-version }}-${{ inputs.bun-version }}-${{ hashFiles(inputs.cache-dependency-path) }}
-        # yamllint disable rule:line-length
+        key:
+          bun-${{ runner.os }}-${{ inputs.node-version }}-${{ inputs.bun-version }}-${{
+          hashFiles(inputs.cache-dependency-path) }}
+        # Restore keys: hierarchical fallbacks - line exceeds 80 but under 120 limit
         restore-keys: |
           bun-${{ runner.os }}-${{ inputs.node-version }}-${{ inputs.bun-version }}-
           bun-${{ runner.os }}-${{ inputs.node-version }}-
           bun-${{ runner.os }}-
-        # yamllint enable rule:line-length
 
     - name: Install dependencies
       if: inputs.install-dependencies == 'true'

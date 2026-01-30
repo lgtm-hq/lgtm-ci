@@ -7,12 +7,12 @@ and shell utilities.
 
 **lgtm-ci** provides a collection of production-ready CI/CD building blocks:
 
-- **Composite Actions** - Reusable actions for environment setup, security
-  hardening, PR comments, and more
-- **Reusable Workflows** - Complete workflow templates for quality gates,
-  releases, and publishing
-- **Shell Libraries** - Modular bash utilities for logging, platform detection,
-  GitHub integration, and downloads
+- **Composite Actions** - Reusable actions for environment setup, security hardening, PR
+  comments, and more
+- **Reusable Workflows** - Complete workflow templates for quality gates, releases, and
+  publishing
+- **Shell Libraries** - Modular bash utilities for logging, platform detection, GitHub
+  integration, and downloads
 
 ## Quick Start
 

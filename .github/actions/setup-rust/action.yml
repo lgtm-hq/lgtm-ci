@@ -44,8 +44,8 @@ runs:
   using: 'composite'
   steps:
     - name: Install Rust toolchain
-      # yamllint disable-line rule:line-length
-      uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203  # master
+      # Pinned to SHA for supply chain security
+      uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # master
       with:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
@@ -67,8 +67,8 @@ runs:
     - name: Cache cargo registry and build
       if: inputs.cache == 'true'
       id: cache
-      # yamllint disable-line rule:line-length
-      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684  # v4.2.3
+      # Pinned to SHA for supply chain security
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
       with:
         path: |
           ~/.cargo/bin/
@@ -76,8 +76,11 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ${{ inputs.working-directory }}/target/
-        # yamllint disable-line rule:line-length
-        key: cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{ hashFiles(inputs.cache-dependency-path) }}
+        # Cache key must be single line - includes toolchain for invalidation
+        # Cache key includes toolchain for proper invalidation
+        key:
+          cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{
+          hashFiles(inputs.cache-dependency-path) }}
         restore-keys: |
           cargo-${{ runner.os }}-${{ inputs.toolchain }}-
           cargo-${{ runner.os }}-

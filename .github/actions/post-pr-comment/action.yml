@@ -3,7 +3,6 @@ name: 'Post PR Comment'
 description: >-
   Create or update a PR comment with unique marker for upsert behavior
 author: 'lgtm-hq'
-
 inputs:
   token:
     description: 'GitHub token for API access'
@@ -49,31 +48,19 @@ runs:
       id: pr-number
       shell: bash
       env:
+        STEP: pr-number
         GH_TOKEN: ${{ inputs.token }}
-      # yamllint disable rule:line-length
-      run: |
-        PR_NUMBER="${{ inputs['pr-number'] }}"
-        if [[ -z "$PR_NUMBER" ]]; then
-          EVENT="${{ github.event_name }}"
-          if [[ "$EVENT" == "pull_request" || "$EVENT" == "pull_request_target" ]]; then
-            PR_NUMBER="${{ github.event.pull_request.number }}"
-          elif [[ "$EVENT" == "issue_comment" ]]; then
-            PR_NUMBER="${{ github.event.issue.number }}"
-          else
-            PR_NUMBER=$(gh pr view --json number -q '.number' 2>/dev/null || echo "")
-          fi
-        fi
-        if [[ -z "$PR_NUMBER" ]]; then
-          echo "::error::Could not determine PR number"
-          exit 1
-        fi
-        echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-      # yamllint enable rule:line-length
+        INPUT_PR_NUMBER: ${{ inputs['pr-number'] }}
+        EVENT_NAME: ${{ github.event_name }}
+        EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+        EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
 
     - name: Post or update comment
       id: post
       shell: bash
       env:
+        STEP: post
         GH_TOKEN: ${{ inputs.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         COMMENT_BODY: ${{ inputs.body }}
@@ -81,8 +68,7 @@ runs:
         MARKER: ${{ inputs.marker }}
         MODE: ${{ inputs.mode }}
         DELETE_ON_EMPTY: ${{ inputs['delete-on-empty'] }}
-      run: >-
-        ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
 
 branding:
   icon: 'message-square'

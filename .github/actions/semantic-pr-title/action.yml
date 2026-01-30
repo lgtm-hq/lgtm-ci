@@ -60,7 +60,6 @@ runs:
         REQUIRE_SCOPE: ${{ inputs['require-scope'] }}
         MAX_LENGTH: ${{ inputs['max-length'] }}
         FAIL_ON_INVALID: ${{ inputs['fail-on-invalid'] }}
-      # yamllint disable-line rule:line-length
       run: ${{ github.action_path }}/../../../scripts/ci/actions/semantic-pr-title.sh
 
 branding:

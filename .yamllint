@@ -1,0 +1,19 @@
+---
+# yamllint configuration for lgtm-ci
+# SHA pins and cache keys require lines > 80 chars
+
+extends: default
+
+rules:
+  # SHA-pinned actions and cache keys exceed 80 chars legitimately
+  line-length:
+    max: 120
+    level: warning
+  # Action files don't need --- at start
+  document-start: disable
+  # Allow standard boolean values
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+  # Allow tighter comment spacing for inline version comments
+  comments:
+    min-spaces-from-content: 1
