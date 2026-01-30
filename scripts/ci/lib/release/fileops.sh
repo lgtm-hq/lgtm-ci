@@ -38,14 +38,14 @@ EOF
 		local prev_trap
 		prev_trap=$(trap -p EXIT | sed "s/trap -- '\\(.*\\)' EXIT/\\1/" || true)
 
-		cleanup_temp() {
+		__fileops_cleanup_temp() {
 			rm -f "$temp_file"
 			# Restore previous trap if it existed
 			if [[ -n "$prev_trap" ]]; then
 				eval "$prev_trap"
 			fi
 		}
-		trap cleanup_temp EXIT
+		trap __fileops_cleanup_temp EXIT
 
 		# Find insertion point (after header section)
 		# Handle case where file starts with version header (## [x.y.z])
@@ -101,6 +101,9 @@ EOF
 			# shellcheck disable=SC2064 # Intentional: restore saved trap content
 			trap "$prev_trap" EXIT
 		fi
+
+		# Clean up the helper function from global scope
+		unset -f __fileops_cleanup_temp
 	fi
 }
 

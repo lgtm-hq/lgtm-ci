@@ -194,9 +194,10 @@ compare_versions() {
 		local p1="${v1_parts[$i]:-0}"
 		local p2="${v2_parts[$i]:-0}"
 
-		if ((p1 > p2)); then
+		# Force base-10 to avoid octal parsing of leading zeros
+		if ((10#$p1 > 10#$p2)); then
 			return 1
-		elif ((p1 < p2)); then
+		elif ((10#$p1 < 10#$p2)); then
 			return 2
 		fi
 	done
