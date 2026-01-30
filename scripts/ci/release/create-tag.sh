@@ -19,10 +19,10 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
 source "$LIB_DIR/log.sh"
-# shellcheck source=../lib/github.sh
-source "$LIB_DIR/github.sh"
 # shellcheck source=../lib/release.sh
 source "$LIB_DIR/release.sh"
+# shellcheck source=../lib/github/output.sh
+source "$LIB_DIR/github/output.sh"
 
 : "${VERSION:?VERSION is required}"
 : "${TAG_PREFIX:=v}"
@@ -37,7 +37,7 @@ TAG_NAME="${TAG_PREFIX}${CLEAN_VERSION}"
 log_info "Creating tag: $TAG_NAME"
 
 # Check if tag already exists
-if git rev-parse --verify --quiet "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
+if git tag -l "$TAG_NAME" | grep -q "^${TAG_NAME}$"; then
 	log_error "Tag $TAG_NAME already exists"
 	exit 1
 fi
@@ -75,10 +75,14 @@ if [[ "$PUSH" == "true" ]]; then
 fi
 
 # Output for GitHub Actions
-set_github_output "tag-name" "$TAG_NAME"
-set_github_output "tag-sha" "$TAG_SHA"
-set_github_output "commit-sha" "$COMMIT_SHA"
-set_github_output "version" "$CLEAN_VERSION"
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+	{
+		echo "tag-name=$TAG_NAME"
+		echo "tag-sha=$TAG_SHA"
+		echo "commit-sha=$COMMIT_SHA"
+		echo "version=$CLEAN_VERSION"
+	} >>"$GITHUB_OUTPUT"
+fi
 
 echo "tag-name=$TAG_NAME"
 echo "tag-sha=$TAG_SHA"

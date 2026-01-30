@@ -8,31 +8,13 @@
 [[ -n "${_RELEASE_VERSION_LOADED:-}" ]] && return 0
 readonly _RELEASE_VERSION_LOADED=1
 
-# Validate semver format (SemVer 2.0.0 compliant with optional v prefix)
+# Validate semver format (X.Y.Z with optional v prefix)
 # Usage: validate_semver "1.2.3" || die "Invalid version"
-# Rules enforced:
-#   - No leading zeros in numeric identifiers (except "0" itself)
-#   - Prerelease identifiers must be non-empty, dot-separated
-#   - Prerelease numeric identifiers also disallow leading zeros
-#   - Build metadata is optional (+identifier.identifier...)
 validate_semver() {
 	local version="${1:-}"
 	# Strip optional v prefix
 	version="${version#v}"
-
-	# SemVer 2.0.0 compliant regex components:
-	# - Numeric: 0 or non-zero digit followed by digits
-	# - Prerelease id: numeric OR alphanumeric (must have non-digit)
-	# - Build id: alphanumeric and hyphens
-	local num='(0|[1-9][0-9]*)'
-	local prerelease_id='(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][a-zA-Z0-9-]*)'
-	local build_id='[a-zA-Z0-9-]+'
-
-	local pattern="^${num}\\.${num}\\.${num}"
-	pattern+="(-${prerelease_id}(\\.${prerelease_id})*)?"
-	pattern+="(\\+${build_id}(\\.${build_id})*)?$"
-
-	[[ "$version" =~ $pattern ]]
+	[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]
 }
 
 # Parse version into components
@@ -54,6 +36,8 @@ parse_version() {
 	local rest="${core#*.}"
 	MINOR="${rest%%.*}"
 	PATCH="${rest#*.}"
+
+	export MAJOR MINOR PATCH
 }
 
 # Bump version based on bump type
@@ -69,17 +53,16 @@ bump_version() {
 
 	case "$bump_type" in
 	major)
-		# Force base-10 to avoid octal parsing of leading zeros
-		MAJOR=$((10#$MAJOR + 1))
+		MAJOR=$((MAJOR + 1))
 		MINOR=0
 		PATCH=0
 		;;
 	minor)
-		MINOR=$((10#$MINOR + 1))
+		MINOR=$((MINOR + 1))
 		PATCH=0
 		;;
 	patch)
-		PATCH=$((10#$PATCH + 1))
+		PATCH=$((PATCH + 1))
 		;;
 	*)
 		echo "Invalid bump type: $bump_type (expected: major, minor, patch)" >&2
@@ -90,91 +73,7 @@ bump_version() {
 	echo "${MAJOR}.${MINOR}.${PATCH}"
 }
 
-# Compare two prerelease identifiers according to SemVer
-# Returns: 0 if equal, 1 if id1 > id2, 2 if id1 < id2
-_compare_prerelease_id() {
-	local id1="${1:-}"
-	local id2="${2:-}"
-
-	# Both numeric - compare numerically (force base-10 to avoid octal parsing)
-	if [[ "$id1" =~ ^[0-9]+$ ]] && [[ "$id2" =~ ^[0-9]+$ ]]; then
-		if ((10#$id1 > 10#$id2)); then
-			return 1
-		elif ((10#$id1 < 10#$id2)); then
-			return 2
-		fi
-		return 0
-	fi
-
-	# Numeric has lower precedence than non-numeric
-	if [[ "$id1" =~ ^[0-9]+$ ]]; then
-		return 2
-	fi
-	if [[ "$id2" =~ ^[0-9]+$ ]]; then
-		return 1
-	fi
-
-	# Both non-numeric - compare lexically
-	if [[ "$id1" > "$id2" ]]; then
-		return 1
-	elif [[ "$id1" < "$id2" ]]; then
-		return 2
-	fi
-	return 0
-}
-
-# Compare two prerelease strings according to SemVer
-# Empty prerelease (release version) > any prerelease
-# Returns: 0 if equal, 1 if pre1 > pre2, 2 if pre1 < pre2
-_compare_prerelease() {
-	local pre1="${1:-}"
-	local pre2="${2:-}"
-
-	# Both empty - equal
-	if [[ -z "$pre1" ]] && [[ -z "$pre2" ]]; then
-		return 0
-	fi
-
-	# Empty prerelease (release) > any prerelease
-	if [[ -z "$pre1" ]]; then
-		return 1
-	fi
-	if [[ -z "$pre2" ]]; then
-		return 2
-	fi
-
-	# Split by dots and compare identifiers
-	local IFS='.'
-	read -ra ids1 <<<"$pre1"
-	read -ra ids2 <<<"$pre2"
-
-	local len1=${#ids1[@]}
-	local len2=${#ids2[@]}
-	local max_len=$((len1 > len2 ? len1 : len2))
-
-	for ((i = 0; i < max_len; i++)); do
-		local id1="${ids1[$i]:-}"
-		local id2="${ids2[$i]:-}"
-
-		# Fewer identifiers = lower precedence
-		if [[ -z "$id1" ]]; then
-			return 2
-		fi
-		if [[ -z "$id2" ]]; then
-			return 1
-		fi
-
-		_compare_prerelease_id "$id1" "$id2"
-		local result=$?
-		if ((result != 0)); then
-			return $result
-		fi
-	done
-
-	return 0
-}
-
-# Compare two versions (SemVer-aware including prerelease)
+# Compare two versions
 # Returns: 0 if equal, 1 if v1 > v2, 2 if v1 < v2
 # Usage: compare_versions "1.2.3" "1.2.4" -> returns 2
 compare_versions() {
@@ -189,22 +88,6 @@ compare_versions() {
 		return 0
 	fi
 
-	# Strip build metadata (ignored in comparison per SemVer)
-	v1="${v1%%+*}"
-	v2="${v2%%+*}"
-
-	# Extract prerelease parts
-	local pre1="" pre2=""
-	if [[ "$v1" == *-* ]]; then
-		pre1="${v1#*-}"
-		v1="${v1%%-*}"
-	fi
-	if [[ "$v2" == *-* ]]; then
-		pre2="${v2#*-}"
-		v2="${v2%%-*}"
-	fi
-
-	# Compare major.minor.patch
 	local IFS='.'
 	read -ra v1_parts <<<"$v1"
 	read -ra v2_parts <<<"$v2"
@@ -213,16 +96,20 @@ compare_versions() {
 		local p1="${v1_parts[$i]:-0}"
 		local p2="${v2_parts[$i]:-0}"
 
-		# Force base-10 to avoid octal parsing of leading zeros
-		if ((10#$p1 > 10#$p2)); then
+		# Strip any prerelease/build metadata from patch
+		p1="${p1%%-*}"
+		p1="${p1%%+*}"
+		p2="${p2%%-*}"
+		p2="${p2%%+*}"
+
+		if ((p1 > p2)); then
 			return 1
-		elif ((10#$p1 < 10#$p2)); then
+		elif ((p1 < p2)); then
 			return 2
 		fi
 	done
 
-	# Major.minor.patch are equal - compare prerelease
-	_compare_prerelease "$pre1" "$pre2"
+	return 0
 }
 
 # Get the higher of two bump types
@@ -273,4 +160,52 @@ clamp_bump() {
 		echo "$bump"
 		;;
 	esac
+}
+
+# Extract version from pyproject.toml
+# Usage: extract_version_pyproject "pyproject.toml"
+extract_version_pyproject() {
+	local file="${1:-pyproject.toml}"
+
+	if [[ ! -f "$file" ]]; then
+		return 1
+	fi
+
+	grep -E '^version\s*=' "$file" | head -1 | sed -E 's/.*=\s*["\x27]([^"\x27]+)["\x27].*/\1/'
+}
+
+# Extract version from package.json
+# Usage: extract_version_package_json "package.json"
+extract_version_package_json() {
+	local file="${1:-package.json}"
+
+	if [[ ! -f "$file" ]]; then
+		return 1
+	fi
+
+	if command -v jq &>/dev/null; then
+		jq -r '.version // empty' "$file"
+	else
+		grep -E '"version"\s*:' "$file" | head -1 | sed -E 's/.*:\s*"([^"]+)".*/\1/'
+	fi
+}
+
+# Extract version from Cargo.toml
+# Usage: extract_version_cargo "Cargo.toml"
+extract_version_cargo() {
+	local file="${1:-Cargo.toml}"
+
+	if [[ ! -f "$file" ]]; then
+		return 1
+	fi
+
+	grep -E '^version\s*=' "$file" | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/'
+}
+
+# Extract version from git tag (latest)
+# Usage: extract_version_git_tag "v*"
+extract_version_git_tag() {
+	local pattern="${1:-v*}"
+
+	git describe --tags --abbrev=0 --match "$pattern" 2>/dev/null | sed 's/^v//'
 }

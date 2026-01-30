@@ -45,7 +45,7 @@ fi
 # Get repo from git remote if not specified
 if [[ -z "$REPO" ]]; then
 	REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
-	if [[ "$REMOTE_URL" =~ github\.com[:/]([^/]+/[^/.]+) ]]; then
+	if [[ "$REMOTE_URL" =~ github\.com[:/]([^/]+/[^/]+) ]]; then
 		REPO="${BASH_REMATCH[1]}"
 		REPO="${REPO%.git}"
 	else

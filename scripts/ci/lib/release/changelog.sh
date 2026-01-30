@@ -10,8 +10,8 @@ readonly _RELEASE_CHANGELOG_LOADED=1
 
 # Source dependencies
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-# shellcheck source=./analyze.sh
-source "$SCRIPT_DIR/analyze.sh"
+# shellcheck source=./conventional.sh
+source "$SCRIPT_DIR/conventional.sh"
 
 # Format a single commit entry for changelog
 # Usage: format_commit_entry "abc1234" "feat" "auth" "add login" "full"
@@ -50,7 +50,6 @@ format_commit_entry() {
 
 # Generate changelog section from commits
 # Usage: generate_changelog_section "Features" "feat_commits_data"
-# Note: commits_data uses ASCII unit separator (0x1F) between fields
 generate_changelog_section() {
 	local title="${1:-}"
 	local commits_data="${2:-}"
@@ -61,8 +60,7 @@ generate_changelog_section() {
 	local has_content=false
 	local output=""
 
-	# Use unit separator (from analyze.sh) to safely handle | in descriptions
-	while IFS=$'\x1F' read -r sha type scope description; do
+	while IFS='|' read -r sha type scope description; do
 		[[ -z "$sha" ]] && continue
 		has_content=true
 		output+="$(format_commit_entry "$sha" "$type" "$scope" "$description" "$format")"$'\n'
@@ -156,20 +154,12 @@ generate_release_notes() {
 	local to_ref="${2:-HEAD}"
 	local version="${3:-}"
 
-	# Counts - parse key=value output safely
+	# Counts
 	local counts
 	counts=$(count_commits_by_type "$from_ref" "$to_ref")
 
-	local breaking=0 features=0 fixes=0 docs=0 other=0
-	while IFS='=' read -r key value; do
-		case "$key" in
-		breaking) breaking="$value" ;;
-		features) features="$value" ;;
-		fixes) fixes="$value" ;;
-		docs) docs="$value" ;;
-		other) other="$value" ;;
-		esac
-	done <<<"$counts"
+	local breaking features fixes docs other
+	eval "$counts"
 
 	# Summary line
 	local summary_parts=()
@@ -188,4 +178,73 @@ generate_release_notes() {
 
 	# Generate changelog content
 	generate_changelog "$from_ref" "$to_ref" "$version" "simple"
+}
+
+# Update CHANGELOG.md file
+# Usage: update_changelog_file "CHANGELOG.md" "new_content" "1.1.0"
+update_changelog_file() {
+	local file="${1:-CHANGELOG.md}"
+	local new_content="${2:-}"
+	local version="${3:-}"
+
+	if [[ ! -f "$file" ]]; then
+		# Create new changelog
+		cat >"$file" <<EOF
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+${new_content}
+EOF
+	else
+		# Insert after header
+		local temp_file
+		temp_file=$(mktemp)
+
+		# Find insertion point (after header section)
+		local header_end=0
+		local line_num=0
+
+		while IFS= read -r line; do
+			((line_num++))
+			if [[ "$line" =~ ^##[[:space:]] ]] && ((line_num > 1)); then
+				header_end=$((line_num - 1))
+				break
+			fi
+		done <"$file"
+
+		if ((header_end == 0)); then
+			# No existing version sections, append after file
+			cat "$file" >"$temp_file"
+			echo "" >>"$temp_file"
+			echo "$new_content" >>"$temp_file"
+		else
+			# Insert before first version section
+			{
+				head -n "$header_end" "$file"
+				echo ""
+				echo "$new_content"
+				tail -n +"$((header_end + 1))" "$file"
+			} >"$temp_file"
+		fi
+
+		mv "$temp_file" "$file"
+	fi
+}
+
+# Generate compare URL for GitHub
+# Usage: generate_compare_url "owner/repo" "v1.0.0" "v1.1.0"
+generate_compare_url() {
+	local repo="${1:-}"
+	local from_tag="${2:-}"
+	local to_tag="${3:-}"
+
+	if [[ -z "$repo" ]] || [[ -z "$from_tag" ]] || [[ -z "$to_tag" ]]; then
+		return 1
+	fi
+
+	echo "https://github.com/${repo}/compare/${from_tag}...${to_tag}"
 }

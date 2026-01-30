@@ -12,24 +12,15 @@ readonly _RELEASE_LOADED=1
 # Get the directory of this script
 RELEASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
-# Source all release sub-libraries in dependency order
+# Source all release sub-libraries
 # shellcheck source=./release/version.sh
 source "$RELEASE_LIB_DIR/release/version.sh"
-
-# shellcheck source=./release/extract.sh
-source "$RELEASE_LIB_DIR/release/extract.sh"
 
 # shellcheck source=./release/conventional.sh
 source "$RELEASE_LIB_DIR/release/conventional.sh"
 
-# shellcheck source=./release/analyze.sh
-source "$RELEASE_LIB_DIR/release/analyze.sh"
-
 # shellcheck source=./release/changelog.sh
 source "$RELEASE_LIB_DIR/release/changelog.sh"
-
-# shellcheck source=./release/fileops.sh
-source "$RELEASE_LIB_DIR/release/fileops.sh"
 
 # ============================================================================
 # High-level release functions
