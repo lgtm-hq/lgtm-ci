@@ -1,0 +1,140 @@
+---
+name: Reusable Quality Workflow
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version for linting tools'
+        required: false
+        type: string
+        default: '3.11'
+      node-version:
+        description: 'Node.js version for JS/TS linting'
+        required: false
+        type: string
+        default: '20'
+      lintro-tools:
+        description: 'Comma-separated list of lintro tools to run (empty = all)'
+        required: false
+        type: string
+        default: ''
+      fail-on-error:
+        description: 'Fail workflow if linting errors found'
+        required: false
+        type: boolean
+        default: true
+      upload-report:
+        description: 'Upload linting report as artifact'
+        required: false
+        type: boolean
+        default: true
+      working-directory:
+        description: 'Working directory for linting'
+        required: false
+        type: string
+        default: '.'
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python
+        with:
+          python-version: ${{ inputs.python-version }}
+          cache: 'true'
+          install-dependencies: 'true'
+
+      - name: Setup Node.js
+        # yamllint disable-line rule:line-length
+        if:
+          contains(inputs.lintro-tools, 'prettier') || contains(inputs.lintro-tools,
+          'biome') || inputs.lintro-tools == ''
+        uses: ./.github/actions/setup-node
+        with:
+          node-version: ${{ inputs.node-version }}
+          cache: 'true'
+
+      - name: Install linting tools
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          # Install actionlint
+          if command -v go &>/dev/null; then
+            go install github.com/rhysd/actionlint/cmd/actionlint@latest
+          else
+            # Download pre-built binary
+            curl -fsSL \
+              https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+              | bash -s -- -b ~/.local/bin
+          fi
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run lintro quality checks
+        id: lintro
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          LINTRO_TOOLS: ${{ inputs.lintro-tools }}
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+        run: |
+          set +e
+
+          LINTRO_ARGS=("chk")
+
+          if [[ -n "$LINTRO_TOOLS" ]]; then
+            LINTRO_ARGS+=("--tools" "$LINTRO_TOOLS")
+          fi
+
+          echo "::group::Running lintro ${LINTRO_ARGS[*]}"
+          uv run lintro "${LINTRO_ARGS[@]}"
+          EXIT_CODE=$?
+          echo "::endgroup::"
+
+          echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
+
+          if [[ $EXIT_CODE -ne 0 && "$FAIL_ON_ERROR" == "true" ]]; then
+            echo "::error::Linting failed with exit code $EXIT_CODE"
+            exit $EXIT_CODE
+          fi
+
+      - name: Run actionlint
+        if: inputs.lintro-tools == '' || contains(inputs.lintro-tools, 'actionlint')
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          echo "::group::Running actionlint"
+          if command -v actionlint &>/dev/null; then
+            actionlint -color
+          else
+            echo "::warning::actionlint not available"
+          fi
+          echo "::endgroup::"
+
+      - name: Upload linting report
+        if: inputs.upload-report && always()
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linting-report
+          path: |
+            ${{ inputs.working-directory }}/.lintro/
+          retention-days: 7
+          if-no-files-found: ignore

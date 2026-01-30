@@ -1,0 +1,84 @@
+---
+name: 'Run Quality Checks'
+description: 'Run lintro quality checks with configurable tools'
+author: 'lgtm-hq'
+
+inputs:
+  tools:
+    description: 'Comma-separated list of lintro tools to run (empty = all)'
+    required: false
+    default: ''
+  mode:
+    description: 'Mode: check (lint only) or format (auto-fix)'
+    required: false
+    default: 'check'
+  fail-on-error:
+    description: 'Fail if linting errors found'
+    required: false
+    default: 'true'
+  working-directory:
+    description: 'Working directory for linting'
+    required: false
+    default: '.'
+
+outputs:
+  exit-code:
+    description: 'Exit code from lintro'
+    value: ${{ steps.lint.outputs.exit-code }}
+  status:
+    description: 'Status: passed or failed'
+    value: ${{ steps.lint.outputs.status }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Run quality checks
+      id: lint
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: ${{ inputs.mode }}
+        TOOLS: ${{ inputs.tools }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: |
+        set +e
+
+        LINTRO_ARGS=("$STEP")
+
+        if [[ -n "$TOOLS" ]]; then
+          LINTRO_ARGS+=("--tools" "$TOOLS")
+        fi
+
+        echo "::group::Running lintro ${LINTRO_ARGS[*]}"
+        uv run lintro "${LINTRO_ARGS[@]}"
+        EXIT_CODE=$?
+        echo "::endgroup::"
+
+        {
+          echo "exit-code=$EXIT_CODE"
+          if [[ $EXIT_CODE -eq 0 ]]; then
+            echo "status=passed"
+          else
+            echo "status=failed"
+          fi
+        } >> "$GITHUB_OUTPUT"
+
+        if [[ $EXIT_CODE -ne 0 && "$FAIL_ON_ERROR" == "true" ]]; then
+          echo "::error::Quality checks failed with exit code $EXIT_CODE"
+          exit $EXIT_CODE
+        fi
+
+    - name: Run actionlint
+      if: inputs.tools == '' || contains(inputs.tools, 'actionlint')
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        if command -v actionlint &>/dev/null; then
+          echo "::group::Running actionlint"
+          actionlint -color || true
+          echo "::endgroup::"
+        fi
+
+branding:
+  icon: 'check-circle'
+  color: 'green'

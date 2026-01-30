@@ -329,6 +329,34 @@ Generate formatted PR comment from code coverage results.
 
 ---
 
+## Quality Actions
+
+### run-quality
+
+Run lintro quality checks with optional actionlint validation.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-quality@main
+  with:
+    tools: '' # optional, comma-separated list (empty = all)
+    mode: 'check' # 'check' or 'format'
+    fail-on-error: 'true' # optional
+```
+
+**Features:**
+
+- Runs all configured lintro tools (shellcheck, shfmt, prettier, yamllint, etc.)
+- Optional actionlint validation for GitHub Actions
+- Support for check mode (lint only) or format mode (auto-fix)
+- Configurable tool selection
+
+**Outputs:**
+
+- `exit-code` - Exit code from lintro
+- `status` - "passed" or "failed"
+
+---
+
 ## Usage Example
 
 ```yaml

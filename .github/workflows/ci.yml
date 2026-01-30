@@ -1,0 +1,92 @@
+---
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  quality:
+    name: Quality Checks
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: ./.github/actions/setup-python
+        with:
+          python-version: '3.11'
+          cache: 'true'
+          install-dependencies: 'true'
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node
+        with:
+          node-version: '20'
+          cache: 'true'
+
+      - name: Install actionlint
+        shell: bash
+        run: |
+          curl -fsSL \
+            https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+            | bash -s -- -b ~/.local/bin
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Run quality checks
+        uses: ./.github/actions/run-quality
+        with:
+          fail-on-error: 'true'
+
+      - name: Upload linting report
+        if: always()
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: linting-report
+          path: .lintro/
+          retention-days: 7
+          if-no-files-found: ignore
+
+  validate-actions:
+    name: Validate Actions
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Install actionlint
+        shell: bash
+        run: |
+          curl -fsSL \
+            https://raw.githubusercontent.com/rhysd/actionlint/main/scripts/download-actionlint.bash \
+            | bash -s -- -b ~/.local/bin
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Validate GitHub Actions
+        shell: bash
+        run: actionlint -color
