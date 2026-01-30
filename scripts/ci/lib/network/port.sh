@@ -33,6 +33,13 @@ command_exists() { command -v "$1" >/dev/null 2>&1; }
 # 0.0.0.0 or specific interfaces may be missed when lsof is unavailable.
 port_available() {
   local port="$1"
+
+  # Validate port is a valid integer in range 1-65535
+  if [[ -z "$port" || ! "$port" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
+    log_warn "Invalid port: $port"
+    return 1
+  fi
+
   if command_exists lsof; then
     ! lsof -Pi :"$port" -sTCP:LISTEN -t >/dev/null 2>&1
   elif command_exists nc; then
