@@ -79,15 +79,13 @@ install)
 	;;
 
 check)
-	: "${PATHS:=.github/}"
+	: "${PATHS:=}"
 	: "${FORMAT:=default}"
 
 	if ! command -v actionlint &>/dev/null; then
 		log_error "actionlint not found. Run with STEP=install first."
 		exit 1
 	fi
-
-	log_info "Running actionlint on: $PATHS"
 
 	ACTIONLINT_ARGS=("-color")
 
@@ -106,8 +104,15 @@ check)
 
 	# Run actionlint (disable errexit to capture exit code)
 	set +e
-	# shellcheck disable=SC2086 # Word splitting intended for PATHS
-	actionlint "${ACTIONLINT_ARGS[@]}" $PATHS
+	if [[ -z "$PATHS" ]]; then
+		# No paths specified - actionlint defaults to .github/workflows/
+		log_info "Running actionlint on: .github/workflows/"
+		actionlint "${ACTIONLINT_ARGS[@]}"
+	else
+		log_info "Running actionlint on: $PATHS"
+		# shellcheck disable=SC2086 # Word splitting intended for PATHS
+		actionlint "${ACTIONLINT_ARGS[@]}" $PATHS
+	fi
 	EXIT_CODE=$?
 	set -e
 
