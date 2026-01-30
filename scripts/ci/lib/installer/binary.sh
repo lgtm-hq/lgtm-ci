@@ -18,7 +18,11 @@ if [[ -f "$_LGTM_CI_INSTALLER_LIB_DIR/log.sh" ]]; then
 	# shellcheck source=../log.sh
 	source "$_LGTM_CI_INSTALLER_LIB_DIR/log.sh"
 else
-	log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
+	log_verbose() {
+		local verbose="${VERBOSE:-}"
+		verbose="${verbose,,}" # lowercase for case-insensitive comparison
+		[[ "$verbose" == "1" || "$verbose" == "true" || "$verbose" == "yes" ]] && echo "[VERBOSE] $*" >&2 || true
+	}
 	log_warn() { echo "[WARN] $*" >&2; }
 	log_error() { echo "[ERROR] $*" >&2; }
 	log_success() { echo "[SUCCESS] $*" >&2; }

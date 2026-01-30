@@ -41,11 +41,12 @@ get_github_pages_url() {
 	repo_name_lower=$(echo "$repo_name" | tr '[:upper:]' '[:lower:]')
 
 	# Handle user pages repos (repo name equals owner.github.io)
+	# Use lowercase repo name in URL path for consistency with subdomain
 	local base_url
 	if [[ "$repo_name_lower" == "${repo_owner_lower}.github.io" ]]; then
 		base_url="https://${repo_owner_lower}.github.io"
 	else
-		base_url="https://${repo_owner_lower}.github.io/${repo_name}"
+		base_url="https://${repo_owner_lower}.github.io/${repo_name_lower}"
 	fi
 
 	if [[ -n "$path" ]]; then
@@ -62,11 +63,18 @@ get_github_pages_url() {
 # Get score emoji based on threshold
 # Usage: score_emoji 85 80 -> "🟢" (score meets threshold)
 # Returns: 🟢 if >= threshold, 🟡 if within 10 points, 🔴 otherwise
-# Note: Handles fractional thresholds by truncating to integers
+# Note: Handles fractional values by truncating to integers
 score_emoji() {
 	local score="$1"
 	local threshold="${2:-80}"
-	# Truncate to integers for bash comparison (handles fractional thresholds)
+
+	# Validate score is non-empty and numeric
+	if [[ -z "$score" ]] || ! [[ "$score" =~ ^-?[0-9]+\.?[0-9]*$ ]]; then
+		echo "⚪"
+		return
+	fi
+
+	# Truncate to integers for bash comparison (handles fractional values)
 	score="${score%.*}"
 	threshold="${threshold%.*}"
 	local warn=$((threshold - 10))
@@ -83,17 +91,30 @@ score_emoji() {
 
 # Format a numeric score with color-coded emoji indicator
 # Usage: format_score_with_color 95 -> "🟢 95"
-# Usage: format_score_with_color 75 80 -> "🔴 75" (custom threshold)
-# Thresholds: 🟢 >= 90, 🟡 >= threshold (default 80), 🔴 < threshold
+# Usage: format_score_with_color 75 80 -> "🟡 75" (within 10 of threshold)
+# Thresholds: 🟢 >= threshold, 🟡 >= threshold-10, 🔴 < threshold-10
+# Note: Uses same dynamic threshold semantics as score_emoji for consistency
 format_score_with_color() {
 	local score="$1"
 	local threshold="${2:-80}"
 
 	if [[ "$score" == "N/A" || -z "$score" ]]; then
 		echo "⚪ N/A"
-	elif [[ "$score" -ge 90 ]] 2>/dev/null; then
+		return
+	fi
+
+	# Validate score is numeric
+	if ! [[ "$score" =~ ^-?[0-9]+$ ]]; then
+		echo "⚪ N/A"
+		return
+	fi
+
+	local warn=$((threshold - 10))
+	((warn < 0)) && warn=0
+
+	if [[ "$score" -ge "$threshold" ]]; then
 		echo "🟢 $score"
-	elif [[ "$score" -ge "$threshold" ]] 2>/dev/null; then
+	elif [[ "$score" -ge "$warn" ]]; then
 		echo "🟡 $score"
 	else
 		echo "🔴 $score"

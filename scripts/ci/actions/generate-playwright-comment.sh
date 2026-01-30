@@ -113,9 +113,9 @@ ${STATUS_EMOJI} **${STATUS_TEXT}**
 | ⏱️ Duration | ${DURATION_STR} |
 | 📊 Pass Rate | ${PASS_RATE}% |"
 
-# Add failed tests list
+# Add failed tests list (include timedOut and interrupted to match FAILED count)
 if [[ "$SHOW_FAILED" == "true" && $FAILED -gt 0 ]]; then
-	FAILED_TESTS=$(jq -r "[.. | .tests? // [] | .[] | select(.status == \"failed\") | .title] | .[0:${MAX_FAILED}] | .[]" "$RESULTS_PATH" 2>/dev/null || echo "")
+	FAILED_TESTS=$(jq -r "[.. | .tests? // [] | .[] | select(.status == \"failed\" or .status == \"timedOut\" or .status == \"interrupted\") | .title] | .[0:${MAX_FAILED}] | .[]" "$RESULTS_PATH" 2>/dev/null || echo "")
 	if [[ -n "$FAILED_TESTS" ]]; then
 		BODY="${BODY}
 
