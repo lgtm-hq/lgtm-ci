@@ -1,0 +1,69 @@
+---
+# lgtm-ci Lintro Configuration
+# See: https://github.com/lgtm-hq/py-lintro
+
+# Execution settings
+execution:
+  enabled_tools: [] # empty = all tools
+  tool_order: 'priority'
+  fail_fast: false
+  parallel: true
+  max_workers: 4
+
+# Cross-cutting enforcement settings
+enforce:
+  line_length: 88
+
+# Default configurations for tools without native config files
+defaults:
+  prettier:
+    semi: false
+    singleQuote: true
+    tabWidth: 2
+    printWidth: 100
+    proseWrap: 'always'
+
+  yamllint:
+    extends: 'default'
+    rules:
+      line-length:
+        max: 120
+        level: warning
+      document-start: disable
+      truthy:
+        allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+      comments:
+        min-spaces-from-content: 1
+
+  hadolint:
+    ignored: []
+    trusted_registries:
+      - docker.io
+      - ghcr.io
+
+# All tools enabled by default
+tools:
+  actionlint:
+    enabled: true
+  hadolint:
+    enabled: true
+  yamllint:
+    enabled: true
+  markdownlint:
+    enabled: true
+  prettier:
+    enabled: true
+  shellcheck:
+    enabled: true
+  shfmt:
+    enabled: true
+  ruff:
+    enabled: true
+  black:
+    enabled: true
+  bandit:
+    enabled: true
+  mypy:
+    enabled: true
+  pytest:
+    enabled: true

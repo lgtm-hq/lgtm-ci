@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Purpose: Git helper utilities for CI scripts
+#
+# Usage:
+#   source "$(dirname "${BASH_SOURCE[0]}")/git.sh"
+#   branch=$(get_current_branch)
+
+# Prevent multiple sourcing
+[[ -n "${_LGTM_CI_GIT_LOADED:-}" ]] && return 0
+readonly _LGTM_CI_GIT_LOADED=1
+
+# =============================================================================
+# Git helper functions
+# =============================================================================
+
+# Get the root directory of the git repository
+get_git_root() {
+  git rev-parse --show-toplevel 2>/dev/null
+}
+
+# Get the current branch name
+get_current_branch() {
+  git rev-parse --abbrev-ref HEAD 2>/dev/null
+}
+
+# Get the full commit SHA
+get_commit_sha() {
+  git rev-parse HEAD 2>/dev/null
+}
+
+# Get the short commit SHA (7 characters)
+get_short_sha() {
+  git rev-parse --short HEAD 2>/dev/null
+}
+
+# Check if we're in a git repository
+is_git_repo() {
+  git rev-parse --git-dir >/dev/null 2>&1
+}
+
+# Check if the working directory is clean
+is_git_clean() {
+  [[ -z "$(git status --porcelain 2>/dev/null)" ]]
+}
+
+# Get the remote URL for origin
+get_git_remote_url() {
+  git remote get-url origin 2>/dev/null
+}
+
+# Get the latest tag matching a pattern
+get_latest_tag() {
+  local pattern="${1:-v*}"
+  git describe --tags --match "$pattern" --abbrev=0 2>/dev/null
+}
+
+# Get list of tags matching a pattern
+get_tags() {
+  local pattern="${1:-v*}"
+  git tag -l "$pattern" --sort=-v:refname 2>/dev/null
+}
+
+# Check if a tag exists
+tag_exists() {
+  local tag="$1"
+  git rev-parse "refs/tags/$tag" >/dev/null 2>&1
+}
+
+# =============================================================================
+# Export functions
+# =============================================================================
+export -f get_git_root get_current_branch get_commit_sha get_short_sha
+export -f is_git_repo is_git_clean get_git_remote_url
+export -f get_latest_tag get_tags tag_exists

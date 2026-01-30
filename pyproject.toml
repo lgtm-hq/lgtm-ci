@@ -1,0 +1,101 @@
+[project]
+name = "lgtm-ci"
+version = "0.1.0"
+description = "Reusable CI/CD components for GitHub Actions - composite actions, reusable workflows, and shell utilities"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "LGTM HQ", email = "lgtm-hq@users.noreply.github.com" }]
+keywords = ["ci", "cd", "github-actions", "automation", "devops"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Build Tools",
+    "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://github.com/lgtm-hq/lgtm-ci"
+Repository = "https://github.com/lgtm-hq/lgtm-ci"
+Issues = "https://github.com/lgtm-hq/lgtm-ci/issues"
+
+[project.optional-dependencies]
+dev = [
+    "lintro>=0.38.0",
+    "pytest>=8.0.0",
+    "assertpy>=1.1",
+    "ruff>=0.14.0",
+    "black>=25.0.0",
+    "tomli-w>=1.0.0",
+]
+
+[tool.lintro]
+config_file = ".lintro-config.yaml"
+
+[tool.ruff]
+line-length = 88
+target-version = "py311"
+unsafe-fixes = false
+exclude = [
+    ".venv",
+    "venv",
+    "env",
+    "build",
+    "dist",
+    "__pycache__",
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+skip-magic-trailing-comma = false
+
+[tool.ruff.lint]
+select = [
+    "E",
+    "F",
+    "W",
+    "I",
+    "B",
+    "C4",
+    "SIM",
+]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.black]
+line-length = 88
+target-version = [
+    "py311",
+    "py312",
+    "py313",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+
+[tool.bandit]
+exclude_dirs = [".venv", "venv", "env", "build", "dist", "tests"]
+skips = [
+    "B101",  # assert_used - assertions expected in tests
+    "B404",  # import_subprocess - needed to test shell scripts
+    "B603",  # subprocess_without_shell_equals_true - testing controlled input
+    "B607",  # start_process_with_partial_path - using standard executables
+    "B108",  # hardcoded_tmp_directory - mocking GitHub env vars
+]
+
+[dependency-groups]
+dev = [
+    "pytest-timeout>=2.4.0",
+    "pytest-xdist>=3.8.0",
+]

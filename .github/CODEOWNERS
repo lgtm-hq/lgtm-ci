@@ -1,0 +1,11 @@
+# lgtm-ci Code Owners
+# These owners will be requested for review on all PRs
+
+# Default owners for everything
+* @lgtm-hq/maintainers
+
+# Shell scripts and CI utilities
+/scripts/ @lgtm-hq/maintainers
+
+# GitHub Actions and workflows
+/.github/ @lgtm-hq/maintainers
