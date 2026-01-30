@@ -36,16 +36,16 @@ on:
         default: false
     outputs:
       released:
-        description: 'Whether a release was created'
+        description: 'Whether a release was created (or would be in dry-run)'
         value: ${{ jobs.release.outputs.released }}
       version:
         description: 'Released version (without prefix)'
         value: ${{ jobs.release.outputs.version }}
       tag:
-        description: 'Created tag name'
+        description: 'Created tag name (empty in dry-run mode)'
         value: ${{ jobs.release.outputs.tag }}
       release-url:
-        description: 'URL of the GitHub release'
+        description: 'URL of the GitHub release (empty in dry-run mode)'
         value: ${{ jobs.release.outputs.release-url }}
 
 jobs:

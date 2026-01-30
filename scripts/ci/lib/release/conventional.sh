@@ -39,7 +39,7 @@ parse_conventional_commit() {
 		CC_SCOPE="${CC_SCOPE#(}"
 		CC_SCOPE="${CC_SCOPE%)}"
 
-		export CC_TYPE CC_SCOPE CC_BREAKING CC_DESCRIPTION
+		# Variables are available to caller since this script is sourced
 		return 0
 	fi
 

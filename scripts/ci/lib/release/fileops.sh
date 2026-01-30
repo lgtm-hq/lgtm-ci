@@ -28,9 +28,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ${new_content}
 EOF
 	else
-		# Insert after header
+		# Create temp file in same directory for atomic mv
+		local file_dir
+		file_dir=$(dirname "$file")
 		local temp_file
-		temp_file=$(mktemp)
+		temp_file=$(mktemp "${file_dir}/.changelog.XXXXXX")
+
+		# Ensure cleanup on exit
+		trap 'rm -f "$temp_file"' EXIT
 
 		# Find insertion point (after header section)
 		local header_end=0
@@ -59,7 +64,13 @@ EOF
 			} >"$temp_file"
 		fi
 
+		# Preserve original file permissions
+		chmod --reference="$file" "$temp_file" 2>/dev/null || chmod "$(stat -f '%Lp' "$file" 2>/dev/null || echo '644')" "$temp_file"
+
 		mv "$temp_file" "$file"
+
+		# Clear trap since file was successfully moved
+		trap - EXIT
 	fi
 }
 

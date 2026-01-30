@@ -4,7 +4,7 @@
 #
 # Required environment variables:
 #   SUMMARY_TYPE - Type of summary: 'dry-run' or 'release'
-#   VERSION - The version being released
+#   VERSION - The version being released (required)
 #
 # For dry-run:
 #   TAG_PREFIX - Tag prefix (e.g., 'v')
@@ -25,7 +25,7 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 source "$LIB_DIR/github.sh"
 
 : "${SUMMARY_TYPE:=release}"
-: "${VERSION:=}"
+: "${VERSION:?VERSION is required}"
 
 case "$SUMMARY_TYPE" in
 dry-run)

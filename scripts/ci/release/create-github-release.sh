@@ -94,10 +94,20 @@ fi
 
 # Create release
 log_info "Running: gh ${GH_ARGS[*]}"
-if RELEASE_URL=$(gh "${GH_ARGS[@]}" 2>&1); then
+GH_STDERR=$(mktemp)
+trap 'rm -f "$GH_STDERR"' EXIT
+
+if RELEASE_URL=$(gh "${GH_ARGS[@]}" 2>"$GH_STDERR"); then
 	log_success "Created release: $RELEASE_URL"
+	# Log any warnings from stderr
+	if [[ -s "$GH_STDERR" ]]; then
+		log_warn "gh stderr: $(cat "$GH_STDERR")"
+	fi
 else
-	log_error "Failed to create release: $RELEASE_URL"
+	log_error "Failed to create release"
+	if [[ -s "$GH_STDERR" ]]; then
+		log_error "$(cat "$GH_STDERR")"
+	fi
 	exit 1
 fi
 
