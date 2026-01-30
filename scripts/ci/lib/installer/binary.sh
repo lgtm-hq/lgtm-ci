@@ -10,34 +10,63 @@
 [[ -n "${_LGTM_CI_INSTALLER_BINARY_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_INSTALLER_BINARY_LOADED=1
 
-# Fallbacks
-log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
-log_warn() { echo "[WARN] $*" >&2; }
-log_error() { echo "[ERROR] $*" >&2; }
-log_success() { echo "[SUCCESS] $*" >&2; }
-ensure_directory() { [[ -d "$1" ]] || mkdir -p "$1"; }
-download_with_retries() {
-	local url="$1" out="$2" attempts="${3:-3}" delay=0.5 i
-	for ((i = 1; i <= attempts; i++)); do
-		curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" 2>/dev/null && return 0
-		if [[ $i -lt $attempts ]]; then
-			sleep "$delay"
-			delay=$(awk -v d="$delay" 'BEGIN{ printf "%.2f", d*2 }')
-		fi
-	done
-	return 1
-}
-verify_checksum() {
-	local file="$1" expected="$2" actual
-	if command -v sha256sum &>/dev/null; then
-		actual=$(sha256sum "$file" | awk '{print $1}')
-	elif command -v shasum &>/dev/null; then
-		actual=$(shasum -a 256 "$file" | awk '{print $1}')
-	else
+# Source shared libraries
+_LGTM_CI_INSTALLER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Source logging (with fallbacks for standalone use)
+if [[ -f "$_LGTM_CI_INSTALLER_LIB_DIR/log.sh" ]]; then
+	# shellcheck source=../log.sh
+	source "$_LGTM_CI_INSTALLER_LIB_DIR/log.sh"
+else
+	log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
+	log_warn() { echo "[WARN] $*" >&2; }
+	log_error() { echo "[ERROR] $*" >&2; }
+	log_success() { echo "[SUCCESS] $*" >&2; }
+fi
+
+# Source filesystem utilities
+if [[ -f "$_LGTM_CI_INSTALLER_LIB_DIR/fs.sh" ]]; then
+	# shellcheck source=../fs.sh
+	source "$_LGTM_CI_INSTALLER_LIB_DIR/fs.sh"
+else
+	ensure_directory() { [[ -d "$1" ]] || mkdir -p "$1"; }
+fi
+
+# Source network utilities
+if [[ -f "$_LGTM_CI_INSTALLER_LIB_DIR/network/download.sh" ]]; then
+	# shellcheck source=../network/download.sh
+	source "$_LGTM_CI_INSTALLER_LIB_DIR/network/download.sh"
+fi
+
+if [[ -f "$_LGTM_CI_INSTALLER_LIB_DIR/network/checksum.sh" ]]; then
+	# shellcheck source=../network/checksum.sh
+	source "$_LGTM_CI_INSTALLER_LIB_DIR/network/checksum.sh"
+fi
+
+# Minimal fallbacks if libraries unavailable
+if ! declare -f download_with_retries &>/dev/null; then
+	download_with_retries() {
+		local url="$1" out="$2" attempts="${3:-3}" i
+		for ((i = 1; i <= attempts; i++)); do
+			curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" 2>/dev/null && return 0
+		done
 		return 1
-	fi
-	[[ "$actual" == "$expected" ]]
-}
+	}
+fi
+
+if ! declare -f verify_checksum &>/dev/null; then
+	verify_checksum() {
+		local file="$1" expected="$2" actual
+		if command -v sha256sum &>/dev/null; then
+			actual=$(sha256sum "$file" | awk '{print $1}')
+		elif command -v shasum &>/dev/null; then
+			actual=$(shasum -a 256 "$file" | awk '{print $1}')
+		else
+			return 1
+		fi
+		[[ "$actual" == "$expected" ]]
+	}
+fi
 
 # =============================================================================
 # Binary installation

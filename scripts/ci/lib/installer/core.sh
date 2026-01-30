@@ -52,56 +52,14 @@ installer_init() {
 		source "$INSTALLER_LIB_DIR/fs.sh"
 	fi
 
-	# Fallback for missing fs.sh
+	# Minimal fallbacks only for functions not provided by libraries
+	# Libraries now have their own internal fallbacks, so these are last-resort
 	if ! declare -f command_exists &>/dev/null; then
 		command_exists() { command -v "$1" >/dev/null 2>&1; }
 	fi
 
-	# Fallback for missing network/download.sh
-	if ! declare -f download_with_retries &>/dev/null; then
-		download_with_retries() {
-			local url="$1" out="$2" attempts="${3:-3}" delay=0.5 i
-			for ((i = 1; i <= attempts; i++)); do
-				if curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" 2>/dev/null; then
-					return 0
-				fi
-				if [[ $i -lt $attempts ]]; then
-					sleep "$delay"
-					# Use -v to pass shell variable to awk safely
-					delay=$(awk -v d="$delay" 'BEGIN{ printf "%.2f", d*2 }')
-				fi
-			done
-			return 1
-		}
-	fi
-
-	# Fallback for missing network/checksum.sh
-	if ! declare -f verify_checksum &>/dev/null; then
-		verify_checksum() {
-			local file="$1" expected="$2" actual
-
-			if [[ "${SKIP_CHECKSUM:-0}" == "1" ]]; then
-				log_warn "Checksum verification skipped (SKIP_CHECKSUM=1) - NOT RECOMMENDED"
-				return 0
-			fi
-
-			if command_exists sha256sum; then
-				actual=$(sha256sum "$file" | awk '{print $1}')
-			elif command_exists shasum; then
-				actual=$(shasum -a 256 "$file" | awk '{print $1}')
-			else
-				log_error "No checksum tool available (sha256sum or shasum required)"
-				return 1
-			fi
-			[[ "$actual" == "$expected" ]]
-		}
-	fi
-
 	if ! declare -f ensure_directory &>/dev/null; then
-		ensure_directory() {
-			local dir="$1"
-			[[ -d "$dir" ]] || mkdir -p "$dir"
-		}
+		ensure_directory() { [[ -d "$1" ]] || mkdir -p "$1"; }
 	fi
 
 	# Set defaults

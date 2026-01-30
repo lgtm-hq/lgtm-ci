@@ -10,6 +10,15 @@
 
 set -euo pipefail
 
+# Source shared libraries for output helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+if [[ -f "$LIB_DIR/github/output.sh" ]]; then
+	# shellcheck source=../lib/github/output.sh
+	source "$LIB_DIR/github/output.sh"
+fi
+
 : "${RESULTS_PATH:=playwright-report/results.json}"
 : "${REPORT_URL:=}"
 : "${SHOW_FAILED:=true}"
@@ -125,10 +134,14 @@ if [[ -n "$REPORT_URL" ]]; then
 [View Full Report](${REPORT_URL})"
 fi
 
-# Output body (handle multiline)
-EOF_MARKER="EOF_$(date +%s)"
-{
-	echo "body<<$EOF_MARKER"
-	echo "$BODY"
-	echo "$EOF_MARKER"
-} >>"$GITHUB_OUTPUT"
+# Output body using shared helper or fallback
+if declare -f set_github_output_multiline &>/dev/null; then
+	set_github_output_multiline "body" "$BODY"
+else
+	EOF_MARKER="EOF_$(date +%s)"
+	{
+		echo "body<<$EOF_MARKER"
+		echo "$BODY"
+		echo "$EOF_MARKER"
+	} >>"$GITHUB_OUTPUT"
+fi

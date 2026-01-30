@@ -12,6 +12,20 @@
 
 set -euo pipefail
 
+# Source shared libraries for score_emoji and output helpers
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+if [[ -f "$LIB_DIR/github/format.sh" ]]; then
+	# shellcheck source=../lib/github/format.sh
+	source "$LIB_DIR/github/format.sh"
+fi
+
+if [[ -f "$LIB_DIR/github/output.sh" ]]; then
+	# shellcheck source=../lib/github/output.sh
+	source "$LIB_DIR/github/output.sh"
+fi
+
 : "${COVERAGE_FILE:=coverage/coverage-summary.json}"
 : "${FORMAT:=auto}"
 : "${REPORT_URL:=}"
@@ -92,21 +106,20 @@ PASSED=true
 	echo "passed=$PASSED"
 } >>"$GITHUB_OUTPUT"
 
-# Helper function for score emoji
-# Green if meets threshold, yellow if within 10 points, red otherwise
-score_emoji() {
-	local score=$1
-	local threshold=$2
-	local warn=$((threshold - 10))
-	((warn < 0)) && warn=0
-	if [[ $score -ge $threshold ]]; then
-		echo "🟢"
-	elif [[ $score -ge $warn ]]; then
-		echo "🟡"
-	else
-		echo "🔴"
-	fi
-}
+# Fallback score_emoji if library not available
+if ! declare -f score_emoji &>/dev/null; then
+	score_emoji() {
+		local score=$1
+		local threshold=$2
+		local warn=$((threshold - 10))
+		((warn < 0)) && warn=0
+		if [[ $score -ge $threshold ]]; then
+			echo "🟢"
+		elif [[ $score -ge $warn ]]; then
+			echo "🟡"
+		else echo "🔴"; fi
+	}
+fi
 
 # Generate comment body
 BODY="## Coverage Report
@@ -134,10 +147,14 @@ else
 ⚠️ Coverage is below some thresholds"
 fi
 
-# Output body (handle multiline)
-EOF_MARKER="EOF_$(date +%s)"
-{
-	echo "body<<$EOF_MARKER"
-	echo "$BODY"
-	echo "$EOF_MARKER"
-} >>"$GITHUB_OUTPUT"
+# Output body using shared helper or fallback
+if declare -f set_github_output_multiline &>/dev/null; then
+	set_github_output_multiline "body" "$BODY"
+else
+	EOF_MARKER="EOF_$(date +%s)"
+	{
+		echo "body<<$EOF_MARKER"
+		echo "$BODY"
+		echo "$EOF_MARKER"
+	} >>"$GITHUB_OUTPUT"
+fi

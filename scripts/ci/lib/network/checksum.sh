@@ -10,8 +10,10 @@
 [[ -n "${_LGTM_CI_NETWORK_CHECKSUM_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_NETWORK_CHECKSUM_LOADED=1
 
-# Source logging if available
+# Source shared libraries
 _LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Source logging (with fallback for standalone use)
 if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
 	# shellcheck source=../log.sh
 	source "$_LGTM_CI_LIB_DIR/log.sh"
@@ -21,8 +23,13 @@ else
 	log_error() { echo "[ERROR] $*" >&2; }
 fi
 
-# Fallback command_exists
-command_exists() { command -v "$1" >/dev/null 2>&1; }
+# Source fs.sh for command_exists (with fallback)
+if [[ -f "$_LGTM_CI_LIB_DIR/fs.sh" ]]; then
+	# shellcheck source=../fs.sh
+	source "$_LGTM_CI_LIB_DIR/fs.sh"
+elif ! declare -f command_exists &>/dev/null; then
+	command_exists() { command -v "$1" >/dev/null 2>&1; }
+fi
 
 # =============================================================================
 # Checksum verification

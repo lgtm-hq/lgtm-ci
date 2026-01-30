@@ -10,13 +10,28 @@
 [[ -n "${_LGTM_CI_INSTALLER_FALLBACKS_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_INSTALLER_FALLBACKS_LOADED=1
 
-# Fallbacks - exported for use in subshells
-command_exists() { command -v "$1" >/dev/null 2>&1; }
-log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
-log_info() { echo "[INFO] $*" >&2; }
-log_warn() { echo "[WARN] $*" >&2; }
-log_success() { echo "[SUCCESS] $*" >&2; }
-export -f command_exists log_verbose log_info log_warn log_success
+# Source shared libraries
+_LGTM_CI_FALLBACKS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+# Source logging and fs utilities (with fallbacks for standalone use)
+if [[ -f "$_LGTM_CI_FALLBACKS_LIB_DIR/log.sh" ]]; then
+	# shellcheck source=../log.sh
+	source "$_LGTM_CI_FALLBACKS_LIB_DIR/log.sh"
+else
+	log_verbose() { [[ "${VERBOSE:-}" == "1" ]] && echo "[VERBOSE] $*" >&2 || true; }
+	log_info() { echo "[INFO] $*" >&2; }
+	log_warn() { echo "[WARN] $*" >&2; }
+	log_success() { echo "[SUCCESS] $*" >&2; }
+	export -f log_verbose log_info log_warn log_success
+fi
+
+if [[ -f "$_LGTM_CI_FALLBACKS_LIB_DIR/fs.sh" ]]; then
+	# shellcheck source=../fs.sh
+	source "$_LGTM_CI_FALLBACKS_LIB_DIR/fs.sh"
+elif ! declare -f command_exists &>/dev/null; then
+	command_exists() { command -v "$1" >/dev/null 2>&1; }
+	export -f command_exists
+fi
 
 # =============================================================================
 # Fallback installers

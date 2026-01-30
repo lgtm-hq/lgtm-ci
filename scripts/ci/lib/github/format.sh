@@ -59,6 +59,24 @@ get_github_pages_url() {
 # Score formatting helpers for PR comments
 # =============================================================================
 
+# Get score emoji based on threshold
+# Usage: score_emoji 85 80 -> "🟢" (score meets threshold)
+# Returns: 🟢 if >= threshold, 🟡 if within 10 points, 🔴 otherwise
+score_emoji() {
+	local score="$1"
+	local threshold="${2:-80}"
+	local warn=$((threshold - 10))
+	((warn < 0)) && warn=0
+
+	if [[ $score -ge $threshold ]]; then
+		echo "🟢"
+	elif [[ $score -ge $warn ]]; then
+		echo "🟡"
+	else
+		echo "🔴"
+	fi
+}
+
 # Format a numeric score with color-coded emoji indicator
 # Usage: format_score_with_color 95 -> "🟢 95"
 # Usage: format_score_with_color 75 80 -> "🔴 75" (custom threshold)
@@ -115,4 +133,4 @@ format_percentage_with_color() {
 # =============================================================================
 # Export functions
 # =============================================================================
-export -f get_github_pages_url format_score_with_color format_percentage_with_color
+export -f get_github_pages_url score_emoji format_score_with_color format_percentage_with_color
