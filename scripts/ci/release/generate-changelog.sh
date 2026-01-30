@@ -20,6 +20,8 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../lib/github.sh
+source "$LIB_DIR/github.sh"
 # shellcheck source=../lib/release.sh
 source "$LIB_DIR/release.sh"
 
@@ -47,10 +49,4 @@ else
 fi
 
 # Output for GitHub Actions (multiline)
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	{
-		echo "changelog<<EOF"
-		echo "$CHANGELOG"
-		echo "EOF"
-	} >>"$GITHUB_OUTPUT"
-fi
+set_github_output_multiline "changelog" "$CHANGELOG"

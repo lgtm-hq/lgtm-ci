@@ -22,6 +22,8 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../lib/github.sh
+source "$LIB_DIR/github.sh"
 # shellcheck source=../lib/release.sh
 source "$LIB_DIR/release.sh"
 
@@ -103,13 +105,9 @@ fi
 RELEASE_ID=$(gh release view "$TAG" --repo "$REPO" --json id --jq '.id' 2>/dev/null || echo "")
 
 # Output for GitHub Actions
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	{
-		echo "release-url=$RELEASE_URL"
-		echo "release-id=$RELEASE_ID"
-		echo "tag=$TAG"
-	} >>"$GITHUB_OUTPUT"
-fi
+set_github_output "release-url" "$RELEASE_URL"
+set_github_output "release-id" "$RELEASE_ID"
+set_github_output "tag" "$TAG"
 
 echo "release-url=$RELEASE_URL"
 echo "release-id=$RELEASE_ID"

@@ -18,6 +18,8 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../lib/github.sh
+source "$LIB_DIR/github.sh"
 # shellcheck source=../lib/release.sh
 source "$LIB_DIR/release.sh"
 
@@ -65,14 +67,10 @@ else
 fi
 
 # Output for GitHub Actions
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	{
-		echo "current-version=$CURRENT_VERSION"
-		echo "next-version=$NEXT_VERSION"
-		echo "bump-type=$BUMP_TYPE"
-		echo "release-needed=$RELEASE_NEEDED"
-	} >>"$GITHUB_OUTPUT"
-fi
+set_github_output "current-version" "$CURRENT_VERSION"
+set_github_output "next-version" "$NEXT_VERSION"
+set_github_output "bump-type" "$BUMP_TYPE"
+set_github_output "release-needed" "$RELEASE_NEEDED"
 
 # Also output to stdout for local testing
 echo "current-version=$CURRENT_VERSION"

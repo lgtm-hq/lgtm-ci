@@ -75,14 +75,10 @@ if [[ "$PUSH" == "true" ]]; then
 fi
 
 # Output for GitHub Actions
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	{
-		echo "tag-name=$TAG_NAME"
-		echo "tag-sha=$TAG_SHA"
-		echo "commit-sha=$COMMIT_SHA"
-		echo "version=$CLEAN_VERSION"
-	} >>"$GITHUB_OUTPUT"
-fi
+set_github_output "tag-name" "$TAG_NAME"
+set_github_output "tag-sha" "$TAG_SHA"
+set_github_output "commit-sha" "$COMMIT_SHA"
+set_github_output "version" "$CLEAN_VERSION"
 
 echo "tag-name=$TAG_NAME"
 echo "tag-sha=$TAG_SHA"

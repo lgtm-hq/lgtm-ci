@@ -82,14 +82,10 @@ jobs:
       - name: Check if release needed
         id: check
         shell: bash
-        run: |
-          if [[ "${{ steps.version.outputs.release-needed }}" == "true" ]]; then
-            echo "release-needed=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::Release needed: ${{ steps.version.outputs.next-version }}"
-          else
-            echo "release-needed=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::No release needed"
-          fi
+        env:
+          RELEASE_NEEDED: ${{ steps.version.outputs.release-needed }}
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+        run: scripts/ci/release/check-release-needed.sh
 
       - name: Generate changelog
         if: steps.check.outputs.release-needed == 'true'
@@ -122,28 +118,20 @@ jobs:
       - name: Dry run summary
         if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == true
         shell: bash
-        run: |
-          {
-            echo "## Dry Run Summary"
-            echo ""
-            echo "Would create release:"
-            echo "- **Version:** ${{ steps.version.outputs.next-version }}"
-            echo "- **Tag:** ${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}"
-            echo "- **Bump type:** ${{ steps.version.outputs.bump-type }}"
-            echo ""
-            echo "### Changelog Preview"
-            echo ""
-            echo '${{ steps.changelog.outputs.changelog }}'
-          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SUMMARY_TYPE: dry-run
+          VERSION: ${{ steps.version.outputs.next-version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          BUMP_TYPE: ${{ steps.version.outputs.bump-type }}
+          CHANGELOG: ${{ steps.changelog.outputs.changelog }}
+        run: scripts/ci/release/write-release-summary.sh
 
       - name: Release summary
         if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == false
         shell: bash
-        run: |
-          {
-            echo "## Release Created"
-            echo ""
-            echo "- **Version:** ${{ steps.version.outputs.next-version }}"
-            echo "- **Tag:** ${{ steps.tag.outputs.tag-name }}"
-            echo "- **Release:** ${{ steps.github-release.outputs.release-url }}"
-          } >> "$GITHUB_STEP_SUMMARY"
+        env:
+          SUMMARY_TYPE: release
+          VERSION: ${{ steps.version.outputs.next-version }}
+          TAG_NAME: ${{ steps.tag.outputs.tag-name }}
+          RELEASE_URL: ${{ steps.github-release.outputs.release-url }}
+        run: scripts/ci/release/write-release-summary.sh
