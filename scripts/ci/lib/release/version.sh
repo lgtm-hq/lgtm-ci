@@ -8,13 +8,31 @@
 [[ -n "${_RELEASE_VERSION_LOADED:-}" ]] && return 0
 readonly _RELEASE_VERSION_LOADED=1
 
-# Validate semver format (X.Y.Z with optional v prefix)
+# Validate semver format (SemVer 2.0.0 compliant with optional v prefix)
 # Usage: validate_semver "1.2.3" || die "Invalid version"
+# Rules enforced:
+#   - No leading zeros in numeric identifiers (except "0" itself)
+#   - Prerelease identifiers must be non-empty, dot-separated
+#   - Prerelease numeric identifiers also disallow leading zeros
+#   - Build metadata is optional (+identifier.identifier...)
 validate_semver() {
 	local version="${1:-}"
 	# Strip optional v prefix
 	version="${version#v}"
-	[[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.-]+)?(\+[a-zA-Z0-9.-]+)?$ ]]
+
+	# SemVer 2.0.0 compliant regex components:
+	# - Numeric: 0 or non-zero digit followed by digits
+	# - Prerelease id: numeric OR alphanumeric (must have non-digit)
+	# - Build id: alphanumeric and hyphens
+	local num='(0|[1-9][0-9]*)'
+	local prerelease_id='(0|[1-9][0-9]*|[0-9]*[a-zA-Z-][a-zA-Z0-9-]*)'
+	local build_id='[a-zA-Z0-9-]+'
+
+	local pattern="^${num}\\.${num}\\.${num}"
+	pattern+="(-${prerelease_id}(\\.${prerelease_id})*)?"
+	pattern+="(\\+${build_id}(\\.${build_id})*)?$"
+
+	[[ "$version" =~ $pattern ]]
 }
 
 # Parse version into components
