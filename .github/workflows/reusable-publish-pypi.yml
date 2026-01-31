@@ -1,0 +1,124 @@
+---
+name: Reusable PyPI Publishing Workflow
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: 'Python version for building'
+        required: false
+        type: string
+        default: '3.12'
+      validate:
+        description: 'Run twine check before publishing'
+        required: false
+        type: boolean
+        default: true
+      test-pypi:
+        description: 'Publish to TestPyPI instead of PyPI'
+        required: false
+        type: boolean
+        default: false
+      update-homebrew:
+        description: 'Update Homebrew formula after publishing'
+        required: false
+        type: boolean
+        default: false
+      homebrew-tap:
+        description: 'Homebrew tap repository (owner/repo)'
+        required: false
+        type: string
+        default: ''
+      homebrew-formula:
+        description: 'Homebrew formula name'
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: 'Build only, do not publish'
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: 'Working directory containing the package'
+        required: false
+        type: string
+        default: '.'
+    outputs:
+      published:
+        description: 'Whether the package was published'
+        value: ${{ jobs.publish.outputs.published }}
+      version:
+        description: 'Published package version'
+        value: ${{ jobs.publish.outputs.version }}
+      package-name:
+        description: 'Published package name'
+        value: ${{ jobs.publish.outputs.package-name }}
+
+jobs:
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    outputs:
+      published: ${{ steps.pypi.outputs.published }}
+      version: ${{ steps.pypi.outputs.version }}
+      package-name: ${{ steps.pypi.outputs.package-name }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Publish to PyPI
+        id: pypi
+        uses: ./.github/actions/publish-pypi
+        with:
+          python-version: ${{ inputs.python-version }}
+          validate: ${{ inputs.validate }}
+          test-pypi: ${{ inputs.test-pypi }}
+          dry-run: ${{ inputs.dry-run }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Attest build provenance
+        if: inputs.dry-run == false
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path: ${{ inputs.working-directory }}/dist/*
+
+  update-homebrew:
+    name: Update Homebrew Formula
+    needs: publish
+    if: >-
+      inputs.update-homebrew && inputs.dry-run == false &&
+      needs.publish.outputs.published == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Update Homebrew formula
+        uses: ./.github/actions/update-homebrew
+        with:
+          tap-repository: ${{ inputs.homebrew-tap }}
+          formula: ${{ inputs.homebrew-formula }}
+          package-name: ${{ needs.publish.outputs.package-name }}
+          version: ${{ needs.publish.outputs.version }}
+          wait-for-availability: 'true'
+          test-pypi: ${{ inputs.test-pypi }}

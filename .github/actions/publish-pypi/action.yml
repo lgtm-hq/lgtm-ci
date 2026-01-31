@@ -1,0 +1,97 @@
+---
+name: 'Publish to PyPI'
+description: 'Build and publish Python package to PyPI using OIDC trusted publishing'
+author: 'lgtm-hq'
+
+inputs:
+  python-version:
+    description: 'Python version for building'
+    required: false
+    default: '3.12'
+  validate:
+    description: 'Run twine check before publishing'
+    required: false
+    default: 'true'
+  test-pypi:
+    description: 'Publish to TestPyPI instead of PyPI'
+    required: false
+    default: 'false'
+  dry-run:
+    description: 'Build only, do not publish'
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Working directory containing the package'
+    required: false
+    default: '.'
+
+outputs:
+  published:
+    description: 'Whether the package was published'
+    value: ${{ steps.set-published.outputs.published || 'false' }}
+  version:
+    description: 'Package version'
+    value: ${{ steps.build.outputs.version }}
+  package-name:
+    description: 'Package name'
+    value: ${{ steps.build.outputs.name }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate package metadata
+      id: validate
+      if: inputs.validate == 'true'
+      shell: bash
+      env:
+        STEP: validate
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+
+    - name: Build package
+      id: build
+      shell: bash
+      env:
+        STEP: build
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+
+    - name: Validate distribution
+      if: inputs.validate == 'true'
+      shell: bash
+      env:
+        STEP: validate-dist
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+
+    - name: Publish to PyPI
+      id: publish
+      if: inputs.dry-run != 'true'
+      uses: pypa/gh-action-pypi-publish@ed0c53931b1dc9bd32cbe73a98c7f6766f8a527e # v1.12.4
+      with:
+        repository-url: >-
+          ${{ inputs.test-pypi == 'true' && 'https://test.pypi.org/legacy/' ||
+          'https://upload.pypi.org/legacy/' }}
+        packages-dir: ${{ inputs.working-directory }}/dist/
+
+    - name: Set publish output
+      id: set-published
+      if: inputs.dry-run != 'true'
+      shell: bash
+      run: echo "published=true" >> "$GITHUB_OUTPUT"
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        PACKAGE_NAME: ${{ steps.build.outputs.name }}
+        PACKAGE_VERSION: ${{ steps.build.outputs.version }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        TEST_PYPI: ${{ inputs.test-pypi }}
+        PUBLISHED: ${{ steps.set-published.outputs.published || 'false' }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'

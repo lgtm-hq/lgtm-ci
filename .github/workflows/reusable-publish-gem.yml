@@ -1,0 +1,81 @@
+---
+name: Reusable RubyGems Publishing Workflow
+
+on:
+  workflow_call:
+    inputs:
+      ruby-version:
+        description: 'Ruby version'
+        required: false
+        type: string
+        default: '3.3'
+      gemspec:
+        description: 'Path to gemspec file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: 'Build only, do not publish'
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: 'Working directory containing the gem'
+        required: false
+        type: string
+        default: '.'
+    outputs:
+      published:
+        description: 'Whether the gem was published'
+        value: ${{ jobs.publish.outputs.published }}
+      version:
+        description: 'Published gem version'
+        value: ${{ jobs.publish.outputs.version }}
+      gem-name:
+        description: 'Published gem name'
+        value: ${{ jobs.publish.outputs.gem-name }}
+      gem-file:
+        description: 'Path to the built gem file'
+        value: ${{ jobs.publish.outputs.gem-file }}
+
+jobs:
+  publish:
+    name: Publish to RubyGems
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      published: ${{ steps.gem.outputs.published || 'false' }}
+      version: ${{ steps.gem.outputs.version }}
+      gem-name: ${{ steps.gem.outputs.gem-name }}
+      gem-file: ${{ steps.gem.outputs.gem-file }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@a4effe49ee8ee5b8224f9b18fb5c7d6ac6239857 # v1.221.0
+        with:
+          ruby-version: ${{ inputs.ruby-version }}
+          bundler-cache: true
+
+      - name: Configure RubyGems OIDC credentials
+        if: inputs.dry-run == false
+        uses: rubygems/configure-rubygems-credentials@bc6dd217f8a4f919d6835fcfefd470ef821f5c44 # v1.0.0
+
+      - name: Publish to RubyGems
+        id: gem
+        uses: ./.github/actions/publish-gem
+        with:
+          ruby-version: ${{ inputs.ruby-version }}
+          gemspec: ${{ inputs.gemspec }}
+          dry-run: ${{ inputs.dry-run }}
+          working-directory: ${{ inputs.working-directory }}
