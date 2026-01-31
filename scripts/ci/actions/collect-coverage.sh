@@ -244,6 +244,12 @@ summary)
 	add_github_summary "## Coverage Summary"
 	add_github_summary ""
 
+	# Initialize coverage variables before extraction
+	COVERAGE_LINES=""
+	COVERAGE_BRANCHES=""
+	COVERAGE_FUNCTIONS=""
+	COVERAGE_STATEMENTS=""
+
 	if [[ -n "$COVERAGE_FILE" ]] && [[ -f "$COVERAGE_FILE" ]]; then
 		# Extract detailed metrics
 		extract_coverage_details "$COVERAGE_FILE"

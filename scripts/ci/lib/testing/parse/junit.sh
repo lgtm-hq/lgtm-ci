@@ -74,6 +74,7 @@ parse_junit_xml() {
 
 	# Combine errors and failures
 	TESTS_FAILED=$((TESTS_FAILED + TESTS_ERRORS))
+	TESTS_ERRORS=0 # Reset after merging to avoid double-counting
 	TESTS_PASSED=$((TESTS_TOTAL - TESTS_FAILED - TESTS_SKIPPED))
 
 	# Ensure passed is not negative

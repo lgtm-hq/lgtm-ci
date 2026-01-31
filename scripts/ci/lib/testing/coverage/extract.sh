@@ -60,7 +60,7 @@ extract_coverage_percent() {
 	cobertura)
 		# Cobertura XML format - extract line-rate attribute and convert to percentage
 		local line_rate
-		line_rate=$(grep -oP 'line-rate="\K[0-9.]+' "$file" | head -1)
+		line_rate=$(sed -n 's/.*line-rate="\([0-9.]*\)".*/\1/p' "$file" | head -1)
 		if [[ -n "$line_rate" ]]; then
 			echo "$line_rate" | awk '{printf "%.2f", $1 * 100}'
 		else
@@ -163,8 +163,8 @@ extract_coverage_details() {
 		;;
 	cobertura)
 		local line_rate branch_rate
-		line_rate=$(grep -oP 'line-rate="\K[0-9.]+' "$file" | head -1)
-		branch_rate=$(grep -oP 'branch-rate="\K[0-9.]+' "$file" | head -1)
+		line_rate=$(sed -n 's/.*line-rate="\([0-9.]*\)".*/\1/p' "$file" | head -1)
+		branch_rate=$(sed -n 's/.*branch-rate="\([0-9.]*\)".*/\1/p' "$file" | head -1)
 		if [[ -n "$line_rate" ]]; then
 			COVERAGE_LINES=$(echo "$line_rate" | awk '{printf "%.2f", $1 * 100}')
 		fi

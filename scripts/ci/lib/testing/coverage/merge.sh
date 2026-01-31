@@ -43,13 +43,61 @@ merge_lcov_files() {
 		done
 		lcov "${lcov_args[@]}" -o "$output" 2>/dev/null
 	else
-		# Simple concatenation as fallback (not ideal but works for basic cases)
-		true >"$output"
+		# Fallback: concatenate and deduplicate LCOV records
+		# LCOV format: TN:, SF:, DA:line,count, LF:, LH:, end_of_record
+		local temp_concat
+		temp_concat=$(mktemp)
+		true >"$temp_concat"
 		for file in "${files[@]}"; do
 			if [[ -f "$file" ]]; then
-				cat "$file" >>"$output"
+				cat "$file" >>"$temp_concat"
 			fi
 		done
+
+		# Deduplicate: for same SF (source file), merge DA lines by summing counts
+		awk '
+		BEGIN { current_sf = ""; tn = "" }
+		/^TN:/ { if (tn == "") tn = $0; next }
+		/^SF:/ { current_sf = substr($0, 4); next }
+		/^DA:/ {
+			# DA:line_number,execution_count
+			split(substr($0, 4), parts, ",")
+			line_num = parts[1]
+			count = parts[2] + 0
+			key = current_sf ":" line_num
+			da_counts[key] += count
+			da_files[key] = current_sf
+			da_lines[key] = line_num
+			next
+		}
+		/^LF:/ { lf[current_sf] = substr($0, 4) + 0; next }
+		/^LH:/ { lh[current_sf] = substr($0, 4) + 0; next }
+		/^end_of_record/ { files[current_sf] = 1; next }
+		END {
+			print tn
+			for (sf in files) {
+				print "SF:" sf
+				for (key in da_files) {
+					if (da_files[key] == sf) {
+						print "DA:" da_lines[key] "," da_counts[key]
+					}
+				}
+				# Recalculate LF (lines found) and LH (lines hit)
+				lf_count = 0
+				lh_count = 0
+				for (key in da_files) {
+					if (da_files[key] == sf) {
+						lf_count++
+						if (da_counts[key] > 0) lh_count++
+					}
+				}
+				print "LF:" lf_count
+				print "LH:" lh_count
+				print "end_of_record"
+			}
+		}
+		' "$temp_concat" >"$output"
+		rm -f "$temp_concat"
 	fi
 }
 
@@ -118,7 +166,18 @@ convert_coverage() {
 		;;
 	"istanbul->lcov")
 		if command -v nyc &>/dev/null; then
-			nyc report --reporter=lcov --temp-dir="$(dirname "$input")" >"$output" 2>/dev/null
+			# nyc report needs coverage files in a temp directory with specific naming
+			local temp_dir
+			temp_dir=$(mktemp -d)
+			cp "$input" "$temp_dir/coverage-final.json"
+			nyc report --reporter=lcovonly --temp-dir="$temp_dir" --report-dir="$temp_dir" 2>/dev/null
+			if [[ -f "$temp_dir/lcov.info" ]]; then
+				cp "$temp_dir/lcov.info" "$output"
+			else
+				# Fallback to manual conversion
+				_convert_istanbul_to_lcov "$input" "$output"
+			fi
+			rm -rf "$temp_dir"
 		else
 			_convert_istanbul_to_lcov "$input" "$output"
 		fi
@@ -159,16 +218,42 @@ _convert_cobertura_to_lcov() {
 	local input="${1:-}"
 	local output="${2:-}"
 
-	# Basic conversion using grep/awk
-	{
-		echo "TN:"
-		# Extract source files and line coverage
-		grep -oP '<class[^>]+filename="\K[^"]+' "$input" | while read -r filename; do
-			echo "SF:$filename"
-			# This is a simplified conversion - full conversion would need XML parsing
-			echo "end_of_record"
-		done
-	} >"$output"
+	# Parse Cobertura XML and emit LCOV format with DA lines
+	# Cobertura structure: <class filename="..."><lines><line number="N" hits="H"/></lines></class>
+	awk '
+	BEGIN { print "TN:" }
+	/<class[^>]+filename="/ {
+		# Extract filename from class element
+		match($0, /filename="[^"]*"/)
+		if (RSTART > 0) {
+			filename = substr($0, RSTART + 10, RLENGTH - 11)
+			in_class = 1
+			print "SF:" filename
+			lf = 0
+			lh = 0
+		}
+	}
+	/<line[^>]+number="[0-9]+"[^>]+hits="[0-9]+"/ && in_class {
+		# Extract line number and hits
+		match($0, /number="[0-9]+"/)
+		if (RSTART > 0) {
+			line_num = substr($0, RSTART + 8, RLENGTH - 9)
+		}
+		match($0, /hits="[0-9]+"/)
+		if (RSTART > 0) {
+			hits = substr($0, RSTART + 6, RLENGTH - 7)
+		}
+		print "DA:" line_num "," hits
+		lf++
+		if (hits > 0) lh++
+	}
+	/<\/class>/ && in_class {
+		print "LF:" lf
+		print "LH:" lh
+		print "end_of_record"
+		in_class = 0
+	}
+	' "$input" >"$output"
 }
 
 # Internal: Convert Istanbul JSON to LCOV format
