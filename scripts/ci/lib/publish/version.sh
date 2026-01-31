@@ -22,13 +22,13 @@ extract_pypi_version() {
 
 	# Try [project] table first (PEP 621) - only match version within [project] section
 	local version
-	version=$(awk '/^\[project\]$/,/^\[/ { if (/^version\s*=/) print }' "$pyproject" |
-		head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	version=$(awk '/^\[project\]$/,/^\[/ { if (/^version[[:space:]]*=/) print }' "$pyproject" |
+		head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
 
 	if [[ -z "$version" ]]; then
 		# Try [tool.poetry] for Poetry projects
-		version=$(awk '/^\[tool\.poetry\]$/,/^\[/ { if (/^version\s*=/) print }' "$pyproject" |
-			head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+		version=$(awk '/^\[tool\.poetry\]$/,/^\[/ { if (/^version[[:space:]]*=/) print }' "$pyproject" |
+			head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
 	fi
 
 	if [[ -n "$version" ]]; then
@@ -50,10 +50,10 @@ extract_npm_version() {
 		return 1
 	fi
 
-	# Use grep/sed to avoid jq dependency
+	# Use grep/sed to avoid jq dependency (POSIX character classes for portability)
 	local version
-	version=$(grep -E '^\s*"version"\s*:' "$package_json" | head -1 |
-		sed 's/.*:\s*"\([^"]*\)".*/\1/')
+	version=$(grep -E '^[[:space:]]*"version"[[:space:]]*:' "$package_json" | head -1 |
+		sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
 
 	if [[ -n "$version" ]]; then
 		echo "$version"
@@ -83,10 +83,25 @@ extract_gem_version() {
 		return 1
 	fi
 
-	# Try spec.version = "x.y.z" pattern
-	local version
-	version=$(grep -E '\.(version)\s*=' "$gemspec" | head -1 |
-		sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	local version=""
+
+	# Try Ruby evaluation first (handles constant-based versions)
+	if command -v ruby >/dev/null 2>&1; then
+		version=$(ruby -e "
+			begin
+				spec = Gem::Specification.load('$gemspec')
+				puts spec.version if spec
+			rescue => e
+				# Silently fail - will use fallback
+			end
+		" 2>/dev/null)
+	fi
+
+	# Fallback to grep/sed pattern for quoted literals
+	if [[ -z "$version" ]]; then
+		version=$(grep -E '\.(version)[[:space:]]*=' "$gemspec" | head -1 |
+			sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	fi
 
 	if [[ -n "$version" ]]; then
 		echo "$version"

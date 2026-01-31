@@ -9,6 +9,8 @@
 #   VERSION: Package version
 #   MAX_WAIT: Maximum wait time in seconds (default: 600)
 #   TEST_PYPI: Use TestPyPI instead of PyPI (default: false)
+#   AVAILABLE: (summary step) Whether package is available (default: false)
+#   ELAPSED: (summary step) Seconds elapsed waiting (default: 0)
 set -euo pipefail
 
 : "${STEP:?STEP is required}"

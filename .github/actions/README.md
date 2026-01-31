@@ -807,7 +807,6 @@ Build and publish Python packages to PyPI using OIDC trusted publishing.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-pypi@main
   with:
-    python-version: '3.12' # optional
     validate: 'true' # optional, run twine check
     test-pypi: 'false' # optional, publish to TestPyPI
     dry-run: 'false' # optional, build only
@@ -864,7 +863,6 @@ Build and publish Ruby gems to RubyGems using OIDC trusted publishing.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-gem@main
   with:
-    ruby-version: '3.3' # optional
     gemspec: '' # optional, auto-detected
     dry-run: 'false' # optional, build only
     working-directory: '.' # optional

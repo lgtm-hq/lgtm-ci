@@ -43,6 +43,10 @@ generate_formula_from_pypi() {
 	# Generate formula class name (CamelCase)
 	local class_name
 	class_name=$(echo "$package" | sed 's/-/_/g' | awk -F_ '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1' OFS='')
+	# Ruby class names cannot start with a digit
+	if [[ "$class_name" =~ ^[0-9] ]]; then
+		class_name="Pkg$class_name"
+	fi
 
 	# Set homepage
 	if [[ -z "$homepage" ]]; then
@@ -106,14 +110,24 @@ update_formula_version() {
 	# Create backup
 	cp "$formula_path" "$formula_path.bak"
 
-	# Update URL
-	sed -i.tmp "s|url \"[^\"]*\"|url \"$new_url\"|" "$formula_path"
+	# Update URL (with atomic error handling)
+	if ! sed -i.tmp "s|url \"[^\"]*\"|url \"$new_url\"|" "$formula_path"; then
+		mv "$formula_path.bak" "$formula_path"
+		log_error "Failed to update URL"
+		return 1
+	fi
+	rm -f "$formula_path.tmp"
 
 	# Update SHA256
-	sed -i.tmp "s|sha256 \"[^\"]*\"|sha256 \"$new_sha256\"|" "$formula_path"
-
-	# Clean up temp files
+	if ! sed -i.tmp "s|sha256 \"[^\"]*\"|sha256 \"$new_sha256\"|" "$formula_path"; then
+		mv "$formula_path.bak" "$formula_path"
+		log_error "Failed to update SHA256"
+		return 1
+	fi
 	rm -f "$formula_path.tmp"
+
+	# Clean up backup on success
+	rm -f "$formula_path.bak"
 
 	log_success "Updated formula to version $new_version"
 	return 0

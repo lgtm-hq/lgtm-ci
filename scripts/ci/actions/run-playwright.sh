@@ -152,8 +152,9 @@ parse)
 	case "$REPORTER" in
 	json | html)
 		# For HTML reporter, use the JSON sidecar for metrics
+		# Honor REPORT_PATH if it exists, otherwise fallback to default
 		json_file="$REPORT_PATH"
-		if [[ "$REPORTER" == "html" ]]; then
+		if [[ "$REPORTER" == "html" ]] && [[ ! -f "$json_file" ]]; then
 			json_file="playwright-results.json"
 		fi
 

@@ -51,16 +51,29 @@ build)
 	if [[ -f "bun.lockb" ]] || [[ -f "bun.lock" ]]; then
 		log_info "Installing dependencies with bun..."
 		bun install --frozen-lockfile
+	elif [[ -f "pnpm-lock.yaml" ]]; then
+		log_info "Installing dependencies with pnpm..."
+		pnpm install --frozen-lockfile
 	elif [[ -f "package-lock.json" ]]; then
 		log_info "Installing dependencies with npm..."
 		npm ci
 	elif [[ -f "yarn.lock" ]]; then
 		log_info "Installing dependencies with yarn..."
-		yarn install --frozen-lockfile
+		# Try Yarn v2+ syntax first, fallback to v1
+		yarn install --immutable 2>/dev/null || yarn install --frozen-lockfile
+	else
+		log_warn "No lockfile found, skipping dependency installation"
 	fi
 
-	# Run build script if it exists (check for exact "build" key in scripts)
-	if grep -qE '^\s*"build"\s*:' package.json; then
+	# Run build script if it exists in scripts object
+	has_build_script=false
+	if command -v jq >/dev/null 2>&1; then
+		jq -e '.scripts.build // empty' package.json >/dev/null 2>&1 && has_build_script=true
+	else
+		# Fallback: grep-based check (may match non-script "build" keys)
+		grep -q '"scripts"' package.json && grep -qE '^[[:space:]]*"build"[[:space:]]*:' package.json && has_build_script=true
+	fi
+	if [[ "$has_build_script" == "true" ]]; then
 		log_info "Running build script..."
 		if command -v bun >/dev/null 2>&1; then
 			bun run build
@@ -69,12 +82,12 @@ build)
 		fi
 	fi
 
-	# Pack the package
+	# Pack the package (don't suppress stderr to preserve error messages)
 	log_info "Packing package..."
 	if command -v bun >/dev/null 2>&1; then
-		tarball=$(bun pm pack 2>/dev/null | tail -1) || tarball=$(npm pack 2>/dev/null | tail -1)
+		tarball=$(bun pm pack 2>&1 | tail -1) || tarball=$(npm pack 2>&1 | tail -1)
 	else
-		tarball=$(npm pack 2>/dev/null | tail -1)
+		tarball=$(npm pack 2>&1 | tail -1)
 	fi
 
 	if [[ -z "$tarball" ]] || [[ ! -f "$tarball" ]]; then
@@ -92,6 +105,10 @@ publish)
 	: "${DIST_TAG:=latest}"
 	: "${PROVENANCE:=true}"
 	: "${ACCESS:=public}"
+
+	if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
+		die "NODE_AUTH_TOKEN is required for publishing"
+	fi
 
 	log_info "Publishing to npm..."
 
