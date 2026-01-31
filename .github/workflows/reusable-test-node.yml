@@ -107,15 +107,10 @@ jobs:
 
       - name: Check coverage threshold
         if: inputs.coverage && inputs.coverage-threshold > 0
-        shell: bash
-        run: |
-          coverage="${{ steps.test.outputs.coverage-percent }}"
-          threshold="${{ inputs.coverage-threshold }}"
-          if awk -v c="$coverage" -v t="$threshold" 'BEGIN { exit (c < t ? 0 : 1) }'; then
-            echo "::error::Coverage ${coverage}% is below threshold ${threshold}%"
-            exit 1
-          fi
-          echo "Coverage ${coverage}% meets threshold ${threshold}%"
+        uses: ./.github/actions/check-coverage-threshold
+        with:
+          coverage-percent: ${{ steps.test.outputs.coverage-percent }}
+          threshold: ${{ inputs.coverage-threshold }}
 
       - name: Upload coverage report
         if: inputs.upload-coverage && inputs.coverage

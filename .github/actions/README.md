@@ -588,6 +588,31 @@ Aggregate coverage from multiple sources and formats.
 
 ---
 
+### check-coverage-threshold
+
+Check if coverage meets a minimum threshold.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/check-coverage-threshold@main
+  with:
+    coverage-percent: '85.5' # current coverage
+    threshold: '80' # minimum required
+    fail-on-error: 'true' # optional, default: true
+```
+
+**Outputs:**
+
+- `passed` - Whether coverage meets the threshold
+- `message` - Human-readable result message
+
+**Features:**
+
+- Portable decimal comparison using awk
+- Configurable failure behavior
+- Clear error messages with GitHub annotations
+
+---
+
 ### generate-coverage-badge
 
 Generate coverage badge SVG/JSON for README display.

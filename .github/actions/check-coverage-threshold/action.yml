@@ -1,0 +1,61 @@
+---
+name: 'Check Coverage Threshold'
+description: 'Check if coverage meets a minimum threshold'
+author: 'lgtm-hq'
+
+inputs:
+  coverage-percent:
+    description: 'Current coverage percentage'
+    required: true
+  threshold:
+    description: 'Minimum coverage percentage required'
+    required: true
+  fail-on-error:
+    description: 'Fail the step if coverage is below threshold'
+    required: false
+    default: 'true'
+
+outputs:
+  passed:
+    description: 'Whether coverage meets the threshold'
+    value: ${{ steps.check.outputs.passed }}
+  message:
+    description: 'Human-readable result message'
+    value: ${{ steps.check.outputs.message }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check coverage threshold
+      id: check
+      shell: bash
+      env:
+        COVERAGE: ${{ inputs.coverage-percent }}
+        THRESHOLD: ${{ inputs.threshold }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run: |
+        # Skip check if threshold is 0 or empty
+        if [[ -z "$THRESHOLD" ]] || awk -v t="$THRESHOLD" 'BEGIN { exit (t > 0 ? 1 : 0) }'; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+          echo "message=Coverage check skipped (no threshold set)" >> "$GITHUB_OUTPUT"
+          echo "Coverage check skipped (no threshold set)"
+          exit 0
+        fi
+
+        # Compare coverage to threshold
+        if awk -v c="$COVERAGE" -v t="$THRESHOLD" 'BEGIN { exit (c >= t ? 0 : 1) }'; then
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+          echo "message=Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%" >> "$GITHUB_OUTPUT"
+          echo "Coverage ${COVERAGE}% meets threshold ${THRESHOLD}%"
+        else
+          echo "passed=false" >> "$GITHUB_OUTPUT"
+          echo "message=Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%" >> "$GITHUB_OUTPUT"
+          echo "::error::Coverage ${COVERAGE}% is below threshold ${THRESHOLD}%"
+          if [[ "$FAIL_ON_ERROR" == "true" ]]; then
+            exit 1
+          fi
+        fi
+
+branding:
+  icon: 'check-circle'
+  color: 'green'
