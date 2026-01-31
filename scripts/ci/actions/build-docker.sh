@@ -16,7 +16,9 @@
 #   PUSH - Push to registry (default: false)
 #   LOAD - Load into local docker (default: false)
 #   BUILD_ARGS - Build arguments (comma-separated key=value)
+#                Note: Values containing commas are not supported
 #   LABELS - Additional labels (comma-separated key=value)
+#            Note: Values containing commas are not supported
 #   CACHE_FROM - Cache sources
 #   CACHE_TO - Cache destinations
 
@@ -83,8 +85,8 @@ build)
 	BUILD_CMD=("docker" "buildx" "build")
 	BUILD_CMD+=("--file" "$FILE")
 
-	# Add platforms (only for push, not for load)
-	if [[ "$PUSH" == "true" ]] || [[ "$LOAD" == "false" ]]; then
+	# Add platforms (--load only supports single-platform builds)
+	if [[ "$LOAD" != "true" ]]; then
 		BUILD_CMD+=("--platform" "$PLATFORMS")
 	fi
 

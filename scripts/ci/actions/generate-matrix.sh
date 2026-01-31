@@ -40,9 +40,9 @@ e2e-matrix)
 	log_info "Browsers: $BROWSERS"
 	log_info "Shards: $SHARDS"
 
-	# Convert comma-separated inputs to JSON arrays (trim whitespace from each entry)
-	suites_json=$(echo "$SUITES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
-	browsers_json=$(echo "$BROWSERS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
+	# Convert comma-separated inputs to JSON arrays (trim whitespace, filter empty entries)
+	suites_json=$(echo "$SUITES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s 'map(select(length>0))')
+	browsers_json=$(echo "$BROWSERS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s 'map(select(length>0))')
 
 	# Generate shard array if sharding enabled
 	if [[ "$SHARDS" -gt 1 ]]; then
@@ -51,8 +51,8 @@ e2e-matrix)
 		shards_json='["1"]'
 	fi
 
-	# Build matrix JSON
-	matrix=$(jq -n \
+	# Build matrix JSON (compact output for GITHUB_OUTPUT compatibility)
+	matrix=$(jq -cn \
 		--argjson suites "$suites_json" \
 		--argjson browsers "$browsers_json" \
 		--argjson shards "$shards_json" \
