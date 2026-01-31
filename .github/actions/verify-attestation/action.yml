@@ -1,0 +1,66 @@
+---
+name: 'Verify Attestation'
+description: 'Verify build attestations using gh attestation verify'
+author: 'lgtm-hq'
+
+inputs:
+  target:
+    description: 'Target to verify (file path or image reference)'
+    required: true
+  target-type:
+    description: 'Type of target: file, image'
+    required: false
+    default: 'file'
+  owner:
+    description: 'Repository owner for attestation lookup'
+    required: false
+    default: ''
+  repo:
+    description: 'Repository name for attestation lookup'
+    required: false
+    default: ''
+
+outputs:
+  verified:
+    description: 'Whether the attestation was verified successfully'
+    value: ${{ steps.verify.outputs.verified }}
+  signer-identity:
+    description: 'Identity of the signer'
+    value: ${{ steps.verify.outputs.signer-identity }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Verify attestation
+      id: verify
+      shell: bash
+      env:
+        STEP: verify
+        TARGET: ${{ inputs.target }}
+        TARGET_TYPE: ${{ inputs.target-type }}
+        OWNER: ${{ inputs.owner || github.repository_owner }}
+        REPO: ${{ inputs.repo }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
+
+    - name: Parse verification output
+      if: steps.verify.outputs.verified == 'true'
+      shell: bash
+      env:
+        STEP: parse
+        VERIFICATION_OUTPUT: ${{ steps.verify.outputs.verification-output }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
+
+    - name: Generate summary
+      if: always()
+      shell: bash
+      env:
+        STEP: summary
+        VERIFIED: ${{ steps.verify.outputs.verified || 'false' }}
+        SIGNER_IDENTITY: ${{ steps.verify.outputs.signer-identity }}
+        TARGET: ${{ inputs.target }}
+        TARGET_TYPE: ${{ inputs.target-type }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
+
+branding:
+  icon: 'check-square'
+  color: 'purple'

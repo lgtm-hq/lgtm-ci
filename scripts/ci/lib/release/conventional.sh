@@ -16,7 +16,6 @@ readonly CC_PATTERN='^([a-z]+)(\([^)]+\))?(!)?: (.+)$'
 readonly FEAT_TYPES="feat feature"
 readonly FIX_TYPES="fix bugfix hotfix"
 readonly DOCS_TYPES="docs documentation"
-readonly MISC_TYPES="style refactor perf test build ci chore revert"
 
 # Parse a conventional commit message
 # Usage: parse_conventional_commit "feat(scope): description"
@@ -57,8 +56,8 @@ is_breaking_change() {
 		return 0
 	fi
 
-	# Check for BREAKING CHANGE in body (full commit message)
-	if [[ "$message" == *"BREAKING CHANGE"* ]]; then
+	# Check for BREAKING CHANGE or BREAKING-CHANGE in body (full commit message)
+	if [[ "$message" == *"BREAKING CHANGE"* ]] || [[ "$message" == *"BREAKING-CHANGE"* ]]; then
 		return 0
 	fi
 

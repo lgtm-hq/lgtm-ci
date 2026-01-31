@@ -70,7 +70,16 @@ die() {
 	exit 1
 }
 
+# Exit with unknown step error (for STEP-based action scripts)
+# Usage: die_unknown_step "$STEP"
+die_unknown_step() {
+	local step="${1:-unknown}"
+	log_error "Unknown step: $step"
+	exit 1
+}
+
 # =============================================================================
 # Export functions
 # =============================================================================
 export -f log_info log_success log_warn log_warning log_error log_verbose die
+export -f die_unknown_step

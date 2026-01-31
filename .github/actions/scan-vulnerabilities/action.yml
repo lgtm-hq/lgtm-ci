@@ -1,0 +1,147 @@
+---
+name: 'Scan Vulnerabilities'
+description: 'Scan for vulnerabilities using Grype'
+author: 'lgtm-hq'
+
+inputs:
+  target:
+    description: 'Target to scan (SBOM file, image, directory)'
+    required: true
+  target-type:
+    description: 'Type of target: sbom, image, dir'
+    required: false
+    default: 'sbom'
+  sbom-file:
+    description: 'Path to SBOM file (alternative to target when target-type is sbom)'
+    required: false
+    default: ''
+  fail-on:
+    description: 'Severity threshold to fail on: critical, high, medium, low, none'
+    required: false
+    default: ''
+  output-format:
+    description: 'Output format: json, table'
+    required: false
+    default: 'json'
+  upload-sarif:
+    description: 'Upload SARIF report to GitHub Security tab'
+    required: false
+    default: 'false'
+
+outputs:
+  vulnerabilities-found:
+    description: 'Whether any vulnerabilities were found'
+    value: ${{ steps.counts.outputs.vulnerabilities-found }}
+  critical-count:
+    description: 'Number of critical vulnerabilities'
+    value: ${{ steps.counts.outputs.critical-count }}
+  high-count:
+    description: 'Number of high-severity vulnerabilities'
+    value: ${{ steps.counts.outputs.high-count }}
+  medium-count:
+    description: 'Number of medium-severity vulnerabilities'
+    value: ${{ steps.counts.outputs.medium-count }}
+  low-count:
+    description: 'Number of low-severity vulnerabilities'
+    value: ${{ steps.counts.outputs.low-count }}
+  sarif-file:
+    description: 'Path to SARIF report file'
+    value: ${{ steps.sarif.outputs.sarif-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Determine scan target
+      id: target
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.sbom-file }}" && "${{ inputs.target-type }}" == "sbom" ]]; then
+          echo "path=${{ inputs.sbom-file }}" >> "$GITHUB_OUTPUT"
+        else
+          echo "path=${{ inputs.target }}" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Scan for vulnerabilities
+      id: scan
+      # Pinned to SHA for supply chain security
+      uses: anchore/scan-action@2c901ab7378897c01b8e6f6ef6b8d422a1d7b992 # v5.3.0
+      with:
+        path: ${{ inputs.target-type == 'dir' && steps.target.outputs.path || '' }}
+        image: ${{ inputs.target-type == 'image' && steps.target.outputs.path || '' }}
+        sbom: ${{ inputs.target-type == 'sbom' && steps.target.outputs.path || '' }}
+        fail-build: ${{ inputs.fail-on != '' && inputs.fail-on != 'none' }}
+        severity-cutoff:
+          ${{ inputs.fail-on != '' && inputs.fail-on != 'none' && inputs.fail-on ||
+          'negligible' }}
+        output-format: ${{ inputs.output-format }}
+
+    - name: Parse vulnerability counts
+      id: counts
+      if: inputs.output-format == 'json'
+      shell: bash
+      run: |
+        RESULTS="${{ steps.scan.outputs.json }}"
+        count_severity() {
+          jq -r "[.matches[]? | select(.vulnerability.severity == \"$1\")] | length" \
+            "$RESULTS" 2>/dev/null || echo 0
+        }
+        if [[ -f "$RESULTS" ]] && command -v jq >/dev/null 2>&1; then
+          CRITICAL=$(count_severity Critical)
+          HIGH=$(count_severity High)
+          MEDIUM=$(count_severity Medium)
+          LOW=$(count_severity Low)
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+          {
+            echo "critical-count=$CRITICAL"
+            echo "high-count=$HIGH"
+            echo "medium-count=$MEDIUM"
+            echo "low-count=$LOW"
+            if [[ $TOTAL -gt 0 ]]; then
+              echo "vulnerabilities-found=true"
+            else
+              echo "vulnerabilities-found=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+        else
+          {
+            echo "critical-count=0"
+            echo "high-count=0"
+            echo "medium-count=0"
+            echo "low-count=0"
+            echo "vulnerabilities-found=false"
+          } >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Generate SARIF report
+      id: sarif
+      if: inputs.upload-sarif == 'true'
+      shell: bash
+      env:
+        STEP: sarif
+        TARGET: ${{ steps.target.outputs.path }}
+        TARGET_TYPE: ${{ inputs.target-type }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/scan-vulnerabilities.sh
+
+    - name: Upload SARIF to GitHub Security
+      if: inputs.upload-sarif == 'true' && steps.sarif.outputs.sarif-file != ''
+      # Pinned to SHA for supply chain security
+      uses: github/codeql-action/upload-sarif@1b549b9259bda1cb5ddde3b41741a82a2d15a841 # v3.28.6
+      with:
+        sarif_file: ${{ steps.sarif.outputs.sarif-file }}
+        category: 'vulnerability-scan'
+
+    - name: Generate summary
+      if: inputs.output-format == 'json'
+      shell: bash
+      env:
+        STEP: summary
+        RESULTS_FILE: ${{ steps.scan.outputs.json }}
+        CRITICAL_COUNT: ${{ steps.counts.outputs.critical-count }}
+        HIGH_COUNT: ${{ steps.counts.outputs.high-count }}
+        MEDIUM_COUNT: ${{ steps.counts.outputs.medium-count }}
+        LOW_COUNT: ${{ steps.counts.outputs.low-count }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/scan-vulnerabilities.sh
+
+branding:
+  icon: 'shield'
+  color: 'red'

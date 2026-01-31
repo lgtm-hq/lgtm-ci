@@ -1,0 +1,66 @@
+---
+name: 'Generate SBOM'
+description: 'Generate Software Bill of Materials (SBOM) using Syft'
+author: 'lgtm-hq'
+
+inputs:
+  target:
+    description: 'Target to generate SBOM for (directory, image, file)'
+    required: false
+    default: '.'
+  target-type:
+    description: 'Type of target: dir, image, file'
+    required: false
+    default: 'dir'
+  format:
+    description: 'SBOM output format: cyclonedx-json, spdx-json'
+    required: false
+    default: 'cyclonedx-json'
+  output-file:
+    description: 'Output file path (auto-generated if not specified)'
+    required: false
+    default: ''
+  upload-artifact:
+    description: 'Upload SBOM as artifact'
+    required: false
+    default: 'true'
+  artifact-name:
+    description: 'Name for the uploaded artifact'
+    required: false
+    default: 'sbom'
+
+outputs:
+  sbom-file:
+    description: 'Path to the generated SBOM file'
+    value: ${{ inputs.output-file || 'sbom.cdx.json' }}
+  sbom-format:
+    description: 'Format of the generated SBOM'
+    value: ${{ inputs.format }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate SBOM
+      id: generate
+      # Pinned to SHA for supply chain security
+      uses: anchore/sbom-action@55dc4ee22412511ee8c3e6b81fb5b279dd5567c5 # v0.17.9
+      with:
+        path: ${{ inputs.target-type == 'dir' && inputs.target || '' }}
+        image: ${{ inputs.target-type == 'image' && inputs.target || '' }}
+        file: ${{ inputs.target-type == 'file' && inputs.target || '' }}
+        format: ${{ inputs.format }}
+        output-file: ${{ inputs.output-file }}
+        upload-artifact: ${{ inputs.upload-artifact }}
+        artifact-name: ${{ inputs.artifact-name }}
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        SBOM_FILE: ${{ inputs.output-file || 'sbom.cdx.json' }}
+        FORMAT: ${{ inputs.format }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-sbom.sh
+
+branding:
+  icon: 'package'
+  color: 'blue'

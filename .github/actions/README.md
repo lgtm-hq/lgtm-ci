@@ -188,6 +188,113 @@ Network egress configuration and reporting scaffolding.
 
 ---
 
+## SBOM & Supply Chain Security
+
+### generate-sbom
+
+Generate Software Bill of Materials (SBOM) using
+[Syft](https://github.com/anchore/syft).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@main
+  with:
+    target: '.' # optional, default: current directory
+    target-type: 'dir' # 'dir', 'image', or 'file'
+    format: 'cyclonedx-json' # see supported formats below
+    upload-artifact: 'true' # optional
+    artifact-name: 'sbom' # optional
+```
+
+**Outputs:**
+
+- `sbom-file` - Path to the generated SBOM file
+- `sbom-format` - Format of the generated SBOM
+
+**Supported formats:**
+
+- `cyclonedx-json` - CycloneDX JSON (default)
+- `spdx-json` - SPDX JSON
+- `cyclonedx-xml` - CycloneDX XML
+- `spdx-tag-value` - SPDX Tag-Value
+
+---
+
+### scan-vulnerabilities
+
+Scan for vulnerabilities using [Grype](https://github.com/anchore/grype).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@main
+  with:
+    target: 'sbom.cdx.json' # SBOM file, image, or directory
+    target-type: 'sbom' # 'sbom', 'image', or 'dir'
+    fail-on: 'high' # 'critical', 'high', 'medium', 'low', or ''
+    upload-sarif: 'true' # upload to GitHub Security tab
+```
+
+**Outputs:**
+
+- `vulnerabilities-found` - Whether any vulnerabilities were found
+- `critical-count` - Number of critical vulnerabilities
+- `high-count` - Number of high-severity vulnerabilities
+- `medium-count` - Number of medium-severity vulnerabilities
+- `low-count` - Number of low-severity vulnerabilities
+- `sarif-file` - Path to SARIF report (if generated)
+
+**Features:**
+
+- Scans SBOMs, container images, or directories
+- Configurable failure threshold by severity
+- SARIF report upload to GitHub Security tab
+- Vulnerability summary in step summary
+
+---
+
+### attest-build
+
+Create build attestations using
+[GitHub attestations](https://github.com/actions/attest-build-provenance).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/attest-build@main
+  with:
+    subject-path: 'dist/myapp.tar.gz' # artifact to attest
+    subject-name: 'myapp' # optional
+    push-to-registry: 'false' # push to container registry
+```
+
+**Outputs:**
+
+- `attestation-id` - ID of the created attestation
+- `attestation-url` - URL of the attestation
+- `bundle-path` - Path to the attestation bundle
+
+**Requirements:**
+
+- `id-token: write` permission for OIDC signing
+- `attestations: write` permission
+
+---
+
+### verify-attestation
+
+Verify build attestations using `gh attestation verify`.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/verify-attestation@main
+  with:
+    target: 'dist/myapp.tar.gz' # file or image to verify
+    target-type: 'file' # 'file' or 'image'
+    owner: 'my-org' # optional, defaults to repository owner
+```
+
+**Outputs:**
+
+- `verified` - Whether the attestation was verified successfully
+- `signer-identity` - Identity of the signer
+
+---
+
 ## PR & Comment Actions
 
 ### post-pr-comment
@@ -369,6 +476,13 @@ Run lintro quality checks with optional actionlint validation.
 ---
 
 ## Release Actions
+
+**Required Permissions:**
+
+Release actions typically need the following GitHub Actions permissions:
+
+- `contents: write` - Required for creating tags and releases
+- `packages: write` - Required if uploading assets to GitHub Packages
 
 ### calculate-version
 

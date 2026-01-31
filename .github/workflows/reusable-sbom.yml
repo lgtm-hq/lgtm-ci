@@ -1,0 +1,115 @@
+---
+name: Reusable SBOM Workflow
+
+on:
+  workflow_call:
+    inputs:
+      target:
+        description: 'Target to generate SBOM for'
+        required: false
+        type: string
+        default: '.'
+      target-type:
+        description: 'Type of target: dir, image, file'
+        required: false
+        type: string
+        default: 'dir'
+      sbom-format:
+        description: 'SBOM output format: cyclonedx-json, spdx-json'
+        required: false
+        type: string
+        default: 'cyclonedx-json'
+      scan-vulnerabilities:
+        description: 'Scan SBOM for vulnerabilities'
+        required: false
+        type: boolean
+        default: true
+      fail-on-severity:
+        description: 'Fail on vulnerability severity: critical, high, medium, low, none'
+        required: false
+        type: string
+        default: ''
+      upload-sarif:
+        description: 'Upload vulnerability SARIF to GitHub Security'
+        required: false
+        type: boolean
+        default: false
+      create-attestation:
+        description: 'Create attestation for the SBOM'
+        required: false
+        type: boolean
+        default: false
+      artifact-name:
+        description: 'Name for uploaded SBOM artifact'
+        required: false
+        type: string
+        default: 'sbom'
+
+    outputs:
+      sbom-file:
+        description: "Path to the generated SBOM file, or 'none' if not generated"
+        value: ${{ jobs.sbom.outputs.sbom-file }}
+      vulnerabilities-found:
+        description:
+          "Whether vulnerabilities were found (true/false), or 'not-run' if scan was
+          skipped"
+        value: ${{ jobs.sbom.outputs.vulnerabilities-found }}
+      attestation-url:
+        description: "URL of the attestation, or 'not-run' if attestation was skipped"
+        value: ${{ jobs.sbom.outputs.attestation-url }}
+
+jobs:
+  sbom:
+    name: SBOM & Supply Chain
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      attestations: write
+
+    outputs:
+      sbom-file: ${{ steps.generate.outputs.sbom-file || 'none' }}
+      vulnerabilities-found:
+        ${{ steps.scan.outputs.vulnerabilities-found || 'not-run' }}
+      attestation-url: ${{ steps.attest.outputs.attestation-url || 'not-run' }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Generate SBOM
+        id: generate
+        uses: ./.github/actions/generate-sbom
+        with:
+          target: ${{ inputs.target }}
+          target-type: ${{ inputs.target-type }}
+          format: ${{ inputs.sbom-format }}
+          upload-artifact: 'true'
+          artifact-name: ${{ inputs.artifact-name }}
+
+      - name: Scan vulnerabilities
+        id: scan
+        if: inputs.scan-vulnerabilities
+        uses: ./.github/actions/scan-vulnerabilities
+        with:
+          target: ${{ steps.generate.outputs.sbom-file }}
+          target-type: sbom
+          fail-on: ${{ inputs.fail-on-severity }}
+          upload-sarif: ${{ inputs.upload-sarif }}
+
+      - name: Create attestation
+        id: attest
+        if: inputs.create-attestation && github.event_name != 'pull_request'
+        uses: ./.github/actions/attest-build
+        with:
+          subject-path: ${{ steps.generate.outputs.sbom-file }}
