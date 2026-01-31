@@ -232,16 +232,21 @@ install_anchore_tool() {
 	if command -v "$tool" >/dev/null 2>&1; then
 		local current_version
 		current_version=$("$tool" version 2>/dev/null | head -1 || echo "unknown")
-		log_info "$tool already installed: $current_version"
-		return 0
+		# If version matches or 'latest' requested, skip install
+		if [[ "$version" == "latest" ]] || [[ "$current_version" == *"$version"* ]]; then
+			log_info "$tool already installed: $current_version"
+			return 0
+		else
+			log_warn "$tool version mismatch: installed=$current_version, requested=$version - reinstalling"
+		fi
 	fi
 
-	log_info "Installing $tool..."
+	log_info "Installing $tool ${version}..."
 
-	# Use official installer script
+	# Use official installer script with version parameter
 	local installer_url="https://raw.githubusercontent.com/anchore/${tool}/main/install.sh"
 
-	if ! curl -sSfL "$installer_url" | sh -s -- -b "$bin_dir"; then
+	if ! curl -sSfL "$installer_url" | sh -s -- -b "$bin_dir" "$version"; then
 		log_error "Failed to install $tool"
 		return 1
 	fi

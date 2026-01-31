@@ -15,17 +15,15 @@ readonly _LGTM_CI_SBOM_TARGET_LOADED=1
 # =============================================================================
 
 # Resolve target path to scanner-compatible format
-# Usage: resolve_scan_target "/path" "dir" [tool]
+# Usage: resolve_scan_target "/path" "dir"
 # Args:
 #   $1 - target path or reference
 #   $2 - target type (dir, image, file, sbom)
-#   $3 - tool name (optional, for tool-specific handling)
 # Returns: formatted target string via stdout
 # Exit: 1 if unsupported target type
 resolve_scan_target() {
 	local target="$1"
 	local target_type="$2"
-	local tool="${3:-}"
 
 	case "$target_type" in
 	dir | directory)

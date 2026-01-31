@@ -61,9 +61,10 @@ verify)
 	log_info "Verifying attestation for: $TARGET"
 	log_info "Owner: $OWNER"
 
-	# Run verification
+	# Run verification (separate stdout JSON from stderr errors)
+	stderr_file="${VERIFICATION_OUTPUT}.err"
 	set +e
-	gh "${GH_ARGS[@]}" >"$VERIFICATION_OUTPUT" 2>&1
+	gh "${GH_ARGS[@]}" >"$VERIFICATION_OUTPUT" 2>"$stderr_file"
 	verify_exit_code=$?
 	set -e
 
@@ -80,10 +81,11 @@ verify)
 		fi
 	else
 		log_error "Attestation verification failed"
-		if [[ -f "$VERIFICATION_OUTPUT" ]]; then
-			cat "$VERIFICATION_OUTPUT" >&2
+		if [[ -f "$stderr_file" && -s "$stderr_file" ]]; then
+			cat "$stderr_file" >&2
 		fi
 	fi
+	rm -f "$stderr_file"
 
 	# Set outputs
 	set_github_output "verified" "$verified"

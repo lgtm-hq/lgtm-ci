@@ -19,6 +19,10 @@ source "$LIB_DIR/github.sh"
 : "${NEXT_VERSION:=}"
 
 if [[ "$RELEASE_NEEDED" == "true" ]]; then
+	if [[ -z "$NEXT_VERSION" ]]; then
+		echo "::error::Release is needed but NEXT_VERSION is empty"
+		exit 1
+	fi
 	set_github_output "release-needed" "true"
 	echo "::notice::Release needed: $NEXT_VERSION"
 else

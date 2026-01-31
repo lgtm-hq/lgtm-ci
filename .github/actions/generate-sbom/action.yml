@@ -32,10 +32,10 @@ inputs:
 outputs:
   sbom-file:
     description: 'Path to the generated SBOM file'
-    value: ${{ steps.generate.outputs.sbom-file }}
+    value: ${{ steps.generate.outputs.sbom-path }}
   sbom-format:
     description: 'Format of the generated SBOM'
-    value: ${{ steps.generate.outputs.sbom-format }}
+    value: ${{ inputs.format }}
 
 runs:
   using: 'composite'
@@ -57,7 +57,7 @@ runs:
       shell: bash
       env:
         STEP: summary
-        SBOM_FILE: ${{ steps.generate.outputs.sbom-file }}
+        SBOM_FILE: ${{ steps.generate.outputs.sbom-path }}
         FORMAT: ${{ inputs.format }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-sbom.sh
 

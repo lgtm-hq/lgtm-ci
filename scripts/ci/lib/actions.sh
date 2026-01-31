@@ -21,9 +21,19 @@ _LGTM_CI_ACTIONS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Source core libraries (required)
 # shellcheck source=log.sh
-[[ -f "$_LGTM_CI_ACTIONS_LIB_DIR/log.sh" ]] && source "$_LGTM_CI_ACTIONS_LIB_DIR/log.sh"
+if [[ -f "$_LGTM_CI_ACTIONS_LIB_DIR/log.sh" ]]; then
+	source "$_LGTM_CI_ACTIONS_LIB_DIR/log.sh"
+else
+	echo "[ERROR] Required library not found: log.sh" >&2
+	exit 1
+fi
 # shellcheck source=github.sh
-[[ -f "$_LGTM_CI_ACTIONS_LIB_DIR/github.sh" ]] && source "$_LGTM_CI_ACTIONS_LIB_DIR/github.sh"
+if [[ -f "$_LGTM_CI_ACTIONS_LIB_DIR/github.sh" ]]; then
+	source "$_LGTM_CI_ACTIONS_LIB_DIR/github.sh"
+else
+	echo "[ERROR] Required library not found: github.sh" >&2
+	exit 1
+fi
 
 # Source optional libraries (load if available)
 # shellcheck source=sbom.sh

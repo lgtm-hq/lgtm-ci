@@ -31,19 +31,19 @@ inputs:
 outputs:
   vulnerabilities-found:
     description: 'Whether any vulnerabilities were found'
-    value: ${{ steps.scan.outputs.vulnerabilities-found }}
+    value: ${{ steps.counts.outputs.vulnerabilities-found }}
   critical-count:
     description: 'Number of critical vulnerabilities'
-    value: ${{ steps.scan.outputs.critical-count }}
+    value: ${{ steps.counts.outputs.critical-count }}
   high-count:
-    description: 'Number of high severity vulnerabilities'
-    value: ${{ steps.scan.outputs.high-count }}
+    description: 'Number of high-severity vulnerabilities'
+    value: ${{ steps.counts.outputs.high-count }}
   medium-count:
-    description: 'Number of medium severity vulnerabilities'
-    value: ${{ steps.scan.outputs.medium-count }}
+    description: 'Number of medium-severity vulnerabilities'
+    value: ${{ steps.counts.outputs.medium-count }}
   low-count:
-    description: 'Number of low severity vulnerabilities'
-    value: ${{ steps.scan.outputs.low-count }}
+    description: 'Number of low-severity vulnerabilities'
+    value: ${{ steps.counts.outputs.low-count }}
   sarif-file:
     description: 'Path to SARIF report file'
     value: ${{ steps.sarif.outputs.sarif-file }}
@@ -75,6 +75,43 @@ runs:
           'negligible' }}
         output-format: ${{ inputs.output-format }}
 
+    - name: Parse vulnerability counts
+      id: counts
+      if: inputs.output-format == 'json'
+      shell: bash
+      run: |
+        RESULTS="${{ steps.scan.outputs.json }}"
+        count_severity() {
+          jq -r "[.matches[]? | select(.vulnerability.severity == \"$1\")] | length" \
+            "$RESULTS" 2>/dev/null || echo 0
+        }
+        if [[ -f "$RESULTS" ]] && command -v jq >/dev/null 2>&1; then
+          CRITICAL=$(count_severity Critical)
+          HIGH=$(count_severity High)
+          MEDIUM=$(count_severity Medium)
+          LOW=$(count_severity Low)
+          TOTAL=$((CRITICAL + HIGH + MEDIUM + LOW))
+          {
+            echo "critical-count=$CRITICAL"
+            echo "high-count=$HIGH"
+            echo "medium-count=$MEDIUM"
+            echo "low-count=$LOW"
+            if [[ $TOTAL -gt 0 ]]; then
+              echo "vulnerabilities-found=true"
+            else
+              echo "vulnerabilities-found=false"
+            fi
+          } >> "$GITHUB_OUTPUT"
+        else
+          {
+            echo "critical-count=0"
+            echo "high-count=0"
+            echo "medium-count=0"
+            echo "low-count=0"
+            echo "vulnerabilities-found=false"
+          } >> "$GITHUB_OUTPUT"
+        fi
+
     - name: Generate SARIF report
       id: sarif
       if: inputs.upload-sarif == 'true'
@@ -94,14 +131,15 @@ runs:
         category: 'vulnerability-scan'
 
     - name: Generate summary
+      if: inputs.output-format == 'json'
       shell: bash
       env:
         STEP: summary
         RESULTS_FILE: ${{ steps.scan.outputs.json }}
-        CRITICAL_COUNT: ${{ steps.scan.outputs.critical-count }}
-        HIGH_COUNT: ${{ steps.scan.outputs.high-count }}
-        MEDIUM_COUNT: ${{ steps.scan.outputs.medium-count }}
-        LOW_COUNT: ${{ steps.scan.outputs.low-count }}
+        CRITICAL_COUNT: ${{ steps.counts.outputs.critical-count }}
+        HIGH_COUNT: ${{ steps.counts.outputs.high-count }}
+        MEDIUM_COUNT: ${{ steps.counts.outputs.medium-count }}
+        LOW_COUNT: ${{ steps.counts.outputs.low-count }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/scan-vulnerabilities.sh
 
 branding:

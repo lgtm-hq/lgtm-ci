@@ -34,7 +34,6 @@ runs:
     - name: Verify attestation
       id: verify
       shell: bash
-      continue-on-error: true
       env:
         STEP: verify
         TARGET: ${{ inputs.target }}
@@ -52,10 +51,11 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
 
     - name: Generate summary
+      if: always()
       shell: bash
       env:
         STEP: summary
-        VERIFIED: ${{ steps.verify.outputs.verified }}
+        VERIFIED: ${{ steps.verify.outputs.verified || 'false' }}
         SIGNER_IDENTITY: ${{ steps.verify.outputs.signer-identity }}
         TARGET: ${{ inputs.target }}
         TARGET_TYPE: ${{ inputs.target-type }}

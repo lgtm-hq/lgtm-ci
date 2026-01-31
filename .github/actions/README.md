@@ -236,9 +236,9 @@ Scan for vulnerabilities using [Grype](https://github.com/anchore/grype).
 
 - `vulnerabilities-found` - Whether any vulnerabilities were found
 - `critical-count` - Number of critical vulnerabilities
-- `high-count` - Number of high severity vulnerabilities
-- `medium-count` - Number of medium severity vulnerabilities
-- `low-count` - Number of low severity vulnerabilities
+- `high-count` - Number of high-severity vulnerabilities
+- `medium-count` - Number of medium-severity vulnerabilities
+- `low-count` - Number of low-severity vulnerabilities
 - `sarif-file` - Path to SARIF report (if generated)
 
 **Features:**

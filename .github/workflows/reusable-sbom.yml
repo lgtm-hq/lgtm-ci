@@ -67,9 +67,10 @@ jobs:
       attestations: write
 
     outputs:
-      sbom-file: ${{ steps.generate.outputs.sbom-file }}
-      vulnerabilities-found: ${{ steps.scan.outputs.vulnerabilities-found }}
-      attestation-url: ${{ steps.attest.outputs.attestation-url }}
+      sbom-file: ${{ steps.generate.outputs.sbom-file || 'none' }}
+      vulnerabilities-found:
+        ${{ steps.scan.outputs.vulnerabilities-found || 'not-run' }}
+      attestation-url: ${{ steps.attest.outputs.attestation-url || 'not-run' }}
 
     steps:
       - name: Harden runner

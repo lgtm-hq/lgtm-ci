@@ -61,7 +61,11 @@ generate)
 
 		# Count components if jq is available and format is JSON
 		if command -v jq >/dev/null 2>&1 && [[ "$FORMAT" == *json* ]]; then
-			component_count=$(jq -r '.components | length // 0' "$OUTPUT_FILE" 2>/dev/null || echo "unknown")
+			# Try CycloneDX (.components) first, then SPDX (.packages)
+			component_count=$(jq -r '.components | length // 0' "$OUTPUT_FILE" 2>/dev/null || echo "0")
+			if [[ "$component_count" == "0" || "$component_count" == "null" ]]; then
+				component_count=$(jq -r '.packages | length // 0' "$OUTPUT_FILE" 2>/dev/null || echo "unknown")
+			fi
 			log_info "Components: $component_count"
 		fi
 	else

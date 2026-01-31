@@ -125,6 +125,7 @@ get_commits_by_type() {
 
 			if $is_breaking || [[ -n "$CC_BREAKING" ]]; then
 				breaking_commits+=("$entry")
+				continue
 			fi
 
 			case "$CC_TYPE" in
@@ -190,6 +191,7 @@ count_commits_by_type() {
 
 		if is_breaking_change "$full_message"; then
 			((breaking++))
+			continue
 		fi
 
 		if parse_conventional_commit "$subject"; then

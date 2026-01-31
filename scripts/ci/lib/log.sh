@@ -74,7 +74,7 @@ die() {
 # Usage: die_unknown_step "$STEP"
 die_unknown_step() {
 	local step="${1:-unknown}"
-	echo "Unknown step: $step" >&2
+	log_error "Unknown step: $step"
 	exit 1
 }
 

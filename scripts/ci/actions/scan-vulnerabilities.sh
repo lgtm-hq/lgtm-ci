@@ -48,11 +48,24 @@ scan)
 		GRYPE_ARGS+=(--fail-on "$FAIL_ON")
 	fi
 
-	# Run scan and capture both result and exit code
+	# Run scan and capture both result and exit code (separate stderr)
+	stderr_file="${OUTPUT_FILE}.err"
 	set +e
-	grype "$GRYPE_TARGET" "${GRYPE_ARGS[@]}" >"$OUTPUT_FILE" 2>&1
+	grype "$GRYPE_TARGET" "${GRYPE_ARGS[@]}" >"$OUTPUT_FILE" 2>"$stderr_file"
 	scan_exit_code=$?
 	set -e
+
+	# Check for operational errors (stderr) before parsing JSON
+	if [[ $scan_exit_code -ne 0 && -s "$stderr_file" ]]; then
+		# Check if it's a vulnerability threshold failure vs operational error
+		if ! grep -qE '^{' "$OUTPUT_FILE" 2>/dev/null; then
+			log_error "Grype scan failed with operational error:"
+			cat "$stderr_file" >&2
+			rm -f "$stderr_file"
+			exit 1
+		fi
+	fi
+	rm -f "$stderr_file"
 
 	# Parse results
 	vulnerabilities_found="false"
@@ -164,7 +177,9 @@ summary)
 			add_github_summary "<summary>Top Vulnerabilities</summary>"
 			add_github_summary ""
 			add_github_summary '```'
-			jq -r '.matches[]? | "\(.vulnerability.severity): \(.vulnerability.id) in \(.artifact.name)@\(.artifact.version)"' "$RESULTS_FILE" | sort | head -20
+			while IFS= read -r vuln_line; do
+				add_github_summary "$vuln_line"
+			done < <(jq -r '.matches[]? | "\(.vulnerability.severity): \(.vulnerability.id) in \(.artifact.name)@\(.artifact.version)"' "$RESULTS_FILE" | sort | head -20)
 			add_github_summary '```'
 			add_github_summary ""
 			add_github_summary "</details>"

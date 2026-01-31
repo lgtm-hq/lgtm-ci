@@ -56,7 +56,7 @@ is_breaking_change() {
 		return 0
 	fi
 
-	# Check for BREAKING CHANGE or BREAKING-CHANGE in body
+	# Check for BREAKING CHANGE or BREAKING-CHANGE in body (full commit message)
 	if [[ "$message" == *"BREAKING CHANGE"* ]] || [[ "$message" == *"BREAKING-CHANGE"* ]]; then
 		return 0
 	fi
