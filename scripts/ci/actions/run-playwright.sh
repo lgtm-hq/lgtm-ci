@@ -174,10 +174,18 @@ parse)
 			log_info "Test results: $(format_test_summary)"
 		else
 			log_warn "Results file not found: $REPORT_PATH"
+			set_github_output "tests-passed" "0"
+			set_github_output "tests-failed" "0"
+			set_github_output "tests-skipped" "0"
+			set_github_output "tests-total" "0"
 		fi
 		;;
 	*)
 		log_warn "Cannot parse results for reporter: $REPORTER"
+		set_github_output "tests-passed" "0"
+		set_github_output "tests-failed" "0"
+		set_github_output "tests-skipped" "0"
+		set_github_output "tests-total" "0"
 		;;
 	esac
 	;;

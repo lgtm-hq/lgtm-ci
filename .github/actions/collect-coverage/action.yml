@@ -64,7 +64,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: merge
-        COVERAGE_FILES:
+        COVERAGE_FILES: >-
           ${{ inputs.coverage-files || steps.detect.outputs.coverage-files }}
         INPUT_FORMAT: ${{ inputs.input-format }}
         OUTPUT_FORMAT: ${{ inputs.output-format }}

@@ -165,10 +165,11 @@ merge)
 			esac
 		else
 			# Files are XML/JSON reports, not binary - can't use coverage combine
-			log_warn "Files are not .coverage binary data files, cannot use coverage combine"
-			log_warn "Rejected files: ${existing_files[*]}"
-			log_warn "Using first file as fallback"
-			cp "${existing_files[0]}" "$temp_merged"
+			log_error "Cannot merge ${#existing_files[@]} coverage-py/cobertura files"
+			log_error "Files are XML/JSON reports, not .coverage binary data"
+			log_error "To merge these files, convert to LCOV format first or use a single file"
+			log_error "Rejected files: ${existing_files[*]}"
+			exit 1
 		fi
 		;;
 	*)

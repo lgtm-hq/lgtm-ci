@@ -13,9 +13,14 @@ readonly _LGTM_CI_TESTING_COVERAGE_EXTRACT_LOADED=1
 # Get directory of this script for sourcing dependencies
 _LGTM_CI_TESTING_COV_EXTRACT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# Source detect.sh for format detection
+# Source detect.sh for format detection (required dependency)
 # shellcheck source=../detect.sh
-[[ -f "$_LGTM_CI_TESTING_COV_EXTRACT_DIR/detect.sh" ]] && source "$_LGTM_CI_TESTING_COV_EXTRACT_DIR/detect.sh"
+if [[ -f "$_LGTM_CI_TESTING_COV_EXTRACT_DIR/detect.sh" ]]; then
+	source "$_LGTM_CI_TESTING_COV_EXTRACT_DIR/detect.sh"
+else
+	echo "Error: Required dependency detect.sh not found at $_LGTM_CI_TESTING_COV_EXTRACT_DIR/detect.sh" >&2
+	return 1
+fi
 
 # Extract coverage percentage from various coverage file formats
 # Usage: extract_coverage_percent "coverage.json"

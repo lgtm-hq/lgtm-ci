@@ -116,9 +116,10 @@ detect_coverage_format() {
 	case "${file##*.}" in
 	xml)
 		# Determine if cobertura or clover format
-		if head -20 "$file" | grep -q '<coverage.*line-rate\|<coverage.*lines-valid\|<package.*name='; then
+		# Use grep -E with POSIX alternation for portability (BSD/macOS)
+		if head -20 "$file" | grep -qE '<coverage.*line-rate|<coverage.*lines-valid|<package.*name='; then
 			echo "cobertura"
-		elif head -20 "$file" | grep -q '<coverage.*clover'; then
+		elif head -20 "$file" | grep -qE '<coverage.*clover'; then
 			echo "clover"
 		else
 			echo "xml"
@@ -127,9 +128,10 @@ detect_coverage_format() {
 		;;
 	json)
 		# Determine if istanbul or coverage.py format
-		if head -5 "$file" | grep -q '"meta"\s*:\s*{.*"version"'; then
+		# Use grep -E with POSIX character classes for portability (BSD/macOS)
+		if head -5 "$file" | grep -qE '"meta"[[:space:]]*:[[:space:]]*\{.*"version"'; then
 			echo "coverage-py"
-		elif head -20 "$file" | grep -q '"path"\s*:\s*"\|"statementMap"\s*:'; then
+		elif head -20 "$file" | grep -qE '"path"[[:space:]]*:[[:space:]]*"|"statementMap"[[:space:]]*:'; then
 			echo "istanbul"
 		else
 			echo "json"
@@ -156,7 +158,7 @@ detect_coverage_format() {
 	fi
 
 	if [[ "$first_line" == "<?xml"* ]] || [[ "$first_line" == "<coverage"* ]]; then
-		if grep -q 'line-rate\|lines-valid' "$file" 2>/dev/null; then
+		if grep -qE 'line-rate|lines-valid' "$file" 2>/dev/null; then
 			echo "cobertura"
 		else
 			echo "xml"
