@@ -5,7 +5,7 @@
 # Required environment variables:
 #   STEP - Which step to run: verify, parse, summary
 #   TARGET - Target to verify (file path or image reference)
-#   TARGET_TYPE - Type of target (file, image)
+#   TARGET_TYPE - Type of target (file, image, container)
 #   OWNER - Repository owner for attestation lookup
 
 set -euo pipefail

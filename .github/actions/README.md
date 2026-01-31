@@ -200,7 +200,7 @@ Generate Software Bill of Materials (SBOM) using
   with:
     target: '.' # optional, default: current directory
     target-type: 'dir' # 'dir', 'image', or 'file'
-    format: 'cyclonedx-json' # 'cyclonedx-json' or 'spdx-json'
+    format: 'cyclonedx-json' # see supported formats below
     upload-artifact: 'true' # optional
     artifact-name: 'sbom' # optional
 ```
@@ -212,10 +212,10 @@ Generate Software Bill of Materials (SBOM) using
 
 **Supported formats:**
 
-- CycloneDX JSON (`cyclonedx-json`) - Default
-- SPDX JSON (`spdx-json`)
-- CycloneDX XML (`cyclonedx-xml`)
-- SPDX Tag-Value (`spdx-tag-value`)
+- `cyclonedx-json` - CycloneDX JSON (default)
+- `spdx-json` - SPDX JSON
+- `cyclonedx-xml` - CycloneDX XML
+- `spdx-tag-value` - SPDX Tag-Value
 
 ---
 
@@ -476,6 +476,13 @@ Run lintro quality checks with optional actionlint validation.
 ---
 
 ## Release Actions
+
+**Required Permissions:**
+
+Release actions typically need the following GitHub Actions permissions:
+
+- `contents: write` - Required for creating tags and releases
+- `packages: write` - Required if uploading assets to GitHub Packages
 
 ### calculate-version
 

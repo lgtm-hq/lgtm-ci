@@ -31,7 +31,7 @@ fi
 if [[ -f "$_LGTM_CI_ACTIONS_LIB_DIR/github.sh" ]]; then
 	source "$_LGTM_CI_ACTIONS_LIB_DIR/github.sh"
 else
-	echo "[ERROR] Required library not found: github.sh" >&2
+	log_error "Required library not found: github.sh"
 	exit 1
 fi
 

@@ -15,10 +15,16 @@ source "$SCRIPT_DIR/conventional.sh"
 
 # Analyze commits between two refs to determine version bump
 # Usage: analyze_commits_for_bump "v1.0.0" "HEAD"
-# Returns: major, minor, patch, or none
+# Returns: major, minor, patch, or none (returns 1 if from_ref is invalid)
 analyze_commits_for_bump() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
+
+	# Validate refs exist before processing
+	if [[ -n "$from_ref" ]] && ! git rev-parse --verify "$from_ref" >/dev/null 2>&1; then
+		echo "none"
+		return 1
+	fi
 
 	local bump="none"
 	local has_breaking=false
@@ -89,6 +95,11 @@ readonly FIELD_SEP=$'\x1F'
 get_commits_by_type() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
+
+	# Validate refs exist before processing
+	if [[ -n "$from_ref" ]] && ! git rev-parse --verify "$from_ref" >/dev/null 2>&1; then
+		return 1
+	fi
 
 	local range
 	if [[ -n "$from_ref" ]]; then
@@ -166,6 +177,11 @@ get_commits_by_type() {
 count_commits_by_type() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
+
+	# Validate refs exist before processing
+	if [[ -n "$from_ref" ]] && ! git rev-parse --verify "$from_ref" >/dev/null 2>&1; then
+		return 1
+	fi
 
 	local range
 	if [[ -n "$from_ref" ]]; then

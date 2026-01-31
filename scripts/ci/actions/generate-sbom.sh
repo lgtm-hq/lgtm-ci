@@ -42,6 +42,12 @@ generate)
 		OUTPUT_FILE="sbom${extension}"
 	fi
 
+	# Validate local targets before resolve
+	if ! validate_scan_target "$TARGET" "$TARGET_TYPE"; then
+		log_error "Invalid target for type $TARGET_TYPE: $TARGET"
+		exit 1
+	fi
+
 	# Resolve target for syft
 	if ! SYFT_TARGET=$(resolve_scan_target "$TARGET" "$TARGET_TYPE"); then
 		log_error "Unsupported target type: $TARGET_TYPE"
