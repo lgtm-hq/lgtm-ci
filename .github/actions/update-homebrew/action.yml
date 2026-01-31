@@ -1,0 +1,118 @@
+---
+name: 'Update Homebrew Formula'
+description: 'Update a Homebrew formula with new version from PyPI'
+author: 'lgtm-hq'
+
+inputs:
+  tap-repository:
+    description: 'Homebrew tap repository (owner/repo)'
+    required: true
+  formula:
+    description: 'Formula name'
+    required: true
+  package-name:
+    description: 'PyPI package name'
+    required: true
+  version:
+    description: 'Version to update to'
+    required: true
+  wait-for-availability:
+    description: 'Wait for package to be available on PyPI'
+    required: false
+    default: 'true'
+  max-wait-minutes:
+    description: 'Maximum wait time in minutes'
+    required: false
+    default: '10'
+  test-pypi:
+    description: 'Use TestPyPI instead of PyPI'
+    required: false
+    default: 'false'
+  push:
+    description: 'Push changes to tap repository'
+    required: false
+    default: 'true'
+  create-pr:
+    description: 'Create PR instead of direct push'
+    required: false
+    default: 'false'
+
+outputs:
+  updated:
+    description: 'Whether the formula was updated'
+    value: ${{ steps.commit.outputs.updated }}
+  commit-sha:
+    description: 'Commit SHA of the update'
+    value: ${{ steps.commit.outputs.commit-sha }}
+  pr-url:
+    description: 'Pull request URL (if create-pr is true)'
+    value: ${{ steps.pr.outputs.pr-url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Wait for package availability
+      if: inputs.wait-for-availability == 'true'
+      shell: bash
+      env:
+        STEP: wait
+        PACKAGE: ${{ inputs.package-name }}
+        VERSION: ${{ inputs.version }}
+        MAX_WAIT: ${{ inputs.max-wait-minutes }}
+        TEST_PYPI: ${{ inputs.test-pypi }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+
+    - name: Generate formula
+      id: generate
+      shell: bash
+      env:
+        STEP: generate
+        TAP_REPOSITORY: ${{ inputs.tap-repository }}
+        FORMULA: ${{ inputs.formula }}
+        PACKAGE: ${{ inputs.package-name }}
+        VERSION: ${{ inputs.version }}
+        TEST_PYPI: ${{ inputs.test-pypi }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+
+    - name: Commit changes
+      id: commit
+      if: inputs.push == 'true' || inputs.create-pr == 'true'
+      shell: bash
+      env:
+        STEP: commit
+        TAP_REPOSITORY: ${{ inputs.tap-repository }}
+        FORMULA: ${{ inputs.formula }}
+        VERSION: ${{ inputs.version }}
+        PUSH: ${{ inputs.push }}
+        CREATE_PR: ${{ inputs.create-pr }}
+        GH_TOKEN: ${{ github.token }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+
+    - name: Create pull request
+      id: pr
+      if: inputs.create-pr == 'true'
+      shell: bash
+      env:
+        STEP: pr
+        TAP_REPOSITORY: ${{ inputs.tap-repository }}
+        FORMULA: ${{ inputs.formula }}
+        VERSION: ${{ inputs.version }}
+        GH_TOKEN: ${{ github.token }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        TAP_REPOSITORY: ${{ inputs.tap-repository }}
+        FORMULA: ${{ inputs.formula }}
+        PACKAGE: ${{ inputs.package-name }}
+        VERSION: ${{ inputs.version }}
+        UPDATED: ${{ steps.commit.outputs.updated || 'false' }}
+        COMMIT_SHA: ${{ steps.commit.outputs.commit-sha }}
+        PR_URL: ${{ steps.pr.outputs.pr-url }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+
+branding:
+  icon: 'download'
+  color: 'yellow'
