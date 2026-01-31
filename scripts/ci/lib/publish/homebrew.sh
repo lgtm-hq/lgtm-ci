@@ -43,8 +43,9 @@ generate_formula_from_pypi() {
 	fi
 
 	# Generate formula class name (CamelCase)
+	# Normalize all non-alphanumeric characters to underscores, then convert to CamelCase
 	local class_name
-	class_name=$(echo "$package" | sed 's/-/_/g' | awk -F_ '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1' OFS='')
+	class_name=$(echo "$package" | sed 's/[^A-Za-z0-9]/_/g' | awk -F_ '{for(i=1;i<=NF;i++) $i=toupper(substr($i,1,1)) tolower(substr($i,2))}1' OFS='')
 	# Ruby class names cannot start with a digit
 	if [[ "$class_name" =~ ^[0-9] ]]; then
 		class_name="Pkg$class_name"
@@ -123,16 +124,16 @@ update_formula_version() {
 	# Create backup
 	cp "$formula_path" "$formula_path.bak"
 
-	# Update URL (with atomic error handling)
-	if ! sed -i.tmp "s|url \"[^\"]*\"|url \"$new_url\"|" "$formula_path"; then
+	# Update URL (only first top-level occurrence with 2-space indent, not resource blocks)
+	if ! sed -i.tmp '0,/^  url "/s|^  url "[^"]*"|  url "'"$new_url"'"|' "$formula_path"; then
 		mv "$formula_path.bak" "$formula_path"
 		log_error "Failed to update URL"
 		return 1
 	fi
 	rm -f "$formula_path.tmp"
 
-	# Update SHA256
-	if ! sed -i.tmp "s|sha256 \"[^\"]*\"|sha256 \"$new_sha256\"|" "$formula_path"; then
+	# Update SHA256 (only first top-level occurrence with 2-space indent, not resource blocks)
+	if ! sed -i.tmp '0,/^  sha256 "/s|^  sha256 "[^"]*"|  sha256 "'"$new_sha256"'"|' "$formula_path"; then
 		mv "$formula_path.bak" "$formula_path"
 		log_error "Failed to update SHA256"
 		return 1
@@ -160,7 +161,7 @@ calculate_sha256_from_url() {
 	tmpfile=$(mktemp)
 	trap 'rm -f "$tmpfile"' RETURN
 
-	if ! curl -sL "$url" -o "$tmpfile"; then
+	if ! curl -sL --fail "$url" -o "$tmpfile"; then
 		log_error "Failed to download: $url"
 		return 1
 	fi
