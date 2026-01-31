@@ -1,0 +1,49 @@
+---
+name: 'Generate Changelog'
+description: 'Generate changelog from conventional commits'
+author: 'lgtm-hq'
+
+inputs:
+  from-ref:
+    description: 'Git reference to start from (default: latest tag)'
+    required: false
+    default: ''
+  to-ref:
+    description: 'Git reference to end at'
+    required: false
+    default: 'HEAD'
+  version:
+    description: 'Version for changelog header'
+    required: false
+    default: ''
+  format:
+    description: 'Output format (full, simple, with-type)'
+    required: false
+    default: 'full'
+  output-file:
+    description: 'File to write changelog to (default: stdout only)'
+    required: false
+    default: ''
+
+outputs:
+  changelog:
+    description: 'Generated changelog content'
+    value: ${{ steps.generate.outputs.changelog }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Generate changelog
+      id: generate
+      shell: bash
+      env:
+        FROM_REF: ${{ inputs.from-ref }}
+        TO_REF: ${{ inputs.to-ref }}
+        VERSION: ${{ inputs.version }}
+        FORMAT: ${{ inputs.format }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+      run: ${{ github.action_path }}/../../../scripts/ci/release/generate-changelog.sh
+
+branding:
+  icon: 'file-text'
+  color: 'green'

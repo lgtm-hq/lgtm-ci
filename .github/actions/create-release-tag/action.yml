@@ -1,0 +1,57 @@
+---
+name: 'Create Release Tag'
+description: 'Create an annotated git tag for release'
+author: 'lgtm-hq'
+
+inputs:
+  version:
+    description: 'Version to tag (with or without v prefix)'
+    required: true
+  tag-prefix:
+    description: 'Prefix for tag name'
+    required: false
+    default: 'v'
+  message:
+    description: 'Tag message (default: auto-generated changelog)'
+    required: false
+    default: ''
+  push:
+    description: 'Push tag to origin'
+    required: false
+    default: 'false'
+  from-ref:
+    description: 'Reference for changelog generation (default: latest tag)'
+    required: false
+    default: ''
+
+outputs:
+  tag-name:
+    description: 'Created tag name'
+    value: ${{ steps.tag.outputs.tag-name }}
+  tag-sha:
+    description: 'Tag SHA'
+    value: ${{ steps.tag.outputs.tag-sha }}
+  commit-sha:
+    description: 'Commit SHA the tag points to'
+    value: ${{ steps.tag.outputs.commit-sha }}
+  version:
+    description: 'Clean version (without prefix)'
+    value: ${{ steps.tag.outputs.version }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Create release tag
+      id: tag
+      shell: bash
+      env:
+        VERSION: ${{ inputs.version }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
+        MESSAGE: ${{ inputs.message }}
+        PUSH: ${{ inputs.push }}
+        FROM_REF: ${{ inputs.from-ref }}
+      run: ${{ github.action_path }}/../../../scripts/ci/release/create-tag.sh
+
+branding:
+  icon: 'tag'
+  color: 'purple'

@@ -368,6 +368,83 @@ Run lintro quality checks with optional actionlint validation.
 
 ---
 
+## Release Actions
+
+### calculate-version
+
+Calculate the next semantic version based on conventional commits.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/calculate-version@main
+  with:
+    max-bump: 'minor' # optional, clamp max bump type
+```
+
+**Outputs:**
+
+- `current-version` - Current version from latest tag
+- `next-version` - Calculated next version
+- `bump-type` - Detected bump type (major, minor, patch, none)
+- `release-needed` - Whether a release is needed
+
+---
+
+### generate-changelog
+
+Generate changelog from conventional commits.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-changelog@main
+  with:
+    version: '1.2.0' # optional
+    format: 'full' # full, simple, or with-type
+```
+
+**Outputs:**
+
+- `changelog` - Generated changelog content (Markdown)
+
+---
+
+### create-release-tag
+
+Create an annotated git tag for release.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/create-release-tag@main
+  with:
+    version: '1.2.0'
+    push: 'true' # push tag to origin
+```
+
+**Outputs:**
+
+- `tag-name` - Created tag name (e.g., v1.2.0)
+- `tag-sha` - Tag SHA
+- `commit-sha` - Commit SHA the tag points to
+
+---
+
+### create-github-release
+
+Create a GitHub release with changelog and optional assets.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/create-github-release@main
+  with:
+    tag: 'v1.2.0'
+    draft: 'false'
+    prerelease: 'false'
+    files: 'dist/*.tar.gz dist/*.whl' # optional
+```
+
+**Outputs:**
+
+- `release-url` - URL of the created release
+- `release-id` - ID of the created release
+
+---
+
 ## Usage Example
 
 ```yaml
