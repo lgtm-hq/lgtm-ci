@@ -131,8 +131,8 @@ validate_gem_package() {
 	local errors=0
 	local name version
 
-	name=$(grep -E '\.(name)\s*=' "$gemspec" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
-	version=$(grep -E '\.(version)\s*=' "$gemspec" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	name=$(grep -E '\.(name)[[:space:]]*=' "$gemspec" | head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	version=$(grep -E '\.(version)[[:space:]]*=' "$gemspec" | head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
 
 	if [[ -z "$name" ]]; then
 		log_error "Missing required field: name"
@@ -159,9 +159,15 @@ validate_gem_package() {
 			log_warn "gem build validation produced warnings"
 		fi
 		# Clean up only the specific gem that was just built (extract from output)
+		# gem build writes to current directory, not necessarily gemspec_dir
 		built_gem=$(echo "$gem_output" | grep -oE 'File: [^ ]+\.gem' | sed 's/File: //' | head -1)
-		if [[ -n "$built_gem" ]] && [[ -f "$gemspec_dir/$built_gem" ]]; then
-			rm -f "$gemspec_dir/$built_gem"
+		if [[ -n "$built_gem" ]]; then
+			# Try gemspec directory first, then current directory
+			if [[ -f "$gemspec_dir/$built_gem" ]]; then
+				rm -f "$gemspec_dir/$built_gem"
+			elif [[ -f "$built_gem" ]]; then
+				rm -f "$built_gem"
+			fi
 		fi
 	fi
 

@@ -112,6 +112,14 @@ detect_coverage_format() {
 		return 1
 	fi
 
+	# Check for Python .coverage* binary files first (before extension-based detection)
+	local basename
+	basename=$(basename "$file")
+	if [[ "$basename" == .coverage* ]]; then
+		echo "coverage-py"
+		return 0
+	fi
+
 	# Check by extension first
 	case "${file##*.}" in
 	xml)
@@ -177,7 +185,7 @@ detect_coverage_format() {
 
 # Detect if a coverage file is from Python (coverage.py) or JavaScript (istanbul/v8)
 # Usage: detect_coverage_source "coverage.json"
-# Output: python|javascript|unknown
+# Output: python|javascript|php|java|unknown
 detect_coverage_source() {
 	local file="${1:-}"
 

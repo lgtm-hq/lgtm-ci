@@ -54,7 +54,8 @@ detect)
 
 	log_info "Found ${#coverage_files[@]} coverage file(s):"
 	for file in "${coverage_files[@]}"; do
-		format=$(detect_coverage_format "$file")
+		# Guard against detect_coverage_format returning non-zero
+		format=$(detect_coverage_format "$file" 2>/dev/null) || format="unknown"
 		log_info "  - $file ($format)"
 	done
 
@@ -90,23 +91,43 @@ merge)
 	cd "$WORKING_DIRECTORY"
 
 	# Parse coverage files (comma-separated or newline-separated)
-	files=()
+	# Supports glob patterns that will be expanded
+	patterns=()
 	if [[ "$COVERAGE_FILES" == *","* ]]; then
 		# Comma-separated
-		IFS=',' read -ra files <<<"$COVERAGE_FILES"
+		IFS=',' read -ra patterns <<<"$COVERAGE_FILES"
 	else
 		# Newline-separated
-		mapfile -t files <<<"$COVERAGE_FILES"
+		mapfile -t patterns <<<"$COVERAGE_FILES"
 	fi
 
-	# Filter to existing files
+	# Expand glob patterns and filter to existing files
 	existing_files=()
-	for file in "${files[@]}"; do
+	for pattern in "${patterns[@]}"; do
 		# Trim whitespace
-		file="${file#"${file%%[![:space:]]*}"}"
-		file="${file%"${file##*[![:space:]]}"}"
-		if [[ -n "$file" ]] && [[ -f "$file" ]]; then
-			existing_files+=("$file")
+		pattern="${pattern#"${pattern%%[![:space:]]*}"}"
+		pattern="${pattern%"${pattern##*[![:space:]]}"}"
+		[[ -z "$pattern" ]] && continue
+
+		# Expand glob pattern (nullglob-safe)
+		shopt -s nullglob
+		# shellcheck disable=SC2206
+		expanded=($pattern)
+		shopt -u nullglob
+
+		if [[ ${#expanded[@]} -eq 0 ]]; then
+			# No matches for pattern - check if it's a literal file
+			if [[ -f "$pattern" ]]; then
+				existing_files+=("$pattern")
+			else
+				log_warn "No files matched pattern: $pattern"
+			fi
+		else
+			for file in "${expanded[@]}"; do
+				if [[ -f "$file" ]]; then
+					existing_files+=("$file")
+				fi
+			done
 		fi
 	done
 

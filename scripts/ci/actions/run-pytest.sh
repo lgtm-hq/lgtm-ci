@@ -87,6 +87,7 @@ run)
 			PYTEST_ARGS+=("--cov-report=lcov:coverage.lcov")
 			;;
 		*)
+			log_warn "Unknown COVERAGE_FORMAT '$COVERAGE_FORMAT', defaulting to json"
 			PYTEST_ARGS+=("--cov-report=json:coverage.json")
 			;;
 		esac
