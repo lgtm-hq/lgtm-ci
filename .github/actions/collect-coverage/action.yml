@@ -1,0 +1,85 @@
+---
+name: 'Collect Coverage'
+description: 'Aggregate coverage from multiple sources and formats'
+author: 'lgtm-hq'
+
+inputs:
+  coverage-files:
+    description: 'Glob pattern or comma-separated list of coverage files'
+    required: false
+    default: ''
+  input-format:
+    description: 'Input format: auto, istanbul, coverage-py, lcov'
+    required: false
+    default: 'auto'
+  output-format:
+    description: 'Output format: json, lcov'
+    required: false
+    default: 'json'
+  merge-strategy:
+    description: 'How to merge coverage: union, intersection'
+    required: false
+    default: 'union'
+  output-file:
+    description: 'Output file path for merged coverage'
+    required: false
+    default: ''
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: '.'
+
+outputs:
+  merged-coverage-file:
+    description: 'Path to merged coverage file'
+    value: ${{ steps.merge.outputs.merged-coverage-file }}
+  coverage-percent:
+    description: 'Overall coverage percentage'
+    value: ${{ steps.merge.outputs.coverage-percent }}
+  lines-coverage:
+    description: 'Lines coverage percentage'
+    value: ${{ steps.summary.outputs.lines-coverage }}
+  branches-coverage:
+    description: 'Branches coverage percentage'
+    value: ${{ steps.summary.outputs.branches-coverage }}
+  functions-coverage:
+    description: 'Functions coverage percentage'
+    value: ${{ steps.summary.outputs.functions-coverage }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect coverage files
+      id: detect
+      if: inputs.coverage-files == ''
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: detect
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
+
+    - name: Merge coverage
+      id: merge
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: merge
+        COVERAGE_FILES:
+          ${{ inputs.coverage-files || steps.detect.outputs.coverage-files }}
+        INPUT_FORMAT: ${{ inputs.input-format }}
+        OUTPUT_FORMAT: ${{ inputs.output-format }}
+        OUTPUT_FILE: ${{ inputs.output-file }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
+
+    - name: Generate summary
+      id: summary
+      shell: bash
+      env:
+        STEP: summary
+        COVERAGE_FILE: ${{ steps.merge.outputs.merged-coverage-file }}
+        COVERAGE_PERCENT: ${{ steps.merge.outputs.coverage-percent }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
+
+branding:
+  icon: 'pie-chart'
+  color: 'blue'

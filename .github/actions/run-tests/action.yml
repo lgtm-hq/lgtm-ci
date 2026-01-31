@@ -1,0 +1,116 @@
+---
+name: 'Run Tests'
+description: 'Generic test runner that delegates to language-specific runners'
+author: 'lgtm-hq'
+
+inputs:
+  runner:
+    description: 'Test runner to use: pytest, vitest, playwright, auto'
+    required: false
+    default: 'auto'
+  config-file:
+    description: 'Path to test configuration file'
+    required: false
+    default: ''
+  coverage:
+    description: 'Whether to collect coverage (true/false)'
+    required: false
+    default: 'false'
+  coverage-format:
+    description: 'Coverage output format (xml, json, lcov)'
+    required: false
+    default: 'json'
+  extra-args:
+    description: 'Additional arguments to pass to the test runner'
+    required: false
+    default: ''
+  working-directory:
+    description: 'Working directory for running tests'
+    required: false
+    default: '.'
+
+outputs:
+  exit-code:
+    description: 'Exit code from the test runner'
+    value: ${{ steps.run.outputs.exit-code }}
+  runner:
+    description: 'Test runner that was used'
+    value: ${{ steps.detect.outputs.runner }}
+  tests-passed:
+    description: 'Number of tests passed'
+    value: ${{ steps.parse.outputs.tests-passed }}
+  tests-failed:
+    description: 'Number of tests failed'
+    value: ${{ steps.parse.outputs.tests-failed }}
+  tests-skipped:
+    description: 'Number of tests skipped'
+    value: ${{ steps.parse.outputs.tests-skipped }}
+  coverage-file:
+    description: 'Path to coverage file'
+    value: ${{ steps.run.outputs.coverage-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect test runner
+      id: detect
+      shell: bash
+      env:
+        STEP: detect
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
+
+    - name: Run tests
+      id: run
+      shell: bash
+      env:
+        STEP: run
+        RUNNER: ${{ inputs.runner }}
+        COVERAGE: ${{ inputs.coverage }}
+        COVERAGE_FORMAT: ${{ inputs.coverage-format }}
+        EXTRA_ARGS: ${{ inputs.extra-args }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
+      continue-on-error: true
+
+    - name: Parse results
+      id: parse
+      shell: bash
+      env:
+        STEP: parse
+        RUNNER: ${{ steps.detect.outputs.runner }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: |
+        runner="${{ steps.detect.outputs.runner }}"
+        case "$runner" in
+          pytest)
+            STEP=parse ${{ github.action_path }}/../../../scripts/ci/actions/run-pytest.sh
+            ;;
+          vitest)
+            STEP=parse ${{ github.action_path }}/../../../scripts/ci/actions/run-vitest.sh
+            ;;
+          playwright)
+            STEP=parse ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+            ;;
+        esac
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        RUNNER: ${{ steps.detect.outputs.runner }}
+        TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
+        TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
+        TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
+        TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
+
+    - name: Check test result
+      if: steps.run.outputs.exit-code != '0'
+      shell: bash
+      run: exit ${{ steps.run.outputs.exit-code }}
+
+branding:
+  icon: 'check-circle'
+  color: 'green'

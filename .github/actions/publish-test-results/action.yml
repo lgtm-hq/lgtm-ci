@@ -1,0 +1,95 @@
+---
+name: 'Publish Test Results'
+description: 'Publish test results and coverage to GitHub Pages'
+author: 'lgtm-hq'
+
+inputs:
+  results-path:
+    description: 'Path to test results directory or file'
+    required: false
+    default: ''
+  coverage-path:
+    description: 'Path to coverage report directory or file'
+    required: false
+    default: ''
+  badge-path:
+    description: 'Path to badge files'
+    required: false
+    default: ''
+  target-branch:
+    description: 'Branch to deploy to'
+    required: false
+    default: 'gh-pages'
+  target-dir:
+    description: 'Directory on target branch'
+    required: false
+    default: '.'
+  keep-history:
+    description: 'Keep historical reports (true/false)'
+    required: false
+    default: 'false'
+  retention-days:
+    description: 'Days to keep historical reports'
+    required: false
+    default: '30'
+  working-directory:
+    description: 'Working directory'
+    required: false
+    default: '.'
+
+outputs:
+  pages-url:
+    description: 'GitHub Pages URL'
+    value: ${{ steps.deploy.outputs.pages-url }}
+  deployment-id:
+    description: 'Deployment ID'
+    value: ${{ steps.deploy.outputs.deployment-id }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare files
+      id: prepare
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: prepare
+        RESULTS_PATH: ${{ inputs.results-path }}
+        COVERAGE_PATH: ${{ inputs.coverage-path }}
+        BADGE_PATH: ${{ inputs.badge-path }}
+        TARGET_DIR: ${{ inputs.target-dir }}
+        KEEP_HISTORY: ${{ inputs.keep-history }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-test-results.sh
+
+    - name: Deploy to GitHub Pages
+      id: deploy
+      # Pinned to SHA for supply chain security
+      uses: peaceiris/actions-gh-pages@4f9cc6602d3f66b9c108549d475ec49e8ef4d45e # v4.0.0
+      with:
+        github_token: ${{ github.token }}
+        publish_dir: ${{ steps.prepare.outputs.staging-dir }}
+        publish_branch: ${{ inputs.target-branch }}
+        force_orphan: ${{ inputs.keep-history != 'true' }}
+        commit_message: 'Deploy test results and coverage [skip ci]'
+
+    - name: Get Pages URL
+      id: pages-url
+      shell: bash
+      run: |
+        # Extract owner/repo from GITHUB_REPOSITORY
+        owner="${GITHUB_REPOSITORY%%/*}"
+        repo="${GITHUB_REPOSITORY##*/}"
+        pages_url="https://${owner}.github.io/${repo}/"
+        echo "pages-url=$pages_url" >> "$GITHUB_OUTPUT"
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        PAGES_URL: ${{ steps.pages-url.outputs.pages-url }}
+        TARGET_BRANCH: ${{ inputs.target-branch }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-test-results.sh
+
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'

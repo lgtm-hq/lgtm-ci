@@ -1,0 +1,126 @@
+---
+name: 'Run Playwright'
+description: 'Run E2E tests using Playwright'
+author: 'lgtm-hq'
+
+inputs:
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+  project:
+    description: 'Playwright project to run'
+    required: false
+    default: ''
+  browser:
+    description: 'Browser to use: chromium, firefox, webkit, all'
+    required: false
+    default: 'chromium'
+  reporter:
+    description: 'Reporter to use: json, html, junit'
+    required: false
+    default: 'json'
+  shard:
+    description: 'Shard configuration (e.g., "1/3" for shard 1 of 3)'
+    required: false
+    default: ''
+  extra-args:
+    description: 'Additional arguments to pass to Playwright'
+    required: false
+    default: ''
+  working-directory:
+    description: 'Working directory for running tests'
+    required: false
+    default: '.'
+
+outputs:
+  exit-code:
+    description: 'Exit code from Playwright'
+    value: ${{ steps.run.outputs.exit-code }}
+  tests-passed:
+    description: 'Number of tests passed'
+    value: ${{ steps.parse.outputs.tests-passed }}
+  tests-failed:
+    description: 'Number of tests failed'
+    value: ${{ steps.parse.outputs.tests-failed }}
+  tests-skipped:
+    description: 'Number of tests skipped'
+    value: ${{ steps.parse.outputs.tests-skipped }}
+  tests-total:
+    description: 'Total number of tests'
+    value: ${{ steps.parse.outputs.tests-total }}
+  report-path:
+    description: 'Path to test report'
+    value: ${{ steps.run.outputs.report-path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: ./.github/actions/setup-node
+      with:
+        node-version: ${{ inputs.node-version }}
+        working-directory: ${{ inputs.working-directory }}
+
+    - name: Setup Playwright
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: setup
+        BROWSER: ${{ inputs.browser }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+
+    - name: Run Playwright
+      id: run
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: run
+        PROJECT: ${{ inputs.project }}
+        BROWSER: ${{ inputs.browser }}
+        REPORTER: ${{ inputs.reporter }}
+        SHARD: ${{ inputs.shard }}
+        EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+      continue-on-error: true
+
+    - name: Parse results
+      id: parse
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: parse
+        REPORT_PATH: ${{ steps.run.outputs.report-path }}
+        REPORTER: ${{ inputs.reporter }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
+        TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
+        TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
+        TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
+        BROWSER: ${{ inputs.browser }}
+        SHARD: ${{ inputs.shard }}
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+
+    - name: Upload report
+      if: inputs.reporter == 'html' && always()
+      # Pinned to SHA for supply chain security
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: playwright-report
+        path: ${{ inputs.working-directory }}/playwright-report
+        retention-days: 30
+
+    - name: Check test result
+      if: steps.run.outputs.exit-code != '0'
+      shell: bash
+      run: exit ${{ steps.run.outputs.exit-code }}
+
+branding:
+  icon: 'monitor'
+  color: 'purple'

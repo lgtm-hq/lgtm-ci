@@ -1,0 +1,168 @@
+---
+name: Reusable Node.js Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '20'
+      test-path:
+        description: 'Path to test files or directory'
+        required: false
+        type: string
+        default: '.'
+      coverage:
+        description: 'Whether to collect coverage'
+        required: false
+        type: boolean
+        default: false
+      coverage-format:
+        description: 'Coverage output format: json, lcov, html'
+        required: false
+        type: string
+        default: 'json'
+      coverage-threshold:
+        description: 'Minimum coverage percentage to pass'
+        required: false
+        type: number
+        default: 0
+      upload-coverage:
+        description: 'Upload coverage report as artifact'
+        required: false
+        type: boolean
+        default: false
+      publish-results:
+        description: 'Publish results to GitHub Pages'
+        required: false
+        type: boolean
+        default: false
+      extra-args:
+        description: 'Additional arguments to pass to vitest'
+        required: false
+        type: string
+        default: ''
+      working-directory:
+        description: 'Working directory for running tests'
+        required: false
+        type: string
+        default: '.'
+
+    outputs:
+      tests-passed:
+        description: 'Number of tests passed'
+        value: ${{ jobs.test.outputs.tests-passed }}
+      tests-failed:
+        description: 'Number of tests failed'
+        value: ${{ jobs.test.outputs.tests-failed }}
+      tests-total:
+        description: 'Total number of tests'
+        value: ${{ jobs.test.outputs.tests-total }}
+      coverage-percent:
+        description: 'Coverage percentage'
+        value: ${{ jobs.test.outputs.coverage-percent }}
+      passed:
+        description: 'Whether all tests passed'
+        value: ${{ jobs.test.outputs.passed }}
+
+jobs:
+  test:
+    name: Node.js Tests
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    outputs:
+      tests-passed: ${{ steps.test.outputs.tests-passed }}
+      tests-failed: ${{ steps.test.outputs.tests-failed }}
+      tests-total: ${{ steps.test.outputs.tests-total }}
+      coverage-percent: ${{ steps.test.outputs.coverage-percent }}
+      passed: ${{ steps.test.outputs.tests-failed == '0' }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Run vitest
+        id: test
+        uses: ./.github/actions/run-vitest
+        with:
+          node-version: ${{ inputs.node-version }}
+          test-path: ${{ inputs.test-path }}
+          coverage: ${{ inputs.coverage }}
+          coverage-format: ${{ inputs.coverage-format }}
+          extra-args: ${{ inputs.extra-args }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Check coverage threshold
+        if: inputs.coverage && inputs.coverage-threshold > 0
+        shell: bash
+        run: |
+          coverage="${{ steps.test.outputs.coverage-percent }}"
+          threshold="${{ inputs.coverage-threshold }}"
+          if (( $(echo "$coverage < $threshold" | bc -l) )); then
+            echo "::error::Coverage ${coverage}% is below threshold ${threshold}%"
+            exit 1
+          fi
+          echo "Coverage ${coverage}% meets threshold ${threshold}%"
+
+      - name: Upload coverage report
+        if: inputs.upload-coverage && inputs.coverage
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: node-coverage
+          path: |
+            ${{ inputs.working-directory }}/coverage/
+            ${{ inputs.working-directory }}/vitest-results.json
+          retention-days: 7
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish Results
+    needs: test
+    if: inputs.publish-results && always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download coverage
+        if: inputs.coverage
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: node-coverage
+          path: coverage-report
+
+      - name: Generate badge
+        if: inputs.coverage
+        uses: ./.github/actions/generate-coverage-badge
+        with:
+          coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+          format: svg
+          output-path: coverage-report/badge.svg
+
+      - name: Publish to GitHub Pages
+        uses: ./.github/actions/publish-test-results
+        with:
+          results-path: coverage-report
+          coverage-path: coverage-report
+          badge-path: coverage-report
+          target-dir: vitest

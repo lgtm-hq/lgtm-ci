@@ -1,0 +1,164 @@
+---
+name: Reusable Coverage Workflow
+
+on:
+  workflow_call:
+    inputs:
+      coverage-files:
+        description: 'Glob pattern or comma-separated list of coverage files'
+        required: false
+        type: string
+        default: ''
+      format:
+        description: 'Coverage format: auto, istanbul, coverage-py, lcov'
+        required: false
+        type: string
+        default: 'auto'
+      threshold:
+        description: 'Minimum coverage percentage to pass'
+        required: false
+        type: number
+        default: 0
+      generate-badge:
+        description: 'Generate coverage badge'
+        required: false
+        type: boolean
+        default: true
+      publish-pages:
+        description: 'Publish coverage to GitHub Pages'
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: 'Working directory'
+        required: false
+        type: string
+        default: '.'
+
+    outputs:
+      coverage-percent:
+        description: 'Overall coverage percentage'
+        value: ${{ jobs.coverage.outputs.coverage-percent }}
+      badge-url:
+        description: 'URL to coverage badge'
+        value: ${{ jobs.coverage.outputs.badge-url }}
+      pages-url:
+        description: 'GitHub Pages URL'
+        value: ${{ jobs.publish.outputs.pages-url }}
+      passed:
+        description: 'Whether coverage meets threshold'
+        value: ${{ jobs.coverage.outputs.passed }}
+
+jobs:
+  coverage:
+    name: Collect Coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    outputs:
+      coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
+      badge-url: ${{ steps.badge.outputs.badge-url }}
+      passed: ${{ steps.threshold.outputs.passed }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download coverage artifacts
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: '*-coverage'
+          path: coverage-artifacts
+          merge-multiple: true
+
+      - name: Collect coverage
+        id: collect
+        uses: ./.github/actions/collect-coverage
+        with:
+          coverage-files: ${{ inputs.coverage-files }}
+          input-format: ${{ inputs.format }}
+          output-format: json
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Check coverage threshold
+        id: threshold
+        shell: bash
+        run: |
+          coverage="${{ steps.collect.outputs.coverage-percent }}"
+          threshold="${{ inputs.threshold }}"
+
+          if [[ "$threshold" -gt 0 ]]; then
+            if (( $(echo "$coverage < $threshold" | bc -l) )); then
+              echo "::error::Coverage ${coverage}% is below threshold ${threshold}%"
+              echo "passed=false" >> "$GITHUB_OUTPUT"
+              exit 1
+            fi
+          fi
+
+          echo "passed=true" >> "$GITHUB_OUTPUT"
+          echo "Coverage ${coverage}% meets threshold ${threshold}%"
+
+      - name: Generate badge
+        id: badge
+        if: inputs.generate-badge
+        uses: ./.github/actions/generate-coverage-badge
+        with:
+          coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
+          format: svg
+          output-path: coverage/badge.svg
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Upload coverage report
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-report
+          path: |
+            ${{ inputs.working-directory }}/${{ steps.collect.outputs.merged-coverage-file }}
+            ${{ inputs.working-directory }}/coverage/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish Coverage
+    needs: coverage
+    if: inputs.publish-pages
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    outputs:
+      pages-url: ${{ steps.publish.outputs.pages-url }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Download coverage report
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: coverage-report
+          path: coverage-report
+
+      - name: Publish to GitHub Pages
+        id: publish
+        uses: ./.github/actions/publish-test-results
+        with:
+          coverage-path: coverage-report
+          badge-path: coverage-report/coverage
+          target-dir: coverage
