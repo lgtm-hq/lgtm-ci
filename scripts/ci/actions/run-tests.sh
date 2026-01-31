@@ -3,7 +3,7 @@
 # Purpose: Generic test runner that delegates to language-specific runners
 #
 # Required environment variables:
-#   STEP - Which step to run: detect, run, summary
+#   STEP - Which step to run: detect, run, parse, summary
 #
 # Optional environment variables:
 #   RUNNER - Test runner to use: pytest, vitest, playwright, auto (default: auto)
@@ -91,6 +91,36 @@ run)
 	set_github_output "runner" "$RUNNER"
 
 	exit "$exit_code"
+	;;
+
+parse)
+	: "${RUNNER:=unknown}"
+	: "${WORKING_DIRECTORY:=.}"
+
+	cd "$WORKING_DIRECTORY"
+
+	# Delegate to the appropriate runner's parse step
+	case "$RUNNER" in
+	pytest)
+		export STEP="parse"
+		"$SCRIPT_DIR/run-pytest.sh"
+		;;
+	vitest)
+		export STEP="parse"
+		"$SCRIPT_DIR/run-vitest.sh"
+		;;
+	playwright)
+		export STEP="parse"
+		"$SCRIPT_DIR/run-playwright.sh"
+		;;
+	*)
+		log_warn "Unknown runner for parsing: $RUNNER"
+		set_github_output "tests-passed" "0"
+		set_github_output "tests-failed" "0"
+		set_github_output "tests-skipped" "0"
+		set_github_output "tests-total" "0"
+		;;
+	esac
 	;;
 
 summary)

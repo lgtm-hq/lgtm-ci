@@ -83,25 +83,7 @@ runs:
         STEP: parse
         RUNNER: ${{ steps.detect.outputs.runner }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: |
-        runner="${{ steps.detect.outputs.runner }}"
-        case "$runner" in
-          pytest)
-            STEP=parse ${{ github.action_path }}/../../../scripts/ci/actions/run-pytest.sh
-            ;;
-          vitest)
-            STEP=parse ${{ github.action_path }}/../../../scripts/ci/actions/run-vitest.sh
-            ;;
-          playwright)
-            STEP=parse ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
-            ;;
-          *)
-            echo "tests-passed=0" >> "$GITHUB_OUTPUT"
-            echo "tests-failed=0" >> "$GITHUB_OUTPUT"
-            echo "tests-skipped=0" >> "$GITHUB_OUTPUT"
-            echo "tests-total=0" >> "$GITHUB_OUTPUT"
-            ;;
-        esac
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
 
     - name: Generate summary
       shell: bash

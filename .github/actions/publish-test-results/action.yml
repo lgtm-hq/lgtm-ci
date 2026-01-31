@@ -73,19 +73,9 @@ runs:
       id: pages-url
       shell: bash
       env:
+        STEP: pages-url
         TARGET_DIR: ${{ inputs.target-dir }}
-      run: |
-        # Extract owner/repo from GITHUB_REPOSITORY
-        owner="${GITHUB_REPOSITORY%%/*}"
-        repo="${GITHUB_REPOSITORY##*/}"
-        target_dir="${TARGET_DIR#.}"
-        target_dir="${target_dir#/}"
-        if [[ -n "$target_dir" ]]; then
-          pages_url="https://${owner}.github.io/${repo}/${target_dir}/"
-        else
-          pages_url="https://${owner}.github.io/${repo}/"
-        fi
-        echo "pages-url=$pages_url" >> "$GITHUB_OUTPUT"
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-test-results.sh
 
     - name: Generate summary
       shell: bash

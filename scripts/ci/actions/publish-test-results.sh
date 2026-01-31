@@ -3,7 +3,7 @@
 # Purpose: Publish test results and coverage to GitHub Pages
 #
 # Required environment variables:
-#   STEP - Which step to run: prepare, deploy, summary
+#   STEP - Which step to run: prepare, pages-url, summary
 #
 # Optional environment variables:
 #   RESULTS_PATH - Path to test results directory
@@ -189,6 +189,27 @@ deploy)
 
 	# Cleanup staging directory
 	rm -rf "$STAGING_DIR"
+	;;
+
+pages-url)
+	: "${TARGET_DIR:=.}"
+
+	# Extract owner/repo from GITHUB_REPOSITORY
+	owner="${GITHUB_REPOSITORY%%/*}"
+	repo="${GITHUB_REPOSITORY##*/}"
+
+	# Clean up target_dir
+	target_dir="${TARGET_DIR#.}"
+	target_dir="${target_dir#/}"
+
+	if [[ -n "$target_dir" ]]; then
+		pages_url="https://${owner}.github.io/${repo}/${target_dir}/"
+	else
+		pages_url="https://${owner}.github.io/${repo}/"
+	fi
+
+	set_github_output "pages-url" "$pages_url"
+	log_info "GitHub Pages URL: $pages_url"
 	;;
 
 summary)
