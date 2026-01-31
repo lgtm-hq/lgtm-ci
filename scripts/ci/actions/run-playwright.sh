@@ -90,6 +90,7 @@ run)
 		;;
 	junit)
 		PLAYWRIGHT_ARGS+=("--reporter=junit")
+		export PLAYWRIGHT_JUNIT_OUTPUT_NAME="playwright-results.xml"
 		;;
 	*)
 		PLAYWRIGHT_ARGS+=("--reporter=json")
@@ -128,8 +129,8 @@ run)
 		fi
 		;;
 	junit)
-		if [[ -f "results.xml" ]]; then
-			set_github_output "report-path" "results.xml"
+		if [[ -f "playwright-results.xml" ]]; then
+			set_github_output "report-path" "playwright-results.xml"
 		fi
 		;;
 	esac

@@ -40,10 +40,7 @@ inputs:
 outputs:
   pages-url:
     description: 'GitHub Pages URL'
-    value: ${{ steps.deploy.outputs.pages-url }}
-  deployment-id:
-    description: 'Deployment ID'
-    value: ${{ steps.deploy.outputs.deployment-id }}
+    value: ${{ steps.pages-url.outputs.pages-url }}
 
 runs:
   using: 'composite'
@@ -75,11 +72,19 @@ runs:
     - name: Get Pages URL
       id: pages-url
       shell: bash
+      env:
+        TARGET_DIR: ${{ inputs.target-dir }}
       run: |
         # Extract owner/repo from GITHUB_REPOSITORY
         owner="${GITHUB_REPOSITORY%%/*}"
         repo="${GITHUB_REPOSITORY##*/}"
-        pages_url="https://${owner}.github.io/${repo}/"
+        target_dir="${TARGET_DIR#.}"
+        target_dir="${target_dir#/}"
+        if [[ -n "$target_dir" ]]; then
+          pages_url="https://${owner}.github.io/${repo}/${target_dir}/"
+        else
+          pages_url="https://${owner}.github.io/${repo}/"
+        fi
         echo "pages-url=$pages_url" >> "$GITHUB_OUTPUT"
 
     - name: Generate summary

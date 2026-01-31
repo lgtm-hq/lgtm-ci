@@ -111,7 +111,7 @@ jobs:
         run: |
           coverage="${{ steps.test.outputs.coverage-percent }}"
           threshold="${{ inputs.coverage-threshold }}"
-          if (( $(echo "$coverage < $threshold" | bc -l) )); then
+          if awk -v c="$coverage" -v t="$threshold" 'BEGIN { exit (c < t ? 0 : 1) }'; then
             echo "::error::Coverage ${coverage}% is below threshold ${threshold}%"
             exit 1
           fi
@@ -132,7 +132,7 @@ jobs:
   publish:
     name: Publish Results
     needs: test
-    if: inputs.publish-results && always()
+    if: inputs.publish-results && !cancelled()
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -142,6 +142,8 @@ jobs:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
 
       - name: Download coverage
         if: inputs.coverage

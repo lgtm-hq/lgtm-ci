@@ -45,6 +45,9 @@ outputs:
   tests-skipped:
     description: 'Number of tests skipped'
     value: ${{ steps.parse.outputs.tests-skipped }}
+  tests-total:
+    description: 'Total number of tests'
+    value: ${{ steps.parse.outputs.tests-total }}
   coverage-file:
     description: 'Path to coverage file'
     value: ${{ steps.run.outputs.coverage-file }}
@@ -92,6 +95,12 @@ runs:
           playwright)
             STEP=parse ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
             ;;
+          *)
+            echo "tests-passed=0" >> "$GITHUB_OUTPUT"
+            echo "tests-failed=0" >> "$GITHUB_OUTPUT"
+            echo "tests-skipped=0" >> "$GITHUB_OUTPUT"
+            echo "tests-total=0" >> "$GITHUB_OUTPUT"
+            ;;
         esac
 
     - name: Generate summary
@@ -107,7 +116,7 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
 
     - name: Check test result
-      if: steps.run.outputs.exit-code != '0'
+      if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
       shell: bash
       run: exit ${{ steps.run.outputs.exit-code }}
 

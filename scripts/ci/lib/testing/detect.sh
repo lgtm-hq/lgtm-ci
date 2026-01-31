@@ -21,20 +21,18 @@ detect_test_runner() {
 	local dir="${1:-.}"
 
 	# Check for Python test indicators
-	if [[ -f "$dir/pytest.ini" ]] || [[ -f "$dir/pyproject.toml" ]] || [[ -f "$dir/setup.py" ]]; then
-		if [[ -f "$dir/pyproject.toml" ]] && grep -q '\[tool\.pytest' "$dir/pyproject.toml" 2>/dev/null; then
-			echo "pytest"
-			return 0
-		fi
-		if [[ -f "$dir/pytest.ini" ]]; then
-			echo "pytest"
-			return 0
-		fi
-		# Check for tests directory with Python files
-		if [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
-			echo "pytest"
-			return 0
-		fi
+	if [[ -f "$dir/pytest.ini" ]]; then
+		echo "pytest"
+		return 0
+	fi
+	if [[ -f "$dir/pyproject.toml" ]] && grep -q '\[tool\.pytest' "$dir/pyproject.toml" 2>/dev/null; then
+		echo "pytest"
+		return 0
+	fi
+	# Check for tests directory with Python files (independent of pyproject.toml/setup.py)
+	if [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
+		echo "pytest"
+		return 0
 	fi
 
 	# Check for Playwright indicators
@@ -74,12 +72,12 @@ detect_all_runners() {
 	local runners=""
 
 	# Check for pytest
-	if [[ -f "$dir/pytest.ini" ]] || [[ -f "$dir/pyproject.toml" ]] || [[ -f "$dir/setup.py" ]]; then
-		if [[ -f "$dir/pytest.ini" ]] || { [[ -f "$dir/pyproject.toml" ]] && grep -q '\[tool\.pytest' "$dir/pyproject.toml" 2>/dev/null; }; then
-			runners="pytest"
-		elif [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
-			runners="pytest"
-		fi
+	if [[ -f "$dir/pytest.ini" ]]; then
+		runners="pytest"
+	elif [[ -f "$dir/pyproject.toml" ]] && grep -q '\[tool\.pytest' "$dir/pyproject.toml" 2>/dev/null; then
+		runners="pytest"
+	elif [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
+		runners="pytest"
 	fi
 
 	# Check for vitest

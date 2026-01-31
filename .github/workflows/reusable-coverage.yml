@@ -98,8 +98,8 @@ jobs:
           coverage="${{ steps.collect.outputs.coverage-percent }}"
           threshold="${{ inputs.threshold }}"
 
-          if [[ "$threshold" -gt 0 ]]; then
-            if (( $(echo "$coverage < $threshold" | bc -l) )); then
+          if awk -v t="$threshold" 'BEGIN { exit (t > 0 ? 0 : 1) }'; then
+            if awk -v c="$coverage" -v t="$threshold" 'BEGIN { exit (c < t ? 0 : 1) }'; then
               echo "::error::Coverage ${coverage}% is below threshold ${threshold}%"
               echo "passed=false" >> "$GITHUB_OUTPUT"
               exit 1

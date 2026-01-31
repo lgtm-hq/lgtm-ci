@@ -4,7 +4,9 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: detect, run, summary
-#   RUNNER - Test runner to use: pytest, vitest, playwright, auto
+#
+# Optional environment variables:
+#   RUNNER - Test runner to use: pytest, vitest, playwright, auto (default: auto)
 #
 # Optional environment variables:
 #   CONFIG_FILE - Path to test config file

@@ -75,7 +75,14 @@ merge)
 	cd "$WORKING_DIRECTORY"
 
 	# Parse coverage files (comma-separated or newline-separated)
-	IFS=$',\n' read -ra files <<<"$COVERAGE_FILES"
+	files=()
+	if [[ "$COVERAGE_FILES" == *","* ]]; then
+		# Comma-separated
+		IFS=',' read -ra files <<<"$COVERAGE_FILES"
+	else
+		# Newline-separated
+		mapfile -t files <<<"$COVERAGE_FILES"
+	fi
 
 	# Filter to existing files
 	existing_files=()

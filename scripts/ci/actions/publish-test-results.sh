@@ -72,8 +72,10 @@ prepare)
 	if [[ -n "$BADGE_PATH" ]]; then
 		if [[ -d "$BADGE_PATH" ]]; then
 			mkdir -p "$staging_dir/$TARGET_DIR/coverage"
-			cp "$BADGE_PATH"/*.svg "$staging_dir/$TARGET_DIR/coverage/" 2>/dev/null || true
-			cp "$BADGE_PATH"/*.json "$staging_dir/$TARGET_DIR/coverage/" 2>/dev/null || true
+			# shellcheck disable=SC2086
+			for f in "$BADGE_PATH"/*.svg "$BADGE_PATH"/*.json; do
+				[[ -f "$f" ]] && cp "$f" "$staging_dir/$TARGET_DIR/coverage/"
+			done
 			log_info "Copied badges from $BADGE_PATH"
 		elif [[ -f "$BADGE_PATH" ]]; then
 			mkdir -p "$staging_dir/$TARGET_DIR/coverage"
@@ -146,7 +148,6 @@ deploy)
 
 	# Get repository info
 	repo_url=$(git config --get remote.origin.url)
-	repo_name=$(basename "$repo_url" .git)
 
 	# Configure git
 	configure_git_ci_user

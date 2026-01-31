@@ -73,7 +73,8 @@ run)
 	fi
 
 	# Add JSON reporter for parsing results
-	VITEST_ARGS+=("--reporter=json" "--outputFile=vitest-results.json")
+	VITEST_ARGS+=("--reporter=json")
+	VITEST_ARGS+=("--outputFile=vitest-results.json")
 
 	# Add coverage options
 	if [[ "$COVERAGE" == "true" ]]; then

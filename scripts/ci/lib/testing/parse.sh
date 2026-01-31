@@ -165,9 +165,10 @@ parse_playwright_json() {
 
 	# Playwright JSON reporter format
 	# Status can be: passed, failed, timedOut, skipped, interrupted
-	TESTS_PASSED=$(jq -r '[.suites[].specs[].tests[] | select(.status == "expected" or .status == "passed")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_FAILED=$(jq -r '[.suites[].specs[].tests[] | select(.status == "unexpected" or .status == "failed" or .status == "timedOut")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_SKIPPED=$(jq -r '[.suites[].specs[].tests[] | select(.status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
+	# Use recursive descent to handle nested suites
+	TESTS_PASSED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "expected" or .status == "passed")] | length' "$file" 2>/dev/null || echo "0")
+	TESTS_FAILED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "unexpected" or .status == "failed" or .status == "timedOut")] | length' "$file" 2>/dev/null || echo "0")
+	TESTS_SKIPPED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
 
 	# Try simpler format
 	if [[ "$TESTS_PASSED" == "0" ]] && [[ "$TESTS_FAILED" == "0" ]]; then
@@ -215,16 +216,18 @@ parse_junit_xml() {
 	root_element=$(head -10 "$file" | grep -o '<testsuites\|<testsuite' | head -1)
 
 	if [[ "$root_element" == "<testsuites" ]]; then
-		TESTS_TOTAL=$(grep -oP 'tests="\K[0-9]+' "$file" | head -1 || echo "0")
-		TESTS_FAILED=$(grep -oP 'failures="\K[0-9]+' "$file" | head -1 || echo "0")
-		TESTS_ERRORS=$(grep -oP 'errors="\K[0-9]+' "$file" | head -1 || echo "0")
-		TESTS_SKIPPED=$(grep -oP 'skipped="\K[0-9]+' "$file" | head -1 || echo "0")
+		TESTS_TOTAL=$(sed -n 's/.*tests="\([0-9]*\)".*/\1/p' "$file" | head -1)
+		TESTS_FAILED=$(sed -n 's/.*failures="\([0-9]*\)".*/\1/p' "$file" | head -1)
+		TESTS_ERRORS=$(sed -n 's/.*errors="\([0-9]*\)".*/\1/p' "$file" | head -1)
+		TESTS_SKIPPED=$(sed -n 's/.*skipped="\([0-9]*\)".*/\1/p' "$file" | head -1)
 	else
-		# Single testsuite element
-		TESTS_TOTAL=$(grep -oP '<testsuite[^>]+tests="\K[0-9]+' "$file" || echo "0")
-		TESTS_FAILED=$(grep -oP '<testsuite[^>]+failures="\K[0-9]+' "$file" || echo "0")
-		TESTS_ERRORS=$(grep -oP '<testsuite[^>]+errors="\K[0-9]+' "$file" || echo "0")
-		TESTS_SKIPPED=$(grep -oP '<testsuite[^>]+skipped="\K[0-9]+' "$file" || echo "0")
+		# Single testsuite element - extract from first testsuite tag
+		local testsuite_line
+		testsuite_line=$(grep '<testsuite' "$file" | head -1)
+		TESTS_TOTAL=$(echo "$testsuite_line" | sed -n 's/.*tests="\([0-9]*\)".*/\1/p')
+		TESTS_FAILED=$(echo "$testsuite_line" | sed -n 's/.*failures="\([0-9]*\)".*/\1/p')
+		TESTS_ERRORS=$(echo "$testsuite_line" | sed -n 's/.*errors="\([0-9]*\)".*/\1/p')
+		TESTS_SKIPPED=$(echo "$testsuite_line" | sed -n 's/.*skipped="\([0-9]*\)".*/\1/p')
 	fi
 
 	# Ensure values are set

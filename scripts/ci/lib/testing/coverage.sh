@@ -219,19 +219,14 @@ merge_istanbul_files() {
 		nyc merge "$temp_dir" "$output" 2>/dev/null
 		rm -rf "$temp_dir"
 	else
-		# Manual merge using jq
+		# Manual merge using jq - only for single file
 		if [[ ${#files[@]} -eq 1 ]]; then
 			cp "${files[0]}" "$output"
 		else
-			# Start with first file
-			local merged
-			merged=$(cat "${files[0]}")
-			for ((i = 1; i < ${#files[@]}; i++)); do
-				if [[ -f "${files[$i]}" ]]; then
-					merged=$(echo "$merged" | jq -s '.[0] * .[1]' - "${files[$i]}")
-				fi
-			done
-			echo "$merged" >"$output"
+			# Multi-file merge requires nyc for proper statement/branch merging
+			echo "Error: nyc is required to merge multiple Istanbul coverage files" >&2
+			echo "Install with: npm install -g nyc" >&2
+			return 1
 		fi
 	fi
 }
@@ -271,9 +266,15 @@ convert_coverage() {
 		;;
 	"coverage-py->lcov")
 		if command -v coverage &>/dev/null; then
-			coverage lcov -o "$output" 2>/dev/null
+			# coverage lcov requires .coverage file, not JSON
+			# If input is JSON, this won't work - need coverage.py tool with .coverage data
+			coverage lcov -o "$output" 2>/dev/null || {
+				log_warn "coverage lcov failed - may need .coverage file instead of JSON"
+				return 1
+			}
 		else
 			# coverage.py JSON doesn't easily convert without the tool
+			log_warn "coverage tool not available for coverage-py->lcov conversion"
 			return 1
 		fi
 		;;

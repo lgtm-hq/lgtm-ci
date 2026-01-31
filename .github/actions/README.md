@@ -613,7 +613,7 @@ Generate coverage badge SVG/JSON for README display.
 **Features:**
 
 - Local SVG generation (no external dependencies)
-- Shields.io compatible JSON endpoint
+- Shields.io-compatible JSON endpoint
 - Configurable color thresholds
 
 ---
@@ -636,7 +636,6 @@ Publish test results and coverage to GitHub Pages.
 **Outputs:**
 
 - `pages-url` - GitHub Pages URL
-- `deployment-id` - Deployment ID
 
 **Features:**
 

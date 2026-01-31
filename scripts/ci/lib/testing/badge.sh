@@ -56,7 +56,7 @@ get_badge_hex_color() {
 		echo "#97ca00"
 		;;
 	brightgreen)
-		echo "#4c1"
+		echo "#44cc11"
 		;;
 	blue)
 		echo "#007ec6"
