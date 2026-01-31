@@ -1,0 +1,75 @@
+---
+name: 'Wait for Package'
+description: 'Wait for a package to be available on a registry'
+author: 'lgtm-hq'
+
+inputs:
+  registry:
+    description: 'Registry type (pypi, npm, gem)'
+    required: true
+  package:
+    description: 'Package name'
+    required: true
+  version:
+    description: 'Package version to wait for'
+    required: true
+  max-wait:
+    description: 'Maximum wait time in seconds'
+    required: false
+    default: '600'
+  test-pypi:
+    description: 'Use TestPyPI instead of PyPI'
+    required: false
+    default: 'false'
+
+outputs:
+  available:
+    description: 'Whether the package became available'
+    value: ${{ steps.wait.outputs.available }}
+  elapsed:
+    description: 'Time elapsed waiting (seconds)'
+    value: ${{ steps.wait.outputs.elapsed }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check initial availability
+      id: check
+      shell: bash
+      env:
+        STEP: check
+        REGISTRY: ${{ inputs.registry }}
+        PACKAGE: ${{ inputs.package }}
+        VERSION: ${{ inputs.version }}
+        TEST_PYPI: ${{ inputs.test-pypi }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/wait-for-package.sh
+
+    - name: Wait for availability
+      id: wait
+      if: steps.check.outputs.available != 'true'
+      shell: bash
+      env:
+        STEP: wait
+        REGISTRY: ${{ inputs.registry }}
+        PACKAGE: ${{ inputs.package }}
+        VERSION: ${{ inputs.version }}
+        MAX_WAIT: ${{ inputs.max-wait }}
+        TEST_PYPI: ${{ inputs.test-pypi }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/wait-for-package.sh
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        REGISTRY: ${{ inputs.registry }}
+        PACKAGE: ${{ inputs.package }}
+        VERSION: ${{ inputs.version }}
+        AVAILABLE:
+          ${{ steps.check.outputs.available == 'true' && 'true' ||
+          steps.wait.outputs.available }}
+        ELAPSED: ${{ steps.wait.outputs.elapsed || '0' }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/wait-for-package.sh
+
+branding:
+  icon: 'clock'
+  color: 'blue'

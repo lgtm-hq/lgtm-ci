@@ -1,0 +1,214 @@
+---
+name: Reusable npm Publishing Workflow
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version'
+        required: false
+        type: string
+        default: '22'
+      dist-tag:
+        description: 'npm dist-tag (latest, beta, next, etc.)'
+        required: false
+        type: string
+        default: 'latest'
+      provenance:
+        description: 'Enable npm provenance attestation'
+        required: false
+        type: boolean
+        default: true
+      access:
+        description: 'Package access level (public, restricted)'
+        required: false
+        type: string
+        default: 'public'
+      dry-run:
+        description: 'Build and pack only, do not publish'
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: 'Working directory containing the package'
+        required: false
+        type: string
+        default: '.'
+    outputs:
+      published:
+        description: 'Whether the package was published'
+        value: ${{ jobs.publish.outputs.published }}
+      version:
+        description: 'Published package version'
+        value: ${{ jobs.publish.outputs.version }}
+      package-name:
+        description: 'Published package name'
+        value: ${{ jobs.publish.outputs.package-name }}
+      tarball:
+        description: 'Path to the built tarball'
+        value: ${{ jobs.publish.outputs.tarball }}
+
+jobs:
+  publish:
+    name: Publish to npm
+    # CRITICAL: Must use GitHub-hosted runner for provenance attestation
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+    outputs:
+      published: ${{ steps.publish.outputs.published || 'false' }}
+      version: ${{ steps.build.outputs.version }}
+      package-name: ${{ steps.build.outputs.name }}
+      tarball: ${{ steps.build.outputs.tarball }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Node.js
+        uses: ./.github/actions/setup-node
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Validate package.json
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [[ ! -f "package.json" ]]; then
+            echo "::error::package.json not found"
+            exit 1
+          fi
+
+          # Check required fields
+          name=$(grep -E '^\s*"name"\s*:' package.json | \
+            sed 's/.*:\s*"\([^"]*\)".*/\1/')
+          version=$(grep -E '^\s*"version"\s*:' package.json | \
+            sed 's/.*:\s*"\([^"]*\)".*/\1/')
+
+          if [[ -z "$name" ]] || [[ -z "$version" ]]; then
+            echo "::error::Missing required fields in package.json"
+            exit 1
+          fi
+
+          echo "Package: $name@$version"
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [[ -f "bun.lockb" ]] || [[ -f "bun.lock" ]]; then
+            bun install --frozen-lockfile
+          elif [[ -f "package-lock.json" ]]; then
+            npm ci
+          elif [[ -f "yarn.lock" ]]; then
+            yarn install --frozen-lockfile
+          else
+            npm install
+          fi
+
+      - name: Build package
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if grep -q '"build"' package.json; then
+            if command -v bun >/dev/null 2>&1; then
+              bun run build
+            else
+              npm run build
+            fi
+          fi
+
+      - name: Pack package
+        id: build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          tarball=$(npm pack 2>/dev/null | tail -1)
+
+          if [[ -z "$tarball" ]] || [[ ! -f "$tarball" ]]; then
+            echo "::error::Failed to pack package"
+            exit 1
+          fi
+
+          name=$(grep -E '^\s*"name"\s*:' package.json | \
+            sed 's/.*:\s*"\([^"]*\)".*/\1/')
+          version=$(grep -E '^\s*"version"\s*:' package.json | \
+            sed 's/.*:\s*"\([^"]*\)".*/\1/')
+
+          {
+            echo "name=$name"
+            echo "version=$version"
+            echo "tarball=$tarball"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Packed: $tarball"
+
+      - name: Attest build provenance
+        if: inputs.dry-run == false && inputs.provenance
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v2.2.3
+        with:
+          subject-path:
+            ${{ inputs.working-directory }}/${{ steps.build.outputs.tarball }}
+
+      - name: Setup npm registry authentication
+        if: inputs.dry-run == false
+        shell: bash
+        run: |
+          echo "//registry.npmjs.org/:_authToken=\${NODE_AUTH_TOKEN}" > ~/.npmrc
+
+      - name: Publish to npm
+        id: publish
+        if: inputs.dry-run == false
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          publish_args=(
+            "--tag" "${{ inputs.dist-tag }}"
+            "--access" "${{ inputs.access }}"
+          )
+
+          if [[ "${{ inputs.provenance }}" == "true" ]]; then
+            publish_args+=("--provenance")
+          fi
+
+          npm publish "${publish_args[@]}"
+
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Generate summary
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.build.outputs.name }}
+          PACKAGE_VERSION: ${{ steps.build.outputs.version }}
+          DIST_TAG: ${{ inputs.dist-tag }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          PUBLISHED: ${{ steps.publish.outputs.published || 'false' }}
+        run: |
+          {
+            echo "## npm Publishing"
+            echo ""
+            echo "| Property | Value |"
+            echo "| -------- | ----- |"
+            echo "| Package | $PACKAGE_NAME |"
+            echo "| Version | $PACKAGE_VERSION |"
+            echo "| Tag | $DIST_TAG |"
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "| Status | :construction: Dry Run |"
+            elif [[ "$PUBLISHED" == "true" ]]; then
+              echo "| Status | :white_check_mark: Published |"
+              echo "| URL | https://www.npmjs.com/package/$PACKAGE_NAME/v/$PACKAGE_VERSION |"
+            else
+              echo "| Status | :x: Not Published |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

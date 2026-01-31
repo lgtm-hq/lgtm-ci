@@ -1,0 +1,82 @@
+---
+name: 'Publish to RubyGems'
+description: 'Build and publish Ruby gem to RubyGems using OIDC trusted publishing'
+author: 'lgtm-hq'
+
+inputs:
+  ruby-version:
+    description: 'Ruby version'
+    required: false
+    default: '3.3'
+  gemspec:
+    description: 'Path to gemspec file (auto-detected if not specified)'
+    required: false
+    default: ''
+  dry-run:
+    description: 'Build only, do not publish'
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Working directory containing the gem'
+    required: false
+    default: '.'
+
+outputs:
+  published:
+    description: 'Whether the gem was published'
+    value: ${{ steps.publish.outputs.published }}
+  version:
+    description: 'Gem version'
+    value: ${{ steps.build.outputs.version }}
+  gem-name:
+    description: 'Gem name'
+    value: ${{ steps.build.outputs.name }}
+  gem-file:
+    description: 'Path to the built gem file'
+    value: ${{ steps.build.outputs.gem-file }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate gemspec
+      id: validate
+      shell: bash
+      env:
+        STEP: validate
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        GEMSPEC: ${{ inputs.gemspec }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-gem.sh
+
+    - name: Build gem
+      id: build
+      shell: bash
+      env:
+        STEP: build
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        GEMSPEC: ${{ inputs.gemspec }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-gem.sh
+
+    - name: Publish to RubyGems
+      id: publish
+      if: inputs.dry-run != 'true'
+      shell: bash
+      env:
+        STEP: publish
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        GEM_FILE: ${{ steps.build.outputs.gem-file }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-gem.sh
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        GEM_NAME: ${{ steps.build.outputs.name }}
+        GEM_VERSION: ${{ steps.build.outputs.version }}
+        GEM_FILE: ${{ steps.build.outputs.gem-file }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        PUBLISHED: ${{ steps.publish.outputs.published || 'false' }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-gem.sh
+
+branding:
+  icon: 'box'
+  color: 'red'

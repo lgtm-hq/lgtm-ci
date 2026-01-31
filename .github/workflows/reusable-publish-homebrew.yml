@@ -1,0 +1,280 @@
+---
+name: Reusable Homebrew Formula Update Workflow
+
+on:
+  workflow_call:
+    inputs:
+      tap-repository:
+        description: 'Homebrew tap repository (owner/repo)'
+        required: true
+        type: string
+      formula:
+        description: 'Formula name'
+        required: true
+        type: string
+      package-name:
+        description: 'PyPI package name'
+        required: true
+        type: string
+      version:
+        description: 'Version to update to'
+        required: true
+        type: string
+      wait-for-availability:
+        description: 'Wait for package to be available on PyPI'
+        required: false
+        type: boolean
+        default: true
+      max-wait-minutes:
+        description: 'Maximum wait time in minutes'
+        required: false
+        type: number
+        default: 10
+      test-pypi:
+        description: 'Use TestPyPI instead of PyPI'
+        required: false
+        type: boolean
+        default: false
+      create-pr:
+        description: 'Create PR instead of direct push'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      updated:
+        description: 'Whether the formula was updated'
+        value: ${{ jobs.update.outputs.updated }}
+      commit-sha:
+        description: 'Commit SHA of the update'
+        value: ${{ jobs.update.outputs.commit-sha }}
+      pr-url:
+        description: 'Pull request URL (if create-pr is true)'
+        value: ${{ jobs.update.outputs.pr-url }}
+
+jobs:
+  update:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      updated: ${{ steps.commit.outputs.updated || 'false' }}
+      commit-sha: ${{ steps.commit.outputs.commit-sha }}
+      pr-url: ${{ steps.pr.outputs.pr-url }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Set tap directory
+        id: dirs
+        shell: bash
+        run: echo "tap_dir=${{ runner.temp }}/homebrew-tap" >> "$GITHUB_OUTPUT"
+
+      - name: Wait for package availability
+        if: inputs.wait-for-availability
+        shell: bash
+        run: |
+          source scripts/ci/lib/actions.sh
+          source scripts/ci/lib/publish.sh
+
+          max_wait_seconds=$(( ${{ inputs.max-wait-minutes }} * 60 ))
+          test_pypi="${{ inputs.test-pypi }}"
+
+          log_info "Waiting for ${{ inputs.package-name }}@${{ inputs.version }}..."
+
+          if ! wait_for_package "pypi" "${{ inputs.package-name }}" \
+            "${{ inputs.version }}" "$max_wait_seconds" "$test_pypi"; then
+            die "Timeout waiting for package availability"
+          fi
+
+          log_success "Package is available on PyPI"
+
+      - name: Clone tap repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_DIR: ${{ steps.dirs.outputs.tap_dir }}
+        run: |
+          git clone --depth 1 \
+            "https://x-access-token:${GH_TOKEN}@github.com/${{ inputs.tap-repository }}.git" \
+            "$TAP_DIR"
+
+      - name: Get PyPI metadata
+        id: pypi
+        shell: bash
+        run: |
+          source scripts/ci/lib/actions.sh
+          source scripts/ci/lib/publish.sh
+
+          test_pypi="${{ inputs.test-pypi }}"
+
+          download_url=$(get_pypi_download_url "${{ inputs.package-name }}" \
+            "${{ inputs.version }}" "$test_pypi")
+          sha256=$(get_pypi_sha256 "${{ inputs.package-name }}" \
+            "${{ inputs.version }}" "$test_pypi")
+
+          if [[ -z "$download_url" ]] || [[ -z "$sha256" ]]; then
+            die "Could not get PyPI metadata"
+          fi
+
+          echo "url=$download_url" >> "$GITHUB_OUTPUT"
+          echo "sha256=$sha256" >> "$GITHUB_OUTPUT"
+
+          log_info "URL: $download_url"
+          log_info "SHA256: $sha256"
+
+      - name: Update formula
+        id: update
+        shell: bash
+        env:
+          TAP_DIR: ${{ steps.dirs.outputs.tap_dir }}
+        run: |
+          source scripts/ci/lib/actions.sh
+          source scripts/ci/lib/publish.sh
+
+          # Find formula file
+          formula_file=""
+          if [[ -f "$TAP_DIR/Formula/${{ inputs.formula }}.rb" ]]; then
+            formula_file="$TAP_DIR/Formula/${{ inputs.formula }}.rb"
+          elif [[ -f "$TAP_DIR/${{ inputs.formula }}.rb" ]]; then
+            formula_file="$TAP_DIR/${{ inputs.formula }}.rb"
+          fi
+
+          if [[ -n "$formula_file" ]]; then
+            log_info "Updating existing formula: $formula_file"
+
+            # Update URL
+            sed -i "s|url \"[^\"]*\"|url \"${{ steps.pypi.outputs.url }}\"|" "$formula_file"
+
+            # Update SHA256
+            sed -i "s|sha256 \"[^\"]*\"|sha256 \"${{ steps.pypi.outputs.sha256 }}\"|" "$formula_file"
+
+            echo "formula-file=$formula_file" >> "$GITHUB_OUTPUT"
+            log_success "Formula updated"
+          else
+            log_info "Creating new formula..."
+            mkdir -p "$TAP_DIR/Formula"
+            formula_file="$TAP_DIR/Formula/${{ inputs.formula }}.rb"
+
+            generate_formula_from_pypi "${{ inputs.package-name }}" \
+              "${{ inputs.version }}" "A Python package" "${{ inputs.test-pypi }}" \
+              > "$formula_file"
+
+            echo "formula-file=$formula_file" >> "$GITHUB_OUTPUT"
+            log_success "Formula created: $formula_file"
+          fi
+
+      - name: Commit changes
+        id: commit
+        shell: bash
+        env:
+          TAP_DIR: ${{ steps.dirs.outputs.tap_dir }}
+        run: |
+          cd "$TAP_DIR"
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          git add -A
+
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            echo "updated=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Create branch for PR if needed
+          if [[ "${{ inputs.create-pr }}" == "true" ]]; then
+            branch_name="update-${{ inputs.formula }}-${{ inputs.version }}"
+            git checkout -b "$branch_name"
+          fi
+
+          git commit -m "Update ${{ inputs.formula }} to ${{ inputs.version }}"
+          commit_sha=$(git rev-parse HEAD)
+
+          echo "updated=true" >> "$GITHUB_OUTPUT"
+          echo "commit-sha=$commit_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Push changes
+        if: steps.commit.outputs.updated == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_DIR: ${{ steps.dirs.outputs.tap_dir }}
+        run: |
+          cd "$TAP_DIR"
+
+          if [[ "${{ inputs.create-pr }}" == "true" ]]; then
+            branch_name="update-${{ inputs.formula }}-${{ inputs.version }}"
+            git push -u origin "$branch_name"
+          else
+            git push origin HEAD
+          fi
+
+      - name: Create pull request
+        id: pr
+        if: inputs.create-pr && steps.commit.outputs.updated == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAP_DIR: ${{ steps.dirs.outputs.tap_dir }}
+        run: |
+          cd "$TAP_DIR"
+
+          branch_name="update-${{ inputs.formula }}-${{ inputs.version }}"
+
+          pr_url=$(gh pr create \
+            --repo "${{ inputs.tap-repository }}" \
+            --title "Update ${{ inputs.formula }} to ${{ inputs.version }}" \
+            --body "Automated formula update for ${{ inputs.formula }} version ${{ inputs.version }}." \
+            --head "$branch_name" \
+            --base main 2>/dev/null || \
+            gh pr create \
+              --repo "${{ inputs.tap-repository }}" \
+              --title "Update ${{ inputs.formula }} to ${{ inputs.version }}" \
+              --body "Automated formula update." \
+              --head "$branch_name" \
+              --base master)
+
+          echo "pr-url=$pr_url" >> "$GITHUB_OUTPUT"
+
+      - name: Generate summary
+        shell: bash
+        env:
+          TAP_REPOSITORY: ${{ inputs.tap-repository }}
+          FORMULA: ${{ inputs.formula }}
+          PACKAGE: ${{ inputs.package-name }}
+          VERSION: ${{ inputs.version }}
+          UPDATED: ${{ steps.commit.outputs.updated }}
+          COMMIT_SHA: ${{ steps.commit.outputs.commit-sha }}
+          PR_URL: ${{ steps.pr.outputs.pr-url }}
+        run: |
+          {
+            echo "## Homebrew Formula Update"
+            echo ""
+            echo "| Property | Value |"
+            echo "| -------- | ----- |"
+            echo "| Tap | $TAP_REPOSITORY |"
+            echo "| Formula | $FORMULA |"
+            echo "| Package | $PACKAGE |"
+            echo "| Version | $VERSION |"
+
+            if [[ "$UPDATED" == "true" ]]; then
+              echo "| Status | :white_check_mark: Updated |"
+              if [[ -n "$COMMIT_SHA" ]]; then
+                echo "| Commit | \`$COMMIT_SHA\` |"
+              fi
+              if [[ -n "$PR_URL" ]]; then
+                echo "| PR | $PR_URL |"
+              fi
+            else
+              echo "| Status | No changes needed |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"

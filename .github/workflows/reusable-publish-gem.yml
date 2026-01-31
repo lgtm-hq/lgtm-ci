@@ -1,0 +1,182 @@
+---
+name: Reusable RubyGems Publishing Workflow
+
+on:
+  workflow_call:
+    inputs:
+      ruby-version:
+        description: 'Ruby version'
+        required: false
+        type: string
+        default: '3.3'
+      gemspec:
+        description: 'Path to gemspec file (auto-detected if not specified)'
+        required: false
+        type: string
+        default: ''
+      dry-run:
+        description: 'Build only, do not publish'
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: 'Working directory containing the gem'
+        required: false
+        type: string
+        default: '.'
+    outputs:
+      published:
+        description: 'Whether the gem was published'
+        value: ${{ jobs.publish.outputs.published }}
+      version:
+        description: 'Published gem version'
+        value: ${{ jobs.publish.outputs.version }}
+      gem-name:
+        description: 'Published gem name'
+        value: ${{ jobs.publish.outputs.gem-name }}
+      gem-file:
+        description: 'Path to the built gem file'
+        value: ${{ jobs.publish.outputs.gem-file }}
+
+jobs:
+  publish:
+    name: Publish to RubyGems
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    outputs:
+      published: ${{ steps.publish.outputs.published || 'false' }}
+      version: ${{ steps.build.outputs.version }}
+      gem-name: ${{ steps.build.outputs.name }}
+      gem-file: ${{ steps.build.outputs.gem-file }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Setup Ruby
+        uses: ruby/setup-ruby@a4effe49ee8ee5b8224f9b18fb5c7d6ac6239857 # v1.221.0
+        with:
+          ruby-version: ${{ inputs.ruby-version }}
+          bundler-cache: true
+
+      - name: Find gemspec
+        id: gemspec
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          if [[ -n "${{ inputs.gemspec }}" ]]; then
+            gemspec="${{ inputs.gemspec }}"
+          else
+            gemspec=$(find . -maxdepth 1 -name "*.gemspec" -print -quit)
+          fi
+
+          if [[ -z "$gemspec" ]] || [[ ! -f "$gemspec" ]]; then
+            echo "::error::No gemspec found"
+            exit 1
+          fi
+
+          echo "path=$gemspec" >> "$GITHUB_OUTPUT"
+          echo "Found gemspec: $gemspec"
+
+      - name: Validate gemspec
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          gemspec="${{ steps.gemspec.outputs.path }}"
+
+          # Extract required fields
+          name=$(grep -E '\.(name)\s*=' "$gemspec" | head -1 | \
+            sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+          version=$(grep -E '\.(version)\s*=' "$gemspec" | head -1 | \
+            sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+
+          if [[ -z "$name" ]] || [[ -z "$version" ]]; then
+            echo "::error::Missing required fields in gemspec"
+            exit 1
+          fi
+
+          echo "Gem: $name@$version"
+
+      - name: Build gem
+        id: build
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          gemspec="${{ steps.gemspec.outputs.path }}"
+
+          # Clean previous builds
+          rm -f ./*.gem
+
+          # Build
+          gem build "$gemspec"
+
+          # Find built gem
+          gem_file=$(find . -maxdepth 1 -name "*.gem" -print -quit 2>/dev/null)
+          if [[ -z "$gem_file" ]]; then
+            echo "::error::Gem build failed"
+            exit 1
+          fi
+
+          # Extract metadata
+          name=$(grep -E '\.(name)\s*=' "$gemspec" | head -1 | \
+            sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+          version=$(grep -E '\.(version)\s*=' "$gemspec" | head -1 | \
+            sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+
+          {
+            echo "name=$name"
+            echo "version=$version"
+            echo "gem-file=$gem_file"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Built: $gem_file"
+
+      - name: Configure RubyGems OIDC credentials
+        if: inputs.dry-run == false
+        uses: rubygems/configure-rubygems-credentials@bc6dd217f8a4f919d6835fcfefd470ef821f5c44 # v1.0.0
+
+      - name: Publish to RubyGems
+        id: publish
+        if: inputs.dry-run == false
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        run: |
+          gem_file="${{ steps.build.outputs.gem-file }}"
+          gem push "$gem_file"
+          echo "published=true" >> "$GITHUB_OUTPUT"
+
+      - name: Generate summary
+        shell: bash
+        env:
+          GEM_NAME: ${{ steps.build.outputs.name }}
+          GEM_VERSION: ${{ steps.build.outputs.version }}
+          GEM_FILE: ${{ steps.build.outputs.gem-file }}
+          DRY_RUN: ${{ inputs.dry-run }}
+          PUBLISHED: ${{ steps.publish.outputs.published || 'false' }}
+        run: |
+          {
+            echo "## RubyGems Publishing"
+            echo ""
+            echo "| Property | Value |"
+            echo "| -------- | ----- |"
+            echo "| Gem | $GEM_NAME |"
+            echo "| Version | $GEM_VERSION |"
+            echo "| File | $GEM_FILE |"
+
+            if [[ "$DRY_RUN" == "true" ]]; then
+              echo "| Status | :construction: Dry Run |"
+            elif [[ "$PUBLISHED" == "true" ]]; then
+              echo "| Status | :white_check_mark: Published |"
+              echo "| URL | https://rubygems.org/gems/$GEM_NAME/versions/$GEM_VERSION |"
+            else
+              echo "| Status | :x: Not Published |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
