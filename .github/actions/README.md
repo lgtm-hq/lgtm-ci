@@ -354,6 +354,47 @@ Validate PR title follows conventional commit format.
 
 ---
 
+### run-lighthouse
+
+Run Lighthouse CI audits with configurable score thresholds.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-lighthouse@main
+  with:
+    url: 'http://localhost:3000'
+    threshold-performance: '80'
+    threshold-accessibility: '90'
+    threshold-best-practices: '80'
+    threshold-seo: '80'
+```
+
+**Inputs:**
+
+- `url` - URL to audit (required)
+- `node-version` - Node.js version (default: '20')
+- `config-path` - Path to lighthouserc.json (optional)
+- `output-dir` - Directory for results (default: 'lighthouse-reports')
+- `threshold-performance` - Min performance score (default: 80)
+- `threshold-accessibility` - Min accessibility score (default: 90, error level)
+- `threshold-best-practices` - Min best practices score (default: 80)
+- `threshold-seo` - Min SEO score (default: 80)
+
+**Outputs:**
+
+- `performance`, `accessibility`, `best-practices`, `seo` - Individual scores
+- `passed` - Whether all thresholds are met
+- `failed-categories` - Comma-separated list of failed categories
+- `results-path` - Path to results JSON file
+
+**Features:**
+
+- Automatic @lhci/cli installation
+- Chrome flags optimized for CI (--headless=new, --no-sandbox)
+- Filesystem upload (no external services required)
+- Artifact upload for HTML reports
+
+---
+
 ### generate-lighthouse-comment
 
 Generate formatted PR comment from Lighthouse CI results.
@@ -560,6 +601,38 @@ Run E2E tests using Playwright with browser automation.
 
 ---
 
+### merge-playwright-reports
+
+Merge multiple Playwright reports from sharded or matrix test runs.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/merge-playwright-reports@main
+  with:
+    input-dir: 'playwright-reports'
+    output-dir: 'merged-report'
+    report-format: 'html'
+```
+
+**Inputs:**
+
+- `input-dir` - Directory containing report artifacts (default: 'playwright-reports')
+- `output-dir` - Directory for merged report (default: 'merged-report')
+- `report-format` - Output format: json, html (default: 'html')
+
+**Outputs:**
+
+- `merged-path` - Path to merged report
+- `report-count` - Number of reports merged
+- `total-passed`, `total-failed`, `total-skipped` - Aggregated test counts
+
+**Features:**
+
+- Supports Playwright blob reports from sharded runs
+- Merges JSON reports with aggregated statistics
+- Compatible with matrix strategy workflows
+
+---
+
 ### collect-coverage
 
 Aggregate coverage from multiple sources and formats.
@@ -672,6 +745,96 @@ Publish test results and coverage to GitHub Pages.
 
 - `contents: write` - For gh-pages deployment
 - `pages: write` - For GitHub Pages
+
+---
+
+### deploy-pages
+
+Prepare and upload content for GitHub Pages deployment using OIDC.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/deploy-pages@main
+  with:
+    source-path: 'dist'
+    build-command: 'bun run build'
+    artifact-name: 'github-pages'
+```
+
+**Inputs:**
+
+- `source-path` - Path to static content (default: 'dist')
+- `build-command` - Optional build command to run first
+- `artifact-name` - Name for pages artifact (default: 'github-pages')
+
+**Outputs:**
+
+- `artifact-id` - ID of the uploaded artifact
+- `file-count` - Number of files in the deployment
+
+**Features:**
+
+- Automatic .nojekyll file creation
+- Content validation (large files, symlinks)
+- Uses actions/upload-pages-artifact for OIDC deployment
+- Compatible with actions/deploy-pages
+
+**Required Permissions:**
+
+- `pages: write` - For GitHub Pages deployment
+- `id-token: write` - For OIDC authentication
+
+---
+
+## Docker Actions
+
+### build-docker
+
+Build and push Docker images with multi-platform support.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/build-docker@main
+  with:
+    context: '.'
+    file: 'Dockerfile'
+    platforms: 'linux/amd64,linux/arm64'
+    registry: 'ghcr.io'
+    image-name: ${{ github.repository }}
+    push: 'true'
+    github-token: ${{ secrets.GITHUB_TOKEN }}
+```
+
+**Inputs:**
+
+- `context` - Build context path (default: '.')
+- `file` - Dockerfile path (default: 'Dockerfile')
+- `platforms` - Target platforms (default: 'linux/amd64,linux/arm64')
+- `registry` - Container registry (default: 'ghcr.io')
+- `image-name` - Image name (default: github.repository)
+- `tags` - Additional tags (comma-separated)
+- `version` - Version for semver tags (e.g., v1.2.3)
+- `push` - Push to registry (default: 'false')
+- `load` - Load into local docker (default: 'false')
+- `build-args` - Build arguments (comma-separated key=value)
+- `cache-from` - Cache source (default: 'type=gha')
+- `cache-to` - Cache destination (default: 'type=gha,mode=max')
+- `github-token` - GitHub token for GHCR authentication
+
+**Outputs:**
+
+- `tags` - Generated image tags (newline-separated)
+- `digest` - Image digest (if pushed)
+
+**Features:**
+
+- Multi-platform builds with QEMU
+- Automatic tag generation (semver, SHA, branch)
+- GitHub Actions cache integration
+- OCI labels for traceability
+- GHCR authentication support
+
+**Required Permissions:**
+
+- `packages: write` - For pushing to GHCR
 
 ---
 
@@ -1108,6 +1271,147 @@ jobs:
 
 - `tests-passed`, `tests-failed`
 - `report-url` - URL to test report (if published)
+
+---
+
+### reusable-test-e2e-matrix.yml
+
+Matrix-based E2E testing workflow with tag filtering and sharding.
+
+```yaml
+jobs:
+  e2e:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@main
+    with:
+      test-suites: 'smoke,visual,a11y'
+      browsers: 'chromium'
+      tag-prefix: '@'
+      shards: 1
+      reporter: 'html'
+      publish-results: true
+```
+
+**Inputs:**
+
+- `node-version` - Node.js version (default: '20')
+- `test-suites` - Comma-separated suites (default: 'smoke')
+- `browsers` - Comma-separated browsers (default: 'chromium')
+- `tag-prefix` - Tag prefix for filtering (default: '@')
+- `shards` - Number of shards per suite (default: 1)
+- `reporter` - Reporter: json, html, blob (default: 'html')
+- `upload-report` - Upload reports as artifacts (default: true)
+- `publish-results` - Publish to GitHub Pages (default: false)
+- `timeout-minutes` - Timeout per job (default: 30)
+
+**Outputs:**
+
+- `total-passed`, `total-failed` - Aggregated test counts
+- `report-url` - URL to merged report (if published)
+
+**Features:**
+
+- Matrix strategy for parallel test execution
+- Tag-based filtering (@smoke, @visual, @a11y)
+- Browser caching for faster runs
+- Automatic report merging from matrix jobs
+
+---
+
+### reusable-deploy-pages.yml
+
+Deploy static content to GitHub Pages with OIDC authentication.
+
+```yaml
+jobs:
+  deploy:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-pages.yml@main
+    with:
+      source-path: 'dist'
+      build-command: 'bun run build'
+      environment: 'github-pages'
+```
+
+**Inputs:**
+
+- `source-path` - Path to static content (default: 'dist')
+- `build-command` - Optional build command
+- `node-version` - Node.js version for build (default: '20')
+- `environment` - GitHub environment name (default: 'github-pages')
+- `artifact-name` - Pages artifact name (default: 'github-pages')
+
+**Outputs:**
+
+- `page-url` - URL of the deployed site
+
+**Features:**
+
+- Two-job workflow (build + deploy) for proper separation
+- OIDC authentication (no secrets required)
+- Configurable GitHub environment for deployment protection
+- Concurrency control to prevent parallel deployments
+
+**Permissions Required:**
+
+- `pages: write` - For GitHub Pages deployment
+- `id-token: write` - For OIDC authentication
+
+---
+
+### reusable-docker.yml
+
+Build and push Docker images with multi-platform support and attestations.
+
+```yaml
+jobs:
+  docker:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@main
+    with:
+      context: '.'
+      platforms: 'linux/amd64,linux/arm64'
+      registry: 'ghcr.io'
+      push: true
+      provenance: true
+      sbom: true
+      scan: true
+```
+
+**Inputs:**
+
+- `context` - Build context path (default: '.')
+- `file` - Dockerfile path (default: 'Dockerfile')
+- `platforms` - Target platforms (default: 'linux/amd64,linux/arm64')
+- `registry` - Registry: ghcr.io or docker.io (default: 'ghcr.io')
+- `image-name` - Image name (default: github.repository)
+- `version` - Version for semver tags
+- `push` - Push to registry (default: false)
+- `provenance` - Generate provenance attestation (default: true)
+- `sbom` - Generate SBOM attestation (default: true)
+- `scan` - Run vulnerability scan (default: false)
+
+**Outputs:**
+
+- `tags` - Generated image tags
+- `digest` - Image digest
+
+**Features:**
+
+- Multi-platform builds with QEMU
+- docker/metadata-action for intelligent tag generation
+- GitHub Actions cache for layer caching
+- Provenance and SBOM attestations
+- Optional Trivy vulnerability scanning with SARIF upload
+
+**Permissions Required:**
+
+- `packages: write` - For pushing to GHCR
+- `id-token: write` - For provenance attestation
+- `attestations: write` - For build attestations
+- `security-events: write` - For vulnerability scan results (if enabled)
+
+**Secrets:**
+
+- `DOCKERHUB_USERNAME` - Docker Hub username (for docker.io registry)
+- `DOCKERHUB_TOKEN` - Docker Hub token (for docker.io registry)
 
 ---
 
