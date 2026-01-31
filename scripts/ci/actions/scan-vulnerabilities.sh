@@ -12,39 +12,14 @@ set -euo pipefail
 
 : "${STEP:?STEP is required}"
 
-# Source library
+# Source common action libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/../lib"
-
-# shellcheck source=../lib/log.sh
-[[ -f "$LIB_DIR/log.sh" ]] && source "$LIB_DIR/log.sh"
-# shellcheck source=../lib/github.sh
-[[ -f "$LIB_DIR/github.sh" ]] && source "$LIB_DIR/github.sh"
-# shellcheck source=../lib/sbom.sh
-[[ -f "$LIB_DIR/sbom.sh" ]] && source "$LIB_DIR/sbom.sh"
+# shellcheck source=../lib/actions.sh
+source "$SCRIPT_DIR/../lib/actions.sh"
 
 case "$STEP" in
 install)
-	# Installation handled by anchore/scan-action
-	# This step is for manual/local installs if needed
-	: "${GRYPE_VERSION:=latest}"
-
-	if command -v grype >/dev/null 2>&1; then
-		log_info "Grype already installed: $(grype version 2>/dev/null | head -1)"
-		exit 0
-	fi
-
-	log_info "Installing Grype..."
-
-	# Use official installer script
-	curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh | sh -s -- -b "${BIN_DIR:-/usr/local/bin}"
-
-	if command -v grype >/dev/null 2>&1; then
-		log_success "Grype installed: $(grype version 2>/dev/null | head -1)"
-	else
-		log_error "Failed to install Grype"
-		exit 1
-	fi
+	install_anchore_tool "grype" "${GRYPE_VERSION:-latest}"
 	;;
 
 scan)
@@ -53,26 +28,17 @@ scan)
 	: "${FAIL_ON:=}"
 	: "${OUTPUT_FILE:=${RUNNER_TEMP:-/tmp}/grype-results.json}"
 
-	# Build grype target based on type
-	case "$TARGET_TYPE" in
-	sbom)
-		if [[ ! -f "$TARGET" ]]; then
-			log_error "SBOM file not found: $TARGET"
-			exit 1
-		fi
-		GRYPE_TARGET="sbom:${TARGET}"
-		;;
-	image | container)
-		GRYPE_TARGET="${TARGET}"
-		;;
-	dir | directory)
-		GRYPE_TARGET="dir:${TARGET}"
-		;;
-	*)
+	# Resolve target for grype
+	if ! GRYPE_TARGET=$(resolve_scan_target "$TARGET" "$TARGET_TYPE"); then
 		log_error "Unsupported target type: $TARGET_TYPE"
 		exit 1
-		;;
-	esac
+	fi
+
+	# Validate SBOM file exists
+	if [[ "$TARGET_TYPE" == "sbom" && ! -f "$TARGET" ]]; then
+		log_error "SBOM file not found: $TARGET"
+		exit 1
+	fi
 
 	log_info "Scanning for vulnerabilities: $GRYPE_TARGET"
 
@@ -149,22 +115,11 @@ sarif)
 	: "${TARGET_TYPE:=sbom}"
 	: "${SARIF_FILE:=${RUNNER_TEMP:-/tmp}/grype-results.sarif}"
 
-	# Build grype target based on type
-	case "$TARGET_TYPE" in
-	sbom)
-		GRYPE_TARGET="sbom:${TARGET}"
-		;;
-	image | container)
-		GRYPE_TARGET="${TARGET}"
-		;;
-	dir | directory)
-		GRYPE_TARGET="dir:${TARGET}"
-		;;
-	*)
+	# Resolve target for grype
+	if ! GRYPE_TARGET=$(resolve_scan_target "$TARGET" "$TARGET_TYPE"); then
 		log_error "Unsupported target type: $TARGET_TYPE"
 		exit 1
-		;;
-	esac
+	fi
 
 	log_info "Generating SARIF report..."
 
@@ -221,7 +176,6 @@ summary)
 	;;
 
 *)
-	echo "Unknown step: $STEP"
-	exit 1
+	die_unknown_step "$STEP"
 	;;
 esac

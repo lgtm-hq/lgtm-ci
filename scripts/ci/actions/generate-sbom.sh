@@ -13,39 +13,14 @@ set -euo pipefail
 
 : "${STEP:?STEP is required}"
 
-# Source library
+# Source common action libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/../lib"
-
-# shellcheck source=../lib/log.sh
-[[ -f "$LIB_DIR/log.sh" ]] && source "$LIB_DIR/log.sh"
-# shellcheck source=../lib/github.sh
-[[ -f "$LIB_DIR/github.sh" ]] && source "$LIB_DIR/github.sh"
-# shellcheck source=../lib/sbom.sh
-[[ -f "$LIB_DIR/sbom.sh" ]] && source "$LIB_DIR/sbom.sh"
+# shellcheck source=../lib/actions.sh
+source "$SCRIPT_DIR/../lib/actions.sh"
 
 case "$STEP" in
 install)
-	# Installation handled by anchore/sbom-action
-	# This step is for manual/local installs if needed
-	: "${SYFT_VERSION:=latest}"
-
-	if command -v syft >/dev/null 2>&1; then
-		log_info "Syft already installed: $(syft version 2>/dev/null | head -1)"
-		exit 0
-	fi
-
-	log_info "Installing Syft..."
-
-	# Use official installer script
-	curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "${BIN_DIR:-/usr/local/bin}"
-
-	if command -v syft >/dev/null 2>&1; then
-		log_success "Syft installed: $(syft version 2>/dev/null | head -1)"
-	else
-		log_error "Failed to install Syft"
-		exit 1
-	fi
+	install_anchore_tool "syft" "${SYFT_VERSION:-latest}"
 	;;
 
 generate)
@@ -67,22 +42,11 @@ generate)
 		OUTPUT_FILE="sbom${extension}"
 	fi
 
-	# Build syft command based on target type
-	case "$TARGET_TYPE" in
-	dir | directory)
-		SYFT_TARGET="dir:${TARGET}"
-		;;
-	image | container)
-		SYFT_TARGET="${TARGET}"
-		;;
-	file)
-		SYFT_TARGET="file:${TARGET}"
-		;;
-	*)
+	# Resolve target for syft
+	if ! SYFT_TARGET=$(resolve_scan_target "$TARGET" "$TARGET_TYPE"); then
 		log_error "Unsupported target type: $TARGET_TYPE"
 		exit 1
-		;;
-	esac
+	fi
 
 	log_info "Generating SBOM for: $SYFT_TARGET"
 	log_info "Format: $FORMAT"
@@ -149,7 +113,6 @@ summary)
 	;;
 
 *)
-	echo "Unknown step: $STEP"
-	exit 1
+	die_unknown_step "$STEP"
 	;;
 esac

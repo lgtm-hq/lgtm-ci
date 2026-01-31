@@ -205,6 +205,60 @@ installer_download_binary() {
 }
 
 # =============================================================================
+# Anchore Tool Installation
+# =============================================================================
+
+# Install an Anchore tool (Syft, Grype) using official installer
+# Usage: install_anchore_tool "syft" ["latest"]
+# Args:
+#   $1 - tool name (syft, grype)
+#   $2 - version (optional, default: latest)
+# Returns: 0 on success, 1 on failure
+install_anchore_tool() {
+	local tool="$1"
+	local version="${2:-latest}"
+	local bin_dir="${BIN_DIR:-/usr/local/bin}"
+
+	# Validate tool name
+	case "$tool" in
+	syft | grype) ;;
+	*)
+		log_error "Unknown Anchore tool: $tool (supported: syft, grype)"
+		return 1
+		;;
+	esac
+
+	# Check if already installed
+	if command -v "$tool" >/dev/null 2>&1; then
+		local current_version
+		current_version=$("$tool" version 2>/dev/null | head -1 || echo "unknown")
+		log_info "$tool already installed: $current_version"
+		return 0
+	fi
+
+	log_info "Installing $tool..."
+
+	# Use official installer script
+	local installer_url="https://raw.githubusercontent.com/anchore/${tool}/main/install.sh"
+
+	if ! curl -sSfL "$installer_url" | sh -s -- -b "$bin_dir"; then
+		log_error "Failed to install $tool"
+		return 1
+	fi
+
+	# Verify installation
+	if command -v "$tool" >/dev/null 2>&1; then
+		local installed_version
+		installed_version=$("$tool" version 2>/dev/null | head -1 || echo "unknown")
+		log_success "$tool installed: $installed_version"
+		return 0
+	else
+		log_error "Installation completed but $tool not found in PATH"
+		return 1
+	fi
+}
+
+# =============================================================================
 # Export functions
 # =============================================================================
-export -f installer_download_binary
+export -f installer_download_binary install_anchore_tool

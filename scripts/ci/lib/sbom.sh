@@ -15,3 +15,4 @@ _LGTM_CI_SBOM_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/sbom" && pwd)"
 # Source all SBOM modules in dependency order
 [[ -f "$_LGTM_CI_SBOM_DIR/format.sh" ]] && source "$_LGTM_CI_SBOM_DIR/format.sh"
 [[ -f "$_LGTM_CI_SBOM_DIR/severity.sh" ]] && source "$_LGTM_CI_SBOM_DIR/severity.sh"
+[[ -f "$_LGTM_CI_SBOM_DIR/target.sh" ]] && source "$_LGTM_CI_SBOM_DIR/target.sh"

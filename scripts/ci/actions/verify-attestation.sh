@@ -12,14 +12,10 @@ set -euo pipefail
 
 : "${STEP:?STEP is required}"
 
-# Source library
+# Source common action libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/../lib"
-
-# shellcheck source=../lib/log.sh
-[[ -f "$LIB_DIR/log.sh" ]] && source "$LIB_DIR/log.sh"
-# shellcheck source=../lib/github.sh
-[[ -f "$LIB_DIR/github.sh" ]] && source "$LIB_DIR/github.sh"
+# shellcheck source=../lib/actions.sh
+source "$SCRIPT_DIR/../lib/actions.sh"
 
 case "$STEP" in
 verify)
@@ -152,7 +148,6 @@ summary)
 	;;
 
 *)
-	echo "Unknown step: $STEP"
-	exit 1
+	die_unknown_step "$STEP"
 	;;
 esac
