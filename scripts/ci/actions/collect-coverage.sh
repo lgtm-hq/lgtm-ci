@@ -156,7 +156,8 @@ merge)
 			cp "${existing_files[0]}" "$temp_merged"
 		elif [[ "$all_binary" == "true" ]] && command -v coverage &>/dev/null; then
 			# Only use coverage combine for actual .coverage binary files
-			coverage combine "${existing_files[@]}"
+			# Use --keep to preserve original files for debugging/re-runs
+			coverage combine --keep "${existing_files[@]}"
 			case "$INPUT_FORMAT" in
 			coverage-py) coverage json -o "$temp_merged" ;;
 			cobertura) coverage xml -o "$temp_merged" ;;

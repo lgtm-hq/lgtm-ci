@@ -184,6 +184,13 @@ convert_coverage() {
 		;;
 	"coverage-py->lcov")
 		if command -v coverage &>/dev/null; then
+			# coverage lcov requires .coverage binary data file, not JSON
+			local input_basename
+			input_basename=$(basename "$input")
+			if [[ ! "$input_basename" =~ ^\.coverage ]]; then
+				log_warn "coverage lcov requires .coverage data file; got: $input"
+				log_warn "JSON/XML reports cannot be converted without the original .coverage file"
+			fi
 			# coverage lcov requires .coverage file - set COVERAGE_FILE to use input
 			COVERAGE_FILE="$input" coverage lcov -o "$output" 2>/dev/null || {
 				log_warn "coverage lcov failed - may need .coverage file instead of JSON"

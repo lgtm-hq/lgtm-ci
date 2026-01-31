@@ -26,8 +26,9 @@ parse_junit_xml() {
 	fi
 
 	# Extract from testsuite or testsuites root element
+	# Scan entire file to handle files with long XML headers/declarations
 	local root_element
-	root_element=$(head -10 "$file" | grep -o '<testsuites\|<testsuite' | head -1)
+	root_element=$(grep -m1 -o '<testsuites\|<testsuite' "$file")
 
 	if [[ "$root_element" == "<testsuites" ]]; then
 		# First try to extract from the <testsuites> root element itself
@@ -38,8 +39,8 @@ parse_junit_xml() {
 		TESTS_ERRORS=$(echo "$testsuites_line" | sed -n 's/.*errors="\([0-9]*\)".*/\1/p')
 		TESTS_SKIPPED=$(echo "$testsuites_line" | sed -n 's/.*skipped="\([0-9]*\)".*/\1/p')
 
-		# If root element lacks attributes, sum from child <testsuite> elements
-		if [[ -z "$TESTS_TOTAL" ]]; then
+		# If root element lacks any attributes, sum from child <testsuite> elements
+		if [[ -z "$TESTS_TOTAL" ]] || [[ -z "$TESTS_FAILED" ]] || [[ -z "$TESTS_ERRORS" ]] || [[ -z "$TESTS_SKIPPED" ]]; then
 			TESTS_TOTAL=0
 			TESTS_FAILED=0
 			TESTS_ERRORS=0
