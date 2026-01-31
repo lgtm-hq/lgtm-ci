@@ -37,25 +37,33 @@ check_buildx_available() {
 # Setup Docker Buildx builder for multi-platform builds
 # Usage: setup_buildx_builder [builder_name]
 # Sets: DOCKER_BUILDER_NAME
+# Returns: 0 on success, 1 on failure
 setup_buildx_builder() {
 	local builder_name="${1:-lgtm-builder}"
 
-	# Check if builder exists
+	# Check if builder exists and use it
 	if docker buildx inspect "$builder_name" &>/dev/null; then
-		docker buildx use "$builder_name"
-		DOCKER_BUILDER_NAME="$builder_name"
-		return 0
+		if docker buildx use "$builder_name"; then
+			DOCKER_BUILDER_NAME="$builder_name"
+			return 0
+		else
+			echo "Error: Failed to use existing builder: $builder_name" >&2
+			return 1
+		fi
 	fi
 
 	# Create new builder with docker-container driver for multi-platform
-	docker buildx create \
+	if docker buildx create \
 		--name "$builder_name" \
 		--driver docker-container \
 		--bootstrap \
-		--use
-
-	DOCKER_BUILDER_NAME="$builder_name"
-	return 0
+		--use; then
+		DOCKER_BUILDER_NAME="$builder_name"
+		return 0
+	else
+		echo "Error: Failed to create builder: $builder_name" >&2
+		return 1
+	fi
 }
 
 # Get default platforms for multi-platform builds
@@ -95,6 +103,12 @@ needs_qemu() {
 	local platforms="${1:-}"
 	local current_platform
 
+	# Guard: return false for empty or whitespace-only input
+	local trimmed="${platforms//[[:space:]]/}"
+	if [[ -z "$trimmed" ]]; then
+		return 1
+	fi
+
 	current_platform=$(get_current_platform)
 
 	# Check if any requested platform differs from current
@@ -103,6 +117,10 @@ needs_qemu() {
 		# Trim leading/trailing whitespace
 		platform="${platform#"${platform%%[![:space:]]*}"}"
 		platform="${platform%"${platform##*[![:space:]]}"}"
+		# Skip empty entries
+		if [[ -z "$platform" ]]; then
+			continue
+		fi
 		if [[ "$platform" != "$current_platform" ]]; then
 			return 0
 		fi

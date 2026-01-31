@@ -102,6 +102,12 @@ generate_branch_tag() {
 	branch="${branch//\//-}"
 	branch="${branch//[^a-zA-Z0-9._-]/}"
 
+	# Guard: ensure sanitized branch is not empty
+	if [[ -z "$branch" ]]; then
+		echo "Error: Branch name empty after sanitization" >&2
+		return 1
+	fi
+
 	echo "$branch"
 }
 

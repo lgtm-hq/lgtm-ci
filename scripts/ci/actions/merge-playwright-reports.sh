@@ -3,7 +3,7 @@
 # Purpose: Merge multiple Playwright JSON/HTML reports from shards or matrix jobs
 #
 # Required environment variables:
-#   STEP - Which step to run: collect, merge, summary
+#   STEP - Which step to run: collect, merge, parse-merged, summary
 #
 # Optional environment variables:
 #   INPUT_DIR - Directory containing report artifacts (default: playwright-reports)
@@ -53,9 +53,10 @@ merge)
 	mkdir -p "$OUTPUT_DIR"
 
 	# Check for blob reports (from sharded runs with blob reporter)
-	blob_reports=$(find "$INPUT_DIR" -name "*.zip" -type f 2>/dev/null || true)
+	# Playwright produces blob-report/ directories, not .zip files
+	blob_dirs=$(find "$INPUT_DIR" -maxdepth 2 -type d \( -name "blob-report" -o -name "blob*" \) 2>/dev/null || true)
 
-	if [[ -n "$blob_reports" ]]; then
+	if [[ -n "$blob_dirs" ]]; then
 		log_info "Merging blob reports into $REPORT_FORMAT format..."
 
 		# Verify bunx is available (requires setup-node action)
@@ -98,7 +99,7 @@ merge)
 		combined_file="$OUTPUT_DIR/merged-results.json"
 
 		# Initialize with first file structure, then merge tests
-		first_file=$(echo "$json_files" | head -1)
+		read -r first_file <<<"$json_files"
 		cp "$first_file" "$combined_file"
 
 		# Aggregate stats from all files
@@ -136,6 +137,33 @@ merge)
 	fi
 
 	log_success "Reports merged to $OUTPUT_DIR"
+	;;
+
+parse-merged)
+	# Parse merged results JSON to extract test counts
+	: "${MERGED_PATH:=}"
+
+	# Find JSON file in merged output
+	json_file=""
+	if [[ -f "$MERGED_PATH" ]] && [[ "$MERGED_PATH" == *.json ]]; then
+		json_file="$MERGED_PATH"
+	elif [[ -d "$MERGED_PATH" ]]; then
+		json_file=$(find "$MERGED_PATH" -name "*.json" -type f 2>/dev/null | head -1 || true)
+	fi
+
+	if [[ -n "$json_file" ]] && [[ -f "$json_file" ]]; then
+		log_info "Parsing merged results from: $json_file"
+		parse_playwright_json "$json_file"
+		set_github_output "total-passed" "$TESTS_PASSED"
+		set_github_output "total-failed" "$TESTS_FAILED"
+		set_github_output "total-skipped" "$TESTS_SKIPPED"
+		log_success "Parsed: $TESTS_PASSED passed, $TESTS_FAILED failed, $TESTS_SKIPPED skipped"
+	else
+		log_warn "No JSON results file found in: $MERGED_PATH"
+		set_github_output "total-passed" "0"
+		set_github_output "total-failed" "0"
+		set_github_output "total-skipped" "0"
+	fi
 	;;
 
 summary)

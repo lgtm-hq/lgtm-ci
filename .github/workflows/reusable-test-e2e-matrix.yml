@@ -75,35 +75,22 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
+      - name: Checkout for scripts
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
       - name: Generate matrix
         id: matrix
         shell: bash
         env:
+          STEP: e2e-matrix
           SUITES: ${{ inputs.test-suites }}
           BROWSERS: ${{ inputs.browsers }}
           SHARDS: ${{ inputs.shards }}
-        run: |
-          # Convert comma-separated inputs to JSON arrays
-          suites_json=$(echo "$SUITES" | tr ',' '\n' | jq -R . | jq -s .)
-          browsers_json=$(echo "$BROWSERS" | tr ',' '\n' | jq -R . | jq -s .)
-
-          # Generate shard array if sharding enabled
-          if [[ "$SHARDS" -gt 1 ]]; then
-            shards_json=$(seq 1 "$SHARDS" | jq -R . | jq -s .)
-          else
-            shards_json='["1"]'
-          fi
-
-          # Build matrix JSON
-          matrix=$(jq -n \
-            --argjson suites "$suites_json" \
-            --argjson browsers "$browsers_json" \
-            --argjson shards "$shards_json" \
-            --arg total_shards "$SHARDS" \
-            '{suite: $suites, browser: $browsers, shard: $shards, total_shards: $total_shards}')
-
-          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          echo "Generated matrix: $matrix"
+        run: ./scripts/ci/actions/generate-matrix.sh
 
   test:
     name: E2E ${{ matrix.suite }} (${{ matrix.browser }})
@@ -145,14 +132,10 @@ jobs:
         id: shard
         shell: bash
         env:
+          STEP: shard-config
           TOTAL_SHARDS: ${{ matrix.total_shards }}
           SHARD: ${{ matrix.shard }}
-        run: |
-          if [[ "$TOTAL_SHARDS" -gt 1 ]]; then
-            echo "config=$SHARD/$TOTAL_SHARDS" >> "$GITHUB_OUTPUT"
-          else
-            echo "config=" >> "$GITHUB_OUTPUT"
-          fi
+        run: ./scripts/ci/actions/generate-matrix.sh
 
       - name: Run Playwright
         id: test

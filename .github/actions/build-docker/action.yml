@@ -79,7 +79,12 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
 
     - name: Setup QEMU for multi-platform
-      if: contains(inputs.platforms, ',')
+      # Run for multi-platform builds OR single non-native platform
+      if: |
+        inputs.platforms != '' && (
+          contains(inputs.platforms, ',') ||
+          !contains(inputs.platforms, 'amd64')
+        )
       # Pinned to SHA for supply chain security
       uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
 
@@ -123,22 +128,11 @@ runs:
       if: inputs.push == 'true'
       shell: bash
       env:
+        STEP: metadata
         REGISTRY: ${{ inputs.registry }}
         IMAGE_NAME: ${{ inputs.image-name }}
         BUILT_TAGS: ${{ steps.build.outputs.tags }}
-      run: |
-        # Get digest using a concrete tag from the build output
-        # Parse first tag from newline-separated list
-        first_tag=$(echo "$BUILT_TAGS" | head -1)
-        fmt='{{.Manifest.Digest}}'
-        if [[ -n "$first_tag" ]]; then
-          digest=$(docker buildx imagetools inspect "$first_tag" --format "$fmt" 2>/dev/null || echo "")
-        else
-          # Fallback to image:latest if no tags available
-          full_image="${REGISTRY}/${IMAGE_NAME}:latest"
-          digest=$(docker buildx imagetools inspect "$full_image" --format "$fmt" 2>/dev/null || echo "")
-        fi
-        echo "digest=$digest" >> "$GITHUB_OUTPUT"
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
 
     - name: Generate summary
       shell: bash

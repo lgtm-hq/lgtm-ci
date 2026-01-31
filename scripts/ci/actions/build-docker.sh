@@ -3,7 +3,7 @@
 # Purpose: Build and push Docker images with multi-platform support
 #
 # Required environment variables:
-#   STEP - Which step to run: setup, build, push, summary
+#   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -170,7 +170,19 @@ build)
 	# Add context
 	BUILD_CMD+=("$CONTEXT")
 
-	log_info "Running: ${BUILD_CMD[*]}"
+	# Log command without sensitive args (build-args and labels may contain secrets)
+	safe_cmd=()
+	for arg in "${BUILD_CMD[@]}"; do
+		if [[ "$arg" == "--build-arg" ]] || [[ "$arg" == "--label" ]]; then
+			safe_cmd+=("$arg" "[REDACTED]")
+		elif [[ "${safe_cmd[*]}" =~ \[REDACTED\]$ ]]; then
+			# Skip the value following --build-arg or --label (already added placeholder)
+			continue
+		else
+			safe_cmd+=("$arg")
+		fi
+	done
+	log_info "Running: ${safe_cmd[*]}"
 
 	# Execute build
 	exit_code=0
@@ -199,17 +211,73 @@ push)
 
 	log_info "Pushing image tags..."
 
-	# Parse tags and push each
-	IFS=',' read -ra tag_array <<<"$TAGS"
-	for tag in "${tag_array[@]}"; do
-		tag=$(echo "$tag" | xargs)
+	# Parse tags (handle both newline and comma-separated formats)
+	while IFS= read -r tag; do
+		tag=$(echo "$tag" | xargs) # Trim whitespace
 		if [[ -n "$tag" ]]; then
 			log_info "Pushing: $tag"
 			docker push "$tag"
 		fi
-	done
+	done < <(printf '%s\n' "$TAGS" | tr ',' '\n')
 
 	log_success "Push completed"
+	;;
+
+metadata)
+	# Extract digest from a built image using a concrete tag
+	: "${REGISTRY:=ghcr.io}"
+	: "${IMAGE_NAME:=${GITHUB_REPOSITORY:-}}"
+	: "${BUILT_TAGS:=}"
+
+	log_info "Extracting image metadata..."
+
+	# Parse first tag from newline-separated list
+	first_tag=$(echo "$BUILT_TAGS" | head -1)
+	fmt='{{.Manifest.Digest}}'
+
+	if [[ -n "$first_tag" ]]; then
+		log_info "Using tag: $first_tag"
+		digest=$(docker buildx imagetools inspect "$first_tag" --format "$fmt" 2>/dev/null || echo "")
+	else
+		# Fallback to image:latest if no tags available
+		full_image="${REGISTRY}/${IMAGE_NAME}:latest"
+		log_info "No tags found, falling back to: $full_image"
+		digest=$(docker buildx imagetools inspect "$full_image" --format "$fmt" 2>/dev/null || echo "")
+	fi
+
+	set_github_output "digest" "$digest"
+
+	if [[ -n "$digest" ]]; then
+		log_success "Extracted digest: $digest"
+	else
+		log_warn "Could not extract digest"
+	fi
+	;;
+
+parse-tags)
+	# Convert comma-separated tags to metadata-action format for docker/metadata-action
+	: "${INPUT_TAGS:=}"
+
+	if [[ -z "$INPUT_TAGS" ]]; then
+		set_github_output "tags" ""
+		exit 0
+	fi
+
+	# Convert comma-separated tags to metadata-action format
+	# Trim whitespace and filter empty entries
+	tags_list=""
+	IFS=',' read -ra tag_array <<<"$INPUT_TAGS"
+	for tag in "${tag_array[@]}"; do
+		tag=$(echo "$tag" | xargs) # Trim whitespace
+		if [[ -n "$tag" ]]; then
+			tags_list="${tags_list}type=raw,value=${tag}"$'\n'
+		fi
+	done
+
+	# Output using heredoc for multiline
+	set_github_output_multiline "tags" "$tags_list"
+
+	log_info "Parsed tags for metadata-action"
 	;;
 
 summary)

@@ -66,29 +66,10 @@ runs:
       if: steps.merge.outputs.merged-path != ''
       shell: bash
       env:
+        STEP: parse-merged
         MERGED_PATH: ${{ steps.merge.outputs.merged-path }}
       run: |
-        # Source testing library for parser
-        source "${{ github.action_path }}/../../../scripts/ci/lib/testing.sh"
-
-        # Find JSON file in merged output
-        json_file=""
-        if [[ -f "$MERGED_PATH" ]] && [[ "$MERGED_PATH" == *.json ]]; then
-          json_file="$MERGED_PATH"
-        elif [[ -d "$MERGED_PATH" ]]; then
-          json_file=$(find "$MERGED_PATH" -name "*.json" -type f 2>/dev/null | head -1)
-        fi
-
-        if [[ -n "$json_file" ]] && [[ -f "$json_file" ]]; then
-          parse_playwright_json "$json_file"
-          echo "total-passed=$TESTS_PASSED" >> "$GITHUB_OUTPUT"
-          echo "total-failed=$TESTS_FAILED" >> "$GITHUB_OUTPUT"
-          echo "total-skipped=$TESTS_SKIPPED" >> "$GITHUB_OUTPUT"
-        else
-          echo "total-passed=0" >> "$GITHUB_OUTPUT"
-          echo "total-failed=0" >> "$GITHUB_OUTPUT"
-          echo "total-skipped=0" >> "$GITHUB_OUTPUT"
-        fi
+        ${{ github.action_path }}/../../../scripts/ci/actions/merge-playwright-reports.sh
 
     - name: Generate summary
       if: steps.collect.outputs.report-count != '0'

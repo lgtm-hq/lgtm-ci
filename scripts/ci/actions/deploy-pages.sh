@@ -91,14 +91,16 @@ validate)
 	fi
 
 	if [[ ${#issues[@]} -gt 0 ]]; then
-		log_warn "Validation warnings:"
+		log_warn "Validation issues found:"
 		for issue in "${issues[@]}"; do
 			log_warn "  - $issue"
 		done
+		set_github_output "valid" "false"
+		log_error "Content validation failed with ${#issues[@]} issue(s)"
+	else
+		set_github_output "valid" "true"
+		log_success "Content validation passed"
 	fi
-
-	set_github_output "valid" "true"
-	log_success "Content validation passed"
 	;;
 
 summary)
