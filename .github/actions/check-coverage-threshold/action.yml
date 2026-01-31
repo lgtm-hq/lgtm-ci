@@ -1,0 +1,42 @@
+---
+name: 'Check Coverage Threshold'
+description: 'Check if coverage meets a minimum threshold'
+author: 'lgtm-hq'
+
+inputs:
+  coverage-percent:
+    description: 'Current coverage percentage'
+    required: true
+  threshold:
+    description: 'Minimum coverage percentage required'
+    required: true
+  fail-on-error:
+    description: 'Fail the step if coverage is below threshold'
+    required: false
+    default: 'true'
+
+outputs:
+  passed:
+    description: 'Whether coverage meets the threshold'
+    value: ${{ steps.check.outputs.passed }}
+  message:
+    description: 'Human-readable result message'
+    value: ${{ steps.check.outputs.message }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check coverage threshold
+      id: check
+      shell: bash
+      env:
+        COVERAGE: ${{ inputs.coverage-percent }}
+        THRESHOLD: ${{ inputs.threshold }}
+        FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/check-coverage-threshold.sh
+
+branding:
+  icon: 'check-circle'
+  color: 'green'

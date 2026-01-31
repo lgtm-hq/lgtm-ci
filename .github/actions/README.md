@@ -436,6 +436,245 @@ Generate formatted PR comment from code coverage results.
 
 ---
 
+## Testing & Coverage Actions
+
+### run-tests
+
+Generic test runner that auto-detects and delegates to language-specific runners.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-tests@main
+  with:
+    runner: 'auto' # 'pytest', 'vitest', 'playwright', or 'auto'
+    coverage: 'true' # optional
+    coverage-format: 'json' # 'xml', 'json', 'lcov'
+    extra-args: '' # additional runner arguments
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `exit-code` - Exit code from the test runner
+- `runner` - Test runner that was used
+- `tests-passed` - Number of tests passed
+- `tests-failed` - Number of tests failed
+- `tests-skipped` - Number of tests skipped
+- `coverage-file` - Path to coverage file
+
+**Features:**
+
+- Auto-detects test runner from project files
+- Supports pytest, vitest, and Playwright
+- Unified output format across runners
+
+---
+
+### run-pytest
+
+Run Python tests using pytest with optional coverage.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@main
+  with:
+    python-version: '3.12' # optional
+    test-path: 'tests' # optional
+    coverage: 'true' # optional
+    coverage-format: 'json' # 'xml', 'json', 'lcov'
+    markers: 'not slow' # optional, pytest markers
+    extra-args: '-v' # optional
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `exit-code` - Exit code from pytest
+- `tests-passed`, `tests-failed`, `tests-skipped`, `tests-total`
+- `coverage-file` - Path to coverage file
+- `coverage-percent` - Coverage percentage
+
+**Features:**
+
+- Automatic pytest and pytest-cov installation
+- JSON report generation for result parsing
+- Coverage in XML, JSON, or LCOV formats
+
+---
+
+### run-vitest
+
+Run JavaScript/TypeScript tests using vitest with optional coverage.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-vitest@main
+  with:
+    node-version: '20' # optional
+    test-path: '.' # optional
+    coverage: 'true' # optional
+    coverage-format: 'json' # 'json', 'lcov', 'html'
+    extra-args: '' # optional
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `exit-code` - Exit code from vitest
+- `tests-passed`, `tests-failed`, `tests-skipped`, `tests-total`
+- `coverage-file` - Path to coverage file
+- `coverage-percent` - Coverage percentage
+
+**Features:**
+
+- Automatic vitest and @vitest/coverage-v8 installation
+- Uses bun for package management
+- Istanbul-compatible coverage output
+
+---
+
+### run-playwright
+
+Run E2E tests using Playwright with browser automation.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-playwright@main
+  with:
+    node-version: '20' # optional
+    project: '' # optional, Playwright project
+    browser: 'chromium' # 'chromium', 'firefox', 'webkit', 'all'
+    reporter: 'html' # 'json', 'html', 'junit'
+    shard: '1/3' # optional, for parallel execution
+    extra-args: '' # optional
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `exit-code` - Exit code from Playwright
+- `tests-passed`, `tests-failed`, `tests-skipped`, `tests-total`
+- `report-path` - Path to test report
+
+**Features:**
+
+- Automatic browser installation
+- Support for sharding across multiple runners
+- HTML report upload as artifact
+
+---
+
+### collect-coverage
+
+Aggregate coverage from multiple sources and formats.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/collect-coverage@main
+  with:
+    coverage-files: 'coverage/*.json' # glob or comma-separated
+    input-format: 'auto' # 'auto', 'istanbul', 'coverage-py', 'lcov'
+    output-format: 'json' # 'json', 'lcov'
+    merge-strategy: 'union' # 'union', 'intersection'
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `merged-coverage-file` - Path to merged coverage file
+- `coverage-percent` - Overall coverage percentage
+- `lines-coverage`, `branches-coverage`, `functions-coverage`
+
+**Features:**
+
+- Auto-detects coverage format from file content
+- Merges coverage from Python and JavaScript projects
+- Supports multiple input formats
+
+---
+
+### check-coverage-threshold
+
+Check if coverage meets a minimum threshold.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/check-coverage-threshold@main
+  with:
+    coverage-percent: '85.5' # current coverage
+    threshold: '80' # minimum required
+    fail-on-error: 'true' # optional, default: true
+```
+
+**Outputs:**
+
+- `passed` - Whether coverage meets the threshold
+- `message` - Human-readable result message
+
+**Features:**
+
+- Portable decimal comparison using awk
+- Configurable failure behavior
+- Clear error messages with GitHub annotations
+
+---
+
+### generate-coverage-badge
+
+Generate coverage badge SVG/JSON for README display.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-badge@main
+  with:
+    coverage-file: 'coverage.json' # or use coverage-percent
+    coverage-percent: '85.5' # if not extracting from file
+    format: 'svg' # 'svg', 'json', 'shields'
+    output-path: 'badge.svg' # optional
+    label: 'coverage' # optional
+    thresholds: '50,80' # red,yellow boundaries
+```
+
+**Outputs:**
+
+- `badge-file` - Path to generated badge file
+- `coverage-percent` - Coverage percentage used
+- `badge-url` - Shields.io URL for badge
+- `badge-color` - Badge color (red, yellow, green, brightgreen)
+
+**Features:**
+
+- Local SVG generation (no external dependencies)
+- Shields.io-compatible JSON endpoint
+- Configurable color thresholds
+
+---
+
+### publish-test-results
+
+Publish test results and coverage to GitHub Pages.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@main
+  with:
+    results-path: 'test-results/' # optional
+    coverage-path: 'coverage/' # optional
+    badge-path: 'coverage/badge.svg' # optional
+    target-branch: 'gh-pages' # optional
+    target-dir: '.' # optional
+    keep-history: 'false' # optional
+```
+
+**Outputs:**
+
+- `pages-url` - GitHub Pages URL
+
+**Features:**
+
+- Deploys to gh-pages branch
+- Optional historical report retention
+- Generates index.html for coverage reports
+
+**Required Permissions:**
+
+- `contents: write` - For gh-pages deployment
+- `pages: write` - For GitHub Pages
+
+---
+
 ## Quality Actions
 
 ### run-quality
@@ -591,6 +830,149 @@ jobs:
       - name: Run tests
         run: uv run pytest
 ```
+
+## Reusable Workflows
+
+Reusable workflows provide complete CI/CD pipelines that can be called from other
+workflows.
+
+### reusable-test-python.yml
+
+Complete Python testing workflow with pytest and optional coverage.
+
+```yaml
+jobs:
+  test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@main
+    with:
+      python-version: '3.12'
+      test-path: 'tests'
+      coverage: true
+      coverage-threshold: 80
+      upload-coverage: true
+      publish-results: false
+```
+
+**Inputs:**
+
+- `python-version` - Python version (default: '3.12')
+- `test-path` - Path to tests (default: 'tests')
+- `coverage` - Collect coverage (default: false)
+- `coverage-format` - Format: xml, json, lcov (default: 'json')
+- `coverage-threshold` - Minimum coverage % (default: 0)
+- `upload-coverage` - Upload as artifact (default: false)
+- `publish-results` - Publish to GitHub Pages (default: false)
+
+**Outputs:**
+
+- `tests-passed`, `tests-failed`, `tests-total`
+- `coverage-percent`
+- `passed` - Whether all tests passed
+
+---
+
+### reusable-test-node.yml
+
+Complete Node.js testing workflow with vitest and optional coverage.
+
+```yaml
+jobs:
+  test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@main
+    with:
+      node-version: '20'
+      coverage: true
+      coverage-threshold: 80
+      upload-coverage: true
+```
+
+**Inputs:**
+
+- `node-version` - Node.js version (default: '20')
+- `test-path` - Path to tests (default: '.')
+- `coverage` - Collect coverage (default: false)
+- `coverage-format` - Format: json, lcov, html (default: 'json')
+- `coverage-threshold` - Minimum coverage % (default: 0)
+- `upload-coverage` - Upload as artifact (default: false)
+- `publish-results` - Publish to GitHub Pages (default: false)
+
+**Outputs:**
+
+- `tests-passed`, `tests-failed`, `tests-total`
+- `coverage-percent`
+- `passed` - Whether all tests passed
+
+---
+
+### reusable-test-e2e.yml
+
+E2E testing workflow with Playwright.
+
+```yaml
+jobs:
+  e2e:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e.yml@main
+    with:
+      browsers: 'chromium'
+      shard: '1/3' # optional, for parallel execution
+      reporter: 'html'
+      upload-report: true
+      publish-results: true
+```
+
+**Inputs:**
+
+- `node-version` - Node.js version (default: '20')
+- `project` - Playwright project (default: '')
+- `browsers` - Browsers: chromium, firefox, webkit, all (default: 'chromium')
+- `shard` - Shard configuration, e.g., "1/3" (default: '')
+- `reporter` - Reporter: json, html, junit (default: 'html')
+- `upload-report` - Upload report as artifact (default: true)
+- `publish-results` - Publish to GitHub Pages (default: false)
+
+**Outputs:**
+
+- `tests-passed`, `tests-failed`
+- `report-url` - URL to test report (if published)
+
+---
+
+### reusable-coverage.yml
+
+Unified coverage collection and publishing workflow.
+
+```yaml
+jobs:
+  coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-coverage.yml@main
+    with:
+      threshold: 80
+      generate-badge: true
+      publish-pages: true
+```
+
+**Inputs:**
+
+- `coverage-files` - Glob or list of coverage files (default: auto-detect)
+- `format` - Format: auto, istanbul, coverage-py, lcov (default: 'auto')
+- `threshold` - Minimum coverage % (default: 0)
+- `generate-badge` - Generate coverage badge (default: true)
+- `publish-pages` - Publish to GitHub Pages (default: false)
+
+**Outputs:**
+
+- `coverage-percent` - Overall coverage percentage
+- `badge-url` - URL to coverage badge
+- `pages-url` - GitHub Pages URL
+- `passed` - Whether coverage meets threshold
+
+**Permissions Required:**
+
+- `contents: write` - For gh-pages deployment
+- `pages: write` - For GitHub Pages
+- `id-token: write` - For pages deployment
+
+---
 
 ## Pinning Versions
 
