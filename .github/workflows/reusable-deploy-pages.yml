@@ -1,0 +1,107 @@
+---
+name: Reusable Deploy to GitHub Pages
+
+on:
+  workflow_call:
+    inputs:
+      source-path:
+        description: 'Path to static content to deploy'
+        required: false
+        type: string
+        default: 'dist'
+      build-command:
+        description: 'Optional build command to run before deployment'
+        required: false
+        type: string
+        default: ''
+      node-version:
+        description: 'Node.js version for build step'
+        required: false
+        type: string
+        default: '20'
+      environment:
+        description: 'GitHub environment name for deployment'
+        required: false
+        type: string
+        default: 'github-pages'
+      artifact-name:
+        description: 'Name for the pages artifact'
+        required: false
+        type: string
+        default: 'github-pages'
+
+    outputs:
+      page-url:
+        description: 'URL of the deployed GitHub Pages site'
+        value: ${{ jobs.deploy.outputs.page-url }}
+
+# Required permissions for GitHub Pages deployment with OIDC
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one deployment at a time
+concurrency:
+  group: pages-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        if: inputs.build-command != ''
+        uses: ./.github/actions/setup-node
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Configure Pages
+        # Pinned to SHA for supply chain security
+        uses: actions/configure-pages@983d7736d9b0ae728b81ab479565c72886d7745b # v5.0.0
+
+      - name: Prepare and upload artifact
+        uses: ./.github/actions/deploy-pages
+        with:
+          source-path: ${{ inputs.source-path }}
+          build-command: ${{ inputs.build-command }}
+          artifact-name: ${{ inputs.artifact-name }}
+
+  deploy:
+    name: Deploy
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+
+    environment:
+      name: ${{ inputs.environment }}
+      url: ${{ steps.deployment.outputs.page_url }}
+
+    outputs:
+      page-url: ${{ steps.deployment.outputs.page_url }}
+
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        # Pinned to SHA for supply chain security
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4.0.5
+        with:
+          artifact_name: ${{ inputs.artifact-name }}

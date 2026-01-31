@@ -1,0 +1,149 @@
+---
+name: 'Build Docker Image'
+description: 'Build and optionally push Docker images with multi-platform support'
+author: 'lgtm-hq'
+
+inputs:
+  context:
+    description: 'Build context path'
+    required: false
+    default: '.'
+  file:
+    description: 'Path to Dockerfile'
+    required: false
+    default: 'Dockerfile'
+  platforms:
+    description: 'Target platforms (comma-separated)'
+    required: false
+    default: 'linux/amd64,linux/arm64'
+  registry:
+    description: 'Container registry URL'
+    required: false
+    default: 'ghcr.io'
+  image-name:
+    description: 'Image name (default: github.repository)'
+    required: false
+    default: ${{ github.repository }}
+  tags:
+    description: 'Additional tags (comma-separated)'
+    required: false
+    default: ''
+  version:
+    description: 'Version for semver tags (e.g., v1.2.3)'
+    required: false
+    default: ''
+  push:
+    description: 'Push image to registry'
+    required: false
+    default: 'false'
+  load:
+    description: 'Load image into local docker (single platform only)'
+    required: false
+    default: 'false'
+  build-args:
+    description: 'Build arguments (comma-separated key=value)'
+    required: false
+    default: ''
+  labels:
+    description: 'Additional labels (comma-separated key=value)'
+    required: false
+    default: ''
+  cache-from:
+    description: 'Cache source (e.g., type=gha)'
+    required: false
+    default: 'type=gha'
+  cache-to:
+    description: 'Cache destination (e.g., type=gha,mode=max)'
+    required: false
+    default: 'type=gha,mode=max'
+  github-token:
+    description: 'GitHub token for GHCR authentication'
+    required: false
+    default: ''
+
+outputs:
+  tags:
+    description: 'Generated image tags (newline-separated)'
+    value: ${{ steps.build.outputs.tags }}
+  digest:
+    description: 'Image digest (if pushed)'
+    value: ${{ steps.metadata.outputs.digest }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Docker environment
+      shell: bash
+      env:
+        STEP: setup
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+
+    - name: Setup QEMU for multi-platform
+      # Run for multi-platform builds OR single non-native platform
+      if: |
+        inputs.platforms != '' && (
+          contains(inputs.platforms, ',') ||
+          !contains(inputs.platforms, 'amd64')
+        )
+      # Pinned to SHA for supply chain security
+      uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+    - name: Setup Docker Buildx
+      # Pinned to SHA for supply chain security
+      uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3.6.1
+
+    - name: Login to GHCR
+      if:
+        inputs.push == 'true' && inputs.registry == 'ghcr.io' && inputs.github-token !=
+        ''
+      # Pinned to SHA for supply chain security
+      uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ inputs.github-token }}
+
+    - name: Build image
+      id: build
+      shell: bash
+      env:
+        STEP: build
+        CONTEXT: ${{ inputs.context }}
+        FILE: ${{ inputs.file }}
+        PLATFORMS: ${{ inputs.platforms }}
+        REGISTRY: ${{ inputs.registry }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+        TAGS: ${{ inputs.tags }}
+        VERSION: ${{ inputs.version }}
+        PUSH: ${{ inputs.push }}
+        LOAD: ${{ inputs.load }}
+        BUILD_ARGS: ${{ inputs.build-args }}
+        LABELS: ${{ inputs.labels }}
+        CACHE_FROM: ${{ inputs.cache-from }}
+        CACHE_TO: ${{ inputs.cache-to }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+
+    - name: Extract metadata
+      id: metadata
+      if: inputs.push == 'true'
+      shell: bash
+      env:
+        STEP: metadata
+        REGISTRY: ${{ inputs.registry }}
+        IMAGE_NAME: ${{ inputs.image-name }}
+        BUILT_TAGS: ${{ steps.build.outputs.tags }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        IMAGE_NAME: ${{ inputs.registry }}/${{ inputs.image-name }}
+        TAGS: ${{ steps.build.outputs.tags }}
+        PLATFORMS: ${{ inputs.platforms }}
+        PUSH: ${{ inputs.push }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+
+branding:
+  icon: 'box'
+  color: 'blue'

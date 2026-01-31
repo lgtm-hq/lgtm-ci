@@ -1,0 +1,221 @@
+---
+name: Reusable Docker Build and Push
+
+on:
+  workflow_call:
+    inputs:
+      context:
+        description: 'Build context path'
+        required: false
+        type: string
+        default: '.'
+      file:
+        description: 'Path to Dockerfile'
+        required: false
+        type: string
+        default: 'Dockerfile'
+      platforms:
+        description: 'Target platforms (comma-separated)'
+        required: false
+        type: string
+        default: 'linux/amd64,linux/arm64'
+      registry:
+        description: 'Container registry URL'
+        required: false
+        type: string
+        default: 'ghcr.io'
+      image-name:
+        description: 'Image name (default: github.repository)'
+        required: false
+        type: string
+        default: ''
+      tags:
+        description: 'Additional tags (comma-separated)'
+        required: false
+        type: string
+        default: ''
+      version:
+        description: 'Version for semver tags'
+        required: false
+        type: string
+        default: ''
+      push:
+        description: 'Push image to registry'
+        required: false
+        type: boolean
+        default: false
+      provenance:
+        description: 'Generate provenance attestation'
+        required: false
+        type: boolean
+        default: true
+      sbom:
+        description: 'Generate SBOM attestation'
+        required: false
+        type: boolean
+        default: true
+      scan:
+        description: 'Run vulnerability scan'
+        required: false
+        type: boolean
+        default: false
+      build-args:
+        description: 'Build arguments (comma-separated key=value)'
+        required: false
+        type: string
+        default: ''
+
+    outputs:
+      tags:
+        description: 'Generated image tags'
+        value: ${{ jobs.build.outputs.tags }}
+      digest:
+        description: 'Image digest'
+        value: ${{ jobs.build.outputs.digest }}
+
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+        description: 'Docker Hub username (for docker.io registry)'
+      DOCKERHUB_TOKEN:
+        required: false
+        description: 'Docker Hub token (for docker.io registry)'
+
+jobs:
+  build:
+    name: Build and Push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    outputs:
+      tags: ${{ steps.build.outputs.tags }}
+      digest: ${{ steps.metadata.outputs.digest }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Setup QEMU
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-qemu-action@29109295f81e9208d7d86ff1c6c12d2833863392 # v3.6.0
+
+      - name: Setup Docker Buildx
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-buildx-action@988b5a0280414f521da01fcc63a27aeeb4b104db # v3.6.1
+
+      - name: Login to GHCR
+        if: inputs.push && inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: inputs.push && inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@9780b0c442fbb1117ed29e0efdff1e18412f7567 # v3.3.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Parse additional tags
+        id: extra-tags
+        if: inputs.tags != ''
+        shell: bash
+        env:
+          STEP: parse-tags
+          INPUT_TAGS: ${{ inputs.tags }}
+        run: ./scripts/ci/actions/build-docker.sh
+
+      - name: Extract metadata
+        id: meta
+        # Pinned to SHA for supply chain security
+        uses: docker/metadata-action@369eb591f429131d6889c46b94e711f089e6ca96 # v5.6.1
+        with:
+          images: |
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ inputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
+            type=semver,pattern={{major}},value=${{ inputs.version }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            ${{ steps.extra-tags.outputs.tags }}
+
+      - name: Build and push
+        id: build
+        # Pinned to SHA for supply chain security
+        uses: docker/build-push-action@0adf9959216b96bec444f325f1e493d4aa344497 # v6.10.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: ${{ inputs.platforms }}
+          push: ${{ inputs.push }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ inputs.build-args }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          provenance: ${{ inputs.provenance }}
+          sbom: ${{ inputs.sbom }}
+
+      - name: Extract digest
+        id: metadata
+        if: inputs.push
+        shell: bash
+        run: |
+          echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate artifact attestation
+        if: inputs.push && inputs.provenance
+        # Pinned to SHA for supply chain security
+        uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
+        with:
+          subject-name:
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true
+
+  scan:
+    name: Vulnerability Scan
+    needs: build
+    if: inputs.scan && inputs.push
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Run Trivy vulnerability scanner
+        # Pinned to SHA for supply chain security
+        uses: aquasecurity/trivy-action@6c175e9c4083a92bbca2f9724c8a5e33bc2d97a5 # v0.30.0
+        with:
+          image-ref:
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
+            needs.build.outputs.digest }}
+          format: 'sarif'
+          output: 'trivy-results.sarif'
+          severity: 'CRITICAL,HIGH'
+
+      - name: Upload Trivy scan results
+        # Pinned to SHA for supply chain security
+        uses: github/codeql-action/upload-sarif@1b549b9259bda1cb5ddde3b41741a82a2d15a841 # v3.28.13
+        with:
+          sarif_file: 'trivy-results.sarif'

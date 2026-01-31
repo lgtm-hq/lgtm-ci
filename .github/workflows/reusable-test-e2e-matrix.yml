@@ -1,0 +1,240 @@
+---
+name: Reusable E2E Matrix Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: 'Node.js version to use'
+        required: false
+        type: string
+        default: '20'
+      test-suites:
+        description: 'Comma-separated test suites to run (e.g., "smoke,visual,a11y")'
+        required: false
+        type: string
+        default: 'smoke'
+      browsers:
+        description: 'Comma-separated browsers to test (e.g., "chromium,firefox")'
+        required: false
+        type: string
+        default: 'chromium'
+      tag-prefix:
+        description: 'Tag prefix for filtering (e.g., "@" for @smoke, @visual)'
+        required: false
+        type: string
+        default: '@'
+      shards:
+        description: 'Number of shards per suite (0 to disable sharding)'
+        required: false
+        type: number
+        default: 1
+      reporter:
+        description: 'Reporter to use: json, html, blob'
+        required: false
+        type: string
+        default: 'html'
+      upload-report:
+        description: 'Upload test reports as artifacts'
+        required: false
+        type: boolean
+        default: true
+      publish-results:
+        description: 'Publish merged results to GitHub Pages'
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: 'Working directory for running tests'
+        required: false
+        type: string
+        default: '.'
+      timeout-minutes:
+        description: 'Timeout for each test job in minutes'
+        required: false
+        type: number
+        default: 30
+
+    outputs:
+      total-passed:
+        description: 'Total tests passed across all matrix jobs'
+        value: ${{ jobs.merge.outputs.total-passed }}
+      total-failed:
+        description: 'Total tests failed across all matrix jobs'
+        value: ${{ jobs.merge.outputs.total-failed }}
+      report-url:
+        description: 'URL to merged test report'
+        value: ${{ jobs.publish.outputs.pages-url }}
+
+jobs:
+  # Generate matrix from inputs
+  setup:
+    name: Setup Matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout for scripts
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Generate matrix
+        id: matrix
+        shell: bash
+        env:
+          STEP: e2e-matrix
+          SUITES: ${{ inputs.test-suites }}
+          BROWSERS: ${{ inputs.browsers }}
+          SHARDS: ${{ inputs.shards }}
+        run: ./scripts/ci/actions/generate-matrix.sh
+
+  test:
+    name: E2E ${{ matrix.suite }} (${{ matrix.browser }})
+    needs: setup
+    runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Cache Playwright browsers
+        # Pinned to SHA for supply chain security
+        uses: actions/cache@1bd1e32a3bdc45362d1e726936510720a7c30a57 # v4.2.0
+        with:
+          path: ~/.cache/ms-playwright
+          key:
+            playwright-${{ matrix.browser }}-${{ hashFiles('**/bun.lock',
+            '**/package-lock.json') }}
+          restore-keys: |
+            playwright-${{ matrix.browser }}-
+
+      - name: Build shard config
+        id: shard
+        shell: bash
+        env:
+          STEP: shard-config
+          TOTAL_SHARDS: ${{ matrix.total_shards }}
+          SHARD: ${{ matrix.shard }}
+        run: ./scripts/ci/actions/generate-matrix.sh
+
+      - name: Run Playwright
+        id: test
+        uses: ./.github/actions/run-playwright
+        with:
+          node-version: ${{ inputs.node-version }}
+          browser: ${{ matrix.browser }}
+          reporter: ${{ inputs.reporter }}
+          shard: ${{ steps.shard.outputs.config }}
+          extra-args: --grep ${{ inputs.tag-prefix }}${{ matrix.suite }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Upload report
+        if: inputs.upload-report && always()
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.shard }}
+          path: |
+            ${{ inputs.working-directory }}/playwright-report/
+            ${{ inputs.working-directory }}/playwright-results.json
+            ${{ inputs.working-directory }}/blob-report/
+          retention-days: 30
+          if-no-files-found: ignore
+
+  merge:
+    name: Merge Reports
+    needs: test
+    if: always() && inputs.upload-report
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    outputs:
+      total-passed: ${{ steps.merge.outputs.total-passed }}
+      total-failed: ${{ steps.merge.outputs.total-failed }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download all reports
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: playwright-*
+          path: playwright-reports
+          merge-multiple: true
+
+      - name: Merge reports
+        id: merge
+        uses: ./.github/actions/merge-playwright-reports
+        with:
+          input-dir: playwright-reports
+          output-dir: merged-report
+          # Map 'blob' reporter to 'html' for merging (blob is intermediate format)
+          report-format: ${{ inputs.reporter == 'blob' && 'html' || inputs.reporter }}
+
+      - name: Upload merged report
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-merged-report
+          path: merged-report
+          retention-days: 30
+          if-no-files-found: ignore
+
+  publish:
+    name: Publish Results
+    needs: merge
+    if: inputs.publish-results && !cancelled()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+
+    outputs:
+      pages-url: ${{ steps.publish.outputs.pages-url }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Download merged report
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: playwright-merged-report
+          path: merged-report
+
+      - name: Publish to GitHub Pages
+        id: publish
+        uses: ./.github/actions/publish-test-results
+        with:
+          results-path: merged-report
+          target-dir: playwright

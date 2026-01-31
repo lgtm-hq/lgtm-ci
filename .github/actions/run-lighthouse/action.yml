@@ -1,0 +1,144 @@
+---
+name: 'Run Lighthouse'
+description: 'Run Lighthouse CI audits with configurable thresholds'
+author: 'lgtm-hq'
+
+inputs:
+  url:
+    description: 'URL to audit'
+    required: true
+  node-version:
+    description: 'Node.js version to use'
+    required: false
+    default: '20'
+  config-path:
+    description: 'Path to lighthouserc.json config file'
+    required: false
+    default: ''
+  output-dir:
+    description: 'Directory for Lighthouse results'
+    required: false
+    default: 'lighthouse-reports'
+  threshold-performance:
+    description: 'Minimum performance score (0-100)'
+    required: false
+    default: '80'
+  threshold-accessibility:
+    description: 'Minimum accessibility score (0-100, error level)'
+    required: false
+    default: '90'
+  threshold-best-practices:
+    description: 'Minimum best practices score (0-100)'
+    required: false
+    default: '80'
+  threshold-seo:
+    description: 'Minimum SEO score (0-100)'
+    required: false
+    default: '80'
+  extra-args:
+    description: 'Additional arguments to pass to LHCI'
+    required: false
+    default: ''
+
+outputs:
+  performance:
+    description: 'Performance score (0-100)'
+    value: ${{ steps.parse.outputs.performance }}
+  accessibility:
+    description: 'Accessibility score (0-100)'
+    value: ${{ steps.parse.outputs.accessibility }}
+  best-practices:
+    description: 'Best practices score (0-100)'
+    value: ${{ steps.parse.outputs.best-practices }}
+  seo:
+    description: 'SEO score (0-100)'
+    value: ${{ steps.parse.outputs.seo }}
+  passed:
+    description: 'Whether all scores meet thresholds'
+    value: ${{ steps.parse.outputs.passed }}
+  failed-categories:
+    description: 'Comma-separated list of failed categories'
+    value: ${{ steps.parse.outputs.failed-categories }}
+  results-path:
+    description: 'Path to results JSON file'
+    value: ${{ steps.run.outputs.results-path }}
+  output-dir:
+    description: 'Directory containing all results'
+    value: ${{ steps.run.outputs.output-dir }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Setup Node.js
+      uses: ./.github/actions/setup-node
+      with:
+        node-version: ${{ inputs.node-version }}
+
+    - name: Setup Lighthouse CI
+      shell: bash
+      env:
+        STEP: setup
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+
+    - name: Run Lighthouse
+      id: run
+      shell: bash
+      env:
+        STEP: run
+        URL: ${{ inputs.url }}
+        CONFIG_PATH: ${{ inputs.config-path }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        EXTRA_ARGS: ${{ inputs.extra-args }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+      continue-on-error: true
+
+    - name: Parse results
+      id: parse
+      shell: bash
+      env:
+        STEP: parse
+        RESULTS_PATH: ${{ steps.run.outputs.results-path }}
+        OUTPUT_DIR: ${{ inputs.output-dir }}
+        THRESHOLD_PERFORMANCE: ${{ inputs.threshold-performance }}
+        THRESHOLD_ACCESSIBILITY: ${{ inputs.threshold-accessibility }}
+        THRESHOLD_BEST_PRACTICES: ${{ inputs.threshold-best-practices }}
+        THRESHOLD_SEO: ${{ inputs.threshold-seo }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        PERFORMANCE: ${{ steps.parse.outputs.performance }}
+        ACCESSIBILITY: ${{ steps.parse.outputs.accessibility }}
+        BEST_PRACTICES: ${{ steps.parse.outputs.best-practices }}
+        SEO: ${{ steps.parse.outputs.seo }}
+        PASSED: ${{ steps.parse.outputs.passed }}
+        THRESHOLD_PERFORMANCE: ${{ inputs.threshold-performance }}
+        THRESHOLD_ACCESSIBILITY: ${{ inputs.threshold-accessibility }}
+        THRESHOLD_BEST_PRACTICES: ${{ inputs.threshold-best-practices }}
+        THRESHOLD_SEO: ${{ inputs.threshold-seo }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+
+    - name: Upload results
+      if: always()
+      # Pinned to SHA for supply chain security
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: lighthouse-reports
+        path: ${{ inputs.output-dir }}
+        retention-days: 30
+        if-no-files-found: ignore
+
+    - name: Check result
+      if: steps.parse.outputs.passed == 'false'
+      shell: bash
+      env:
+        FAILED_CATS: ${{ steps.parse.outputs.failed-categories }}
+      run: |
+        echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
+        exit 1
+
+branding:
+  icon: 'zap'
+  color: 'orange'

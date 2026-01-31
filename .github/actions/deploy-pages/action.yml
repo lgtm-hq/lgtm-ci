@@ -1,0 +1,57 @@
+---
+name: 'Deploy to GitHub Pages'
+description: 'Prepare and upload content for GitHub Pages deployment'
+author: 'lgtm-hq'
+
+inputs:
+  source-path:
+    description: 'Path to static content to deploy'
+    required: false
+    default: 'dist'
+  build-command:
+    description: 'Optional build command to run before deployment'
+    required: false
+    default: ''
+  artifact-name:
+    description: 'Name for the pages artifact'
+    required: false
+    default: 'github-pages'
+
+outputs:
+  artifact-id:
+    description: 'ID of the uploaded artifact'
+    value: ${{ steps.upload.outputs.artifact_id }}
+  file-count:
+    description: 'Number of files in the deployment'
+    value: ${{ steps.prepare.outputs.file-count }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Prepare content
+      id: prepare
+      shell: bash
+      env:
+        STEP: prepare
+        SOURCE_PATH: ${{ inputs.source-path }}
+        BUILD_COMMAND: ${{ inputs.build-command }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/deploy-pages.sh
+
+    - name: Validate content
+      shell: bash
+      env:
+        STEP: validate
+        SOURCE_PATH: ${{ inputs.source-path }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/deploy-pages.sh
+
+    - name: Upload Pages artifact
+      id: upload
+      # Pinned to SHA for supply chain security
+      uses: actions/upload-pages-artifact@56afc609e74202658d3ffba0e8f6dda462b719fa # v3.0.1
+      with:
+        path: ${{ inputs.source-path }}
+        name: ${{ inputs.artifact-name }}
+
+branding:
+  icon: 'upload-cloud'
+  color: 'blue'
