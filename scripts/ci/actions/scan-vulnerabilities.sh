@@ -55,15 +55,16 @@ scan)
 	scan_exit_code=$?
 	set -e
 
-	# Check for operational errors (stderr) before parsing JSON
-	if [[ $scan_exit_code -ne 0 && -s "$stderr_file" ]]; then
-		# Check if it's a vulnerability threshold failure vs operational error
-		if ! grep -qE '^{' "$OUTPUT_FILE" 2>/dev/null; then
-			log_error "Grype scan failed with operational error:"
+	# Check for operational errors vs vulnerability threshold failures
+	# Exit code 2 = vulnerabilities found at/above threshold (expected behavior)
+	# Exit code 1 or other = operational failure
+	if [[ $scan_exit_code -ne 0 && $scan_exit_code -ne 2 ]]; then
+		log_error "Grype scan failed with operational error (exit code: $scan_exit_code):"
+		if [[ -s "$stderr_file" ]]; then
 			cat "$stderr_file" >&2
-			rm -f "$stderr_file"
-			exit 1
 		fi
+		rm -f "$stderr_file"
+		exit 1
 	fi
 	rm -f "$stderr_file"
 

@@ -32,7 +32,7 @@ inputs:
 outputs:
   sbom-file:
     description: 'Path to the generated SBOM file'
-    value: ${{ steps.generate.outputs.sbom-path }}
+    value: ${{ inputs.output-file || 'sbom.cdx.json' }}
   sbom-format:
     description: 'Format of the generated SBOM'
     value: ${{ inputs.format }}
@@ -57,7 +57,7 @@ runs:
       shell: bash
       env:
         STEP: summary
-        SBOM_FILE: ${{ steps.generate.outputs.sbom-path }}
+        SBOM_FILE: ${{ inputs.output-file || 'sbom.cdx.json' }}
         FORMAT: ${{ inputs.format }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-sbom.sh
 

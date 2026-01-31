@@ -15,15 +15,16 @@ source "$SCRIPT_DIR/conventional.sh"
 
 # Analyze commits between two refs to determine version bump
 # Usage: analyze_commits_for_bump "v1.0.0" "HEAD"
-# Returns: major, minor, patch, or none (returns 1 if from_ref is invalid)
+# Returns: major, minor, patch, or none
+# Note: Returns "none" for invalid refs (indistinguishable from no releasable commits)
 analyze_commits_for_bump() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
 
-	# Validate refs exist before processing
+	# Validate refs exist before processing - return "none" for invalid refs
 	if [[ -n "$from_ref" ]] && ! git rev-parse --verify "$from_ref" >/dev/null 2>&1; then
 		echo "none"
-		return 1
+		return 0
 	fi
 
 	local bump="none"
@@ -92,13 +93,19 @@ readonly FIELD_SEP=$'\x1F'
 # Output: Sections separated by markers for changelog generation
 # Fields are delimited by ASCII unit separator (0x1F) to handle | in descriptions
 # Note: Empty sections will have only the marker with no commits between them
+# Note: Returns empty sections for invalid refs
 get_commits_by_type() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
 
-	# Validate refs exist before processing
+	# Validate refs exist before processing - output empty sections for invalid refs
 	if [[ -n "$from_ref" ]] && ! git rev-parse --verify "$from_ref" >/dev/null 2>&1; then
-		return 1
+		echo "### BREAKING"
+		echo "### FEATURES"
+		echo "### FIXES"
+		echo "### DOCS"
+		echo "### OTHER"
+		return 0
 	fi
 
 	local range
@@ -154,8 +161,12 @@ get_commits_by_type() {
 				;;
 			esac
 		else
-			# Non-conventional commit
-			other_commits+=("${sha}${FIELD_SEP}other${FIELD_SEP}${FIELD_SEP}${subject}")
+			# Non-conventional commit - still check for breaking changes
+			if $is_breaking; then
+				breaking_commits+=("${sha}${FIELD_SEP}breaking${FIELD_SEP}${FIELD_SEP}${subject}")
+			else
+				other_commits+=("${sha}${FIELD_SEP}other${FIELD_SEP}${FIELD_SEP}${subject}")
+			fi
 		fi
 	done < <(git log --oneline "$range" 2>/dev/null)
 
@@ -174,13 +185,19 @@ get_commits_by_type() {
 
 # Count commits by type between refs
 # Usage: count_commits_by_type "v1.0.0" "HEAD"
+# Note: Returns all zeros for invalid refs
 count_commits_by_type() {
 	local from_ref="${1:-}"
 	local to_ref="${2:-HEAD}"
 
-	# Validate refs exist before processing
+	# Validate refs exist before processing - output zeros for invalid refs
 	if [[ -n "$from_ref" ]] && ! git rev-parse --verify "$from_ref" >/dev/null 2>&1; then
-		return 1
+		echo "breaking=0"
+		echo "features=0"
+		echo "fixes=0"
+		echo "docs=0"
+		echo "other=0"
+		return 0
 	fi
 
 	local range

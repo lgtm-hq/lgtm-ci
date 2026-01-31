@@ -85,7 +85,7 @@ generate)
 	;;
 
 summary)
-	: "${SBOM_FILE:=$OUTPUT_FILE}"
+	: "${SBOM_FILE:=${OUTPUT_FILE:-}}"
 	: "${FORMAT:=cyclonedx-json}"
 
 	if [[ ! -f "$SBOM_FILE" ]]; then

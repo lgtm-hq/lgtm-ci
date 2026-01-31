@@ -47,13 +47,15 @@ on:
 
     outputs:
       sbom-file:
-        description: 'Path to the generated SBOM file'
+        description: "Path to the generated SBOM file, or 'none' if not generated"
         value: ${{ jobs.sbom.outputs.sbom-file }}
       vulnerabilities-found:
-        description: 'Whether vulnerabilities were found'
+        description:
+          "Whether vulnerabilities were found (true/false), or 'not-run' if scan was
+          skipped"
         value: ${{ jobs.sbom.outputs.vulnerabilities-found }}
       attestation-url:
-        description: 'URL of the attestation'
+        description: "URL of the attestation, or 'not-run' if attestation was skipped"
         value: ${{ jobs.sbom.outputs.attestation-url }}
 
 jobs:
