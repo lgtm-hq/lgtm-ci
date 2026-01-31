@@ -45,9 +45,14 @@ prepare)
 	# Copy test results if provided
 	if [[ -n "$RESULTS_PATH" ]]; then
 		if [[ -d "$RESULTS_PATH" ]]; then
-			mkdir -p "$staging_dir/$TARGET_DIR/tests"
-			cp -r "$RESULTS_PATH"/* "$staging_dir/$TARGET_DIR/tests/"
-			log_info "Copied test results from $RESULTS_PATH"
+			# Check if directory is non-empty before copying
+			if ls -A "$RESULTS_PATH" >/dev/null 2>&1 && [[ -n "$(ls -A "$RESULTS_PATH" 2>/dev/null)" ]]; then
+				mkdir -p "$staging_dir/$TARGET_DIR/tests"
+				cp -r "$RESULTS_PATH"/* "$staging_dir/$TARGET_DIR/tests/"
+				log_info "Copied test results from $RESULTS_PATH"
+			else
+				log_warn "Test results directory is empty: $RESULTS_PATH"
+			fi
 		elif [[ -f "$RESULTS_PATH" ]]; then
 			mkdir -p "$staging_dir/$TARGET_DIR/tests"
 			cp "$RESULTS_PATH" "$staging_dir/$TARGET_DIR/tests/"
@@ -58,9 +63,14 @@ prepare)
 	# Copy coverage report if provided
 	if [[ -n "$COVERAGE_PATH" ]]; then
 		if [[ -d "$COVERAGE_PATH" ]]; then
-			mkdir -p "$staging_dir/$TARGET_DIR/coverage"
-			cp -r "$COVERAGE_PATH"/* "$staging_dir/$TARGET_DIR/coverage/"
-			log_info "Copied coverage report from $COVERAGE_PATH"
+			# Check if directory is non-empty before copying
+			if ls -A "$COVERAGE_PATH" >/dev/null 2>&1 && [[ -n "$(ls -A "$COVERAGE_PATH" 2>/dev/null)" ]]; then
+				mkdir -p "$staging_dir/$TARGET_DIR/coverage"
+				cp -r "$COVERAGE_PATH"/* "$staging_dir/$TARGET_DIR/coverage/"
+				log_info "Copied coverage report from $COVERAGE_PATH"
+			else
+				log_warn "Coverage directory is empty: $COVERAGE_PATH"
+			fi
 		elif [[ -f "$COVERAGE_PATH" ]]; then
 			mkdir -p "$staging_dir/$TARGET_DIR/coverage"
 			cp "$COVERAGE_PATH" "$staging_dir/$TARGET_DIR/coverage/"

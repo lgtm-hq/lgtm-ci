@@ -67,6 +67,7 @@ runs:
         publish_dir: ${{ steps.prepare.outputs.staging-dir }}
         publish_branch: ${{ inputs.target-branch }}
         force_orphan: ${{ inputs.keep-history != 'true' }}
+        keep_files: ${{ inputs.keep-history == 'true' }}
         commit_message: 'Deploy test results and coverage [skip ci]'
 
     - name: Get Pages URL

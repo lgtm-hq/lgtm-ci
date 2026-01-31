@@ -94,10 +94,15 @@ run)
 	;;
 
 parse)
-	: "${RUNNER:=unknown}"
+	: "${RUNNER:=auto}"
 	: "${WORKING_DIRECTORY:=.}"
 
 	cd "$WORKING_DIRECTORY"
+
+	# Auto-detect runner if needed
+	if [[ "$RUNNER" == "auto" ]]; then
+		RUNNER=$(detect_test_runner ".")
+	fi
 
 	# Delegate to the appropriate runner's parse step
 	case "$RUNNER" in

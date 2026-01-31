@@ -20,6 +20,16 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 : "${THRESHOLD:=0}"
 : "${FAIL_ON_ERROR:=true}"
 
+# Validate numeric inputs
+if ! [[ "$COVERAGE" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+	log_error "Invalid COVERAGE value: $COVERAGE (must be numeric)"
+	exit 1
+fi
+if ! [[ "$THRESHOLD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+	log_error "Invalid THRESHOLD value: $THRESHOLD (must be numeric)"
+	exit 1
+fi
+
 # Skip check if threshold is 0 or empty
 if [[ -z "$THRESHOLD" ]] || awk -v t="$THRESHOLD" 'BEGIN { exit (t > 0 ? 1 : 0) }'; then
 	set_github_output "passed" "true"

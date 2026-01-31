@@ -116,33 +116,46 @@ merge)
 		INPUT_FORMAT=$(detect_coverage_format "${existing_files[0]}")
 	fi
 
-	# Merge based on format
+	# Create temp file for merging in input format
+	temp_merged=$(mktemp)
+	trap 'rm -f "$temp_merged"' EXIT
+
+	# Merge based on input format
 	case "$INPUT_FORMAT" in
 	lcov)
-		merge_lcov_files "$OUTPUT_FILE" "${existing_files[@]}"
+		merge_lcov_files "$temp_merged" "${existing_files[@]}"
 		;;
 	istanbul | json)
-		merge_istanbul_files "$OUTPUT_FILE" "${existing_files[@]}"
+		merge_istanbul_files "$temp_merged" "${existing_files[@]}"
 		;;
 	coverage-py | cobertura)
-		# For Python coverage, if we need to merge, we can concatenate XMLs
-		# or rely on coverage.py combine
-		if [[ ${#existing_files[@]} -eq 1 ]]; then
-			cp "${existing_files[0]}" "$OUTPUT_FILE"
-		else
-			# Try to use coverage combine if available
-			if command -v coverage &>/dev/null; then
-				coverage combine "${existing_files[@]}"
-				case "$OUTPUT_FORMAT" in
-				json) coverage json -o "$OUTPUT_FILE" ;;
-				lcov) coverage lcov -o "$OUTPUT_FILE" ;;
-				*) coverage json -o "$OUTPUT_FILE" ;;
-				esac
-			else
-				# Just use the first file as fallback
-				cp "${existing_files[0]}" "$OUTPUT_FILE"
-				log_warn "Multiple Python coverage files but coverage tool not available"
+		# Check if files are .coverage binary data files (for coverage combine)
+		all_binary=true
+		for file in "${existing_files[@]}"; do
+			basename_file=$(basename "$file")
+			# .coverage files are binary data, not JSON/XML
+			if [[ ! "$basename_file" =~ ^\.coverage ]] && [[ ! "$file" =~ \.coverage$ ]]; then
+				all_binary=false
+				break
 			fi
+		done
+
+		if [[ ${#existing_files[@]} -eq 1 ]]; then
+			cp "${existing_files[0]}" "$temp_merged"
+		elif [[ "$all_binary" == "true" ]] && command -v coverage &>/dev/null; then
+			# Only use coverage combine for actual .coverage binary files
+			coverage combine "${existing_files[@]}"
+			case "$INPUT_FORMAT" in
+			coverage-py) coverage json -o "$temp_merged" ;;
+			cobertura) coverage xml -o "$temp_merged" ;;
+			*) coverage json -o "$temp_merged" ;;
+			esac
+		else
+			# Files are XML/JSON reports, not binary - can't use coverage combine
+			log_warn "Files are not .coverage binary data files, cannot use coverage combine"
+			log_warn "Rejected files: ${existing_files[*]}"
+			log_warn "Using first file as fallback"
+			cp "${existing_files[0]}" "$temp_merged"
 		fi
 		;;
 	*)
@@ -150,6 +163,19 @@ merge)
 		exit 1
 		;;
 	esac
+
+	# Convert to output format if different from input format
+	if [[ "$INPUT_FORMAT" != "$OUTPUT_FORMAT" ]]; then
+		log_info "Converting from $INPUT_FORMAT to $OUTPUT_FORMAT..."
+		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$INPUT_FORMAT" "$OUTPUT_FORMAT"; then
+			log_info "Conversion successful"
+		else
+			log_warn "Conversion failed, copying merged file as-is"
+			cp "$temp_merged" "$OUTPUT_FILE"
+		fi
+	else
+		cp "$temp_merged" "$OUTPUT_FILE"
+	fi
 
 	if [[ -f "$OUTPUT_FILE" ]]; then
 		log_success "Merged coverage written to: $OUTPUT_FILE"

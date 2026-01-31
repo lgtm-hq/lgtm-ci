@@ -147,7 +147,7 @@ jobs:
           persist-credentials: false
 
       - name: Download coverage
-        if: inputs.coverage
+        if: inputs.coverage && inputs.upload-coverage
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
@@ -155,7 +155,7 @@ jobs:
           path: coverage-report
 
       - name: Generate badge
-        if: inputs.coverage
+        if: inputs.coverage && inputs.upload-coverage
         uses: ./.github/actions/generate-coverage-badge
         with:
           coverage-percent: ${{ needs.test.outputs.coverage-percent }}

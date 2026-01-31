@@ -80,19 +80,19 @@ run)
 	if [[ "$COVERAGE" == "true" ]]; then
 		VITEST_ARGS+=("--coverage")
 		VITEST_ARGS+=("--coverage.reporter=text")
+		# Always add json-summary for parse_vitest_coverage
+		VITEST_ARGS+=("--coverage.reporter=json-summary")
 
+		# Add user-selected reporter in addition to json-summary
 		case "$COVERAGE_FORMAT" in
 		json)
-			VITEST_ARGS+=("--coverage.reporter=json-summary")
+			# json-summary already added above
 			;;
 		lcov)
 			VITEST_ARGS+=("--coverage.reporter=lcov")
 			;;
 		html)
 			VITEST_ARGS+=("--coverage.reporter=html")
-			;;
-		*)
-			VITEST_ARGS+=("--coverage.reporter=json-summary")
 			;;
 		esac
 	fi

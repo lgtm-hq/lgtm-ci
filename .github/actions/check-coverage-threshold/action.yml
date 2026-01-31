@@ -33,7 +33,9 @@ runs:
         COVERAGE: ${{ inputs.coverage-percent }}
         THRESHOLD: ${{ inputs.threshold }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/check-coverage-threshold.sh
+      run:
+        ${{ github.action_path
+        }}/../../../scripts/ci/actions/check-coverage-threshold.sh
 
 branding:
   icon: 'check-circle'
