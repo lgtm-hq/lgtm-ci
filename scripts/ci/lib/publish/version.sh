@@ -86,15 +86,16 @@ extract_gem_version() {
 	local version=""
 
 	# Try Ruby evaluation first (handles constant-based versions)
+	# Pass gemspec path via environment to avoid shell escaping issues
 	if command -v ruby >/dev/null 2>&1; then
-		version=$(ruby -e "
+		version=$(GEMSPEC_PATH="$gemspec" ruby -e '
 			begin
-				spec = Gem::Specification.load('$gemspec')
+				spec = Gem::Specification.load(ENV["GEMSPEC_PATH"])
 				puts spec.version if spec
 			rescue => e
 				# Silently fail - will use fallback
 			end
-		" 2>/dev/null)
+		' 2>/dev/null)
 	fi
 
 	# Fallback to grep/sed pattern for quoted literals

@@ -47,23 +47,28 @@ build)
 	name=$(grep -E '^\s*"name"\s*:' package.json | sed 's/.*:\s*"\([^"]*\)".*/\1/')
 	version=$(extract_npm_version ".") || die "Could not extract version"
 
-	# Install dependencies if needed
+	# Detect package manager once based on lockfile
+	pm="npm"
 	if [[ -f "bun.lockb" ]] || [[ -f "bun.lock" ]]; then
-		log_info "Installing dependencies with bun..."
-		bun install --frozen-lockfile
+		pm="bun"
 	elif [[ -f "pnpm-lock.yaml" ]]; then
-		log_info "Installing dependencies with pnpm..."
-		pnpm install --frozen-lockfile
-	elif [[ -f "package-lock.json" ]]; then
-		log_info "Installing dependencies with npm..."
-		npm ci
+		pm="pnpm"
 	elif [[ -f "yarn.lock" ]]; then
-		log_info "Installing dependencies with yarn..."
-		# Try Yarn v2+ syntax first, fallback to v1
-		yarn install --immutable 2>/dev/null || yarn install --frozen-lockfile
+		pm="yarn"
+	elif [[ -f "package-lock.json" ]]; then
+		pm="npm"
 	else
-		log_warn "No lockfile found, skipping dependency installation"
+		log_warn "No lockfile found, defaulting to npm"
 	fi
+
+	# Install dependencies
+	log_info "Installing dependencies with $pm..."
+	case "$pm" in
+	bun) bun install --frozen-lockfile ;;
+	pnpm) pnpm install --frozen-lockfile ;;
+	npm) npm ci ;;
+	yarn) yarn install --immutable 2>/dev/null || yarn install --frozen-lockfile ;;
+	esac
 
 	# Run build script if it exists in scripts object
 	has_build_script=false
@@ -74,21 +79,23 @@ build)
 		grep -q '"scripts"' package.json && grep -qE '^[[:space:]]*"build"[[:space:]]*:' package.json && has_build_script=true
 	fi
 	if [[ "$has_build_script" == "true" ]]; then
-		log_info "Running build script..."
-		if command -v bun >/dev/null 2>&1; then
-			bun run build
-		else
-			npm run build
-		fi
+		log_info "Running build script with $pm..."
+		case "$pm" in
+		bun) bun run build ;;
+		pnpm) pnpm run build ;;
+		yarn) yarn run build ;;
+		npm) npm run build ;;
+		esac
 	fi
 
 	# Pack the package (don't suppress stderr to preserve error messages)
-	log_info "Packing package..."
-	if command -v bun >/dev/null 2>&1; then
-		tarball=$(bun pm pack 2>&1 | tail -1) || tarball=$(npm pack 2>&1 | tail -1)
-	else
-		tarball=$(npm pack 2>&1 | tail -1)
-	fi
+	log_info "Packing package with $pm..."
+	case "$pm" in
+	bun) tarball=$(bun pm pack 2>&1 | tail -1) ;;
+	pnpm) tarball=$(pnpm pack 2>&1 | tail -1) ;;
+	yarn) tarball=$(yarn pack --filename - 2>&1 | tail -1) || tarball=$(npm pack 2>&1 | tail -1) ;;
+	npm) tarball=$(npm pack 2>&1 | tail -1) ;;
+	esac
 
 	if [[ -z "$tarball" ]] || [[ ! -f "$tarball" ]]; then
 		die "Failed to pack package"

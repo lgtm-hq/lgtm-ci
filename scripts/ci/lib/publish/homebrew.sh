@@ -61,9 +61,11 @@ generate_formula_from_pypi() {
 		fi
 		license=$(curl -s "$api_url/$package/$version/json" 2>/dev/null |
 			grep -o '"license":"[^"]*"' | head -1 | sed 's/"license":"\([^"]*\)"/\1/')
-		# Default to MIT if not found or empty
+		# Warn if license not found - don't default to MIT
 		if [[ -z "$license" ]] || [[ "$license" == "null" ]]; then
-			license="MIT"
+			log_warn "Could not determine license for $package@$version"
+			log_warn "Please provide license explicitly or verify the generated formula"
+			license="UNKNOWN"
 		fi
 	fi
 
@@ -235,25 +237,26 @@ commit_formula_update() {
 	local formula_name="${2:?Formula name required}"
 	local version="${3:?Version required}"
 
-	cd "$tap_dir" || return 1
+	# Use subshell to isolate directory change
+	(
+		cd "$tap_dir" || exit 1
 
-	# Configure git for CI
-	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-		git config user.name "github-actions[bot]"
-		git config user.email "github-actions[bot]@users.noreply.github.com"
-	fi
+		# Configure git for CI
+		if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+			git config user.name "github-actions[bot]"
+			git config user.email "github-actions[bot]@users.noreply.github.com"
+		fi
 
-	# Add and commit
-	git add "Formula/$formula_name.rb" 2>/dev/null || git add "$formula_name.rb"
+		# Add and commit
+		git add "Formula/$formula_name.rb" 2>/dev/null || git add "$formula_name.rb"
 
-	if ! git diff --cached --quiet; then
-		git commit -m "Update $formula_name to $version"
-		log_success "Committed formula update"
-		return 0
-	else
-		log_warn "No changes to commit"
-		return 0
-	fi
+		if ! git diff --cached --quiet; then
+			git commit -m "Update $formula_name to $version"
+			log_success "Committed formula update"
+		else
+			log_warn "No changes to commit"
+		fi
+	)
 }
 
 # =============================================================================

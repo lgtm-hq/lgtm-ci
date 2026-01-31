@@ -1167,8 +1167,8 @@ jobs:
 - `validate` - Run twine check before publishing (default: true)
 - `test-pypi` - Publish to TestPyPI instead of PyPI (default: false)
 - `update-homebrew` - Update Homebrew formula after publishing (default: false)
-- `homebrew-tap` - Homebrew tap repository (owner/repo)
-- `homebrew-formula` - Homebrew formula name
+- `homebrew-tap` - Homebrew tap repository (owner/repo) (default: '')
+- `homebrew-formula` - Homebrew formula name (default: '')
 - `dry-run` - Build only, do not publish (default: false)
 - `working-directory` - Working directory containing the package (default: '.')
 
