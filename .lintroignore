@@ -1,0 +1,4 @@
+# Directories to ignore during linting
+.lintro/
+.venv/
+node_modules/
