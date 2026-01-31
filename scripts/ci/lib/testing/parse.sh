@@ -27,3 +27,6 @@ source "$_LGTM_CI_TESTING_PARSE_DIR/parse/playwright.sh"
 
 # shellcheck source=./parse/junit.sh
 source "$_LGTM_CI_TESTING_PARSE_DIR/parse/junit.sh"
+
+# shellcheck source=./parse/lighthouse.sh
+source "$_LGTM_CI_TESTING_PARSE_DIR/parse/lighthouse.sh"
