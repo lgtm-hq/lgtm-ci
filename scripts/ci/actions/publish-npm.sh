@@ -66,7 +66,15 @@ build)
 	case "$pm" in
 	bun) bun install --frozen-lockfile ;;
 	pnpm) pnpm install --frozen-lockfile ;;
-	npm) npm ci ;;
+	npm)
+		# npm ci requires package-lock.json or npm-shrinkwrap.json
+		if [[ -f "package-lock.json" ]] || [[ -f "npm-shrinkwrap.json" ]]; then
+			npm ci
+		else
+			log_warn "No lockfile found, using npm install instead of npm ci"
+			npm install
+		fi
+		;;
 	yarn) yarn install --immutable 2>/dev/null || yarn install --frozen-lockfile ;;
 	esac
 
@@ -93,7 +101,14 @@ build)
 	case "$pm" in
 	bun) tarball=$(bun pm pack 2>&1 | tail -1) ;;
 	pnpm) tarball=$(pnpm pack 2>&1 | tail -1) ;;
-	yarn) tarball=$(yarn pack --filename - 2>&1 | tail -1) || tarball=$(npm pack 2>&1 | tail -1) ;;
+	yarn)
+		# yarn pack outputs the filename; avoid --filename - which creates literal "-" file
+		tarball=$(yarn pack 2>&1 | grep -oE '[^ ]+\.tgz' | tail -1)
+		if [[ -z "$tarball" ]] || [[ ! -f "$tarball" ]]; then
+			# Fallback to npm pack if yarn pack fails
+			tarball=$(npm pack 2>&1 | tail -1)
+		fi
+		;;
 	npm) tarball=$(npm pack 2>&1 | tail -1) ;;
 	esac
 
@@ -126,6 +141,14 @@ publish)
 	)
 
 	if [[ "$PROVENANCE" == "true" ]]; then
+		# npm provenance requires npm 9.5.0+
+		npm_version=$(npm --version)
+		npm_major="${npm_version%%.*}"
+		npm_rest="${npm_version#*.}"
+		npm_minor="${npm_rest%%.*}"
+		if [[ "$npm_major" -lt 9 ]] || { [[ "$npm_major" -eq 9 ]] && [[ "$npm_minor" -lt 5 ]]; }; then
+			die "npm 9.5.0+ required for provenance support (found: $npm_version)"
+		fi
 		publish_args+=("--provenance")
 	fi
 

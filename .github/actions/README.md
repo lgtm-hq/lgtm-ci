@@ -906,6 +906,11 @@ Update a Homebrew formula with a new version from PyPI.
 - `commit-sha` - Commit SHA of the update
 - `pr-url` - Pull request URL (if create-pr is true)
 
+**Requirements:**
+
+- Repository write access for pushing to tap (via `GITHUB_TOKEN` or PAT)
+- `contents: write` permission when used in workflows
+
 **Features:**
 
 - Waits for package availability on PyPI

@@ -16,7 +16,7 @@ if [[ -z "${_PUBLISH_REGISTRY_LOADED:-}" ]]; then
 fi
 
 # Generate a Homebrew formula from PyPI package
-# Usage: generate_formula_from_pypi "package-name" "1.2.3" "Formula description" [test-pypi] [homepage] [license]
+# Usage: generate_formula_from_pypi "package-name" "1.2.3" "Formula description" [test-pypi] [homepage] [license] [python-version] [test-cmd]
 # Outputs formula content to stdout
 generate_formula_from_pypi() {
 	local package="${1:?Package name required}"
@@ -25,6 +25,8 @@ generate_formula_from_pypi() {
 	local test_pypi="${4:-false}"
 	local homepage="${5:-}"
 	local license="${6:-}"
+	local python_version="${7:-3.12}"
+	local test_cmd="${8:-}"
 
 	# Get download URL and SHA256
 	local download_url sha256
@@ -54,6 +56,7 @@ generate_formula_from_pypi() {
 	fi
 
 	# Try to get license from PyPI if not provided
+	local license_line
 	if [[ -z "$license" ]]; then
 		local api_url="$PYPI_API_URL"
 		if [[ "$test_pypi" == "true" ]]; then
@@ -61,12 +64,20 @@ generate_formula_from_pypi() {
 		fi
 		license=$(curl -s "$api_url/$package/$version/json" 2>/dev/null |
 			grep -o '"license":"[^"]*"' | head -1 | sed 's/"license":"\([^"]*\)"/\1/')
-		# Warn if license not found - don't default to MIT
-		if [[ -z "$license" ]] || [[ "$license" == "null" ]]; then
-			log_warn "Could not determine license for $package@$version"
-			log_warn "Please provide license explicitly or verify the generated formula"
-			license="UNKNOWN"
-		fi
+	fi
+
+	# Build license line - use comment placeholder if not found
+	if [[ -n "$license" ]] && [[ "$license" != "null" ]]; then
+		license_line="license \"$license\""
+	else
+		log_warn "Could not determine license for $package@$version"
+		log_warn "Please provide license explicitly or verify the generated formula"
+		license_line="# license not detected; please verify and add an SPDX identifier"
+	fi
+
+	# Set default test command if not provided
+	if [[ -z "$test_cmd" ]]; then
+		test_cmd="bin/\"$package\", \"--version\""
 	fi
 
 	# Output formula
@@ -80,29 +91,29 @@ class $class_name < Formula
   homepage "$homepage"
   url "$download_url"
   sha256 "$sha256"
-  license "$license"
+  $license_line
 
-  depends_on "python@3.12"
+  depends_on "python@$python_version"
 
   def install
     virtualenv_install_with_resources
   end
 
   test do
-    system bin/"$package", "--version"
+    system $test_cmd
   end
 end
 EOF
 }
 
 # Update version and SHA256 in existing Homebrew formula
-# Usage: update_formula_version "formula_path" "new_version" "new_url" "new_sha256"
+# Usage: update_formula_version "formula_path" "new_url" "new_sha256" [new_version]
 # Returns 0 on success, 1 on failure
 update_formula_version() {
 	local formula_path="${1:?Formula path required}"
-	local new_version="${2:?New version required}"
-	local new_url="${3:?New URL required}"
-	local new_sha256="${4:?New SHA256 required}"
+	local new_url="${2:?New URL required}"
+	local new_sha256="${3:?New SHA256 required}"
+	local new_version="${4:-}" # Optional for logging
 
 	if [[ ! -f "$formula_path" ]]; then
 		log_error "Formula not found: $formula_path"
@@ -131,7 +142,11 @@ update_formula_version() {
 	# Clean up backup on success
 	rm -f "$formula_path.bak"
 
-	log_success "Updated formula to version $new_version"
+	if [[ -n "$new_version" ]]; then
+		log_success "Updated formula to version $new_version"
+	else
+		log_success "Updated formula"
+	fi
 	return 0
 }
 
@@ -184,6 +199,7 @@ calculate_resource_checksums() {
 			pkg_name="${BASH_REMATCH[1]}"
 			pkg_version="${BASH_REMATCH[2]}"
 		else
+			log_warn "Skipping unparseable requirement: $pkg_spec (only '==' pinned versions supported)"
 			continue
 		fi
 
@@ -209,7 +225,7 @@ EOF
 
 # Clone a Homebrew tap repository
 # Usage: clone_homebrew_tap "owner/repo" "target_dir"
-# Returns 0 on success
+# Returns 0 on success, 1 on failure
 clone_homebrew_tap() {
 	local tap_repo="${1:?Tap repository required (owner/repo)}"
 	local target_dir="${2:?Target directory required}"
@@ -218,12 +234,18 @@ clone_homebrew_tap() {
 
 	if [[ -d "$target_dir/.git" ]]; then
 		log_info "Updating existing tap clone..."
-		git -C "$target_dir" fetch origin
+		if ! git -C "$target_dir" fetch origin; then
+			log_error "Failed to fetch from $repo_url"
+			return 1
+		fi
 		git -C "$target_dir" reset --hard origin/main 2>/dev/null ||
 			git -C "$target_dir" reset --hard origin/master
 	else
 		log_info "Cloning tap repository..."
-		git clone --depth 1 "$repo_url" "$target_dir"
+		if ! git clone --depth 1 "$repo_url" "$target_dir"; then
+			log_error "Failed to clone $repo_url to $target_dir"
+			return 1
+		fi
 	fi
 
 	return 0
@@ -231,7 +253,7 @@ clone_homebrew_tap() {
 
 # Commit and push formula update
 # Usage: commit_formula_update "tap_dir" "formula_name" "version"
-# Returns 0 on success
+# Returns 0 on success, 1 on failure
 commit_formula_update() {
 	local tap_dir="${1:?Tap directory required}"
 	local formula_name="${2:?Formula name required}"
@@ -257,6 +279,12 @@ commit_formula_update() {
 			log_warn "No changes to commit"
 		fi
 	)
+	local status=$?
+	if [[ $status -ne 0 ]]; then
+		log_error "Failed to commit formula update in $tap_dir"
+		return $status
+	fi
+	return 0
 }
 
 # =============================================================================
