@@ -1,0 +1,91 @@
+---
+name: 'Publish to npm'
+description: 'Build and publish Node.js package to npm with provenance'
+author: 'lgtm-hq'
+
+inputs:
+  node-version:
+    description: 'Node.js version'
+    required: false
+    default: '22'
+  dist-tag:
+    description: 'npm dist-tag (latest, beta, next, etc.)'
+    required: false
+    default: 'latest'
+  provenance:
+    description: 'Enable npm provenance attestation (requires id-token: write)'
+    required: false
+    default: 'true'
+  access:
+    description: 'Package access level (public, restricted)'
+    required: false
+    default: 'public'
+  dry-run:
+    description: 'Build and pack only, do not publish'
+    required: false
+    default: 'false'
+  working-directory:
+    description: 'Working directory containing the package'
+    required: false
+    default: '.'
+
+outputs:
+  published:
+    description: 'Whether the package was published'
+    value: ${{ steps.publish.outputs.published || 'false' }}
+  version:
+    description: 'Package version'
+    value: ${{ steps.build.outputs.version }}
+  package-name:
+    description: 'Package name'
+    value: ${{ steps.build.outputs.name }}
+  tarball:
+    description: 'Path to the built tarball'
+    value: ${{ steps.build.outputs.tarball }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Validate package
+      id: validate
+      shell: bash
+      env:
+        STEP: validate
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-npm.sh
+
+    - name: Build and pack
+      id: build
+      shell: bash
+      env:
+        STEP: build
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-npm.sh
+
+    - name: Publish to npm
+      id: publish
+      if: inputs.dry-run != 'true'
+      shell: bash
+      env:
+        STEP: publish
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        DIST_TAG: ${{ inputs.dist-tag }}
+        PROVENANCE: ${{ inputs.provenance }}
+        ACCESS: ${{ inputs.access }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-npm.sh
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        PACKAGE_NAME: ${{ steps.build.outputs.name }}
+        PACKAGE_VERSION: ${{ steps.build.outputs.version }}
+        DIST_TAG: ${{ inputs.dist-tag }}
+        DRY_RUN: ${{ inputs.dry-run }}
+        PUBLISHED: ${{ steps.publish.outputs.published || 'false' }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-npm.sh
+
+branding:
+  icon: 'package'
+  color: 'red'

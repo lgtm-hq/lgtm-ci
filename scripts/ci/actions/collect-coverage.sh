@@ -54,7 +54,8 @@ detect)
 
 	log_info "Found ${#coverage_files[@]} coverage file(s):"
 	for file in "${coverage_files[@]}"; do
-		format=$(detect_coverage_format "$file")
+		# Guard against detect_coverage_format returning non-zero
+		format=$(detect_coverage_format "$file" 2>/dev/null) || format="unknown"
 		log_info "  - $file ($format)"
 	done
 
@@ -69,29 +70,64 @@ merge)
 	: "${COVERAGE_FILES:=}"
 	: "${INPUT_FORMAT:=auto}"
 	: "${OUTPUT_FORMAT:=json}"
+	: "${MERGE_STRATEGY:=union}"
 	: "${OUTPUT_FILE:=}"
 	: "${WORKING_DIRECTORY:=.}"
+
+	# Validate MERGE_STRATEGY (only 'union' is currently implemented)
+	case "$MERGE_STRATEGY" in
+	union) ;;
+	intersection)
+		log_error "MERGE_STRATEGY 'intersection' is not yet implemented"
+		log_error "Please use 'union' (the default) or contribute an implementation"
+		exit 1
+		;;
+	*)
+		log_error "Invalid MERGE_STRATEGY: $MERGE_STRATEGY (must be 'union')"
+		exit 1
+		;;
+	esac
 
 	cd "$WORKING_DIRECTORY"
 
 	# Parse coverage files (comma-separated or newline-separated)
-	files=()
+	# Supports glob patterns that will be expanded
+	patterns=()
 	if [[ "$COVERAGE_FILES" == *","* ]]; then
 		# Comma-separated
-		IFS=',' read -ra files <<<"$COVERAGE_FILES"
+		IFS=',' read -ra patterns <<<"$COVERAGE_FILES"
 	else
 		# Newline-separated
-		mapfile -t files <<<"$COVERAGE_FILES"
+		mapfile -t patterns <<<"$COVERAGE_FILES"
 	fi
 
-	# Filter to existing files
+	# Expand glob patterns and filter to existing files
 	existing_files=()
-	for file in "${files[@]}"; do
+	for pattern in "${patterns[@]}"; do
 		# Trim whitespace
-		file="${file#"${file%%[![:space:]]*}"}"
-		file="${file%"${file##*[![:space:]]}"}"
-		if [[ -n "$file" ]] && [[ -f "$file" ]]; then
-			existing_files+=("$file")
+		pattern="${pattern#"${pattern%%[![:space:]]*}"}"
+		pattern="${pattern%"${pattern##*[![:space:]]}"}"
+		[[ -z "$pattern" ]] && continue
+
+		# Expand glob pattern (nullglob-safe)
+		shopt -s nullglob
+		# shellcheck disable=SC2206
+		expanded=($pattern)
+		shopt -u nullglob
+
+		if [[ ${#expanded[@]} -eq 0 ]]; then
+			# No matches for pattern - check if it's a literal file
+			if [[ -f "$pattern" ]]; then
+				existing_files+=("$pattern")
+			else
+				log_warn "No files matched pattern: $pattern"
+			fi
+		else
+			for file in "${expanded[@]}"; do
+				if [[ -f "$file" ]]; then
+					existing_files+=("$file")
+				fi
+			done
 		fi
 	done
 
@@ -132,13 +168,18 @@ merge)
 	temp_merged=$(mktemp)
 	trap 'rm -f "$temp_merged"' EXIT
 
+	# Track the actual format of the merged temp file (may differ from INPUT_FORMAT)
+	MERGED_FORMAT="$INPUT_FORMAT"
+
 	# Merge based on input format
 	case "$INPUT_FORMAT" in
 	lcov)
 		merge_lcov_files "$temp_merged" "${existing_files[@]}"
+		MERGED_FORMAT="lcov"
 		;;
 	istanbul | json)
 		merge_istanbul_files "$temp_merged" "${existing_files[@]}"
+		MERGED_FORMAT="istanbul"
 		;;
 	coverage-py | cobertura)
 		# Check if files are .coverage binary data files (for coverage combine)
@@ -154,21 +195,33 @@ merge)
 
 		if [[ ${#existing_files[@]} -eq 1 ]]; then
 			cp "${existing_files[0]}" "$temp_merged"
+			# Detect actual format of the copied file
+			MERGED_FORMAT=$(detect_coverage_format "$temp_merged" 2>/dev/null) || MERGED_FORMAT="$INPUT_FORMAT"
 		elif [[ "$all_binary" == "true" ]] && command -v coverage &>/dev/null; then
 			# Only use coverage combine for actual .coverage binary files
 			# Use --keep to preserve original files for debugging/re-runs
 			coverage combine --keep "${existing_files[@]}"
 			case "$INPUT_FORMAT" in
-			coverage-py) coverage json -o "$temp_merged" ;;
-			cobertura) coverage xml -o "$temp_merged" ;;
-			*) coverage json -o "$temp_merged" ;;
+			coverage-py)
+				coverage json -o "$temp_merged"
+				MERGED_FORMAT="json"
+				;;
+			cobertura)
+				coverage xml -o "$temp_merged"
+				MERGED_FORMAT="cobertura"
+				;;
+			*)
+				coverage json -o "$temp_merged"
+				MERGED_FORMAT="json"
+				;;
 			esac
 		else
 			# Files are XML/JSON reports, not binary - can't use coverage combine
-			log_warn "Files are not .coverage binary data files, cannot use coverage combine"
-			log_warn "Rejected files: ${existing_files[*]}"
-			log_warn "Using first file as fallback"
-			cp "${existing_files[0]}" "$temp_merged"
+			log_error "Cannot merge ${#existing_files[@]} coverage-py/cobertura files"
+			log_error "Files are XML/JSON reports, not .coverage binary data"
+			log_error "To merge these files, convert to LCOV format first or use a single file"
+			log_error "Rejected files: ${existing_files[*]}"
+			exit 1
 		fi
 		;;
 	*)
@@ -177,13 +230,13 @@ merge)
 		;;
 	esac
 
-	# Convert to output format if different from input format
-	if [[ "$INPUT_FORMAT" != "$OUTPUT_FORMAT" ]]; then
-		log_info "Converting from $INPUT_FORMAT to $OUTPUT_FORMAT..."
-		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$INPUT_FORMAT" "$OUTPUT_FORMAT"; then
+	# Convert to output format if different from merged format
+	if [[ "$MERGED_FORMAT" != "$OUTPUT_FORMAT" ]]; then
+		log_info "Converting from $MERGED_FORMAT to $OUTPUT_FORMAT..."
+		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$MERGED_FORMAT" "$OUTPUT_FORMAT"; then
 			log_info "Conversion successful"
 		else
-			log_error "Conversion failed: cannot convert from $INPUT_FORMAT to $OUTPUT_FORMAT"
+			log_error "Conversion failed: cannot convert from $MERGED_FORMAT to $OUTPUT_FORMAT"
 			log_error "Merged file was: $temp_merged"
 			log_error "This would produce an incorrectly labeled output file"
 			exit 1

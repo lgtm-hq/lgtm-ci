@@ -68,13 +68,21 @@ generate)
 
 	cd "$WORKING_DIRECTORY"
 
-	# Determine output path based on format
+	# Validate FORMAT upfront (before OUTPUT_PATH logic)
+	case "$FORMAT" in
+	svg | json | shields) ;;
+	*)
+		log_error "Unsupported badge format: $FORMAT"
+		exit 1
+		;;
+	esac
+
+	# Determine output path based on format if not specified
 	if [[ -z "$OUTPUT_PATH" ]]; then
 		case "$FORMAT" in
 		svg) OUTPUT_PATH="coverage-badge.svg" ;;
 		json) OUTPUT_PATH="coverage-badge.json" ;;
 		shields) OUTPUT_PATH="coverage-badge.json" ;;
-		*) OUTPUT_PATH="coverage-badge.svg" ;;
 		esac
 	fi
 
@@ -92,10 +100,6 @@ generate)
 		;;
 	json | shields)
 		generate_badge_json "$COVERAGE_PERCENT" "$OUTPUT_PATH" "$LABEL" "$RED_THRESHOLD" "$YELLOW_THRESHOLD"
-		;;
-	*)
-		log_error "Unsupported badge format: $FORMAT"
-		exit 1
 		;;
 	esac
 

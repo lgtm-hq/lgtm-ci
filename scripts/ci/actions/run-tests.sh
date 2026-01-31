@@ -33,13 +33,13 @@ detect)
 
 	# Guard against set -e exiting on detection failure
 	runner=""
-	if ! runner=$(detect_test_runner "." 2>&1); then
+	if ! runner=$(detect_test_runner "."); then
 		runner="unknown"
 	fi
 	runner="${runner:-unknown}"
 
 	all_runners=""
-	if ! all_runners=$(detect_all_runners "." 2>&1); then
+	if ! all_runners=$(detect_all_runners "."); then
 		all_runners=""
 	fi
 
@@ -62,7 +62,7 @@ run)
 
 	# Auto-detect runner if needed
 	if [[ "$RUNNER" == "auto" ]]; then
-		if ! RUNNER=$(detect_test_runner "." 2>&1); then
+		if ! RUNNER=$(detect_test_runner "."); then
 			RUNNER="unknown"
 		fi
 		RUNNER="${RUNNER:-unknown}"
@@ -113,7 +113,7 @@ parse)
 
 	# Auto-detect runner if needed
 	if [[ "$RUNNER" == "auto" ]]; then
-		if ! RUNNER=$(detect_test_runner "." 2>&1); then
+		if ! RUNNER=$(detect_test_runner "."); then
 			RUNNER="unknown"
 		fi
 		RUNNER="${RUNNER:-unknown}"

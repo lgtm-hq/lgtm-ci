@@ -798,6 +798,180 @@ Create a GitHub release with changelog and optional assets.
 
 ---
 
+## Publishing Actions
+
+### publish-pypi
+
+Build and publish Python packages to PyPI using OIDC trusted publishing.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-pypi@main
+  with:
+    validate: 'true' # optional, run twine check
+    test-pypi: 'false' # optional, publish to TestPyPI
+    dry-run: 'false' # optional, build only
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `published` - Whether the package was published
+- `version` - Package version
+- `package-name` - Package name
+
+**Requirements:**
+
+- `id-token: write` permission for OIDC authentication
+- Configure trusted publisher in PyPI project settings
+
+---
+
+### publish-npm
+
+Build and publish Node.js packages to npm with provenance attestation.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-npm@main
+  with:
+    node-version: '22' # optional
+    dist-tag: 'latest' # optional, npm dist-tag
+    provenance: 'true' # optional, enable provenance attestation
+    access: 'public' # optional, package access level
+    dry-run: 'false' # optional, build only
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `published` - Whether the package was published
+- `version` - Package version
+- `package-name` - Package name
+- `tarball` - Path to the built tarball
+
+**Requirements:**
+
+- `id-token: write` permission for provenance
+- Must run on GitHub-hosted runners for provenance attestation
+- `NPM_TOKEN` secret for authentication
+
+---
+
+### publish-gem
+
+Build and publish Ruby gems to RubyGems using OIDC trusted publishing.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-gem@main
+  with:
+    gemspec: '' # optional, auto-detected
+    dry-run: 'false' # optional, build only
+    working-directory: '.' # optional
+```
+
+**Outputs:**
+
+- `published` - Whether the gem was published
+- `version` - Gem version
+- `gem-name` - Gem name
+- `gem-file` - Path to the built gem file
+
+**Requirements:**
+
+- `id-token: write` permission for OIDC authentication
+- Configure trusted publisher in RubyGems
+
+---
+
+### update-homebrew
+
+Update a Homebrew formula with a new version from PyPI.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/update-homebrew@main
+  with:
+    tap-repository: 'owner/homebrew-tap' # required
+    formula: 'mypackage' # required
+    package-name: 'my-pypi-package' # required
+    version: '1.2.3' # required
+    wait-for-availability: 'true' # optional
+    max-wait-minutes: '10' # optional
+    test-pypi: 'false' # optional
+    push: 'true' # optional
+    create-pr: 'false' # optional
+```
+
+**Outputs:**
+
+- `updated` - Whether the formula was updated
+- `commit-sha` - Commit SHA of the update
+- `pr-url` - Pull request URL (if create-pr is true)
+
+**Requirements:**
+
+- Repository write access for pushing to tap (via `GITHUB_TOKEN` or PAT)
+- `contents: write` permission when used in workflows
+
+**Features:**
+
+- Waits for package availability on PyPI
+- Downloads and calculates SHA256 automatically
+- Creates or updates existing formulas
+- Supports direct push or PR workflow
+
+---
+
+### validate-package
+
+Validate package metadata before publishing.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/validate-package@main
+  with:
+    type: 'pypi' # 'pypi', 'npm', or 'gem'
+    path: '.' # optional
+```
+
+**Outputs:**
+
+- `valid` - Whether the package is valid
+- `name` - Package name
+- `version` - Package version
+
+**Features:**
+
+- Validates PyPI packages with twine check
+- Validates npm package.json required fields
+- Validates gemspec syntax and required fields
+
+---
+
+### wait-for-package
+
+Wait for a package to be available on a registry.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/wait-for-package@main
+  with:
+    registry: 'pypi' # 'pypi', 'npm', or 'gem'
+    package: 'my-package' # package name
+    version: '1.2.3' # version to wait for
+    max-wait: '600' # optional, max wait in seconds
+    test-pypi: 'false' # optional
+```
+
+**Outputs:**
+
+- `available` - Whether the package became available
+- `elapsed` - Time elapsed waiting (seconds)
+
+**Features:**
+
+- Exponential backoff polling
+- Supports PyPI, npm, and RubyGems registries
+- Configurable timeout
+
+---
+
 ## Usage Example
 
 ```yaml
@@ -971,6 +1145,167 @@ jobs:
 - `contents: write` - For gh-pages deployment
 - `pages: write` - For GitHub Pages
 - `id-token: write` - For pages deployment
+
+---
+
+### reusable-publish-pypi.yml
+
+Publish Python packages to PyPI using OIDC trusted publishing.
+
+```yaml
+jobs:
+  publish:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@main
+    with:
+      python-version: '3.12'
+      validate: true
+      test-pypi: false
+      dry-run: false
+      update-homebrew: false
+      homebrew-tap: 'owner/homebrew-tap'
+      homebrew-formula: 'mypackage'
+```
+
+**Inputs:**
+
+- `python-version` - Python version for building (default: '3.12')
+- `validate` - Run twine check before publishing (default: true)
+- `test-pypi` - Publish to TestPyPI instead of PyPI (default: false)
+- `update-homebrew` - Update Homebrew formula after publishing (default: false)
+- `homebrew-tap` - Homebrew tap repository (owner/repo) (default: '')
+- `homebrew-formula` - Homebrew formula name (default: '')
+- `dry-run` - Build only, do not publish (default: false)
+- `working-directory` - Working directory containing the package (default: '.')
+
+**Outputs:**
+
+- `published` - Whether the package was published
+- `version` - Published package version
+- `package-name` - Published package name
+
+**Permissions Required:**
+
+- `contents: read` - For checkout
+- `id-token: write` - For OIDC authentication
+- `attestations: write` - For build provenance
+
+---
+
+### reusable-publish-npm.yml
+
+Publish Node.js packages to npm with provenance attestation.
+
+```yaml
+jobs:
+  publish:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm.yml@main
+    secrets:
+      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    with:
+      node-version: '22'
+      dist-tag: 'latest'
+      provenance: true
+      access: 'public'
+      dry-run: false
+```
+
+**Inputs:**
+
+- `node-version` - Node.js version (default: '22')
+- `dist-tag` - npm dist-tag (default: 'latest')
+- `provenance` - Enable npm provenance attestation (default: true)
+- `access` - Package access level (default: 'public')
+- `dry-run` - Build only, do not publish (default: false)
+- `working-directory` - Working directory containing the package (default: '.')
+
+**Outputs:**
+
+- `published` - Whether the package was published
+- `version` - Published package version
+- `package-name` - Published package name
+- `tarball` - Path to the built tarball
+
+**Permissions Required:**
+
+- `contents: read` - For checkout
+- `id-token: write` - For provenance attestation
+- `attestations: write` - For build provenance
+
+**Note:** Must run on GitHub-hosted runners for npm provenance to work.
+
+---
+
+### reusable-publish-gem.yml
+
+Publish Ruby gems to RubyGems using OIDC trusted publishing.
+
+```yaml
+jobs:
+  publish:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-gem.yml@main
+    with:
+      ruby-version: '3.3'
+      dry-run: false
+```
+
+**Inputs:**
+
+- `ruby-version` - Ruby version (default: '3.3')
+- `gemspec` - Path to gemspec file (auto-detected if not specified)
+- `dry-run` - Build only, do not publish (default: false)
+- `working-directory` - Working directory containing the gem (default: '.')
+
+**Outputs:**
+
+- `published` - Whether the gem was published
+- `version` - Published gem version
+- `gem-name` - Published gem name
+- `gem-file` - Path to the built gem file
+
+**Permissions Required:**
+
+- `contents: read` - For checkout
+- `id-token: write` - For OIDC authentication
+
+---
+
+### reusable-publish-homebrew.yml
+
+Update Homebrew formula with new version from PyPI.
+
+```yaml
+jobs:
+  homebrew:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-homebrew.yml@main
+    with:
+      tap-repository: 'owner/homebrew-tap'
+      formula: 'mypackage'
+      package-name: 'my-pypi-package'
+      version: '1.2.3'
+      wait-for-availability: true
+      create-pr: false
+```
+
+**Inputs:**
+
+- `tap-repository` - Homebrew tap repository (owner/repo) - required
+- `formula` - Formula name - required
+- `package-name` - PyPI package name - required
+- `version` - Version to update to - required
+- `wait-for-availability` - Wait for package on PyPI (default: true)
+- `max-wait-minutes` - Maximum wait time in minutes (default: 10)
+- `test-pypi` - Use TestPyPI instead of PyPI (default: false)
+- `create-pr` - Create PR instead of direct push (default: false)
+
+**Outputs:**
+
+- `updated` - Whether the formula was updated
+- `commit-sha` - Commit SHA of the update
+- `pr-url` - Pull request URL (if create-pr is true)
+
+**Permissions Required:**
+
+- `contents: write` - For pushing to tap repository
 
 ---
 

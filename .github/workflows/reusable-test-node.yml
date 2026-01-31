@@ -154,12 +154,21 @@ jobs:
         with:
           coverage-percent: ${{ needs.test.outputs.coverage-percent }}
           format: svg
-          output-path: coverage-report/badge.svg
+          output-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report/badge.svg' ||
+            format('coverage-report/{0}/badge.svg', inputs.working-directory) }}
 
       - name: Publish to GitHub Pages
+        if: inputs.coverage && inputs.upload-coverage
         uses: ./.github/actions/publish-test-results
         with:
-          results-path: coverage-report
-          coverage-path: coverage-report
-          badge-path: coverage-report
+          results-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report' ||
+            format('coverage-report/{0}', inputs.working-directory) }}
+          coverage-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report' ||
+            format('coverage-report/{0}', inputs.working-directory) }}
+          badge-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report' ||
+            format('coverage-report/{0}', inputs.working-directory) }}
           target-dir: vitest

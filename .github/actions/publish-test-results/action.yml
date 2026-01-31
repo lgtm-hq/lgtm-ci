@@ -56,6 +56,7 @@ runs:
         BADGE_PATH: ${{ inputs.badge-path }}
         TARGET_DIR: ${{ inputs.target-dir }}
         KEEP_HISTORY: ${{ inputs.keep-history }}
+        RETENTION_DAYS: ${{ inputs.retention-days }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-test-results.sh
 
     - name: Deploy to GitHub Pages

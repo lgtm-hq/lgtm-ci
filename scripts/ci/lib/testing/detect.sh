@@ -30,7 +30,7 @@ detect_test_runner() {
 		return 0
 	fi
 	# Check for tests directory with Python files (independent of pyproject.toml/setup.py)
-	if [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
+	if [[ -d "$dir/tests" ]] && find "$dir/tests" \( -name "test_*.py" -o -name "*_test.py" \) 2>/dev/null | head -1 | grep -q .; then
 		echo "pytest"
 		return 0
 	fi
@@ -76,7 +76,7 @@ detect_all_runners() {
 		runners="pytest"
 	elif [[ -f "$dir/pyproject.toml" ]] && grep -q '\[tool\.pytest' "$dir/pyproject.toml" 2>/dev/null; then
 		runners="pytest"
-	elif [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
+	elif [[ -d "$dir/tests" ]] && find "$dir/tests" \( -name "test_*.py" -o -name "*_test.py" \) 2>/dev/null | head -1 | grep -q .; then
 		runners="pytest"
 	fi
 
@@ -103,7 +103,7 @@ detect_all_runners() {
 
 # Detect coverage format from file extension or content
 # Usage: detect_coverage_format "coverage.xml"
-# Output: xml|json|lcov|html|cobertura|istanbul|unknown
+# Output: cobertura|clover|xml|coverage-py|istanbul|json|lcov|html|unknown
 detect_coverage_format() {
 	local file="${1:-}"
 
@@ -112,13 +112,22 @@ detect_coverage_format() {
 		return 1
 	fi
 
+	# Check for Python .coverage* binary files first (before extension-based detection)
+	local basename
+	basename=$(basename "$file")
+	if [[ "$basename" == .coverage* ]]; then
+		echo "coverage-py"
+		return 0
+	fi
+
 	# Check by extension first
 	case "${file##*.}" in
 	xml)
 		# Determine if cobertura or clover format
-		if head -20 "$file" | grep -q '<coverage.*line-rate\|<coverage.*lines-valid\|<package.*name='; then
+		# Use grep -E with POSIX alternation for portability (BSD/macOS)
+		if head -20 "$file" | grep -qE '<coverage.*line-rate|<coverage.*lines-valid|<package.*name='; then
 			echo "cobertura"
-		elif head -20 "$file" | grep -q '<coverage.*clover'; then
+		elif head -20 "$file" | grep -qE '<coverage.*clover'; then
 			echo "clover"
 		else
 			echo "xml"
@@ -127,9 +136,10 @@ detect_coverage_format() {
 		;;
 	json)
 		# Determine if istanbul or coverage.py format
-		if head -5 "$file" | grep -q '"meta"\s*:\s*{.*"version"'; then
+		# Use grep -E with POSIX character classes for portability (BSD/macOS)
+		if head -5 "$file" | grep -qE '"meta"[[:space:]]*:[[:space:]]*\{.*"version"'; then
 			echo "coverage-py"
-		elif head -20 "$file" | grep -q '"path"\s*:\s*"\|"statementMap"\s*:'; then
+		elif head -20 "$file" | grep -qE '"path"[[:space:]]*:[[:space:]]*"|"statementMap"[[:space:]]*:'; then
 			echo "istanbul"
 		else
 			echo "json"
@@ -156,8 +166,10 @@ detect_coverage_format() {
 	fi
 
 	if [[ "$first_line" == "<?xml"* ]] || [[ "$first_line" == "<coverage"* ]]; then
-		if grep -q 'line-rate\|lines-valid' "$file" 2>/dev/null; then
+		if grep -qE 'line-rate|lines-valid' "$file" 2>/dev/null; then
 			echo "cobertura"
+		elif grep -qE '<coverage.*clover' "$file" 2>/dev/null; then
+			echo "clover"
 		else
 			echo "xml"
 		fi
@@ -175,7 +187,7 @@ detect_coverage_format() {
 
 # Detect if a coverage file is from Python (coverage.py) or JavaScript (istanbul/v8)
 # Usage: detect_coverage_source "coverage.json"
-# Output: python|javascript|unknown
+# Output: python|javascript|php|java|unknown
 detect_coverage_source() {
 	local file="${1:-}"
 
@@ -188,10 +200,25 @@ detect_coverage_source() {
 	format=$(detect_coverage_format "$file")
 
 	case "$format" in
-	coverage-py | cobertura)
-		# Check for Python-specific patterns
-		if grep -q '\.py"\|\.py$' "$file" 2>/dev/null; then
+	coverage-py)
+		# Binary .coverage files are always Python - no grep needed
+		echo "python"
+		return 0
+		;;
+	cobertura)
+		# Check for Python-specific patterns (use ERE for portability)
+		if grep -qE '\.py("|$)' "$file" 2>/dev/null; then
 			echo "python"
+			return 0
+		fi
+		;;
+	clover)
+		# Clover can be from PHP (PHPUnit) or Java - check file extensions
+		if grep -qE '\.php("|$)' "$file" 2>/dev/null; then
+			echo "php"
+			return 0
+		elif grep -qE '\.java("|$)' "$file" 2>/dev/null; then
+			echo "java"
 			return 0
 		fi
 		;;

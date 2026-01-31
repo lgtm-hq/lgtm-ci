@@ -86,7 +86,9 @@ run)
 		export PLAYWRIGHT_JSON_OUTPUT_NAME="playwright-results.json"
 		;;
 	html)
-		PLAYWRIGHT_ARGS+=("--reporter=html")
+		# HTML reporter with JSON sidecar for machine-readable metrics
+		PLAYWRIGHT_ARGS+=("--reporter=html" "--reporter=json")
+		export PLAYWRIGHT_JSON_OUTPUT_NAME="playwright-results.json"
 		;;
 	junit)
 		PLAYWRIGHT_ARGS+=("--reporter=junit")
@@ -127,6 +129,10 @@ run)
 		if [[ -d "playwright-report" ]]; then
 			set_github_output "report-path" "playwright-report"
 		fi
+		# Also output JSON sidecar path for parsing
+		if [[ -f "playwright-results.json" ]]; then
+			set_github_output "json-report-path" "playwright-results.json"
+		fi
 		;;
 	junit)
 		if [[ -f "playwright-results.xml" ]]; then
@@ -144,9 +150,16 @@ parse)
 
 	# Parse test results based on reporter type
 	case "$REPORTER" in
-	json)
-		if [[ -f "$REPORT_PATH" ]]; then
-			parse_playwright_json "$REPORT_PATH"
+	json | html)
+		# For HTML reporter, use the JSON sidecar for metrics
+		# Honor REPORT_PATH if it exists, otherwise fallback to default
+		json_file="$REPORT_PATH"
+		if [[ "$REPORTER" == "html" ]] && [[ ! -f "$json_file" ]]; then
+			json_file="playwright-results.json"
+		fi
+
+		if [[ -f "$json_file" ]]; then
+			parse_playwright_json "$json_file"
 
 			set_github_output "tests-passed" "$TESTS_PASSED"
 			set_github_output "tests-failed" "$TESTS_FAILED"
@@ -155,7 +168,7 @@ parse)
 
 			log_info "Test results: $(format_test_summary)"
 		else
-			log_warn "Results file not found: $REPORT_PATH"
+			log_warn "Results file not found: $json_file"
 			set_github_output "tests-passed" "0"
 			set_github_output "tests-failed" "0"
 			set_github_output "tests-skipped" "0"
@@ -174,10 +187,18 @@ parse)
 			log_info "Test results: $(format_test_summary)"
 		else
 			log_warn "Results file not found: $REPORT_PATH"
+			set_github_output "tests-passed" "0"
+			set_github_output "tests-failed" "0"
+			set_github_output "tests-skipped" "0"
+			set_github_output "tests-total" "0"
 		fi
 		;;
 	*)
 		log_warn "Cannot parse results for reporter: $REPORTER"
+		set_github_output "tests-passed" "0"
+		set_github_output "tests-failed" "0"
+		set_github_output "tests-skipped" "0"
+		set_github_output "tests-total" "0"
 		;;
 	esac
 	;;

@@ -32,8 +32,9 @@ setup)
 
 	log_info "Checking pytest installation..."
 
-	if ! uv run python -c "import pytest" 2>/dev/null; then
-		log_info "Installing pytest..."
+	# Check for both pytest and pytest-json-report
+	if ! uv run python -c "import pytest; import pytest_jsonreport" 2>/dev/null; then
+		log_info "Installing pytest and pytest-json-report..."
 		uv pip install pytest pytest-json-report
 	fi
 
@@ -53,6 +54,7 @@ run)
 	: "${TEST_PATH:=tests}"
 	: "${COVERAGE:=false}"
 	: "${COVERAGE_FORMAT:=json}"
+	: "${COVERAGE_SOURCE:=}"
 	: "${MARKERS:=}"
 	: "${EXTRA_ARGS:=}"
 	: "${WORKING_DIRECTORY:=.}"
@@ -68,7 +70,11 @@ run)
 
 	# Add coverage options
 	if [[ "$COVERAGE" == "true" ]]; then
-		PYTEST_ARGS+=("--cov" "--cov-report=term")
+		if [[ -n "$COVERAGE_SOURCE" ]]; then
+			PYTEST_ARGS+=("--cov=$COVERAGE_SOURCE" "--cov-report=term")
+		else
+			PYTEST_ARGS+=("--cov" "--cov-report=term")
+		fi
 
 		case "$COVERAGE_FORMAT" in
 		xml)
@@ -81,6 +87,7 @@ run)
 			PYTEST_ARGS+=("--cov-report=lcov:coverage.lcov")
 			;;
 		*)
+			log_warn "Unknown COVERAGE_FORMAT '$COVERAGE_FORMAT', defaulting to json"
 			PYTEST_ARGS+=("--cov-report=json:coverage.json")
 			;;
 		esac
@@ -116,6 +123,7 @@ run)
 		xml) coverage_file="coverage.xml" ;;
 		json) coverage_file="coverage.json" ;;
 		lcov) coverage_file="coverage.lcov" ;;
+		*) coverage_file="coverage.json" ;; # Match the default from earlier
 		esac
 		if [[ -f "$coverage_file" ]]; then
 			set_github_output "coverage-file" "$coverage_file"
@@ -127,7 +135,7 @@ run)
 
 parse)
 	: "${RESULTS_FILE:=pytest-results.json}"
-	: "${COVERAGE_FILE:=coverage.json}"
+	: "${COVERAGE_FILE:=}"
 
 	# Parse test results
 	if [[ -f "$RESULTS_FILE" ]]; then
@@ -147,8 +155,8 @@ parse)
 		set_github_output "tests-total" "0"
 	fi
 
-	# Parse coverage if available
-	if [[ -f "$COVERAGE_FILE" ]]; then
+	# Parse coverage if explicitly provided and file exists
+	if [[ -n "$COVERAGE_FILE" ]] && [[ -f "$COVERAGE_FILE" ]]; then
 		coverage_percent=$(extract_coverage_percent "$COVERAGE_FILE")
 		set_github_output "coverage-percent" "$coverage_percent"
 		log_info "Coverage: ${coverage_percent}%"

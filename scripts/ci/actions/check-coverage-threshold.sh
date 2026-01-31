@@ -30,11 +30,11 @@ if ! [[ "$THRESHOLD" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
 	exit 1
 fi
 
-# Skip check if threshold is 0 or empty
-if [[ -z "$THRESHOLD" ]] || awk -v t="$THRESHOLD" 'BEGIN { exit (t > 0 ? 1 : 0) }'; then
+# Skip check if threshold is 0 (already validated as numeric above)
+if awk -v t="$THRESHOLD" 'BEGIN { exit (t > 0 ? 1 : 0) }'; then
 	set_github_output "passed" "true"
-	set_github_output "message" "Coverage check skipped (no threshold set)"
-	log_info "Coverage check skipped (no threshold set)"
+	set_github_output "message" "Coverage check skipped (threshold is 0)"
+	log_info "Coverage check skipped (threshold is 0)"
 	exit 0
 fi
 

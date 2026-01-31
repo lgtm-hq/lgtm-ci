@@ -1,0 +1,86 @@
+---
+name: Reusable Homebrew Formula Update Workflow
+
+on:
+  workflow_call:
+    inputs:
+      tap-repository:
+        description: 'Homebrew tap repository (owner/repo)'
+        required: true
+        type: string
+      formula:
+        description: 'Formula name'
+        required: true
+        type: string
+      package-name:
+        description: 'PyPI package name'
+        required: true
+        type: string
+      version:
+        description: 'Version to update to'
+        required: true
+        type: string
+      wait-for-availability:
+        description: 'Wait for package to be available on PyPI'
+        required: false
+        type: boolean
+        default: true
+      max-wait-minutes:
+        description: 'Maximum wait time in minutes'
+        required: false
+        type: number
+        default: 10
+      test-pypi:
+        description: 'Use TestPyPI instead of PyPI'
+        required: false
+        type: boolean
+        default: false
+      create-pr:
+        description: 'Create PR instead of direct push'
+        required: false
+        type: boolean
+        default: false
+    outputs:
+      updated:
+        description: 'Whether the formula was updated'
+        value: ${{ jobs.update.outputs.updated }}
+      commit-sha:
+        description: 'Commit SHA of the update'
+        value: ${{ jobs.update.outputs.commit-sha }}
+      pr-url:
+        description: 'Pull request URL (if create-pr is true)'
+        value: ${{ jobs.update.outputs.pr-url }}
+
+jobs:
+  update:
+    name: Update Homebrew Formula
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    outputs:
+      updated: ${{ steps.homebrew.outputs.updated || 'false' }}
+      commit-sha: ${{ steps.homebrew.outputs.commit-sha }}
+      pr-url: ${{ steps.homebrew.outputs.pr-url }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Update Homebrew formula
+        id: homebrew
+        uses: ./.github/actions/update-homebrew
+        with:
+          tap-repository: ${{ inputs.tap-repository }}
+          formula: ${{ inputs.formula }}
+          package-name: ${{ inputs.package-name }}
+          version: ${{ inputs.version }}
+          wait-for-availability: ${{ inputs.wait-for-availability }}
+          max-wait-minutes: ${{ inputs.max-wait-minutes }}
+          test-pypi: ${{ inputs.test-pypi }}
+          create-pr: ${{ inputs.create-pr }}

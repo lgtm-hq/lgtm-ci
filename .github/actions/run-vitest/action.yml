@@ -105,9 +105,11 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/run-vitest.sh
 
     - name: Check test result
-      if: steps.run.outputs.exit-code != '0'
+      if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
       shell: bash
-      run: exit ${{ steps.run.outputs.exit-code }}
+      run: exit "${EXIT_CODE:-1}"
+      env:
+        EXIT_CODE: ${{ steps.run.outputs.exit-code }}
 
 branding:
   icon: 'check-circle'

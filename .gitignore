@@ -40,6 +40,11 @@ htmlcov/
 .tox/
 .pytest_cache/
 .mypy_cache/
+report.xml
+pytest-results.json
+coverage.json
+coverage.xml
+coverage.lcov
 
 # Lintro
 .lintro/

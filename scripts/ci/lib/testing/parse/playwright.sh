@@ -26,10 +26,11 @@ parse_playwright_json() {
 	fi
 
 	# Playwright JSON reporter format
-	# Status can be: passed, failed, timedOut, skipped, interrupted
+	# Status can be: passed, failed, timedOut, skipped, interrupted, flaky
 	# Use recursive descent to handle nested suites
+	# Note: flaky tests are counted as failures since they represent unreliable tests
 	TESTS_PASSED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "expected" or .status == "passed")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_FAILED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "unexpected" or .status == "failed" or .status == "timedOut")] | length' "$file" 2>/dev/null || echo "0")
+	TESTS_FAILED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "unexpected" or .status == "failed" or .status == "timedOut" or .status == "flaky")] | length' "$file" 2>/dev/null || echo "0")
 	TESTS_SKIPPED=$(jq -r '[.. | .tests? // empty | .[] | select(.status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
 
 	# Try simpler format
@@ -37,7 +38,7 @@ parse_playwright_json() {
 		# Try stats object if present
 		if jq -e '.stats' "$file" &>/dev/null; then
 			TESTS_PASSED=$(jq -r '.stats.expected // 0' "$file" 2>/dev/null || echo "0")
-			TESTS_FAILED=$(jq -r '.stats.unexpected // 0' "$file" 2>/dev/null || echo "0")
+			TESTS_FAILED=$(jq -r '(.stats.unexpected // 0) + (.stats.flaky // 0)' "$file" 2>/dev/null || echo "0")
 			TESTS_SKIPPED=$(jq -r '.stats.skipped // 0' "$file" 2>/dev/null || echo "0")
 		fi
 	fi
