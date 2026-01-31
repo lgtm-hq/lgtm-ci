@@ -28,7 +28,8 @@ prepare)
 	# Note: BUILD_COMMAND must come from a trusted source (workflow input)
 	# Using bash -c is safer than eval as it runs in a subshell
 	if [[ -n "$BUILD_COMMAND" ]]; then
-		log_info "Running build command: $BUILD_COMMAND"
+		# Don't log full command as it may contain secrets (tokens, passwords)
+		log_info "Running build command..."
 		bash -c "$BUILD_COMMAND"
 	fi
 

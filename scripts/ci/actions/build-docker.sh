@@ -172,12 +172,15 @@ build)
 
 	# Log command without sensitive args (build-args and labels may contain secrets)
 	safe_cmd=()
+	skip_next=0
 	for arg in "${BUILD_CMD[@]}"; do
-		if [[ "$arg" == "--build-arg" ]] || [[ "$arg" == "--label" ]]; then
-			safe_cmd+=("$arg" "[REDACTED]")
-		elif [[ "${safe_cmd[*]}" =~ \[REDACTED\]$ ]]; then
-			# Skip the value following --build-arg or --label (already added placeholder)
+		if [[ "$skip_next" -eq 1 ]]; then
+			# Skip the secret value following --build-arg or --label
+			skip_next=0
 			continue
+		elif [[ "$arg" == "--build-arg" ]] || [[ "$arg" == "--label" ]]; then
+			safe_cmd+=("$arg" "[REDACTED]")
+			skip_next=1
 		else
 			safe_cmd+=("$arg")
 		fi

@@ -69,12 +69,12 @@ merge)
 		merge_args=("merge-reports")
 		merge_args+=("--reporter=$REPORT_FORMAT")
 
-		# Add all blob directories
-		for blob_dir in "$INPUT_DIR"/*/; do
-			if [[ -d "$blob_dir" ]]; then
+		# Add only the detected blob directories (not all subdirectories)
+		while IFS= read -r blob_dir; do
+			if [[ -n "$blob_dir" ]] && [[ -d "$blob_dir" ]]; then
 				merge_args+=("$blob_dir")
 			fi
-		done
+		done <<<"$blob_dirs"
 
 		bunx playwright "${merge_args[@]}"
 
@@ -83,8 +83,11 @@ merge)
 			mv playwright-report/* "$OUTPUT_DIR/" 2>/dev/null || true
 		fi
 	else
-		# Fallback: merge JSON reports manually
-		log_info "Merging JSON reports..."
+		# Fallback: stats-only merge for JSON reports (no blob reports found)
+		# Note: This fallback only aggregates stats across files. It does NOT merge
+		# suites/tests - the first file's structure is preserved with updated totals.
+		# For full test merging, use the blob reporter which supports proper merging.
+		log_info "Merging JSON reports (stats-only fallback)..."
 
 		json_files=$(find "$INPUT_DIR" -name "*.json" -type f 2>/dev/null || true)
 
@@ -94,11 +97,10 @@ merge)
 			exit 0
 		fi
 
-		# Combine JSON reports using jq
-		# Create array of all test results
+		# Stats-only merge: copy first file structure, then aggregate stats
 		combined_file="$OUTPUT_DIR/merged-results.json"
 
-		# Initialize with first file structure, then merge tests
+		# Use first file as base (suites/tests not merged, only stats updated)
 		read -r first_file <<<"$json_files"
 		cp "$first_file" "$combined_file"
 

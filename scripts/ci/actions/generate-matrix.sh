@@ -29,14 +29,20 @@ e2e-matrix)
 	: "${BROWSERS:=chromium}"
 	: "${SHARDS:=1}"
 
+	# Validate SHARDS is a positive integer
+	if ! [[ "$SHARDS" =~ ^[1-9][0-9]*$ ]]; then
+		log_error "SHARDS must be a positive integer, got: $SHARDS"
+		exit 1
+	fi
+
 	log_info "Generating E2E test matrix..."
 	log_info "Suites: $SUITES"
 	log_info "Browsers: $BROWSERS"
 	log_info "Shards: $SHARDS"
 
-	# Convert comma-separated inputs to JSON arrays
-	suites_json=$(echo "$SUITES" | tr ',' '\n' | jq -R . | jq -s .)
-	browsers_json=$(echo "$BROWSERS" | tr ',' '\n' | jq -R . | jq -s .)
+	# Convert comma-separated inputs to JSON arrays (trim whitespace from each entry)
+	suites_json=$(echo "$SUITES" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
+	browsers_json=$(echo "$BROWSERS" | tr ',' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | jq -R . | jq -s .)
 
 	# Generate shard array if sharding enabled
 	if [[ "$SHARDS" -gt 1 ]]; then
@@ -61,6 +67,16 @@ e2e-matrix)
 shard-config)
 	: "${SHARD:=1}"
 	: "${TOTAL_SHARDS:=1}"
+
+	# Validate inputs are positive integers
+	if ! [[ "$SHARD" =~ ^[1-9][0-9]*$ ]] || ! [[ "$TOTAL_SHARDS" =~ ^[1-9][0-9]*$ ]]; then
+		log_error "SHARD and TOTAL_SHARDS must be positive integers"
+		exit 1
+	fi
+	if [[ "$SHARD" -gt "$TOTAL_SHARDS" ]]; then
+		log_error "SHARD ($SHARD) cannot exceed TOTAL_SHARDS ($TOTAL_SHARDS)"
+		exit 1
+	fi
 
 	if [[ "$TOTAL_SHARDS" -gt 1 ]]; then
 		config="${SHARD}/${TOTAL_SHARDS}"
