@@ -211,15 +211,22 @@ calculate_resource_checksums() {
 		url=$(get_pypi_download_url "$pkg_name" "$pkg_version")
 		sha256=$(get_pypi_sha256 "$pkg_name" "$pkg_version")
 
-		if [[ -n "$url" ]] && [[ -n "$sha256" ]]; then
-			cat <<EOF
+		if [[ -z "$url" ]]; then
+			log_warn "Could not get download URL for $pkg_name - dependency will be omitted from formula"
+			continue
+		fi
+		if [[ -z "$sha256" ]]; then
+			log_warn "Could not get SHA256 for $pkg_name - dependency will be omitted from formula"
+			continue
+		fi
+
+		cat <<EOF
 
   resource "$pkg_name" do
     url "$url"
     sha256 "$sha256"
   end
 EOF
-		fi
 	done <"$requirements_file"
 }
 
@@ -238,8 +245,13 @@ clone_homebrew_tap() {
 			log_error "Failed to fetch from $repo_url"
 			return 1
 		fi
-		git -C "$target_dir" reset --hard origin/main 2>/dev/null ||
-			git -C "$target_dir" reset --hard origin/master
+		# Try main first, then master; fail if both don't exist
+		if ! git -C "$target_dir" reset --hard origin/main 2>/dev/null; then
+			if ! git -C "$target_dir" reset --hard origin/master 2>/dev/null; then
+				log_error "Failed to reset $target_dir to origin/main or origin/master"
+				return 1
+			fi
+		fi
 	else
 		log_info "Cloning tap repository..."
 		if ! git clone --depth 1 "$repo_url" "$target_dir"; then

@@ -102,8 +102,9 @@ build)
 	bun) tarball=$(bun pm pack 2>&1 | tail -1) ;;
 	pnpm) tarball=$(pnpm pack 2>&1 | tail -1) ;;
 	yarn)
-		# yarn pack outputs the filename; avoid --filename - which creates literal "-" file
-		tarball=$(yarn pack 2>&1 | grep -oE '[^ ]+\.tgz' | tail -1)
+		# yarn pack outputs the filename; capture output first to avoid pipefail exit
+		yarn_out=$(yarn pack 2>&1) || true
+		tarball=$(printf '%s\n' "$yarn_out" | grep -oE '[^ ]+\.tgz' | tail -1) || true
 		if [[ -z "$tarball" ]] || [[ ! -f "$tarball" ]]; then
 			# Fallback to npm pack if yarn pack fails
 			tarball=$(npm pack 2>&1 | tail -1)
