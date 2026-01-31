@@ -31,8 +31,17 @@ detect)
 
 	cd "$WORKING_DIRECTORY"
 
-	runner=$(detect_test_runner ".")
-	all_runners=$(detect_all_runners ".")
+	# Guard against set -e exiting on detection failure
+	runner=""
+	if ! runner=$(detect_test_runner "." 2>&1); then
+		runner="unknown"
+	fi
+	runner="${runner:-unknown}"
+
+	all_runners=""
+	if ! all_runners=$(detect_all_runners "." 2>&1); then
+		all_runners=""
+	fi
 
 	log_info "Detected test runner: $runner"
 	if [[ -n "$all_runners" ]]; then
@@ -53,7 +62,10 @@ run)
 
 	# Auto-detect runner if needed
 	if [[ "$RUNNER" == "auto" ]]; then
-		RUNNER=$(detect_test_runner ".")
+		if ! RUNNER=$(detect_test_runner "." 2>&1); then
+			RUNNER="unknown"
+		fi
+		RUNNER="${RUNNER:-unknown}"
 		if [[ "$RUNNER" == "unknown" ]]; then
 			log_error "Could not auto-detect test runner"
 			exit 1
@@ -101,7 +113,10 @@ parse)
 
 	# Auto-detect runner if needed
 	if [[ "$RUNNER" == "auto" ]]; then
-		RUNNER=$(detect_test_runner ".")
+		if ! RUNNER=$(detect_test_runner "." 2>&1); then
+			RUNNER="unknown"
+		fi
+		RUNNER="${RUNNER:-unknown}"
 	fi
 
 	# Delegate to the appropriate runner's parse step

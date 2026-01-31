@@ -44,11 +44,11 @@ parse_playwright_json() {
 
 	TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED))
 
-	# Duration from stats
+	# Duration from stats (Playwright always reports in milliseconds)
 	TESTS_DURATION=$(jq -r '.stats.duration // 0' "$file" 2>/dev/null || echo "0")
-	# Convert milliseconds to seconds
-	if [[ "$TESTS_DURATION" -gt 1000 ]]; then
-		TESTS_DURATION=$((TESTS_DURATION / 1000))
+	# Convert milliseconds to seconds with rounding
+	if [[ "$TESTS_DURATION" -gt 0 ]]; then
+		TESTS_DURATION=$(((TESTS_DURATION + 500) / 1000))
 	fi
 
 	return 0

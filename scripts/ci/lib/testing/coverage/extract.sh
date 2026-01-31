@@ -40,9 +40,14 @@ extract_coverage_percent() {
 		# Istanbul/NYC JSON format (coverage-summary.json)
 		if jq -e '.total.lines.pct' "$file" &>/dev/null; then
 			jq -r '.total.lines.pct // 0' "$file" 2>/dev/null || echo "0"
-		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines.pct] | length > 0' "$file" &>/dev/null; then
-			# Full istanbul format with per-file .lines.pct - calculate from all files
-			jq -r '[to_entries[] | select(.key != "total") | .value.lines.pct // 0] | add / length // 0' "$file" 2>/dev/null || echo "0"
+		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines] | length > 0' "$file" &>/dev/null; then
+			# Full istanbul format with per-file coverage - calculate weighted average
+			jq -r '
+				[to_entries[] | select(.key != "total") | .value.lines] as $lines
+				| ([$lines[].covered] | add) as $covered
+				| ([$lines[].total] | add) as $total
+				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
+			' "$file" 2>/dev/null || echo "0"
 		else
 			# coverage-final.json format without .lines.pct - cannot extract coverage
 			echo "Error: Istanbul coverage file does not contain .total.lines.pct or per-file .lines.pct" >&2
@@ -122,12 +127,32 @@ extract_coverage_details() {
 			COVERAGE_BRANCHES=$(jq -r '.total.branches.pct // 0' "$file" 2>/dev/null || echo "0")
 			COVERAGE_FUNCTIONS=$(jq -r '.total.functions.pct // 0' "$file" 2>/dev/null || echo "0")
 			COVERAGE_STATEMENTS=$(jq -r '.total.statements.pct // 0' "$file" 2>/dev/null || echo "0")
-		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines.pct] | length > 0' "$file" &>/dev/null; then
-			# Full istanbul format with per-file .lines.pct
-			COVERAGE_LINES=$(jq -r '[to_entries[] | select(.key != "total") | .value.lines.pct // 0] | add / length // 0' "$file" 2>/dev/null || echo "0")
-			COVERAGE_BRANCHES=$(jq -r '[to_entries[] | select(.key != "total") | .value.branches.pct // 0] | add / length // 0' "$file" 2>/dev/null || echo "0")
-			COVERAGE_FUNCTIONS=$(jq -r '[to_entries[] | select(.key != "total") | .value.functions.pct // 0] | add / length // 0' "$file" 2>/dev/null || echo "0")
-			COVERAGE_STATEMENTS=$(jq -r '[to_entries[] | select(.key != "total") | .value.statements.pct // 0] | add / length // 0' "$file" 2>/dev/null || echo "0")
+		elif jq -e '[to_entries[] | select(.key != "total") | .value.lines] | length > 0' "$file" &>/dev/null; then
+			# Full istanbul format with per-file coverage - calculate weighted averages
+			COVERAGE_LINES=$(jq -r '
+				[to_entries[] | select(.key != "total") | .value.lines] as $data
+				| ([$data[].covered] | add) as $covered
+				| ([$data[].total] | add) as $total
+				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
+			' "$file" 2>/dev/null || echo "0")
+			COVERAGE_BRANCHES=$(jq -r '
+				[to_entries[] | select(.key != "total") | .value.branches] as $data
+				| ([$data[].covered] | add) as $covered
+				| ([$data[].total] | add) as $total
+				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
+			' "$file" 2>/dev/null || echo "0")
+			COVERAGE_FUNCTIONS=$(jq -r '
+				[to_entries[] | select(.key != "total") | .value.functions] as $data
+				| ([$data[].covered] | add) as $covered
+				| ([$data[].total] | add) as $total
+				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
+			' "$file" 2>/dev/null || echo "0")
+			COVERAGE_STATEMENTS=$(jq -r '
+				[to_entries[] | select(.key != "total") | .value.statements] as $data
+				| ([$data[].covered] | add) as $covered
+				| ([$data[].total] | add) as $total
+				| if ($total // 0) > 0 then ($covered / $total * 100) else 0 end
+			' "$file" 2>/dev/null || echo "0")
 		else
 			# coverage-final.json format - cannot extract detailed coverage
 			echo "Error: Istanbul coverage file does not contain coverage percentages" >&2

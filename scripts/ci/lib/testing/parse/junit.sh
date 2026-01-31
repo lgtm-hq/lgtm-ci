@@ -30,10 +30,32 @@ parse_junit_xml() {
 	root_element=$(head -10 "$file" | grep -o '<testsuites\|<testsuite' | head -1)
 
 	if [[ "$root_element" == "<testsuites" ]]; then
-		TESTS_TOTAL=$(sed -n 's/.*tests="\([0-9]*\)".*/\1/p' "$file" | head -1)
-		TESTS_FAILED=$(sed -n 's/.*failures="\([0-9]*\)".*/\1/p' "$file" | head -1)
-		TESTS_ERRORS=$(sed -n 's/.*errors="\([0-9]*\)".*/\1/p' "$file" | head -1)
-		TESTS_SKIPPED=$(sed -n 's/.*skipped="\([0-9]*\)".*/\1/p' "$file" | head -1)
+		# First try to extract from the <testsuites> root element itself
+		local testsuites_line
+		testsuites_line=$(grep '<testsuites' "$file" | head -1)
+		TESTS_TOTAL=$(echo "$testsuites_line" | sed -n 's/.*tests="\([0-9]*\)".*/\1/p')
+		TESTS_FAILED=$(echo "$testsuites_line" | sed -n 's/.*failures="\([0-9]*\)".*/\1/p')
+		TESTS_ERRORS=$(echo "$testsuites_line" | sed -n 's/.*errors="\([0-9]*\)".*/\1/p')
+		TESTS_SKIPPED=$(echo "$testsuites_line" | sed -n 's/.*skipped="\([0-9]*\)".*/\1/p')
+
+		# If root element lacks attributes, sum from child <testsuite> elements
+		if [[ -z "$TESTS_TOTAL" ]]; then
+			TESTS_TOTAL=0
+			TESTS_FAILED=0
+			TESTS_ERRORS=0
+			TESTS_SKIPPED=0
+			while IFS= read -r line; do
+				local t f e s
+				t=$(echo "$line" | sed -n 's/.*tests="\([0-9]*\)".*/\1/p')
+				f=$(echo "$line" | sed -n 's/.*failures="\([0-9]*\)".*/\1/p')
+				e=$(echo "$line" | sed -n 's/.*errors="\([0-9]*\)".*/\1/p')
+				s=$(echo "$line" | sed -n 's/.*skipped="\([0-9]*\)".*/\1/p')
+				TESTS_TOTAL=$((TESTS_TOTAL + ${t:-0}))
+				TESTS_FAILED=$((TESTS_FAILED + ${f:-0}))
+				TESTS_ERRORS=$((TESTS_ERRORS + ${e:-0}))
+				TESTS_SKIPPED=$((TESTS_SKIPPED + ${s:-0}))
+			done < <(grep '<testsuite[^s]' "$file")
+		fi
 	else
 		# Single testsuite element - extract from first testsuite tag
 		local testsuite_line

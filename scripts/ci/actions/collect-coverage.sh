@@ -111,9 +111,21 @@ merge)
 		esac
 	fi
 
-	# Determine input format from first file if auto
+	# Determine input format from files if auto
 	if [[ "$INPUT_FORMAT" == "auto" ]]; then
 		INPUT_FORMAT=$(detect_coverage_format "${existing_files[0]}")
+
+		# Validate all files have the same format
+		for file in "${existing_files[@]:1}"; do
+			file_format=$(detect_coverage_format "$file")
+			if [[ "$file_format" != "$INPUT_FORMAT" ]]; then
+				log_error "Mixed coverage formats detected:"
+				log_error "  - ${existing_files[0]}: $INPUT_FORMAT"
+				log_error "  - $file: $file_format"
+				log_error "Please specify INPUT_FORMAT explicitly or supply consistent files"
+				exit 1
+			fi
+		done
 	fi
 
 	# Create temp file for merging in input format
@@ -170,8 +182,10 @@ merge)
 		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$INPUT_FORMAT" "$OUTPUT_FORMAT"; then
 			log_info "Conversion successful"
 		else
-			log_warn "Conversion failed, copying merged file as-is"
-			cp "$temp_merged" "$OUTPUT_FILE"
+			log_error "Conversion failed: cannot convert from $INPUT_FORMAT to $OUTPUT_FORMAT"
+			log_error "Merged file was: $temp_merged"
+			log_error "This would produce an incorrectly labeled output file"
+			exit 1
 		fi
 	else
 		cp "$temp_merged" "$OUTPUT_FILE"

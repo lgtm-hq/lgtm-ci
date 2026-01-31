@@ -91,7 +91,9 @@ runs:
       shell: bash
       env:
         STEP: summary
-        RUNNER: ${{ steps.detect.outputs.runner }}
+        RUNNER:
+          ${{ inputs.runner != 'auto' && inputs.runner != '' && inputs.runner ||
+          steps.detect.outputs.runner }}
         TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
         TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
         TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
