@@ -58,6 +58,12 @@ merge)
 	if [[ -n "$blob_reports" ]]; then
 		log_info "Merging blob reports into $REPORT_FORMAT format..."
 
+		# Verify bunx is available (requires setup-node action)
+		if ! command -v bunx &>/dev/null; then
+			log_error "bunx not found. Ensure setup-node action runs before this step."
+			exit 1
+		fi
+
 		# Playwright merge-reports command handles blob reports
 		merge_args=("merge-reports")
 		merge_args+=("--reporter=$REPORT_FORMAT")

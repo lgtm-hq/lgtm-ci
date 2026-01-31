@@ -61,6 +61,10 @@ run)
 	LHCI_ARGS=()
 	LHCI_ARGS+=("autorun")
 
+	# Always enforce output directory (CLI flags override config file)
+	LHCI_ARGS+=("--upload.target=filesystem")
+	LHCI_ARGS+=("--upload.outputDir=$OUTPUT_DIR")
+
 	# Use config file if provided, otherwise generate inline config
 	if [[ -n "$CONFIG_PATH" ]] && [[ -f "$CONFIG_PATH" ]]; then
 		LHCI_ARGS+=("--config=$CONFIG_PATH")
@@ -71,8 +75,6 @@ run)
 		LHCI_ARGS+=("--collect.url=$URL")
 		LHCI_ARGS+=("--collect.numberOfRuns=1")
 		LHCI_ARGS+=("--collect.settings.chromeFlags=--headless=new --no-sandbox --disable-gpu --disable-dev-shm-usage")
-		LHCI_ARGS+=("--upload.target=filesystem")
-		LHCI_ARGS+=("--upload.outputDir=$OUTPUT_DIR")
 	fi
 
 	# Add extra args

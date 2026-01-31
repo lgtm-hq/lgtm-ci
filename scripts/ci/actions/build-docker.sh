@@ -54,7 +54,7 @@ setup)
 build)
 	: "${CONTEXT:=.}"
 	: "${FILE:=Dockerfile}"
-	: "${PLATFORMS:=linux/amd64}"
+	: "${PLATFORMS:=linux/amd64,linux/arm64}"
 	: "${REGISTRY:=ghcr.io}"
 	: "${IMAGE_NAME:=${GITHUB_REPOSITORY:-}}"
 	: "${TAGS:=}"
@@ -231,10 +231,14 @@ summary)
 	if [[ -n "$TAGS" ]]; then
 		add_github_summary "### Tags"
 		add_github_summary ""
-		IFS=',' read -ra tag_array <<<"$TAGS"
+		# TAGS is newline-separated, read into array properly
+		readarray -t tag_array <<<"$TAGS"
 		for tag in "${tag_array[@]}"; do
+			# Trim whitespace
 			tag=$(echo "$tag" | xargs)
-			add_github_summary "- \`$tag\`"
+			if [[ -n "$tag" ]]; then
+				add_github_summary "- \`$tag\`"
+			fi
 		done
 	fi
 

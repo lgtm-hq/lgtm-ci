@@ -25,9 +25,11 @@ prepare)
 	: "${BUILD_COMMAND:=}"
 
 	# Run build command if provided
+	# Note: BUILD_COMMAND must come from a trusted source (workflow input)
+	# Using bash -c is safer than eval as it runs in a subshell
 	if [[ -n "$BUILD_COMMAND" ]]; then
 		log_info "Running build command: $BUILD_COMMAND"
-		eval "$BUILD_COMMAND"
+		bash -c "$BUILD_COMMAND"
 	fi
 
 	# Validate source path exists

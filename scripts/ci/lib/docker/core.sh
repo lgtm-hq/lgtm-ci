@@ -100,6 +100,9 @@ needs_qemu() {
 	# Check if any requested platform differs from current
 	IFS=',' read -ra platform_array <<<"$platforms"
 	for platform in "${platform_array[@]}"; do
+		# Trim leading/trailing whitespace
+		platform="${platform#"${platform%%[![:space:]]*}"}"
+		platform="${platform%"${platform##*[![:space:]]}"}"
 		if [[ "$platform" != "$current_platform" ]]; then
 			return 0
 		fi

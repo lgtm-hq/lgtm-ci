@@ -23,8 +23,9 @@ generate_semver_tags() {
 	# Strip leading 'v' if present
 	version="${version#v}"
 
-	# Validate semver format (basic check)
-	if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+	# Validate semver format with optional prerelease and build metadata
+	# Pattern: MAJOR.MINOR.PATCH[-prerelease][+build]
+	if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
 		echo "Error: Invalid semver format: $version" >&2
 		return 1
 	fi

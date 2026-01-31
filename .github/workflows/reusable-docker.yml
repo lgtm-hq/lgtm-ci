@@ -133,6 +133,30 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Parse additional tags
+        id: extra-tags
+        if: inputs.tags != ''
+        shell: bash
+        env:
+          INPUT_TAGS: ${{ inputs.tags }}
+        run: |
+          # Convert comma-separated tags to metadata-action format
+          # Trim whitespace and filter empty entries
+          tags_list=""
+          IFS=',' read -ra tag_array <<< "$INPUT_TAGS"
+          for tag in "${tag_array[@]}"; do
+            tag=$(echo "$tag" | xargs)  # Trim whitespace
+            if [[ -n "$tag" ]]; then
+              tags_list="${tags_list}type=raw,value=${tag}"$'\n'
+            fi
+          done
+          # Output using heredoc for multiline
+          {
+            echo "tags<<EOF"
+            echo -n "$tags_list"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
       - name: Extract metadata
         id: meta
         # Pinned to SHA for supply chain security
@@ -148,6 +172,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
             type=semver,pattern={{major}},value=${{ inputs.version }}
             type=raw,value=latest,enable=${{ inputs.version != '' }}
+            ${{ steps.extra-tags.outputs.tags }}
 
       - name: Build and push
         id: build

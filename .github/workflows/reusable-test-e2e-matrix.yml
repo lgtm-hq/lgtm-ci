@@ -211,7 +211,8 @@ jobs:
         with:
           input-dir: playwright-reports
           output-dir: merged-report
-          report-format: ${{ inputs.reporter }}
+          # Map 'blob' reporter to 'html' for merging (blob is intermediate format)
+          report-format: ${{ inputs.reporter == 'blob' && 'html' || inputs.reporter }}
 
       - name: Upload merged report
         # Pinned to SHA for supply chain security

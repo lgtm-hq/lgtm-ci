@@ -125,10 +125,19 @@ runs:
       env:
         REGISTRY: ${{ inputs.registry }}
         IMAGE_NAME: ${{ inputs.image-name }}
+        BUILT_TAGS: ${{ steps.build.outputs.tags }}
       run: |
-        # Get digest if available
-        full_image="${REGISTRY}/${IMAGE_NAME}"
-        digest=$(docker buildx imagetools inspect "$full_image" --format '{{.Manifest.Digest}}' 2>/dev/null || echo "")
+        # Get digest using a concrete tag from the build output
+        # Parse first tag from newline-separated list
+        first_tag=$(echo "$BUILT_TAGS" | head -1)
+        fmt='{{.Manifest.Digest}}'
+        if [[ -n "$first_tag" ]]; then
+          digest=$(docker buildx imagetools inspect "$first_tag" --format "$fmt" 2>/dev/null || echo "")
+        else
+          # Fallback to image:latest if no tags available
+          full_image="${REGISTRY}/${IMAGE_NAME}:latest"
+          digest=$(docker buildx imagetools inspect "$full_image" --format "$fmt" 2>/dev/null || echo "")
+        fi
         echo "digest=$digest" >> "$GITHUB_OUTPUT"
 
     - name: Generate summary
