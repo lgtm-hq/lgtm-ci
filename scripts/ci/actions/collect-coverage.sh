@@ -69,8 +69,18 @@ merge)
 	: "${COVERAGE_FILES:=}"
 	: "${INPUT_FORMAT:=auto}"
 	: "${OUTPUT_FORMAT:=json}"
+	: "${MERGE_STRATEGY:=union}"
 	: "${OUTPUT_FILE:=}"
 	: "${WORKING_DIRECTORY:=.}"
+
+	# Validate MERGE_STRATEGY
+	case "$MERGE_STRATEGY" in
+	union | intersection) ;;
+	*)
+		log_error "Invalid MERGE_STRATEGY: $MERGE_STRATEGY (must be 'union' or 'intersection')"
+		exit 1
+		;;
+	esac
 
 	cd "$WORKING_DIRECTORY"
 

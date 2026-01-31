@@ -62,20 +62,54 @@ validate)
 
 	case "$PACKAGE_TYPE" in
 	pypi)
-		# Extract version
+		# Extract version and name
 		if [[ -f "$PACKAGE_PATH/pyproject.toml" ]]; then
 			version=$(extract_pypi_version "$PACKAGE_PATH") || true
-			name=$(grep -E '^name\s*=' "$PACKAGE_PATH/pyproject.toml" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || true)
+			name=$(awk '/^\[project\]$/,/^\[/ { if (/^name\s*=/) print }' "$PACKAGE_PATH/pyproject.toml" |
+				head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || true)
+			if [[ -z "$name" ]]; then
+				name=$(awk '/^\[tool\.poetry\]$/,/^\[/ { if (/^name\s*=/) print }' "$PACKAGE_PATH/pyproject.toml" |
+					head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || true)
+			fi
 		fi
 
 		# Validate dist files if they exist
 		if [[ -d "$PACKAGE_PATH/dist" ]]; then
 			if validate_pypi_package "$PACKAGE_PATH/dist"; then
 				valid="true"
+				# Extract name/version from wheel if not already set
+				if [[ -z "$name" ]] || [[ -z "$version" ]]; then
+					wheel_file=$(find "$PACKAGE_PATH/dist" -name "*.whl" -print -quit 2>/dev/null || true)
+					if [[ -n "$wheel_file" ]]; then
+						# Wheel filename format: {name}-{version}(-{build})?-{python}-{abi}-{platform}.whl
+						wheel_basename=$(basename "$wheel_file")
+						# Extract name (first segment before -)
+						wheel_name="${wheel_basename%%-*}"
+						# Extract version (second segment) using remainder after first -
+						wheel_remainder="${wheel_basename#*-}"
+						wheel_version="${wheel_remainder%%-*}"
+						name="${name:-${wheel_name//_/-}}"
+						version="${version:-$wheel_version}"
+					fi
+				fi
 			fi
 		elif [[ -d "$PACKAGE_PATH" ]] && compgen -G "$PACKAGE_PATH/*.whl" >/dev/null; then
 			if validate_pypi_package "$PACKAGE_PATH"; then
 				valid="true"
+				# Extract name/version from wheel if not already set
+				if [[ -z "$name" ]] || [[ -z "$version" ]]; then
+					wheel_file=$(find "$PACKAGE_PATH" -maxdepth 1 -name "*.whl" -print -quit 2>/dev/null || true)
+					if [[ -n "$wheel_file" ]]; then
+						wheel_basename=$(basename "$wheel_file")
+						# Extract name (first segment before -)
+						wheel_name="${wheel_basename%%-*}"
+						# Extract version (second segment) using remainder after first -
+						wheel_remainder="${wheel_basename#*-}"
+						wheel_version="${wheel_remainder%%-*}"
+						name="${name:-${wheel_name//_/-}}"
+						version="${version:-$wheel_version}"
+					fi
+				fi
 			fi
 		else
 			# No dist files yet, just validate metadata exists

@@ -39,8 +39,9 @@ parse_junit_xml() {
 		TESTS_ERRORS=$(echo "$testsuites_line" | sed -n 's/.*errors="\([0-9]*\)".*/\1/p')
 		TESTS_SKIPPED=$(echo "$testsuites_line" | sed -n 's/.*skipped="\([0-9]*\)".*/\1/p')
 
-		# If root element lacks any attributes, sum from child <testsuite> elements
-		if [[ -z "$TESTS_TOTAL" ]] || [[ -z "$TESTS_FAILED" ]] || [[ -z "$TESTS_ERRORS" ]] || [[ -z "$TESTS_SKIPPED" ]]; then
+		# If root element lacks ALL attributes, sum from child <testsuite> elements
+		# Only re-aggregate when no values were extracted, to preserve partial data
+		if [[ -z "$TESTS_TOTAL" ]] && [[ -z "$TESTS_FAILED" ]] && [[ -z "$TESTS_ERRORS" ]] && [[ -z "$TESTS_SKIPPED" ]]; then
 			TESTS_TOTAL=0
 			TESTS_FAILED=0
 			TESTS_ERRORS=0

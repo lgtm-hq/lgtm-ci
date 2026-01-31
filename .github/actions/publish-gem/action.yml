@@ -4,10 +4,6 @@ description: 'Build and publish Ruby gem to RubyGems using OIDC trusted publishi
 author: 'lgtm-hq'
 
 inputs:
-  ruby-version:
-    description: 'Ruby version'
-    required: false
-    default: '3.3'
   gemspec:
     description: 'Path to gemspec file (auto-detected if not specified)'
     required: false

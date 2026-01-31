@@ -54,6 +54,16 @@ merge_lcov_files() {
 			fi
 		done
 
+		# Check for branch/function records that the fallback cannot handle
+		if grep -qE '^(BR|BRDA|FN|FNDA|FNF|FNH):' "$temp_concat" 2>/dev/null; then
+			rm -f "$temp_concat"
+			echo "Error: LCOV files contain branch/function coverage records (BR/FN/FNDA)" >&2
+			echo "The fallback merge cannot handle these records. Please install lcov:" >&2
+			echo "  brew install lcov  # macOS" >&2
+			echo "  apt install lcov   # Ubuntu/Debian" >&2
+			return 1
+		fi
+
 		# Deduplicate: for same SF (source file), merge DA lines by summing counts
 		awk '
 		BEGIN { current_sf = ""; tn = "" }

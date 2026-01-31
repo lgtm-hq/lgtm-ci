@@ -17,13 +17,13 @@ check_coverage_threshold() {
 	local coverage="${1:-0}"
 	local threshold="${2:-0}"
 
-	# Validate numeric inputs
-	if ! [[ "$coverage" =~ ^-?[0-9]*\.?[0-9]+$ ]]; then
-		echo "Error: coverage value '$coverage' is not a valid number" >&2
+	# Validate numeric inputs (non-negative only for coverage/threshold)
+	if ! [[ "$coverage" =~ ^[0-9]*\.?[0-9]+$ ]]; then
+		echo "Error: coverage value '$coverage' is not a valid non-negative number" >&2
 		return 2
 	fi
-	if ! [[ "$threshold" =~ ^-?[0-9]*\.?[0-9]+$ ]]; then
-		echo "Error: threshold value '$threshold' is not a valid number" >&2
+	if ! [[ "$threshold" =~ ^[0-9]*\.?[0-9]+$ ]]; then
+		echo "Error: threshold value '$threshold' is not a valid non-negative number" >&2
 		return 2
 	fi
 

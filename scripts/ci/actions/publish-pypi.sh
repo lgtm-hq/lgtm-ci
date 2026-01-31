@@ -36,8 +36,14 @@ validate)
 		die "Invalid version format: $version"
 	fi
 
-	# Extract name
-	name=$(grep -E '^name\s*=' "pyproject.toml" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	# Extract name (scoped to [project] or [tool.poetry] tables)
+	name=$(awk '/^\[project\]$/,/^\[/ { if (/^name\s*=/) print }' "pyproject.toml" |
+		head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	if [[ -z "$name" ]]; then
+		# Try [tool.poetry] table
+		name=$(awk '/^\[tool\.poetry\]$/,/^\[/ { if (/^name\s*=/) print }' "pyproject.toml" |
+			head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	fi
 	if [[ -z "$name" ]]; then
 		die "Could not extract package name from pyproject.toml"
 	fi
@@ -51,13 +57,25 @@ build)
 	# Clean previous builds
 	rm -rf dist/ build/ ./*.egg-info/
 
-	# Extract version and name first
+	# Extract version and name first (scoped to [project] or [tool.poetry] tables)
 	version=$(extract_pypi_version ".") || die "Could not extract version"
-	name=$(grep -E '^name\s*=' "pyproject.toml" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	name=$(awk '/^\[project\]$/,/^\[/ { if (/^name\s*=/) print }' "pyproject.toml" |
+		head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	if [[ -z "$name" ]]; then
+		name=$(awk '/^\[tool\.poetry\]$/,/^\[/ { if (/^name\s*=/) print }' "pyproject.toml" |
+			head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	fi
 
-	# Build using uv
-	log_info "Running uv build..."
-	uv build
+	# Build using uv or python -m build
+	if command -v uv >/dev/null 2>&1; then
+		log_info "Running uv build..."
+		uv build
+	elif command -v python >/dev/null 2>&1; then
+		log_info "uv not found, falling back to python -m build..."
+		python -m build
+	else
+		die "Neither uv nor python found. Please install uv or python with build module."
+	fi
 
 	# Verify build output
 	if [[ ! -d "dist" ]]; then

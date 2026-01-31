@@ -174,8 +174,13 @@ deploy)
 		git reset --hard
 	fi
 
-	# Copy staging content
-	cp -r "$STAGING_DIR"/* .
+	# Clean working tree (remove all except .git) to avoid stale files
+	find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} + 2>/dev/null || true
+
+	# Copy staging content (use /. to include dotfiles and handle empty dirs)
+	if [[ -n "$(ls -A "$STAGING_DIR" 2>/dev/null)" ]]; then
+		cp -r "$STAGING_DIR"/. .
+	fi
 
 	# Add and commit
 	git add -A
@@ -187,12 +192,20 @@ deploy)
 		log_success "Deployed to $TARGET_BRANCH"
 	fi
 
-	# Generate pages URL
+	# Generate pages URL (respect TARGET_DIR if set)
+	: "${TARGET_DIR:=.}"
 	# Extract owner/repo from remote URL
 	if [[ "$repo_url" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
 		owner="${BASH_REMATCH[1]}"
 		repo="${BASH_REMATCH[2]}"
-		pages_url="https://${owner}.github.io/${repo}/"
+		# Clean up target_dir
+		target_dir="${TARGET_DIR#.}"
+		target_dir="${target_dir#/}"
+		if [[ -n "$target_dir" ]]; then
+			pages_url="https://${owner}.github.io/${repo}/${target_dir}/"
+		else
+			pages_url="https://${owner}.github.io/${repo}/"
+		fi
 		set_github_output "pages-url" "$pages_url"
 		log_info "GitHub Pages URL: $pages_url"
 	fi

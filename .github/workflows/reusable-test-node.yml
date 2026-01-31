@@ -157,6 +157,7 @@ jobs:
           output-path: coverage-report/badge.svg
 
       - name: Publish to GitHub Pages
+        if: inputs.coverage && inputs.upload-coverage
         uses: ./.github/actions/publish-test-results
         with:
           results-path: coverage-report

@@ -68,6 +68,7 @@ runs:
           ${{ inputs.coverage-files || steps.detect.outputs.coverage-files }}
         INPUT_FORMAT: ${{ inputs.input-format }}
         OUTPUT_FORMAT: ${{ inputs.output-format }}
+        MERGE_STRATEGY: ${{ inputs.merge-strategy }}
         OUTPUT_FILE: ${{ inputs.output-file }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
 

@@ -82,7 +82,6 @@ jobs:
         id: pypi
         uses: ./.github/actions/publish-pypi
         with:
-          python-version: ${{ inputs.python-version }}
           validate: ${{ inputs.validate }}
           test-pypi: ${{ inputs.test-pypi }}
           dry-run: ${{ inputs.dry-run }}

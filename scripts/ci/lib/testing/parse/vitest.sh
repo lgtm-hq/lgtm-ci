@@ -31,7 +31,8 @@ parse_vitest_json() {
 	TESTS_SKIPPED=$(jq -r '[.testResults[].assertionResults[] | select(.status == "pending" or .status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
 
 	# Try alternative format (vitest built-in json reporter)
-	if [[ "$TESTS_PASSED" == "0" ]] && [[ "$TESTS_FAILED" == "0" ]]; then
+	# Only fallback when ALL counts are zero (avoid overwriting skipped-only results)
+	if [[ "$TESTS_PASSED" == "0" ]] && [[ "$TESTS_FAILED" == "0" ]] && [[ "$TESTS_SKIPPED" == "0" ]]; then
 		TESTS_PASSED=$(jq -r '.numPassedTests // 0' "$file" 2>/dev/null || echo "0")
 		TESTS_FAILED=$(jq -r '.numFailedTests // 0' "$file" 2>/dev/null || echo "0")
 		TESTS_SKIPPED=$(jq -r '.numPendingTests // 0' "$file" 2>/dev/null || echo "0")

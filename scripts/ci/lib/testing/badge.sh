@@ -71,6 +71,22 @@ get_badge_hex_color() {
 }
 
 # =============================================================================
+# XML/SVG escaping
+# =============================================================================
+
+# Escape special XML characters to prevent injection
+# Usage: escape_xml "string with <special> chars"
+escape_xml() {
+	local str="${1:-}"
+	str="${str//&/&amp;}"
+	str="${str//</&lt;}"
+	str="${str//>/&gt;}"
+	str="${str//\"/&quot;}"
+	str="${str//\'/&#39;}"
+	echo "$str"
+}
+
+# =============================================================================
 # Badge generation
 # =============================================================================
 
@@ -83,9 +99,12 @@ generate_badge_svg() {
 	local red_threshold="${4:-50}"
 	local yellow_threshold="${5:-80}"
 
-	# Format percentage for display
+	# Format percentage for display and escape for XML
 	local display_percent
 	display_percent=$(printf "%.1f%%" "$percent")
+	local escaped_label escaped_percent
+	escaped_label=$(escape_xml "$label")
+	escaped_percent=$(escape_xml "$display_percent")
 
 	# Get color
 	local color hex_color
@@ -98,10 +117,10 @@ generate_badge_svg() {
 	text_width=$((${#display_percent} * 7 + 10))
 	total_width=$((label_width + text_width))
 
-	# Generate SVG using shields.io style
+	# Generate SVG using shields.io style (using escaped values)
 	cat >"$output" <<EOF
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${total_width}" height="20" role="img" aria-label="${label}: ${display_percent}">
-  <title>${label}: ${display_percent}</title>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${total_width}" height="20" role="img" aria-label="${escaped_label}: ${escaped_percent}">
+  <title>${escaped_label}: ${escaped_percent}</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -115,10 +134,10 @@ generate_badge_svg() {
     <rect width="${total_width}" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
-    <text aria-hidden="true" x="$((label_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((label_width * 10 - 100))">${label}</text>
-    <text x="$((label_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((label_width * 10 - 100))">${label}</text>
-    <text aria-hidden="true" x="$((label_width * 10 + text_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((text_width * 10 - 100))">${display_percent}</text>
-    <text x="$((label_width * 10 + text_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((text_width * 10 - 100))">${display_percent}</text>
+    <text aria-hidden="true" x="$((label_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((label_width * 10 - 100))">${escaped_label}</text>
+    <text x="$((label_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((label_width * 10 - 100))">${escaped_label}</text>
+    <text aria-hidden="true" x="$((label_width * 10 + text_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((text_width * 10 - 100))">${escaped_percent}</text>
+    <text x="$((label_width * 10 + text_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((text_width * 10 - 100))">${escaped_percent}</text>
   </g>
 </svg>
 EOF
@@ -222,10 +241,15 @@ generate_test_badge() {
 	text_width=$((${#message} * 7 + 10))
 	total_width=$((label_width + text_width))
 
+	# Escape values for XML
+	local escaped_label escaped_message
+	escaped_label=$(escape_xml "$label")
+	escaped_message=$(escape_xml "$message")
+
 	# Generate SVG
 	cat >"$output" <<EOF
-<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${total_width}" height="20" role="img" aria-label="${label}: ${message}">
-  <title>${label}: ${message}</title>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${total_width}" height="20" role="img" aria-label="${escaped_label}: ${escaped_message}">
+  <title>${escaped_label}: ${escaped_message}</title>
   <linearGradient id="s" x2="0" y2="100%">
     <stop offset="0" stop-color="#bbb" stop-opacity=".1"/>
     <stop offset="1" stop-opacity=".1"/>
@@ -239,10 +263,10 @@ generate_test_badge() {
     <rect width="${total_width}" height="20" fill="url(#s)"/>
   </g>
   <g fill="#fff" text-anchor="middle" font-family="Verdana,Geneva,DejaVu Sans,sans-serif" text-rendering="geometricPrecision" font-size="110">
-    <text aria-hidden="true" x="$((label_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((label_width * 10 - 100))">${label}</text>
-    <text x="$((label_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((label_width * 10 - 100))">${label}</text>
-    <text aria-hidden="true" x="$((label_width * 10 + text_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((text_width * 10 - 100))">${message}</text>
-    <text x="$((label_width * 10 + text_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((text_width * 10 - 100))">${message}</text>
+    <text aria-hidden="true" x="$((label_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((label_width * 10 - 100))">${escaped_label}</text>
+    <text x="$((label_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((label_width * 10 - 100))">${escaped_label}</text>
+    <text aria-hidden="true" x="$((label_width * 10 + text_width * 5))" y="150" fill="#010101" fill-opacity=".3" transform="scale(.1)" textLength="$((text_width * 10 - 100))">${escaped_message}</text>
+    <text x="$((label_width * 10 + text_width * 5))" y="140" transform="scale(.1)" fill="#fff" textLength="$((text_width * 10 - 100))">${escaped_message}</text>
   </g>
 </svg>
 EOF
@@ -253,6 +277,6 @@ EOF
 # =============================================================================
 # Export functions
 # =============================================================================
-export -f get_badge_color get_badge_hex_color
+export -f escape_xml get_badge_color get_badge_hex_color
 export -f generate_badge_svg generate_badge_json get_shields_url
 export -f generate_test_badge

@@ -127,7 +127,7 @@ run)
 
 parse)
 	: "${RESULTS_FILE:=pytest-results.json}"
-	: "${COVERAGE_FILE:=coverage.json}"
+	: "${COVERAGE_FILE:=}"
 
 	# Parse test results
 	if [[ -f "$RESULTS_FILE" ]]; then
@@ -147,8 +147,8 @@ parse)
 		set_github_output "tests-total" "0"
 	fi
 
-	# Parse coverage if available
-	if [[ -f "$COVERAGE_FILE" ]]; then
+	# Parse coverage if explicitly provided and file exists
+	if [[ -n "$COVERAGE_FILE" ]] && [[ -f "$COVERAGE_FILE" ]]; then
 		coverage_percent=$(extract_coverage_percent "$COVERAGE_FILE")
 		set_github_output "coverage-percent" "$coverage_percent"
 		log_info "Coverage: ${coverage_percent}%"

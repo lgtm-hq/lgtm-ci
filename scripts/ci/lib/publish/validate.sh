@@ -148,13 +148,17 @@ validate_gem_package() {
 	if command -v gem >/dev/null 2>&1; then
 		log_info "Validating gemspec syntax..."
 		# Run build in the gemspec's directory
-		local gemspec_dir
+		local gemspec_dir gem_output built_gem
 		gemspec_dir=$(dirname "$gemspec")
-		if ! gem build "$gemspec" --strict 2>/dev/null; then
+		gem_output=$(gem build "$gemspec" --strict 2>&1) || true
+		if echo "$gem_output" | grep -qiE 'warning|error'; then
 			log_warn "gem build validation produced warnings"
 		fi
-		# Clean up built gem if created (in the gemspec's directory)
-		rm -f "$gemspec_dir"/*.gem 2>/dev/null
+		# Clean up only the specific gem that was just built (extract from output)
+		built_gem=$(echo "$gem_output" | grep -oE 'File: [^ ]+\.gem' | sed 's/File: //' | head -1)
+		if [[ -n "$built_gem" ]] && [[ -f "$gemspec_dir/$built_gem" ]]; then
+			rm -f "$gemspec_dir/$built_gem"
+		fi
 	fi
 
 	if ((errors > 0)); then

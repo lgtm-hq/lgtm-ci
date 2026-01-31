@@ -4,10 +4,6 @@ description: 'Build and publish Python package to PyPI using OIDC trusted publis
 author: 'lgtm-hq'
 
 inputs:
-  python-version:
-    description: 'Python version for building'
-    required: false
-    default: '3.12'
   validate:
     description: 'Run twine check before publishing'
     required: false

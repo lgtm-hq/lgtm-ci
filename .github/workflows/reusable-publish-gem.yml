@@ -75,7 +75,6 @@ jobs:
         id: gem
         uses: ./.github/actions/publish-gem
         with:
-          ruby-version: ${{ inputs.ruby-version }}
           gemspec: ${{ inputs.gemspec }}
           dry-run: ${{ inputs.dry-run }}
           working-directory: ${{ inputs.working-directory }}

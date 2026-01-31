@@ -148,6 +148,10 @@ jobs:
         id: publish
         uses: ./.github/actions/publish-test-results
         with:
-          coverage-path: coverage-report
-          badge-path: coverage-report/coverage
+          coverage-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report' ||
+            format('coverage-report/{0}', inputs.working-directory) }}
+          badge-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report/coverage' ||
+            format('coverage-report/{0}/coverage', inputs.working-directory) }}
           target-dir: coverage

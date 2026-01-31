@@ -30,7 +30,7 @@ detect_test_runner() {
 		return 0
 	fi
 	# Check for tests directory with Python files (independent of pyproject.toml/setup.py)
-	if [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
+	if [[ -d "$dir/tests" ]] && find "$dir/tests" \( -name "test_*.py" -o -name "*_test.py" \) 2>/dev/null | head -1 | grep -q .; then
 		echo "pytest"
 		return 0
 	fi
@@ -76,7 +76,7 @@ detect_all_runners() {
 		runners="pytest"
 	elif [[ -f "$dir/pyproject.toml" ]] && grep -q '\[tool\.pytest' "$dir/pyproject.toml" 2>/dev/null; then
 		runners="pytest"
-	elif [[ -d "$dir/tests" ]] && find "$dir/tests" -name "test_*.py" -o -name "*_test.py" 2>/dev/null | head -1 | grep -q .; then
+	elif [[ -d "$dir/tests" ]] && find "$dir/tests" \( -name "test_*.py" -o -name "*_test.py" \) 2>/dev/null | head -1 | grep -q .; then
 		runners="pytest"
 	fi
 
@@ -191,8 +191,8 @@ detect_coverage_source() {
 
 	case "$format" in
 	coverage-py | cobertura)
-		# Check for Python-specific patterns
-		if grep -q '\.py"\|\.py$' "$file" 2>/dev/null; then
+		# Check for Python-specific patterns (use ERE for portability)
+		if grep -qE '\.py("|$)' "$file" 2>/dev/null; then
 			echo "python"
 			return 0
 		fi

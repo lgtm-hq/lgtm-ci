@@ -154,7 +154,7 @@ wait_for_package() {
 
 # Get PyPI download URL for a specific version
 # Usage: get_pypi_download_url "package-name" "1.2.3" [test-pypi]
-# Returns the sdist (.tar.gz) download URL
+# Returns the sdist download URL (using packagetype to find sdist)
 get_pypi_download_url() {
 	local package="${1:?Package name required}"
 	local version="${2:?Version required}"
@@ -173,9 +173,14 @@ get_pypi_download_url() {
 		return 1
 	fi
 
-	# Extract sdist URL (prefer .tar.gz)
+	# Extract sdist URL using packagetype field (handles both .tar.gz and .zip)
 	local download_url
-	download_url=$(echo "$response" | grep -o '"url":"[^"]*\.tar\.gz"' | head -1 | sed 's/"url":"\([^"]*\)"/\1/')
+	if command -v jq >/dev/null 2>&1; then
+		download_url=$(echo "$response" | jq -r '.urls[] | select(.packagetype == "sdist") | .url' 2>/dev/null | head -1)
+	else
+		# Fallback: look for sdist packagetype and extract URL
+		download_url=$(echo "$response" | grep -B5 '"packagetype":"sdist"' | grep -o '"url":"[^"]*"' | head -1 | sed 's/"url":"\([^"]*\)"/\1/')
+	fi
 
 	if [[ -n "$download_url" ]]; then
 		echo "$download_url"
