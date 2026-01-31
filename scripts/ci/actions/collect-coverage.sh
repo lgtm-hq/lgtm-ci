@@ -168,13 +168,18 @@ merge)
 	temp_merged=$(mktemp)
 	trap 'rm -f "$temp_merged"' EXIT
 
+	# Track the actual format of the merged temp file (may differ from INPUT_FORMAT)
+	MERGED_FORMAT="$INPUT_FORMAT"
+
 	# Merge based on input format
 	case "$INPUT_FORMAT" in
 	lcov)
 		merge_lcov_files "$temp_merged" "${existing_files[@]}"
+		MERGED_FORMAT="lcov"
 		;;
 	istanbul | json)
 		merge_istanbul_files "$temp_merged" "${existing_files[@]}"
+		MERGED_FORMAT="istanbul"
 		;;
 	coverage-py | cobertura)
 		# Check if files are .coverage binary data files (for coverage combine)
@@ -190,14 +195,25 @@ merge)
 
 		if [[ ${#existing_files[@]} -eq 1 ]]; then
 			cp "${existing_files[0]}" "$temp_merged"
+			# Detect actual format of the copied file
+			MERGED_FORMAT=$(detect_coverage_format "$temp_merged" 2>/dev/null) || MERGED_FORMAT="$INPUT_FORMAT"
 		elif [[ "$all_binary" == "true" ]] && command -v coverage &>/dev/null; then
 			# Only use coverage combine for actual .coverage binary files
 			# Use --keep to preserve original files for debugging/re-runs
 			coverage combine --keep "${existing_files[@]}"
 			case "$INPUT_FORMAT" in
-			coverage-py) coverage json -o "$temp_merged" ;;
-			cobertura) coverage xml -o "$temp_merged" ;;
-			*) coverage json -o "$temp_merged" ;;
+			coverage-py)
+				coverage json -o "$temp_merged"
+				MERGED_FORMAT="json"
+				;;
+			cobertura)
+				coverage xml -o "$temp_merged"
+				MERGED_FORMAT="cobertura"
+				;;
+			*)
+				coverage json -o "$temp_merged"
+				MERGED_FORMAT="json"
+				;;
 			esac
 		else
 			# Files are XML/JSON reports, not binary - can't use coverage combine
@@ -214,13 +230,13 @@ merge)
 		;;
 	esac
 
-	# Convert to output format if different from input format
-	if [[ "$INPUT_FORMAT" != "$OUTPUT_FORMAT" ]]; then
-		log_info "Converting from $INPUT_FORMAT to $OUTPUT_FORMAT..."
-		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$INPUT_FORMAT" "$OUTPUT_FORMAT"; then
+	# Convert to output format if different from merged format
+	if [[ "$MERGED_FORMAT" != "$OUTPUT_FORMAT" ]]; then
+		log_info "Converting from $MERGED_FORMAT to $OUTPUT_FORMAT..."
+		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$MERGED_FORMAT" "$OUTPUT_FORMAT"; then
 			log_info "Conversion successful"
 		else
-			log_error "Conversion failed: cannot convert from $INPUT_FORMAT to $OUTPUT_FORMAT"
+			log_error "Conversion failed: cannot convert from $MERGED_FORMAT to $OUTPUT_FORMAT"
 			log_error "Merged file was: $temp_merged"
 			log_error "This would produce an incorrectly labeled output file"
 			exit 1

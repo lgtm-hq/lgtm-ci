@@ -123,6 +123,7 @@ run)
 		xml) coverage_file="coverage.xml" ;;
 		json) coverage_file="coverage.json" ;;
 		lcov) coverage_file="coverage.lcov" ;;
+		*) coverage_file="coverage.json" ;; # Match the default from earlier
 		esac
 		if [[ -f "$coverage_file" ]]; then
 			set_github_output "coverage-file" "$coverage_file"

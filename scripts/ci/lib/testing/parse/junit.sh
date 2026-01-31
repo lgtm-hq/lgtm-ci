@@ -26,9 +26,9 @@ parse_junit_xml() {
 	fi
 
 	# Extract from testsuite or testsuites root element
-	# Scan entire file to handle files with long XML headers/declarations
+	# Skip XML prolog, DOCTYPE, and comments to find actual root element
 	local root_element
-	root_element=$(grep -m1 -o '<testsuites\|<testsuite' "$file")
+	root_element=$(grep -v '^[[:space:]]*<?' "$file" | grep -v '^[[:space:]]*<!' | grep -m1 -o '<testsuites\|<testsuite')
 
 	if [[ "$root_element" == "<testsuites" ]]; then
 		# First try to extract from the <testsuites> root element itself

@@ -168,6 +168,8 @@ detect_coverage_format() {
 	if [[ "$first_line" == "<?xml"* ]] || [[ "$first_line" == "<coverage"* ]]; then
 		if grep -qE 'line-rate|lines-valid' "$file" 2>/dev/null; then
 			echo "cobertura"
+		elif grep -qE '<coverage.*clover' "$file" 2>/dev/null; then
+			echo "clover"
 		else
 			echo "xml"
 		fi
@@ -198,7 +200,12 @@ detect_coverage_source() {
 	format=$(detect_coverage_format "$file")
 
 	case "$format" in
-	coverage-py | cobertura)
+	coverage-py)
+		# Binary .coverage files are always Python - no grep needed
+		echo "python"
+		return 0
+		;;
+	cobertura)
 		# Check for Python-specific patterns (use ERE for portability)
 		if grep -qE '\.py("|$)' "$file" 2>/dev/null; then
 			echo "python"

@@ -3,6 +3,9 @@
 # Purpose: Package validation utilities for publishing
 #
 # Provides functions to validate packages before publishing to registries.
+#
+# Dependencies: Requires logging functions (log_error, log_info, log_warn, log_success)
+# to be defined before sourcing. Source scripts/ci/lib/actions.sh first.
 
 # Guard against multiple sourcing
 [[ -n "${_PUBLISH_VALIDATE_LOADED:-}" ]] && return 0
