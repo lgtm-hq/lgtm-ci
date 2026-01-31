@@ -103,7 +103,7 @@ detect_all_runners() {
 
 # Detect coverage format from file extension or content
 # Usage: detect_coverage_format "coverage.xml"
-# Output: xml|json|lcov|html|cobertura|istanbul|unknown
+# Output: cobertura|clover|xml|coverage-py|istanbul|json|lcov|html|unknown
 detect_coverage_format() {
 	local file="${1:-}"
 
@@ -194,6 +194,16 @@ detect_coverage_source() {
 		# Check for Python-specific patterns (use ERE for portability)
 		if grep -qE '\.py("|$)' "$file" 2>/dev/null; then
 			echo "python"
+			return 0
+		fi
+		;;
+	clover)
+		# Clover can be from PHP (PHPUnit) or Java - check file extensions
+		if grep -qE '\.php("|$)' "$file" 2>/dev/null; then
+			echo "php"
+			return 0
+		elif grep -qE '\.java("|$)' "$file" 2>/dev/null; then
+			echo "java"
 			return 0
 		fi
 		;;

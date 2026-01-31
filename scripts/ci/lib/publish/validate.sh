@@ -81,18 +81,18 @@ validate_npm_package() {
 		((errors++))
 	fi
 
-	# Validate package name format
+	# Validate package name format (use POSIX character classes for BSD/macOS compatibility)
 	if [[ -n "$name" ]]; then
 		# npm package names must be lowercase, may contain hyphens/underscores/dots
-		if [[ ! "$name" =~ ^(@[a-z0-9._-]+/)?[a-z0-9._-]+$ ]]; then
+		if ! echo "$name" | grep -qE '^(@[a-z0-9._-]+/)?[a-z0-9._-]+$'; then
 			log_error "Invalid package name format: $name"
 			((errors++))
 		fi
 	fi
 
-	# Validate version format (semver)
+	# Validate version format using shared semver validator
 	if [[ -n "$version" ]]; then
-		if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+ ]]; then
+		if ! validate_version_format "$version"; then
 			log_error "Invalid version format: $version (expected semver)"
 			((errors++))
 		fi
@@ -148,10 +148,14 @@ validate_gem_package() {
 	if command -v gem >/dev/null 2>&1; then
 		log_info "Validating gemspec syntax..."
 		# Run build in the gemspec's directory
-		local gemspec_dir gem_output built_gem
+		local gemspec_dir gem_output built_gem build_exit_code
 		gemspec_dir=$(dirname "$gemspec")
-		gem_output=$(gem build "$gemspec" --strict 2>&1) || true
-		if echo "$gem_output" | grep -qiE 'warning|error'; then
+		gem_output=$(gem build "$gemspec" --strict 2>&1)
+		build_exit_code=$?
+		if [[ "$build_exit_code" -ne 0 ]]; then
+			log_error "gem build failed with exit code $build_exit_code"
+			((errors++))
+		elif echo "$gem_output" | grep -qiE 'warning|error'; then
 			log_warn "gem build validation produced warnings"
 		fi
 		# Clean up only the specific gem that was just built (extract from output)

@@ -41,7 +41,9 @@ merge_lcov_files() {
 				lcov_args+=("-a" "$file")
 			fi
 		done
-		lcov "${lcov_args[@]}" -o "$output" 2>/dev/null
+		local lcov_exit_code=0
+		lcov "${lcov_args[@]}" -o "$output" 2>/dev/null || lcov_exit_code=$?
+		return "$lcov_exit_code"
 	else
 		# Fallback: concatenate and deduplicate LCOV records
 		# LCOV format: TN:, SF:, DA:line,count, LF:, LH:, end_of_record
@@ -133,8 +135,10 @@ merge_istanbul_files() {
 				((i++))
 			fi
 		done
-		nyc merge "$temp_dir" "$output" 2>/dev/null
+		local nyc_exit_code=0
+		nyc merge "$temp_dir" "$output" 2>/dev/null || nyc_exit_code=$?
 		rm -rf "$temp_dir"
+		return "$nyc_exit_code"
 	else
 		# Manual merge using jq - only for single file
 		if [[ ${#files[@]} -eq 1 ]]; then

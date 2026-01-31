@@ -68,8 +68,8 @@ check_rubygems_availability() {
 	local gem_name="${1:?Gem name required}"
 	local version="${2:?Version required}"
 
-	# RubyGems API returns gem info, check versions array
-	local url="$RUBYGEMS_API_URL/$gem_name.json"
+	# Use /api/v1/versions endpoint which returns all versions as an array
+	local url="https://rubygems.org/api/v1/versions/$gem_name.json"
 	local response
 	response=$(curl -s "$url" 2>/dev/null)
 
@@ -77,9 +77,9 @@ check_rubygems_availability() {
 		return 1
 	fi
 
-	# Check if version exists in response (exact match with word boundaries)
-	# The version field in RubyGems JSON is the exact version string
-	if echo "$response" | grep -qE "\"version\":\"${version}\"(,|})"; then
+	# Check if version exists in the versions array (exact match)
+	# Each version object has a "number" field with the version string
+	if echo "$response" | grep -qE "\"number\"[[:space:]]*:[[:space:]]*\"${version}\""; then
 		return 0
 	fi
 
@@ -212,10 +212,13 @@ get_pypi_sha256() {
 	fi
 
 	# Find the sdist entry and extract sha256
-	# Look for entries with packagetype "sdist" and extract digests.sha256
 	local sha256
-	# Find sdist block and extract sha256 - this is a simplified approach
-	sha256=$(echo "$response" | grep -A 10 '"packagetype":"sdist"' | grep -o '"sha256":"[^"]*"' | head -1 | sed 's/"sha256":"\([^"]*\)"/\1/')
+	if command -v jq >/dev/null 2>&1; then
+		sha256=$(echo "$response" | jq -r '.urls[] | select(.packagetype == "sdist") | .digests.sha256' 2>/dev/null | head -1)
+	else
+		# Fallback: find sdist block and extract sha256
+		sha256=$(echo "$response" | grep -A 10 '"packagetype":"sdist"' | grep -o '"sha256":"[^"]*"' | head -1 | sed 's/"sha256":"\([^"]*\)"/\1/')
+	fi
 
 	if [[ -n "$sha256" ]]; then
 		echo "$sha256"

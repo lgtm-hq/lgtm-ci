@@ -73,11 +73,16 @@ merge)
 	: "${OUTPUT_FILE:=}"
 	: "${WORKING_DIRECTORY:=.}"
 
-	# Validate MERGE_STRATEGY
+	# Validate MERGE_STRATEGY (only 'union' is currently implemented)
 	case "$MERGE_STRATEGY" in
-	union | intersection) ;;
+	union) ;;
+	intersection)
+		log_error "MERGE_STRATEGY 'intersection' is not yet implemented"
+		log_error "Please use 'union' (the default) or contribute an implementation"
+		exit 1
+		;;
 	*)
-		log_error "Invalid MERGE_STRATEGY: $MERGE_STRATEGY (must be 'union' or 'intersection')"
+		log_error "Invalid MERGE_STRATEGY: $MERGE_STRATEGY (must be 'union')"
 		exit 1
 		;;
 	esac

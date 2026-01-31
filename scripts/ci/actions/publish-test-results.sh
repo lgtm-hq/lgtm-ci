@@ -46,7 +46,7 @@ prepare)
 	if [[ -n "$RESULTS_PATH" ]]; then
 		if [[ -d "$RESULTS_PATH" ]]; then
 			# Check if directory is non-empty before copying
-			if ls -A "$RESULTS_PATH" >/dev/null 2>&1 && [[ -n "$(ls -A "$RESULTS_PATH" 2>/dev/null)" ]]; then
+			if [[ -n "$(ls -A "$RESULTS_PATH" 2>/dev/null)" ]]; then
 				mkdir -p "$staging_dir/$TARGET_DIR/tests"
 				cp -r "$RESULTS_PATH"/* "$staging_dir/$TARGET_DIR/tests/"
 				log_info "Copied test results from $RESULTS_PATH"
@@ -64,7 +64,7 @@ prepare)
 	if [[ -n "$COVERAGE_PATH" ]]; then
 		if [[ -d "$COVERAGE_PATH" ]]; then
 			# Check if directory is non-empty before copying
-			if ls -A "$COVERAGE_PATH" >/dev/null 2>&1 && [[ -n "$(ls -A "$COVERAGE_PATH" 2>/dev/null)" ]]; then
+			if [[ -n "$(ls -A "$COVERAGE_PATH" 2>/dev/null)" ]]; then
 				mkdir -p "$staging_dir/$TARGET_DIR/coverage"
 				cp -r "$COVERAGE_PATH"/* "$staging_dir/$TARGET_DIR/coverage/"
 				log_info "Copied coverage report from $COVERAGE_PATH"
@@ -217,9 +217,26 @@ deploy)
 pages-url)
 	: "${TARGET_DIR:=.}"
 
-	# Extract owner/repo from GITHUB_REPOSITORY
-	owner="${GITHUB_REPOSITORY%%/*}"
-	repo="${GITHUB_REPOSITORY##*/}"
+	owner=""
+	repo=""
+
+	# Try GITHUB_REPOSITORY first (CI environment)
+	if [[ -n "${GITHUB_REPOSITORY:-}" ]] && [[ "$GITHUB_REPOSITORY" == *"/"* ]]; then
+		owner="${GITHUB_REPOSITORY%%/*}"
+		repo="${GITHUB_REPOSITORY##*/}"
+	else
+		# Fallback to parsing git remote origin URL (local runs)
+		repo_url=$(git config --get remote.origin.url 2>/dev/null || true)
+		if [[ -n "$repo_url" ]] && [[ "$repo_url" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
+			owner="${BASH_REMATCH[1]}"
+			repo="${BASH_REMATCH[2]}"
+		fi
+	fi
+
+	if [[ -z "$owner" ]] || [[ -z "$repo" ]]; then
+		log_error "Could not determine repository owner/name from GITHUB_REPOSITORY or git remote"
+		exit 1
+	fi
 
 	# Clean up target_dir
 	target_dir="${TARGET_DIR#.}"
