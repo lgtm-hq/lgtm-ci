@@ -15,6 +15,17 @@ if [[ -z "${_PUBLISH_REGISTRY_LOADED:-}" ]]; then
 	source "$_HOMEBREW_LIB_DIR/registry.sh"
 fi
 
+# Escape a string for use in Ruby double-quoted strings
+# Escapes backslashes and double quotes
+# Usage: escape_ruby_string "string with \"quotes\" and \\backslashes"
+escape_ruby_string() {
+	local str="${1:-}"
+	# Escape backslashes first, then double quotes
+	str="${str//\\/\\\\}"
+	str="${str//\"/\\\"}"
+	echo "$str"
+}
+
 # Generate a Homebrew formula from PyPI package
 # Usage: generate_formula_from_pypi "package-name" "1.2.3" "Formula description" [test-pypi] [homepage] [license] [python-version] [test-cmd]
 # Outputs formula content to stdout
@@ -27,6 +38,9 @@ generate_formula_from_pypi() {
 	local license="${6:-}"
 	local python_version="${7:-3.12}"
 	local test_cmd="${8:-}"
+
+	# Escape description for Ruby string
+	description=$(escape_ruby_string "$description")
 
 	# Get download URL and SHA256
 	local download_url sha256
@@ -69,7 +83,10 @@ generate_formula_from_pypi() {
 
 	# Build license line - use comment placeholder if not found
 	if [[ -n "$license" ]] && [[ "$license" != "null" ]]; then
-		license_line="license \"$license\""
+		# Escape license for Ruby string
+		local escaped_license
+		escaped_license=$(escape_ruby_string "$license")
+		license_line="license \"$escaped_license\""
 	else
 		log_warn "Could not determine license for $package@$version"
 		log_warn "Please provide license explicitly or verify the generated formula"
@@ -188,15 +205,28 @@ calculate_resource_checksums() {
 	fi
 
 	while IFS= read -r line || [[ -n "$line" ]]; do
-		# Skip comments and empty lines
+		# Skip comment-only lines
 		[[ "$line" =~ ^[[:space:]]*# ]] && continue
 		[[ -z "${line// /}" ]] && continue
 
-		# Parse package==version
-		local pkg_spec="$line"
+		# Strip inline comments and trim whitespace
+		local pkg_spec="${line%%#*}"
+		pkg_spec="${pkg_spec%"${pkg_spec##*[![:space:]]}"}" # Trim trailing whitespace
+		pkg_spec="${pkg_spec#"${pkg_spec%%[![:space:]]*}"}" # Trim leading whitespace
+
+		# Skip empty after stripping comments
+		[[ -z "$pkg_spec" ]] && continue
+
+		# Skip lines with environment markers (e.g., package==1.0; python_version<"3.9")
+		if [[ "$pkg_spec" == *";"* ]]; then
+			log_warn "Skipping requirement with environment markers: $pkg_spec (not supported)"
+			continue
+		fi
+
+		# Parse package==version (capture only the version token, excluding any trailing chars)
 		local pkg_name pkg_version
 
-		if [[ "$pkg_spec" =~ ^([^=<>!]+)==([^,]+) ]]; then
+		if [[ "$pkg_spec" =~ ^([^=\<\>![:space:]]+)[[:space:]]*==[[:space:]]*([^[:space:]\;\#,]+) ]]; then
 			pkg_name="${BASH_REMATCH[1]}"
 			pkg_version="${BASH_REMATCH[2]}"
 		else
@@ -204,7 +234,8 @@ calculate_resource_checksums() {
 			continue
 		fi
 
-		# Clean package name
+		# Clean package name (remove extras like [dev])
+		pkg_name="${pkg_name%%\[*}"
 		pkg_name="${pkg_name// /}"
 
 		# Get PyPI info
