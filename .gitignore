@@ -46,6 +46,8 @@ coverage.json
 coverage.xml
 coverage.lcov
 *.tap
+coverage-report/
+coverage/
 
 # Lintro
 .lintro/

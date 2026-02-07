@@ -61,10 +61,11 @@ runs:
       env:
         STEP: audit
         MODE: ${{ inputs.mode }}
+        FAIL_ON_VIOLATION: ${{ inputs['fail-on-violation'] }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
 
     - name: Generate egress report
-      if: inputs.report-format != 'none'
+      if: inputs['report-format'] != 'none'
       shell: bash
       env:
         STEP: report

@@ -230,9 +230,9 @@ teardown() {
 
 @test "check_docker_available: returns failure when docker command not found" {
 	run bash -c '
-		# Remove docker from PATH
-		PATH=""
 		source "$LIB_DIR/docker/core.sh"
+		# Remove docker from PATH after sourcing
+		PATH=""
 		check_docker_available
 		echo "result=$?"
 	'

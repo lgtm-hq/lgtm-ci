@@ -44,7 +44,7 @@ BUILD_URL="${GITHUB_SERVER_URL:-https://github.com}/${REPO}/actions/runs/${GITHU
 
 # Extract execution summary from output
 SUMMARY=""
-if [[ -f "$LINTRO_OUTPUT" ]]; then
+if [[ -f "$LINTRO_OUTPUT" ]] && [[ -s "$LINTRO_OUTPUT" ]]; then
 	# Try to extract the EXECUTION SUMMARY section
 	if grep -q "EXECUTION SUMMARY" "$LINTRO_OUTPUT"; then
 		SUMMARY=$(sed -n '/EXECUTION SUMMARY/,/^$/p' "$LINTRO_OUTPUT" | head -50)
@@ -52,6 +52,8 @@ if [[ -f "$LINTRO_OUTPUT" ]]; then
 		# Fallback to last 30 lines
 		SUMMARY=$(tail -30 "$LINTRO_OUTPUT")
 	fi
+else
+	SUMMARY="No lintro output available — file missing or empty"
 fi
 
 # Generate comment

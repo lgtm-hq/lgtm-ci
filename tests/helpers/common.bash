@@ -185,10 +185,21 @@ if ! _load_bats_library "assert"; then
 	}
 
 	assert_failure() {
-		if [[ "$status" -eq 0 ]]; then
-			echo "# Expected failure (exit != 0), got exit 0" >&2
-			echo "# Output: $output" >&2
-			return 1
+		local expected_code="${1:-}"
+		if [[ -n "$expected_code" ]]; then
+			# Specific exit code requested
+			if [[ "$status" -ne "$expected_code" ]]; then
+				echo "# Expected exit code $expected_code, got $status" >&2
+				echo "# Output: $output" >&2
+				return 1
+			fi
+		else
+			# Any non-zero exit code
+			if [[ "$status" -eq 0 ]]; then
+				echo "# Expected failure (exit != 0), got exit 0" >&2
+				echo "# Output: $output" >&2
+				return 1
+			fi
 		fi
 	}
 
@@ -219,9 +230,48 @@ if ! _load_bats_library "assert"; then
 	}
 
 	assert_line() {
+		local index=""
+		local partial=""
 		local expected
-		if [[ "$1" == "--partial" ]]; then
-			expected="$2"
+
+		# Parse flags
+		while [[ $# -gt 1 ]]; do
+			case "$1" in
+			--index)
+				index="$2"
+				shift 2
+				;;
+			--partial)
+				partial=1
+				shift
+				;;
+			*)
+				break
+				;;
+			esac
+		done
+		expected="$1"
+
+		if [[ -n "$index" ]]; then
+			# Index-based: check specific line
+			local actual_line
+			actual_line=$(echo "$output" | sed -n "$((index + 1))p")
+			if [[ -n "$partial" ]]; then
+				if [[ "$actual_line" != *"$expected"* ]]; then
+					echo "# Expected line $index to contain: $expected" >&2
+					echo "# Actual line $index: $actual_line" >&2
+					echo "# Full output: $output" >&2
+					return 1
+				fi
+			else
+				if [[ "$actual_line" != "$expected" ]]; then
+					echo "# Expected line $index: $expected" >&2
+					echo "# Actual line $index: $actual_line" >&2
+					echo "# Full output: $output" >&2
+					return 1
+				fi
+			fi
+		elif [[ -n "$partial" ]]; then
 			local found=0
 			while IFS= read -r line; do
 				if [[ "$line" == *"$expected"* ]]; then
@@ -235,7 +285,6 @@ if ! _load_bats_library "assert"; then
 				return 1
 			fi
 		else
-			expected="$1"
 			local found=0
 			while IFS= read -r line; do
 				if [[ "$line" == "$expected" ]]; then

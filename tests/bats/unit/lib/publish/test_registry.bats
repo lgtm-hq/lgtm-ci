@@ -224,9 +224,13 @@ teardown() {
 	mock_command "curl" "$json"
 
 	run bash -c "
-		# Hide jq from PATH
+		# Hide jq from PATH (only if jq is installed)
 		jq_path=\$(command -v jq 2>/dev/null || true)
-		PATH=\"${BATS_TEST_TMPDIR}/bin:\$(echo \"\$PATH\" | tr ':' '\n' | grep -v \"\$(dirname \"\$jq_path\" 2>/dev/null)\" | tr '\n' ':')\"
+		if [[ -n \"\$jq_path\" ]]; then
+			PATH=\"${BATS_TEST_TMPDIR}/bin:\$(echo \"\$PATH\" | tr ':' '\n' | grep -v \"\$(dirname \"\$jq_path\")\" | tr '\n' ':')\"
+		else
+			PATH=\"${BATS_TEST_TMPDIR}/bin:\$PATH\"
+		fi
 		source \"\$LIB_DIR/publish/registry.sh\"
 		get_pypi_download_url \"my-package\" \"1.0.0\"
 	"

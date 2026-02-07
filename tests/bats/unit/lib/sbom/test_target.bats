@@ -7,7 +7,6 @@ load "../../../../helpers/common"
 setup() {
 	setup_temp_dir
 	export LIB_DIR
-	export BATS_TEST_TMPDIR
 }
 
 teardown() {

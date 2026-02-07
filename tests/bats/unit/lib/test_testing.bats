@@ -43,6 +43,28 @@ teardown() {
 }
 
 # =============================================================================
+# Error handling tests
+# =============================================================================
+
+@test "testing.sh: aggregator pattern reports syntax errors in submodules" {
+	# Create a minimal aggregator that sources a broken submodule
+	local fake_dir="${BATS_TEST_TMPDIR}/test_aggregator"
+	mkdir -p "${fake_dir}"
+
+	echo 'if [[ ; then' >"${fake_dir}/broken.sh"
+
+	cat >"${fake_dir}/aggregator.sh" <<'SCRIPT'
+#!/usr/bin/env bash
+_AGG_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$_AGG_DIR/broken.sh"
+SCRIPT
+
+	run bash -c "source '${fake_dir}/aggregator.sh' 2>&1"
+	assert_failure
+	assert_output --partial "syntax error"
+}
+
+# =============================================================================
 # Guard pattern tests
 # =============================================================================
 

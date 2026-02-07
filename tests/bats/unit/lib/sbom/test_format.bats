@@ -189,10 +189,34 @@ teardown() {
 # Constants tests
 # =============================================================================
 
-@test "format.sh: defines SBOM_FORMAT constants" {
+@test "format.sh: defines SBOM_FORMAT_CYCLONEDX_JSON constant" {
 	run bash -c 'source "$LIB_DIR/sbom/format.sh" && echo "$SBOM_FORMAT_CYCLONEDX_JSON"'
 	assert_success
 	assert_output "cyclonedx-json"
+}
+
+@test "format.sh: defines SBOM_FORMAT_SPDX_JSON constant" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && echo "$SBOM_FORMAT_SPDX_JSON"'
+	assert_success
+	assert_output "spdx-json"
+}
+
+@test "format.sh: defines SBOM_FORMAT_CYCLONEDX_XML constant" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && echo "$SBOM_FORMAT_CYCLONEDX_XML"'
+	assert_success
+	assert_output "cyclonedx-xml"
+}
+
+@test "format.sh: defines SBOM_FORMAT_SPDX_TV constant" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && echo "$SBOM_FORMAT_SPDX_TV"'
+	assert_success
+	assert_output "spdx-tv"
+}
+
+@test "format.sh: defines SBOM_FORMAT_SYFT_JSON constant" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && echo "$SBOM_FORMAT_SYFT_JSON"'
+	assert_success
+	assert_output "syft-json"
 }
 
 # =============================================================================

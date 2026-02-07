@@ -271,7 +271,7 @@ teardown() {
 	run bash -c 'source "$LIB_DIR/git.sh" && get_tags "v*"'
 	assert_success
 	# Should be sorted with highest version first
-	assert_line --partial "v2.0.0"
+	assert_line --index 0 "v2.0.0"
 }
 
 @test "get_tags: returns multiple tags" {

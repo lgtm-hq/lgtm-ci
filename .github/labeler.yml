@@ -29,6 +29,7 @@ documentation:
           - "README.md"
           - "CHANGELOG.md"
           - "**/*.md"
+      - all-globs-to-all-files:
           - "!.github/**/*.md"
 
 dependencies:

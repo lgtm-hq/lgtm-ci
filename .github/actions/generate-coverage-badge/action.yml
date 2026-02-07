@@ -58,8 +58,8 @@ runs:
         STEP: calculate
         COVERAGE_FILE: ${{ inputs.coverage-file }}
         COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
-        RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] }}
-        YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] }}
+        RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] || 50 }}
+        YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] || 80 }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
 
     - name: Generate badge
@@ -72,8 +72,8 @@ runs:
         FORMAT: ${{ inputs.format }}
         OUTPUT_PATH: ${{ inputs.output-path }}
         LABEL: ${{ inputs.label }}
-        RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] }}
-        YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] }}
+        RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] || 50 }}
+        YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] || 80 }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
 
     - name: Generate summary
