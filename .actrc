@@ -1,0 +1,10 @@
+# Default: full image for comprehensive testing
+# For fast testing: use catthehacker/ubuntu:act-24.04 (minimal image)
+# Toggle by uncommenting the act-24.04 lines and commenting the full-24.04 lines
+# Run: docker pull catthehacker/ubuntu:full-24.04
+# -P ubuntu-24.04=catthehacker/ubuntu:act-24.04
+# -P ubuntu-latest=catthehacker/ubuntu:act-24.04
+-P ubuntu-24.04=catthehacker/ubuntu:full-24.04
+-P ubuntu-latest=catthehacker/ubuntu:full-24.04
+--container-architecture linux/amd64
+--env ACT=true

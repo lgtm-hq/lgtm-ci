@@ -1,0 +1,70 @@
+# Configuration for actions/labeler
+# Maps file paths to labels for automatic PR labeling
+---
+enhancement:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "scripts/ci/lib/**"
+          - "scripts/ci/actions/**"
+
+ci:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/**"
+          - ".github/actions/**"
+          - "scripts/ci/**"
+
+testing:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "tests/**"
+          - "**/*.bats"
+          - "**/test_*.py"
+          - "**/*_test.py"
+
+documentation:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "README.md"
+          - "CHANGELOG.md"
+          - "**/*.md"
+          - "!.github/**/*.md"
+
+dependencies:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "pyproject.toml"
+          - "uv.lock"
+          - "requirements*.txt"
+          - "package.json"
+          - "package-lock.json"
+          - "bun.lockb"
+
+maintenance:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/CODEOWNERS"
+          - ".github/labeler.yml"
+          - "renovate.json"
+          - ".gitignore"
+          - ".editorconfig"
+
+security:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/workflows/*security*.yml"
+          - ".github/workflows/*codeql*.yml"
+          - ".github/actions/scan-vulnerabilities/**"
+          - ".github/actions/generate-sbom/**"
+          - ".github/actions/verify-attestation/**"
+          - ".github/actions/harden-runner/**"
+
+release:
+  - changed-files:
+      - any-glob-to-any-file:
+          - ".github/actions/calculate-version/**"
+          - ".github/actions/create-github-release/**"
+          - ".github/actions/create-release-tag/**"
+          - ".github/actions/generate-changelog/**"
+          - "scripts/ci/lib/release/**"
