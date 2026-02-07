@@ -11,26 +11,14 @@
 
 set -euo pipefail
 
-# Source shared libraries
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/../lib"
-
-if [[ -f "$LIB_DIR/github/format.sh" ]]; then
-	# shellcheck source=../lib/github/format.sh
-	source "$LIB_DIR/github/format.sh"
-fi
-
-if [[ -f "$LIB_DIR/github/output.sh" ]]; then
-	# shellcheck source=../lib/github/output.sh
-	source "$LIB_DIR/github/output.sh"
-fi
 
 # Defaults
 LINTRO_OUTPUT="${LINTRO_OUTPUT:-chk-output.txt}"
 LINTRO_EXIT_CODE="${LINTRO_EXIT_CODE:-0}"
 
 # Determine status using score_emoji if available for consistency
-if [[ "$LINTRO_EXIT_CODE" -eq 0 ]]; then
+if [[ "$LINTRO_EXIT_CODE" =~ ^[0-9]+$ ]] && [[ "$LINTRO_EXIT_CODE" -eq 0 ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
 else
@@ -55,6 +43,9 @@ if [[ -f "$LINTRO_OUTPUT" ]] && [[ -s "$LINTRO_OUTPUT" ]]; then
 else
 	SUMMARY="No lintro output available — file missing or empty"
 fi
+
+# Sanitize SUMMARY to prevent triple-backtick breakout in fenced code block
+SUMMARY="${SUMMARY//\`\`\`/~~~}"
 
 # Generate comment
 cat <<EOF

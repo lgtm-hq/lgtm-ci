@@ -68,6 +68,11 @@ teardown() {
 	assert_failure
 }
 
+@test "check_npm_availability: requires package name" {
+	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_npm_availability "" "1.0.0" 2>&1'
+	assert_failure
+}
+
 # =============================================================================
 # check_rubygems_availability tests
 # =============================================================================
@@ -97,6 +102,11 @@ teardown() {
 	mock_command "curl" ""
 
 	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_rubygems_availability "my-gem" "1.0.0"'
+	assert_failure
+}
+
+@test "check_rubygems_availability: requires gem name" {
+	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_rubygems_availability "" "1.0.0" 2>&1'
 	assert_failure
 }
 
@@ -224,19 +234,21 @@ teardown() {
 	mock_command "curl" "$json"
 
 	run bash -c "
-		# Hide jq from PATH (only if jq is installed)
-		jq_path=\$(command -v jq 2>/dev/null || true)
-		if [[ -n \"\$jq_path\" ]]; then
-			PATH=\"${BATS_TEST_TMPDIR}/bin:\$(echo \"\$PATH\" | tr ':' '\n' | grep -v \"\$(dirname \"\$jq_path\")\" | tr '\n' ':')\"
-		else
-			PATH=\"${BATS_TEST_TMPDIR}/bin:\$PATH\"
-		fi
+		# Hide jq by shadowing command builtin
+		command() { case \"\$1\" in -v) [[ \"\$2\" != \"jq\" ]] && builtin command \"\$@\" || return 1;; *) builtin command \"\$@\";; esac; }
 		source \"\$LIB_DIR/publish/registry.sh\"
 		get_pypi_download_url \"my-package\" \"1.0.0\"
 	"
-	# May succeed or fail depending on grep's ability to parse the JSON
-	# The important thing is it doesn't crash
-	[[ "$status" -eq 0 ]] || [[ "$status" -eq 1 ]]
+	assert_success
+	assert_output "https://files.pythonhosted.org/pkg-1.0.0.tar.gz"
+}
+
+@test "get_pypi_download_url: returns 1 when no sdist in response" {
+	local json='{"urls":[{"packagetype":"bdist_wheel","url":"https://example.com/pkg.whl"}]}'
+	mock_command "curl" "$json"
+
+	run bash -c 'source "$LIB_DIR/publish/registry.sh" && get_pypi_download_url "my-package" "1.0.0"'
+	assert_failure
 }
 
 # =============================================================================
@@ -274,24 +286,6 @@ teardown() {
 	mock_command "curl" "$json"
 
 	run bash -c 'source "$LIB_DIR/publish/registry.sh" && get_pypi_sha256 "my-package" "1.0.0"'
-	assert_failure
-}
-
-@test "get_pypi_download_url: returns 1 when no sdist in response" {
-	local json='{"urls":[{"packagetype":"bdist_wheel","url":"https://example.com/pkg.whl"}]}'
-	mock_command "curl" "$json"
-
-	run bash -c 'source "$LIB_DIR/publish/registry.sh" && get_pypi_download_url "my-package" "1.0.0"'
-	assert_failure
-}
-
-@test "check_npm_availability: requires package name" {
-	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_npm_availability "" "1.0.0" 2>&1'
-	assert_failure
-}
-
-@test "check_rubygems_availability: requires gem name" {
-	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_rubygems_availability "" "1.0.0" 2>&1'
 	assert_failure
 }
 
@@ -335,6 +329,18 @@ teardown() {
 
 @test "registry.sh: exports get_pypi_sha256 function" {
 	run bash -c 'source "$LIB_DIR/publish/registry.sh" && declare -f get_pypi_sha256 >/dev/null && echo "ok"'
+	assert_success
+	assert_output "ok"
+}
+
+@test "registry.sh: exports check_npm_availability function" {
+	run bash -c 'source "$LIB_DIR/publish/registry.sh" && declare -f check_npm_availability >/dev/null && echo "ok"'
+	assert_success
+	assert_output "ok"
+}
+
+@test "registry.sh: exports check_rubygems_availability function" {
+	run bash -c 'source "$LIB_DIR/publish/registry.sh" && declare -f check_rubygems_availability >/dev/null && echo "ok"'
 	assert_success
 	assert_output "ok"
 }

@@ -88,8 +88,30 @@ EOF
 		merge_lcov_files \"$outfile\" \"$file1\" \"$file2\"
 	"
 	assert_success
-	# Verify output file was created
 	assert_file_exists "$outfile"
+
+	# Verify merged content: single SF block with summed DA counts
+	local merged
+	merged=$(cat "$outfile")
+
+	# Only one SF:/src/a.js block (deduplicated)
+	local sf_count
+	sf_count=$(grep -c '^SF:' "$outfile")
+	assert_equal "1" "$sf_count"
+
+	# DA:1 summed: 1+2=3
+	assert_file_contains "$outfile" "DA:1,3"
+	# DA:2 summed: 0+1=1
+	assert_file_contains "$outfile" "DA:2,1"
+
+	# Recalculated LF/LH: 2 lines found, 2 lines hit (both >0 after merge)
+	assert_file_contains "$outfile" "LF:2"
+	assert_file_contains "$outfile" "LH:2"
+
+	# Only one end_of_record (single SF block)
+	local eor_count
+	eor_count=$(grep -c '^end_of_record' "$outfile")
+	assert_equal "1" "$eor_count"
 }
 
 @test "merge_lcov_files: awk fallback rejects branch/function records" {
@@ -250,6 +272,7 @@ EOF
 
 	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && convert_coverage \"$input\" \"$outfile\" \"auto\" \"lcov\""
 	assert_success
+	assert_file_exists "$outfile"
 }
 
 @test "convert_coverage: cobertura to lcov manual conversion" {
@@ -273,9 +296,12 @@ EOF
 </coverage>
 EOF
 
-	# pycobertura is not available in test environment, so this exercises
-	# the manual _convert_cobertura_to_lcov fallback path
-	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && convert_coverage \"$input\" \"$outfile\" \"cobertura\" \"lcov\""
+	# Hide pycobertura from PATH so the manual _convert_cobertura_to_lcov fallback is exercised
+	run bash -c "
+		command() { case \"\$*\" in *pycobertura*) return 1;; *) builtin command \"\$@\";; esac; }
+		source \"\$LIB_DIR/testing/coverage/merge.sh\"
+		convert_coverage \"$input\" \"$outfile\" \"cobertura\" \"lcov\"
+	"
 	assert_success
 	assert_file_exists "$outfile"
 }
@@ -295,9 +321,12 @@ EOF
 }
 EOF
 
-	# nyc is not available in test environment, so this exercises
-	# the manual _convert_istanbul_to_lcov fallback path
-	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && convert_coverage \"$input\" \"$outfile\" \"istanbul\" \"lcov\""
+	# Hide nyc from PATH so the manual _convert_istanbul_to_lcov fallback is exercised
+	run bash -c "
+		command() { case \"\$*\" in *nyc*) return 1;; *) builtin command \"\$@\";; esac; }
+		source \"\$LIB_DIR/testing/coverage/merge.sh\"
+		convert_coverage \"$input\" \"$outfile\" \"istanbul\" \"lcov\"
+	"
 	assert_success
 	assert_file_exists "$outfile"
 }
@@ -307,8 +336,12 @@ EOF
 	local outfile="${BATS_TEST_TMPDIR}/output.xml"
 	echo "TN:" >"$input"
 
-	# lcov_cobertura is not available in test environment
-	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && convert_coverage \"$input\" \"$outfile\" \"lcov\" \"cobertura\""
+	# Hide lcov_cobertura from PATH to exercise the failure path
+	run bash -c "
+		command() { case \"\$*\" in *lcov_cobertura*) return 1;; *) builtin command \"\$@\";; esac; }
+		source \"\$LIB_DIR/testing/coverage/merge.sh\"
+		convert_coverage \"$input\" \"$outfile\" \"lcov\" \"cobertura\"
+	"
 	assert_failure
 }
 

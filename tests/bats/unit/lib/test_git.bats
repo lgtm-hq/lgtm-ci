@@ -59,10 +59,11 @@ teardown() {
 
 @test "get_current_branch: returns current branch name" {
 	cd "$MOCK_GIT_REPO"
+	local expected_branch
+	expected_branch=$(git rev-parse --abbrev-ref HEAD)
 	run bash -c 'source "$LIB_DIR/git.sh" && get_current_branch'
 	assert_success
-	# Default branch after init could be master or main depending on git config
-	[[ "$output" == "master" ]] || [[ "$output" == "main" ]]
+	assert_output "$expected_branch"
 }
 
 @test "get_current_branch: returns feature branch name" {
@@ -113,7 +114,7 @@ teardown() {
 
 @test "get_short_sha: matches beginning of full SHA" {
 	cd "$MOCK_GIT_REPO"
-	local full_sha short_sha
+	local full_sha
 	full_sha=$(git rev-parse HEAD)
 	run bash -c 'source "$LIB_DIR/git.sh" && get_short_sha'
 	assert_success
@@ -278,9 +279,11 @@ teardown() {
 	cd "$MOCK_GIT_REPO"
 	git tag v1.0.0
 	git tag v1.1.0
-	run bash -c 'source "$LIB_DIR/git.sh" && get_tags | wc -l'
+	run bash -c 'source "$LIB_DIR/git.sh" && get_tags'
 	assert_success
-	[[ "$output" -ge 2 ]]
+	local line_count
+	line_count=$(echo "$output" | wc -l)
+	[[ "$line_count" -ge 2 ]]
 }
 
 @test "get_tags: uses v* pattern by default" {

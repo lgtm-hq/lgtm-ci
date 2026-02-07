@@ -5,9 +5,12 @@
 load "../../../helpers/common"
 
 setup() {
+	if [[ -z "${LIB_DIR:-}" ]]; then
+		echo "ERROR: LIB_DIR is not set — common.bash may have failed to load" >&2
+		return 1
+	fi
 	setup_temp_dir
 	export LIB_DIR
-	export BATS_TEST_TMPDIR
 }
 
 teardown() {

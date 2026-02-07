@@ -5,12 +5,7 @@
 load "../../../../helpers/common"
 
 setup() {
-	setup_temp_dir
 	export LIB_DIR
-}
-
-teardown() {
-	teardown_temp_dir
 }
 
 # =============================================================================
@@ -99,6 +94,30 @@ teardown() {
 	assert_output "valid"
 }
 
+@test "validate_sbom_format: validates cyclonedx-xml" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && validate_sbom_format "cyclonedx-xml" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_sbom_format: validates spdx-tag-value" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && validate_sbom_format "spdx-tag-value" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_sbom_format: validates spdx-tv alias" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && validate_sbom_format "spdx-tv" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_sbom_format: validates cdx-xml alias" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && validate_sbom_format "cdx-xml" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
 @test "validate_sbom_format: rejects invalid format" {
 	run bash -c 'source "$LIB_DIR/sbom/format.sh" && validate_sbom_format "invalid" || echo "invalid"'
 	assert_success
@@ -179,6 +198,24 @@ teardown() {
 	assert_output "application/json"
 }
 
+@test "get_sbom_mime_type: returns correct type for cdx-json alias" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && get_sbom_mime_type "cdx-json"'
+	assert_success
+	assert_output "application/vnd.cyclonedx+json"
+}
+
+@test "get_sbom_mime_type: returns correct type for cdx-xml alias" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && get_sbom_mime_type "cdx-xml"'
+	assert_success
+	assert_output "application/vnd.cyclonedx+xml"
+}
+
+@test "get_sbom_mime_type: returns correct type for spdx-tv alias" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && get_sbom_mime_type "spdx-tv"'
+	assert_success
+	assert_output "text/spdx"
+}
+
 @test "get_sbom_mime_type: returns octet-stream for unknown format" {
 	run bash -c 'source "$LIB_DIR/sbom/format.sh" && get_sbom_mime_type "unknown"'
 	assert_success
@@ -210,7 +247,7 @@ teardown() {
 @test "format.sh: defines SBOM_FORMAT_SPDX_TV constant" {
 	run bash -c 'source "$LIB_DIR/sbom/format.sh" && echo "$SBOM_FORMAT_SPDX_TV"'
 	assert_success
-	assert_output "spdx-tv"
+	assert_output "spdx-tag-value"
 }
 
 @test "format.sh: defines SBOM_FORMAT_SYFT_JSON constant" {
@@ -233,6 +270,18 @@ teardown() {
 	run bash -c 'source "$LIB_DIR/sbom/format.sh" && bash -c "validate_sbom_format cyclonedx-json && echo ok"'
 	assert_success
 	assert_output "ok"
+}
+
+@test "format.sh: exports normalize_sbom_format function" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && bash -c "normalize_sbom_format cdx-json"'
+	assert_success
+	assert_output "cyclonedx-json"
+}
+
+@test "format.sh: exports get_sbom_mime_type function" {
+	run bash -c 'source "$LIB_DIR/sbom/format.sh" && bash -c "get_sbom_mime_type cyclonedx-json"'
+	assert_success
+	assert_output "application/vnd.cyclonedx+json"
 }
 
 # =============================================================================

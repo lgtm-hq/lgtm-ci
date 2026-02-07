@@ -238,6 +238,10 @@ if ! _load_bats_library "assert"; then
 		while [[ $# -gt 1 ]]; do
 			case "$1" in
 			--index)
+				if [[ -z "${2:-}" ]] || ! [[ "$2" =~ ^[0-9]+$ ]]; then
+					echo "# assert_line --index requires a numeric argument" >&2
+					return 1
+				fi
 				index="$2"
 				shift 2
 				;;
@@ -250,6 +254,10 @@ if ! _load_bats_library "assert"; then
 				;;
 			esac
 		done
+		if [[ $# -eq 0 ]] || [[ "$1" == --* ]]; then
+			echo "# assert_line requires an expected value" >&2
+			return 1
+		fi
 		expected="$1"
 
 		if [[ -n "$index" ]]; then

@@ -72,6 +72,7 @@ create_mock_checksum_file() {
 
 	# Update mock to serve checksum file on second call
 	local mock_bin="${BATS_TEST_TMPDIR}/mock_bin"
+	mkdir -p "$mock_bin"
 	local call_count_file="${mock_bin}/.curl_call_count"
 	echo "0" >"$call_count_file"
 
@@ -99,6 +100,7 @@ fi
 exit 0
 EOF
 	chmod +x "${mock_bin}/curl"
+	export PATH="${mock_bin}:$PATH"
 }
 
 # =============================================================================
@@ -381,10 +383,11 @@ EOF
 
 	# Count temp dirs before
 	local tmpdir_before
-	tmpdir_before=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name "lgtm-binary.*" -type d 2>/dev/null | wc -l || echo "0")
+	tmpdir_before=$(find "${BATS_TEST_TMPDIR}" -maxdepth 1 -name "lgtm-binary.*" -type d 2>/dev/null | wc -l || echo "0")
 
 	run bash -c "
 		export BIN_DIR='$BIN_DIR'
+		export TMPDIR='$BATS_TEST_TMPDIR'
 		source \"\$LIB_DIR/installer/binary.sh\"
 		installer_download_binary 'https://example.com/tool.tar.gz' '' 'tar.gz' 'mytool' 2>&1
 	"
@@ -392,7 +395,7 @@ EOF
 
 	# Count temp dirs after
 	local tmpdir_after
-	tmpdir_after=$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name "lgtm-binary.*" -type d 2>/dev/null | wc -l || echo "0")
+	tmpdir_after=$(find "${BATS_TEST_TMPDIR}" -maxdepth 1 -name "lgtm-binary.*" -type d 2>/dev/null | wc -l || echo "0")
 
 	# Should have cleaned up (no increase in temp dirs)
 	[[ "$tmpdir_after" -le "$tmpdir_before" ]]
@@ -530,13 +533,8 @@ MOCK
 	assert_success
 
 	# Verify curl was called with anchore/syft URL
-	[[ -f "$BATS_TEST_TMPDIR/mock_calls_curl" ]]
-	local calls
-	calls=$(cat "$BATS_TEST_TMPDIR/mock_calls_curl")
-	if [[ "$calls" != *"anchore"* ]]; then
-		echo "expected 'anchore' in mock_calls_curl, got: $calls" >&2
-		return 1
-	fi
+	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
+	assert_output --partial "anchore"
 }
 
 @test "install_anchore_tool: defaults to latest version" {
