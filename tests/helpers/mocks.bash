@@ -258,6 +258,24 @@ tag_mock_repo() {
 }
 
 # =============================================================================
+# Coverage tool stubs
+# =============================================================================
+
+# Generate bash source code that hides lcov from PATH.
+# Usage (inside a run bash -c "..." block):
+#   run bash -c "$(stub_hide_lcov); source ..."
+# This defines lcov() returning 127 and overrides command() to fail for lcov.
+stub_hide_lcov() {
+	cat <<'STUB'
+lcov() { return 127; }
+command() {
+	case "$*" in *lcov*) return 1;; esac
+	builtin command "$@"
+}
+STUB
+}
+
+# =============================================================================
 # Helper to restore original PATH
 # =============================================================================
 

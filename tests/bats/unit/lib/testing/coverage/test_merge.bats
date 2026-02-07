@@ -48,8 +48,13 @@ EOF
 
 	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && merge_lcov_files \"$outfile\" \"$file1\" \"$file2\""
 	assert_success
-	# Verify lcov was called
+	# Verify lcov was called with expected arguments
 	assert_file_exists "${BATS_TEST_TMPDIR}/mock_calls_lcov"
+	local lcov_args
+	lcov_args=$(cat "${BATS_TEST_TMPDIR}/mock_calls_lcov")
+	[[ "$lcov_args" == *"$outfile"* ]]
+	[[ "$lcov_args" == *"$file1"* ]]
+	[[ "$lcov_args" == *"$file2"* ]]
 }
 
 @test "merge_lcov_files: awk fallback concatenates and deduplicates" {
@@ -78,12 +83,7 @@ EOF
 
 	# Use subshell where lcov is not available
 	run bash -c "
-		# Ensure lcov is not found
-		lcov() { return 127; }
-		command() {
-			case \"\$*\" in *lcov*) return 1;; esac
-			builtin command \"\$@\"
-		}
+		$(stub_hide_lcov)
 		source \"\$LIB_DIR/testing/coverage/merge.sh\"
 		merge_lcov_files \"$outfile\" \"$file1\" \"$file2\"
 	"
@@ -107,11 +107,7 @@ end_of_record
 EOF
 
 	run bash -c "
-		lcov() { return 127; }
-		command() {
-			case \"\$*\" in *lcov*) return 1;; esac
-			builtin command \"\$@\"
-		}
+		$(stub_hide_lcov)
 		source \"\$LIB_DIR/testing/coverage/merge.sh\"
 		merge_lcov_files \"$outfile\" \"$file1\" 2>&1
 	"
@@ -128,6 +124,12 @@ EOF
 
 	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && merge_lcov_files \"$outfile\" \"$file1\" \"/nonexistent/file.lcov\""
 	assert_success
+	# Verify lcov was called with existing file but not the missing one
+	assert_file_exists "${BATS_TEST_TMPDIR}/mock_calls_lcov"
+	local lcov_args
+	lcov_args=$(cat "${BATS_TEST_TMPDIR}/mock_calls_lcov")
+	[[ "$lcov_args" == *"$file1"* ]]
+	[[ "$lcov_args" != *"/nonexistent/file.lcov"* ]]
 }
 
 @test "merge_lcov_files: single file input works" {
@@ -162,6 +164,12 @@ EOF
 
 	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && merge_istanbul_files \"$outfile\" \"$file1\""
 	assert_success
+	# Verify nyc was called with merge subcommand and output path
+	assert_file_exists "${BATS_TEST_TMPDIR}/mock_calls_nyc"
+	local nyc_args
+	nyc_args=$(cat "${BATS_TEST_TMPDIR}/mock_calls_nyc")
+	[[ "$nyc_args" == *"merge"* ]]
+	[[ "$nyc_args" == *"$outfile"* ]]
 }
 
 @test "merge_istanbul_files: single file fallback copies without nyc" {

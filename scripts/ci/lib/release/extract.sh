@@ -66,7 +66,7 @@ extract_version_cargo() {
 	fi
 
 	local version
-	version=$(grep -E '^version\s*=' "$file" | head -1 | sed -E 's/.*=[[:space:]]*"([^"]+)".*/\1/' || true)
+	version=$(grep -E '^version\s*=' "$file" | head -1 | sed -E "s/.*=[[:space:]]*[\"']([^\"']+)[\"'].*/\1/" || true)
 
 	if [[ -z "$version" ]]; then
 		return 1

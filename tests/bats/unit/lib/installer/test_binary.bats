@@ -460,7 +460,6 @@ EOF
 #!/usr/bin/env bash
 count=\$(cat "$call_count_file")
 if [[ \$count -eq 0 ]]; then
-    echo "0" > "$call_count_file"
     echo "Application: syft"
     echo "Version: 0.80.0"
 else
