@@ -71,8 +71,8 @@ validate_npm_package() {
 
 	# Check required fields
 	local name version
-	name=$(grep -E '^\s*"name"\s*:' "$package_json" | sed 's/.*:\s*"\([^"]*\)".*/\1/')
-	version=$(grep -E '^\s*"version"\s*:' "$package_json" | sed 's/.*:\s*"\([^"]*\)".*/\1/')
+	name=$(grep -E '^\s*"name"\s*:' "$package_json" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
+	version=$(grep -E '^\s*"version"\s*:' "$package_json" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
 
 	if [[ -z "$name" ]]; then
 		log_error "Missing required field: name"

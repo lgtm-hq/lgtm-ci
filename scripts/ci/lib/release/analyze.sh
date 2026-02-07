@@ -223,19 +223,19 @@ count_commits_by_type() {
 		full_message=$(git log -1 --format='%B' "$sha" 2>/dev/null)
 
 		if is_breaking_change "$full_message"; then
-			((breaking++))
+			breaking=$((breaking + 1))
 			continue
 		fi
 
 		if parse_conventional_commit "$subject"; then
 			case "$CC_TYPE" in
-			feat | feature) ((feat++)) ;;
-			fix | bugfix | hotfix) ((fix++)) ;;
-			docs | documentation) ((docs++)) ;;
-			*) ((other++)) ;;
+			feat | feature) feat=$((feat + 1)) ;;
+			fix | bugfix | hotfix) fix=$((fix + 1)) ;;
+			docs | documentation) docs=$((docs + 1)) ;;
+			*) other=$((other + 1)) ;;
 			esac
 		else
-			((other++))
+			other=$((other + 1))
 		fi
 	done < <(git log --oneline "$range" 2>/dev/null)
 

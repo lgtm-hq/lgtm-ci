@@ -179,7 +179,7 @@ installer_run() {
 
 	# String comparison to handle "1", "true", "yes" values
 	local dry_run="${DRY_RUN:-0}"
-	dry_run="${dry_run,,}" # lowercase
+	dry_run=$(printf '%s' "$dry_run" | tr '[:upper:]' '[:lower:]')
 	if [[ "$dry_run" == "1" || "$dry_run" == "true" || "$dry_run" == "yes" ]]; then
 		log_info "[DRY-RUN] Would install ${TOOL_NAME:-tool}${TOOL_VERSION:+ v${TOOL_VERSION}}"
 		return 0

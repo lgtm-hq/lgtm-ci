@@ -142,20 +142,20 @@ update_formula_version() {
 	cp "$formula_path" "$formula_path.bak"
 
 	# Update URL (only first top-level occurrence with 2-space indent, not resource blocks)
-	if ! sed -i.tmp '0,/^  url "/s|^  url "[^"]*"|  url "'"$new_url"'"|' "$formula_path"; then
+	if ! awk -v new_val="$new_url" 'BEGIN { gsub(/&/, "\\\\&", new_val) } /^  url "/ && !done { sub(/url "[^"]*"/, "url \"" new_val "\""); done=1 } { print }' "$formula_path" >"${formula_path}.tmp"; then
 		mv "$formula_path.bak" "$formula_path"
 		log_error "Failed to update URL"
 		return 1
 	fi
-	rm -f "$formula_path.tmp"
+	mv "${formula_path}.tmp" "$formula_path"
 
 	# Update SHA256 (only first top-level occurrence with 2-space indent, not resource blocks)
-	if ! sed -i.tmp '0,/^  sha256 "/s|^  sha256 "[^"]*"|  sha256 "'"$new_sha256"'"|' "$formula_path"; then
+	if ! awk -v new_val="$new_sha256" 'BEGIN { gsub(/&/, "\\\\&", new_val) } /^  sha256 "/ && !done { sub(/sha256 "[^"]*"/, "sha256 \"" new_val "\""); done=1 } { print }' "$formula_path" >"${formula_path}.tmp"; then
 		mv "$formula_path.bak" "$formula_path"
 		log_error "Failed to update SHA256"
 		return 1
 	fi
-	rm -f "$formula_path.tmp"
+	mv "${formula_path}.tmp" "$formula_path"
 
 	# Clean up backup on success
 	rm -f "$formula_path.bak"
