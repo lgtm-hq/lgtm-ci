@@ -1,75 +1,90 @@
 ---
-name: 'Post PR Comment'
-description: >-
-  Create or update a PR comment with unique marker for upsert behavior
-author: 'lgtm-hq'
+name: "Post PR Comment"
+description: "Post or update a comment on a pull request with marker-based identification"
+author: "lgtm-hq"
+
 inputs:
-  token:
-    description: 'GitHub token for API access'
+  file:
+    description:
+      "Path to file containing comment body (takes precedence over 'body' if both
+      provided)"
     required: false
-    default: ${{ github.token }}
-  pr-number:
-    description: >-
-      Pull request number (auto-detected from context if not provided)
-    required: false
-    default: ''
-  marker:
-    description: >-
-      Unique marker to identify this comment for updates
-    required: true
+    default: ""
   body:
-    description: 'Comment body content (Markdown supported)'
+    description: >-
+      Comment body content (used only if 'file' is not provided; if neither is set,
+      behavior depends on 'delete-on-empty')
+    required: false
+    default: ""
+  marker:
+    description: "Unique marker for comment identification"
     required: true
   mode:
-    description: >-
-      Comment mode: upsert (create or update), create, or update
+    description: "Comment mode: upsert (default), create, or update"
     required: false
-    default: 'upsert'
+    default: "upsert"
   delete-on-empty:
-    description: 'Delete existing comment if body is empty'
+    description: "Delete existing comment if body is empty"
     required: false
-    default: 'false'
+    default: "false"
+  pr-number:
+    description: "Pull request number (auto-detected if not provided)"
+    required: false
+    default: ""
 
 outputs:
   comment-id:
-    description: 'ID of the created or updated comment'
+    description: "ID of the created or updated comment"
     value: ${{ steps.post.outputs.comment-id }}
   comment-url:
-    description: 'URL of the comment'
+    description: "URL of the created or updated comment"
     value: ${{ steps.post.outputs.comment-url }}
   action-taken:
-    description: 'Action taken: "created", "updated", "deleted", or "skipped"'
+    description: "Action taken: created, updated, deleted, or skipped"
     value: ${{ steps.post.outputs.action-taken }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
-    - name: Determine PR number
-      id: pr-number
+    - name: Detect PR number
+      id: pr
       shell: bash
       env:
         STEP: pr-number
-        GH_TOKEN: ${{ inputs.token }}
-        INPUT_PR_NUMBER: ${{ inputs['pr-number'] }}
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
+        INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
 
-    - name: Post or update comment
+    - name: Read comment from file
+      id: read
+      if: inputs.file != ''
+      shell: bash
+      env:
+        STEP: read-file
+        COMMENT_FILE: ${{ inputs.file }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
+
+    - name: Post comment
       id: post
       shell: bash
       env:
         STEP: post
-        GH_TOKEN: ${{ inputs.token }}
+        GH_TOKEN: ${{ github.token }}
+        GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
-        COMMENT_BODY: ${{ inputs.body }}
-        PR_NUMBER: ${{ steps.pr-number.outputs.number }}
+        PR_NUMBER: ${{ steps.pr.outputs.number }}
         MARKER: ${{ inputs.marker }}
         MODE: ${{ inputs.mode }}
-        DELETE_ON_EMPTY: ${{ inputs['delete-on-empty'] }}
+        DELETE_ON_EMPTY: ${{ inputs.delete-on-empty }}
+        FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
+        BODY_FROM_FILE: ${{ steps.read.outputs.body }}
+        BODY_FROM_INPUT: ${{ inputs.body }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
 
 branding:
-  icon: 'message-square'
-  color: 'blue'
+  icon: "message-square"
+  color: "blue"

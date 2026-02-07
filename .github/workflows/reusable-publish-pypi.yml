@@ -5,54 +5,54 @@ on:
   workflow_call:
     inputs:
       python-version:
-        description: 'Python version for building'
+        description: "Python version for building"
         required: false
         type: string
-        default: '3.12'
+        default: "3.12"
       validate:
-        description: 'Run twine check before publishing'
+        description: "Run twine check before publishing"
         required: false
         type: boolean
         default: true
       test-pypi:
-        description: 'Publish to TestPyPI instead of PyPI'
+        description: "Publish to TestPyPI instead of PyPI"
         required: false
         type: boolean
         default: false
       update-homebrew:
-        description: 'Update Homebrew formula after publishing'
+        description: "Update Homebrew formula after publishing"
         required: false
         type: boolean
         default: false
       homebrew-tap:
-        description: 'Homebrew tap repository (owner/repo)'
+        description: "Homebrew tap repository (owner/repo)"
         required: false
         type: string
-        default: ''
+        default: ""
       homebrew-formula:
-        description: 'Homebrew formula name'
+        description: "Homebrew formula name"
         required: false
         type: string
-        default: ''
+        default: ""
       dry-run:
-        description: 'Build only, do not publish'
+        description: "Build only, do not publish"
         required: false
         type: boolean
         default: false
       working-directory:
-        description: 'Working directory containing the package'
+        description: "Working directory containing the package"
         required: false
         type: string
-        default: '.'
+        default: "."
     outputs:
       published:
-        description: 'Whether the package was published'
+        description: "Whether the package was published"
         value: ${{ jobs.publish.outputs.published }}
       version:
-        description: 'Published package version'
+        description: "Published package version"
         value: ${{ jobs.publish.outputs.version }}
       package-name:
-        description: 'Published package name'
+        description: "Published package name"
         value: ${{ jobs.publish.outputs.package-name }}
 
 jobs:
@@ -119,5 +119,5 @@ jobs:
           formula: ${{ inputs.homebrew-formula }}
           package-name: ${{ needs.publish.outputs.package-name }}
           version: ${{ needs.publish.outputs.version }}
-          wait-for-availability: 'true'
+          wait-for-availability: "true"
           test-pypi: ${{ inputs.test-pypi }}

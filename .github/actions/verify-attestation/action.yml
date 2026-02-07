@@ -1,35 +1,35 @@
 ---
-name: 'Verify Attestation'
-description: 'Verify build attestations using gh attestation verify'
-author: 'lgtm-hq'
+name: "Verify Attestation"
+description: "Verify build attestations using gh attestation verify"
+author: "lgtm-hq"
 
 inputs:
   target:
-    description: 'Target to verify (file path or image reference)'
+    description: "Target to verify (file path or image reference)"
     required: true
   target-type:
-    description: 'Type of target: file, image'
+    description: "Type of target: file, image"
     required: false
-    default: 'file'
+    default: "file"
   owner:
-    description: 'Repository owner for attestation lookup'
+    description: "Repository owner for attestation lookup"
     required: false
-    default: ''
+    default: ""
   repo:
-    description: 'Repository name for attestation lookup'
+    description: "Repository name for attestation lookup"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   verified:
-    description: 'Whether the attestation was verified successfully'
+    description: "Whether the attestation was verified successfully"
     value: ${{ steps.verify.outputs.verified }}
   signer-identity:
-    description: 'Identity of the signer'
+    description: "Identity of the signer"
     value: ${{ steps.verify.outputs.signer-identity }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Verify attestation
       id: verify
@@ -62,5 +62,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
 
 branding:
-  icon: 'check-square'
-  color: 'purple'
+  icon: "check-square"
+  color: "purple"

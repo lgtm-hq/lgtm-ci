@@ -1,32 +1,32 @@
 ---
-name: 'Deploy to GitHub Pages'
-description: 'Prepare and upload content for GitHub Pages deployment'
-author: 'lgtm-hq'
+name: "Deploy to GitHub Pages"
+description: "Prepare and upload content for GitHub Pages deployment"
+author: "lgtm-hq"
 
 inputs:
   source-path:
-    description: 'Path to static content to deploy'
+    description: "Path to static content to deploy"
     required: false
-    default: 'dist'
+    default: "dist"
   build-command:
-    description: 'Optional build command to run before deployment'
+    description: "Optional build command to run before deployment"
     required: false
-    default: ''
+    default: ""
   artifact-name:
-    description: 'Name for the pages artifact'
+    description: "Name for the pages artifact"
     required: false
-    default: 'github-pages'
+    default: "github-pages"
 
 outputs:
   artifact-id:
-    description: 'ID of the uploaded artifact'
+    description: "ID of the uploaded artifact"
     value: ${{ steps.upload.outputs.artifact_id }}
   file-count:
-    description: 'Number of files in the deployment'
+    description: "Number of files in the deployment"
     value: ${{ steps.prepare.outputs.file-count }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Prepare content
       id: prepare
@@ -53,5 +53,5 @@ runs:
         name: ${{ inputs.artifact-name }}
 
 branding:
-  icon: 'upload-cloud'
-  color: 'blue'
+  icon: "upload-cloud"
+  color: "blue"

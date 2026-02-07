@@ -1,92 +1,92 @@
 ---
-name: 'Secure Checkout'
-description: 'Checkout repository with security-hardened defaults'
-author: 'lgtm-hq'
+name: "Secure Checkout"
+description: "Checkout repository with security-hardened defaults"
+author: "lgtm-hq"
 
 inputs:
   repository:
-    description: 'Repository name with owner (e.g., owner/repo)'
+    description: "Repository name with owner (e.g., owner/repo)"
     required: false
     default: ${{ github.repository }}
   ref:
-    description: 'The branch, tag or SHA to checkout'
+    description: "The branch, tag or SHA to checkout"
     required: false
-    default: ''
+    default: ""
   token:
-    description: 'Personal access token (PAT) for authentication'
+    description: "Personal access token (PAT) for authentication"
     required: false
     default: ${{ github.token }}
   ssh-key:
-    description: 'SSH key for authentication'
+    description: "SSH key for authentication"
     required: false
-    default: ''
+    default: ""
   ssh-known-hosts:
-    description: 'Known hosts for SSH'
+    description: "Known hosts for SSH"
     required: false
-    default: ''
+    default: ""
   ssh-strict:
-    description: 'Enable strict SSH host key checking'
+    description: "Enable strict SSH host key checking"
     required: false
-    default: 'true'
+    default: "true"
   persist-credentials:
-    description: 'Persist credentials in git config (disabled by default)'
+    description: "Persist credentials in git config (disabled by default)"
     required: false
-    default: 'false'
+    default: "false"
   path:
-    description: 'Relative path under $GITHUB_WORKSPACE to place the repository'
+    description: "Relative path under $GITHUB_WORKSPACE to place the repository"
     required: false
-    default: ''
+    default: ""
   clean:
-    description: 'Whether to clean the repository before checkout'
+    description: "Whether to clean the repository before checkout"
     required: false
-    default: 'true'
+    default: "true"
   filter:
-    description: 'Partially clone using git sparse-checkout'
+    description: "Partially clone using git sparse-checkout"
     required: false
-    default: ''
+    default: ""
   sparse-checkout:
-    description: 'Paths for sparse checkout'
+    description: "Paths for sparse checkout"
     required: false
-    default: ''
+    default: ""
   sparse-checkout-cone-mode:
-    description: 'Use cone mode for sparse checkout'
+    description: "Use cone mode for sparse checkout"
     required: false
-    default: 'true'
+    default: "true"
   fetch-depth:
-    description: 'Number of commits to fetch (0 for full history)'
+    description: "Number of commits to fetch (0 for full history)"
     required: false
-    default: '1'
+    default: "1"
   fetch-tags:
-    description: 'Fetch tags'
+    description: "Fetch tags"
     required: false
-    default: 'false'
+    default: "false"
   show-progress:
-    description: 'Show progress during checkout'
+    description: "Show progress during checkout"
     required: false
-    default: 'true'
+    default: "true"
   lfs:
-    description: 'Download LFS files'
+    description: "Download LFS files"
     required: false
-    default: 'false'
+    default: "false"
   submodules:
-    description: 'Checkout submodules (true, recursive, or false)'
+    description: "Checkout submodules (true, recursive, or false)"
     required: false
-    default: 'false'
+    default: "false"
   set-safe-directory:
-    description: 'Add path to git safe.directory'
+    description: "Add path to git safe.directory"
     required: false
-    default: 'true'
+    default: "true"
 
 outputs:
   ref:
-    description: 'The resolved ref that was checked out'
+    description: "The resolved ref that was checked out"
     value: ${{ steps.checkout.outputs.ref }}
   commit:
-    description: 'The commit SHA that was checked out'
+    description: "The commit SHA that was checked out"
     value: ${{ steps.checkout.outputs.commit }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Checkout repository
       id: checkout
@@ -131,5 +131,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/secure-checkout.sh
 
 branding:
-  icon: 'download'
-  color: 'blue'
+  icon: "download"
+  color: "blue"

@@ -11,8 +11,8 @@ Configure common CI environment variables and PATH.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main
   with:
-    bin-dir: '${{ github.workspace }}/.local/bin' # optional
-    add-to-path: '/custom/path1, /custom/path2' # optional
+    bin-dir: "${{ github.workspace }}/.local/bin" # optional
+    add-to-path: "/custom/path1, /custom/path2" # optional
 ```
 
 **Outputs:**
@@ -38,10 +38,10 @@ Setup Python with [uv](https://github.com/astral-sh/uv) package manager.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
   with:
-    python-version: '3.12' # optional, default: 3.12
-    uv-version: 'latest' # optional
-    cache: 'true' # optional, default: true
-    install-dependencies: 'true' # optional, default: true
+    python-version: "3.12" # optional, default: 3.12
+    uv-version: "latest" # optional
+    cache: "true" # optional, default: true
+    install-dependencies: "true" # optional, default: true
 ```
 
 **Outputs:**
@@ -66,11 +66,11 @@ Setup Node.js with [bun](https://bun.sh) package manager.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@main
   with:
-    node-version: '22' # optional, default: 22
-    bun-version: 'latest' # optional
-    cache: 'true' # optional, default: true
-    install-dependencies: 'true' # optional, default: true
-    frozen-lockfile: 'true' # optional, default: true
+    node-version: "22" # optional, default: 22
+    bun-version: "latest" # optional
+    cache: "true" # optional, default: true
+    install-dependencies: "true" # optional, default: true
+    frozen-lockfile: "true" # optional, default: true
 ```
 
 **Outputs:**
@@ -94,10 +94,10 @@ Setup Rust toolchain with cargo caching.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-rust@main
   with:
-    toolchain: 'stable' # optional, default: stable
-    components: 'clippy, rustfmt' # optional
-    targets: 'wasm32-unknown-unknown' # optional
-    cache: 'true' # optional, default: true
+    toolchain: "stable" # optional, default: stable
+    components: "clippy, rustfmt" # optional
+    targets: "wasm32-unknown-unknown" # optional
+    cache: "true" # optional, default: true
 ```
 
 **Outputs:**
@@ -125,8 +125,8 @@ Security hardening using [StepSecurity](https://stepsecurity.io).
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
   with:
-    egress-policy: 'audit' # or 'block' to enforce allowlist
-    disable-sudo: 'false' # optional
+    egress-policy: "audit" # or 'block' to enforce allowlist
+    disable-sudo: "false" # optional
 ```
 
 **Features:**
@@ -144,8 +144,8 @@ Security-hardened repository checkout with sensible defaults.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
   with:
-    persist-credentials: 'false' # default: false (secure)
-    fetch-depth: '1' # default: 1 (shallow clone)
+    persist-credentials: "false" # default: false (secure)
+    fetch-depth: "1" # default: 1 (shallow clone)
 ```
 
 **Security defaults:**
@@ -168,8 +168,8 @@ Network egress configuration and reporting scaffolding.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/egress-audit@main
   with:
-    mode: 'audit' # 'audit', 'report', or 'block'
-    report-format: 'summary' # 'summary', 'json', or 'none'
+    mode: "audit" # 'audit', 'report', or 'block'
+    report-format: "summary" # 'summary', 'json', or 'none'
 ```
 
 **Features:**
@@ -198,11 +198,11 @@ Generate Software Bill of Materials (SBOM) using
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@main
   with:
-    target: '.' # optional, default: current directory
-    target-type: 'dir' # 'dir', 'image', or 'file'
-    format: 'cyclonedx-json' # see supported formats below
-    upload-artifact: 'true' # optional
-    artifact-name: 'sbom' # optional
+    target: "." # optional, default: current directory
+    target-type: "dir" # 'dir', 'image', or 'file'
+    format: "cyclonedx-json" # see supported formats below
+    upload-artifact: "true" # optional
+    artifact-name: "sbom" # optional
 ```
 
 **Outputs:**
@@ -226,10 +226,10 @@ Scan for vulnerabilities using [Grype](https://github.com/anchore/grype).
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@main
   with:
-    target: 'sbom.cdx.json' # SBOM file, image, or directory
-    target-type: 'sbom' # 'sbom', 'image', or 'dir'
-    fail-on: 'high' # 'critical', 'high', 'medium', 'low', or ''
-    upload-sarif: 'true' # upload to GitHub Security tab
+    target: "sbom.cdx.json" # SBOM file, image, or directory
+    target-type: "sbom" # 'sbom', 'image', or 'dir'
+    fail-on: "high" # 'critical', 'high', 'medium', 'low', or ''
+    upload-sarif: "true" # upload to GitHub Security tab
 ```
 
 **Outputs:**
@@ -258,9 +258,9 @@ Create build attestations using
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/attest-build@main
   with:
-    subject-path: 'dist/myapp.tar.gz' # artifact to attest
-    subject-name: 'myapp' # optional
-    push-to-registry: 'false' # push to container registry
+    subject-path: "dist/myapp.tar.gz" # artifact to attest
+    subject-name: "myapp" # optional
+    push-to-registry: "false" # push to container registry
 ```
 
 **Outputs:**
@@ -283,9 +283,9 @@ Verify build attestations using `gh attestation verify`.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/verify-attestation@main
   with:
-    target: 'dist/myapp.tar.gz' # file or image to verify
-    target-type: 'file' # 'file' or 'image'
-    owner: 'my-org' # optional, defaults to repository owner
+    target: "dist/myapp.tar.gz" # file or image to verify
+    target-type: "file" # 'file' or 'image'
+    owner: "my-org" # optional, defaults to repository owner
 ```
 
 **Outputs:**
@@ -304,11 +304,11 @@ Create or update PR comments with upsert behavior using unique markers.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@main
   with:
-    marker: 'lighthouse-results' # unique identifier for this comment
+    marker: "lighthouse-results" # unique identifier for this comment
     body: |
       ## Results
       Your content here...
-    mode: 'upsert' # 'upsert', 'create', or 'update'
+    mode: "upsert" # 'upsert', 'create', or 'update'
 ```
 
 **Features:**
@@ -333,9 +333,9 @@ Validate PR title follows conventional commit format.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/semantic-pr-title@main
   with:
-    types: 'feat,fix,docs,chore' # optional, allowed types
-    require-scope: 'false' # optional
-    max-length: '72' # optional
+    types: "feat,fix,docs,chore" # optional, allowed types
+    require-scope: "false" # optional
+    max-length: "72" # optional
 ```
 
 **Features:**
@@ -361,11 +361,11 @@ Run Lighthouse CI audits with configurable score thresholds.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-lighthouse@main
   with:
-    url: 'http://localhost:3000'
-    threshold-performance: '80'
-    threshold-accessibility: '90'
-    threshold-best-practices: '80'
-    threshold-seo: '80'
+    url: "http://localhost:3000"
+    threshold-performance: "80"
+    threshold-accessibility: "90"
+    threshold-best-practices: "80"
+    threshold-seo: "80"
 ```
 
 **Inputs:**
@@ -402,9 +402,9 @@ Generate formatted PR comment from Lighthouse CI results.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/generate-lighthouse-comment@main
   with:
-    results-path: 'lighthouse-results/'
-    report-url: 'https://example.github.io/lighthouse/'
-    threshold-performance: '80'
+    results-path: "lighthouse-results/"
+    report-url: "https://example.github.io/lighthouse/"
+    threshold-performance: "80"
 ```
 
 **Features:**
@@ -429,9 +429,9 @@ Generate formatted PR comment from Playwright test results.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/generate-playwright-comment@main
   with:
-    results-path: 'playwright-report/results.json'
-    report-url: 'https://example.github.io/playwright/'
-    show-failed-tests: 'true'
+    results-path: "playwright-report/results.json"
+    report-url: "https://example.github.io/playwright/"
+    show-failed-tests: "true"
 ```
 
 **Features:**
@@ -456,10 +456,10 @@ Generate formatted PR comment from code coverage results.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-comment@main
   with:
-    coverage-file: 'coverage/coverage-summary.json'
-    format: 'auto' # 'istanbul', 'coverage-py', or 'auto'
-    threshold-lines: '80'
-    threshold-branches: '70'
+    coverage-file: "coverage/coverage-summary.json"
+    format: "auto" # 'istanbul', 'coverage-py', or 'auto'
+    threshold-lines: "80"
+    threshold-branches: "70"
 ```
 
 **Features:**
@@ -486,11 +486,11 @@ Generic test runner that auto-detects and delegates to language-specific runners
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-tests@main
   with:
-    runner: 'auto' # 'pytest', 'vitest', 'playwright', or 'auto'
-    coverage: 'true' # optional
-    coverage-format: 'json' # 'xml', 'json', 'lcov'
-    extra-args: '' # additional runner arguments
-    working-directory: '.' # optional
+    runner: "auto" # 'pytest', 'vitest', 'playwright', or 'auto'
+    coverage: "true" # optional
+    coverage-format: "json" # 'xml', 'json', 'lcov'
+    extra-args: "" # additional runner arguments
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -517,13 +517,13 @@ Run Python tests using pytest with optional coverage.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@main
   with:
-    python-version: '3.12' # optional
-    test-path: 'tests' # optional
-    coverage: 'true' # optional
-    coverage-format: 'json' # 'xml', 'json', 'lcov'
-    markers: 'not slow' # optional, pytest markers
-    extra-args: '-v' # optional
-    working-directory: '.' # optional
+    python-version: "3.12" # optional
+    test-path: "tests" # optional
+    coverage: "true" # optional
+    coverage-format: "json" # 'xml', 'json', 'lcov'
+    markers: "not slow" # optional, pytest markers
+    extra-args: "-v" # optional
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -548,12 +548,12 @@ Run JavaScript/TypeScript tests using vitest with optional coverage.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-vitest@main
   with:
-    node-version: '20' # optional
-    test-path: '.' # optional
-    coverage: 'true' # optional
-    coverage-format: 'json' # 'json', 'lcov', 'html'
-    extra-args: '' # optional
-    working-directory: '.' # optional
+    node-version: "20" # optional
+    test-path: "." # optional
+    coverage: "true" # optional
+    coverage-format: "json" # 'json', 'lcov', 'html'
+    extra-args: "" # optional
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -578,13 +578,13 @@ Run E2E tests using Playwright with browser automation.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-playwright@main
   with:
-    node-version: '20' # optional
-    project: '' # optional, Playwright project
-    browser: 'chromium' # 'chromium', 'firefox', 'webkit', 'all'
-    reporter: 'html' # 'json', 'html', 'junit'
-    shard: '1/3' # optional, for parallel execution
-    extra-args: '' # optional
-    working-directory: '.' # optional
+    node-version: "20" # optional
+    project: "" # optional, Playwright project
+    browser: "chromium" # 'chromium', 'firefox', 'webkit', 'all'
+    reporter: "html" # 'json', 'html', 'junit'
+    shard: "1/3" # optional, for parallel execution
+    extra-args: "" # optional
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -608,9 +608,9 @@ Merge multiple Playwright reports from sharded or matrix test runs.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/merge-playwright-reports@main
   with:
-    input-dir: 'playwright-reports'
-    output-dir: 'merged-report'
-    report-format: 'html'
+    input-dir: "playwright-reports"
+    output-dir: "merged-report"
+    report-format: "html"
 ```
 
 **Inputs:**
@@ -640,11 +640,11 @@ Aggregate coverage from multiple sources and formats.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/collect-coverage@main
   with:
-    coverage-files: 'coverage/*.json' # glob or comma-separated
-    input-format: 'auto' # 'auto', 'istanbul', 'coverage-py', 'lcov'
-    output-format: 'json' # 'json', 'lcov'
-    merge-strategy: 'union' # 'union', 'intersection'
-    working-directory: '.' # optional
+    coverage-files: "coverage/*.json" # glob or comma-separated
+    input-format: "auto" # 'auto', 'istanbul', 'coverage-py', 'lcov'
+    output-format: "json" # 'json', 'lcov'
+    merge-strategy: "union" # 'union', 'intersection'
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -668,9 +668,9 @@ Check if coverage meets a minimum threshold.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/check-coverage-threshold@main
   with:
-    coverage-percent: '85.5' # current coverage
-    threshold: '80' # minimum required
-    fail-on-error: 'true' # optional, default: true
+    coverage-percent: "85.5" # current coverage
+    threshold: "80" # minimum required
+    fail-on-error: "true" # optional, default: true
 ```
 
 **Outputs:**
@@ -693,12 +693,12 @@ Generate coverage badge SVG/JSON for README display.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-badge@main
   with:
-    coverage-file: 'coverage.json' # or use coverage-percent
-    coverage-percent: '85.5' # if not extracting from file
-    format: 'svg' # 'svg', 'json', 'shields'
-    output-path: 'badge.svg' # optional
-    label: 'coverage' # optional
-    thresholds: '50,80' # red,yellow boundaries
+    coverage-file: "coverage.json" # or use coverage-percent
+    coverage-percent: "85.5" # if not extracting from file
+    format: "svg" # 'svg', 'json', 'shields'
+    output-path: "badge.svg" # optional
+    label: "coverage" # optional
+    thresholds: "50,80" # red,yellow boundaries
 ```
 
 **Outputs:**
@@ -723,12 +723,12 @@ Publish test results and coverage to GitHub Pages.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@main
   with:
-    results-path: 'test-results/' # optional
-    coverage-path: 'coverage/' # optional
-    badge-path: 'coverage/badge.svg' # optional
-    target-branch: 'gh-pages' # optional
-    target-dir: '.' # optional
-    keep-history: 'false' # optional
+    results-path: "test-results/" # optional
+    coverage-path: "coverage/" # optional
+    badge-path: "coverage/badge.svg" # optional
+    target-branch: "gh-pages" # optional
+    target-dir: "." # optional
+    keep-history: "false" # optional
 ```
 
 **Outputs:**
@@ -755,9 +755,9 @@ Prepare and upload content for GitHub Pages deployment using OIDC.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/deploy-pages@main
   with:
-    source-path: 'dist'
-    build-command: 'bun run build'
-    artifact-name: 'github-pages'
+    source-path: "dist"
+    build-command: "bun run build"
+    artifact-name: "github-pages"
 ```
 
 **Inputs:**
@@ -794,12 +794,12 @@ Build and push Docker images with multi-platform support.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/build-docker@main
   with:
-    context: '.'
-    file: 'Dockerfile'
-    platforms: 'linux/amd64,linux/arm64'
-    registry: 'ghcr.io'
+    context: "."
+    file: "Dockerfile"
+    platforms: "linux/amd64,linux/arm64"
+    registry: "ghcr.io"
     image-name: ${{ github.repository }}
-    push: 'true'
+    push: "true"
     github-token: ${{ secrets.GITHUB_TOKEN }}
 ```
 
@@ -847,11 +847,11 @@ Run lintro quality checks with optional actionlint validation.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-quality@main
   with:
-    tools: '' # optional, comma-separated list (empty = all)
-    mode: 'check' # 'check' or 'format'
-    fail-on-error: 'true' # optional
-    run-actionlint: 'true' # optional, run actionlint on GitHub Actions
-    working-directory: '.' # optional, working directory for linting
+    tools: "" # optional, comma-separated list (empty = all)
+    mode: "check" # 'check' or 'format'
+    fail-on-error: "true" # optional
+    run-actionlint: "true" # optional, run actionlint on GitHub Actions
+    working-directory: "." # optional, working directory for linting
 ```
 
 **Inputs:**
@@ -893,7 +893,7 @@ Calculate the next semantic version based on conventional commits.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/calculate-version@main
   with:
-    max-bump: 'minor' # optional, clamp max bump type
+    max-bump: "minor" # optional, clamp max bump type
 ```
 
 **Outputs:**
@@ -912,8 +912,8 @@ Generate changelog from conventional commits.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/generate-changelog@main
   with:
-    version: '1.2.0' # optional
-    format: 'full' # full, simple, or with-type
+    version: "1.2.0" # optional
+    format: "full" # full, simple, or with-type
 ```
 
 **Outputs:**
@@ -929,8 +929,8 @@ Create an annotated git tag for release.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/create-release-tag@main
   with:
-    version: '1.2.0'
-    push: 'true' # push tag to origin
+    version: "1.2.0"
+    push: "true" # push tag to origin
 ```
 
 **Outputs:**
@@ -948,10 +948,10 @@ Create a GitHub release with changelog and optional assets.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/create-github-release@main
   with:
-    tag: 'v1.2.0'
-    draft: 'false'
-    prerelease: 'false'
-    files: 'dist/*.tar.gz dist/*.whl' # optional
+    tag: "v1.2.0"
+    draft: "false"
+    prerelease: "false"
+    files: "dist/*.tar.gz dist/*.whl" # optional
 ```
 
 **Outputs:**
@@ -970,10 +970,10 @@ Build and publish Python packages to PyPI using OIDC trusted publishing.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-pypi@main
   with:
-    validate: 'true' # optional, run twine check
-    test-pypi: 'false' # optional, publish to TestPyPI
-    dry-run: 'false' # optional, build only
-    working-directory: '.' # optional
+    validate: "true" # optional, run twine check
+    test-pypi: "false" # optional, publish to TestPyPI
+    dry-run: "false" # optional, build only
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -996,12 +996,12 @@ Build and publish Node.js packages to npm with provenance attestation.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-npm@main
   with:
-    node-version: '22' # optional
-    dist-tag: 'latest' # optional, npm dist-tag
-    provenance: 'true' # optional, enable provenance attestation
-    access: 'public' # optional, package access level
-    dry-run: 'false' # optional, build only
-    working-directory: '.' # optional
+    node-version: "22" # optional
+    dist-tag: "latest" # optional, npm dist-tag
+    provenance: "true" # optional, enable provenance attestation
+    access: "public" # optional, package access level
+    dry-run: "false" # optional, build only
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -1026,9 +1026,9 @@ Build and publish Ruby gems to RubyGems using OIDC trusted publishing.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-gem@main
   with:
-    gemspec: '' # optional, auto-detected
-    dry-run: 'false' # optional, build only
-    working-directory: '.' # optional
+    gemspec: "" # optional, auto-detected
+    dry-run: "false" # optional, build only
+    working-directory: "." # optional
 ```
 
 **Outputs:**
@@ -1052,15 +1052,15 @@ Update a Homebrew formula with a new version from PyPI.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/update-homebrew@main
   with:
-    tap-repository: 'owner/homebrew-tap' # required
-    formula: 'mypackage' # required
-    package-name: 'my-pypi-package' # required
-    version: '1.2.3' # required
-    wait-for-availability: 'true' # optional
-    max-wait-minutes: '10' # optional
-    test-pypi: 'false' # optional
-    push: 'true' # optional
-    create-pr: 'false' # optional
+    tap-repository: "owner/homebrew-tap" # required
+    formula: "mypackage" # required
+    package-name: "my-pypi-package" # required
+    version: "1.2.3" # required
+    wait-for-availability: "true" # optional
+    max-wait-minutes: "10" # optional
+    test-pypi: "false" # optional
+    push: "true" # optional
+    create-pr: "false" # optional
 ```
 
 **Outputs:**
@@ -1090,8 +1090,8 @@ Validate package metadata before publishing.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/validate-package@main
   with:
-    type: 'pypi' # 'pypi', 'npm', or 'gem'
-    path: '.' # optional
+    type: "pypi" # 'pypi', 'npm', or 'gem'
+    path: "." # optional
 ```
 
 **Outputs:**
@@ -1115,11 +1115,11 @@ Wait for a package to be available on a registry.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/wait-for-package@main
   with:
-    registry: 'pypi' # 'pypi', 'npm', or 'gem'
-    package: 'my-package' # package name
-    version: '1.2.3' # version to wait for
-    max-wait: '600' # optional, max wait in seconds
-    test-pypi: 'false' # optional
+    registry: "pypi" # 'pypi', 'npm', or 'gem'
+    package: "my-package" # package name
+    version: "1.2.3" # version to wait for
+    max-wait: "600" # optional, max wait in seconds
+    test-pypi: "false" # optional
 ```
 
 **Outputs:**
@@ -1162,7 +1162,7 @@ jobs:
 
       - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
         with:
-          python-version: '3.12'
+          python-version: "3.12"
 
       - name: Run tests
         run: uv run pytest
@@ -1182,8 +1182,8 @@ jobs:
   test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@main
     with:
-      python-version: '3.12'
-      test-path: 'tests'
+      python-version: "3.12"
+      test-path: "tests"
       coverage: true
       coverage-threshold: 80
       upload-coverage: true
@@ -1217,7 +1217,7 @@ jobs:
   test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@main
     with:
-      node-version: '20'
+      node-version: "20"
       coverage: true
       coverage-threshold: 80
       upload-coverage: true
@@ -1250,9 +1250,9 @@ jobs:
   e2e:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e.yml@main
     with:
-      browsers: 'chromium'
-      shard: '1/3' # optional, for parallel execution
-      reporter: 'html'
+      browsers: "chromium"
+      shard: "1/3" # optional, for parallel execution
+      reporter: "html"
       upload-report: true
       publish-results: true
 ```
@@ -1283,11 +1283,11 @@ jobs:
   e2e:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@main
     with:
-      test-suites: 'smoke,visual,a11y'
-      browsers: 'chromium'
-      tag-prefix: '@'
+      test-suites: "smoke,visual,a11y"
+      browsers: "chromium"
+      tag-prefix: "@"
       shards: 1
-      reporter: 'html'
+      reporter: "html"
       publish-results: true
 ```
 
@@ -1326,9 +1326,9 @@ jobs:
   deploy:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-pages.yml@main
     with:
-      source-path: 'dist'
-      build-command: 'bun run build'
-      environment: 'github-pages'
+      source-path: "dist"
+      build-command: "bun run build"
+      environment: "github-pages"
 ```
 
 **Inputs:**
@@ -1366,9 +1366,9 @@ jobs:
   docker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@main
     with:
-      context: '.'
-      platforms: 'linux/amd64,linux/arm64'
-      registry: 'ghcr.io'
+      context: "."
+      platforms: "linux/amd64,linux/arm64"
+      registry: "ghcr.io"
       push: true
       provenance: true
       sbom: true
@@ -1461,13 +1461,13 @@ jobs:
   publish:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@main
     with:
-      python-version: '3.12'
+      python-version: "3.12"
       validate: true
       test-pypi: false
       dry-run: false
       update-homebrew: false
-      homebrew-tap: 'owner/homebrew-tap'
-      homebrew-formula: 'mypackage'
+      homebrew-tap: "owner/homebrew-tap"
+      homebrew-formula: "mypackage"
 ```
 
 **Inputs:**
@@ -1506,10 +1506,10 @@ jobs:
     secrets:
       NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
     with:
-      node-version: '22'
-      dist-tag: 'latest'
+      node-version: "22"
+      dist-tag: "latest"
       provenance: true
-      access: 'public'
+      access: "public"
       dry-run: false
 ```
 
@@ -1548,7 +1548,7 @@ jobs:
   publish:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-gem.yml@main
     with:
-      ruby-version: '3.3'
+      ruby-version: "3.3"
       dry-run: false
 ```
 
@@ -1582,10 +1582,10 @@ jobs:
   homebrew:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-homebrew.yml@main
     with:
-      tap-repository: 'owner/homebrew-tap'
-      formula: 'mypackage'
-      package-name: 'my-pypi-package'
-      version: '1.2.3'
+      tap-repository: "owner/homebrew-tap"
+      formula: "mypackage"
+      package-name: "my-pypi-package"
+      version: "1.2.3"
       wait-for-availability: true
       create-pr: false
 ```

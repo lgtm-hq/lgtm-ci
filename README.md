@@ -27,8 +27,8 @@ jobs:
 
       - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1
         with:
-          python-version: '3.13'
-          node-version: '22'
+          python-version: "3.13"
+          node-version: "22"
 ```
 
 ### Using a Reusable Workflow
@@ -38,7 +38,7 @@ jobs:
   quality:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@v1
     with:
-      python-version: '3.13'
+      python-version: "3.13"
 ```
 
 ### Using Shell Libraries

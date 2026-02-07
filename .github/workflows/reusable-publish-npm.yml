@@ -5,47 +5,47 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: 'Node.js version'
+        description: "Node.js version"
         required: false
         type: string
-        default: '22'
+        default: "22"
       dist-tag:
-        description: 'npm dist-tag (latest, beta, next, etc.)'
+        description: "npm dist-tag (latest, beta, next, etc.)"
         required: false
         type: string
-        default: 'latest'
+        default: "latest"
       provenance:
-        description: 'Enable npm provenance attestation'
+        description: "Enable npm provenance attestation"
         required: false
         type: boolean
         default: true
       access:
-        description: 'Package access level (public, restricted)'
+        description: "Package access level (public, restricted)"
         required: false
         type: string
-        default: 'public'
+        default: "public"
       dry-run:
-        description: 'Build and pack only, do not publish'
+        description: "Build and pack only, do not publish"
         required: false
         type: boolean
         default: false
       working-directory:
-        description: 'Working directory containing the package'
+        description: "Working directory containing the package"
         required: false
         type: string
-        default: '.'
+        default: "."
     outputs:
       published:
-        description: 'Whether the package was published'
+        description: "Whether the package was published"
         value: ${{ jobs.publish.outputs.published }}
       version:
-        description: 'Published package version'
+        description: "Published package version"
         value: ${{ jobs.publish.outputs.version }}
       package-name:
-        description: 'Published package name'
+        description: "Published package name"
         value: ${{ jobs.publish.outputs.package-name }}
       tarball:
-        description: 'Path to the built tarball'
+        description: "Path to the built tarball"
         value: ${{ jobs.publish.outputs.tarball }}
 
 jobs:

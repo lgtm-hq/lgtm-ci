@@ -1,34 +1,34 @@
 ---
-name: 'Setup Environment'
-description: 'Configure common CI environment variables and PATH'
-author: 'lgtm-hq'
+name: "Setup Environment"
+description: "Configure common CI environment variables and PATH"
+author: "lgtm-hq"
 
 inputs:
   bin-dir:
-    description: 'Directory for installed binaries (added to PATH)'
+    description: "Directory for installed binaries (added to PATH)"
     required: false
-    default: '${{ github.workspace }}/.local/bin'
+    default: "${{ github.workspace }}/.local/bin"
   add-to-path:
-    description: 'Additional directories to add to PATH (comma-separated)'
+    description: "Additional directories to add to PATH (comma-separated)"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   bin-dir:
-    description: 'The configured binary directory'
+    description: "The configured binary directory"
     value: ${{ inputs.bin-dir }}
   platform:
-    description: 'Detected platform (linux-x86_64, darwin-arm64, etc.)'
+    description: "Detected platform (linux-x86_64, darwin-arm64, etc.)"
     value: ${{ steps.setup.outputs.platform }}
   os:
-    description: 'Detected OS (linux, darwin, windows)'
+    description: "Detected OS (linux, darwin, windows)"
     value: ${{ steps.setup.outputs.os }}
   arch:
-    description: 'Detected architecture (x86_64, arm64)'
+    description: "Detected architecture (x86_64, arm64)"
     value: ${{ steps.setup.outputs.arch }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Setup environment
       id: setup
@@ -39,5 +39,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-env.sh
 
 branding:
-  icon: 'settings'
-  color: 'blue'
+  icon: "settings"
+  color: "blue"

@@ -5,45 +5,45 @@ on:
   workflow_call:
     inputs:
       target:
-        description: 'Target to generate SBOM for'
+        description: "Target to generate SBOM for"
         required: false
         type: string
-        default: '.'
+        default: "."
       target-type:
-        description: 'Type of target: dir, image, file'
+        description: "Type of target: dir, image, file"
         required: false
         type: string
-        default: 'dir'
+        default: "dir"
       sbom-format:
-        description: 'SBOM output format: cyclonedx-json, spdx-json'
+        description: "SBOM output format: cyclonedx-json, spdx-json"
         required: false
         type: string
-        default: 'cyclonedx-json'
+        default: "cyclonedx-json"
       scan-vulnerabilities:
-        description: 'Scan SBOM for vulnerabilities'
+        description: "Scan SBOM for vulnerabilities"
         required: false
         type: boolean
         default: true
       fail-on-severity:
-        description: 'Fail on vulnerability severity: critical, high, medium, low, none'
+        description: "Fail on vulnerability severity: critical, high, medium, low, none"
         required: false
         type: string
-        default: ''
+        default: ""
       upload-sarif:
-        description: 'Upload vulnerability SARIF to GitHub Security'
+        description: "Upload vulnerability SARIF to GitHub Security"
         required: false
         type: boolean
         default: false
       create-attestation:
-        description: 'Create attestation for the SBOM'
+        description: "Create attestation for the SBOM"
         required: false
         type: boolean
         default: false
       artifact-name:
-        description: 'Name for uploaded SBOM artifact'
+        description: "Name for uploaded SBOM artifact"
         required: false
         type: string
-        default: 'sbom'
+        default: "sbom"
 
     outputs:
       sbom-file:
@@ -70,8 +70,7 @@ jobs:
 
     outputs:
       sbom-file: ${{ steps.generate.outputs.sbom-file || 'none' }}
-      vulnerabilities-found:
-        ${{ steps.scan.outputs.vulnerabilities-found || 'not-run' }}
+      vulnerabilities-found: ${{ steps.scan.outputs.vulnerabilities-found || 'not-run' }}
       attestation-url: ${{ steps.attest.outputs.attestation-url || 'not-run' }}
 
     steps:
@@ -94,7 +93,7 @@ jobs:
           target: ${{ inputs.target }}
           target-type: ${{ inputs.target-type }}
           format: ${{ inputs.sbom-format }}
-          upload-artifact: 'true'
+          upload-artifact: "true"
           artifact-name: ${{ inputs.artifact-name }}
 
       - name: Scan vulnerabilities

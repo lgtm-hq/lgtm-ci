@@ -1,45 +1,45 @@
 ---
-name: 'Create Release Tag'
-description: 'Create an annotated git tag for release'
-author: 'lgtm-hq'
+name: "Create Release Tag"
+description: "Create an annotated git tag for release"
+author: "lgtm-hq"
 
 inputs:
   version:
-    description: 'Version to tag (with or without v prefix)'
+    description: "Version to tag (with or without v prefix)"
     required: true
   tag-prefix:
-    description: 'Prefix for tag name'
+    description: "Prefix for tag name"
     required: false
-    default: 'v'
+    default: "v"
   message:
-    description: 'Tag message (default: auto-generated changelog)'
+    description: "Tag message (default: auto-generated changelog)"
     required: false
-    default: ''
+    default: ""
   push:
-    description: 'Push tag to origin'
+    description: "Push tag to origin"
     required: false
-    default: 'false'
+    default: "false"
   from-ref:
-    description: 'Reference for changelog generation (default: latest tag)'
+    description: "Reference for changelog generation (default: latest tag)"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   tag-name:
-    description: 'Created tag name'
+    description: "Created tag name"
     value: ${{ steps.tag.outputs.tag-name }}
   tag-sha:
-    description: 'Tag SHA'
+    description: "Tag SHA"
     value: ${{ steps.tag.outputs.tag-sha }}
   commit-sha:
-    description: 'Commit SHA the tag points to'
+    description: "Commit SHA the tag points to"
     value: ${{ steps.tag.outputs.commit-sha }}
   version:
-    description: 'Clean version (without prefix)'
+    description: "Clean version (without prefix)"
     value: ${{ steps.tag.outputs.version }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Create release tag
       id: tag
@@ -53,5 +53,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/release/create-tag.sh
 
 branding:
-  icon: 'tag'
-  color: 'purple'
+  icon: "tag"
+  color: "purple"

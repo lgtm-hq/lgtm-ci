@@ -1,54 +1,54 @@
 ---
-name: 'Semantic PR Title'
-description: 'Validate PR title follows conventional commit format'
-author: 'lgtm-hq'
+name: "Semantic PR Title"
+description: "Validate PR title follows conventional commit format"
+author: "lgtm-hq"
 
 inputs:
   title:
     description: >-
       PR title to validate (auto-detected from context if not provided)
     required: false
-    default: ''
+    default: ""
   types:
-    description: 'Allowed commit types (comma-separated)'
+    description: "Allowed commit types (comma-separated)"
     required: false
-    default: 'feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert'
+    default: "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert"
   scopes:
-    description: 'Allowed scopes (comma-separated, empty for any scope)'
+    description: "Allowed scopes (comma-separated, empty for any scope)"
     required: false
-    default: ''
+    default: ""
   require-scope:
-    description: 'Require a scope in the title'
+    description: "Require a scope in the title"
     required: false
-    default: 'false'
+    default: "false"
   max-length:
-    description: 'Maximum title length (0 for no limit)'
+    description: "Maximum title length (0 for no limit)"
     required: false
-    default: '72'
+    default: "72"
   fail-on-invalid:
-    description: 'Fail the action if title is invalid'
+    description: "Fail the action if title is invalid"
     required: false
-    default: 'true'
+    default: "true"
 
 outputs:
   valid:
-    description: 'Whether the title is valid'
+    description: "Whether the title is valid"
     value: ${{ steps.validate.outputs.valid }}
   type:
-    description: 'Extracted commit type'
+    description: "Extracted commit type"
     value: ${{ steps.validate.outputs.type }}
   scope:
-    description: 'Extracted scope (if any)'
+    description: "Extracted scope (if any)"
     value: ${{ steps.validate.outputs.scope }}
   description:
-    description: 'Extracted description'
+    description: "Extracted description"
     value: ${{ steps.validate.outputs.description }}
   error:
-    description: 'Error message if invalid'
+    description: "Error message if invalid"
     value: ${{ steps.validate.outputs.error }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Validate PR title
       id: validate
@@ -63,5 +63,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/semantic-pr-title.sh
 
 branding:
-  icon: 'check-circle'
-  color: 'green'
+  icon: "check-circle"
+  color: "green"

@@ -43,7 +43,7 @@ generate_semver_tags() {
 
 	# Add latest tag if this looks like a stable release
 	if [[ ! "$version" =~ (alpha|beta|rc|dev|pre) ]]; then
-		echo "${prefix}latest"
+		echo "latest"
 	fi
 }
 

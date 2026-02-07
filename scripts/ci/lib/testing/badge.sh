@@ -78,12 +78,15 @@ get_badge_hex_color() {
 # Usage: escape_xml "string with <special> chars"
 escape_xml() {
 	local str="${1:-}"
-	str="${str//&/&amp;}"
-	str="${str//</&lt;}"
-	str="${str//>/&gt;}"
-	str="${str//\"/&quot;}"
-	str="${str//\'/&#39;}"
-	echo "$str"
+	# Use sed escapes instead of bash replacement expansion because replacement
+	# behavior for '&' differs across bash versions/options in CI environments.
+	printf "%s" "$str" | sed \
+		-e 's/&/\&amp;/g' \
+		-e 's/</\&lt;/g' \
+		-e 's/>/\&gt;/g' \
+		-e 's/"/\&quot;/g' \
+		-e "s/'/\&#39;/g"
+	echo
 }
 
 # =============================================================================

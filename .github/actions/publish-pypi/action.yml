@@ -1,39 +1,39 @@
 ---
-name: 'Publish to PyPI'
-description: 'Build and publish Python package to PyPI using OIDC trusted publishing'
-author: 'lgtm-hq'
+name: "Publish to PyPI"
+description: "Build and publish Python package to PyPI using OIDC trusted publishing"
+author: "lgtm-hq"
 
 inputs:
   validate:
-    description: 'Run twine check before publishing'
+    description: "Run twine check before publishing"
     required: false
-    default: 'true'
+    default: "true"
   test-pypi:
-    description: 'Publish to TestPyPI instead of PyPI'
+    description: "Publish to TestPyPI instead of PyPI"
     required: false
-    default: 'false'
+    default: "false"
   dry-run:
-    description: 'Build only, do not publish'
+    description: "Build only, do not publish"
     required: false
-    default: 'false'
+    default: "false"
   working-directory:
-    description: 'Working directory containing the package'
+    description: "Working directory containing the package"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   published:
-    description: 'Whether the package was published'
+    description: "Whether the package was published"
     value: ${{ steps.set-published.outputs.published || 'false' }}
   version:
-    description: 'Package version'
+    description: "Package version"
     value: ${{ steps.build.outputs.version }}
   package-name:
-    description: 'Package name'
+    description: "Package name"
     value: ${{ steps.build.outputs.name }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Validate package metadata
       id: validate
@@ -89,5 +89,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
 
 branding:
-  icon: 'upload-cloud'
-  color: 'blue'
+  icon: "upload-cloud"
+  color: "blue"

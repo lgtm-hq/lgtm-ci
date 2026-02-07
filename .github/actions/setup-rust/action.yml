@@ -1,47 +1,47 @@
 ---
-name: 'Setup Rust'
-description: 'Setup Rust toolchain with cargo caching'
-author: 'lgtm-hq'
+name: "Setup Rust"
+description: "Setup Rust toolchain with cargo caching"
+author: "lgtm-hq"
 
 inputs:
   toolchain:
-    description: 'Rust toolchain (e.g., stable, nightly, 1.75.0)'
+    description: "Rust toolchain (e.g., stable, nightly, 1.75.0)"
     required: false
-    default: 'stable'
+    default: "stable"
   components:
-    description: 'Components to install (e.g., clippy, rustfmt)'
+    description: "Components to install (e.g., clippy, rustfmt)"
     required: false
-    default: ''
+    default: ""
   targets:
-    description: 'Additional targets to install (comma-separated)'
+    description: "Additional targets to install (comma-separated)"
     required: false
-    default: ''
+    default: ""
   cache:
-    description: 'Enable cargo cache'
+    description: "Enable cargo cache"
     required: false
-    default: 'true'
+    default: "true"
   cache-dependency-path:
-    description: 'Path to Cargo.lock for cache key'
+    description: "Path to Cargo.lock for cache key"
     required: false
-    default: '**/Cargo.lock'
+    default: "**/Cargo.lock"
   working-directory:
-    description: 'Working directory for cargo commands'
+    description: "Working directory for cargo commands"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   rustc-version:
-    description: 'Installed rustc version'
+    description: "Installed rustc version"
     value: ${{ steps.rust-version.outputs.rustc }}
   cargo-version:
-    description: 'Installed cargo version'
+    description: "Installed cargo version"
     value: ${{ steps.rust-version.outputs.cargo }}
   cache-hit:
-    description: 'Whether the cache was hit'
+    description: "Whether the cache was hit"
     value: ${{ steps.cache.outputs.cache-hit }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Install Rust toolchain
       # Pinned to SHA for supply chain security
@@ -78,8 +78,7 @@ runs:
           ${{ inputs.working-directory }}/target/
         # Cache key includes toolchain for proper invalidation
         # yamllint disable-line rule:line-length
-        key:
-          cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{
+        key: cargo-${{ runner.os }}-${{ inputs.toolchain }}-${{
           hashFiles(inputs.cache-dependency-path) }}
         restore-keys: |
           cargo-${{ runner.os }}-${{ inputs.toolchain }}-
@@ -92,5 +91,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-rust.sh
 
 branding:
-  icon: 'cpu'
-  color: 'orange'
+  icon: "cpu"
+  color: "orange"

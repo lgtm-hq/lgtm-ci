@@ -1,76 +1,76 @@
 ---
-name: 'Build Docker Image'
-description: 'Build and optionally push Docker images with multi-platform support'
-author: 'lgtm-hq'
+name: "Build Docker Image"
+description: "Build and optionally push Docker images with multi-platform support"
+author: "lgtm-hq"
 
 inputs:
   context:
-    description: 'Build context path'
+    description: "Build context path"
     required: false
-    default: '.'
+    default: "."
   file:
-    description: 'Path to Dockerfile'
+    description: "Path to Dockerfile"
     required: false
-    default: 'Dockerfile'
+    default: "Dockerfile"
   platforms:
-    description: 'Target platforms (comma-separated)'
+    description: "Target platforms (comma-separated)"
     required: false
-    default: 'linux/amd64,linux/arm64'
+    default: "linux/amd64,linux/arm64"
   registry:
-    description: 'Container registry URL'
+    description: "Container registry URL"
     required: false
-    default: 'ghcr.io'
+    default: "ghcr.io"
   image-name:
-    description: 'Image name (default: github.repository)'
+    description: "Image name (default: github.repository)"
     required: false
     default: ${{ github.repository }}
   tags:
-    description: 'Additional tags (comma-separated)'
+    description: "Additional tags (comma-separated)"
     required: false
-    default: ''
+    default: ""
   version:
-    description: 'Version for semver tags (e.g., v1.2.3)'
+    description: "Version for semver tags (e.g., v1.2.3)"
     required: false
-    default: ''
+    default: ""
   push:
-    description: 'Push image to registry'
+    description: "Push image to registry"
     required: false
-    default: 'false'
+    default: "false"
   load:
-    description: 'Load image into local docker (single platform only)'
+    description: "Load image into local docker (single platform only)"
     required: false
-    default: 'false'
+    default: "false"
   build-args:
-    description: 'Build arguments (comma-separated key=value)'
+    description: "Build arguments (comma-separated key=value)"
     required: false
-    default: ''
+    default: ""
   labels:
-    description: 'Additional labels (comma-separated key=value)'
+    description: "Additional labels (comma-separated key=value)"
     required: false
-    default: ''
+    default: ""
   cache-from:
-    description: 'Cache source (e.g., type=gha)'
+    description: "Cache source (e.g., type=gha)"
     required: false
-    default: 'type=gha'
+    default: "type=gha"
   cache-to:
-    description: 'Cache destination (e.g., type=gha,mode=max)'
+    description: "Cache destination (e.g., type=gha,mode=max)"
     required: false
-    default: 'type=gha,mode=max'
+    default: "type=gha,mode=max"
   github-token:
-    description: 'GitHub token for GHCR authentication'
+    description: "GitHub token for GHCR authentication"
     required: false
-    default: ''
+    default: ""
 
 outputs:
   tags:
-    description: 'Generated image tags (newline-separated)'
+    description: "Generated image tags (newline-separated)"
     value: ${{ steps.build.outputs.tags }}
   digest:
-    description: 'Image digest (if pushed)'
+    description: "Image digest (if pushed)"
     value: ${{ steps.metadata.outputs.digest }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Setup Docker environment
       shell: bash
@@ -145,5 +145,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
 
 branding:
-  icon: 'box'
-  color: 'blue'
+  icon: "box"
+  color: "blue"

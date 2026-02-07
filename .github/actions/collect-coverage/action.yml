@@ -1,53 +1,53 @@
 ---
-name: 'Collect Coverage'
-description: 'Aggregate coverage from multiple sources and formats'
-author: 'lgtm-hq'
+name: "Collect Coverage"
+description: "Aggregate coverage from multiple sources and formats"
+author: "lgtm-hq"
 
 inputs:
   coverage-files:
-    description: 'Glob pattern or comma-separated list of coverage files'
+    description: "Glob pattern or comma-separated list of coverage files"
     required: false
-    default: ''
+    default: ""
   input-format:
-    description: 'Input format: auto, istanbul, coverage-py, lcov'
+    description: "Input format: auto, istanbul, coverage-py, lcov"
     required: false
-    default: 'auto'
+    default: "auto"
   output-format:
-    description: 'Output format: json, lcov'
+    description: "Output format: json, lcov"
     required: false
-    default: 'json'
+    default: "json"
   merge-strategy:
-    description: 'How to merge coverage: union, intersection'
+    description: "How to merge coverage: union, intersection"
     required: false
-    default: 'union'
+    default: "union"
   output-file:
-    description: 'Output file path for merged coverage'
+    description: "Output file path for merged coverage"
     required: false
-    default: ''
+    default: ""
   working-directory:
-    description: 'Working directory'
+    description: "Working directory"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   merged-coverage-file:
-    description: 'Path to merged coverage file'
+    description: "Path to merged coverage file"
     value: ${{ steps.merge.outputs.merged-coverage-file }}
   coverage-percent:
-    description: 'Overall coverage percentage'
+    description: "Overall coverage percentage"
     value: ${{ steps.merge.outputs.coverage-percent }}
   lines-coverage:
-    description: 'Lines coverage percentage'
+    description: "Lines coverage percentage"
     value: ${{ steps.summary.outputs.lines-coverage }}
   branches-coverage:
-    description: 'Branches coverage percentage'
+    description: "Branches coverage percentage"
     value: ${{ steps.summary.outputs.branches-coverage }}
   functions-coverage:
-    description: 'Functions coverage percentage'
+    description: "Functions coverage percentage"
     value: ${{ steps.summary.outputs.functions-coverage }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Detect coverage files
       id: detect
@@ -83,5 +83,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
 
 branding:
-  icon: 'pie-chart'
-  color: 'blue'
+  icon: "pie-chart"
+  color: "blue"

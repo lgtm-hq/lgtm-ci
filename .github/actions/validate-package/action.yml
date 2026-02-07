@@ -1,33 +1,32 @@
 ---
-name: 'Validate Package'
-description: 'Validate package before publishing to PyPI, npm, or RubyGems'
-author: 'lgtm-hq'
+name: "Validate Package"
+description: "Validate package before publishing to PyPI, npm, or RubyGems"
+author: "lgtm-hq"
 
 inputs:
   type:
-    description: 'Package type (pypi, npm, gem)'
+    description: "Package type (pypi, npm, gem)"
     required: true
   path:
-    description: 'Path to package directory or dist folder'
+    description: "Path to package directory or dist folder"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   valid:
-    description: 'Whether the package is valid'
+    description: "Whether the package is valid"
     value: ${{ steps.validate.outputs.valid }}
   name:
-    description: 'Package name'
+    description: "Package name"
     value: ${{ steps.validate.outputs.name }}
   version:
-    description: 'Package version'
+    description: "Package version"
     value: ${{ steps.validate.outputs.version }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Detect package type
-      id: detect
       shell: bash
       env:
         STEP: detect
@@ -55,5 +54,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/validate-package.sh
 
 branding:
-  icon: 'check-circle'
-  color: 'green'
+  icon: "check-circle"
+  color: "green"

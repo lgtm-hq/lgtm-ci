@@ -5,14 +5,14 @@
 # Execution settings
 execution:
   enabled_tools: [] # empty = all tools
-  tool_order: 'priority'
+  tool_order: "priority"
   fail_fast: false
   parallel: true
   max_workers: 4
   exclude:
-    - '.lintro/'
-    - '.venv/'
-    - 'node_modules/'
+    - ".lintro/"
+    - ".venv/"
+    - "node_modules/"
 
 # Cross-cutting enforcement settings
 enforce:
@@ -25,17 +25,17 @@ defaults:
     singleQuote: true
     tabWidth: 2
     printWidth: 100
-    proseWrap: 'always'
+    proseWrap: "always"
 
   yamllint:
-    extends: 'default'
+    extends: "default"
     rules:
       line-length:
         max: 120
         level: warning
       document-start: disable
       truthy:
-        allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+        allowed-values: ["true", "false", "on", "off", "yes", "no"]
       comments:
         min-spaces-from-content: 1
 

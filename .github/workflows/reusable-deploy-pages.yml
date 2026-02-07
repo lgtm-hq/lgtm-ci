@@ -5,34 +5,34 @@ on:
   workflow_call:
     inputs:
       source-path:
-        description: 'Path to static content to deploy'
+        description: "Path to static content to deploy"
         required: false
         type: string
-        default: 'dist'
+        default: "dist"
       build-command:
-        description: 'Optional build command to run before deployment'
+        description: "Optional build command to run before deployment"
         required: false
         type: string
-        default: ''
+        default: ""
       node-version:
-        description: 'Node.js version for build step'
+        description: "Node.js version for build step"
         required: false
         type: string
-        default: '20'
+        default: "20"
       environment:
-        description: 'GitHub environment name for deployment'
+        description: "GitHub environment name for deployment"
         required: false
         type: string
-        default: 'github-pages'
+        default: "github-pages"
       artifact-name:
-        description: 'Name for the pages artifact'
+        description: "Name for the pages artifact"
         required: false
         type: string
-        default: 'github-pages'
+        default: "github-pages"
 
     outputs:
       page-url:
-        description: 'URL of the deployed GitHub Pages site'
+        description: "URL of the deployed GitHub Pages site"
         value: ${{ jobs.deploy.outputs.page-url }}
 
 # Required permissions for GitHub Pages deployment with OIDC

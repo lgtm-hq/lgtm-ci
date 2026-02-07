@@ -1,54 +1,54 @@
 ---
-name: 'Generate Coverage Badge'
-description: 'Generate coverage badge SVG/JSON for README display'
-author: 'lgtm-hq'
+name: "Generate Coverage Badge"
+description: "Generate coverage badge SVG/JSON for README display"
+author: "lgtm-hq"
 
 inputs:
   coverage-file:
-    description: 'Path to coverage file (for extracting percentage)'
+    description: "Path to coverage file (for extracting percentage)"
     required: false
-    default: ''
+    default: ""
   coverage-percent:
-    description: 'Coverage percentage (if not extracting from file)'
+    description: "Coverage percentage (if not extracting from file)"
     required: false
-    default: ''
+    default: ""
   format:
-    description: 'Badge format: svg, json, shields'
+    description: "Badge format: svg, json, shields"
     required: false
-    default: 'svg'
+    default: "svg"
   output-path:
-    description: 'Output path for badge file'
+    description: "Output path for badge file"
     required: false
-    default: ''
+    default: ""
   label:
-    description: 'Badge label'
+    description: "Badge label"
     required: false
-    default: 'coverage'
+    default: "coverage"
   thresholds:
     description: 'Color thresholds as "red,yellow" (e.g., "50,80")'
     required: false
-    default: '50,80'
+    default: "50,80"
   working-directory:
-    description: 'Working directory'
+    description: "Working directory"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   badge-file:
-    description: 'Path to generated badge file'
+    description: "Path to generated badge file"
     value: ${{ steps.generate.outputs.badge-file }}
   coverage-percent:
-    description: 'Coverage percentage used for badge'
+    description: "Coverage percentage used for badge"
     value: ${{ steps.calculate.outputs.coverage-percent }}
   badge-url:
-    description: 'Shields.io URL for badge'
+    description: "Shields.io URL for badge"
     value: ${{ steps.generate.outputs.badge-url }}
   badge-color:
-    description: 'Badge color (red, yellow, green, brightgreen)'
+    description: "Badge color (red, yellow, green, brightgreen)"
     value: ${{ steps.calculate.outputs.badge-color }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Calculate coverage
       id: calculate
@@ -60,8 +60,7 @@ runs:
         COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
         RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] }}
         YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] }}
-      run:
-        ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
 
     - name: Generate badge
       id: generate
@@ -75,8 +74,7 @@ runs:
         LABEL: ${{ inputs.label }}
         RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] }}
         YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] }}
-      run:
-        ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
 
     - name: Generate summary
       shell: bash
@@ -85,9 +83,8 @@ runs:
         COVERAGE_PERCENT: ${{ steps.calculate.outputs.coverage-percent }}
         BADGE_FILE: ${{ steps.generate.outputs.badge-file }}
         BADGE_URL: ${{ steps.generate.outputs.badge-url }}
-      run:
-        ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
 
 branding:
-  icon: 'award'
-  color: 'green'
+  icon: "award"
+  color: "green"

@@ -1,41 +1,41 @@
 ---
-name: 'Merge Playwright Reports'
-description: 'Merge multiple Playwright reports from sharded or matrix test runs'
-author: 'lgtm-hq'
+name: "Merge Playwright Reports"
+description: "Merge multiple Playwright reports from sharded or matrix test runs"
+author: "lgtm-hq"
 
 inputs:
   input-dir:
-    description: 'Directory containing report artifacts to merge'
+    description: "Directory containing report artifacts to merge"
     required: false
-    default: 'playwright-reports'
+    default: "playwright-reports"
   output-dir:
-    description: 'Directory for merged report output'
+    description: "Directory for merged report output"
     required: false
-    default: 'merged-report'
+    default: "merged-report"
   report-format:
-    description: 'Output format: json, html'
+    description: "Output format: json, html"
     required: false
-    default: 'html'
+    default: "html"
 
 outputs:
   merged-path:
-    description: 'Path to merged report'
+    description: "Path to merged report"
     value: ${{ steps.merge.outputs.merged-path }}
   report-count:
-    description: 'Number of reports merged'
+    description: "Number of reports merged"
     value: ${{ steps.collect.outputs.report-count }}
   total-passed:
-    description: 'Total tests passed across all reports'
+    description: "Total tests passed across all reports"
     value: ${{ steps.parse.outputs.total-passed }}
   total-failed:
-    description: 'Total tests failed across all reports'
+    description: "Total tests failed across all reports"
     value: ${{ steps.parse.outputs.total-failed }}
   total-skipped:
-    description: 'Total tests skipped across all reports'
+    description: "Total tests skipped across all reports"
     value: ${{ steps.parse.outputs.total-skipped }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Collect reports
       id: collect
@@ -44,8 +44,7 @@ runs:
         STEP: collect
         INPUT_DIR: ${{ inputs.input-dir }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
-      run:
-        ${{ github.action_path
+      run: ${{ github.action_path
         }}/../../../scripts/ci/actions/merge-playwright-reports.sh
 
     - name: Merge reports
@@ -57,8 +56,7 @@ runs:
         INPUT_DIR: ${{ inputs.input-dir }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         REPORT_FORMAT: ${{ inputs.report-format }}
-      run:
-        ${{ github.action_path
+      run: ${{ github.action_path
         }}/../../../scripts/ci/actions/merge-playwright-reports.sh
 
     - name: Parse merged results
@@ -80,10 +78,9 @@ runs:
         TOTAL_FAILED: ${{ steps.parse.outputs.total-failed }}
         TOTAL_SKIPPED: ${{ steps.parse.outputs.total-skipped }}
         REPORT_COUNT: ${{ steps.collect.outputs.report-count }}
-      run:
-        ${{ github.action_path
+      run: ${{ github.action_path
         }}/../../../scripts/ci/actions/merge-playwright-reports.sh
 
 branding:
-  icon: 'layers'
-  color: 'green'
+  icon: "layers"
+  color: "green"

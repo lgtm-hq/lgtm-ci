@@ -1,51 +1,51 @@
 ---
-name: 'Setup Node.js'
-description: 'Setup Node.js with bun package manager and caching'
-author: 'lgtm-hq'
+name: "Setup Node.js"
+description: "Setup Node.js with bun package manager and caching"
+author: "lgtm-hq"
 
 inputs:
   node-version:
     description: 'Node.js version to install (e.g., "20", "22", "lts/*")'
     required: false
-    default: '22'
+    default: "22"
   bun-version:
     description: 'Bun version to install (e.g., "1.1.0", "latest")'
     required: false
-    default: 'latest'
+    default: "latest"
   cache:
-    description: 'Enable bun cache'
+    description: "Enable bun cache"
     required: false
-    default: 'true'
+    default: "true"
   cache-dependency-path:
-    description: 'Path to lockfile for cache key'
+    description: "Path to lockfile for cache key"
     required: false
-    default: '**/bun.lockb'
+    default: "**/bun.lockb"
   working-directory:
-    description: 'Working directory for bun commands'
+    description: "Working directory for bun commands"
     required: false
-    default: '.'
+    default: "."
   install-dependencies:
-    description: 'Run bun install to install dependencies'
+    description: "Run bun install to install dependencies"
     required: false
-    default: 'true'
+    default: "true"
   frozen-lockfile:
-    description: 'Use --frozen-lockfile for installs (recommended for CI)'
+    description: "Use --frozen-lockfile for installs (recommended for CI)"
     required: false
-    default: 'true'
+    default: "true"
 
 outputs:
   node-version:
-    description: 'Installed Node.js version'
+    description: "Installed Node.js version"
     value: ${{ steps.node-version.outputs.version }}
   bun-version:
-    description: 'Installed bun version'
+    description: "Installed bun version"
     value: ${{ steps.bun-version.outputs.version }}
   cache-hit:
-    description: 'Whether the cache was hit'
+    description: "Whether the cache was hit"
     value: ${{ steps.cache.outputs.cache-hit }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Setup Node.js
       # Pinned to SHA for supply chain security - line exceeds 80 but under 120 limit
@@ -111,5 +111,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-node.sh
 
 branding:
-  icon: 'package'
-  color: 'green'
+  icon: "package"
+  color: "green"
