@@ -49,9 +49,9 @@ sign)
 	signed_count=0
 
 	for file in "${file_list[@]}"; do
-		# Use full path with separators replaced to avoid collisions
-		# when different directories contain files with the same basename
-		sanitized="$(echo "$file" | sed 's|^/||; s|/|__|g')"
+		# Normalize path: strip leading ./ and ../ segments to avoid dotfile names,
+		# then replace / with __ to avoid collisions across directories
+		sanitized="$(echo "$file" | sed 's|^\(\.\./\)*||; s|^\./||; s|^/||; s|/|__|g')"
 		sig_file="${SIGNATURES_DIR}/${sanitized}.sig"
 		cert_file="${SIGNATURES_DIR}/${sanitized}.pem"
 
