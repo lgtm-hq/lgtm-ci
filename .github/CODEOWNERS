@@ -1,11 +1,44 @@
-# lgtm-ci Code Owners
-# These owners will be requested for review on all PRs
+# CODEOWNERS - Define code ownership for pull request reviews
+#
+# Rules are evaluated top-to-bottom; LAST matching pattern wins.
+# Note: GitHub requires every pattern to have at least one owner.
 
-# Default owners for everything - team for reviews, user for auto-assignment
+# =============================================================================
+# Global default - all files require maintainer review
+# =============================================================================
 * @lgtm-hq/maintainers @TurboCoder13
 
-# Shell scripts and CI utilities
-/scripts/ @lgtm-hq/maintainers @TurboCoder13
+# =============================================================================
+# Core scripts and CI utilities
+# =============================================================================
+/scripts/ @lgtm-hq/maintainers
+/scripts/ci/ @lgtm-hq/maintainers
 
+# =============================================================================
 # GitHub Actions and workflows
-/.github/ @lgtm-hq/maintainers @TurboCoder13
+# =============================================================================
+/.github/workflows/ @lgtm-hq/maintainers
+/.github/actions/ @lgtm-hq/maintainers
+
+# =============================================================================
+# Tests
+# =============================================================================
+/tests/ @lgtm-hq/maintainers
+
+# =============================================================================
+# Documentation
+# =============================================================================
+/docs/ @lgtm-hq/maintainers
+/README.md @lgtm-hq/maintainers
+/CHANGELOG.md @lgtm-hq/maintainers
+
+# =============================================================================
+# Dependency files
+# =============================================================================
+# NOTE: To exclude dependency files from review requirements for Renovate
+# automerge, configure branch protection rules to not require CODEOWNERS
+# approval for dependency-only PRs, or use Renovate's automerge with
+# platformAutomerge option.
+#
+# CODEOWNERS patterns require at least one owner - patterns without owners
+# are invalid and will cause GitHub to reject the file.

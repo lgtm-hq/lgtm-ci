@@ -5,22 +5,22 @@ on:
   workflow_call:
     inputs:
       max-bump:
-        description: 'Maximum bump type allowed. Valid values: major, minor, patch'
+        description: "Maximum bump type allowed. Valid values: major, minor, patch"
         required: false
         type: string
-        default: 'major'
+        default: "major"
       tag-prefix:
-        description: 'Prefix for version tags'
+        description: "Prefix for version tags"
         required: false
         type: string
-        default: 'v'
+        default: "v"
       draft:
-        description: 'Create release as draft'
+        description: "Create release as draft"
         required: false
         type: boolean
         default: false
       prerelease:
-        description: 'Mark release as prerelease'
+        description: "Mark release as prerelease"
         required: false
         type: boolean
         default: false
@@ -30,22 +30,22 @@ on:
         type: boolean
         default: false
       dry-run:
-        description: 'Run without creating tag or release'
+        description: "Run without creating tag or release"
         required: false
         type: boolean
         default: false
     outputs:
       released:
-        description: 'Whether a release was created (or would be in dry-run)'
+        description: "Whether a release was created (or would be in dry-run)"
         value: ${{ jobs.release.outputs.released }}
       version:
-        description: 'Released version (without prefix)'
+        description: "Released version (without prefix)"
         value: ${{ jobs.release.outputs.version }}
       tag:
-        description: 'Created tag name (empty in dry-run mode)'
+        description: "Created tag name (empty in dry-run mode)"
         value: ${{ jobs.release.outputs.tag }}
       release-url:
-        description: 'URL of the GitHub release (empty in dry-run mode)'
+        description: "URL of the GitHub release (empty in dry-run mode)"
         value: ${{ jobs.release.outputs.release-url }}
 
 jobs:
@@ -101,7 +101,7 @@ jobs:
         with:
           version: ${{ steps.version.outputs.next-version }}
           tag-prefix: ${{ inputs.tag-prefix }}
-          push: 'true'
+          push: "true"
 
       - name: Create GitHub release
         # yamllint disable-line rule:line-length

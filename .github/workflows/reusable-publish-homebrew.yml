@@ -5,50 +5,50 @@ on:
   workflow_call:
     inputs:
       tap-repository:
-        description: 'Homebrew tap repository (owner/repo)'
+        description: "Homebrew tap repository (owner/repo)"
         required: true
         type: string
       formula:
-        description: 'Formula name'
+        description: "Formula name"
         required: true
         type: string
       package-name:
-        description: 'PyPI package name'
+        description: "PyPI package name"
         required: true
         type: string
       version:
-        description: 'Version to update to'
+        description: "Version to update to"
         required: true
         type: string
       wait-for-availability:
-        description: 'Wait for package to be available on PyPI'
+        description: "Wait for package to be available on PyPI"
         required: false
         type: boolean
         default: true
       max-wait-minutes:
-        description: 'Maximum wait time in minutes'
+        description: "Maximum wait time in minutes"
         required: false
         type: number
         default: 10
       test-pypi:
-        description: 'Use TestPyPI instead of PyPI'
+        description: "Use TestPyPI instead of PyPI"
         required: false
         type: boolean
         default: false
       create-pr:
-        description: 'Create PR instead of direct push'
+        description: "Create PR instead of direct push"
         required: false
         type: boolean
         default: false
     outputs:
       updated:
-        description: 'Whether the formula was updated'
+        description: "Whether the formula was updated"
         value: ${{ jobs.update.outputs.updated }}
       commit-sha:
-        description: 'Commit SHA of the update'
+        description: "Commit SHA of the update"
         value: ${{ jobs.update.outputs.commit-sha }}
       pr-url:
-        description: 'Pull request URL (if create-pr is true)'
+        description: "Pull request URL (if create-pr is true)"
         value: ${{ jobs.update.outputs.pr-url }}
 
 jobs:

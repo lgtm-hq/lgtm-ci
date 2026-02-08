@@ -45,6 +45,10 @@ pytest-results.json
 coverage.json
 coverage.xml
 coverage.lcov
+*.tap
+coverage-report/
+coverage/
+!tests/**/coverage/
 
 # Lintro
 .lintro/

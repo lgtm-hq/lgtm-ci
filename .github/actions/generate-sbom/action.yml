@@ -1,44 +1,47 @@
 ---
-name: 'Generate SBOM'
-description: 'Generate Software Bill of Materials (SBOM) using Syft'
-author: 'lgtm-hq'
+name: "Generate SBOM"
+description: "Generate Software Bill of Materials (SBOM) using Syft"
+author: "lgtm-hq"
 
 inputs:
   target:
-    description: 'Target to generate SBOM for (directory, image, file)'
+    description: "Target to generate SBOM for (directory, image, file)"
     required: false
-    default: '.'
+    default: "."
   target-type:
-    description: 'Type of target: dir, image, file'
+    description: "Type of target: dir, image, file"
     required: false
-    default: 'dir'
+    default: "dir"
   format:
-    description: 'SBOM output format: cyclonedx-json, spdx-json'
+    description: "SBOM output format: cyclonedx-json, spdx-json"
     required: false
-    default: 'cyclonedx-json'
+    default: "cyclonedx-json"
   output-file:
-    description: 'Output file path (auto-generated if not specified)'
+    description: "Output file path (default: sbom.json)"
     required: false
-    default: ''
+    default: "sbom.json"
   upload-artifact:
-    description: 'Upload SBOM as artifact'
+    description: "Upload SBOM as artifact"
     required: false
-    default: 'true'
+    default: "true"
   artifact-name:
-    description: 'Name for the uploaded artifact'
+    description: "Name for the uploaded artifact"
     required: false
-    default: 'sbom'
+    default: "sbom"
 
 outputs:
   sbom-file:
-    description: 'Path to the generated SBOM file'
-    value: ${{ inputs.output-file || 'sbom.cdx.json' }}
+    description: >-
+      Path to the generated SBOM file. Returns the value of inputs.output-file (defaults
+      to 'sbom.json' if not specified). Note: anchore/sbom-action does not expose
+      auto-generated filenames, so this output relies on the explicit output-file input.
+    value: ${{ inputs.output-file }}
   sbom-format:
-    description: 'Format of the generated SBOM'
+    description: "Format of the generated SBOM"
     value: ${{ inputs.format }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Generate SBOM
       id: generate
@@ -54,13 +57,14 @@ runs:
         artifact-name: ${{ inputs.artifact-name }}
 
     - name: Generate summary
+      if: inputs.output-file != ''
       shell: bash
       env:
         STEP: summary
-        SBOM_FILE: ${{ inputs.output-file || 'sbom.cdx.json' }}
+        SBOM_FILE: ${{ inputs.output-file }}
         FORMAT: ${{ inputs.format }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-sbom.sh
 
 branding:
-  icon: 'package'
-  color: 'blue'
+  icon: "package"
+  color: "blue"

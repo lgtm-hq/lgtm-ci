@@ -1,54 +1,54 @@
 ---
-name: 'Setup Python'
-description: 'Setup Python with uv package manager and caching'
-author: 'lgtm-hq'
+name: "Setup Python"
+description: "Setup Python with uv package manager and caching"
+author: "lgtm-hq"
 
 inputs:
   python-version:
     description: 'Python version to install (e.g., "3.11", "3.12")'
     required: false
-    default: '3.12'
+    default: "3.12"
   uv-version:
     description: 'uv version to install (e.g., "0.4.0", "latest")'
     required: false
-    default: 'latest'
+    default: "latest"
   cache:
-    description: 'Enable uv cache'
+    description: "Enable uv cache"
     required: false
-    default: 'true'
+    default: "true"
   cache-dependency-path:
-    description: 'Path to dependency files for cache key (supports glob)'
+    description: "Path to dependency files for cache key (supports glob)"
     required: false
     default: |
       **/pyproject.toml
       **/requirements*.txt
       **/uv.lock
   working-directory:
-    description: 'Working directory for uv commands'
+    description: "Working directory for uv commands"
     required: false
-    default: '.'
+    default: "."
   install-dependencies:
-    description: 'Run uv sync to install dependencies'
+    description: "Run uv sync to install dependencies"
     required: false
-    default: 'true'
+    default: "true"
   install-extras:
     description: 'Comma-separated list of extras to install (e.g., "dev,test")'
     required: false
-    default: ''
+    default: ""
 
 outputs:
   python-version:
-    description: 'Installed Python version'
+    description: "Installed Python version"
     value: ${{ steps.python-version.outputs.version }}
   uv-version:
-    description: 'Installed uv version'
+    description: "Installed uv version"
     value: ${{ steps.uv-version.outputs.version }}
   cache-hit:
-    description: 'Whether the cache was hit'
+    description: "Whether the cache was hit"
     value: ${{ steps.cache.outputs.cache-hit }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Install uv
       # Pinned to SHA for supply chain security
@@ -91,8 +91,7 @@ runs:
           ${{ inputs.working-directory }}/.venv
         # Cache key includes version for proper invalidation
         # yamllint disable-line rule:line-length
-        key:
-          uv-${{ runner.os }}-${{ inputs.python-version }}-${{
+        key: uv-${{ runner.os }}-${{ inputs.python-version }}-${{
           hashFiles(inputs.cache-dependency-path) }}
         restore-keys: |
           uv-${{ runner.os }}-${{ inputs.python-version }}-
@@ -108,5 +107,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-python.sh
 
 branding:
-  icon: 'code'
-  color: 'yellow'
+  icon: "code"
+  color: "yellow"

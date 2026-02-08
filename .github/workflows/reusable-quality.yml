@@ -5,40 +5,40 @@ on:
   workflow_call:
     inputs:
       python-version:
-        description: 'Python version for linting tools'
+        description: "Python version for linting tools"
         required: false
         type: string
-        default: '3.11'
+        default: "3.11"
       node-version:
-        description: 'Node.js version for JS/TS linting'
+        description: "Node.js version for JS/TS linting"
         required: false
         type: string
-        default: '20'
+        default: "20"
       lintro-tools:
-        description: 'Comma-separated list of lintro tools to run (empty = all)'
+        description: "Comma-separated list of lintro tools to run (empty = all)"
         required: false
         type: string
-        default: ''
+        default: ""
       fail-on-error:
-        description: 'Fail workflow if linting errors found'
+        description: "Fail workflow if linting errors found"
         required: false
         type: boolean
         default: true
       run-actionlint:
-        description: 'Run actionlint on GitHub Actions'
+        description: "Run actionlint on GitHub Actions"
         required: false
         type: boolean
         default: true
       upload-report:
-        description: 'Upload linting report as artifact'
+        description: "Upload linting report as artifact"
         required: false
         type: boolean
         default: true
       working-directory:
-        description: 'Working directory for linting'
+        description: "Working directory for linting"
         required: false
         type: string
-        default: '.'
+        default: "."
 
 jobs:
   quality:
@@ -64,9 +64,9 @@ jobs:
         uses: ./.github/actions/setup-python
         with:
           python-version: ${{ inputs.python-version }}
-          cache: 'true'
-          install-dependencies: 'true'
-          install-extras: 'dev'
+          cache: "true"
+          install-dependencies: "true"
+          install-extras: "dev"
 
       - name: Setup Node.js
         # yamllint disable-line rule:line-length
@@ -76,7 +76,7 @@ jobs:
         uses: ./.github/actions/setup-node
         with:
           node-version: ${{ inputs.node-version }}
-          cache: 'true'
+          cache: "true"
 
       - name: Install actionlint
         if: inputs.run-actionlint

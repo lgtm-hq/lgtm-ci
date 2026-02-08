@@ -22,7 +22,7 @@ extract_version_pyproject() {
 	fi
 
 	local version
-	version=$(grep -E '^version\s*=' "$file" | head -1 | sed -E 's/.*=\s*["\x27]([^"\x27]+)["\x27].*/\1/' || true)
+	version=$(grep -E '^version[[:space:]]*=' "$file" | head -1 | sed -E "s/.*=[[:space:]]*[\"']([^\"']+)[\"'].*/\1/" || true)
 
 	if [[ -z "$version" ]]; then
 		return 1
@@ -45,7 +45,7 @@ extract_version_package_json() {
 	if command -v jq &>/dev/null; then
 		version=$(jq -r '.version // empty' "$file" 2>/dev/null || true)
 	else
-		version=$(grep -E '"version"\s*:' "$file" | head -1 | sed -E 's/.*:\s*"([^"]+)".*/\1/' || true)
+		version=$(grep -E '"version"[[:space:]]*:' "$file" | head -1 | sed -E 's/.*:[[:space:]]*"([^"]+)".*/\1/' || true)
 	fi
 
 	if [[ -z "$version" ]]; then
@@ -66,7 +66,7 @@ extract_version_cargo() {
 	fi
 
 	local version
-	version=$(grep -E '^version\s*=' "$file" | head -1 | sed -E 's/.*=\s*"([^"]+)".*/\1/' || true)
+	version=$(grep -E '^version[[:space:]]*=' "$file" | head -1 | sed -E "s/.*=[[:space:]]*[\"']([^\"']+)[\"'].*/\1/" || true)
 
 	if [[ -z "$version" ]]; then
 		return 1

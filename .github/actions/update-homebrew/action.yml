@@ -1,55 +1,55 @@
 ---
-name: 'Update Homebrew Formula'
-description: 'Update a Homebrew formula with new version from PyPI'
-author: 'lgtm-hq'
+name: "Update Homebrew Formula"
+description: "Update a Homebrew formula with new version from PyPI"
+author: "lgtm-hq"
 
 inputs:
   tap-repository:
-    description: 'Homebrew tap repository (owner/repo)'
+    description: "Homebrew tap repository (owner/repo)"
     required: true
   formula:
-    description: 'Formula name'
+    description: "Formula name"
     required: true
   package-name:
-    description: 'PyPI package name'
+    description: "PyPI package name"
     required: true
   version:
-    description: 'Version to update to'
+    description: "Version to update to"
     required: true
   wait-for-availability:
-    description: 'Wait for package to be available on PyPI'
+    description: "Wait for package to be available on PyPI"
     required: false
-    default: 'true'
+    default: "true"
   max-wait-minutes:
-    description: 'Maximum wait time in minutes'
+    description: "Maximum wait time in minutes"
     required: false
-    default: '10'
+    default: "10"
   test-pypi:
-    description: 'Use TestPyPI instead of PyPI'
+    description: "Use TestPyPI instead of PyPI"
     required: false
-    default: 'false'
+    default: "false"
   push:
-    description: 'Push changes to tap repository'
+    description: "Push changes to tap repository"
     required: false
-    default: 'true'
+    default: "true"
   create-pr:
-    description: 'Create PR instead of direct push'
+    description: "Create PR instead of direct push"
     required: false
-    default: 'false'
+    default: "false"
 
 outputs:
   updated:
-    description: 'Whether the formula was updated'
+    description: "Whether the formula was updated"
     value: ${{ steps.commit.outputs.updated || 'false' }}
   commit-sha:
-    description: 'Commit SHA of the update'
+    description: "Commit SHA of the update"
     value: ${{ steps.commit.outputs.commit-sha }}
   pr-url:
-    description: 'Pull request URL (if create-pr is true)'
+    description: "Pull request URL (if create-pr is true)"
     value: ${{ steps.pr.outputs.pr-url }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Wait for package availability
       if: inputs.wait-for-availability == 'true'
@@ -114,5 +114,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
 
 branding:
-  icon: 'download'
-  color: 'yellow'
+  icon: "download"
+  color: "yellow"

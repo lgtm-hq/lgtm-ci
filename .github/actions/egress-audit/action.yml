@@ -1,15 +1,15 @@
 ---
-name: 'Egress Audit'
-description: 'Audit and restrict network egress from workflows'
-author: 'lgtm-hq'
+name: "Egress Audit"
+description: "Audit and restrict network egress from workflows"
+author: "lgtm-hq"
 
 inputs:
   mode:
-    description: 'Mode: audit (log), report (summary), or block (enforce)'
+    description: "Mode: audit (log), report (summary), or block (enforce)"
     required: false
-    default: 'audit'
+    default: "audit"
   allowed-domains:
-    description: 'Allowed domains when mode is block (newline-separated)'
+    description: "Allowed domains when mode is block (newline-separated)"
     required: false
     default: |
       github.com
@@ -29,22 +29,22 @@ inputs:
   report-format:
     description: 'Report format: "summary" (step summary), "json", or "none"'
     required: false
-    default: 'summary'
+    default: "summary"
   fail-on-violation:
-    description: 'Fail workflow on unauthorized egress (block mode only)'
+    description: "Fail workflow on unauthorized egress (block mode only)"
     required: false
-    default: 'false'
+    default: "false"
 
 outputs:
   violations-detected:
-    description: 'Whether any egress policy violations were detected'
+    description: "Whether any egress policy violations were detected"
     value: ${{ steps.audit.outputs.violations-detected }}
   egress-log:
-    description: 'Path to the egress log file'
+    description: "Path to the egress log file"
     value: ${{ steps.audit.outputs.egress-log }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Setup egress monitoring
       id: setup
@@ -61,10 +61,11 @@ runs:
       env:
         STEP: audit
         MODE: ${{ inputs.mode }}
+        FAIL_ON_VIOLATION: ${{ inputs['fail-on-violation'] }}
       run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
 
     - name: Generate egress report
-      if: inputs.report-format != 'none'
+      if: inputs['report-format'] != 'none'
       shell: bash
       env:
         STEP: report
@@ -73,5 +74,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
 
 branding:
-  icon: 'wifi'
-  color: 'yellow'
+  icon: "wifi"
+  color: "yellow"

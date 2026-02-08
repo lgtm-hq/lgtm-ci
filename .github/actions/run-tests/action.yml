@@ -1,59 +1,59 @@
 ---
-name: 'Run Tests'
-description: 'Generic test runner that delegates to language-specific runners'
-author: 'lgtm-hq'
+name: "Run Tests"
+description: "Generic test runner that delegates to language-specific runners"
+author: "lgtm-hq"
 
 inputs:
   runner:
-    description: 'Test runner to use: pytest, vitest, playwright, auto'
+    description: "Test runner to use: pytest, vitest, playwright, auto"
     required: false
-    default: 'auto'
+    default: "auto"
   config-file:
-    description: 'Path to test configuration file'
+    description: "Path to test configuration file"
     required: false
-    default: ''
+    default: ""
   coverage:
-    description: 'Whether to collect coverage (true/false)'
+    description: "Whether to collect coverage (true/false)"
     required: false
-    default: 'false'
+    default: "false"
   coverage-format:
-    description: 'Coverage output format (xml, json, lcov)'
+    description: "Coverage output format (xml, json, lcov)"
     required: false
-    default: 'json'
+    default: "json"
   extra-args:
-    description: 'Additional arguments to pass to the test runner'
+    description: "Additional arguments to pass to the test runner"
     required: false
-    default: ''
+    default: ""
   working-directory:
-    description: 'Working directory for running tests'
+    description: "Working directory for running tests"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   exit-code:
-    description: 'Exit code from the test runner'
+    description: "Exit code from the test runner"
     value: ${{ steps.run.outputs.exit-code }}
   runner:
-    description: 'Test runner that was used'
+    description: "Test runner that was used"
     value: ${{ steps.detect.outputs.runner }}
   tests-passed:
-    description: 'Number of tests passed'
+    description: "Number of tests passed"
     value: ${{ steps.parse.outputs.tests-passed }}
   tests-failed:
-    description: 'Number of tests failed'
+    description: "Number of tests failed"
     value: ${{ steps.parse.outputs.tests-failed }}
   tests-skipped:
-    description: 'Number of tests skipped'
+    description: "Number of tests skipped"
     value: ${{ steps.parse.outputs.tests-skipped }}
   tests-total:
-    description: 'Total number of tests'
+    description: "Total number of tests"
     value: ${{ steps.parse.outputs.tests-total }}
   coverage-file:
-    description: 'Path to coverage file'
+    description: "Path to coverage file"
     value: ${{ steps.run.outputs.coverage-file }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Detect test runner
       id: detect
@@ -107,5 +107,5 @@ runs:
       run: exit ${{ steps.run.outputs.exit-code }}
 
 branding:
-  icon: 'check-circle'
-  color: 'green'
+  icon: "check-circle"
+  color: "green"

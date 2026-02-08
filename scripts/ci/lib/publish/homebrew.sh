@@ -142,20 +142,21 @@ update_formula_version() {
 	cp "$formula_path" "$formula_path.bak"
 
 	# Update URL (only first top-level occurrence with 2-space indent, not resource blocks)
-	if ! sed -i.tmp '0,/^  url "/s|^  url "[^"]*"|  url "'"$new_url"'"|' "$formula_path"; then
+	# Uses match()+substr() instead of sub() to treat new_val as literal text
+	if ! awk -v new_val="$new_url" '/^  url "/ && !done { match($0, /url "[^"]*"/); prefix = substr($0, 1, RSTART - 1); suffix = substr($0, RSTART + RLENGTH); print prefix "url \"" new_val "\"" suffix; done=1; next } { print }' "$formula_path" >"${formula_path}.tmp"; then
 		mv "$formula_path.bak" "$formula_path"
 		log_error "Failed to update URL"
 		return 1
 	fi
-	rm -f "$formula_path.tmp"
+	mv "${formula_path}.tmp" "$formula_path"
 
 	# Update SHA256 (only first top-level occurrence with 2-space indent, not resource blocks)
-	if ! sed -i.tmp '0,/^  sha256 "/s|^  sha256 "[^"]*"|  sha256 "'"$new_sha256"'"|' "$formula_path"; then
+	if ! awk -v new_val="$new_sha256" '/^  sha256 "/ && !done { match($0, /sha256 "[^"]*"/); prefix = substr($0, 1, RSTART - 1); suffix = substr($0, RSTART + RLENGTH); print prefix "sha256 \"" new_val "\"" suffix; done=1; next } { print }' "$formula_path" >"${formula_path}.tmp"; then
 		mv "$formula_path.bak" "$formula_path"
 		log_error "Failed to update SHA256"
 		return 1
 	fi
-	rm -f "$formula_path.tmp"
+	mv "${formula_path}.tmp" "$formula_path"
 
 	# Clean up backup on success
 	rm -f "$formula_path.bak"

@@ -1,0 +1,18 @@
+{
+  "summary": {
+    "passed": 10,
+    "failed": 2,
+    "skipped": 1,
+    "total": 13,
+    "duration": 5.234
+  },
+  "tests": [
+    { "name": "test_example_1", "outcome": "passed" },
+    { "name": "test_example_2", "outcome": "passed" },
+    {
+      "name": "test_example_3",
+      "outcome": "failed",
+      "message": "AssertionError"
+    }
+  ]
+}

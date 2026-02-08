@@ -1,63 +1,63 @@
 ---
-name: 'Run pytest'
-description: 'Run Python tests using pytest with coverage support'
-author: 'lgtm-hq'
+name: "Run pytest"
+description: "Run Python tests using pytest with coverage support"
+author: "lgtm-hq"
 
 inputs:
   python-version:
-    description: 'Python version to use'
+    description: "Python version to use"
     required: false
-    default: '3.12'
+    default: "3.12"
   test-path:
-    description: 'Path to test files or directory'
+    description: "Path to test files or directory"
     required: false
-    default: 'tests'
+    default: "tests"
   coverage:
-    description: 'Whether to collect coverage (true/false)'
+    description: "Whether to collect coverage (true/false)"
     required: false
-    default: 'false'
+    default: "false"
   coverage-format:
-    description: 'Coverage output format: xml, json, lcov'
+    description: "Coverage output format: xml, json, lcov"
     required: false
-    default: 'json'
+    default: "json"
   markers:
     description: 'pytest markers to filter tests (e.g., "not slow")'
     required: false
-    default: ''
+    default: ""
   extra-args:
-    description: 'Additional arguments to pass to pytest'
+    description: "Additional arguments to pass to pytest"
     required: false
-    default: ''
+    default: ""
   working-directory:
-    description: 'Working directory for running tests'
+    description: "Working directory for running tests"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   exit-code:
-    description: 'Exit code from pytest'
+    description: "Exit code from pytest"
     value: ${{ steps.run.outputs.exit-code }}
   tests-passed:
-    description: 'Number of tests passed'
+    description: "Number of tests passed"
     value: ${{ steps.parse.outputs.tests-passed }}
   tests-failed:
-    description: 'Number of tests failed'
+    description: "Number of tests failed"
     value: ${{ steps.parse.outputs.tests-failed }}
   tests-skipped:
-    description: 'Number of tests skipped'
+    description: "Number of tests skipped"
     value: ${{ steps.parse.outputs.tests-skipped }}
   tests-total:
-    description: 'Total number of tests'
+    description: "Total number of tests"
     value: ${{ steps.parse.outputs.tests-total }}
   coverage-file:
-    description: 'Path to coverage file'
+    description: "Path to coverage file"
     value: ${{ steps.run.outputs.coverage-file }}
   coverage-percent:
-    description: 'Coverage percentage'
+    description: "Coverage percentage"
     value: ${{ steps.parse.outputs.coverage-percent }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Setup Python
       uses: ./.github/actions/setup-python
@@ -115,5 +115,5 @@ runs:
       run: exit ${{ steps.run.outputs.exit-code }}
 
 branding:
-  icon: 'check-circle'
-  color: 'yellow'
+  icon: "check-circle"
+  color: "yellow"

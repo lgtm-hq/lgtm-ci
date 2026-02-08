@@ -5,81 +5,81 @@ on:
   workflow_call:
     inputs:
       context:
-        description: 'Build context path'
+        description: "Build context path"
         required: false
         type: string
-        default: '.'
+        default: "."
       file:
-        description: 'Path to Dockerfile'
+        description: "Path to Dockerfile"
         required: false
         type: string
-        default: 'Dockerfile'
+        default: "Dockerfile"
       platforms:
-        description: 'Target platforms (comma-separated)'
+        description: "Target platforms (comma-separated)"
         required: false
         type: string
-        default: 'linux/amd64,linux/arm64'
+        default: "linux/amd64,linux/arm64"
       registry:
-        description: 'Container registry URL'
+        description: "Container registry URL"
         required: false
         type: string
-        default: 'ghcr.io'
+        default: "ghcr.io"
       image-name:
-        description: 'Image name (default: github.repository)'
+        description: "Image name (default: github.repository)"
         required: false
         type: string
-        default: ''
+        default: ""
       tags:
-        description: 'Additional tags (comma-separated)'
+        description: "Additional tags (comma-separated)"
         required: false
         type: string
-        default: ''
+        default: ""
       version:
-        description: 'Version for semver tags'
+        description: "Version for semver tags"
         required: false
         type: string
-        default: ''
+        default: ""
       push:
-        description: 'Push image to registry'
+        description: "Push image to registry"
         required: false
         type: boolean
         default: false
       provenance:
-        description: 'Generate provenance attestation'
+        description: "Generate provenance attestation"
         required: false
         type: boolean
         default: true
       sbom:
-        description: 'Generate SBOM attestation'
+        description: "Generate SBOM attestation"
         required: false
         type: boolean
         default: true
       scan:
-        description: 'Run vulnerability scan'
+        description: "Run vulnerability scan"
         required: false
         type: boolean
         default: false
       build-args:
-        description: 'Build arguments (comma-separated key=value)'
+        description: "Build arguments (comma-separated key=value)"
         required: false
         type: string
-        default: ''
+        default: ""
 
     outputs:
       tags:
-        description: 'Generated image tags'
+        description: "Generated image tags"
         value: ${{ jobs.build.outputs.tags }}
       digest:
-        description: 'Image digest'
+        description: "Image digest"
         value: ${{ jobs.build.outputs.digest }}
 
     secrets:
       DOCKERHUB_USERNAME:
         required: false
-        description: 'Docker Hub username (for docker.io registry)'
+        description: "Docker Hub username (for docker.io registry)"
       DOCKERHUB_TOKEN:
         required: false
-        description: 'Docker Hub token (for docker.io registry)'
+        description: "Docker Hub token (for docker.io registry)"
 
 jobs:
   build:
@@ -188,8 +188,7 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/attest-build-provenance@ef244123eb79f2f7a7e75d99086184180e6d0018 # v2.1.0
         with:
-          subject-name:
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
@@ -210,12 +209,12 @@ jobs:
           image-ref:
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
             needs.build.outputs.digest }}
-          format: 'sarif'
-          output: 'trivy-results.sarif'
-          severity: 'CRITICAL,HIGH'
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
 
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
         uses: github/codeql-action/upload-sarif@1b549b9259bda1cb5ddde3b41741a82a2d15a841 # v3.28.13
         with:
-          sarif_file: 'trivy-results.sarif'
+          sarif_file: "trivy-results.sarif"

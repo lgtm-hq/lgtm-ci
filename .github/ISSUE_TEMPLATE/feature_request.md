@@ -1,9 +1,9 @@
 ---
 name: Feature Request
 about: Suggest a new feature for lgtm-ci
-title: '[FEATURE] '
+title: "[FEATURE] "
 labels: enhancement
-assignees: ''
+assignees: ""
 ---
 
 ## Summary

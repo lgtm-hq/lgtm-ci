@@ -1,55 +1,55 @@
 ---
-name: 'Scan Vulnerabilities'
-description: 'Scan for vulnerabilities using Grype'
-author: 'lgtm-hq'
+name: "Scan Vulnerabilities"
+description: "Scan for vulnerabilities using Grype"
+author: "lgtm-hq"
 
 inputs:
   target:
-    description: 'Target to scan (SBOM file, image, directory)'
+    description: "Target to scan (SBOM file, image, directory)"
     required: true
   target-type:
-    description: 'Type of target: sbom, image, dir'
+    description: "Type of target: sbom, image, dir"
     required: false
-    default: 'sbom'
+    default: "sbom"
   sbom-file:
-    description: 'Path to SBOM file (alternative to target when target-type is sbom)'
+    description: "Path to SBOM file (alternative to target when target-type is sbom)"
     required: false
-    default: ''
+    default: ""
   fail-on:
-    description: 'Severity threshold to fail on: critical, high, medium, low, none'
+    description: "Severity threshold to fail on: critical, high, medium, low, none"
     required: false
-    default: ''
+    default: ""
   output-format:
-    description: 'Output format: json, table'
+    description: "Output format: json, table"
     required: false
-    default: 'json'
+    default: "json"
   upload-sarif:
-    description: 'Upload SARIF report to GitHub Security tab'
+    description: "Upload SARIF report to GitHub Security tab"
     required: false
-    default: 'false'
+    default: "false"
 
 outputs:
   vulnerabilities-found:
-    description: 'Whether any vulnerabilities were found'
+    description: "Whether any vulnerabilities were found"
     value: ${{ steps.counts.outputs.vulnerabilities-found }}
   critical-count:
-    description: 'Number of critical vulnerabilities'
+    description: "Number of critical vulnerabilities"
     value: ${{ steps.counts.outputs.critical-count }}
   high-count:
-    description: 'Number of high-severity vulnerabilities'
+    description: "Number of high-severity vulnerabilities"
     value: ${{ steps.counts.outputs.high-count }}
   medium-count:
-    description: 'Number of medium-severity vulnerabilities'
+    description: "Number of medium-severity vulnerabilities"
     value: ${{ steps.counts.outputs.medium-count }}
   low-count:
-    description: 'Number of low-severity vulnerabilities'
+    description: "Number of low-severity vulnerabilities"
     value: ${{ steps.counts.outputs.low-count }}
   sarif-file:
-    description: 'Path to SARIF report file'
+    description: "Path to SARIF report file"
     value: ${{ steps.sarif.outputs.sarif-file }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Determine scan target
       id: target
@@ -128,7 +128,7 @@ runs:
       uses: github/codeql-action/upload-sarif@1b549b9259bda1cb5ddde3b41741a82a2d15a841 # v3.28.6
       with:
         sarif_file: ${{ steps.sarif.outputs.sarif-file }}
-        category: 'vulnerability-scan'
+        category: "vulnerability-scan"
 
     - name: Generate summary
       if: inputs.output-format == 'json'
@@ -143,5 +143,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/scan-vulnerabilities.sh
 
 branding:
-  icon: 'shield'
-  color: 'red'
+  icon: "shield"
+  color: "red"

@@ -5,48 +5,48 @@ on:
   workflow_call:
     inputs:
       coverage-files:
-        description: 'Glob pattern or comma-separated list of coverage files'
+        description: "Glob pattern or comma-separated list of coverage files"
         required: false
         type: string
-        default: ''
+        default: ""
       format:
-        description: 'Coverage format: auto, istanbul, coverage-py, lcov'
+        description: "Coverage format: auto, istanbul, coverage-py, lcov"
         required: false
         type: string
-        default: 'auto'
+        default: "auto"
       threshold:
-        description: 'Minimum coverage percentage to pass'
+        description: "Minimum coverage percentage to pass"
         required: false
         type: number
         default: 0
       generate-badge:
-        description: 'Generate coverage badge'
+        description: "Generate coverage badge"
         required: false
         type: boolean
         default: true
       publish-pages:
-        description: 'Publish coverage to GitHub Pages'
+        description: "Publish coverage to GitHub Pages"
         required: false
         type: boolean
         default: false
       working-directory:
-        description: 'Working directory'
+        description: "Working directory"
         required: false
         type: string
-        default: '.'
+        default: "."
 
     outputs:
       coverage-percent:
-        description: 'Overall coverage percentage'
+        description: "Overall coverage percentage"
         value: ${{ jobs.coverage.outputs.coverage-percent }}
       badge-url:
-        description: 'URL to coverage badge'
+        description: "URL to coverage badge"
         value: ${{ jobs.coverage.outputs.badge-url }}
       pages-url:
-        description: 'GitHub Pages URL'
+        description: "GitHub Pages URL"
         value: ${{ jobs.publish.outputs.pages-url }}
       passed:
-        description: 'Whether coverage meets threshold'
+        description: "Whether coverage meets threshold"
         value: ${{ jobs.coverage.outputs.passed }}
 
 jobs:
@@ -78,7 +78,7 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
-          pattern: '*-coverage'
+          pattern: "*-coverage"
           path: coverage-artifacts
           merge-multiple: true
 

@@ -1,38 +1,38 @@
 ---
-name: 'Attest Build'
-description: 'Create build attestations using GitHub attestations'
-author: 'lgtm-hq'
+name: "Attest Build"
+description: "Create build attestations using GitHub attestations"
+author: "lgtm-hq"
 
 inputs:
   subject-path:
-    description: 'Path to the artifact to attest'
+    description: "Path to the artifact to attest"
     required: true
   subject-digest:
-    description: 'Digest of the artifact (sha256:...)'
+    description: "Digest of the artifact (sha256:...)"
     required: false
-    default: ''
+    default: ""
   subject-name:
-    description: 'Name of the artifact'
+    description: "Name of the artifact"
     required: false
-    default: ''
+    default: ""
   push-to-registry:
-    description: 'Push attestation to container registry'
+    description: "Push attestation to container registry"
     required: false
-    default: 'false'
+    default: "false"
 
 outputs:
   attestation-id:
-    description: 'ID of the created attestation'
+    description: "ID of the created attestation"
     value: ${{ steps.attest.outputs.attestation-id }}
   attestation-url:
-    description: 'URL of the attestation'
+    description: "URL of the attestation"
     value: ${{ steps.attest.outputs.attestation-url }}
   bundle-path:
-    description: 'Path to the attestation bundle'
+    description: "Path to the attestation bundle"
     value: ${{ steps.attest.outputs.bundle-path }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Prepare attestation
       id: prepare
@@ -65,5 +65,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/attest-build.sh
 
 branding:
-  icon: 'check-circle'
-  color: 'green'
+  icon: "check-circle"
+  color: "green"

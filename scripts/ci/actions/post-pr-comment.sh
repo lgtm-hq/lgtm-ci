@@ -19,6 +19,27 @@
 set -euo pipefail
 
 : "${STEP:=post}"
+
+# -----------------------------------------------------------------------------
+# Step: read-file - Read comment body from file
+# -----------------------------------------------------------------------------
+if [[ "$STEP" == "read-file" ]]; then
+	: "${COMMENT_FILE:?COMMENT_FILE is required}"
+	echo "file_provided=true" >>"$GITHUB_OUTPUT"
+	if [[ ! -f "$COMMENT_FILE" ]]; then
+		echo "::warning::Comment file not found: $COMMENT_FILE"
+		echo "body=" >>"$GITHUB_OUTPUT"
+	else
+		EOF_MARKER="LGTM_EOF_$$_$(date +%s)"
+		{
+			echo "body<<$EOF_MARKER"
+			cat "$COMMENT_FILE"
+			echo "$EOF_MARKER"
+		} >>"$GITHUB_OUTPUT"
+	fi
+	exit 0
+fi
+
 : "${GH_TOKEN:?GH_TOKEN is required}"
 
 # -----------------------------------------------------------------------------
@@ -59,6 +80,13 @@ fi
 : "${MARKER:?MARKER is required}"
 : "${MODE:=upsert}"
 : "${DELETE_ON_EMPTY:=false}"
+
+# Determine COMMENT_BODY: prefer file content when file was provided (even if empty)
+if [[ "${FILE_PROVIDED:-}" == "true" ]]; then
+	COMMENT_BODY="${BODY_FROM_FILE:-}"
+else
+	COMMENT_BODY="${BODY_FROM_INPUT:-}"
+fi
 
 # Create marker comment (hidden in rendered markdown)
 MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"

@@ -1,50 +1,50 @@
 ---
-name: 'Publish to npm'
-description: 'Build and publish Node.js package to npm with provenance'
-author: 'lgtm-hq'
+name: "Publish to npm"
+description: "Build and publish Node.js package to npm with provenance"
+author: "lgtm-hq"
 
 inputs:
   node-version:
-    description: 'Node.js version'
+    description: "Node.js version"
     required: false
-    default: '22'
+    default: "22"
   dist-tag:
-    description: 'npm dist-tag (latest, beta, next, etc.)'
+    description: "npm dist-tag (latest, beta, next, etc.)"
     required: false
-    default: 'latest'
+    default: "latest"
   provenance:
-    description: 'Enable npm provenance attestation (requires id-token: write)'
+    description: "Enable npm provenance attestation (requires id-token: write)"
     required: false
-    default: 'true'
+    default: "true"
   access:
-    description: 'Package access level (public, restricted)'
+    description: "Package access level (public, restricted)"
     required: false
-    default: 'public'
+    default: "public"
   dry-run:
-    description: 'Build and pack only, do not publish'
+    description: "Build and pack only, do not publish"
     required: false
-    default: 'false'
+    default: "false"
   working-directory:
-    description: 'Working directory containing the package'
+    description: "Working directory containing the package"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   published:
-    description: 'Whether the package was published'
+    description: "Whether the package was published"
     value: ${{ steps.publish.outputs.published || 'false' }}
   version:
-    description: 'Package version'
+    description: "Package version"
     value: ${{ steps.build.outputs.version }}
   package-name:
-    description: 'Package name'
+    description: "Package name"
     value: ${{ steps.build.outputs.name }}
   tarball:
-    description: 'Path to the built tarball'
+    description: "Path to the built tarball"
     value: ${{ steps.build.outputs.tarball }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Validate package
       id: validate
@@ -87,5 +87,5 @@ runs:
       run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-npm.sh
 
 branding:
-  icon: 'package'
-  color: 'red'
+  icon: "package"
+  color: "red"

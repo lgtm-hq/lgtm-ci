@@ -5,37 +5,37 @@ on:
   workflow_call:
     inputs:
       ruby-version:
-        description: 'Ruby version'
+        description: "Ruby version"
         required: false
         type: string
-        default: '3.3'
+        default: "3.3"
       gemspec:
-        description: 'Path to gemspec file (auto-detected if not specified)'
+        description: "Path to gemspec file (auto-detected if not specified)"
         required: false
         type: string
-        default: ''
+        default: ""
       dry-run:
-        description: 'Build only, do not publish'
+        description: "Build only, do not publish"
         required: false
         type: boolean
         default: false
       working-directory:
-        description: 'Working directory containing the gem'
+        description: "Working directory containing the gem"
         required: false
         type: string
-        default: '.'
+        default: "."
     outputs:
       published:
-        description: 'Whether the gem was published'
+        description: "Whether the gem was published"
         value: ${{ jobs.publish.outputs.published }}
       version:
-        description: 'Published gem version'
+        description: "Published gem version"
         value: ${{ jobs.publish.outputs.version }}
       gem-name:
-        description: 'Published gem name'
+        description: "Published gem name"
         value: ${{ jobs.publish.outputs.gem-name }}
       gem-file:
-        description: 'Path to the built gem file'
+        description: "Path to the built gem file"
         value: ${{ jobs.publish.outputs.gem-file }}
 
 jobs:

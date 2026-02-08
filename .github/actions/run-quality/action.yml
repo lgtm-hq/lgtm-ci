@@ -1,40 +1,40 @@
 ---
-name: 'Run Quality Checks'
-description: 'Run lintro quality checks with configurable tools'
-author: 'lgtm-hq'
+name: "Run Quality Checks"
+description: "Run lintro quality checks with configurable tools"
+author: "lgtm-hq"
 
 inputs:
   tools:
-    description: 'Comma-separated list of lintro tools to run (empty = all)'
+    description: "Comma-separated list of lintro tools to run (empty = all)"
     required: false
-    default: ''
+    default: ""
   mode:
-    description: 'Mode: check (lint only) or format (auto-fix)'
+    description: "Mode: check (lint only) or format (auto-fix)"
     required: false
-    default: 'check'
+    default: "check"
   fail-on-error:
-    description: 'Fail if linting errors found'
+    description: "Fail if linting errors found"
     required: false
-    default: 'true'
+    default: "true"
   run-actionlint:
-    description: 'Also run actionlint on GitHub Actions'
+    description: "Also run actionlint on GitHub Actions"
     required: false
-    default: 'true'
+    default: "true"
   working-directory:
-    description: 'Working directory for linting'
+    description: "Working directory for linting"
     required: false
-    default: '.'
+    default: "."
 
 outputs:
   exit-code:
-    description: 'Exit code from lintro'
+    description: "Exit code from lintro"
     value: ${{ steps.lint.outputs.exit-code }}
   status:
-    description: 'Status: passed or failed'
+    description: "Status: passed or failed"
     value: ${{ steps.lint.outputs.status }}
 
 runs:
-  using: 'composite'
+  using: "composite"
   steps:
     - name: Run lintro quality checks
       id: lint
@@ -61,8 +61,10 @@ runs:
             exit 0
           fi
           exit $EXIT_CODE
+        else
+          echo "::debug::actionlint not found, skipping GitHub Actions linting"
         fi
 
 branding:
-  icon: 'check-circle'
-  color: 'green'
+  icon: "check-circle"
+  color: "green"

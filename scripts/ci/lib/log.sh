@@ -61,7 +61,9 @@ log_verbose() {
 	# Use string comparison to handle non-numeric VERBOSE values
 	# Check for "1" first, then lowercase the value to check for "true"
 	local verbose_val="${VERBOSE:-}"
-	[[ "$verbose_val" == "1" || "${verbose_val,,}" == "true" ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
+	local verbose_lower
+	verbose_lower=$(printf '%s' "$verbose_val" | tr '[:upper:]' '[:lower:]')
+	[[ "$verbose_val" == "1" || "$verbose_lower" == "true" ]] && echo -e "${LGTM_CI_BLUE}[VERBOSE]${LGTM_CI_NC} $*" >&2 || true
 }
 
 # Exit with error message
