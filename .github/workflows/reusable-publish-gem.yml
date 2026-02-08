@@ -62,10 +62,9 @@ jobs:
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
 
       - name: Setup Ruby
-        uses: ruby/setup-ruby@a4effe49ee8ee5b8224f9b18fb5c7d6ac6239857 # v1.221.0
+        uses: ./.github/actions/setup-ruby
         with:
           ruby-version: ${{ inputs.ruby-version }}
-          bundler-cache: true
 
       - name: Configure RubyGems OIDC credentials
         if: inputs.dry-run == false
