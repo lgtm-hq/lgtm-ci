@@ -281,6 +281,20 @@ teardown() {
 	assert_output --partial "test.pypi.org"
 }
 
+@test "get_pypi_sha256: grep fallback when jq unavailable" {
+	local json='{"urls":[{"packagetype":"sdist","digests":{"sha256":"grep123"},"url":"https://files.pythonhosted.org/pkg-1.0.0.tar.gz"}]}'
+	mock_command "curl" "$json"
+
+	run bash -c "
+		# Hide jq by shadowing command builtin
+		command() { case \"\$1\" in -v) [[ \"\$2\" != \"jq\" ]] && builtin command \"\$@\" || return 1;; *) builtin command \"\$@\";; esac; }
+		source \"\$LIB_DIR/publish/registry.sh\"
+		get_pypi_sha256 \"my-package\" \"1.0.0\"
+	"
+	assert_success
+	assert_output "grep123"
+}
+
 @test "get_pypi_sha256: returns 1 when no sdist in response" {
 	local json='{"urls":[{"packagetype":"bdist_wheel","digests":{"sha256":"wheelonly"}}]}'
 	mock_command "curl" "$json"
@@ -294,15 +308,23 @@ teardown() {
 # =============================================================================
 
 @test "registry.sh: sets PYPI_API_URL readonly" {
-	run bash -c 'source "$LIB_DIR/publish/registry.sh" && echo "$PYPI_API_URL"'
-	assert_success
-	assert_output "https://pypi.org/pypi"
+	run bash -c '
+		source "$LIB_DIR/publish/registry.sh"
+		echo "$PYPI_API_URL"
+		PYPI_API_URL="overwritten" 2>/dev/null
+	'
+	assert_failure
+	assert_output --partial "https://pypi.org/pypi"
 }
 
 @test "registry.sh: sets NPM_REGISTRY_URL readonly" {
-	run bash -c 'source "$LIB_DIR/publish/registry.sh" && echo "$NPM_REGISTRY_URL"'
-	assert_success
-	assert_output "https://registry.npmjs.org"
+	run bash -c '
+		source "$LIB_DIR/publish/registry.sh"
+		echo "$NPM_REGISTRY_URL"
+		NPM_REGISTRY_URL="overwritten" 2>/dev/null
+	'
+	assert_failure
+	assert_output --partial "https://registry.npmjs.org"
 }
 
 # =============================================================================

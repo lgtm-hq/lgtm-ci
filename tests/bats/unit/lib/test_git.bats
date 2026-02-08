@@ -283,7 +283,7 @@ teardown() {
 	assert_success
 	local line_count
 	line_count=$(echo "$output" | wc -l)
-	[[ "$line_count" -ge 2 ]]
+	[ "$line_count" -ge 2 ] || fail "expected at least 2 tags, got $line_count"
 }
 
 @test "get_tags: uses v* pattern by default" {

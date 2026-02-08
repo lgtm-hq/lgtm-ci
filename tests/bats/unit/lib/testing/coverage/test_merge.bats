@@ -6,6 +6,7 @@ load "../../../../../helpers/common"
 load "../../../../../helpers/mocks"
 
 setup() {
+	[[ -n "$LIB_DIR" ]] || { echo "LIB_DIR is not set; cannot source library files" >&2; return 1; }
 	setup_temp_dir
 	save_path
 	export LIB_DIR

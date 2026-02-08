@@ -11,8 +11,6 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
 # Defaults
 LINTRO_OUTPUT="${LINTRO_OUTPUT:-chk-output.txt}"
 LINTRO_EXIT_CODE="${LINTRO_EXIT_CODE:-0}"
