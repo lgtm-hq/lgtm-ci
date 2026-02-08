@@ -103,11 +103,18 @@ Located in `scripts/ci/lib/`:
 
 ## Versioning
 
-lgtm-ci uses semantic versioning:
+lgtm-ci uses [semantic versioning](https://semver.org/) with
+[conventional commits](https://www.conventionalcommits.org/) for automated releases.
 
-- `v1.0.0` - Specific version
-- `v1` - Latest v1.x.x (recommended for stability)
-- `main` - Latest development (use with caution)
+| Ref       | Example                                                  | Description                             |
+| --------- | -------------------------------------------------------- | --------------------------------------- |
+| `@v1`     | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1`     | Recommended — gets all v1.x.x updates   |
+| `@v1.2.3` | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1.2.3` | Pinned to exact version                 |
+| `@main`   | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main`   | Latest development (not for production) |
+
+Releases are automated — every push to `main` with releasable commits
+(`feat:`, `fix:`, etc.) creates a new tagged release and updates the
+floating major version tag.
 
 ## Contributing
 
