@@ -171,16 +171,17 @@ get_commits_by_type() {
 	done < <(git log --oneline "$range" 2>/dev/null)
 
 	# Output as simple format (one commit per line, sections separated by markers)
+	# Use length check to avoid unbound variable with set -u on empty arrays
 	echo "### BREAKING"
-	printf '%s\n' "${breaking_commits[@]}"
+	if [[ ${#breaking_commits[@]} -gt 0 ]]; then printf '%s\n' "${breaking_commits[@]}"; fi
 	echo "### FEATURES"
-	printf '%s\n' "${feat_commits[@]}"
+	if [[ ${#feat_commits[@]} -gt 0 ]]; then printf '%s\n' "${feat_commits[@]}"; fi
 	echo "### FIXES"
-	printf '%s\n' "${fix_commits[@]}"
+	if [[ ${#fix_commits[@]} -gt 0 ]]; then printf '%s\n' "${fix_commits[@]}"; fi
 	echo "### DOCS"
-	printf '%s\n' "${docs_commits[@]}"
+	if [[ ${#docs_commits[@]} -gt 0 ]]; then printf '%s\n' "${docs_commits[@]}"; fi
 	echo "### OTHER"
-	printf '%s\n' "${other_commits[@]}"
+	if [[ ${#other_commits[@]} -gt 0 ]]; then printf '%s\n' "${other_commits[@]}"; fi
 }
 
 # Count commits by type between refs

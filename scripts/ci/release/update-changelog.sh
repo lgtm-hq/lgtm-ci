@@ -129,7 +129,14 @@ in_links { next }
 { print }
 ' "$CHANGELOG_FILE" >"$TMPFILE"
 
-chmod --reference="$CHANGELOG_FILE" "$TMPFILE"
+# Preserve file permissions (portable: works on both GNU and BSD/macOS)
+if command -v stat >/dev/null 2>&1; then
+	if [[ "$(uname -s)" == "Darwin" ]]; then
+		chmod "$(stat -f '%Lp' "$CHANGELOG_FILE")" "$TMPFILE"
+	else
+		chmod --reference="$CHANGELOG_FILE" "$TMPFILE"
+	fi
+fi
 mv "$TMPFILE" "$CHANGELOG_FILE"
 trap - EXIT
 
