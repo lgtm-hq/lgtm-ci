@@ -318,6 +318,7 @@ Sign release artifacts (tarballs, binaries, SBOMs) with Sigstore/Cosign keyless 
 **Requirements:**
 
 - `id-token: write` permission for OIDC keyless signing
+- `contents: write` permission for release uploads (when `upload-to-release` is true)
 
 ---
 

@@ -133,9 +133,11 @@ MOCK
 	assert_github_output "signed-count" "1"
 	assert_github_output "signatures-dir" "${BATS_TEST_TMPDIR}/sigs"
 
-	# Verify signature files were created
-	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/artifact.tar.gz.sig"
-	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/artifact.tar.gz.pem"
+	# Verify signature files were created (sanitized path replaces / with __)
+	local sanitized
+	sanitized="$(echo "$test_file" | sed 's|^/||; s|/|__|g')"
+	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/${sanitized}.sig"
+	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/${sanitized}.pem"
 }
 
 @test "sign-artifact: sign succeeds with multiple files" {
@@ -156,11 +158,14 @@ MOCK
 	assert_output --partial "Successfully signed 2 file(s)"
 	assert_github_output "signed-count" "2"
 
-	# Verify all signature files
-	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/app-linux.tar.gz.sig"
-	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/app-linux.tar.gz.pem"
-	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/app-darwin.tar.gz.sig"
-	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/app-darwin.tar.gz.pem"
+	# Verify all signature files (sanitized path replaces / with __)
+	local san1 san2
+	san1="$(echo "$file1" | sed 's|^/||; s|/|__|g')"
+	san2="$(echo "$file2" | sed 's|^/||; s|/|__|g')"
+	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/${san1}.sig"
+	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/${san1}.pem"
+	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/${san2}.sig"
+	assert_file_exists "${BATS_TEST_TMPDIR}/sigs/${san2}.pem"
 }
 
 # =============================================================================

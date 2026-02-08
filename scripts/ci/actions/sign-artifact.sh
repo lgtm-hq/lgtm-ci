@@ -49,9 +49,11 @@ sign)
 	signed_count=0
 
 	for file in "${file_list[@]}"; do
-		basename_file="$(basename "$file")"
-		sig_file="${SIGNATURES_DIR}/${basename_file}.sig"
-		cert_file="${SIGNATURES_DIR}/${basename_file}.pem"
+		# Use full path with separators replaced to avoid collisions
+		# when different directories contain files with the same basename
+		sanitized="$(echo "$file" | sed 's|^/||; s|/|__|g')"
+		sig_file="${SIGNATURES_DIR}/${sanitized}.sig"
+		cert_file="${SIGNATURES_DIR}/${sanitized}.pem"
 
 		log_info "Signing: $file"
 
@@ -68,7 +70,7 @@ sign)
 				signatures="$sig_file"
 			fi
 			certificate="$cert_file"
-			log_success "Signed: $basename_file"
+			log_success "Signed: $(basename "$file")"
 		else
 			log_error "Failed to sign: $file"
 		fi
