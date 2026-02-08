@@ -89,12 +89,14 @@ UNRELEASED_LINK="[Unreleased]: ${REPO_URL}/compare/${TAG_NAME}...HEAD"
 TMPFILE=$(mktemp "${CHANGELOG_FILE}.XXXXXX")
 trap 'rm -f "$TMPFILE"' EXIT
 
-awk -v new_section="$NEW_SECTION" -v unreleased="$UNRELEASED_SECTION" -v unreleased_link="$UNRELEASED_LINK" -v version_link="$VERSION_LINK" '
+export NEW_SECTION UNRELEASED_SECTION UNRELEASED_LINK VERSION_LINK
+
+awk '
 BEGIN { in_unreleased=0; in_links=0 }
 /^## \[Unreleased\]/ {
-	print unreleased
+	print ENVIRON["UNRELEASED_SECTION"]
 	print ""
-	print new_section
+	print ENVIRON["NEW_SECTION"]
 	in_unreleased=1
 	next
 }
@@ -105,8 +107,8 @@ in_unreleased && /^## \[/ {
 }
 in_unreleased { next }
 /^\[Unreleased\]:/ {
-	print unreleased_link
-	print version_link
+	print ENVIRON["UNRELEASED_LINK"]
+	print ENVIRON["VERSION_LINK"]
 	in_links=1
 	next
 }
