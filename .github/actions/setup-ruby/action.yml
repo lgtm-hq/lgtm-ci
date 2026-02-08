@@ -1,0 +1,104 @@
+---
+name: "Setup Ruby"
+description: "Setup Ruby with bundler and gem caching"
+author: "lgtm-hq"
+
+inputs:
+  ruby-version:
+    description: 'Ruby version to install (e.g., "3.2", "3.3")'
+    required: false
+    default: "3.3"
+  bundler-version:
+    description: 'Bundler version to install (e.g., "2.5.0", "latest")'
+    required: false
+    default: "latest"
+  cache:
+    description: "Enable gem caching"
+    required: false
+    default: "true"
+  cache-dependency-path:
+    description: "Path to Gemfile.lock for cache key (supports glob)"
+    required: false
+    default: |
+      **/Gemfile.lock
+      **/gems.locked
+  working-directory:
+    description: "Working directory for bundle commands"
+    required: false
+    default: "."
+  install-dependencies:
+    description: "Run bundle install to install dependencies"
+    required: false
+    default: "true"
+
+outputs:
+  ruby-version:
+    description: "Installed Ruby version"
+    value: ${{ steps.ruby-version.outputs.version }}
+  bundler-version:
+    description: "Installed Bundler version"
+    value: ${{ steps.bundler-version.outputs.version }}
+  cache-hit:
+    description: "Whether the cache was hit"
+    value: ${{ steps.cache.outputs.cache-hit || 'false' }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Ruby
+      # Pinned to SHA for supply chain security
+      uses: ruby/setup-ruby@a4effe49ee8ee5b8224f9b18fb5c7d6ac6239857 # v1.221.0
+      with:
+        ruby-version: ${{ inputs.ruby-version }}
+        bundler: ${{ inputs.bundler-version }}
+        bundler-cache: false
+
+    - name: Get Ruby version
+      id: ruby-version
+      shell: bash
+      env:
+        STEP: ruby-version
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+
+    - name: Get Bundler version
+      id: bundler-version
+      shell: bash
+      env:
+        STEP: bundler-version
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+
+    - name: Configure bundler
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: bundle-config
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+
+    - name: Cache gem dependencies
+      if: inputs.cache == 'true'
+      id: cache
+      # Pinned to SHA for supply chain security
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.2.3
+      with:
+        path: |
+          ${{ inputs.working-directory }}/vendor/bundle
+          ~/.bundle
+        # Cache key uses resolved ruby version for proper invalidation
+        # yamllint disable-line rule:line-length
+        key: gems-${{ runner.os }}-${{ steps.ruby-version.outputs.version }}-${{
+          hashFiles(inputs.cache-dependency-path) }}
+        restore-keys: |
+          gems-${{ runner.os }}-${{ steps.ruby-version.outputs.version }}-
+          gems-${{ runner.os }}-
+
+    - name: Install dependencies
+      if: inputs.install-dependencies == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: deps
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+
+branding:
+  icon: "package"
+  color: "red"
