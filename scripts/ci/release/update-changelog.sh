@@ -74,8 +74,11 @@ UNRELEASED_SECTION="## [Unreleased]
 
 ### Security"
 
-# Find the previous version tag for the comparison link
-PREV_TAG=$(git describe --tags --abbrev=0 --match "${TAG_PREFIX}*" HEAD^ 2>/dev/null || echo "")
+# Find the previous semver tag for the comparison link (skip floating tags)
+PREV_TAG=$(git tag --merged HEAD^ --sort=-v:refname |
+	grep -E "^${TAG_PREFIX}[0-9]+\.[0-9]+\.[0-9]+" |
+	head -n1) || true
+PREV_TAG="${PREV_TAG:-}"
 
 # Build the new comparison links
 if [[ -n "$PREV_TAG" ]]; then

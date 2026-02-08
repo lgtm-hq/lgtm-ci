@@ -81,6 +81,7 @@ run_calculate_version() {
 	assert_success
 	assert_line --partial "current-version=1.0.0"
 	assert_line --partial "next-version=1.0.1"
+	assert_line --partial "bump-type=patch"
 }
 
 @test "calculate-version: works with no tags at all" {
