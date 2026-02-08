@@ -108,11 +108,18 @@ jobs:
         run: scripts/ci/release/write-release-summary.sh
 
       - name: Skip summary
-        if: steps.guard.outputs.is-release-commit != 'true' && github.event_name != 'workflow_dispatch'
+        # yamllint disable-line rule:line-length
+        if: always() && steps.version.outputs.found != 'true'
         shell: bash
+        env:
+          IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
         run: |
           {
             echo "## Auto Tag Summary"
             echo ""
-            echo "Skipped: last commit is not a release commit"
+            if [[ "$IS_RELEASE" != "true" ]]; then
+              echo "Skipped: last commit is not a release commit"
+            else
+              echo "Skipped: version not found or guard step failed"
+            fi
           } >> "$GITHUB_STEP_SUMMARY"

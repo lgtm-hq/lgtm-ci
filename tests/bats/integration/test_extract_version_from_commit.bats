@@ -27,11 +27,10 @@ teardown() {
 
 run_extract() {
 	local commit_msg="$1"
-	run bash -c "
-		export GITHUB_OUTPUT='$GITHUB_OUTPUT'
-		export COMMIT_MESSAGE='$commit_msg'
-		'$PROJECT_ROOT/scripts/ci/release/extract-version-from-commit.sh' 2>&1
-	"
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COMMIT_MESSAGE="$commit_msg" \
+		bash -c "'$PROJECT_ROOT/scripts/ci/release/extract-version-from-commit.sh' 2>&1"
 }
 
 run_extract_from_git() {

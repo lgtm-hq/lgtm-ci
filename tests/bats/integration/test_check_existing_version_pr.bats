@@ -40,7 +40,6 @@ run_check_pr() {
 
 @test "check-existing-version-pr: returns false when no PRs match" {
 	mock_command "gh" ""
-	mock_command "jq" ""
 
 	run_check_pr
 	assert_success

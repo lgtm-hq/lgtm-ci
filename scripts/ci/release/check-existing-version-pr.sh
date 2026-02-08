@@ -48,4 +48,6 @@ else
 	set_github_output "pr-number" ""
 	set_github_output "pr-url" ""
 	echo "pr-exists=false"
+	echo "pr-number="
+	echo "pr-url="
 fi

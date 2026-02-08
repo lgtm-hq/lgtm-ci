@@ -123,7 +123,10 @@ run_create_version_pr() {
 	# Verify gh was called with the right arguments
 	local gh_calls
 	gh_calls=$(cat "$BATS_TEST_TMPDIR/mock_calls_gh")
-	[[ "$gh_calls" == *"chore(release): version 0.1.0"* ]]
+	if [[ "$gh_calls" != *"chore(release): version 0.1.0"* ]]; then
+		echo "Expected gh call to contain 'chore(release): version 0.1.0' but got: $gh_calls" >&2
+		return 1
+	fi
 }
 
 @test "create-version-pr: updates CHANGELOG.md with version section" {
@@ -136,11 +139,7 @@ run_create_version_pr() {
 	assert_success
 
 	# Verify CHANGELOG.md was updated
-	(
-		cd "$MOCK_GIT_REPO" || exit 1
-		git checkout release/v0.1.0 2>/dev/null
-		grep -q '\[0\.1\.0\]' CHANGELOG.md
-	)
+	cd "$MOCK_GIT_REPO" && git checkout release/v0.1.0 2>/dev/null && grep -q '\[0\.1\.0\]' CHANGELOG.md
 }
 
 @test "create-version-pr: outputs version and branch" {

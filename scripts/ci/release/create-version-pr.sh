@@ -37,6 +37,15 @@ source "$LIB_DIR/release.sh"
 : "${TAG_PREFIX:=v}"
 : "${PR_LABELS:=release}"
 
+# Detect default branch
+if [[ -n "${DEFAULT_BRANCH:-}" ]]; then
+	: # already set
+elif DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null); then
+	DEFAULT_BRANCH="${DEFAULT_BRANCH#refs/remotes/origin/}"
+else
+	DEFAULT_BRANCH="main"
+fi
+
 # =============================================================================
 # Calculate next version
 # =============================================================================
@@ -140,10 +149,9 @@ printf '%s' "$PR_BODY" >"$BODY_FILE"
 PR_URL=$(gh pr create \
 	--title "chore(release): version ${CLEAN_VERSION}" \
 	--body-file "$BODY_FILE" \
-	--base main \
+	--base "$DEFAULT_BRANCH" \
 	--head "$BRANCH_NAME" \
-	--label "$PR_LABELS" \
-	2>&1)
+	--label "$PR_LABELS")
 
 rm -f "$BODY_FILE"
 trap - EXIT
