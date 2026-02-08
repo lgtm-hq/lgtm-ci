@@ -53,9 +53,9 @@ EOF
 	assert_file_exists "${BATS_TEST_TMPDIR}/mock_calls_lcov"
 	local lcov_args
 	lcov_args=$(cat "${BATS_TEST_TMPDIR}/mock_calls_lcov")
-	[[ "$lcov_args" == *"$outfile"* ]]
-	[[ "$lcov_args" == *"$file1"* ]]
-	[[ "$lcov_args" == *"$file2"* ]]
+	[[ "$lcov_args" == *"$outfile"* ]] || fail "lcov_args missing outfile: $lcov_args"
+	[[ "$lcov_args" == *"$file1"* ]] || fail "lcov_args missing file1: $lcov_args"
+	[[ "$lcov_args" == *"$file2"* ]] || fail "lcov_args missing file2: $lcov_args"
 }
 
 @test "merge_lcov_files: awk fallback concatenates and deduplicates" {
@@ -209,8 +209,11 @@ EOF
 		merge_istanbul_files \"$outfile\" \"$file1\"
 	"
 	assert_success
-	# Verify file was copied
+	# Verify file was copied with correct contents
 	assert_file_exists "$outfile"
+	local copied
+	copied=$(cat "$outfile")
+	[[ "$copied" == '{"test": true}' ]] || fail "expected '{\"test\": true}', got '$copied'"
 }
 
 @test "merge_istanbul_files: multi-file without nyc returns error" {
