@@ -40,6 +40,11 @@ fi
 
 CLEAN_VERSION="${VERSION#v}"
 TAG_NAME="${TAG_PREFIX}${CLEAN_VERSION}"
+
+if [[ -z "$REPO_URL" ]]; then
+	log_error "REPO_URL could not be detected and was not provided (needed for ${TAG_NAME} comparison links)"
+	exit 1
+fi
 RELEASE_DATE=$(date +%Y-%m-%d)
 
 if [[ ! -f "$CHANGELOG_FILE" ]]; then
@@ -80,19 +85,17 @@ else
 fi
 UNRELEASED_LINK="[Unreleased]: ${REPO_URL}/compare/${TAG_NAME}...HEAD"
 
-# Read existing file
-EXISTING=$(cat "$CHANGELOG_FILE")
+# Update changelog via awk, reading the file directly and writing to a temp file
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
 
-# Replace the [Unreleased] section with fresh unreleased + new version
-# Match from "## [Unreleased]" to the next "## [" or link references
-UPDATED=$(echo "$EXISTING" | awk -v new_section="$NEW_SECTION" -v unreleased="$UNRELEASED_SECTION" -v unreleased_link="$UNRELEASED_LINK" -v version_link="$VERSION_LINK" '
-BEGIN { in_unreleased=0; printed_replacement=0; in_links=0 }
+awk -v new_section="$NEW_SECTION" -v unreleased="$UNRELEASED_SECTION" -v unreleased_link="$UNRELEASED_LINK" -v version_link="$VERSION_LINK" '
+BEGIN { in_unreleased=0; in_links=0 }
 /^## \[Unreleased\]/ {
 	print unreleased
 	print ""
 	print new_section
 	in_unreleased=1
-	printed_replacement=1
 	next
 }
 in_unreleased && /^## \[/ {
@@ -114,9 +117,10 @@ in_links && /^\[/ {
 }
 in_links { next }
 { print }
-')
+' "$CHANGELOG_FILE" >"$TMPFILE"
 
-echo "$UPDATED" >"$CHANGELOG_FILE"
+mv "$TMPFILE" "$CHANGELOG_FILE"
+trap - EXIT
 
 log_success "Updated $CHANGELOG_FILE with version $CLEAN_VERSION"
 

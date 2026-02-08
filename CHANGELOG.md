@@ -31,7 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/commits/main
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.0.0...main
 [#37]: https://github.com/lgtm-hq/lgtm-ci/pull/37
 [#12]: https://github.com/lgtm-hq/lgtm-ci/pull/12
 [#11]: https://github.com/lgtm-hq/lgtm-ci/pull/11
