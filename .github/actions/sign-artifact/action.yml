@@ -1,0 +1,93 @@
+---
+name: "Sign Artifact"
+description: "Sign release artifacts with Sigstore/Cosign keyless signing"
+author: "lgtm-hq"
+
+inputs:
+  files:
+    description: "Glob pattern(s) for files to sign (space-separated)"
+    required: true
+  upload-signatures:
+    description: "Upload signatures as a GitHub Actions artifact"
+    required: false
+    default: "true"
+  artifact-name:
+    description: "Name for the uploaded signatures artifact"
+    required: false
+    default: "cosign-signatures"
+  upload-to-release:
+    description: "Upload signatures to a GitHub release"
+    required: false
+    default: "false"
+  release-tag:
+    description: "Release tag to upload signatures to (REQUIRED when upload-to-release is 'true')"
+    required: false
+    default: ""
+
+outputs:
+  signatures:
+    description: "Multiline list of signature file paths"
+    value: ${{ steps.sign.outputs.signatures }}
+  certificate:
+    description: "Path to the last signing certificate"
+    value: ${{ steps.sign.outputs.certificate }}
+  signatures-dir:
+    description: "Directory containing all signature and certificate files"
+    value: ${{ steps.sign.outputs.signatures-dir }}
+  signed-count:
+    description: "Number of files successfully signed"
+    value: ${{ steps.sign.outputs.signed-count }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Cosign
+      # Pinned to SHA for supply chain security
+      uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
+
+    - name: Sign artifacts
+      id: sign
+      shell: bash
+      env:
+        STEP: sign
+        FILES: ${{ inputs.files }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/sign-artifact.sh
+
+    - name: Upload signatures artifact
+      if: steps.sign.outputs.signed-count != '0' && inputs.upload-signatures == 'true'
+      # Pinned to SHA for supply chain security
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.sign.outputs.signatures-dir }}
+
+    - name: Validate release-tag input
+      if: inputs.upload-to-release == 'true' && inputs.release-tag == ''
+      shell: bash
+      run: |
+        echo "::error::release-tag is required when upload-to-release is 'true'"
+        exit 1
+
+    - name: Upload signatures to release
+      if: steps.sign.outputs.signed-count != '0' && inputs.upload-to-release == 'true'
+      shell: bash
+      env:
+        STEP: upload-release
+        RELEASE_TAG: ${{ inputs.release-tag }}
+        SIGNATURES_DIR: ${{ steps.sign.outputs.signatures-dir }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/sign-artifact.sh
+
+    - name: Generate summary
+      if: always()
+      shell: bash
+      env:
+        STEP: summary
+        SIGNED_COUNT: ${{ steps.sign.outputs.signed-count || '0' }}
+        FILES: ${{ inputs.files }}
+        CERTIFICATE: ${{ steps.sign.outputs.certificate }}
+        SIGNATURES: ${{ steps.sign.outputs.signatures }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/sign-artifact.sh
+
+branding:
+  icon: "edit-3"
+  color: "purple"
