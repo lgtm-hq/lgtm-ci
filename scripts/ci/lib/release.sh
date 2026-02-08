@@ -41,9 +41,12 @@ source "$RELEASE_LIB_DIR/release/fileops.sh"
 determine_next_version() {
 	local max_bump="${1:-major}"
 
-	# Get latest tag
+	# Get latest semver tag (skip floating tags like v0, v1)
 	local latest_tag
-	latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+	latest_tag=$(git tag --merged HEAD --sort=-v:refname |
+		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
+		head -n1) || true
+	latest_tag="${latest_tag:-}"
 
 	# Get current version
 	local current_version
@@ -85,9 +88,12 @@ create_release() {
 	local clean_version="${version#v}"
 	local tag_name="v${clean_version}"
 
-	# Get latest tag for changelog
+	# Get latest semver tag for changelog (skip floating tags)
 	local latest_tag
-	latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+	latest_tag=$(git tag --merged HEAD --sort=-v:refname |
+		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
+		head -n1) || true
+	latest_tag="${latest_tag:-}"
 
 	# Generate changelog
 	local changelog
@@ -112,7 +118,11 @@ should_release() {
 	local from_ref="${1:-}"
 
 	if [[ -z "$from_ref" ]]; then
-		from_ref=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+		# Find latest semver tag (skip floating tags like v0, v1)
+		from_ref=$(git tag --merged HEAD --sort=-v:refname |
+			grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
+			head -n1) || true
+		from_ref="${from_ref:-}"
 	fi
 
 	has_releasable_commits "$from_ref" "HEAD"
@@ -122,7 +132,10 @@ should_release() {
 # Usage: get_release_summary
 get_release_summary() {
 	local latest_tag
-	latest_tag=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+	latest_tag=$(git tag --merged HEAD --sort=-v:refname |
+		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
+		head -n1) || true
+	latest_tag="${latest_tag:-}"
 
 	echo "Latest tag: ${latest_tag:-none}"
 

@@ -29,7 +29,11 @@ source "$LIB_DIR/release.sh"
 
 # Get from_ref if not specified
 if [[ -z "$FROM_REF" ]]; then
-	FROM_REF=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+	# Find latest semver tag reachable from HEAD, skipping floating tags (e.g., v0, v1)
+	FROM_REF=$(git tag --merged HEAD --sort=-v:refname |
+		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
+		head -n1) || true
+	FROM_REF="${FROM_REF:-}"
 fi
 
 log_info "Analyzing commits from '${FROM_REF:-beginning}' to '$TO_REF'"

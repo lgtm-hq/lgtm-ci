@@ -119,6 +119,12 @@ teardown() {
 	assert_output "invalid"
 }
 
+@test "validate_semver: rejects bare zero (floating tag format)" {
+	run bash -c 'source "$LIB_DIR/release/version.sh" && validate_semver "0" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
 @test "validate_semver: rejects leading zero in major" {
 	run bash -c 'source "$LIB_DIR/release/version.sh" && validate_semver "01.0.0" || echo "invalid"'
 	assert_success
