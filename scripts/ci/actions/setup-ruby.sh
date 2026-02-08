@@ -11,7 +11,7 @@ set -euo pipefail
 
 case "$STEP" in
 ruby-version)
-	version=$(ruby --version | awk '{print $2}')
+	version=$(ruby -e 'print RUBY_VERSION')
 	echo "version=$version" >>"$GITHUB_OUTPUT"
 	echo "Ruby version: $version"
 	;;

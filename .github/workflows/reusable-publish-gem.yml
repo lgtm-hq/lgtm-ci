@@ -65,6 +65,7 @@ jobs:
         uses: ./.github/actions/setup-ruby
         with:
           ruby-version: ${{ inputs.ruby-version }}
+          working-directory: ${{ inputs.working-directory }}
 
       - name: Configure RubyGems OIDC credentials
         if: inputs.dry-run == false

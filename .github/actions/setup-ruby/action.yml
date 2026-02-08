@@ -40,7 +40,7 @@ outputs:
     value: ${{ steps.bundler-version.outputs.version }}
   cache-hit:
     description: "Whether the cache was hit"
-    value: ${{ steps.cache.outputs.cache-hit }}
+    value: ${{ steps.cache.outputs.cache-hit || 'false' }}
 
 runs:
   using: "composite"
@@ -83,12 +83,12 @@ runs:
         path: |
           ${{ inputs.working-directory }}/vendor/bundle
           ~/.bundle
-        # Cache key includes ruby version for proper invalidation
+        # Cache key uses resolved ruby version for proper invalidation
         # yamllint disable-line rule:line-length
-        key: gems-${{ runner.os }}-${{ inputs.ruby-version }}-${{
+        key: gems-${{ runner.os }}-${{ steps.ruby-version.outputs.version }}-${{
           hashFiles(inputs.cache-dependency-path) }}
         restore-keys: |
-          gems-${{ runner.os }}-${{ inputs.ruby-version }}-
+          gems-${{ runner.os }}-${{ steps.ruby-version.outputs.version }}-
           gems-${{ runner.os }}-
 
     - name: Install dependencies
