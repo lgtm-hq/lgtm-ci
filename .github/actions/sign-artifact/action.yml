@@ -20,7 +20,7 @@ inputs:
     required: false
     default: "false"
   release-tag:
-    description: "Release tag to upload signatures to (required if upload-to-release is true)"
+    description: "Release tag to upload signatures to (REQUIRED when upload-to-release is 'true')"
     required: false
     default: ""
 
@@ -60,6 +60,13 @@ runs:
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ steps.sign.outputs.signatures-dir }}
+
+    - name: Validate release-tag input
+      if: inputs.upload-to-release == 'true' && inputs.release-tag == ''
+      shell: bash
+      run: |
+        echo "::error::release-tag is required when upload-to-release is 'true'"
+        exit 1
 
     - name: Upload signatures to release
       if: steps.sign.outputs.signed-count != '0' && inputs.upload-to-release == 'true'

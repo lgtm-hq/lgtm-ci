@@ -136,6 +136,23 @@ _setup_verify_files() {
 	assert_output --partial "Signature file not found"
 }
 
+@test "verify-signature: verify fails when certificate not found" {
+	_mock_cosign_verify
+	_setup_verify_files
+
+	run bash -c '
+		export STEP=verify
+		export FILE="'"$TEST_FILE"'"
+		export SIGNATURE="'"$TEST_SIG"'"
+		export CERTIFICATE="/nonexistent/file.pem"
+		export CERTIFICATE_IDENTITY="https://github.com/owner/repo/.github/workflows/release.yml@refs/tags/v1.0.0"
+		export CERTIFICATE_OIDC_ISSUER="https://token.actions.githubusercontent.com"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "Certificate file not found"
+}
+
 @test "verify-signature: successful verification" {
 	_mock_cosign_verify 0
 	_setup_verify_files

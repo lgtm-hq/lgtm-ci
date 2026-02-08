@@ -99,14 +99,18 @@ upload-release)
 
 	log_info "Uploading signatures to release: $RELEASE_TAG"
 
-	# Upload .sig and .pem files to the release
-	# shellcheck disable=SC2086
-	gh release upload "$RELEASE_TAG" \
-		"${SIGNATURES_DIR}"/*.sig \
-		"${SIGNATURES_DIR}"/*.pem \
-		--clobber
+	# Collect .sig and .pem files, guarding against empty glob expansion
+	upload_files=()
+	for f in "${SIGNATURES_DIR}"/*.sig "${SIGNATURES_DIR}"/*.pem; do
+		[[ -f "$f" ]] && upload_files+=("$f")
+	done
 
-	log_success "Signatures uploaded to release $RELEASE_TAG"
+	if [[ ${#upload_files[@]} -eq 0 ]]; then
+		log_warning "No .sig or .pem files found in ${SIGNATURES_DIR}, skipping upload"
+	else
+		gh release upload "$RELEASE_TAG" "${upload_files[@]}" --clobber
+		log_success "Signatures uploaded to release $RELEASE_TAG"
+	fi
 	;;
 
 summary)
