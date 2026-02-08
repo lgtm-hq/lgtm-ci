@@ -34,6 +34,11 @@ on:
         required: false
         type: boolean
         default: false
+      floating-tag:
+        description: "Update major version floating tag (e.g., v1) on release"
+        required: false
+        type: boolean
+        default: false
     outputs:
       released:
         description: "Whether a release was created (or would be in dry-run)"
@@ -135,3 +140,13 @@ jobs:
           TAG_NAME: ${{ steps.tag.outputs.tag-name }}
           RELEASE_URL: ${{ steps.github-release.outputs.release-url }}
         run: scripts/ci/release/write-release-summary.sh
+
+      - name: Update floating tag
+        # yamllint disable-line rule:line-length
+        if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == false && inputs.floating-tag == true
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag-name }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PUSH: "true"
+        run: scripts/ci/release/update-floating-tag.sh
