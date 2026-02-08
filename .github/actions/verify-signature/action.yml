@@ -1,0 +1,61 @@
+---
+name: "Verify Signature"
+description: "Verify Sigstore/Cosign signatures on artifacts"
+author: "lgtm-hq"
+
+inputs:
+  file:
+    description: "File to verify"
+    required: true
+  signature:
+    description: "Path to the signature file (.sig)"
+    required: true
+  certificate:
+    description: "Path to the certificate file (.pem)"
+    required: true
+  certificate-identity:
+    description: "Expected signer identity (workflow URL)"
+    required: true
+  certificate-oidc-issuer:
+    description: "Expected OIDC issuer"
+    required: false
+    default: "https://token.actions.githubusercontent.com"
+
+outputs:
+  verified:
+    description: "Whether the signature was verified successfully"
+    value: ${{ steps.verify.outputs.verified }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Install Cosign
+      # Pinned to SHA for supply chain security
+      uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
+
+    - name: Verify signature
+      id: verify
+      shell: bash
+      env:
+        STEP: verify
+        FILE: ${{ inputs.file }}
+        SIGNATURE: ${{ inputs.signature }}
+        CERTIFICATE: ${{ inputs.certificate }}
+        CERTIFICATE_IDENTITY: ${{ inputs.certificate-identity }}
+        CERTIFICATE_OIDC_ISSUER: ${{ inputs.certificate-oidc-issuer }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-signature.sh
+
+    - name: Generate summary
+      if: always()
+      shell: bash
+      env:
+        STEP: summary
+        VERIFIED: ${{ steps.verify.outputs.verified || 'false' }}
+        FILE: ${{ inputs.file }}
+        SIGNATURE: ${{ inputs.signature }}
+        CERTIFICATE_IDENTITY: ${{ inputs.certificate-identity }}
+      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-signature.sh
+
+branding:
+  icon: "check-square"
+  color: "green"
