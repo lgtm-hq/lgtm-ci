@@ -75,7 +75,12 @@ UNRELEASED_SECTION="## [Unreleased]
 ### Security"
 
 # Find the previous semver tag for the comparison link (skip floating tags)
-PREV_TAG=$(git tag --merged HEAD^ --sort=-v:refname |
+# Use HEAD^ if it exists, otherwise HEAD (single-commit repo)
+TAG_BASE="HEAD"
+if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
+	TAG_BASE="HEAD^"
+fi
+PREV_TAG=$(git tag --merged "$TAG_BASE" --sort=-v:refname |
 	grep -E "^${TAG_PREFIX}[0-9]+\.[0-9]+\.[0-9]+" |
 	head -n1) || true
 PREV_TAG="${PREV_TAG:-}"

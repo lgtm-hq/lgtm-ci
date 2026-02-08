@@ -95,6 +95,8 @@ run_calculate_version() {
 	assert_success
 	assert_line --partial "current-version=0.0.0"
 	assert_line --partial "next-version=0.1.0"
+	assert_line --partial "bump-type=minor"
+	assert_line --partial "release-needed=true"
 }
 
 @test "calculate-version: works with only semver tags (no floating)" {
