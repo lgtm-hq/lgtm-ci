@@ -295,6 +295,52 @@ Verify build attestations using `gh attestation verify`.
 
 ---
 
+### sign-artifact
+
+Sign release artifacts (tarballs, binaries, SBOMs) with Sigstore/Cosign keyless signing.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/sign-artifact@main
+  with:
+    files: "dist/*.tar.gz" # glob pattern(s) for files to sign
+    upload-signatures: "true" # upload as GitHub Actions artifact
+    upload-to-release: "false" # upload .sig/.pem to a release
+    release-tag: "v1.0.0" # required if upload-to-release is true
+```
+
+**Outputs:**
+
+- `signatures` - Multiline list of signature file paths
+- `certificate` - Path to the last signing certificate
+- `signatures-dir` - Directory containing all signature and certificate files
+- `signed-count` - Number of files successfully signed
+
+**Requirements:**
+
+- `id-token: write` permission for OIDC keyless signing
+
+---
+
+### verify-signature
+
+Verify Sigstore/Cosign signatures on artifacts.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/verify-signature@main
+  with:
+    file: "dist/myapp.tar.gz" # file to verify
+    signature: "dist/myapp.tar.gz.sig" # signature file
+    certificate: "dist/myapp.tar.gz.pem" # certificate file
+    certificate-identity: "https://github.com/owner/repo/.github/workflows/release.yml@refs/tags/v1.0.0"
+    certificate-oidc-issuer: "https://token.actions.githubusercontent.com" # optional, this is the default
+```
+
+**Outputs:**
+
+- `verified` - Whether the signature was verified successfully
+
+---
+
 ## PR & Comment Actions
 
 ### post-pr-comment
