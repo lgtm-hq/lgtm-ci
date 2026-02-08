@@ -120,6 +120,17 @@ jobs:
           prerelease: ${{ inputs.prerelease }}
           generate-notes: ${{ inputs.generate-notes }}
 
+      - name: Update CHANGELOG.md
+        # yamllint disable-line rule:line-length
+        if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == false
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.next-version }}
+          CHANGELOG_BODY: ${{ steps.changelog.outputs.changelog }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PUSH: "true"
+        run: scripts/ci/release/update-changelog.sh
+
       - name: Dry run summary
         if: steps.check.outputs.release-needed == 'true' && inputs.dry-run == true
         shell: bash
