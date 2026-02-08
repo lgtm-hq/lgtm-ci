@@ -86,7 +86,7 @@ fi
 UNRELEASED_LINK="[Unreleased]: ${REPO_URL}/compare/${TAG_NAME}...HEAD"
 
 # Update changelog via awk, reading the file directly and writing to a temp file
-TMPFILE=$(mktemp)
+TMPFILE=$(mktemp "${CHANGELOG_FILE}.XXXXXX")
 trap 'rm -f "$TMPFILE"' EXIT
 
 awk -v new_section="$NEW_SECTION" -v unreleased="$UNRELEASED_SECTION" -v unreleased_link="$UNRELEASED_LINK" -v version_link="$VERSION_LINK" '
@@ -119,6 +119,7 @@ in_links { next }
 { print }
 ' "$CHANGELOG_FILE" >"$TMPFILE"
 
+chmod --reference="$CHANGELOG_FILE" "$TMPFILE"
 mv "$TMPFILE" "$CHANGELOG_FILE"
 trap - EXIT
 
@@ -126,11 +127,21 @@ log_success "Updated $CHANGELOG_FILE with version $CLEAN_VERSION"
 
 # Commit and push if requested
 if [[ "$PUSH" == "true" ]]; then
+	# Resolve target branch (handles detached HEAD in CI)
+	TARGET_BRANCH="${GITHUB_REF_NAME:-}"
+	if [[ -z "$TARGET_BRANCH" ]]; then
+		TARGET_BRANCH=$(git symbolic-ref --short HEAD 2>/dev/null || echo "")
+	fi
+	if [[ -z "$TARGET_BRANCH" ]]; then
+		log_error "Could not determine target branch for push (detached HEAD with no GITHUB_REF_NAME)"
+		exit 1
+	fi
+
 	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
 		configure_git_ci_user
 	fi
 	git add "$CHANGELOG_FILE"
 	git commit -m "docs: update CHANGELOG.md for ${CLEAN_VERSION}"
-	git push origin HEAD
-	log_success "Committed and pushed CHANGELOG.md update"
+	git push origin HEAD:refs/heads/"$TARGET_BRANCH"
+	log_success "Committed and pushed CHANGELOG.md update to $TARGET_BRANCH"
 fi
