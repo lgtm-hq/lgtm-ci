@@ -184,7 +184,7 @@ run_update_changelog() {
 
 	local changelog
 	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
-	echo "$changelog" | grep -q 'Manual entry'
+	echo "$changelog" | grep -q 'Manual entry' || fail "'Manual entry' not found in changelog"
 }
 
 # =============================================================================
@@ -375,7 +375,7 @@ run_update_changelog() {
 	fi
 
 	# Should have the feature from generated body
-	echo "$changelog" | grep -q 'new feature'
+	echo "$changelog" | grep -q 'new feature' || fail "'new feature' not found in changelog"
 }
 
 # =============================================================================
@@ -421,14 +421,14 @@ run_update_changelog() {
 	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
 
 	# Both versions should exist
-	echo "$changelog" | grep -q '## \[0\.2\.0\]'
-	echo "$changelog" | grep -q '## \[0\.1\.0\]'
+	echo "$changelog" | grep -q '## \[0\.2\.0\]' || fail "'## [0.2.0]' not found in changelog"
+	echo "$changelog" | grep -q '## \[0\.1\.0\]' || fail "'## [0.1.0]' not found in changelog"
 
 	# Old feature preserved
-	echo "$changelog" | grep -q 'old feature'
+	echo "$changelog" | grep -q 'old feature' || fail "'old feature' not found in changelog"
 
 	# New feature present
-	echo "$changelog" | grep -q 'newer feature'
+	echo "$changelog" | grep -q 'newer feature' || fail "'newer feature' not found in changelog"
 
 	# Old version link preserved
 	echo "$changelog" | grep -q '\[0\.1\.0\]: https://github.com/test-org/test-repo/' || {
