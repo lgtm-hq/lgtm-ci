@@ -27,7 +27,7 @@ source "$LIB_DIR/log.sh"
 source "$LIB_DIR/github.sh"
 
 : "${VERSION:?VERSION is required}"
-: "${CHANGELOG_BODY:?CHANGELOG_BODY is required}"
+: "${CHANGELOG_BODY=}"
 : "${CHANGELOG_FILE:=CHANGELOG.md}"
 : "${TAG_PREFIX:=v}"
 : "${REPO_URL:=}"
@@ -53,11 +53,6 @@ if [[ ! -f "$CHANGELOG_FILE" ]]; then
 fi
 
 log_info "Updating $CHANGELOG_FILE for version $CLEAN_VERSION"
-
-# Build the new versioned section from the generated changelog body
-NEW_SECTION="## [${CLEAN_VERSION}] - ${RELEASE_DATE}
-
-${CHANGELOG_BODY}"
 
 # Build the empty unreleased section
 UNRELEASED_SECTION="## [Unreleased]
@@ -93,6 +88,38 @@ else
 fi
 UNRELEASED_LINK="[Unreleased]: ${REPO_URL}/compare/${TAG_NAME}...HEAD"
 
+# Extract existing unreleased content (between ## [Unreleased] and next ## [)
+# so we can merge it into the versioned section alongside machine-generated entries.
+EXISTING_UNRELEASED=$(awk '
+/^## \[Unreleased\]/ { capture=1; next }
+capture && /^## \[/ { exit }
+capture { print }
+' "$CHANGELOG_FILE")
+
+# Strip Keep-a-Changelog sub-headers, reference-style links, and blank lines
+# to get only bullet entries (lines starting with -)
+EXISTING_ENTRIES=$(echo "$EXISTING_UNRELEASED" | grep -v '^### ' | grep -v '^\[' | sed '/^[[:space:]]*$/d') || true
+
+# If we have both existing and generated entries, combine them
+if [[ -n "$EXISTING_ENTRIES" ]] && [[ -n "$CHANGELOG_BODY" ]]; then
+	# Append existing entries under a "Previously Unreleased" sub-section
+	# to distinguish hand-curated entries from auto-generated ones
+	CHANGELOG_BODY="${CHANGELOG_BODY}
+
+### Previously Unreleased
+
+${EXISTING_ENTRIES}"
+elif [[ -n "$EXISTING_ENTRIES" ]]; then
+	CHANGELOG_BODY="### Previously Unreleased
+
+${EXISTING_ENTRIES}"
+fi
+
+# Rebuild NEW_SECTION with the merged content
+NEW_SECTION="## [${CLEAN_VERSION}] - ${RELEASE_DATE}
+
+${CHANGELOG_BODY}"
+
 # Update changelog via awk, reading the file directly and writing to a temp file
 TMPFILE=$(mktemp "${CHANGELOG_FILE}.XXXXXX")
 trap 'rm -f "$TMPFILE"' EXIT
@@ -100,7 +127,7 @@ trap 'rm -f "$TMPFILE"' EXIT
 export NEW_SECTION UNRELEASED_SECTION UNRELEASED_LINK VERSION_LINK
 
 awk '
-BEGIN { in_unreleased=0; in_links=0 }
+BEGIN { in_unreleased=0 }
 /^## \[Unreleased\]/ {
 	print ENVIRON["UNRELEASED_SECTION"]
 	print ""
@@ -113,19 +140,16 @@ in_unreleased && /^## \[/ {
 	print
 	next
 }
-in_unreleased { next }
+# Replace [Unreleased]: link even inside the unreleased section
 /^\[Unreleased\]:/ {
 	print ENVIRON["UNRELEASED_LINK"]
 	print ENVIRON["VERSION_LINK"]
-	in_links=1
 	next
 }
-in_links && /^\[/ {
-	in_links=0
-	print
-	next
-}
-in_links { next }
+# Preserve reference-style link definitions (e.g., [#1]: https://...)
+# even inside the unreleased section
+in_unreleased && /^\[.+\]:/ { print; next }
+in_unreleased { next }
 { print }
 ' "$CHANGELOG_FILE" >"$TMPFILE"
 

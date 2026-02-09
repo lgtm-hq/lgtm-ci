@@ -166,3 +166,93 @@ run_create_version_pr() {
 	assert_success
 	assert_line --partial "version=0.1.0"
 }
+
+@test "create-version-pr: CHANGELOG has no duplicate version headers" {
+	setup_release_repo
+	add_commit "feat: add new feature"
+
+	mock_command_record "gh" "https://github.com/test-org/test-repo/pull/1"
+
+	run_create_version_pr "minor"
+	assert_success
+
+	# Check the CHANGELOG on the release branch
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git checkout release/v0.1.0 2>/dev/null
+		local count
+		count=$(grep -c '## \[0\.1\.0\]' CHANGELOG.md)
+		if [[ "$count" -ne 1 ]]; then
+			echo "Expected 1 version header, found $count:" >&2
+			cat CHANGELOG.md >&2
+			return 1
+		fi
+	)
+}
+
+@test "create-version-pr: preserves existing unreleased entries in CHANGELOG" {
+	setup_mock_git_repo
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+
+		# Create a CHANGELOG with pre-existing entries
+		cat >CHANGELOG.md <<'EOF'
+# Changelog
+
+## [Unreleased]
+
+### Added
+
+- Existing manual entry ([#1])
+- Another manual entry ([#2])
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD
+[#1]: https://github.com/test-org/test-repo/pull/1
+[#2]: https://github.com/test-org/test-repo/pull/2
+EOF
+		git add CHANGELOG.md
+		git commit -q -m "docs: add changelog"
+
+		local bare_dir="${BATS_TEST_TMPDIR}/bare.git"
+		git init -q --bare "$bare_dir"
+		git remote add origin "$bare_dir"
+		git push -q origin HEAD:main 2>/dev/null
+	)
+
+	add_commit "feat: new automated feature"
+
+	mock_command_record "gh" "https://github.com/test-org/test-repo/pull/3"
+
+	run_create_version_pr "minor"
+	assert_success
+
+	# Check the CHANGELOG on the release branch
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git checkout release/v0.1.0 2>/dev/null
+
+		# Manual entries should be preserved
+		grep -q 'Existing manual entry' CHANGELOG.md || {
+			echo "Missing 'Existing manual entry'" >&2
+			cat CHANGELOG.md >&2
+			return 1
+		}
+
+		# Reference links should be preserved
+		grep -q '\[#1\]: https://github.com/test-org/test-repo/pull/1' CHANGELOG.md || {
+			echo "Missing [#1] reference link" >&2
+			cat CHANGELOG.md >&2
+			return 1
+		}
+	)
+}
