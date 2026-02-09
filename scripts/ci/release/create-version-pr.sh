@@ -7,9 +7,10 @@
 # This is the Stage 1 script in the two-stage release workflow.
 #
 # Optional environment variables:
-#   MAX_BUMP   - Maximum bump type: major, minor, patch (default: major)
-#   TAG_PREFIX - Prefix for version tags (default: v)
-#   PR_LABELS  - Comma-separated PR labels (default: release)
+#   MAX_BUMP          - Maximum bump type: major, minor, patch (default: major)
+#   TAG_PREFIX        - Prefix for version tags (default: v)
+#   PR_LABELS         - Comma-separated PR labels (default: release)
+#   LINTRO_DOCKER_USER - UID:GID for Docker container (default: 0)
 #
 # Required: GH_TOKEN must be set for gh CLI authentication
 #
@@ -113,12 +114,13 @@ export PUSH="false"
 "$RELEASE_SCRIPT_DIR/update-changelog.sh"
 
 # Format and verify CHANGELOG passes lint checks (mirrors py-lintro pattern)
+: "${LINTRO_DOCKER_USER:=0}"
 if [[ -n "${LINTRO_IMAGE:-}" ]]; then
 	log_info "Formatting CHANGELOG.md with lintro (Docker)..."
-	docker run --rm -v "$PWD:/workspace" -w /workspace \
+	docker run --rm --user "$LINTRO_DOCKER_USER" -v "$PWD:/workspace" -w /workspace \
 		"$LINTRO_IMAGE" lintro fmt
 	log_info "Verifying CHANGELOG.md passes lint checks..."
-	docker run --rm -v "$PWD:/workspace" -w /workspace \
+	docker run --rm --user "$LINTRO_DOCKER_USER" -v "$PWD:/workspace" -w /workspace \
 		"$LINTRO_IMAGE" lintro chk
 	log_success "CHANGELOG.md passes all lint checks"
 elif command -v lintro >/dev/null 2>&1; then
