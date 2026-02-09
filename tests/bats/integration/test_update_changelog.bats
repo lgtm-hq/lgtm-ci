@@ -27,15 +27,13 @@ teardown() {
 
 # Create a mock repo with a CHANGELOG.md and a remote
 setup_changelog_repo() {
-	setup_mock_git_repo
-	(
-		cd "$MOCK_GIT_REPO" || exit 1
+	setup_mock_git_repo || return 1
+	cd "$MOCK_GIT_REPO" || return 1
 
-		local bare_dir="${BATS_TEST_TMPDIR}/bare.git"
-		git init -q --bare "$bare_dir"
-		git remote add origin "$bare_dir"
-		git push -q origin HEAD:main 2>/dev/null
-	)
+	local bare_dir="${BATS_TEST_TMPDIR}/bare.git"
+	git init -q --bare "$bare_dir" || return 1
+	git remote add origin "$bare_dir" || return 1
+	git push -q origin HEAD:main 2>/dev/null || return 1
 }
 
 # Write a changelog file with the given content
