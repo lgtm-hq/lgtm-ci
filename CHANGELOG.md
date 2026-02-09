@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.4.0] - 2026-02-09
+
+### Features
+
+- **release**: adopt two-stage release-PR workflow (#43) (a3a0bba)
+
+### Bug Fixes
+
+- **release**: prevent changelog data loss in version PR workflow (#45) (974b2e1)
+
+### Previously Unreleased
+
 - Comprehensive BATS shell testing infrastructure ([#37])
 - Advanced CI features including Docker, deploy-pages, and Homebrew workflows ([#12])
 - Testing and publishing infrastructure with PyPI, npm, and gem support ([#11])
@@ -20,18 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security composite actions with runner hardening and egress audit ([#3])
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
-
-### Changed
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
-
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.0.0...main
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.3.0...v0.4.0
 [#37]: https://github.com/lgtm-hq/lgtm-ci/pull/37
 [#12]: https://github.com/lgtm-hq/lgtm-ci/pull/12
 [#11]: https://github.com/lgtm-hq/lgtm-ci/pull/11
