@@ -41,7 +41,7 @@ setup_changelog_repo() {
 # Write a changelog file with the given content
 write_changelog() {
 	local content="$1"
-	echo "$content" >"${MOCK_GIT_REPO}/CHANGELOG.md"
+	printf '%s' "$content" >"${MOCK_GIT_REPO}/CHANGELOG.md"
 }
 
 # Run update-changelog.sh with the given version and body
