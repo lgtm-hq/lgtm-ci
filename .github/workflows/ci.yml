@@ -29,6 +29,10 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Add lintro to PATH
+        shell: bash
+        run: echo "/app/.venv/bin" >> "$GITHUB_PATH"
+
       - name: Run lintro quality checks
         id: lintro
         shell: bash

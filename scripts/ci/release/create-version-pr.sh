@@ -126,6 +126,8 @@ elif command -v lintro >/dev/null 2>&1; then
 	lintro fmt --tools markdownlint,prettier
 	lintro chk --tools markdownlint,prettier
 	log_success "CHANGELOG.md passes all lint checks"
+else
+	log_warn "Skipping CHANGELOG lint: set LINTRO_IMAGE or install lintro"
 fi
 
 git add CHANGELOG.md
