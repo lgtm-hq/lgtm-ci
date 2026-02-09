@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     container:
       # Pinned to SHA for supply chain security
-      image: ghcr.io/lgtm-hq/py-lintro@sha256:7821a77038f1d10332a5bec3bab9a6a6019df9829de9eeddc25fae58de7624ac
+      image: ghcr.io/lgtm-hq/py-lintro@sha256:3fc889e0944c4dc551224ad5830fab785f4f3d44423ba08d4e2e3921636d41a5
       # Run as root to avoid permission issues with GitHub Actions file commands
       options: --user 0
     outputs:
