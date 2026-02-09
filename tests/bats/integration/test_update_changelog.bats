@@ -52,7 +52,15 @@ run_update_changelog() {
 
 	# Write body to a temp file to avoid single-quote escaping issues
 	local body_file
-	body_file=$(mktemp "${BATS_TEST_TMPDIR}/changelog-body.XXXXXX")
+	body_file=$(mktemp "${BATS_TEST_TMPDIR}/changelog-body.XXXXXX") || {
+		echo "mktemp failed for changelog body file" >&2
+		return 1
+	}
+	if [[ -z "$body_file" || ! -e "$body_file" ]]; then
+		echo "body_file is empty or does not exist: '$body_file'" >&2
+		rm -f "$body_file"
+		return 1
+	fi
 	printf '%s' "$body" >"$body_file"
 
 	run bash -c "
