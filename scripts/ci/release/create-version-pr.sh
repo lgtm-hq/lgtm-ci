@@ -116,15 +116,15 @@ export PUSH="false"
 if [[ -n "${LINTRO_IMAGE:-}" ]]; then
 	log_info "Formatting CHANGELOG.md with lintro (Docker)..."
 	docker run --rm -v "$PWD:/workspace" -w /workspace \
-		"$LINTRO_IMAGE" lintro fmt --tools markdownlint,prettier
+		"$LINTRO_IMAGE" lintro fmt
 	log_info "Verifying CHANGELOG.md passes lint checks..."
 	docker run --rm -v "$PWD:/workspace" -w /workspace \
-		"$LINTRO_IMAGE" lintro chk --tools markdownlint,prettier
+		"$LINTRO_IMAGE" lintro chk
 	log_success "CHANGELOG.md passes all lint checks"
 elif command -v lintro >/dev/null 2>&1; then
 	log_info "Formatting CHANGELOG.md with lintro (native)..."
-	lintro fmt --tools markdownlint,prettier
-	lintro chk --tools markdownlint,prettier
+	lintro fmt
+	lintro chk
 	log_success "CHANGELOG.md passes all lint checks"
 else
 	log_warn "Skipping CHANGELOG lint: set LINTRO_IMAGE or install lintro"

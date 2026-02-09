@@ -60,7 +60,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           # Keep in sync with ci.yml container image SHA
           # yamllint disable-line rule:line-length
-          LINTRO_IMAGE: "ghcr.io/lgtm-hq/py-lintro@sha256:3fc889e0944c4dc551224ad5830fab785f4f3d44423ba08d4e2e3921636d41a5"
+          LINTRO_IMAGE: "ghcr.io/lgtm-hq/py-lintro@sha256:1be4acd3590a0dd9c672699866f22aaca73b9612a134d30c60441bc4ad89a206"
         run: scripts/ci/release/create-version-pr.sh
 
       - name: Summary
