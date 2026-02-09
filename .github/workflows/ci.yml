@@ -12,7 +12,7 @@ permissions:
 
 jobs:
   quality:
-    name: Quality Checks
+    name: Lintro Quality Checks
     runs-on: ubuntu-latest
     container:
       # Pinned to SHA for supply chain security
@@ -45,11 +45,6 @@ jobs:
           EXIT_CODE=${PIPESTATUS[0]}
           echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
           exit "$EXIT_CODE"
-
-      - name: Run actionlint
-        if: always()
-        shell: bash
-        run: actionlint
 
       - name: Upload linting report
         if: always()
