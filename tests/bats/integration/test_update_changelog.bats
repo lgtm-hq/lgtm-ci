@@ -443,3 +443,119 @@ run_update_changelog() {
 		return 1
 	}
 }
+
+# =============================================================================
+# Tests: lint compliance (MD034, prettier formatting)
+# =============================================================================
+
+@test "update-changelog: blank line before link definitions" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+### Added
+
+- Feature ([#1])
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD
+[#1]: https://github.com/test-org/test-repo/pull/1'
+
+	run_update_changelog "1.0.0" "### Features
+
+- new feature (abc1234)"
+	assert_success
+
+	# The line immediately before [Unreleased]: must be blank (prevents
+	# prettier violations when content runs directly into link definitions)
+	run bash -c "awk '/^\[Unreleased\]:/{print prev} {prev=\$0}' '${MOCK_GIT_REPO}/CHANGELOG.md'"
+	assert_output ""
+}
+
+@test "update-changelog: generates valid reference link definitions" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
+
+	run_update_changelog "1.0.0" "### Features
+
+- a feature (abc1234)"
+	assert_success
+
+	# New [Unreleased] link must be present with correct tag
+	run bash -c "grep '^\[Unreleased\]:' '${MOCK_GIT_REPO}/CHANGELOG.md'"
+	assert_output --partial "compare/v1.0.0...HEAD"
+
+	# New version link must be present
+	run bash -c "grep '^\[1\.0\.0\]:' '${MOCK_GIT_REPO}/CHANGELOG.md'"
+	assert_success
+}
+
+@test "update-changelog: no triple-blank-line runs" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+### Added
+
+- Feature A ([#1])
+- Feature B ([#2])
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD
+[#1]: https://github.com/test-org/test-repo/pull/1
+[#2]: https://github.com/test-org/test-repo/pull/2'
+
+	run_update_changelog "1.0.0" "### Features
+
+- new feature (abc1234)"
+	assert_success
+
+	# Check for 3+ consecutive blank lines (violates prettier/markdownlint)
+	run bash -c "
+		awk '
+			/^$/ { blank++; next }
+			{ if (blank >= 3) { found=1 }; blank=0 }
+			END { exit found ? 1 : 0 }
+		' '${MOCK_GIT_REPO}/CHANGELOG.md'
+	"
+	assert_success
+}

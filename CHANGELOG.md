@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Security composite actions with runner hardening and egress audit ([#3])
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
+
 [Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.4.0...HEAD
 [0.4.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.3.0...v0.4.0
 [#37]: https://github.com/lgtm-hq/lgtm-ci/pull/37

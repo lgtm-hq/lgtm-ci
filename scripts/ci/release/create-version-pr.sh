@@ -112,6 +112,24 @@ export TAG_PREFIX
 export PUSH="false"
 "$RELEASE_SCRIPT_DIR/update-changelog.sh"
 
+# Format and verify CHANGELOG passes lint checks (mirrors py-lintro pattern)
+if [[ -n "${LINTRO_IMAGE:-}" ]]; then
+	log_info "Formatting CHANGELOG.md with lintro (Docker)..."
+	docker run --rm -v "$PWD:/workspace" -w /workspace \
+		"$LINTRO_IMAGE" lintro fmt --tools markdownlint,prettier
+	log_info "Verifying CHANGELOG.md passes lint checks..."
+	docker run --rm -v "$PWD:/workspace" -w /workspace \
+		"$LINTRO_IMAGE" lintro chk --tools markdownlint,prettier
+	log_success "CHANGELOG.md passes all lint checks"
+elif command -v lintro >/dev/null 2>&1; then
+	log_info "Formatting CHANGELOG.md with lintro (native)..."
+	lintro fmt --tools markdownlint,prettier
+	lintro chk --tools markdownlint,prettier
+	log_success "CHANGELOG.md passes all lint checks"
+else
+	log_warn "Skipping CHANGELOG lint: set LINTRO_IMAGE or install lintro"
+fi
+
 git add CHANGELOG.md
 git commit -m "chore(release): version ${CLEAN_VERSION}"
 

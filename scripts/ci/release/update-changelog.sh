@@ -142,6 +142,7 @@ in_unreleased && /^## \[/ {
 }
 # Replace [Unreleased]: link even inside the unreleased section
 /^\[Unreleased\]:/ {
+	print ""
 	print ENVIRON["UNRELEASED_LINK"]
 	print ENVIRON["VERSION_LINK"]
 	next
