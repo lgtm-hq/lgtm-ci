@@ -79,7 +79,11 @@ FROM_REF=$(git tag --merged HEAD --sort=-v:refname |
 	head -n1) || true
 FROM_REF="${FROM_REF:-}"
 
-CHANGELOG_BODY=$(generate_changelog "$FROM_REF" "HEAD" "$CLEAN_VERSION" "full")
+# Generate changelog body (without version header — update-changelog.sh adds it)
+CHANGELOG_BODY=$(generate_changelog "$FROM_REF" "HEAD" "" "full")
+# Strip the "## Unreleased" header line that generate_changelog emits when
+# no version is provided, keeping only the section content.
+CHANGELOG_BODY=$(echo "$CHANGELOG_BODY" | sed '1{/^## Unreleased$/d;}' | sed '1{/^$/d;}')
 
 # =============================================================================
 # Create release branch and update CHANGELOG
