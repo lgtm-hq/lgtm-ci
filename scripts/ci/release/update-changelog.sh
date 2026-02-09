@@ -129,7 +129,14 @@ in_links { next }
 { print }
 ' "$CHANGELOG_FILE" >"$TMPFILE"
 
-chmod --reference="$CHANGELOG_FILE" "$TMPFILE"
+# Preserve file permissions (portable: works on GNU, BSD/macOS, and BusyBox)
+if [[ "$(uname -s)" == "Darwin" ]]; then
+	chmod "$(stat -f '%Lp' "$CHANGELOG_FILE")" "$TMPFILE"
+elif stat -c '%a' "$CHANGELOG_FILE" >/dev/null 2>&1; then
+	chmod "$(stat -c '%a' "$CHANGELOG_FILE")" "$TMPFILE"
+else
+	chmod --reference="$CHANGELOG_FILE" "$TMPFILE" 2>/dev/null || true
+fi
 mv "$TMPFILE" "$CHANGELOG_FILE"
 trap - EXIT
 
