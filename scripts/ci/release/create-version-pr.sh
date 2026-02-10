@@ -115,6 +115,8 @@ export PUSH="false"
 "$RELEASE_SCRIPT_DIR/update-changelog.sh"
 
 # Format and verify CHANGELOG passes lint checks (mirrors py-lintro pattern)
+# Default to root (0) for CI where the runner owns the workspace.
+# Locally, export LINTRO_DOCKER_USER="$(id -u):$(id -g)" to avoid root-owned files.
 : "${LINTRO_DOCKER_USER:=0}"
 if [[ -n "${LINTRO_IMAGE:-}" ]]; then
 	log_info "Formatting CHANGELOG.md with lintro (Docker)..."
