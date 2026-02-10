@@ -106,11 +106,11 @@ Located in `scripts/ci/lib/`:
 lgtm-ci uses [semantic versioning](https://semver.org/) with
 [conventional commits](https://www.conventionalcommits.org/) for automated releases.
 
-| Ref       | Example                                                  | Description                             |
-| --------- | -------------------------------------------------------- | --------------------------------------- |
-| `@v1`     | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1`     | Recommended — gets all v1.x.x updates   |
-| `@v1.2.3` | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1.2.3` | Pinned to exact version                 |
-| `@main`   | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main`   | Latest development (not for production) |
+| Ref       | Example                                                  | Description          |
+| --------- | -------------------------------------------------------- | -------------------- |
+| `@v1`     | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1`     | All v1.x.x updates   |
+| `@v1.2.3` | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1.2.3` | Pinned exact version |
+| `@main`   | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main`   | Latest, not for prod |
 
 Releases are automated — every push to `main` with releasable commits
 (`feat:`, `fix:`, etc.) creates a new tagged release and updates the
