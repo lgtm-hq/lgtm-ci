@@ -1,0 +1,138 @@
+---
+name: "Reusable: Release Auto Tag"
+
+"on":
+  workflow_call:
+    inputs:
+      version:
+        description: "Version override (e.g., 1.2.3). Leave empty for commit-based detection."
+        required: false
+        type: string
+        default: ""
+      tag-prefix:
+        description: "Prefix for the release tag"
+        required: false
+        type: string
+        default: "v"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling checkout (should match the workflow ref)"
+        required: false
+        type: string
+        default: "v0.5.0"
+    secrets:
+      RELEASE_APP_ID:
+        description: "GitHub App ID for creating release tokens"
+        required: true
+      RELEASE_APP_PRIVATE_KEY:
+        description: "GitHub App private key for creating release tokens"
+        required: true
+
+jobs:
+  auto-tag:
+    name: Create Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Create GitHub App installation token
+        id: app-token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Guard release commit
+        id: guard
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
+
+      - name: Extract version from commit
+        # yamllint disable-line rule:line-length
+        if: steps.guard.outputs.is-release-commit == 'true' || inputs.version != ''
+        id: version
+        shell: bash
+        env:
+          COMMIT_MESSAGE: >-
+            ${{ inputs.version != ''
+                && format('chore(release): version {0}', inputs.version)
+                || '' }}
+        run: .lgtm-ci-tooling/scripts/ci/release/extract-version-from-commit.sh
+
+      - name: Configure git with app token
+        # yamllint disable-line rule:line-length
+        if: steps.version.outputs.found == 'true'
+        shell: bash
+        env:
+          GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
+          GH_REPOSITORY: ${{ github.repository }}
+        run: .lgtm-ci-tooling/scripts/ci/release/configure-git-remote.sh
+
+      - name: Create release tag
+        if: steps.version.outputs.found == 'true'
+        id: tag
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PUSH: "true"
+        run: .lgtm-ci-tooling/scripts/ci/release/create-tag.sh
+
+      - name: Create GitHub release
+        if: steps.version.outputs.found == 'true'
+        id: github-release
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag-name }}
+          GH_TOKEN: ${{ github.token }}
+        run: .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
+
+      - name: Update floating tag
+        if: steps.version.outputs.found == 'true'
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag-name }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PUSH: "true"
+        run: .lgtm-ci-tooling/scripts/ci/release/update-floating-tag.sh
+
+      - name: Release summary
+        if: steps.version.outputs.found == 'true'
+        shell: bash
+        env:
+          SUMMARY_TYPE: release
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG_NAME: ${{ steps.tag.outputs.tag-name }}
+          RELEASE_URL: ${{ steps.github-release.outputs.release-url }}
+        run: .lgtm-ci-tooling/scripts/ci/release/write-release-summary.sh
+
+      - name: Skip summary
+        # yamllint disable-line rule:line-length
+        if: always() && steps.version.outputs.found != 'true'
+        shell: bash
+        env:
+          IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
+        run: .lgtm-ci-tooling/scripts/ci/release/write-skip-summary.sh
