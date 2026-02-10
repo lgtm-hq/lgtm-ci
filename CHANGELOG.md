@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.4.1] - 2026-02-10
+
+### Bug Fixes
+
+- **lint**: add markdownlint config for MD013/MD024 (#50) (0073e65)
+- **release**: lintro Docker permissions and v0.51.0 update (#49) (7e8aed1)
+- **release**: let lintro auto-detect tools for fmt and chk (#48) (96bad24)
+- **release**: add lintro formatting to version PR workflow (#47) (5cdd1e0)
+
 ## [0.4.0] - 2026-02-09
 
 ### Features
@@ -43,7 +52,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.3.0...v0.4.0
 [#37]: https://github.com/lgtm-hq/lgtm-ci/pull/37
 [#12]: https://github.com/lgtm-hq/lgtm-ci/pull/12
