@@ -29,6 +29,7 @@ jobs:
   auto-tag:
     name: Create Release
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     permissions:
       contents: write
 
@@ -52,10 +53,19 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          token: ${{ steps.app-token.outputs.token }}
+
       - name: Guard release commit
         id: guard
         shell: bash
-        run: scripts/ci/release/guard-release-commit.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
 
       - name: Extract version from commit
         # yamllint disable-line rule:line-length
@@ -67,7 +77,7 @@ jobs:
             ${{ inputs.version != ''
                 && format('chore(release): version {0}', inputs.version)
                 || '' }}
-        run: scripts/ci/release/extract-version-from-commit.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/extract-version-from-commit.sh
 
       - name: Configure git with app token
         # yamllint disable-line rule:line-length
@@ -76,23 +86,26 @@ jobs:
         env:
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPOSITORY: ${{ github.repository }}
-        run: scripts/ci/release/configure-git-remote.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/configure-git-remote.sh
 
       - name: Create release tag
         if: steps.version.outputs.found == 'true'
         id: tag
-        uses: ./.github/actions/create-release-tag
-        with:
-          version: ${{ steps.version.outputs.version }}
-          tag-prefix: ${{ inputs.tag-prefix }}
-          push: "true"
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PUSH: "true"
+        run: .lgtm-ci-tooling/scripts/ci/release/create-tag.sh
 
       - name: Create GitHub release
         if: steps.version.outputs.found == 'true'
         id: github-release
-        uses: ./.github/actions/create-github-release
-        with:
-          tag: ${{ steps.tag.outputs.tag-name }}
+        shell: bash
+        env:
+          TAG: ${{ steps.tag.outputs.tag-name }}
+          GH_TOKEN: ${{ github.token }}
+        run: .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
 
       - name: Update floating tag
         if: steps.version.outputs.found == 'true'
@@ -101,7 +114,7 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag-name }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
           PUSH: "true"
-        run: scripts/ci/release/update-floating-tag.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/update-floating-tag.sh
 
       - name: Release summary
         if: steps.version.outputs.found == 'true'
@@ -111,7 +124,7 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
           TAG_NAME: ${{ steps.tag.outputs.tag-name }}
           RELEASE_URL: ${{ steps.github-release.outputs.release-url }}
-        run: scripts/ci/release/write-release-summary.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/write-release-summary.sh
 
       - name: Skip summary
         # yamllint disable-line rule:line-length
@@ -119,4 +132,4 @@ jobs:
         shell: bash
         env:
           IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
-        run: scripts/ci/release/write-skip-summary.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/write-skip-summary.sh
