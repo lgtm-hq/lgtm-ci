@@ -10,7 +10,8 @@
 #   MAX_BUMP          - Maximum bump type: major, minor, patch (default: major)
 #   TAG_PREFIX        - Prefix for version tags (default: v)
 #   PR_LABELS         - Comma-separated PR labels (default: release)
-#   LINTRO_DOCKER_USER - UID:GID for Docker container (default: 0)
+#   LINTRO_DOCKER_USER - UID[:GID] for Docker container; a bare UID
+#                        defaults to the user's primary group (default: 0)
 #
 # Required: GH_TOKEN must be set for gh CLI authentication
 #
