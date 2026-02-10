@@ -55,12 +55,13 @@ owner_array=("${filtered_array[@]}")
 count=${#owner_array[@]}
 
 if [[ $count -eq 0 ]]; then
-	echo "No eligible assignees after filtering out PR author ($PR_AUTHOR), skipping"
-	exit 0
+	echo "No other assignees available, falling back to full CODEOWNERS list"
+	mapfile -t owner_array <<<"$owners"
+	count=${#owner_array[@]}
 fi
 
 random_index=$((RANDOM % count))
 selected="${owner_array[$random_index]}"
 
-echo "Selected assignee: $selected (from $count eligible CODEOWNERS, excluding PR author $PR_AUTHOR)"
+echo "Selected assignee: $selected (from $count eligible CODEOWNERS)"
 gh pr edit "$PR_NUMBER" --add-assignee "$selected"
