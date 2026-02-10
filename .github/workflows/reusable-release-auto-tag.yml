@@ -14,6 +14,11 @@ name: "Reusable: Release Auto Tag"
         required: false
         type: string
         default: "v"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling checkout (should match the workflow ref)"
+        required: false
+        type: string
+        default: "v0.5.0"
     secrets:
       RELEASE_APP_ID:
         description: "GitHub App ID for creating release tokens"
@@ -21,9 +26,6 @@ name: "Reusable: Release Auto Tag"
       RELEASE_APP_PRIVATE_KEY:
         description: "GitHub App private key for creating release tokens"
         required: true
-
-permissions:
-  contents: write
 
 jobs:
   auto-tag:
@@ -58,6 +60,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           token: ${{ steps.app-token.outputs.token }}
