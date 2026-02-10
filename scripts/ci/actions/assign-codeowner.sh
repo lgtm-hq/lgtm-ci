@@ -13,7 +13,7 @@ set -euo pipefail
 : "${GH_TOKEN:?GH_TOKEN is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
 : "${PR_AUTHOR:?PR_AUTHOR is required}"
-: "${CODEOWNERS_PATH:?.github/CODEOWNERS}"
+: "${CODEOWNERS_PATH:?CODEOWNERS_PATH is required}"
 
 # Extract usernames from CODEOWNERS, filtering out commented lines first
 # Pipeline: remove comments -> extract @mentions -> dedupe -> remove @ -> filter individuals

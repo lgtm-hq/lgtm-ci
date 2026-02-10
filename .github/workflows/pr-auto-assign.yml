@@ -18,5 +18,4 @@ jobs:
     uses: ./.github/workflows/reusable-pr-auto-assign.yml
     permissions:
       contents: read
-      issues: write
       pull-requests: write
