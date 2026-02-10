@@ -4,8 +4,8 @@
 #
 # Writes a summary explaining why the auto-tag workflow was skipped.
 #
-# Required environment variables:
-#   IS_RELEASE - Whether the last commit was a release commit ('true'/'false')
+# Environment variables:
+#   IS_RELEASE - Whether the last commit was a release commit (default: 'false')
 
 set -euo pipefail
 
