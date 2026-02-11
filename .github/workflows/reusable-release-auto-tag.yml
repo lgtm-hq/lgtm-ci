@@ -15,10 +15,11 @@ name: "Reusable: Release Auto Tag"
         type: string
         default: "v"
       tooling-ref:
-        description: "Git ref for lgtm-ci tooling checkout (should match the workflow ref)"
+        # yamllint disable-line rule:line-length
+        description: "Git ref for lgtm-ci tooling checkout. Same-repo callers default to github.sha; cross-repo callers default to main."
         required: false
         type: string
-        default: "v0.5.0"
+        default: ""
     secrets:
       RELEASE_APP_ID:
         description: "GitHub App ID for creating release tokens"
@@ -55,12 +56,31 @@ jobs:
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
 
+      - name: Resolve tooling ref
+        id: tooling
+        shell: bash
+        env:
+          TOOLING_REF: ${{ inputs.tooling-ref }}
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+        run: |
+          if [[ -n "$TOOLING_REF" ]]; then
+            # Explicit override from caller
+            echo "ref=$TOOLING_REF" >> "$GITHUB_OUTPUT"
+          elif [[ "$GH_REPO" == "lgtm-hq/lgtm-ci" ]]; then
+            # Same repo: use the current commit
+            echo "ref=$GH_SHA" >> "$GITHUB_OUTPUT"
+          else
+            # Cross-repo caller: use main (github.sha is the caller's SHA)
+            echo "ref=main" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref }}
+          ref: ${{ steps.tooling.outputs.ref }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           token: ${{ steps.app-token.outputs.token }}
