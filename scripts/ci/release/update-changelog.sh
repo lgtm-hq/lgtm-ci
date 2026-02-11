@@ -124,10 +124,10 @@ ${CHANGELOG_BODY}"
 TMPFILE=$(mktemp "${CHANGELOG_FILE}.XXXXXX")
 trap 'rm -f "$TMPFILE"' EXIT
 
-export NEW_SECTION UNRELEASED_SECTION UNRELEASED_LINK VERSION_LINK
+export NEW_SECTION UNRELEASED_SECTION UNRELEASED_LINK VERSION_LINK CLEAN_VERSION
 
 awk '
-BEGIN { in_unreleased=0 }
+BEGIN { in_unreleased=0; in_dup_version=0 }
 /^## \[Unreleased\]/ {
 	print ENVIRON["UNRELEASED_SECTION"]
 	print ""
@@ -137,15 +137,37 @@ BEGIN { in_unreleased=0 }
 }
 in_unreleased && /^## \[/ {
 	in_unreleased=0
+	# Skip duplicate version section when re-creating the same release
+	v = ENVIRON["CLEAN_VERSION"]
+	if (index($0, "## [" v "]") == 1) {
+		in_dup_version=1
+		next
+	}
 	print
 	next
 }
+# Skip content of duplicate version section until the next version heading
+in_dup_version && /^## \[/ {
+	in_dup_version=0
+	print ""
+	print
+	next
+}
+# Clear in_dup_version when reaching the link-definition block so the
+# [Unreleased]: handler below still fires (no next — fall through).
+in_dup_version && /^\[Unreleased\]:/ { in_dup_version=0 }
+in_dup_version { next }
 # Replace [Unreleased]: link even inside the unreleased section
 /^\[Unreleased\]:/ {
 	print ""
 	print ENVIRON["UNRELEASED_LINK"]
 	print ENVIRON["VERSION_LINK"]
 	next
+}
+# Skip existing version link definition to prevent duplicates (MD053)
+{
+	v = ENVIRON["CLEAN_VERSION"]
+	if (index($0, "[" v "]: ") == 1) next
 }
 # Preserve reference-style link definitions (e.g., [#1]: https://...)
 # even inside the unreleased section

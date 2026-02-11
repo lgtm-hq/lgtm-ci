@@ -518,6 +518,158 @@ run_update_changelog() {
 	assert_success
 }
 
+@test "update-changelog: deduplicates when same version already exists" {
+	setup_changelog_repo
+
+	# Simulate the scenario where a version PR was merged but the tag was
+	# never created, so the next run calculates the same version again.
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.6.0] - 2026-02-10
+
+### Features
+
+- old feature from first run (aaa1111)
+
+## [0.5.0] - 2026-02-09
+
+### Features
+
+- even older feature (bbb2222)
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.6.0...HEAD
+[0.6.0]: https://github.com/test-org/test-repo/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/test-org/test-repo/releases/tag/v0.5.0'
+
+	(cd "$MOCK_GIT_REPO" && git tag v0.5.0)
+
+	run_update_changelog "0.6.0" "### Features
+
+- old feature from first run (aaa1111)
+
+### Bug Fixes
+
+- new fix added since first run (ccc3333)"
+	assert_success
+
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	# Exactly one version header for 0.6.0
+	local count
+	count=$(echo "$changelog" | grep -c '## \[0\.6\.0\]')
+	[[ "$count" -eq 1 ]] || {
+		echo "Expected exactly 1 version header for 0.6.0, found $count" >&2
+		echo "$changelog" >&2
+		return 1
+	}
+
+	# Exactly one link definition for 0.6.0 (no MD053 duplicate)
+	local link_count
+	link_count=$(echo "$changelog" | grep -c '^\[0\.6\.0\]:')
+	[[ "$link_count" -eq 1 ]] || {
+		echo "Expected exactly 1 link definition for [0.6.0], found $link_count" >&2
+		echo "$changelog" >&2
+		return 1
+	}
+
+	# The 0.5.0 section should still be preserved
+	echo "$changelog" | grep -q '## \[0\.5\.0\]' || fail "'## [0.5.0]' not found in changelog"
+	echo "$changelog" | grep -q 'even older feature' || fail "'even older feature' not found in changelog"
+
+	# The 0.5.0 link should still be preserved
+	echo "$changelog" | grep -q '\[0\.5\.0\]:' || fail "'[0.5.0]' link not found in changelog"
+
+	# The new fix should be present in the updated 0.6.0 section
+	echo "$changelog" | grep -q 'new fix added since first run' || fail "'new fix added since first run' not found in changelog"
+}
+
+@test "update-changelog: deduplicates when duplicate is the only version section" {
+	setup_changelog_repo
+
+	# Edge case: the duplicate version is the last (and only) section before
+	# the link definitions. in_dup_version must be cleared so the
+	# [Unreleased]: handler still fires.
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [1.0.0] - 2026-02-10
+
+### Features
+
+- initial release feature (aaa1111)
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/test-org/test-repo/releases/tag/v1.0.0'
+
+	run_update_changelog "1.0.0" "### Features
+
+- initial release feature (aaa1111)
+
+### Bug Fixes
+
+- hotfix after version PR merged (bbb2222)"
+	assert_success
+
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	# Exactly one version header
+	local count
+	count=$(echo "$changelog" | grep -c '## \[1\.0\.0\]')
+	[[ "$count" -eq 1 ]] || {
+		echo "Expected exactly 1 version header for 1.0.0, found $count" >&2
+		echo "$changelog" >&2
+		return 1
+	}
+
+	# Exactly one link definition (no MD053 duplicate)
+	local link_count
+	link_count=$(echo "$changelog" | grep -c '^\[1\.0\.0\]:')
+	[[ "$link_count" -eq 1 ]] || {
+		echo "Expected exactly 1 link definition for [1.0.0], found $link_count" >&2
+		echo "$changelog" >&2
+		return 1
+	}
+
+	# Unreleased link must still be emitted
+	echo "$changelog" | grep -q '^\[Unreleased\]: https://github.com/test-org/test-repo/compare/v1.0.0...HEAD' || {
+		echo "Missing or incorrect [Unreleased] link" >&2
+		echo "$changelog" >&2
+		return 1
+	}
+
+	# The hotfix should be present
+	echo "$changelog" | grep -q 'hotfix after version PR merged' || fail "'hotfix after version PR merged' not found in changelog"
+}
+
 @test "update-changelog: no triple-blank-line runs" {
 	setup_changelog_repo
 
