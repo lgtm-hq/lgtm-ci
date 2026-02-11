@@ -19,11 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-## [0.6.0] - 2026-02-10
+## [0.6.0] - 2026-02-11
 
 ### Features
 
 - **workflows**: add reusable release-auto-tag workflow (#60) (5d22dcb)
+
+### Bug Fixes
+
+- **release**: deduplicate changelog when same version is re-created (#63) (b7fef51)
+- **workflows**: use github.sha as default tooling-ref in auto-tag workflow (#62) (b911193)
+
+### Other Changes
+
+- **release**: version 0.6.0 (#61) (3c6f9e9)
 
 ## [0.5.1] - 2026-02-10
 
