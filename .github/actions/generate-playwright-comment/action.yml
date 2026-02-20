@@ -44,6 +44,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Generate comment
       id: generate
       shell: bash
@@ -52,7 +58,7 @@ runs:
         REPORT_URL: ${{ inputs['report-url'] }}
         SHOW_FAILED: ${{ inputs['show-failed-tests'] }}
         MAX_FAILED: ${{ inputs['max-failed-tests'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-playwright-comment.sh
+      run: $SCRIPTS_DIR/ci/actions/generate-playwright-comment.sh
 
 branding:
   icon: "play-circle"

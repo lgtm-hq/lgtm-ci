@@ -26,6 +26,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Check coverage threshold
       id: check
       shell: bash
@@ -33,8 +39,7 @@ runs:
         COVERAGE: ${{ inputs.coverage-percent }}
         THRESHOLD: ${{ inputs.threshold }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-      run: ${{ github.action_path
-        }}/../../../scripts/ci/actions/check-coverage-threshold.sh
+      run: $SCRIPTS_DIR/ci/actions/check-coverage-threshold.sh
 
 branding:
   icon: "check-circle"

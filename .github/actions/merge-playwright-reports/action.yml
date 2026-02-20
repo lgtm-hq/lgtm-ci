@@ -37,6 +37,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Collect reports
       id: collect
       shell: bash
@@ -44,8 +50,7 @@ runs:
         STEP: collect
         INPUT_DIR: ${{ inputs.input-dir }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
-      run: ${{ github.action_path
-        }}/../../../scripts/ci/actions/merge-playwright-reports.sh
+      run: $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh
 
     - name: Merge reports
       id: merge
@@ -56,8 +61,7 @@ runs:
         INPUT_DIR: ${{ inputs.input-dir }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         REPORT_FORMAT: ${{ inputs.report-format }}
-      run: ${{ github.action_path
-        }}/../../../scripts/ci/actions/merge-playwright-reports.sh
+      run: $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh
 
     - name: Parse merged results
       id: parse
@@ -67,7 +71,7 @@ runs:
         STEP: parse-merged
         MERGED_PATH: ${{ steps.merge.outputs.merged-path }}
       run: |
-        ${{ github.action_path }}/../../../scripts/ci/actions/merge-playwright-reports.sh
+        $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh
 
     - name: Generate summary
       if: steps.collect.outputs.report-count != '0'
@@ -78,8 +82,7 @@ runs:
         TOTAL_FAILED: ${{ steps.parse.outputs.total-failed }}
         TOTAL_SKIPPED: ${{ steps.parse.outputs.total-skipped }}
         REPORT_COUNT: ${{ steps.collect.outputs.report-count }}
-      run: ${{ github.action_path
-        }}/../../../scripts/ci/actions/merge-playwright-reports.sh
+      run: $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh
 
 branding:
   icon: "layers"

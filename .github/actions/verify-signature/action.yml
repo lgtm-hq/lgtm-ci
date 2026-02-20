@@ -29,6 +29,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Install Cosign
       # Pinned to SHA for supply chain security
       uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
@@ -43,7 +49,7 @@ runs:
         CERTIFICATE: ${{ inputs.certificate }}
         CERTIFICATE_IDENTITY: ${{ inputs.certificate-identity }}
         CERTIFICATE_OIDC_ISSUER: ${{ inputs.certificate-oidc-issuer }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-signature.sh
+      run: $SCRIPTS_DIR/ci/actions/verify-signature.sh
 
     - name: Generate summary
       if: always()
@@ -54,7 +60,7 @@ runs:
         FILE: ${{ inputs.file }}
         SIGNATURE: ${{ inputs.signature }}
         CERTIFICATE_IDENTITY: ${{ inputs.certificate-identity }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-signature.sh
+      run: $SCRIPTS_DIR/ci/actions/verify-signature.sh
 
 branding:
   icon: "check-square"

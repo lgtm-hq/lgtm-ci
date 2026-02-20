@@ -41,6 +41,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Install Cosign
       # Pinned to SHA for supply chain security
       uses: sigstore/cosign-installer@c56c2d3e59e4281cc41dea2217323ba5694b171e # v3.8.0
@@ -51,7 +57,7 @@ runs:
       env:
         STEP: sign
         FILES: ${{ inputs.files }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/sign-artifact.sh
+      run: $SCRIPTS_DIR/ci/actions/sign-artifact.sh
 
     - name: Upload signatures artifact
       if: steps.sign.outputs.signed-count != '0' && inputs.upload-signatures == 'true'
@@ -75,7 +81,7 @@ runs:
         STEP: upload-release
         RELEASE_TAG: ${{ inputs.release-tag }}
         SIGNATURES_DIR: ${{ steps.sign.outputs.signatures-dir }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/sign-artifact.sh
+      run: $SCRIPTS_DIR/ci/actions/sign-artifact.sh
 
     - name: Generate summary
       if: always()
@@ -86,7 +92,7 @@ runs:
         FILES: ${{ inputs.files }}
         CERTIFICATE: ${{ steps.sign.outputs.certificate }}
         SIGNATURES: ${{ steps.sign.outputs.signatures }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/sign-artifact.sh
+      run: $SCRIPTS_DIR/ci/actions/sign-artifact.sh
 
 branding:
   icon: "edit-3"

@@ -49,6 +49,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Detect coverage files
       id: detect
       if: inputs.coverage-files == ''
@@ -56,7 +62,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: detect
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
+      run: $SCRIPTS_DIR/ci/actions/collect-coverage.sh
 
     - name: Merge coverage
       id: merge
@@ -70,7 +76,7 @@ runs:
         OUTPUT_FORMAT: ${{ inputs.output-format }}
         MERGE_STRATEGY: ${{ inputs.merge-strategy }}
         OUTPUT_FILE: ${{ inputs.output-file }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
+      run: $SCRIPTS_DIR/ci/actions/collect-coverage.sh
 
     - name: Generate summary
       id: summary
@@ -80,7 +86,7 @@ runs:
         STEP: summary
         COVERAGE_FILE: ${{ steps.merge.outputs.merged-coverage-file }}
         COVERAGE_PERCENT: ${{ steps.merge.outputs.coverage-percent }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/collect-coverage.sh
+      run: $SCRIPTS_DIR/ci/actions/collect-coverage.sh
 
 branding:
   icon: "pie-chart"

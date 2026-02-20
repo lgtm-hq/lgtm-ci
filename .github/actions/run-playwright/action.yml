@@ -56,6 +56,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Setup Node.js
       uses: ./.github/actions/setup-node
       with:
@@ -68,7 +74,7 @@ runs:
       env:
         STEP: setup
         BROWSER: ${{ inputs.browser }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+      run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
 
     - name: Run Playwright
       id: run
@@ -81,7 +87,7 @@ runs:
         REPORTER: ${{ inputs.reporter }}
         SHARD: ${{ inputs.shard }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+      run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
       continue-on-error: true
 
     - name: Parse results
@@ -92,7 +98,7 @@ runs:
         STEP: parse
         REPORT_PATH: ${{ steps.run.outputs.report-path }}
         REPORTER: ${{ inputs.reporter }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+      run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
 
     - name: Generate summary
       shell: bash
@@ -105,7 +111,7 @@ runs:
         BROWSER: ${{ inputs.browser }}
         SHARD: ${{ inputs.shard }}
         EXIT_CODE: ${{ steps.run.outputs.exit-code }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-playwright.sh
+      run: $SCRIPTS_DIR/ci/actions/run-playwright.sh
 
     - name: Upload report
       if: inputs.reporter == 'html' && always()

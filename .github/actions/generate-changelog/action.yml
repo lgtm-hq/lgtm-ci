@@ -33,6 +33,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Generate changelog
       id: generate
       shell: bash
@@ -42,7 +48,7 @@ runs:
         VERSION: ${{ inputs.version }}
         FORMAT: ${{ inputs.format }}
         OUTPUT_FILE: ${{ inputs.output-file }}
-      run: ${{ github.action_path }}/../../../scripts/ci/release/generate-changelog.sh
+      run: $SCRIPTS_DIR/ci/release/generate-changelog.sh
 
 branding:
   icon: "file-text"

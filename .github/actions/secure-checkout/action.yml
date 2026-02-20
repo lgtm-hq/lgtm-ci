@@ -88,6 +88,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Checkout repository
       id: checkout
       # Pinned to SHA for supply chain security
@@ -119,9 +125,7 @@ runs:
         STEP: repo-dir
         WORKSPACE: ${{ github.workspace }}
         CHECKOUT_PATH: ${{ inputs.path }}
-      run: |
-        SCRIPT="${GITHUB_ACTION_PATH//\\//}/../../../scripts/ci/actions/secure-checkout.sh"
-        "$SCRIPT"
+      run: $SCRIPTS_DIR/ci/actions/secure-checkout.sh
 
     - name: Verify checkout integrity
       shell: bash
@@ -130,9 +134,7 @@ runs:
         STEP: verify
         REPOSITORY: ${{ inputs.repository }}
         PERSIST_CREDENTIALS: ${{ inputs['persist-credentials'] }}
-      run: |
-        SCRIPT="${GITHUB_ACTION_PATH//\\//}/../../../scripts/ci/actions/secure-checkout.sh"
-        "$SCRIPT"
+      run: $SCRIPTS_DIR/ci/actions/secure-checkout.sh
 
 branding:
   icon: "download"

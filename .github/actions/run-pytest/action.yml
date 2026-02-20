@@ -59,6 +59,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Setup Python
       uses: ./.github/actions/setup-python
       with:
@@ -71,7 +77,7 @@ runs:
       env:
         STEP: setup
         COVERAGE: ${{ inputs.coverage }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-pytest.sh
+      run: $SCRIPTS_DIR/ci/actions/run-pytest.sh
 
     - name: Run pytest
       id: run
@@ -84,7 +90,7 @@ runs:
         COVERAGE_FORMAT: ${{ inputs.coverage-format }}
         MARKERS: ${{ inputs.markers }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-pytest.sh
+      run: $SCRIPTS_DIR/ci/actions/run-pytest.sh
       continue-on-error: true
 
     - name: Parse results
@@ -95,7 +101,7 @@ runs:
         STEP: parse
         RESULTS_FILE: pytest-results.json
         COVERAGE_FILE: ${{ steps.run.outputs.coverage-file }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-pytest.sh
+      run: $SCRIPTS_DIR/ci/actions/run-pytest.sh
 
     - name: Generate summary
       shell: bash
@@ -107,7 +113,7 @@ runs:
         TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
         COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
         EXIT_CODE: ${{ steps.run.outputs.exit-code }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-pytest.sh
+      run: $SCRIPTS_DIR/ci/actions/run-pytest.sh
 
     - name: Check test result
       if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'

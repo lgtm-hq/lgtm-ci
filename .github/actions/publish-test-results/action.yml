@@ -45,6 +45,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Prepare files
       id: prepare
       shell: bash
@@ -57,7 +63,7 @@ runs:
         TARGET_DIR: ${{ inputs.target-dir }}
         KEEP_HISTORY: ${{ inputs.keep-history }}
         RETENTION_DAYS: ${{ inputs.retention-days }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-test-results.sh
+      run: $SCRIPTS_DIR/ci/actions/publish-test-results.sh
 
     - name: Deploy to GitHub Pages
       id: deploy
@@ -77,7 +83,7 @@ runs:
       env:
         STEP: pages-url
         TARGET_DIR: ${{ inputs.target-dir }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-test-results.sh
+      run: $SCRIPTS_DIR/ci/actions/publish-test-results.sh
 
     - name: Generate summary
       shell: bash
@@ -85,7 +91,7 @@ runs:
         STEP: summary
         PAGES_URL: ${{ steps.pages-url.outputs.pages-url }}
         TARGET_BRANCH: ${{ inputs.target-branch }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-test-results.sh
+      run: $SCRIPTS_DIR/ci/actions/publish-test-results.sh
 
 branding:
   icon: "upload-cloud"

@@ -41,6 +41,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Create release tag
       id: tag
       shell: bash
@@ -50,7 +56,7 @@ runs:
         MESSAGE: ${{ inputs.message }}
         PUSH: ${{ inputs.push }}
         FROM_REF: ${{ inputs.from-ref }}
-      run: ${{ github.action_path }}/../../../scripts/ci/release/create-tag.sh
+      run: $SCRIPTS_DIR/ci/release/create-tag.sh
 
 branding:
   icon: "tag"

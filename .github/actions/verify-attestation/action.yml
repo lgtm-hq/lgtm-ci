@@ -31,6 +31,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Verify attestation
       id: verify
       shell: bash
@@ -40,7 +46,7 @@ runs:
         TARGET_TYPE: ${{ inputs.target-type }}
         OWNER: ${{ inputs.owner || github.repository_owner }}
         REPO: ${{ inputs.repo }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
+      run: $SCRIPTS_DIR/ci/actions/verify-attestation.sh
 
     - name: Parse verification output
       if: steps.verify.outputs.verified == 'true'
@@ -48,7 +54,7 @@ runs:
       env:
         STEP: parse
         VERIFICATION_OUTPUT: ${{ steps.verify.outputs.verification-output }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
+      run: $SCRIPTS_DIR/ci/actions/verify-attestation.sh
 
     - name: Generate summary
       if: always()
@@ -59,7 +65,7 @@ runs:
         SIGNER_IDENTITY: ${{ steps.verify.outputs.signer-identity }}
         TARGET: ${{ inputs.target }}
         TARGET_TYPE: ${{ inputs.target-type }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/verify-attestation.sh
+      run: $SCRIPTS_DIR/ci/actions/verify-attestation.sh
 
 branding:
   icon: "check-square"

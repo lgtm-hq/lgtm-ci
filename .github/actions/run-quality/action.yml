@@ -36,6 +36,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Run lintro quality checks
       id: lint
       shell: bash
@@ -44,7 +50,7 @@ runs:
         STEP: ${{ inputs.mode }}
         TOOLS: ${{ inputs.tools }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-      run: ${{ github.action_path }}/../../../scripts/ci/quality/lint-check.sh
+      run: $SCRIPTS_DIR/ci/quality/lint-check.sh
 
     - name: Run actionlint
       if: inputs.run-actionlint == 'true'
@@ -55,7 +61,7 @@ runs:
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
       run: |
         if command -v actionlint &>/dev/null; then
-          ${{ github.action_path }}/../../../scripts/ci/quality/actionlint-check.sh
+          $SCRIPTS_DIR/ci/quality/actionlint-check.sh
           EXIT_CODE=$?
           if [[ "$FAIL_ON_ERROR" != "true" ]]; then
             exit 0
