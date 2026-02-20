@@ -46,6 +46,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Detect PR number
       id: pr
       shell: bash
@@ -57,7 +63,7 @@ runs:
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
+      run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
     - name: Read comment from file
       id: read
@@ -66,7 +72,7 @@ runs:
       env:
         STEP: read-file
         COMMENT_FILE: ${{ inputs.file }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
+      run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
     - name: Post comment
       id: post
@@ -83,7 +89,7 @@ runs:
         FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
         BODY_FROM_FILE: ${{ steps.read.outputs.body }}
         BODY_FROM_INPUT: ${{ inputs.body }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/post-pr-comment.sh
+      run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
 branding:
   icon: "message-square"

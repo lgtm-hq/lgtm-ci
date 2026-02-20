@@ -51,6 +51,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Wait for package availability
       if: inputs.wait-for-availability == 'true'
       shell: bash
@@ -60,7 +66,7 @@ runs:
         VERSION: ${{ inputs.version }}
         MAX_WAIT: ${{ inputs.max-wait-minutes }}
         TEST_PYPI: ${{ inputs.test-pypi }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+      run: $SCRIPTS_DIR/ci/actions/update-homebrew.sh
 
     - name: Generate formula
       id: generate
@@ -72,7 +78,7 @@ runs:
         PACKAGE: ${{ inputs.package-name }}
         VERSION: ${{ inputs.version }}
         TEST_PYPI: ${{ inputs.test-pypi }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+      run: $SCRIPTS_DIR/ci/actions/update-homebrew.sh
 
     - name: Commit changes
       id: commit
@@ -86,7 +92,7 @@ runs:
         PUSH: ${{ inputs.push }}
         CREATE_PR: ${{ inputs.create-pr }}
         GH_TOKEN: ${{ github.token }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+      run: $SCRIPTS_DIR/ci/actions/update-homebrew.sh
 
     - name: Create pull request
       id: pr
@@ -98,7 +104,7 @@ runs:
         FORMULA: ${{ inputs.formula }}
         VERSION: ${{ inputs.version }}
         GH_TOKEN: ${{ github.token }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+      run: $SCRIPTS_DIR/ci/actions/update-homebrew.sh
 
     - name: Generate summary
       shell: bash
@@ -111,7 +117,7 @@ runs:
         UPDATED: ${{ steps.commit.outputs.updated || 'false' }}
         COMMIT_SHA: ${{ steps.commit.outputs.commit-sha }}
         PR_URL: ${{ steps.pr.outputs.pr-url }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/update-homebrew.sh
+      run: $SCRIPTS_DIR/ci/actions/update-homebrew.sh
 
 branding:
   icon: "download"

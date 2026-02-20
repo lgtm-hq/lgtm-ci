@@ -69,6 +69,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Setup Node.js
       uses: ./.github/actions/setup-node
       with:
@@ -78,7 +84,7 @@ runs:
       shell: bash
       env:
         STEP: setup
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+      run: $SCRIPTS_DIR/ci/actions/run-lighthouse.sh
 
     - name: Run Lighthouse
       id: run
@@ -89,7 +95,7 @@ runs:
         CONFIG_PATH: ${{ inputs.config-path }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+      run: $SCRIPTS_DIR/ci/actions/run-lighthouse.sh
       continue-on-error: true
 
     - name: Parse results
@@ -103,7 +109,7 @@ runs:
         THRESHOLD_ACCESSIBILITY: ${{ inputs.threshold-accessibility }}
         THRESHOLD_BEST_PRACTICES: ${{ inputs.threshold-best-practices }}
         THRESHOLD_SEO: ${{ inputs.threshold-seo }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+      run: $SCRIPTS_DIR/ci/actions/run-lighthouse.sh
 
     - name: Generate summary
       shell: bash
@@ -118,7 +124,7 @@ runs:
         THRESHOLD_ACCESSIBILITY: ${{ inputs.threshold-accessibility }}
         THRESHOLD_BEST_PRACTICES: ${{ inputs.threshold-best-practices }}
         THRESHOLD_SEO: ${{ inputs.threshold-seo }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-lighthouse.sh
+      run: $SCRIPTS_DIR/ci/actions/run-lighthouse.sh
 
     - name: Upload results
       if: always()

@@ -55,13 +55,19 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Detect test runner
       id: detect
       shell: bash
       env:
         STEP: detect
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
+      run: $SCRIPTS_DIR/ci/actions/run-tests.sh
 
     - name: Run tests
       id: run
@@ -73,7 +79,7 @@ runs:
         COVERAGE_FORMAT: ${{ inputs.coverage-format }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
+      run: $SCRIPTS_DIR/ci/actions/run-tests.sh
       continue-on-error: true
 
     - name: Parse results
@@ -85,7 +91,7 @@ runs:
           ${{ inputs.runner != 'auto' && inputs.runner != '' && inputs.runner ||
           steps.detect.outputs.runner }}
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
+      run: $SCRIPTS_DIR/ci/actions/run-tests.sh
 
     - name: Generate summary
       shell: bash
@@ -99,7 +105,7 @@ runs:
         TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
         TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
         EXIT_CODE: ${{ steps.run.outputs.exit-code }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/run-tests.sh
+      run: $SCRIPTS_DIR/ci/actions/run-tests.sh
 
     - name: Check test result
       if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'

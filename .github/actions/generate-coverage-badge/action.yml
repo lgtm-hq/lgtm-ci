@@ -50,6 +50,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Calculate coverage
       id: calculate
       shell: bash
@@ -60,7 +66,7 @@ runs:
         COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
         RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] || 50 }}
         YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] || 80 }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
+      run: $SCRIPTS_DIR/ci/actions/generate-coverage-badge.sh
 
     - name: Generate badge
       id: generate
@@ -74,7 +80,7 @@ runs:
         LABEL: ${{ inputs.label }}
         RED_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[0] || 50 }}
         YELLOW_THRESHOLD: ${{ fromJSON(format('[{0}]', inputs.thresholds))[1] || 80 }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
+      run: $SCRIPTS_DIR/ci/actions/generate-coverage-badge.sh
 
     - name: Generate summary
       shell: bash
@@ -83,7 +89,7 @@ runs:
         COVERAGE_PERCENT: ${{ steps.calculate.outputs.coverage-percent }}
         BADGE_FILE: ${{ steps.generate.outputs.badge-file }}
         BADGE_URL: ${{ steps.generate.outputs.badge-url }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-coverage-badge.sh
+      run: $SCRIPTS_DIR/ci/actions/generate-coverage-badge.sh
 
 branding:
   icon: "award"

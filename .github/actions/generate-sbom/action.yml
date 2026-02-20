@@ -43,6 +43,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Generate SBOM
       id: generate
       # Pinned to SHA for supply chain security
@@ -63,7 +69,7 @@ runs:
         STEP: summary
         SBOM_FILE: ${{ inputs.output-file }}
         FORMAT: ${{ inputs.format }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/generate-sbom.sh
+      run: $SCRIPTS_DIR/ci/actions/generate-sbom.sh
 
 branding:
   icon: "package"

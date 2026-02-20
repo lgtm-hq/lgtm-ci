@@ -43,6 +43,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Install Rust toolchain
       # Pinned to SHA for supply chain security
       uses: dtolnay/rust-toolchain@a54c7afa936fefeb4456b2dd8068152669aa8203 # master
@@ -56,13 +62,13 @@ runs:
       shell: bash
       env:
         STEP: version
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-rust.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-rust.sh
 
     - name: Configure cargo for CI
       shell: bash
       env:
         STEP: cargo-env
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-rust.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-rust.sh
 
     - name: Cache cargo registry and build
       if: inputs.cache == 'true'
@@ -88,7 +94,7 @@ runs:
       shell: bash
       env:
         STEP: binstall
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-rust.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-rust.sh
 
 branding:
   icon: "cpu"

@@ -50,6 +50,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Validate PR title
       id: validate
       shell: bash
@@ -60,7 +66,7 @@ runs:
         REQUIRE_SCOPE: ${{ inputs['require-scope'] }}
         MAX_LENGTH: ${{ inputs['max-length'] }}
         FAIL_ON_INVALID: ${{ inputs['fail-on-invalid'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/semantic-pr-title.sh
+      run: $SCRIPTS_DIR/ci/actions/semantic-pr-title.sh
 
 branding:
   icon: "check-circle"

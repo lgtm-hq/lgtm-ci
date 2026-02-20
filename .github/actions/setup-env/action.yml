@@ -30,13 +30,19 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Setup environment
       id: setup
       shell: bash
       env:
         BIN_DIR: ${{ inputs['bin-dir'] }}
         ADD_TO_PATH: ${{ inputs['add-to-path'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-env.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-env.sh
 
 branding:
   icon: "settings"

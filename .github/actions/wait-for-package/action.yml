@@ -35,6 +35,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Check initial availability
       id: check
       shell: bash
@@ -44,7 +50,7 @@ runs:
         PACKAGE: ${{ inputs.package }}
         VERSION: ${{ inputs.version }}
         TEST_PYPI: ${{ inputs.test-pypi }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/wait-for-package.sh
+      run: $SCRIPTS_DIR/ci/actions/wait-for-package.sh
 
     - name: Wait for availability
       id: wait
@@ -57,7 +63,7 @@ runs:
         VERSION: ${{ inputs.version }}
         MAX_WAIT: ${{ inputs.max-wait }}
         TEST_PYPI: ${{ inputs.test-pypi }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/wait-for-package.sh
+      run: $SCRIPTS_DIR/ci/actions/wait-for-package.sh
 
     - name: Generate summary
       shell: bash
@@ -70,7 +76,7 @@ runs:
           ${{ steps.check.outputs.available == 'true' && 'true' ||
           steps.wait.outputs.available || 'false' }}
         ELAPSED: ${{ steps.wait.outputs.elapsed || '0' }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/wait-for-package.sh
+      run: $SCRIPTS_DIR/ci/actions/wait-for-package.sh
 
 branding:
   icon: "clock"

@@ -34,6 +34,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Prepare attestation
       id: prepare
       shell: bash
@@ -42,7 +48,7 @@ runs:
         SUBJECT_PATH: ${{ inputs.subject-path }}
         SUBJECT_NAME: ${{ inputs.subject-name }}
         SUBJECT_DIGEST: ${{ inputs.subject-digest }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/attest-build.sh
+      run: $SCRIPTS_DIR/ci/actions/attest-build.sh
 
     - name: Create attestation
       id: attest
@@ -62,7 +68,7 @@ runs:
         ATTESTATION_URL: ${{ steps.attest.outputs.attestation-url }}
         BUNDLE_PATH: ${{ steps.attest.outputs.bundle-path }}
         SUBJECT_NAME: ${{ steps.prepare.outputs.subject-name }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/attest-build.sh
+      run: $SCRIPTS_DIR/ci/actions/attest-build.sh
 
 branding:
   icon: "check-circle"

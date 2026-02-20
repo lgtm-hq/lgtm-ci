@@ -34,6 +34,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Calculate next version
       id: calculate
       shell: bash
@@ -41,7 +47,7 @@ runs:
         MAX_BUMP: ${{ inputs.max-bump }}
         FROM_REF: ${{ inputs.from-ref }}
         TO_REF: ${{ inputs.to-ref }}
-      run: ${{ github.action_path }}/../../../scripts/ci/release/calculate-version.sh
+      run: $SCRIPTS_DIR/ci/release/calculate-version.sh
 
 branding:
   icon: "tag"

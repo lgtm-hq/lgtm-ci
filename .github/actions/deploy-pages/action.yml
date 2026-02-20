@@ -28,6 +28,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Prepare content
       id: prepare
       shell: bash
@@ -35,14 +41,14 @@ runs:
         STEP: prepare
         SOURCE_PATH: ${{ inputs.source-path }}
         BUILD_COMMAND: ${{ inputs.build-command }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/deploy-pages.sh
+      run: $SCRIPTS_DIR/ci/actions/deploy-pages.sh
 
     - name: Validate content
       shell: bash
       env:
         STEP: validate
         SOURCE_PATH: ${{ inputs.source-path }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/deploy-pages.sh
+      run: $SCRIPTS_DIR/ci/actions/deploy-pages.sh
 
     - name: Upload Pages artifact
       id: upload

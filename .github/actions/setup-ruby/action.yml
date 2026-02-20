@@ -45,6 +45,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Setup Ruby
       # Pinned to SHA for supply chain security
       uses: ruby/setup-ruby@a4effe49ee8ee5b8224f9b18fb5c7d6ac6239857 # v1.221.0
@@ -58,21 +64,21 @@ runs:
       shell: bash
       env:
         STEP: ruby-version
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-ruby.sh
 
     - name: Get Bundler version
       id: bundler-version
       shell: bash
       env:
         STEP: bundler-version
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-ruby.sh
 
     - name: Configure bundler
       shell: bash
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: bundle-config
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-ruby.sh
 
     - name: Cache gem dependencies
       if: inputs.cache == 'true'
@@ -97,7 +103,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: deps
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/setup-ruby.sh
+      run: $SCRIPTS_DIR/ci/actions/setup-ruby.sh
 
 branding:
   icon: "package"

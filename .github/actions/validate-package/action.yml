@@ -26,13 +26,19 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Detect package type
       shell: bash
       env:
         STEP: detect
         PACKAGE_TYPE: ${{ inputs.type }}
         PACKAGE_PATH: ${{ inputs.path }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/validate-package.sh
+      run: $SCRIPTS_DIR/ci/actions/validate-package.sh
 
     - name: Validate package
       id: validate
@@ -41,7 +47,7 @@ runs:
         STEP: validate
         PACKAGE_TYPE: ${{ inputs.type }}
         PACKAGE_PATH: ${{ inputs.path }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/validate-package.sh
+      run: $SCRIPTS_DIR/ci/actions/validate-package.sh
 
     - name: Generate summary
       shell: bash
@@ -51,7 +57,7 @@ runs:
         PACKAGE_NAME: ${{ steps.validate.outputs.name }}
         PACKAGE_VERSION: ${{ steps.validate.outputs.version }}
         VALID: ${{ steps.validate.outputs.valid }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/validate-package.sh
+      run: $SCRIPTS_DIR/ci/actions/validate-package.sh
 
 branding:
   icon: "check-circle"

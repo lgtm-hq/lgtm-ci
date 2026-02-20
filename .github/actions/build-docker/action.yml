@@ -72,11 +72,17 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Setup Docker environment
       shell: bash
       env:
         STEP: setup
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+      run: $SCRIPTS_DIR/ci/actions/build-docker.sh
 
     - name: Setup QEMU for multi-platform
       # Run for multi-platform builds OR single non-native platform
@@ -121,7 +127,7 @@ runs:
         LABELS: ${{ inputs.labels }}
         CACHE_FROM: ${{ inputs.cache-from }}
         CACHE_TO: ${{ inputs.cache-to }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+      run: $SCRIPTS_DIR/ci/actions/build-docker.sh
 
     - name: Extract metadata
       id: metadata
@@ -132,7 +138,7 @@ runs:
         REGISTRY: ${{ inputs.registry }}
         IMAGE_NAME: ${{ inputs.image-name }}
         BUILT_TAGS: ${{ steps.build.outputs.tags }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+      run: $SCRIPTS_DIR/ci/actions/build-docker.sh
 
     - name: Generate summary
       shell: bash
@@ -142,7 +148,7 @@ runs:
         TAGS: ${{ steps.build.outputs.tags }}
         PLATFORMS: ${{ inputs.platforms }}
         PUSH: ${{ inputs.push }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/build-docker.sh
+      run: $SCRIPTS_DIR/ci/actions/build-docker.sh
 
 branding:
   icon: "box"

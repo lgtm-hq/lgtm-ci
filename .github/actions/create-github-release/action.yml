@@ -47,6 +47,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Create GitHub release
       id: release
       shell: bash
@@ -60,7 +66,7 @@ runs:
         FILES: ${{ inputs.files }}
         REPO: ${{ inputs.repo }}
         GH_TOKEN: ${{ github.token }}
-      run: ${{ github.action_path }}/../../../scripts/ci/release/create-github-release.sh
+      run: $SCRIPTS_DIR/ci/release/create-github-release.sh
 
 branding:
   icon: "package"

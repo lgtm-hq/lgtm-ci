@@ -60,6 +60,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Generate comment
       id: generate
       shell: bash
@@ -72,8 +78,7 @@ runs:
         THRESHOLD_FUNCTIONS: ${{ inputs['threshold-functions'] }}
         SHOW_FILE_COVERAGE: ${{ inputs['show-file-coverage'] }}
         MAX_FILES: ${{ inputs['max-files'] }}
-      run: ${{ github.action_path
-        }}/../../../scripts/ci/actions/generate-coverage-comment.sh
+      run: $SCRIPTS_DIR/ci/actions/generate-coverage-comment.sh
 
 branding:
   icon: "percent"

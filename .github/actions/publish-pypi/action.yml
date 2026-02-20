@@ -35,6 +35,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Validate package metadata
       id: validate
       if: inputs.validate == 'true'
@@ -42,7 +48,7 @@ runs:
       env:
         STEP: validate
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
 
     - name: Build package
       id: build
@@ -50,7 +56,7 @@ runs:
       env:
         STEP: build
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
 
     - name: Validate distribution
       if: inputs.validate == 'true'
@@ -58,7 +64,7 @@ runs:
       env:
         STEP: validate-dist
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
 
     - name: Publish to PyPI
       id: publish
@@ -86,7 +92,7 @@ runs:
         DRY_RUN: ${{ inputs.dry-run }}
         TEST_PYPI: ${{ inputs.test-pypi }}
         PUBLISHED: ${{ steps.set-published.outputs.published || 'false' }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/publish-pypi.sh
+      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
 
 branding:
   icon: "upload-cloud"

@@ -46,6 +46,12 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
     - name: Setup egress monitoring
       id: setup
       shell: bash
@@ -53,7 +59,7 @@ runs:
         STEP: setup
         MODE: ${{ inputs.mode }}
         ALLOWED_DOMAINS: ${{ inputs['allowed-domains'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
+      run: $SCRIPTS_DIR/ci/actions/egress-audit.sh
 
     - name: Configure egress policy
       id: audit
@@ -62,7 +68,7 @@ runs:
         STEP: audit
         MODE: ${{ inputs.mode }}
         FAIL_ON_VIOLATION: ${{ inputs['fail-on-violation'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
+      run: $SCRIPTS_DIR/ci/actions/egress-audit.sh
 
     - name: Generate egress report
       if: inputs['report-format'] != 'none'
@@ -71,7 +77,7 @@ runs:
         STEP: report
         MODE: ${{ inputs.mode }}
         REPORT_FORMAT: ${{ inputs['report-format'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/egress-audit.sh
+      run: $SCRIPTS_DIR/ci/actions/egress-audit.sh
 
 branding:
   icon: "wifi"
