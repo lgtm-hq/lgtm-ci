@@ -119,7 +119,9 @@ runs:
         STEP: repo-dir
         WORKSPACE: ${{ github.workspace }}
         CHECKOUT_PATH: ${{ inputs.path }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/secure-checkout.sh
+      run: |
+        SCRIPT="${GITHUB_ACTION_PATH//\\//}/../../../scripts/ci/actions/secure-checkout.sh"
+        "$SCRIPT"
 
     - name: Verify checkout integrity
       shell: bash
@@ -128,7 +130,9 @@ runs:
         STEP: verify
         REPOSITORY: ${{ inputs.repository }}
         PERSIST_CREDENTIALS: ${{ inputs['persist-credentials'] }}
-      run: ${{ github.action_path }}/../../../scripts/ci/actions/secure-checkout.sh
+      run: |
+        SCRIPT="${GITHUB_ACTION_PATH//\\//}/../../../scripts/ci/actions/secure-checkout.sh"
+        "$SCRIPT"
 
 branding:
   icon: "download"
