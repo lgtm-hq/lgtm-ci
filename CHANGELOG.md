@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.6.1] - 2026-02-20
+
+### Bug Fixes
+
+- **actions**: resolve secure-checkout path failure on Windows runners (#75) (27529c3)
+
+### Documentation
+
+- revamp README to match org standards (#72) (64dc59a)
+
+### Other Changes
+
+- add Renovate workflow (#71) (17e64ec)
+
 ## [0.6.0] - 2026-02-11
 
 ### Features
@@ -79,7 +93,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.5.1...v0.6.0
 [0.5.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.4.1...v0.5.0
