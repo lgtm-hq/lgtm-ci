@@ -25,7 +25,7 @@ if [[ -n "$INPUT_ALLOW_ORG_VERSIONS" ]]; then
 	IFS=',' read -ra ALLOWED_PREFIXES <<<"$INPUT_ALLOW_ORG_VERSIONS"
 	# Trim whitespace from each prefix
 	for i in "${!ALLOWED_PREFIXES[@]}"; do
-		ALLOWED_PREFIXES[$i]="$(echo "${ALLOWED_PREFIXES[$i]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+		ALLOWED_PREFIXES[i]="$(echo "${ALLOWED_PREFIXES[i]}" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 	done
 fi
 
@@ -116,7 +116,8 @@ for file in "${yaml_files[@]}"; do
 			continue
 		fi
 
-		# Skip template expressions (${{ }})
+		# Skip template expressions (${{ }}) — single quotes are intentional
+		# shellcheck disable=SC2016
 		if [[ "$action_ref" == *'${'* ]]; then
 			continue
 		fi
