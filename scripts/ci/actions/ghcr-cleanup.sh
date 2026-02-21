@@ -18,6 +18,15 @@ set -euo pipefail
 : "${KEEP_LATEST:=5}"
 : "${DRY_RUN:=false}"
 
+[[ "$MIN_AGE_DAYS" =~ ^[0-9]+$ ]] || {
+	echo "ERROR: MIN_AGE_DAYS must be a non-negative integer, got: '$MIN_AGE_DAYS'" >&2
+	exit 1
+}
+[[ "$KEEP_LATEST" =~ ^[0-9]+$ ]] || {
+	echo "ERROR: KEEP_LATEST must be a non-negative integer, got: '$KEEP_LATEST'" >&2
+	exit 1
+}
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
