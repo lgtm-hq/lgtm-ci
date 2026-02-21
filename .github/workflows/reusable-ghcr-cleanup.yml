@@ -34,6 +34,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
+      contents: read
       packages: write
 
     steps:
@@ -58,4 +59,4 @@ jobs:
           KEEP_LATEST: ${{ inputs.keep-latest }}
           DRY_RUN: ${{ inputs.dry-run }}
           GITHUB_ORG: ${{ github.repository_owner }}
-        run: scripts/ci/actions/ghcr-cleanup.sh
+        run: ./scripts/ci/actions/ghcr-cleanup.sh
