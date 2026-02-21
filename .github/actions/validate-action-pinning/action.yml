@@ -1,0 +1,49 @@
+---
+name: "Validate Action Pinning"
+description: "Ensure all GitHub Actions references are pinned to commit SHAs"
+author: "lgtm-hq"
+
+inputs:
+  enforce:
+    description: "Fail if non-pinned actions are found"
+    required: false
+    default: "true"
+  allow-org-versions:
+    description: >-
+      Comma-separated org/repo prefixes allowed to use version tags
+      (e.g., lgtm-hq/lgtm-ci)
+    required: false
+    default: ""
+  scan-paths:
+    description: >-
+      Paths to scan for workflow files
+      (default: .github/workflows .github/actions)
+    required: false
+    default: ".github/workflows .github/actions"
+
+outputs:
+  offenders:
+    description: "Count of non-pinned action references found"
+    value: ${{ steps.validate.outputs.offenders }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
+          >> "$GITHUB_ENV"
+
+    - name: Validate action pinning
+      id: validate
+      shell: bash
+      env:
+        INPUT_ENFORCE: ${{ inputs.enforce }}
+        INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}
+        INPUT_SCAN_PATHS: ${{ inputs['scan-paths'] }}
+      run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh
+
+branding:
+  icon: "shield"
+  color: "blue"
