@@ -38,7 +38,7 @@ is_allowed_prefix() {
 		if [[ -z "$prefix" ]]; then
 			continue
 		fi
-		if [[ "$action_ref" == "$prefix"* ]]; then
+		if [[ "$action_ref" == "$prefix" || "$action_ref" == "$prefix"/* ]]; then
 			return 0
 		fi
 	done

@@ -203,6 +203,32 @@ jobs:
 	assert_github_output "offenders" "1"
 }
 
+@test "validate-action-pinning: allow-list prefix does not match colliding repo names" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: org/repo@v1
+      - uses: org/repo-evil@v1
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_ORG_VERSIONS="org/repo"
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "unpinned action reference"
+	assert_output --partial "org/repo-evil@v1"
+	refute_output --partial "ci.yml:8: org/repo@v1"
+	assert_github_output "offenders" "1"
+}
+
 @test "validate-action-pinning: multiple allowed org prefixes work" {
 	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
 	create_workflow "$scan_dir" "ci.yml" '
