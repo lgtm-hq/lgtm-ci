@@ -9,7 +9,7 @@
 [[ -n "${_PUBLISH_VERSION_LOADED:-}" ]] && return 0
 readonly _PUBLISH_VERSION_LOADED=1
 
-# Extract version from pyproject.toml
+# Extract version from pyproject.toml using Python's tomllib (stdlib in 3.11+)
 # Usage: extract_pypi_version [path]
 # Returns version string or empty if not found
 extract_pypi_version() {
@@ -20,19 +20,53 @@ extract_pypi_version() {
 		return 1
 	fi
 
-	# Try [project] table first (PEP 621) - only match version within [project] section
 	local version
-	version=$(awk '/^\[project\]$/,/^\[/ { if (/^version[[:space:]]*=/) print }' "$pyproject" |
-		head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
-
-	if [[ -z "$version" ]]; then
-		# Try [tool.poetry] for Poetry projects
-		version=$(awk '/^\[tool\.poetry\]$/,/^\[/ { if (/^version[[:space:]]*=/) print }' "$pyproject" |
-			head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
-	fi
+	version=$(python3 -c "
+import tomllib, sys
+with open(sys.argv[1], 'rb') as f:
+    data = tomllib.load(f)
+project = data.get('project') or data.get('tool', {}).get('poetry', {})
+v = project.get('version', '')
+if v:
+    print(v)
+else:
+    sys.exit(1)
+" "$pyproject" 2>/dev/null)
 
 	if [[ -n "$version" ]]; then
 		echo "$version"
+		return 0
+	fi
+
+	return 1
+}
+
+# Extract package name from pyproject.toml using Python's tomllib (stdlib in 3.11+)
+# Usage: extract_pypi_name [path]
+# Returns name string or empty if not found
+extract_pypi_name() {
+	local path="${1:-.}"
+	local pyproject="$path/pyproject.toml"
+
+	if [[ ! -f "$pyproject" ]]; then
+		return 1
+	fi
+
+	local name
+	name=$(python3 -c "
+import tomllib, sys
+with open(sys.argv[1], 'rb') as f:
+    data = tomllib.load(f)
+project = data.get('project') or data.get('tool', {}).get('poetry', {})
+n = project.get('name', '')
+if n:
+    print(n)
+else:
+    sys.exit(1)
+" "$pyproject" 2>/dev/null)
+
+	if [[ -n "$name" ]]; then
+		echo "$name"
 		return 0
 	fi
 
@@ -169,5 +203,5 @@ get_dist_tag_for_version() {
 # =============================================================================
 # Export functions
 # =============================================================================
-export -f extract_pypi_version extract_npm_version extract_gem_version
+export -f extract_pypi_version extract_pypi_name extract_npm_version extract_gem_version
 export -f is_prerelease_version get_dist_tag_for_version

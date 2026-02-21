@@ -65,12 +65,7 @@ validate)
 		# Extract version and name
 		if [[ -f "$PACKAGE_PATH/pyproject.toml" ]]; then
 			version=$(extract_pypi_version "$PACKAGE_PATH") || true
-			name=$(awk '/^\[project\]$/,/^\[/ { if (/^name\s*=/) print }' "$PACKAGE_PATH/pyproject.toml" |
-				head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || true)
-			if [[ -z "$name" ]]; then
-				name=$(awk '/^\[tool\.poetry\]$/,/^\[/ { if (/^name\s*=/) print }' "$PACKAGE_PATH/pyproject.toml" |
-					head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || true)
-			fi
+			name=$(extract_pypi_name "$PACKAGE_PATH") || true
 		fi
 
 		# Validate dist files if they exist

@@ -21,11 +21,37 @@ teardown() {
 # extract_pypi_version tests
 # =============================================================================
 
-@test "extract_pypi_version: exercises PEP 621 and Poetry code paths" {
-	# The awk range pattern /^\[project\]$/,/^\[/ has a known limitation where
-	# [project] matches both start and end patterns (both match /^\[/),
-	# causing the range to collapse. This test ensures all code paths are
-	# exercised for coverage even though extraction may not succeed.
+@test "extract_pypi_version: extracts version from PEP 621 project table" {
+	cat >"$PKG_DIR/pyproject.toml" <<'EOF'
+[project]
+name = "my-package"
+version = "1.2.3"
+
+[build-system]
+requires = ["setuptools"]
+EOF
+
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_version \"$PKG_DIR\""
+	assert_success
+	assert_output "1.2.3"
+}
+
+@test "extract_pypi_version: falls back to tool.poetry table" {
+	cat >"$PKG_DIR/pyproject.toml" <<'EOF'
+[tool.poetry]
+name = "my-package"
+version = "2.0.0"
+
+[build-system]
+requires = ["poetry-core"]
+EOF
+
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_version \"$PKG_DIR\""
+	assert_success
+	assert_output "2.0.0"
+}
+
+@test "extract_pypi_version: prefers project table over tool.poetry" {
 	cat >"$PKG_DIR/pyproject.toml" <<'EOF'
 [project]
 name = "my-package"
@@ -38,8 +64,31 @@ version = "2.0.0"
 requires = ["setuptools"]
 EOF
 
-	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_version \"$PKG_DIR\" || true"
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_version \"$PKG_DIR\""
 	assert_success
+	assert_output "1.2.3"
+}
+
+@test "extract_pypi_version: handles inline tables and complex TOML" {
+	cat >"$PKG_DIR/pyproject.toml" <<'EOF'
+[project]
+name = "my-package"
+version = "3.0.0"
+dependencies = [
+    {name = "foo", version = "1.0"},
+]
+description = """
+A package with
+multi-line description
+"""
+
+[build-system]
+requires = ["setuptools"]
+EOF
+
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_version \"$PKG_DIR\""
+	assert_success
+	assert_output "3.0.0"
 }
 
 @test "extract_pypi_version: returns 1 for missing file" {
@@ -65,6 +114,49 @@ EOF
 
 	# With no version found, should return 1
 	run bash -c "cd \"$PKG_DIR\" && source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_version"
+	assert_failure
+}
+
+# =============================================================================
+# extract_pypi_name tests
+# =============================================================================
+
+@test "extract_pypi_name: extracts name from PEP 621 project table" {
+	cat >"$PKG_DIR/pyproject.toml" <<'EOF'
+[project]
+name = "my-package"
+version = "1.2.3"
+EOF
+
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_name \"$PKG_DIR\""
+	assert_success
+	assert_output "my-package"
+}
+
+@test "extract_pypi_name: falls back to tool.poetry table" {
+	cat >"$PKG_DIR/pyproject.toml" <<'EOF'
+[tool.poetry]
+name = "poetry-pkg"
+version = "1.0.0"
+EOF
+
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_name \"$PKG_DIR\""
+	assert_success
+	assert_output "poetry-pkg"
+}
+
+@test "extract_pypi_name: returns 1 for missing file" {
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_name \"/nonexistent\""
+	assert_failure
+}
+
+@test "extract_pypi_name: returns 1 when no name found" {
+	cat >"$PKG_DIR/pyproject.toml" <<'EOF'
+[build-system]
+requires = ["setuptools"]
+EOF
+
+	run bash -c "source \"\$LIB_DIR/publish/version.sh\" && extract_pypi_name \"$PKG_DIR\""
 	assert_failure
 }
 
@@ -287,6 +379,12 @@ EOF
 
 @test "version.sh: exports extract_pypi_version function" {
 	run bash -c 'source "$LIB_DIR/publish/version.sh" && declare -f extract_pypi_version >/dev/null && echo "ok"'
+	assert_success
+	assert_output "ok"
+}
+
+@test "version.sh: exports extract_pypi_name function" {
+	run bash -c 'source "$LIB_DIR/publish/version.sh" && declare -f extract_pypi_name >/dev/null && echo "ok"'
 	assert_success
 	assert_output "ok"
 }
