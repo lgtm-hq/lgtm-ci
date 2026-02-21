@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.8.0] - 2026-02-21
+
+### Features
+
+- add reusable GHCR cleanup workflow (#82) (0fb74a0)
+
 ## [0.7.0] - 2026-02-21
 
 ### Features
@@ -117,7 +123,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.7.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.0...HEAD
+[0.8.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.4...v0.7.0
 [0.6.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.2...v0.6.3
