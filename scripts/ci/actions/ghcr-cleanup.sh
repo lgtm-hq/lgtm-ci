@@ -36,13 +36,14 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 # =============================================================================
 log_info "Fetching versions for package: ${GITHUB_ORG}/${PACKAGE_NAME}"
 
+api_err=""
 all_versions=$(gh api --paginate \
 	"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions" \
-	2>/dev/null) || {
+	2>/dev/null | jq -s 'add // []') || {
 	# Try user endpoint if org endpoint fails
 	all_versions=$(gh api --paginate \
 		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions" \
-		2>/dev/null) || die "Failed to fetch package versions"
+		2>/dev/null | jq -s 'add // []') || die "Failed to fetch package versions"
 }
 
 total_count=$(echo "$all_versions" | jq 'length')
@@ -99,35 +100,28 @@ log_info "Will delete $delete_count version(s) (keeping $KEEP_LATEST most recent
 deleted=0
 failed=0
 
-for i in $(seq 0 $((delete_count - 1))); do
-	version_id=$(echo "$to_delete" | jq -r ".[$i].id")
-	version_name=$(echo "$to_delete" | jq -r ".[$i].name")
-	updated_at=$(echo "$to_delete" | jq -r ".[$i].updated_at")
-
+while IFS=$'\t' read -r version_id version_name updated_at; do
 	if [[ "$DRY_RUN" == "true" ]]; then
 		log_info "[dry-run] Would delete version $version_id ($version_name, updated $updated_at)"
 		deleted=$((deleted + 1))
 		continue
 	fi
 
-	if gh api --method DELETE \
+	if api_err=$(gh api --method DELETE \
 		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
-		2>/dev/null; then
+		2>&1); then
+		log_success "Deleted version $version_id ($version_name, updated $updated_at)"
+		deleted=$((deleted + 1))
+	elif api_err=$(gh api --method DELETE \
+		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
+		2>&1); then
 		log_success "Deleted version $version_id ($version_name, updated $updated_at)"
 		deleted=$((deleted + 1))
 	else
-		# Try user endpoint
-		if gh api --method DELETE \
-			"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
-			2>/dev/null; then
-			log_success "Deleted version $version_id ($version_name, updated $updated_at)"
-			deleted=$((deleted + 1))
-		else
-			log_error "Failed to delete version $version_id ($version_name)"
-			failed=$((failed + 1))
-		fi
+		log_error "Failed to delete version $version_id ($version_name): $api_err"
+		failed=$((failed + 1))
 	fi
-done
+done < <(echo "$to_delete" | jq -r '.[] | [.id, .name, .updated_at] | @tsv')
 
 # =============================================================================
 # Summary
