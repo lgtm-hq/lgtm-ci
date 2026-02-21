@@ -10,6 +10,13 @@
       "automergeType": "branch"
     },
     {
+      "matchDatasources": ["docker"],
+      "matchPackageNames": ["ghcr.io/lgtm-hq/py-lintro"],
+      "pinDigests": true,
+      "automerge": true,
+      "automergeType": "branch"
+    },
+    {
       "matchManagers": ["pip_requirements", "pep621"],
       "matchUpdateTypes": ["patch"],
       "automerge": true,
