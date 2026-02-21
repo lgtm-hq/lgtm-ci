@@ -408,3 +408,19 @@ jobs:
 	assert_output --partial "no version specified"
 	assert_github_output "offenders" "1"
 }
+
+@test "validate-action-pinning: detects unpinned action on final line without trailing newline" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	mkdir -p "$scan_dir"
+	printf 'name: CI\non: push\njobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n      - uses: actions/checkout@v4' >"${scan_dir}/ci.yml"
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "actions/checkout@v4"
+	assert_github_output "offenders" "1"
+}

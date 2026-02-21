@@ -67,7 +67,9 @@ fi
 
 # Collect YAML files from all scan paths
 yaml_files=()
-for scan_path in $INPUT_SCAN_PATHS; do
+# Split space-separated paths into array for safe iteration
+read -ra scan_paths <<<"$INPUT_SCAN_PATHS"
+for scan_path in "${scan_paths[@]}"; do
 	if [[ ! -d "$scan_path" ]]; then
 		log_warn "Scan path does not exist: $scan_path"
 		continue
@@ -87,7 +89,7 @@ log_info "Found ${#yaml_files[@]} workflow file(s) to scan"
 
 for file in "${yaml_files[@]}"; do
 	line_number=0
-	while IFS= read -r line; do
+	while IFS= read -r line || [[ -n "$line" ]]; do
 		line_number=$((line_number + 1))
 
 		# Match lines containing "uses:" (with optional leading whitespace/dash)
