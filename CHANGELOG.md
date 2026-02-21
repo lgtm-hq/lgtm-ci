@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.6.4] - 2026-02-21
+
+### Bug Fixes
+
+- replace awk TOML parsing with Python tomllib (#80) (eb673af)
+
 ## [0.6.3] - 2026-02-21
 
 ### Bug Fixes
@@ -105,7 +111,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.4...HEAD
+[0.6.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.3...v0.6.4
 [0.6.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.2...v0.6.3
 [0.6.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.0...v0.6.1
