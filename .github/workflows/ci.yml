@@ -15,8 +15,8 @@ jobs:
     name: Lintro Quality Checks
     runs-on: ubuntu-latest
     container:
-      # Pinned to SHA for supply chain security
-      image: ghcr.io/lgtm-hq/py-lintro@sha256:1be4acd3590a0dd9c672699866f22aaca73b9612a134d30c60441bc4ad89a206
+      # Pinned to immutable sha-<commit> tag for supply chain security
+      image: ghcr.io/lgtm-hq/py-lintro:sha-d0f799c
       # Run as root to avoid permission issues with GitHub Actions file commands
       options: --user 0
     outputs:
