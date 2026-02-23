@@ -999,7 +999,13 @@ Create a GitHub release with changelog and optional assets.
     draft: "false"
     prerelease: "false"
     files: "dist/*.tar.gz dist/*.whl" # optional
+    token: ${{ steps.app-token.outputs.token }} # optional, see note below
 ```
+
+> **Note:** By default, `token` uses the built-in `GITHUB_TOKEN`. Events created
+> by `GITHUB_TOKEN` do not trigger other workflows (GitHub prevents recursive
+> workflow runs). If downstream workflows need to react to the `release:published`
+> event, pass a GitHub App installation token or PAT instead.
 
 **Outputs:**
 

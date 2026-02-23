@@ -35,6 +35,11 @@ inputs:
     description: "Repository in owner/repo format (default: current repo)"
     required: false
     default: ""
+  token:
+    # yamllint disable-line rule:line-length
+    description: "GitHub token for creating the release. Use a GitHub App or PAT if downstream workflows must trigger on the release event (GITHUB_TOKEN suppresses event propagation)."
+    required: false
+    default: ${{ github.token }}
 
 outputs:
   release-url:
@@ -65,7 +70,7 @@ runs:
         GENERATE_NOTES: ${{ inputs['generate-notes'] }}
         FILES: ${{ inputs.files }}
         REPO: ${{ inputs.repo }}
-        GH_TOKEN: ${{ github.token }}
+        GH_TOKEN: ${{ inputs.token }}
       run: $SCRIPTS_DIR/ci/release/create-github-release.sh
 
 branding:
