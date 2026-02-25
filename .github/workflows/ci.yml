@@ -15,8 +15,9 @@ jobs:
     name: Lintro Quality Checks
     runs-on: ubuntu-latest
     container:
-      # Pinned to SHA for supply chain security
-      image: ghcr.io/lgtm-hq/py-lintro@sha256:1be4acd3590a0dd9c672699866f22aaca73b9612a134d30c60441bc4ad89a206
+      # Pinned to digest for supply chain security (sha-<commit> tag keeps it from GC)
+      # yamllint disable-line rule:line-length
+      image: ghcr.io/lgtm-hq/py-lintro@sha256:0cee6a15814db15ce8442af623bd2ca71a8d29f30e562ac5e7260e38e9338ada
       # Run as root to avoid permission issues with GitHub Actions file commands
       options: --user 0
     outputs:

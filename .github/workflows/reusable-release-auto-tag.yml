@@ -127,7 +127,7 @@ jobs:
         shell: bash
         env:
           TAG: ${{ steps.tag.outputs.tag-name }}
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
 
       - name: Update floating tag
