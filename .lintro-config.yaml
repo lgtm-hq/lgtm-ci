@@ -25,7 +25,7 @@ defaults:
     singleQuote: true
     tabWidth: 2
     printWidth: 100
-    proseWrap: "always"
+    proseWrap: "preserve"
 
   yamllint:
     extends: "default"
