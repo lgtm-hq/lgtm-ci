@@ -10,11 +10,15 @@
       "automergeType": "branch"
     },
     {
+      "description": "Group lintro Docker image + PyPI pin so they update together",
+      "groupName": "lintro",
+      "matchPackageNames": ["ghcr.io/lgtm-hq/py-lintro", "lintro"],
+      "automerge": false
+    },
+    {
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/lgtm-hq/py-lintro"],
-      "pinDigests": true,
-      "automerge": true,
-      "automergeType": "branch"
+      "pinDigests": true
     },
     {
       "matchManagers": ["pip_requirements", "pep621"],
