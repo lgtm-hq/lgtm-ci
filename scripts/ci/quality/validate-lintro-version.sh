@@ -30,7 +30,7 @@ if [[ ! -f "$PYPROJECT" ]]; then
 fi
 
 # Extract pinned version from pyproject.toml (matches lintro==X.Y.Z)
-PYPROJECT_VERSION=$(grep -oE 'lintro==[0-9]+\.[0-9]+\.[0-9]+' "$PYPROJECT" | head -1 | sed 's/lintro==//')
+PYPROJECT_VERSION=$(grep -oE 'lintro==[0-9]+\.[0-9]+\.[0-9]+' "$PYPROJECT" | head -1 | sed 's/lintro==//' || true)
 if [[ -z "$PYPROJECT_VERSION" ]]; then
 	log_error "Could not find pinned lintro version (lintro==X.Y.Z) in $PYPROJECT"
 	log_error "Use an exact pin (==) instead of a minimum version (>=)"
@@ -39,7 +39,7 @@ fi
 
 # Extract version from Docker image
 log_info "Querying lintro version from Docker image..."
-DOCKER_VERSION=$(docker run --rm "$LINTRO_IMAGE" lintro --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+DOCKER_VERSION=$(docker run --rm "$LINTRO_IMAGE" lintro --version 2>/dev/null | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1 || true)
 if [[ -z "$DOCKER_VERSION" ]]; then
 	log_error "Could not determine lintro version from Docker image: $LINTRO_IMAGE"
 	exit 1

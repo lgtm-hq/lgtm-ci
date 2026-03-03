@@ -23,6 +23,7 @@
     {
       "matchManagers": ["pip_requirements", "pep621"],
       "matchUpdateTypes": ["patch"],
+      "excludePackageNames": ["lintro"],
       "automerge": true,
       "automergeType": "branch"
     }
