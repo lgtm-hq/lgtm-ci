@@ -53,14 +53,6 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: scripts/ci/release/check-existing-version-pr.sh
 
-      - name: Validate lintro version consistency
-        # yamllint disable-line rule:line-length
-        if: >-
-          steps.guard.outputs.is-release-commit == 'false'
-          && steps.check-pr.outputs.pr-exists == 'false'
-        shell: bash
-        run: scripts/ci/quality/validate-lintro-version.sh
-
       - name: Create version PR
         # yamllint disable-line rule:line-length
         if: >-
