@@ -26,7 +26,8 @@ Issues = "https://github.com/lgtm-hq/lgtm-ci/issues"
 
 [project.optional-dependencies]
 dev = [
-  "lintro>=0.46.0",
+  # Keep in sync with LINTRO_IMAGE digest in ci.yml / release-version-pr.yml
+  "lintro==0.52.4",
   "pytest>=8.0.0",
   "assertpy>=1.1",
   "ruff>=0.14.0",
