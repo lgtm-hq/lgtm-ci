@@ -143,6 +143,7 @@ in_unreleased && /^## \[/ {
 		in_dup_version=1
 		next
 	}
+	print ""
 	print
 	next
 }
@@ -159,7 +160,7 @@ in_dup_version && /^\[Unreleased\]:/ { in_dup_version=0 }
 in_dup_version { next }
 # Replace [Unreleased]: link even inside the unreleased section
 /^\[Unreleased\]:/ {
-	print ""
+	if (in_unreleased) print ""
 	print ENVIRON["UNRELEASED_LINK"]
 	print ENVIRON["VERSION_LINK"]
 	next

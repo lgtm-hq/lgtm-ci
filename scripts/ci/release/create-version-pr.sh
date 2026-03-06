@@ -10,8 +10,7 @@
 #   MAX_BUMP          - Maximum bump type: major, minor, patch (default: major)
 #   TAG_PREFIX        - Prefix for version tags (default: v)
 #   PR_LABELS         - Comma-separated PR labels (default: release)
-#   LINTRO_DOCKER_USER - UID[:GID] for Docker container; a bare UID
-#                        defaults to the user's primary group (default: 0)
+#   LINTRO_DOCKER_USER - UID[:GID] for Docker container (default: $(id -u):$(id -g))
 #
 # Required: GH_TOKEN must be set for gh CLI authentication
 #
@@ -115,10 +114,9 @@ export PUSH="false"
 "$RELEASE_SCRIPT_DIR/update-changelog.sh"
 
 # Format and verify CHANGELOG passes lint checks (mirrors py-lintro pattern)
-# Default to root (0) for CI where the runner owns the workspace.
-# Locally, export LINTRO_DOCKER_USER="$(id -u):$(id -g)" to avoid root-owned files.
-: "${LINTRO_DOCKER_USER:=0}"
+: "${LINTRO_DOCKER_USER:=$(id -u):$(id -g)}"
 if [[ -n "${LINTRO_IMAGE:-}" ]]; then
+	mkdir -p .lintro
 	log_info "Formatting CHANGELOG.md with lintro (Docker)..."
 	docker run --rm --user "$LINTRO_DOCKER_USER" -v "$PWD:/workspace" -w /workspace \
 		"$LINTRO_IMAGE" lintro fmt
