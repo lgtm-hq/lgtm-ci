@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.8.1] - 2026-03-06
+
+### Bug Fixes
+
+- **ci**: fix changelog blank lines and Docker write permissions (#92) (ffeb674)
+- **lint**: align enforce.line_length with tool configs (#91) (28a9850)
+- **ci**: enforce lintro version consistency between Docker and pyproject (#90) (dcb5e93)
+- **ci**: use proseWrap preserve to fix version PR prettier failure (#89) (c8aa55e)
+- **ci**: propagate App token to release creation for event triggering (#88) (125c485)
+
 ## [0.8.0] - 2026-02-21
 
 ### Features
@@ -123,7 +133,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.4...v0.7.0
 [0.6.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.3...v0.6.4
