@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.8.2] - 2026-03-22
+
+### Bug Fixes
+
+- **actions**: pin setup-trivy by SHA after upstream tag deletion (#95) (7baf38a)
+
 ## [0.8.1] - 2026-03-06
 
 ### Bug Fixes
@@ -133,7 +139,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.6.4...v0.7.0
