@@ -18,7 +18,7 @@ permissions:
 env:
   # Keep in sync with ci.yml container image digest and pyproject.toml lintro pin
   # yamllint disable-line rule:line-length
-  LINTRO_IMAGE: "ghcr.io/lgtm-hq/py-lintro@sha256:0cee6a15814db15ce8442af623bd2ca71a8d29f30e562ac5e7260e38e9338ada"
+  LINTRO_IMAGE: "ghcr.io/lgtm-hq/py-lintro@sha256:8523b9b77a931cd16d7dd4ecd666f357037a8c1c1a86f022dd28ee7bf766806b"
 
 jobs:
   version-pr:
