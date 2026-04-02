@@ -72,6 +72,10 @@ gh pr edit "$PR_NUMBER" --add-assignee "$selected"
 # Request a review from the selected CODEOWNER for bot-authored PRs
 # (e.g. version bumps, Renovate dependency updates)
 if [[ "${PR_AUTHOR_TYPE:-}" == "Bot" ]]; then
-  echo "Bot-authored PR detected, requesting review from $selected"
-  gh pr edit "$PR_NUMBER" --add-reviewer "$selected"
+	if [[ "$selected" == "$PR_AUTHOR" ]]; then
+		echo "Bot-authored PR detected, but selected CODEOWNER is the PR author ($selected); skipping review request"
+	else
+		echo "Bot-authored PR detected, requesting review from $selected"
+		gh pr edit "$PR_NUMBER" --add-reviewer "$selected"
+	fi
 fi
