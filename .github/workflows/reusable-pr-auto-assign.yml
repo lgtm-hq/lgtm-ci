@@ -42,6 +42,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_AUTHOR: ${{ github.event.pull_request.user.login }}
+          PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
           CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
         shell: bash
         run: ${{ github.workspace }}/scripts/ci/actions/assign-codeowner.sh
