@@ -1,14 +1,7 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": ["config:recommended"],
-  "platformCommit": true,
+  "extends": ["local>lgtm-hq/.github:renovate-config"],
   "packageRules": [
-    {
-      "matchManagers": ["github-actions"],
-      "pinDigests": true,
-      "automerge": true,
-      "automergeType": "branch"
-    },
     {
       "description": "Group lintro Docker image + PyPI pin so they update together",
       "groupName": "lintro",
@@ -19,21 +12,6 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/lgtm-hq/py-lintro"],
       "pinDigests": true
-    },
-    {
-      "matchManagers": ["pip_requirements", "pep621"],
-      "matchUpdateTypes": ["patch"],
-      "excludePackageNames": ["lintro"],
-      "automerge": true,
-      "automergeType": "branch"
     }
-  ],
-  "schedule": ["* 22-23,0-5 * * *"],
-  "timezone": "UTC",
-  "labels": ["dependencies"],
-  "semanticCommits": "enabled",
-  "lockFileMaintenance": {
-    "enabled": true,
-    "automerge": true
-  }
+  ]
 }
