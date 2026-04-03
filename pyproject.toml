@@ -3,7 +3,7 @@ name = "lgtm-ci"
 version = "1.0.0"
 description = "Reusable CI/CD components for GitHub Actions - composite actions, reusable workflows, and shell utilities"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = "==3.14.3"
 license = { text = "MIT" }
 authors = [{ name = "LGTM HQ", email = "lgtm-hq@users.noreply.github.com" }]
 keywords = ["ci", "cd", "github-actions", "automation", "devops"]
@@ -28,11 +28,11 @@ Issues = "https://github.com/lgtm-hq/lgtm-ci/issues"
 dev = [
   # Keep in sync with LINTRO_IMAGE digest in ci.yml / release-version-pr.yml
   "lintro==0.52.4",
-  "pytest>=8.0.0",
-  "assertpy>=1.1",
-  "ruff>=0.14.0",
-  "black>=25.0.0",
-  "tomli-w>=1.0.0",
+  "pytest==9.0.2",
+  "assertpy==1.1",
+  "ruff==0.14.14",
+  "black==26.1.0",
+  "tomli-w==1.2.0",
 ]
 
 [tool.lintro]
@@ -77,4 +77,4 @@ skips = [
 ]
 
 [dependency-groups]
-dev = ["pytest-timeout>=2.4.0", "pytest-xdist>=3.8.0"]
+dev = ["pytest-timeout==2.4.0", "pytest-xdist==3.8.0"]
