@@ -57,6 +57,7 @@ EOF
 		# Add a remote (mock: points to local bare repo)
 		local bare_dir="${BATS_TEST_TMPDIR}/bare.git"
 		git init -q --bare "$bare_dir"
+		git -C "$bare_dir" config receive.denyCurrentBranch ignore
 		git remote add origin "$bare_dir"
 		git push -q origin HEAD:main 2>/dev/null
 	)
@@ -64,6 +65,15 @@ EOF
 
 run_create_version_pr() {
 	local max_bump="${1:-major}"
+	# Build a PATH that excludes lintro so create-version-pr.sh skips
+	# CHANGELOG lint (the full lintro toolchain is not suitable for
+	# integration tests running against tiny mock repos).
+	local filtered_path
+	filtered_path=$(echo "$PATH" | tr ':' '\n' |
+		while IFS= read -r dir; do
+			[[ -x "$dir/lintro" ]] || printf '%s:' "$dir"
+		done)
+	filtered_path="${filtered_path%:}" # strip trailing colon
 	run bash -c "
 		cd '$MOCK_GIT_REPO'
 		export GITHUB_OUTPUT='$GITHUB_OUTPUT'
@@ -74,7 +84,7 @@ run_create_version_pr() {
 		export TAG_PREFIX='v'
 		export PR_LABELS='release'
 		export GH_TOKEN='fake-token'
-		export PATH='$PATH'
+		export PATH='$filtered_path'
 		'$PROJECT_ROOT/scripts/ci/release/create-version-pr.sh' 2>&1
 	"
 }
