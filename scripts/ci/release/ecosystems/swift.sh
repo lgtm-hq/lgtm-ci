@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
@@ -41,14 +41,20 @@ fi
 
 log_info "[swift] Updating $VERSION_SWIFT → $NEXT_VERSION"
 
-# Update the version string constant (matches patterns like:
+# Update the first version string constant only (matches patterns like:
 #   public static let string = "1.2.3"
 #   static let version_string = "1.2.3"
-# Uses [a-zA-Z_][a-zA-Z0-9_]* to match valid Swift identifiers.
+# Uses awk to replace only the first match, avoiding accidental changes
+# to unrelated constants in the same file.
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
-sed "s/\(static let [a-zA-Z_][a-zA-Z0-9_]* = \"\)[^\"]*\"/\1${NEXT_VERSION}\"/" \
-	"$VERSION_SWIFT" >"$TMPFILE"
+awk -v ver="$NEXT_VERSION" '
+!done && /static let [a-zA-Z_][a-zA-Z0-9_]* = "/ {
+	sub(/"[^"]*"/, "\"" ver "\"")
+	done = 1
+}
+{ print }
+' "$VERSION_SWIFT" >"$TMPFILE"
 mv "$TMPFILE" "$VERSION_SWIFT"
 trap - EXIT
 

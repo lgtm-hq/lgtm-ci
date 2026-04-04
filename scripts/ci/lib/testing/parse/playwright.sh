@@ -3,7 +3,7 @@
 # Purpose: Playwright result parsing utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/playwright.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/playwright.sh"
 #   parse_playwright_json "results.json"
 
 # Prevent multiple sourcing

@@ -3,7 +3,7 @@
 # Purpose: Formatting helpers for GitHub PR comments and summaries
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/format.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/format.sh"
 #   formatted=$(format_score_with_color 95)
 
 # Prevent multiple sourcing

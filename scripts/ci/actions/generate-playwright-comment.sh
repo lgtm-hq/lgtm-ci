@@ -11,7 +11,7 @@
 set -euo pipefail
 
 # Source shared libraries for output helpers
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 
 if [[ -f "$LIB_DIR/github/output.sh" ]]; then

@@ -9,7 +9,7 @@
 readonly _RELEASE_ANALYZE_LOADED=1
 
 # Source dependencies
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=./conventional.sh
 source "$SCRIPT_DIR/conventional.sh"
 

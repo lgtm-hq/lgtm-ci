@@ -3,7 +3,7 @@
 # Purpose: GitHub Actions step summary helpers
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/summary.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/summary.sh"
 #   add_github_summary "## Build Results"
 
 # Prevent multiple sourcing

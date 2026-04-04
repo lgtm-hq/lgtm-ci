@@ -3,7 +3,7 @@
 # Purpose: Argument parsing for installer scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/args.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/args.sh"
 #   installer_parse_args "$@"
 
 # Prevent multiple sourcing

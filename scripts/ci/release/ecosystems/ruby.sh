@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
@@ -87,7 +87,6 @@ fi
 if command -v bundle >/dev/null 2>&1; then
 	log_info "[ruby] Regenerating Gemfile.lock via bundle lock..."
 	bundle lock --update "$GEM_NAME" 2>&1 | tail -5
-	log_success "[ruby] Gemfile.lock regenerated"
 else
 	log_warn "[ruby] bundle not found — using regex fallback for Gemfile.lock"
 	# Replace version in PATH spec and CHECKSUMS sections
@@ -98,5 +97,12 @@ else
 		Gemfile.lock >"$TMPFILE"
 	mv "$TMPFILE" Gemfile.lock
 	trap - EXIT
-	log_success "[ruby] Gemfile.lock updated via regex fallback"
 fi
+
+# Verify Gemfile.lock contains the updated version
+if ! grep -q "${GEM_NAME} (${NEXT_VERSION})" Gemfile.lock; then
+	log_error "[ruby] Gemfile.lock verification failed: ${GEM_NAME} (${NEXT_VERSION}) not found"
+	exit 1
+fi
+
+log_success "[ruby] Gemfile.lock updated to $NEXT_VERSION"

@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
@@ -34,12 +34,13 @@ log_info "[kotlin] Updating $GRADLE → $NEXT_VERSION"
 # Portable in-place edit via temp file
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
-sed "s/^version = \"[^\"]*\"/version = \"$NEXT_VERSION\"/" "$GRADLE" >"$TMPFILE"
+# Whitespace-tolerant: handles indented lines and variable spacing
+sed "s|^[[:space:]]*version[[:space:]]*=[[:space:]]*\"[^\"]*\"|version = \"$NEXT_VERSION\"|" "$GRADLE" >"$TMPFILE"
 mv "$TMPFILE" "$GRADLE"
 trap - EXIT
 
 # Verify the write
-ACTUAL=$(awk -F'"' '/^version = "/ {print $2; exit}' "$GRADLE")
+ACTUAL=$(awk -F'"' '/version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$GRADLE")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[kotlin] Verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

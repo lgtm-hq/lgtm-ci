@@ -3,7 +3,7 @@
 # Purpose: Git helper utilities for CI scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/git.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/git.sh"
 #   branch=$(get_current_branch)
 
 # Prevent multiple sourcing

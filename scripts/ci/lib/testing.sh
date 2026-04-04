@@ -10,7 +10,7 @@
 readonly _LGTM_CI_TESTING_LOADED=1
 
 # Get the directory of this script
-TESTING_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+TESTING_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 # Source all testing sub-libraries in dependency order
 # shellcheck source=./testing/detect.sh

@@ -3,7 +3,7 @@
 # Purpose: Coverage merging and conversion utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/merge.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/merge.sh"
 #   merge_lcov_files "output.lcov" "file1.lcov" "file2.lcov"
 
 # Prevent multiple sourcing
@@ -11,14 +11,14 @@
 readonly _LGTM_CI_TESTING_COVERAGE_MERGE_LOADED=1
 
 # Get directory of this script for sourcing dependencies
-_LGTM_CI_TESTING_COV_MERGE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
+_LGTM_CI_TESTING_COV_MERGE_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." && pwd)"
 
 # Source detect.sh for format detection
 # shellcheck source=../detect.sh
 [[ -f "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh" ]] && source "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh"
 
 # Source actions.sh for logging (if available)
-_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/../.." && pwd)"
+_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/../.." && pwd)"
 # shellcheck source=../../actions.sh
 [[ -f "$_LGTM_CI_LIB_DIR/actions.sh" ]] && source "$_LGTM_CI_LIB_DIR/actions.sh"
 

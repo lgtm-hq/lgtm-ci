@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
@@ -34,7 +34,7 @@ log_info "[dart] Updating $PUBSPEC → $NEXT_VERSION"
 # Portable in-place edit via temp file
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
-sed "s/^version: .*/version: $NEXT_VERSION/" "$PUBSPEC" >"$TMPFILE"
+sed "s|^version: .*|version: $NEXT_VERSION|" "$PUBSPEC" >"$TMPFILE"
 mv "$TMPFILE" "$PUBSPEC"
 trap - EXIT
 

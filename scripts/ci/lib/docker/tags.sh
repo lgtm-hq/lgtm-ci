@@ -3,7 +3,7 @@
 # Purpose: Docker image tag generation utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/tags.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/tags.sh"
 #   generate_semver_tags "v1.2.3"
 
 # Prevent multiple sourcing

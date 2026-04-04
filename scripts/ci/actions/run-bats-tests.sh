@@ -208,11 +208,19 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		--exclude-pattern="/tests/,/tmp/,/bats-" \
 		"$COVERAGE_DIR" \
 		bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
-	KCOV_EXIT_CODE=${PIPESTATUS[0]}
+	# Capture exit codes from both sides of the pipe
+	KCOV_EXIT=${PIPESTATUS[0]}
+	TEE_EXIT=${PIPESTATUS[1]}
+	# Use first non-zero exit code (prefer kcov/bats failure over tee)
+	if [[ "$KCOV_EXIT" -ne 0 ]]; then
+		EXIT_CODE="$KCOV_EXIT"
+	else
+		EXIT_CODE="$TEE_EXIT"
+	fi
 
-	echo "exit-code=$KCOV_EXIT_CODE" >>"$GITHUB_OUTPUT"
+	echo "exit-code=$EXIT_CODE" >>"$GITHUB_OUTPUT"
 	echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
-	exit "$KCOV_EXIT_CODE"
+	exit "$EXIT_CODE"
 fi
 
 # =============================================================================

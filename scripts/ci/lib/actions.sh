@@ -3,7 +3,7 @@
 # Purpose: Common initialization for CI action scripts
 #
 # Usage:
-#   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+#   SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 #   source "$SCRIPT_DIR/../lib/actions.sh"
 #
 # This aggregator sources common libraries needed by action scripts:
@@ -17,7 +17,7 @@
 readonly _LGTM_CI_ACTIONS_LOADED=1
 
 # Determine library directory relative to this file
-_LGTM_CI_ACTIONS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+_LGTM_CI_ACTIONS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 # Source core libraries (required)
 # shellcheck source=log.sh

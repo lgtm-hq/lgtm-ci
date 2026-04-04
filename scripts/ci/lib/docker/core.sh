@@ -3,7 +3,7 @@
 # Purpose: Docker core utilities - buildx setup and platform detection
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/core.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/core.sh"
 #   setup_buildx_builder
 
 # Prevent multiple sourcing

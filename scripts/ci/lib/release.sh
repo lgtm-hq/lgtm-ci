@@ -10,7 +10,7 @@
 readonly _RELEASE_LOADED=1
 
 # Get the directory of this script
-RELEASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+RELEASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 # Source all release sub-libraries in dependency order
 # shellcheck source=./release/version.sh

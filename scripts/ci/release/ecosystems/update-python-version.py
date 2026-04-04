@@ -38,18 +38,19 @@ def main() -> None:
     content = pyproject_path.read_text(encoding="utf-8")
     doc = tomlkit.parse(content)
 
-    if "project" not in doc:
+    project = doc.get("project")
+    if project is None:
         print(f"ERROR: no [project] table in {pyproject_path}", file=sys.stderr)
         sys.exit(1)
 
-    if "version" not in doc["project"]:
+    if "version" not in project:
         print(
             f"ERROR: no version key in [project] table of {pyproject_path}",
             file=sys.stderr,
         )
         sys.exit(1)
 
-    doc["project"]["version"] = new_version
+    project["version"] = new_version
     pyproject_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
 
 

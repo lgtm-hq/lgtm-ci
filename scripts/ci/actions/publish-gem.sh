@@ -13,7 +13,7 @@ set -euo pipefail
 : "${WORKING_DIRECTORY:=.}"
 : "${GEMSPEC:=}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/publish.sh"
 

@@ -14,7 +14,7 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
@@ -71,18 +71,15 @@ log_success "[rust] $CARGO_TOML updated to $NEXT_VERSION"
 MANIFEST_DIR=$(dirname "$CARGO_TOML")
 LOCKFILE="${MANIFEST_DIR}/Cargo.lock"
 
+# Regenerate Cargo.lock requires a Rust toolchain.
+# The calling workflow (reusable-release-version-pr.yml) installs Rust
+# via dtolnay/rust-toolchain when the rust ecosystem is declared.
 if [[ -f "$LOCKFILE" ]]; then
-	if command -v cargo >/dev/null 2>&1; then
-		log_info "[rust] Regenerating Cargo.lock..."
-		cargo generate-lockfile --manifest-path "$CARGO_TOML" 2>&1 | tail -5
-		log_success "[rust] Cargo.lock regenerated"
-	else
-		log_warn "[rust] cargo not found — installing Rust toolchain..."
-		curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal 2>&1 | tail -3
-		# shellcheck source=/dev/null
-		source "$HOME/.cargo/env"
-		log_info "[rust] Regenerating Cargo.lock..."
-		cargo generate-lockfile --manifest-path "$CARGO_TOML" 2>&1 | tail -5
-		log_success "[rust] Cargo.lock regenerated"
+	if ! command -v cargo >/dev/null 2>&1; then
+		log_error "[rust] cargo not found — the calling workflow must install Rust"
+		exit 1
 	fi
+	log_info "[rust] Regenerating Cargo.lock..."
+	cargo generate-lockfile --manifest-path "$CARGO_TOML" 2>&1 | tail -5
+	log_success "[rust] Cargo.lock regenerated"
 fi
