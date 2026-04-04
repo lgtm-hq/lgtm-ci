@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Update Kotlin/Gradle version files
 #
-# Updates the version field in build.gradle.kts via sed.
+# Updates the version field in build.gradle.kts.
 # Only runs if build.gradle.kts exists.
 #
 # Required environment variables:
@@ -31,10 +31,15 @@ fi
 
 log_info "[kotlin] Updating $GRADLE → $NEXT_VERSION"
 
-sed -i "s/^version = \"[^\"]*\"/version = \"$NEXT_VERSION\"/" "$GRADLE"
+# Portable in-place edit via temp file
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+sed "s/^version = \"[^\"]*\"/version = \"$NEXT_VERSION\"/" "$GRADLE" >"$TMPFILE"
+mv "$TMPFILE" "$GRADLE"
+trap - EXIT
 
 # Verify the write
-ACTUAL=$(grep -oP '^version = "\K[^"]+' "$GRADLE" || true)
+ACTUAL=$(awk -F'"' '/^version = "/ {print $2; exit}' "$GRADLE")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[kotlin] Verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

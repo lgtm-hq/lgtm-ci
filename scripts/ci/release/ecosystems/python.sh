@@ -4,7 +4,7 @@
 #
 # Updates [project].version in pyproject.toml using a tomlkit-based
 # Python script (preserves formatting and comments), and updates
-# the __version__ dunder in __init__.py via sed.
+# the __version__ dunder in __init__.py.
 #
 # Required environment variables:
 #   NEXT_VERSION - The version to set (e.g., 1.2.3)
@@ -42,16 +42,17 @@ log_info "[python] Updating $PYPROJECT → $NEXT_VERSION"
 python3 "$SCRIPT_DIR/update-python-version.py" "$PYPROJECT" "$NEXT_VERSION"
 
 # Verify the write by extracting [project].version with Python
+# Pass path as argument to avoid shell interpolation issues
 ACTUAL=$(python3 -c "
 import sys
 try:
     import tomllib
 except ImportError:
     import tomli as tomllib
-with open('$PYPROJECT', 'rb') as f:
+with open(sys.argv[1], 'rb') as f:
     data = tomllib.load(f)
 print(data.get('project', {}).get('version', ''))
-")
+" "$PYPROJECT")
 
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[python] pyproject.toml verification failed: expected $NEXT_VERSION, got $ACTUAL"
@@ -66,18 +67,19 @@ log_success "[python] $PYPROJECT updated to $NEXT_VERSION"
 
 # Derive init file path from package name if not explicitly set
 if [[ -z "$INIT_FILE" ]]; then
+	# Pass path as argument to avoid shell interpolation issues
 	PKG_NAME=$(python3 -c "
 import sys
 try:
     import tomllib
 except ImportError:
     import tomli as tomllib
-with open('$PYPROJECT', 'rb') as f:
+with open(sys.argv[1], 'rb') as f:
     data = tomllib.load(f)
 name = data.get('project', {}).get('name', '')
-# Convert dashes to underscores (PEP 503 normalization)
-print(name.replace('-', '_'))
-")
+# PEP 503 normalization: lowercase and dashes to underscores
+print(name.replace('-', '_').lower())
+" "$PYPROJECT")
 
 	if [[ -z "$PKG_NAME" ]]; then
 		log_warn "[python] Could not derive package name from $PYPROJECT — skipping __init__.py"
@@ -108,10 +110,15 @@ fi
 
 log_info "[python] Updating $INIT_FILE → $NEXT_VERSION"
 
-sed -i "s/^__version__ = .*/__version__ = \"$NEXT_VERSION\"/" "$INIT_FILE"
+# Portable in-place edit via temp file
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+sed "s/^__version__ = .*/__version__ = \"$NEXT_VERSION\"/" "$INIT_FILE" >"$TMPFILE"
+mv "$TMPFILE" "$INIT_FILE"
+trap - EXIT
 
 # Verify the write
-ACTUAL=$(grep -oP '^__version__ = "\K[^"]+' "$INIT_FILE" || true)
+ACTUAL=$(awk -F'"' '/__version__/ {print $2; exit}' "$INIT_FILE")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[python] __init__.py verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

@@ -26,6 +26,12 @@ source "$LIB_DIR/log.sh"
 
 export NEXT_VERSION
 
+# Validate ecosystem config JSON upfront
+if ! echo "$ECOSYSTEM_CONFIG" | jq empty 2>/dev/null; then
+	log_error "ECOSYSTEM_CONFIG is not valid JSON: $ECOSYSTEM_CONFIG"
+	exit 1
+fi
+
 log_info "Running ecosystem updaters for: $ECOSYSTEMS"
 log_info "Target version: $NEXT_VERSION"
 

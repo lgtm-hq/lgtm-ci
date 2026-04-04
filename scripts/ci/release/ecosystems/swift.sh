@@ -43,11 +43,17 @@ log_info "[swift] Updating $VERSION_SWIFT → $NEXT_VERSION"
 
 # Update the version string constant (matches patterns like:
 #   public static let string = "1.2.3"
-#   static let version = "1.2.3"
-sed -i "s/\(static let [a-zA-Z]* = \"\)[^\"]*\"/\1${NEXT_VERSION}\"/" "$VERSION_SWIFT"
+#   static let version_string = "1.2.3"
+# Uses [a-zA-Z_][a-zA-Z0-9_]* to match valid Swift identifiers.
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+sed "s/\(static let [a-zA-Z_][a-zA-Z0-9_]* = \"\)[^\"]*\"/\1${NEXT_VERSION}\"/" \
+	"$VERSION_SWIFT" >"$TMPFILE"
+mv "$TMPFILE" "$VERSION_SWIFT"
+trap - EXIT
 
-# Verify the write
-ACTUAL=$(grep -oP 'static let \w+ = "\K[^"]+' "$VERSION_SWIFT" || true)
+# Verify the write (take first match only)
+ACTUAL=$(awk -F'"' '/static let .* = "/ {print $2; exit}' "$VERSION_SWIFT")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[swift] Verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

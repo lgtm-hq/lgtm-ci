@@ -59,10 +59,15 @@ fi
 
 log_info "[ruby] Updating $VERSION_RB → $NEXT_VERSION"
 
-sed -i "s/VERSION = \"[^\"]*\"/VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB"
+# Portable in-place edit via temp file
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+sed "s/VERSION = \"[^\"]*\"/VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB" >"$TMPFILE"
+mv "$TMPFILE" "$VERSION_RB"
+trap - EXIT
 
 # Verify the write
-ACTUAL=$(grep -oP 'VERSION = "\K[^"]+' "$VERSION_RB" || true)
+ACTUAL=$(awk -F'"' '/VERSION =/ {print $2; exit}' "$VERSION_RB")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[ruby] version.rb verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1
@@ -86,6 +91,12 @@ if command -v bundle >/dev/null 2>&1; then
 else
 	log_warn "[ruby] bundle not found — using regex fallback for Gemfile.lock"
 	# Replace version in PATH spec and CHECKSUMS sections
-	sed -i "s/${GEM_NAME} ([0-9][0-9.]*[0-9])/${GEM_NAME} (${NEXT_VERSION})/g" Gemfile.lock
+	# Portable in-place edit via temp file
+	TMPFILE=$(mktemp)
+	trap 'rm -f "$TMPFILE"' EXIT
+	sed "s/${GEM_NAME} ([0-9][0-9.]*[0-9])/${GEM_NAME} (${NEXT_VERSION})/g" \
+		Gemfile.lock >"$TMPFILE"
+	mv "$TMPFILE" Gemfile.lock
+	trap - EXIT
 	log_success "[ruby] Gemfile.lock updated via regex fallback"
 fi

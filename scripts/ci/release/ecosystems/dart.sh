@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Update Dart version files
 #
-# Updates the version field in pubspec.yaml via sed.
+# Updates the version field in pubspec.yaml.
 # Only runs if pubspec.yaml exists.
 #
 # Required environment variables:
@@ -31,10 +31,15 @@ fi
 
 log_info "[dart] Updating $PUBSPEC → $NEXT_VERSION"
 
-sed -i "s/^version: .*/version: $NEXT_VERSION/" "$PUBSPEC"
+# Portable in-place edit via temp file
+TMPFILE=$(mktemp)
+trap 'rm -f "$TMPFILE"' EXIT
+sed "s/^version: .*/version: $NEXT_VERSION/" "$PUBSPEC" >"$TMPFILE"
+mv "$TMPFILE" "$PUBSPEC"
+trap - EXIT
 
 # Verify the write
-ACTUAL=$(grep -oP '^version: \K.*' "$PUBSPEC" || true)
+ACTUAL=$(sed -n 's/^version: //p' "$PUBSPEC")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[dart] Verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

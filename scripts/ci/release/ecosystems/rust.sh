@@ -67,11 +67,14 @@ fi
 
 log_success "[rust] $CARGO_TOML updated to $NEXT_VERSION"
 
-# Regenerate Cargo.lock if it exists
-if [[ -f "Cargo.lock" ]]; then
+# Regenerate Cargo.lock if it exists (derive path from Cargo.toml location)
+MANIFEST_DIR=$(dirname "$CARGO_TOML")
+LOCKFILE="${MANIFEST_DIR}/Cargo.lock"
+
+if [[ -f "$LOCKFILE" ]]; then
 	if command -v cargo >/dev/null 2>&1; then
 		log_info "[rust] Regenerating Cargo.lock..."
-		cargo generate-lockfile 2>&1 | tail -5
+		cargo generate-lockfile --manifest-path "$CARGO_TOML" 2>&1 | tail -5
 		log_success "[rust] Cargo.lock regenerated"
 	else
 		log_warn "[rust] cargo not found — installing Rust toolchain..."
@@ -79,7 +82,7 @@ if [[ -f "Cargo.lock" ]]; then
 		# shellcheck source=/dev/null
 		source "$HOME/.cargo/env"
 		log_info "[rust] Regenerating Cargo.lock..."
-		cargo generate-lockfile 2>&1 | tail -5
+		cargo generate-lockfile --manifest-path "$CARGO_TOML" 2>&1 | tail -5
 		log_success "[rust] Cargo.lock regenerated"
 	fi
 fi
