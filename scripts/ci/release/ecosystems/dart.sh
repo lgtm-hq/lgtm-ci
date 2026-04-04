@@ -25,8 +25,8 @@ source "$LIB_DIR/log.sh"
 PUBSPEC=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.pubspec // "pubspec.yaml"')
 
 if [[ ! -f "$PUBSPEC" ]]; then
-	log_info "[dart] $PUBSPEC not found — skipping"
-	exit 0
+	log_error "[dart] $PUBSPEC not found — skipping"
+	exit 1
 fi
 
 log_info "[dart] Updating $PUBSPEC → $NEXT_VERSION"

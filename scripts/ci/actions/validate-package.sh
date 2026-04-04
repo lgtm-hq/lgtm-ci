@@ -13,7 +13,9 @@ set -euo pipefail
 : "${PACKAGE_PATH:=.}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+# shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
+# shellcheck source=../lib/publish.sh
 source "$SCRIPT_DIR/../lib/publish.sh"
 
 case "$STEP" in

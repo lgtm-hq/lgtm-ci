@@ -81,7 +81,7 @@ if [[ -z "$INIT_FILE" ]]; then
 	for candidate in \
 		"${PYPROJECT_DIR}/${PKG_NAME}/__init__.py" \
 		"${PYPROJECT_DIR}/src/${PKG_NAME}/__init__.py"; do
-		if [[ -f "$candidate" ]] && grep -q '__version__' "$candidate"; then
+		if [[ -f "$candidate" ]] && grep -q '^__version__[[:space:]]*=' "$candidate"; then
 			INIT_FILE="$candidate"
 			break
 		fi

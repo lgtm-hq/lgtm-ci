@@ -35,8 +35,17 @@ def main() -> None:
         print(f"ERROR: {pyproject_path} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    content = pyproject_path.read_text(encoding="utf-8")
-    doc = tomlkit.parse(content)
+    try:
+        content = pyproject_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"ERROR: cannot read {pyproject_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
+
+    try:
+        doc = tomlkit.parse(content)
+    except Exception as exc:
+        print(f"ERROR: failed to parse {pyproject_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     project = doc.get("project")
     if project is None:
@@ -51,7 +60,12 @@ def main() -> None:
         sys.exit(1)
 
     project["version"] = new_version
-    pyproject_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+
+    try:
+        pyproject_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+    except OSError as exc:
+        print(f"ERROR: cannot write {pyproject_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
 
 if __name__ == "__main__":

@@ -209,8 +209,9 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		"$COVERAGE_DIR" \
 		bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
 	# Capture exit codes from both sides of the pipe
-	KCOV_EXIT=${PIPESTATUS[0]}
-	TEE_EXIT=${PIPESTATUS[1]}
+	PIPE_STATUS=("${PIPESTATUS[@]}")
+	KCOV_EXIT=${PIPE_STATUS[0]}
+	TEE_EXIT=${PIPE_STATUS[1]}
 	# Use first non-zero exit code (prefer kcov/bats failure over tee)
 	if [[ "$KCOV_EXIT" -ne 0 ]]; then
 		EXIT_CODE="$KCOV_EXIT"

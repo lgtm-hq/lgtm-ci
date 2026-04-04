@@ -26,11 +26,19 @@ VERSION_SWIFT=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '."version-swift" // ""')
 
 # Auto-detect Version.swift if not configured
 if [[ -z "$VERSION_SWIFT" ]]; then
-	VERSION_SWIFT=$(find . -path '*/Sources/*/Version.swift' -print -quit 2>/dev/null || true)
-	if [[ -z "$VERSION_SWIFT" ]]; then
+	mapfile -t MATCHES < <(find . -path '*/Sources/*/Version.swift' 2>/dev/null)
+	if [[ ${#MATCHES[@]} -eq 0 ]]; then
 		log_error "[swift] No Version.swift found and none configured"
 		exit 1
 	fi
+	if [[ ${#MATCHES[@]} -gt 1 ]]; then
+		log_error "[swift] Multiple Version.swift files found — set 'version-swift' in config:"
+		for m in "${MATCHES[@]}"; do
+			log_error "  $m"
+		done
+		exit 1
+	fi
+	VERSION_SWIFT="${MATCHES[0]}"
 	log_info "[swift] Auto-detected: $VERSION_SWIFT"
 fi
 

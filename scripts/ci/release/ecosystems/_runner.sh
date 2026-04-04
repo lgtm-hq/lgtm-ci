@@ -45,6 +45,12 @@ for ecosystem in "${ECOSYSTEM_LIST[@]}"; do
 	ecosystem=$(echo "$ecosystem" | xargs)
 	[[ -z "$ecosystem" ]] && continue
 
+	if [[ "$ecosystem" =~ [/\\] || "$ecosystem" == *..* ]]; then
+		log_error "Invalid ecosystem identifier: $ecosystem"
+		FAILED=1
+		continue
+	fi
+
 	SCRIPT="$SCRIPT_DIR/${ecosystem}.sh"
 
 	if [[ ! -f "$SCRIPT" ]]; then

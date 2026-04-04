@@ -223,12 +223,25 @@ jobs:
           NEXT_VERSION: ${{ steps.version.outputs.next-version }}
         run: ${{ inputs.version-update-script }}
 
+      - name: Check for version file changes
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        id: changes
+        shell: bash
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh
+
       - name: Remove tooling checkout before PR creation
         # yamllint disable-line rule:line-length
         if: >-
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-version-changes == 'true'
         shell: bash
         run: rm -rf .lgtm-ci-tooling
 
@@ -238,6 +251,7 @@ jobs:
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-version-changes == 'true'
         id: create-pr
         # yamllint disable-line rule:line-length
         uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8
@@ -281,19 +295,7 @@ jobs:
             steps.version.outputs.next-version }}
           labels: ${{ inputs.pr-labels }}
 
-      - name: Enable auto-merge
-        # yamllint disable-line rule:line-length
-        if: >-
-          inputs.auto-merge
-          && steps.create-pr.outputs.pull-request-number
-        env:
-          GH_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: >-
-          gh pr merge
-          ${{ steps.create-pr.outputs.pull-request-number }}
-          --auto --squash
-
-      - name: Restore tooling for summary
+      - name: Restore tooling for post-PR steps
         if: always()
         # yamllint disable-line rule:line-length
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
@@ -304,6 +306,19 @@ jobs:
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Enable auto-merge
+        # yamllint disable-line rule:line-length
+        if: >-
+          inputs.auto-merge
+          && steps.create-pr.outputs.pull-request-number
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/enable-auto-merge.sh
 
       - name: Write summary
         if: always()

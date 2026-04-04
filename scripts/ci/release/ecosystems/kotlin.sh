@@ -25,8 +25,8 @@ source "$LIB_DIR/log.sh"
 GRADLE=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.gradle // "build.gradle.kts"')
 
 if [[ ! -f "$GRADLE" ]]; then
-	log_info "[kotlin] $GRADLE not found — skipping"
-	exit 0
+	log_error "[kotlin] $GRADLE not found — skipping"
+	exit 1
 fi
 
 log_info "[kotlin] Updating $GRADLE → $NEXT_VERSION"

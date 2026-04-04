@@ -30,12 +30,19 @@ def main() -> None:
     pyproject_path = Path(sys.argv[1])
     field = sys.argv[2]
 
-    if not pyproject_path.exists():
+    if not pyproject_path.is_file():
         print(f"ERROR: {pyproject_path} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    with pyproject_path.open("rb") as f:
-        data = tomllib.load(f)
+    try:
+        with pyproject_path.open("rb") as f:
+            data = tomllib.load(f)
+    except OSError as exc:
+        print(f"ERROR: cannot read {pyproject_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    except Exception as exc:
+        print(f"ERROR: failed to parse {pyproject_path}: {exc}", file=sys.stderr)
+        sys.exit(1)
 
     value = data.get("project", {}).get(field, "")
     print(value)
