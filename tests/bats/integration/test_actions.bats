@@ -40,7 +40,7 @@ teardown() {
 
 @test "integration: libraries work correctly when sourced in any order" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/git.sh"
 		source "$LIB_DIR/fs.sh"
 		source "$LIB_DIR/platform.sh"
@@ -66,7 +66,7 @@ teardown() {
 
 @test "integration: github output libraries integrate correctly" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/log.sh"
 		source "$LIB_DIR/github/output.sh"
 		set_github_output "test" "value"
@@ -118,7 +118,7 @@ teardown() {
 
 @test "integration: GitHub Actions environment is properly simulated" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		[[ "$GITHUB_ACTIONS" == "true" ]]
 		[[ -f "$GITHUB_OUTPUT" ]]
 		[[ -f "$GITHUB_ENV" ]]
@@ -134,7 +134,7 @@ teardown() {
 
 @test "integration: GitHub outputs persist across function calls" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/github/output.sh"
 		set_github_output "first" "1"
 		set_github_output "second" "2"
@@ -180,7 +180,7 @@ teardown() {
 
 @test "integration: platform detection provides consistent results" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/platform.sh"
 		os=$(detect_os)
 		arch=$(detect_arch)
@@ -213,7 +213,7 @@ teardown() {
 @test "integration: git functions work in real repository" {
 	cd "$PROJECT_ROOT"
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/git.sh"
 		root=$(get_git_root)
 		[[ "$root" == "$PROJECT_ROOT" ]]
@@ -228,7 +228,7 @@ teardown() {
 @test "integration: git branch detection works" {
 	cd "$PROJECT_ROOT"
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/git.sh"
 		expected=$(git rev-parse --abbrev-ref HEAD)
 		branch=$(get_current_branch)
@@ -241,7 +241,7 @@ teardown() {
 @test "integration: git sha functions return valid format" {
 	cd "$PROJECT_ROOT"
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/git.sh"
 		full=$(get_commit_sha)
 		short=$(get_short_sha)
@@ -262,7 +262,7 @@ teardown() {
 	# runs when the subshell exits, which cleans up the directories. This test
 	# verifies the path format rather than directory existence.
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/fs.sh"
 		outer=$(create_temp_dir)
 		inner=$(create_temp_dir)

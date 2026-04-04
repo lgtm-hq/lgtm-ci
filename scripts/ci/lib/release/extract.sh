@@ -5,7 +5,9 @@
 # Extract version numbers from various project files.
 # Returns non-zero if version cannot be found.
 
-set -euo pipefail
+# Note: no set -euo here — this is a sourced library.
+# The caller controls shell options. Setting set -u here breaks
+# kcov's bash instrumentation (BASH_SOURCE unbound in DEBUG trap).
 
 # Guard against multiple sourcing
 [[ -n "${_RELEASE_EXTRACT_LOADED:-}" ]] && return 0
