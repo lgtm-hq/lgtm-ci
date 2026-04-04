@@ -3,7 +3,7 @@
 # Purpose: Docker registry authentication utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/registry.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/registry.sh"
 #   docker_login_ghcr "$GITHUB_TOKEN"
 
 # Prevent multiple sourcing

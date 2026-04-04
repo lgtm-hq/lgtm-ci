@@ -3,7 +3,7 @@
 # Purpose: Coverage extraction utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/extract.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/extract.sh"
 #   percent=$(extract_coverage_percent "coverage.json")
 
 # Prevent multiple sourcing
@@ -11,7 +11,7 @@
 readonly _LGTM_CI_TESTING_COVERAGE_EXTRACT_LOADED=1
 
 # Get directory of this script for sourcing dependencies
-_LGTM_CI_TESTING_COV_EXTRACT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_LGTM_CI_TESTING_COV_EXTRACT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
 # Source detect.sh for format detection (required dependency)
 # shellcheck source=../detect.sh

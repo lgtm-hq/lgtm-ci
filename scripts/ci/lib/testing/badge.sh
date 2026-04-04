@@ -3,7 +3,7 @@
 # Purpose: Coverage badge generation utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/badge.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/badge.sh"
 #   generate_badge_svg 85.5 "badge.svg"
 
 # Prevent multiple sourcing

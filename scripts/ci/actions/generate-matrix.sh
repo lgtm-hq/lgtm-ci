@@ -19,7 +19,7 @@ set -euo pipefail
 : "${STEP:?STEP is required}"
 
 # Source common action libraries
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
 

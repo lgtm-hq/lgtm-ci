@@ -10,7 +10,7 @@ readonly _PUBLISH_HOMEBREW_LOADED=1
 
 # Source registry functions if not already loaded
 if [[ -z "${_PUBLISH_REGISTRY_LOADED:-}" ]]; then
-	_HOMEBREW_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+	_HOMEBREW_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 	# shellcheck source=registry.sh
 	source "$_HOMEBREW_LIB_DIR/registry.sh"
 fi

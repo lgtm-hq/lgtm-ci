@@ -3,7 +3,7 @@
 # Purpose: Target type resolution for SBOM tools (Syft, Grype)
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/target.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/target.sh"
 #   target=$(resolve_scan_target "/path/to/dir" "dir")
 
 # Prevent multiple sourcing

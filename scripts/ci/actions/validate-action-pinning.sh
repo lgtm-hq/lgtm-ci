@@ -13,7 +13,7 @@ set -euo pipefail
 : "${INPUT_ALLOW_ORG_VERSIONS:=}"
 : "${INPUT_SCAN_PATHS:=.github/workflows .github/actions}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
 

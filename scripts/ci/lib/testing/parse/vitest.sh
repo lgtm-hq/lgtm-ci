@@ -3,7 +3,7 @@
 # Purpose: Vitest result parsing utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/vitest.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/vitest.sh"
 #   parse_vitest_json "results.json"
 
 # Prevent multiple sourcing

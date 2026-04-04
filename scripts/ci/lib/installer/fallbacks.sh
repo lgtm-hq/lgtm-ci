@@ -3,7 +3,7 @@
 # Purpose: Fallback installation methods (go, brew, cargo)
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/fallbacks.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/fallbacks.sh"
 #   installer_fallback_brew "formula"
 
 # Prevent multiple sourcing
@@ -11,7 +11,7 @@
 readonly _LGTM_CI_INSTALLER_FALLBACKS_LOADED=1
 
 # Source shared libraries
-_LGTM_CI_FALLBACKS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_LGTM_CI_FALLBACKS_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
 # Source logging and fs utilities (with fallbacks for standalone use)
 if [[ -f "$_LGTM_CI_FALLBACKS_LIB_DIR/log.sh" ]]; then

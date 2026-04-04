@@ -184,7 +184,8 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	mkdir -p "$COVERAGE_DIR"
 
 	# Build bats command with same flags as main test step
-	BATS_ARGS=("--recursive")
+	# Include --tap so parse-results can read bats-output.tap
+	BATS_ARGS=("--recursive" "--tap")
 
 	if [[ -n "$FILTER" ]]; then
 		BATS_ARGS+=("--filter" "$FILTER")
@@ -206,18 +207,10 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		--include-path="$(pwd)/scripts/ci/lib" \
 		--exclude-pattern="/tests/,/tmp/,/bats-" \
 		"$COVERAGE_DIR" \
-		bats "${BATS_ARGS[@]}" "$TEST_PATH"
-	KCOV_EXIT_CODE=$?
+		bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
+	KCOV_EXIT_CODE=${PIPESTATUS[0]}
 
-	# Debug: List coverage output
-	echo "Coverage output directory contents:"
-	ls -la "$COVERAGE_DIR" 2>/dev/null || echo "Directory not found"
-	if [[ -f "$COVERAGE_DIR/index.html" ]]; then
-		echo "Coverage index.html exists"
-		# Use POSIX-compatible sed (gawk's match with third arg is not portable)
-		sed -n 's/.*covered">\([0-9.]*\).*/\1/p' "$COVERAGE_DIR/index.html" 2>/dev/null | head -n5 || true
-	fi
-
+	echo "exit-code=$KCOV_EXIT_CODE" >>"$GITHUB_OUTPUT"
 	echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
 	exit "$KCOV_EXIT_CODE"
 fi

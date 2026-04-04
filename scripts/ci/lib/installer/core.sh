@@ -3,7 +3,7 @@
 # Purpose: Core installer initialization for CI tool installation scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/core.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/core.sh"
 #   installer_init
 
 # Prevent multiple sourcing
@@ -17,7 +17,7 @@ readonly _LGTM_CI_INSTALLER_CORE_LOADED=1
 # Initialize installer environment - sources all required libraries
 # Sets INSTALLER_LIB_DIR for use by callers
 installer_init() {
-	INSTALLER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+	INSTALLER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
 	# Source required libraries with fallbacks
 	if [[ -f "$INSTALLER_LIB_DIR/log.sh" ]]; then

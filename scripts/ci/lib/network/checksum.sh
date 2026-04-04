@@ -3,7 +3,7 @@
 # Purpose: Checksum verification utilities for CI scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/checksum.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/checksum.sh"
 #   verify_checksum "file.tar.gz" "abc123..."
 
 # Prevent multiple sourcing
@@ -11,7 +11,7 @@
 readonly _LGTM_CI_NETWORK_CHECKSUM_LOADED=1
 
 # Source shared libraries
-_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")/.." && pwd)"
 
 # Source logging (with fallback for standalone use)
 if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then

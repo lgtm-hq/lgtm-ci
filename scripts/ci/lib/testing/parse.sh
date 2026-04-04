@@ -10,7 +10,7 @@
 readonly _LGTM_CI_TESTING_PARSE_LOADED=1
 
 # Get directory of this script
-_LGTM_CI_TESTING_PARSE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LGTM_CI_TESTING_PARSE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 
 # Source all parse sub-modules
 # shellcheck source=./parse/common.sh

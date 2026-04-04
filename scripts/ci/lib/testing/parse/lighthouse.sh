@@ -3,7 +3,7 @@
 # Purpose: Lighthouse CI result parsing utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/lighthouse.sh"
+#   source "$(dirname "${BASH_SOURCE[0]:-$0}")/lighthouse.sh"
 #   parse_lighthouse_json "lhr.json"
 
 # Prevent multiple sourcing

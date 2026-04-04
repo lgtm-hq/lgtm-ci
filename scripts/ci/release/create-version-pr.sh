@@ -24,7 +24,7 @@ set -euo pipefail
 
 # Source libraries
 # Save RELEASE_SCRIPT_DIR before sourcing (sourced libs may overwrite SCRIPT_DIR)
-RELEASE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+RELEASE_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd)"
 LIB_DIR="$RELEASE_SCRIPT_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
