@@ -10,91 +10,12 @@ concurrency:
   group: release-version-pr-${{ github.repository }}
   cancel-in-progress: false
 
-permissions:
-  contents: write
-  pull-requests: write
-
-# yamllint disable-line rule:line-length
-env:
-  # Keep in sync with ci.yml container image digest and pyproject.toml lintro pin
-  # yamllint disable-line rule:line-length
-  LINTRO_IMAGE: "ghcr.io/lgtm-hq/py-lintro@sha256:8523b9b77a931cd16d7dd4ecd666f357037a8c1c1a86f022dd28ee7bf766806b"
-
 jobs:
   version-pr:
-    name: Create Version PR
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@0634a2670c59f64b4a01f0f96f84700a4088b9f0 # v2.12.0
-        with:
-          egress-policy: audit
-
-      - name: Checkout repository
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
-        with:
-          fetch-depth: 0
-          persist-credentials: true
-
-      - name: Guard release commit
-        id: guard
-        shell: bash
-        run: scripts/ci/release/guard-release-commit.sh
-
-      - name: Check existing version PR
-        if: steps.guard.outputs.is-release-commit == 'false'
-        id: check-pr
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/ci/release/check-existing-version-pr.sh
-
-      - name: Validate lintro version consistency
-        # yamllint disable-line rule:line-length
-        if: >-
-          steps.guard.outputs.is-release-commit == 'false'
-          && steps.check-pr.outputs.pr-exists == 'false'
-        shell: bash
-        run: scripts/ci/quality/validate-lintro-version.sh
-
-      - name: Create version PR
-        # yamllint disable-line rule:line-length
-        if: >-
-          steps.guard.outputs.is-release-commit == 'false'
-          && steps.check-pr.outputs.pr-exists == 'false'
-        id: create-pr
-        shell: bash
-        env:
-          MAX_BUMP: minor
-          TAG_PREFIX: v
-          GH_TOKEN: ${{ github.token }}
-        run: scripts/ci/release/create-version-pr.sh
-
-      - name: Summary
-        if: always()
-        shell: bash
-        env:
-          IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
-          PR_EXISTS: ${{ steps.check-pr.outputs.pr-exists }}
-          PR_CREATED: ${{ steps.create-pr.outputs.pr-created }}
-          PR_URL: ${{ steps.create-pr.outputs.pr-url }}
-          VERSION: ${{ steps.create-pr.outputs.version }}
-        run: |
-          {
-            echo "## Version PR Summary"
-            echo ""
-            if [[ "$IS_RELEASE" == "true" ]]; then
-              echo "Skipped: last commit is a release commit (loop prevention)"
-            elif [[ "$PR_EXISTS" == "true" ]]; then
-              echo "Skipped: version PR already exists"
-            elif [[ "$PR_CREATED" == "true" ]]; then
-              echo "- **Version:** $VERSION"
-              echo "- **PR:** $PR_URL"
-            else
-              echo "Skipped: no releasable commits found"
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+    # yamllint disable-line rule:line-length
+    uses: ./.github/workflows/reusable-release-version-pr.yml
+    with:
+      max-bump: minor
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
