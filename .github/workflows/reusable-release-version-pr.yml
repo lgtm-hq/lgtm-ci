@@ -70,6 +70,9 @@ jobs:
     name: Create Version PR
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    concurrency:
+      group: release-version-pr-${{ github.repository }}
+      cancel-in-progress: false
     permissions:
       contents: write
       pull-requests: write
@@ -98,6 +101,7 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
+      # Runs before tooling checkout — must be inline (bootstrap)
       - name: Resolve tooling ref
         id: tooling
         shell: bash
@@ -180,6 +184,18 @@ jobs:
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh
 
+      - name: Setup Rust toolchain
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && contains(inputs.ecosystems, 'rust')
+        # yamllint disable-line rule:line-length
+        uses: dtolnay/rust-toolchain@a54c7afe936fefeb4456b2dd8068152669aa8211 # stable
+        with:
+          toolchain: stable
+
       - name: Run ecosystem version updaters
         # yamllint disable-line rule:line-length
         if: >-
@@ -206,6 +222,15 @@ jobs:
         env:
           NEXT_VERSION: ${{ steps.version.outputs.next-version }}
         run: ${{ inputs.version-update-script }}
+
+      - name: Remove tooling checkout before PR creation
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        shell: bash
+        run: rm -rf .lgtm-ci-tooling
 
       - name: Create or update version PR
         # yamllint disable-line rule:line-length
@@ -268,6 +293,18 @@ jobs:
           ${{ steps.create-pr.outputs.pull-request-number }}
           --auto --squash
 
+      - name: Restore tooling for summary
+        if: always()
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ steps.tooling.outputs.ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          token: ${{ steps.app-token.outputs.token }}
+
       - name: Write summary
         if: always()
         shell: bash
@@ -280,23 +317,6 @@ jobs:
           PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
           PR_OP: ${{ steps.create-pr.outputs.pull-request-operation }}
           ECOSYSTEMS: ${{ inputs.ecosystems }}
-        run: |
-          {
-            echo "## Version PR Summary"
-            echo ""
-            if [[ "$IS_RELEASE" == "true" ]]; then
-              echo "Skipped: last commit is a release commit (loop prevention)"
-            elif [[ "$PR_EXISTS" == "true" ]]; then
-              echo "Skipped: version PR already exists"
-            elif [[ "$RELEASE_NEEDED" != "true" ]]; then
-              echo "Skipped: no releasable commits found"
-            else
-              echo "- **Version:** $NEXT_VERSION"
-              echo "- **Bump type:** $BUMP_TYPE"
-              echo "- **PR:** ${PR_URL:-not created}"
-              echo "- **Operation:** ${PR_OP:-unknown}"
-              if [[ -n "$ECOSYSTEMS" ]]; then
-                echo "- **Ecosystems:** $ECOSYSTEMS"
-              fi
-            fi
-          } >> "$GITHUB_STEP_SUMMARY"
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
