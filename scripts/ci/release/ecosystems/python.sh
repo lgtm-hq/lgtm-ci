@@ -103,7 +103,7 @@ log_info "[python] Updating $INIT_FILE → $NEXT_VERSION"
 # Portable in-place edit via temp file
 TMPFILE=$(mktemp)
 trap 'rm -f "$TMPFILE"' EXIT
-sed "s/^__version__ = .*/__version__ = \"$NEXT_VERSION\"/" "$INIT_FILE" >"$TMPFILE"
+sed "s|^__version__ = .*|__version__ = \"$NEXT_VERSION\"|" "$INIT_FILE" >"$TMPFILE"
 mv "$TMPFILE" "$INIT_FILE"
 trap - EXIT
 

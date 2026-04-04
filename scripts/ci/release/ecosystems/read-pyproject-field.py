@@ -31,6 +31,7 @@ def main() -> None:
     field = sys.argv[2]
 
     if not pyproject_path.exists():
+        print(f"ERROR: {pyproject_path} does not exist", file=sys.stderr)
         sys.exit(1)
 
     with pyproject_path.open("rb") as f:
