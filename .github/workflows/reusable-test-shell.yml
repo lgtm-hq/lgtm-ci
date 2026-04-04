@@ -79,9 +79,10 @@ jobs:
       tests-failed: ${{ steps.results.outputs.tests-failed }}
       tests-total: ${{ steps.results.outputs.tests-total }}
       coverage-percent: ${{ steps.coverage.outputs.coverage-percent }}
-      passed:
-        ${{ steps.test.outcome == 'success' && steps.results.outputs.tests-ran == 'true'
-        }}
+      # yamllint disable-line rule:line-length
+      passed: >-
+        ${{ (steps.test.outcome == 'success' || steps.coverage-run.outcome == 'success')
+        && steps.results.outputs.tests-ran == 'true' }}
 
     steps:
       - name: Harden runner
@@ -111,6 +112,7 @@ jobs:
         run: bash scripts/ci/actions/run-bats-tests.sh
 
       - name: Run BATS tests
+        if: ${{ !inputs.coverage }}
         id: test
         shell: bash
         working-directory: ${{ inputs.working-directory }}
@@ -121,12 +123,11 @@ jobs:
           PARALLEL: ${{ inputs.parallel }}
         run: bash scripts/ci/actions/run-bats-tests.sh
 
-      - name: Run tests with coverage
-        if: inputs.coverage && steps.test.outcome == 'success'
+      - name: Run BATS tests with coverage
+        if: ${{ inputs.coverage }}
         id: coverage-run
         shell: bash
         working-directory: ${{ inputs.working-directory }}
-        continue-on-error: true
         env:
           STEP: run-coverage
           TEST_PATH: ${{ inputs.test-path }}
