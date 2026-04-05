@@ -19,11 +19,13 @@ source "$LIB_DIR/log.sh"
 # shellcheck source=../lib/github.sh
 source "$LIB_DIR/github.sh"
 
-# Get all changed files (staged + unstaged), excluding CHANGELOG.md
-# Anchor the CHANGELOG.md filter to the end of the path so files like
-# docs/CHANGELOG.md.backup are NOT excluded. The porcelain format is
-# "XY path" where XY is the two-char status code.
-CHANGED_FILES=$(git status --porcelain |
+# Get all changed files (staged + unstaged). Run git separately so
+# git failures fail the script instead of being masked by the pipeline.
+GIT_STATUS_OUTPUT=$(git status --porcelain)
+
+# Exclude CHANGELOG.md (anchored to end of path so docs/CHANGELOG.md.backup
+# is NOT excluded) and untracked files. The porcelain format is "XY path".
+CHANGED_FILES=$(printf '%s\n' "$GIT_STATUS_OUTPUT" |
 	grep -vE '^.. (.*/)?CHANGELOG\.md$' |
 	grep -v '^??' || true)
 
