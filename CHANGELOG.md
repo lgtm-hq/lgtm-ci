@@ -19,6 +19,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.10.0] - 2026-04-05
+
+## Unreleased
+
+### Features
+
+- **workflows**: add reusable release-version-pr with ecosystem-based version sync (#105) (8292382)
+
+### Bug Fixes
+
+- **actions**: refresh stale pinned SHAs after upstream tag rewrites (#109) (23bb227)
+- **workflows**: avoid self-deadlock between caller and reusable concurrency (#108) (403f1aa)
+
+### Other Changes
+
+- **workflows**: harden reusable-release-auto-tag and align with version-pr (#107) (45015e3)
+- standardize Renovate config with org-wide shared preset (#101) (87a3c1a)
+
 ## [0.9.0] - 2026-04-02
 
 ### Features
@@ -145,7 +163,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.9.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.0...HEAD
+[0.10.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.0...v0.8.1
