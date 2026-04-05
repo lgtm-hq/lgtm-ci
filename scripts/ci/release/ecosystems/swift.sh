@@ -67,8 +67,9 @@ write_file_atomic "$VERSION_SWIFT" awk -v ver="$NEXT_VERSION" '
 { print }
 ' "$VERSION_SWIFT"
 
-# Verify the write (take first match only)
-ACTUAL=$(awk -F'"' '/static let .* = "/ {print $2; exit}' "$VERSION_SWIFT")
+# Verify the write — use the same first-match strict-identifier regex
+# as the replacement above so both operations target the same line.
+ACTUAL=$(awk -F'"' '/static let [a-zA-Z_][a-zA-Z0-9_]* = "/ {print $2; exit}' "$VERSION_SWIFT")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[swift] Verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

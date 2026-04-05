@@ -96,11 +96,18 @@ if command -v bundle >/dev/null 2>&1; then
 	log_info "[ruby] Regenerating Gemfile.lock via bundle lock..."
 	bundle lock --update "$GEM_NAME" 2>&1 | tail -5
 else
+	# Regex fallback per issue #55 3.4 — for environments where Bundler
+	# isn't available (e.g., some CI images or cross-repo callers that
+	# don't install ruby toolchain). This ONLY rewrites the gem's own
+	# version strings in PATH specs and CHECKSUMS sections; it does NOT
+	# re-resolve transitive dependencies or refresh other lockfile
+	# metadata. Callers that need a fully-resolved lock should ensure
+	# Bundler is on PATH so the primary 'bundle lock --update' path runs.
 	log_warn "[ruby] bundle not found — using regex fallback for Gemfile.lock"
-	# Escape regex metacharacters in GEM_NAME for safe use in sed/grep patterns
-	# (handles gems with dots or other special chars)
+	log_warn "[ruby] Fallback does not refresh transitive dependencies"
+	# Escape regex metacharacters in GEM_NAME for safe use in sed/grep
+	# patterns (handles gems with dots or other special chars).
 	ESC_GEM_NAME=$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')
-	# Replace version in PATH spec and CHECKSUMS sections
 	write_file_atomic Gemfile.lock \
 		sed "s/\(^\|[[:space:]]\)${ESC_GEM_NAME} ([0-9][0-9.]*[0-9])/\1${GEM_NAME} (${NEXT_VERSION})/g" \
 		Gemfile.lock
