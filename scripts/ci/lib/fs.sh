@@ -137,8 +137,11 @@ create_temp_dir() {
 # Usage: sed "s/old/new/" file | write_file_atomic file
 write_file_atomic() {
 	local dest="$1"
-	local tmpfile
-	tmpfile=$(mktemp) || return 1
+	local dest_dir tmpfile
+	dest_dir=$(dirname "$dest")
+	# Create tmpfile in the same directory as dest so mv is atomic
+	# (both paths must be on the same filesystem).
+	tmpfile=$(mktemp "${dest_dir}/.write_file_atomic.XXXXXX") || return 1
 	if ! cat >"$tmpfile"; then
 		rm -f "$tmpfile"
 		return 1
