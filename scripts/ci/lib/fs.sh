@@ -131,9 +131,24 @@ create_temp_dir() {
 	echo "$tmpdir"
 }
 
+# Atomic file write via temp file. Reads content from stdin
+# and writes to the destination file atomically (temp + mv).
+# Replaces the repeated mktemp/trap/mv/trap pattern.
+# Usage: sed "s/old/new/" file | write_file_atomic file
+write_file_atomic() {
+	local dest="$1"
+	local tmpfile
+	tmpfile=$(mktemp) || return 1
+	if ! cat >"$tmpfile"; then
+		rm -f "$tmpfile"
+		return 1
+	fi
+	mv "$tmpfile" "$dest"
+}
+
 # =============================================================================
 # Export functions
 # =============================================================================
 export -f command_exists require_command
 export -f ensure_directory require_file check_file_exists check_dir_exists
-export -f create_temp_dir
+export -f create_temp_dir write_file_atomic
