@@ -20,7 +20,12 @@ source "$LIB_DIR/log.sh"
 source "$LIB_DIR/github.sh"
 
 # Get all changed files (staged + unstaged), excluding CHANGELOG.md
-CHANGED_FILES=$(git status --porcelain | grep -v 'CHANGELOG.md' | grep -v '^??' || true)
+# Anchor the CHANGELOG.md filter to the end of the path so files like
+# docs/CHANGELOG.md.backup are NOT excluded. The porcelain format is
+# "XY path" where XY is the two-char status code.
+CHANGED_FILES=$(git status --porcelain |
+	grep -vE '^.. (.*/)?CHANGELOG\.md$' |
+	grep -v '^??' || true)
 
 if [[ -z "$CHANGED_FILES" ]]; then
 	log_info "No version file changes detected (only CHANGELOG.md or nothing)"
@@ -32,3 +37,4 @@ log_info "Version file changes detected:"
 echo "$CHANGED_FILES" | head -10 >&2
 
 set_github_output "has-version-changes" "true"
+exit 0
