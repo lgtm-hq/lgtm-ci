@@ -20,7 +20,7 @@ source "$LIB_DIR/log.sh"
 source "$LIB_DIR/github.sh"
 
 # Get all changed files (staged + unstaged), excluding CHANGELOG.md
-CHANGED_FILES=$(git status --porcelain | grep -v 'CHANGELOG.md' | grep -v '^\?\?' || true)
+CHANGED_FILES=$(git status --porcelain | grep -v 'CHANGELOG.md' | grep -v '^??' || true)
 
 if [[ -z "$CHANGED_FILES" ]]; then
 	log_info "No version file changes detected (only CHANGELOG.md or nothing)"
