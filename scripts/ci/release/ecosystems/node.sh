@@ -51,10 +51,14 @@ else
 	JQ_INDENT="--indent 2"
 fi
 
-# Update version field, preserving formatting
-# shellcheck disable=SC2086
-jq $JQ_INDENT --arg v "$NEXT_VERSION" '.version = $v' "$PACKAGE_JSON" |
-	write_file_atomic "$PACKAGE_JSON"
+# Update version field, preserving formatting.
+# SC2086: $JQ_INDENT must word-split into either "--indent N" (two args)
+# or "--tab" (one arg), so unquoted expansion is intentional.
+# SC2016: '.version = $v' is a jq filter — $v is a jq variable (set by
+# --arg v), not a shell variable; single quotes prevent shell expansion.
+# shellcheck disable=SC2086,SC2016
+write_file_atomic "$PACKAGE_JSON" \
+	jq $JQ_INDENT --arg v "$NEXT_VERSION" '.version = $v' "$PACKAGE_JSON"
 
 # Verify the write
 ACTUAL=$(jq -r '.version' "$PACKAGE_JSON")

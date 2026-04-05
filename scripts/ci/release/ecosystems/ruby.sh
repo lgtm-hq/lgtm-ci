@@ -71,8 +71,8 @@ fi
 
 log_info "[ruby] Updating $VERSION_RB → $NEXT_VERSION"
 
-sed "s/VERSION = \"[^\"]*\"/VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB" |
-	write_file_atomic "$VERSION_RB"
+write_file_atomic "$VERSION_RB" \
+	sed "s/VERSION = \"[^\"]*\"/VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB"
 
 # Verify the write
 ACTUAL=$(awk -F'"' '/VERSION =/ {print $2; exit}' "$VERSION_RB")
@@ -101,8 +101,9 @@ else
 	# (handles gems with dots or other special chars)
 	ESC_GEM_NAME=$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')
 	# Replace version in PATH spec and CHECKSUMS sections
-	sed "s/\(^\|[[:space:]]\)${ESC_GEM_NAME} ([0-9][0-9.]*[0-9])/\1${GEM_NAME} (${NEXT_VERSION})/g" \
-		Gemfile.lock | write_file_atomic Gemfile.lock
+	write_file_atomic Gemfile.lock \
+		sed "s/\(^\|[[:space:]]\)${ESC_GEM_NAME} ([0-9][0-9.]*[0-9])/\1${GEM_NAME} (${NEXT_VERSION})/g" \
+		Gemfile.lock
 fi
 
 # Verify Gemfile.lock contains the updated version

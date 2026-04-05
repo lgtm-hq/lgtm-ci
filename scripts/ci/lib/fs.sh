@@ -131,18 +131,24 @@ create_temp_dir() {
 	echo "$tmpdir"
 }
 
-# Atomic file write via temp file. Reads content from stdin
-# and writes to the destination file atomically (temp + mv).
-# Replaces the repeated mktemp/trap/mv/trap pattern.
-# Usage: sed "s/old/new/" file | write_file_atomic file
+# Atomic file write via temp file. Runs the given command with its
+# stdout redirected to a tmpfile in dest's directory, and only moves
+# the tmpfile over dest if the command exits 0. If the producer fails
+# (or is killed mid-stream), the partial tmpfile is discarded and
+# write_file_atomic returns non-zero. This avoids the pipe-based
+# variant, where partial producer output could be committed before
+# set -o pipefail could abort the caller.
+# Usage: write_file_atomic <dest> <command> [args...]
+# Example: write_file_atomic foo.txt sed "s/a/b/" input.txt
 write_file_atomic() {
 	local dest="$1"
+	shift
 	local dest_dir tmpfile
 	dest_dir=$(dirname "$dest")
 	# Create tmpfile in the same directory as dest so mv is atomic
 	# (both paths must be on the same filesystem).
 	tmpfile=$(mktemp "${dest_dir}/.write_file_atomic.XXXXXX") || return 1
-	if ! cat >"$tmpfile"; then
+	if ! "$@" >"$tmpfile"; then
 		rm -f "$tmpfile"
 		return 1
 	fi

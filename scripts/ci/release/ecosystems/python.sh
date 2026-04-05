@@ -106,8 +106,8 @@ fi
 
 log_info "[python] Updating $INIT_FILE → $NEXT_VERSION"
 
-sed "s|^__version__[[:space:]]*=.*|__version__ = \"$NEXT_VERSION\"|" "$INIT_FILE" |
-	write_file_atomic "$INIT_FILE"
+write_file_atomic "$INIT_FILE" \
+	sed "s|^__version__[[:space:]]*=.*|__version__ = \"$NEXT_VERSION\"|" "$INIT_FILE"
 
 # Verify the write
 ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$INIT_FILE")

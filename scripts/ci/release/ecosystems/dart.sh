@@ -33,7 +33,7 @@ fi
 
 log_info "[dart] Updating $PUBSPEC → $NEXT_VERSION"
 
-sed "s|^version: .*|version: $NEXT_VERSION|" "$PUBSPEC" | write_file_atomic "$PUBSPEC"
+write_file_atomic "$PUBSPEC" sed "s|^version: .*|version: $NEXT_VERSION|" "$PUBSPEC"
 
 # Verify the write
 ACTUAL=$(sed -n 's/^version: //p' "$PUBSPEC")

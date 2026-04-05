@@ -38,7 +38,7 @@ log_info "[rust] Updating $CARGO_TOML → $NEXT_VERSION"
 # The awk script tracks which TOML section we're in and only replaces
 # the version line when inside [package] or [workspace.package].
 # Portable awk: avoid ERE (workspace\.)? which fails on BSD awk
-awk -v new_version="$NEXT_VERSION" '
+write_file_atomic "$CARGO_TOML" awk -v new_version="$NEXT_VERSION" '
 /^\[package\]/ || /^\[workspace\.package\]/ { in_package=1 }
 /^\[/ && !/^\[package\]/ && !/^\[workspace\.package\]/ { in_package=0 }
 in_package && /^version[[:space:]]*=/ {
@@ -46,7 +46,7 @@ in_package && /^version[[:space:]]*=/ {
 	next
 }
 { print }
-' "$CARGO_TOML" | write_file_atomic "$CARGO_TOML"
+' "$CARGO_TOML"
 
 # Verify the write
 ACTUAL=$(awk -F'"' '

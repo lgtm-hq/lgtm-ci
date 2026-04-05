@@ -59,13 +59,13 @@ log_info "[swift] Updating $VERSION_SWIFT → $NEXT_VERSION"
 #   static let version_string = "1.2.3"
 # Uses awk to replace only the first match, avoiding accidental changes
 # to unrelated constants in the same file.
-awk -v ver="$NEXT_VERSION" '
+write_file_atomic "$VERSION_SWIFT" awk -v ver="$NEXT_VERSION" '
 !done && /static let [a-zA-Z_][a-zA-Z0-9_]* = "/ {
 	sub(/"[^"]*"/, "\"" ver "\"")
 	done = 1
 }
 { print }
-' "$VERSION_SWIFT" | write_file_atomic "$VERSION_SWIFT"
+' "$VERSION_SWIFT"
 
 # Verify the write (take first match only)
 ACTUAL=$(awk -F'"' '/static let .* = "/ {print $2; exit}' "$VERSION_SWIFT")

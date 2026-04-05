@@ -34,8 +34,8 @@ fi
 log_info "[kotlin] Updating $GRADLE → $NEXT_VERSION"
 
 # Whitespace-tolerant, preserves leading indentation via capture group
-sed -E "s|^([[:space:]]*)version[[:space:]]*=[[:space:]]*\"[^\"]*\"|\\1version = \"$NEXT_VERSION\"|" "$GRADLE" |
-	write_file_atomic "$GRADLE"
+write_file_atomic "$GRADLE" \
+	sed -E "s|^([[:space:]]*)version[[:space:]]*=[[:space:]]*\"[^\"]*\"|\\1version = \"$NEXT_VERSION\"|" "$GRADLE"
 
 # Verify the write (anchored to start-of-line + optional indent, same
 # as the sed that wrote the root version, so nested properties like
