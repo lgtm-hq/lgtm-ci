@@ -111,7 +111,7 @@ else
 	# patterns (handles gems with dots or other special chars).
 	ESC_GEM_NAME=$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')
 	write_file_atomic Gemfile.lock \
-		sed "s/\(^\|[[:space:]]\)${ESC_GEM_NAME} ([0-9][0-9.]*[0-9])/\1${GEM_NAME} (${NEXT_VERSION})/g" \
+		sed -E "s/(^|[[:space:]])${ESC_GEM_NAME} \\([0-9][0-9.]*[0-9]\\)/\\1${GEM_NAME} (${NEXT_VERSION})/g" \
 		Gemfile.lock
 fi
 

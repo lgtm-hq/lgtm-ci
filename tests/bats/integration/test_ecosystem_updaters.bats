@@ -90,10 +90,50 @@ EOF
 
 create_gemspec() {
 	local dir="$1" gem="$2"
+	# Dynamic gemspec that loads version from lib/<gem>/version.rb — the
+	# standard ruby convention that lets 'bundle lock --update' pick up
+	# version changes made to version.rb.
+	local gem_path="${gem//-//}"
 	cat >"$dir/$gem.gemspec" <<EOF
+require_relative "lib/${gem_path}/version"
 Gem::Specification.new do |spec|
   spec.name = "$gem"
+  spec.version = TestGem::VERSION
+  spec.summary = "Test gem"
+  spec.authors = ["Test"]
+  spec.files = []
 end
+EOF
+}
+
+create_gemfile_lock() {
+	local dir="$1" gem="$2" version="${3:-1.0.0}"
+	cat >"$dir/Gemfile.lock" <<EOF
+PATH
+  remote: .
+  specs:
+    $gem ($version)
+
+GEM
+  remote: https://rubygems.org/
+  specs:
+
+PLATFORMS
+  ruby
+
+DEPENDENCIES
+  $gem!
+
+BUNDLED WITH
+   2.4.10
+EOF
+}
+
+create_gemfile() {
+	local dir="$1" gem="$2"
+	cat >"$dir/Gemfile" <<EOF
+source "https://rubygems.org"
+gemspec
 EOF
 }
 
@@ -135,12 +175,36 @@ run_ecosystem() {
 	local script="$1"
 	local dir="$2"
 	local version="${3:-9.8.7}"
-	run bash -c "
-		cd '$dir'
-		export NEXT_VERSION='$version'
-		export ECOSYSTEM_CONFIG_JSON='{}'
-		'$ECOSYSTEMS_DIR/$script' 2>&1
-	"
+	local config="${4:-{}}"
+	NEXT_VERSION="$version" \
+		ECOSYSTEM_CONFIG_JSON="$config" \
+		run bash -c "cd '$dir' && '$ECOSYSTEMS_DIR/$script' 2>&1"
+}
+
+run_ecosystem_no_bundle() {
+	# Run an ecosystem script with 'bundle' hidden from PATH via a shim
+	# directory that symlinks every other binary. This preserves access
+	# to jq/sed/awk/etc. while making 'command -v bundle' fail.
+	local script="$1"
+	local dir="$2"
+	local version="${3:-9.8.7}"
+	local shim_dir="${BATS_TEST_TMPDIR}/shim_bin_$$"
+	mkdir -p "$shim_dir"
+	local d f name
+	while IFS= read -r d; do
+		[[ -d "$d" ]] || continue
+		for f in "$d"/*; do
+			[[ -e "$f" ]] || continue
+			name=$(basename "$f")
+			[[ "$name" == "bundle" ]] && continue
+			[[ -e "$shim_dir/$name" ]] && continue
+			ln -sf "$f" "$shim_dir/$name"
+		done
+	done < <(echo "$PATH" | tr ':' '\n')
+	NEXT_VERSION="$version" \
+		ECOSYSTEM_CONFIG_JSON='{}' \
+		PATH="$shim_dir" \
+		run bash -c "cd '$dir' && '$ECOSYSTEMS_DIR/$script' 2>&1"
 }
 
 run_runner() {
@@ -148,13 +212,10 @@ run_runner() {
 	local ecosystems="$2"
 	local version="${3:-9.8.7}"
 	local config="${4:-{}}"
-	run bash -c "
-		cd '$dir'
-		export NEXT_VERSION='$version'
-		export ECOSYSTEMS='$ecosystems'
-		export ECOSYSTEM_CONFIG='$config'
-		'$ECOSYSTEMS_DIR/_runner.sh' 2>&1
-	"
+	NEXT_VERSION="$version" \
+		ECOSYSTEMS="$ecosystems" \
+		ECOSYSTEM_CONFIG="$config" \
+		run bash -c "cd '$dir' && '$ECOSYSTEMS_DIR/_runner.sh' 2>&1"
 }
 
 # =============================================================================
@@ -297,6 +358,31 @@ run_runner() {
 	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR"
 	assert_failure
 	assert_line --partial "No gem name configured"
+}
+
+@test "ruby: updates Gemfile.lock via regex fallback when bundle unavailable" {
+	create_gemspec "$BATS_TEST_TMPDIR" "test-gem"
+	create_version_rb "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
+	create_gemfile_lock "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
+
+	run_ecosystem_no_bundle "ruby.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	assert_line --partial "regex fallback"
+	grep -q "test-gem (9.8.7)" "$BATS_TEST_TMPDIR/Gemfile.lock"
+}
+
+@test "ruby: updates Gemfile.lock via bundle lock when bundle available" {
+	if ! command -v bundle >/dev/null 2>&1; then
+		skip "bundle not available"
+	fi
+	create_gemspec "$BATS_TEST_TMPDIR" "test-gem"
+	create_version_rb "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
+	create_gemfile "$BATS_TEST_TMPDIR" "test-gem"
+	create_gemfile_lock "$BATS_TEST_TMPDIR" "test-gem" "1.0.0"
+
+	run_ecosystem "ruby.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	grep -q "test-gem (9.8.7)" "$BATS_TEST_TMPDIR/Gemfile.lock"
 }
 
 # =============================================================================
