@@ -72,10 +72,12 @@ fi
 log_info "[ruby] Updating $VERSION_RB → $NEXT_VERSION"
 
 write_file_atomic "$VERSION_RB" \
-	sed "s/VERSION = \"[^\"]*\"/VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB"
+	sed -E "s/^([[:space:]]*)VERSION[[:space:]]*=[[:space:]]*\"[^\"]*\"/\\1VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB"
 
-# Verify the write
-ACTUAL=$(awk -F'"' '/VERSION =/ {print $2; exit}' "$VERSION_RB")
+# Verify the write — use the same anchored strict pattern as the sed
+# above so comments or nested keys containing "VERSION =" aren't
+# accidentally picked up.
+ACTUAL=$(awk -F'"' '/^[[:space:]]*VERSION[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$VERSION_RB")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[ruby] version.rb verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

@@ -143,19 +143,6 @@ run_ecosystem() {
 	"
 }
 
-run_ecosystem_with_config() {
-	local script="$1"
-	local dir="$2"
-	local config="$3"
-	local version="${4:-9.8.7}"
-	run bash -c "
-		cd '$dir'
-		export NEXT_VERSION='$version'
-		export ECOSYSTEM_CONFIG_JSON='$config'
-		'$ECOSYSTEMS_DIR/$script' 2>&1
-	"
-}
-
 run_runner() {
 	local dir="$1"
 	local ecosystems="$2"
