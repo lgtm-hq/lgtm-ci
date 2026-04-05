@@ -319,7 +319,7 @@ dev = [
 requires-dist = [
     { name = "assertpy", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
-    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.52.4" },
+    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.60.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -397,7 +397,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.52.4"
+version = "0.60.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bandit" },
@@ -417,9 +417,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "yamllint" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/66/16/87a4af3342f9245edb1e0994001ad7ff7fea6ac82d494a70785d42e314c3/lintro-0.52.4.tar.gz", hash = "sha256:c751c60375b7c48195832f5b992cdab84a2d2e68b3ee3a7f533c57ebae7bf974", size = 1847510, upload-time = "2026-02-23T13:23:04.697Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/5a/89/65828bcb73138c8ddb72779d222ad3521ebc4c0e5124a11234049f372a59/lintro-0.60.0.tar.gz", hash = "sha256:1322ff0164f4904d5b46dde76a63477c08cf5432bc768ae9948f8c02897a3d3a", size = 2092317, upload-time = "2026-04-05T13:56:12.836Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/6c/02/509d692bd623a9644fc6680372c1fef3641cb3d43a5338c438281f02b8ed/lintro-0.52.4-py3-none-any.whl", hash = "sha256:5c6ae521c26dffcba47c5015cdf94af69453764ff96e3266b9811ac397c40370", size = 473109, upload-time = "2026-02-23T13:23:02.63Z" },
+    { url = "https://files.pythonhosted.org/packages/29/62/dda36d6a83e4ac93b429d4795ea75e6ad95fc5476d52b32a0639a0b80e12/lintro-0.60.0-py3-none-any.whl", hash = "sha256:1a87eac663fda78471f7b3908a545eb5a743410848b48e5eab51a8d3273b20e1", size = 645372, upload-time = "2026-04-05T13:56:10.84Z" },
 ]
 
 [[package]]
