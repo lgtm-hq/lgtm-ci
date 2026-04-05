@@ -191,7 +191,7 @@ jobs:
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
-          && contains(inputs.ecosystems, 'rust')
+          && contains(format(',{0},', inputs.ecosystems), ',rust,')
         # yamllint disable-line rule:line-length
         uses: dtolnay/rust-toolchain@a54c7afe936fefeb4456b2dd8068152669aa8211 # stable
         with:

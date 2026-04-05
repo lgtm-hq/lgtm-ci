@@ -113,9 +113,12 @@ else
 		Gemfile.lock
 fi
 
-# Verify Gemfile.lock contains the updated version
+# Verify Gemfile.lock contains the updated version. Escape both the gem
+# name and NEXT_VERSION for regex safety — NEXT_VERSION contains dots
+# (regex metacharacters) that would otherwise allow false positives.
 ESC_GEM_NAME=${ESC_GEM_NAME:-$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')}
-if ! grep -qE "(^|[[:space:]])${ESC_GEM_NAME} \(${NEXT_VERSION}\)" Gemfile.lock; then
+ESC_NEXT_VERSION=$(printf '%s' "$NEXT_VERSION" | sed 's/[][\\.*^$/]/\\&/g')
+if ! grep -qE "(^|[[:space:]])${ESC_GEM_NAME} \(${ESC_NEXT_VERSION}\)" Gemfile.lock; then
 	log_error "[ruby] Gemfile.lock verification failed: ${GEM_NAME} (${NEXT_VERSION}) not found"
 	exit 1
 fi

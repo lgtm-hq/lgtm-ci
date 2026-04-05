@@ -342,6 +342,19 @@ run_runner() {
 	assert_line --partial "No Version.swift found"
 }
 
+@test "swift: errors when file has multiple candidate constants" {
+	mkdir -p "$BATS_TEST_TMPDIR/Sources/TestLib"
+	cat >"$BATS_TEST_TMPDIR/Sources/TestLib/Version.swift" <<'EOF'
+public enum Info {
+    public static let name = "MyLib"
+    public static let version = "1.0.0"
+}
+EOF
+	run_ecosystem "swift.sh" "$BATS_TEST_TMPDIR"
+	assert_failure
+	assert_line --partial "2 candidate constants"
+}
+
 # =============================================================================
 # Tests: dart.sh
 # =============================================================================
