@@ -31,7 +31,7 @@ def main() -> None:
     pyproject_path = Path(sys.argv[1])
     new_version = sys.argv[2]
 
-    if not pyproject_path.exists():
+    if not pyproject_path.is_file():
         print(f"ERROR: {pyproject_path} does not exist", file=sys.stderr)
         sys.exit(1)
 

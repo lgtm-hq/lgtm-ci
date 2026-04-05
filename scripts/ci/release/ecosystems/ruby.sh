@@ -19,6 +19,8 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/fs.sh
+source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:={}}"
@@ -59,12 +61,8 @@ fi
 
 log_info "[ruby] Updating $VERSION_RB → $NEXT_VERSION"
 
-# Portable in-place edit via temp file
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
-sed "s/VERSION = \"[^\"]*\"/VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB" >"$TMPFILE"
-mv "$TMPFILE" "$VERSION_RB"
-trap - EXIT
+sed "s/VERSION = \"[^\"]*\"/VERSION = \"$NEXT_VERSION\"/" "$VERSION_RB" |
+	write_file_atomic "$VERSION_RB"
 
 # Verify the write
 ACTUAL=$(awk -F'"' '/VERSION =/ {print $2; exit}' "$VERSION_RB")
@@ -90,17 +88,12 @@ if command -v bundle >/dev/null 2>&1; then
 else
 	log_warn "[ruby] bundle not found — using regex fallback for Gemfile.lock"
 	# Replace version in PATH spec and CHECKSUMS sections
-	# Portable in-place edit via temp file
-	TMPFILE=$(mktemp)
-	trap 'rm -f "$TMPFILE"' EXIT
-	sed "s/${GEM_NAME} ([0-9][0-9.]*[0-9])/${GEM_NAME} (${NEXT_VERSION})/g" \
-		Gemfile.lock >"$TMPFILE"
-	mv "$TMPFILE" Gemfile.lock
-	trap - EXIT
+	sed "s/\(^\|[[:space:]]\)${GEM_NAME} ([0-9][0-9.]*[0-9])/\1${GEM_NAME} (${NEXT_VERSION})/g" \
+		Gemfile.lock | write_file_atomic Gemfile.lock
 fi
 
 # Verify Gemfile.lock contains the updated version
-if ! grep -q "${GEM_NAME} (${NEXT_VERSION})" Gemfile.lock; then
+if ! grep -qE "(^|[[:space:]])${GEM_NAME} \(${NEXT_VERSION}\)" Gemfile.lock; then
 	log_error "[ruby] Gemfile.lock verification failed: ${GEM_NAME} (${NEXT_VERSION}) not found"
 	exit 1
 fi

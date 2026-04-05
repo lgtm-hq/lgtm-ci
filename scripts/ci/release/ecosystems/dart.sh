@@ -18,6 +18,8 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/fs.sh
+source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:={}}"
@@ -31,12 +33,7 @@ fi
 
 log_info "[dart] Updating $PUBSPEC → $NEXT_VERSION"
 
-# Portable in-place edit via temp file
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
-sed "s|^version: .*|version: $NEXT_VERSION|" "$PUBSPEC" >"$TMPFILE"
-mv "$TMPFILE" "$PUBSPEC"
-trap - EXIT
+sed "s|^version: .*|version: $NEXT_VERSION|" "$PUBSPEC" | write_file_atomic "$PUBSPEC"
 
 # Verify the write
 ACTUAL=$(sed -n 's/^version: //p' "$PUBSPEC")

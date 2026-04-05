@@ -17,6 +17,8 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/fs.sh
+source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:={}}"
@@ -31,13 +33,20 @@ fi
 
 log_info "[node] Updating $PACKAGE_JSON → $NEXT_VERSION"
 
-# Update version field, preserving formatting
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
+# Detect existing indentation to preserve formatting
+INDENT=$(awk '/^[\t ]/ { match($0, /^[\t ]+/); print substr($0, RSTART, RLENGTH); exit }' "$PACKAGE_JSON")
+if [[ "$INDENT" == $'\t'* ]]; then
+	JQ_INDENT="--tab"
+elif [[ ${#INDENT} -gt 0 ]]; then
+	JQ_INDENT="--indent ${#INDENT}"
+else
+	JQ_INDENT="--indent 2"
+fi
 
-jq --arg v "$NEXT_VERSION" '.version = $v' "$PACKAGE_JSON" >"$TMPFILE"
-mv "$TMPFILE" "$PACKAGE_JSON"
-trap - EXIT
+# Update version field, preserving formatting
+# shellcheck disable=SC2086
+jq $JQ_INDENT --arg v "$NEXT_VERSION" '.version = $v' "$PACKAGE_JSON" |
+	write_file_atomic "$PACKAGE_JSON"
 
 # Verify the write
 ACTUAL=$(jq -r '.version' "$PACKAGE_JSON")

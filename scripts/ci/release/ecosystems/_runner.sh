@@ -24,7 +24,16 @@ source "$LIB_DIR/log.sh"
 : "${ECOSYSTEMS:?ECOSYSTEMS is required}"
 : "${ECOSYSTEM_CONFIG:={}}"
 
+# Validate NEXT_VERSION is a valid semver string (defense-in-depth)
+if [[ ! "$NEXT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+	log_error "NEXT_VERSION is not valid semver: $NEXT_VERSION"
+	exit 1
+fi
+
 export NEXT_VERSION
+
+# Allowlist of supported ecosystem identifiers
+ALLOWED_ECOSYSTEMS="node rust python ruby swift dart kotlin"
 
 # Validate ecosystem config JSON upfront
 if ! echo "$ECOSYSTEM_CONFIG" | jq empty 2>/dev/null; then
@@ -45,16 +54,17 @@ for ecosystem in "${ECOSYSTEM_LIST[@]}"; do
 	ecosystem=$(echo "$ecosystem" | xargs)
 	[[ -z "$ecosystem" ]] && continue
 
-	if [[ "$ecosystem" =~ [/\\] || "$ecosystem" == *..* ]]; then
-		log_error "Invalid ecosystem identifier: $ecosystem"
+	if [[ ! " $ALLOWED_ECOSYSTEMS " == *" $ecosystem "* ]]; then
+		log_error "Unknown ecosystem: $ecosystem (allowed: $ALLOWED_ECOSYSTEMS)"
 		FAILED=1
 		continue
 	fi
 
 	SCRIPT="$SCRIPT_DIR/${ecosystem}.sh"
 
+	# Defense-in-depth: verify the script file exists even after allowlist
 	if [[ ! -f "$SCRIPT" ]]; then
-		log_error "Unknown ecosystem: $ecosystem (no script at $SCRIPT)"
+		log_error "Ecosystem script missing: $SCRIPT"
 		FAILED=1
 		continue
 	fi

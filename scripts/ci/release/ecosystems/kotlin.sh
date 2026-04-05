@@ -18,6 +18,8 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/fs.sh
+source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:={}}"
@@ -31,13 +33,9 @@ fi
 
 log_info "[kotlin] Updating $GRADLE → $NEXT_VERSION"
 
-# Portable in-place edit via temp file
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
 # Whitespace-tolerant: handles indented lines and variable spacing
-sed "s|^[[:space:]]*version[[:space:]]*=[[:space:]]*\"[^\"]*\"|version = \"$NEXT_VERSION\"|" "$GRADLE" >"$TMPFILE"
-mv "$TMPFILE" "$GRADLE"
-trap - EXIT
+sed "s|^[[:space:]]*version[[:space:]]*=[[:space:]]*\"[^\"]*\"|version = \"$NEXT_VERSION\"|" "$GRADLE" |
+	write_file_atomic "$GRADLE"
 
 # Verify the write
 ACTUAL=$(awk -F'"' '/version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$GRADLE")

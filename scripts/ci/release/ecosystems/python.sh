@@ -20,6 +20,8 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/fs.sh
+source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:={}}"
@@ -33,7 +35,7 @@ INIT_FILE=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.init // ""')
 
 if ! python3 -c 'import tomlkit' 2>/dev/null; then
 	log_info "[python] Installing tomlkit..."
-	pip install --quiet tomlkit
+	pip install --quiet 'tomlkit>=0.13,<1'
 fi
 
 # =============================================================================
@@ -100,15 +102,11 @@ fi
 
 log_info "[python] Updating $INIT_FILE → $NEXT_VERSION"
 
-# Portable in-place edit via temp file
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
-sed "s|^__version__ = .*|__version__ = \"$NEXT_VERSION\"|" "$INIT_FILE" >"$TMPFILE"
-mv "$TMPFILE" "$INIT_FILE"
-trap - EXIT
+sed "s|^__version__[[:space:]]*=.*|__version__ = \"$NEXT_VERSION\"|" "$INIT_FILE" |
+	write_file_atomic "$INIT_FILE"
 
 # Verify the write
-ACTUAL=$(awk -F'"' '/__version__/ {print $2; exit}' "$INIT_FILE")
+ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$INIT_FILE")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[python] __init__.py verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

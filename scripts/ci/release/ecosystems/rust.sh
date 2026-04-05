@@ -19,6 +19,8 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/fs.sh
+source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:={}}"
@@ -35,29 +37,22 @@ log_info "[rust] Updating $CARGO_TOML → $NEXT_VERSION"
 # Update version in [workspace.package] or [package] section only.
 # The awk script tracks which TOML section we're in and only replaces
 # the version line when inside [package] or [workspace.package].
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
-
+# Portable awk: avoid ERE (workspace\.)? which fails on BSD awk
 awk -v new_version="$NEXT_VERSION" '
-/^\[(workspace\.)?package\]/ { in_package=1 }
-/^\[/ && !/^\[(workspace\.)?package\]/ { in_package=0 }
+/^\[package\]/ || /^\[workspace\.package\]/ { in_package=1 }
+/^\[/ && !/^\[package\]/ && !/^\[workspace\.package\]/ { in_package=0 }
 in_package && /^version[[:space:]]*=/ {
 	print "version = \"" new_version "\""
 	next
 }
 { print }
-' "$CARGO_TOML" >"$TMPFILE"
-
-mv "$TMPFILE" "$CARGO_TOML"
-trap - EXIT
+' "$CARGO_TOML" | write_file_atomic "$CARGO_TOML"
 
 # Verify the write
-ACTUAL=$(awk '
-/^\[(workspace\.)?package\]/ { in_pkg=1 }
-/^\[/ && !/^\[(workspace\.)?package\]/ { in_pkg=0 }
-in_pkg && /^version[[:space:]]*=/ {
-	gsub(/.*"/, "", $0); gsub(/".*/, "", $0); print; exit
-}
+ACTUAL=$(awk -F'"' '
+/^\[package\]/ || /^\[workspace\.package\]/ { in_pkg=1 }
+/^\[/ && !/^\[package\]/ && !/^\[workspace\.package\]/ { in_pkg=0 }
+in_pkg && /^version[[:space:]]*=/ { print $2; exit }
 ' "$CARGO_TOML")
 
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then

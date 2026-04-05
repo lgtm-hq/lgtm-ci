@@ -18,6 +18,8 @@ LIB_DIR="$SCRIPT_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/fs.sh
+source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEM_CONFIG_JSON:={}}"
@@ -26,7 +28,10 @@ VERSION_SWIFT=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '."version-swift" // ""')
 
 # Auto-detect Version.swift if not configured
 if [[ -z "$VERSION_SWIFT" ]]; then
-	mapfile -t MATCHES < <(find . -path '*/Sources/*/Version.swift' 2>/dev/null)
+	MATCHES=()
+	while IFS= read -r match; do
+		MATCHES+=("$match")
+	done < <(find . -path '*/Sources/*/Version.swift' 2>/dev/null)
 	if [[ ${#MATCHES[@]} -eq 0 ]]; then
 		log_error "[swift] No Version.swift found and none configured"
 		exit 1
@@ -54,17 +59,13 @@ log_info "[swift] Updating $VERSION_SWIFT → $NEXT_VERSION"
 #   static let version_string = "1.2.3"
 # Uses awk to replace only the first match, avoiding accidental changes
 # to unrelated constants in the same file.
-TMPFILE=$(mktemp)
-trap 'rm -f "$TMPFILE"' EXIT
 awk -v ver="$NEXT_VERSION" '
 !done && /static let [a-zA-Z_][a-zA-Z0-9_]* = "/ {
 	sub(/"[^"]*"/, "\"" ver "\"")
 	done = 1
 }
 { print }
-' "$VERSION_SWIFT" >"$TMPFILE"
-mv "$TMPFILE" "$VERSION_SWIFT"
-trap - EXIT
+' "$VERSION_SWIFT" | write_file_atomic "$VERSION_SWIFT"
 
 # Verify the write (take first match only)
 ACTUAL=$(awk -F'"' '/static let .* = "/ {print $2; exit}' "$VERSION_SWIFT")
