@@ -127,6 +127,7 @@ jobs:
           ref: ${{ steps.tooling.outputs.ref }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
+          persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Guard release commit
@@ -218,17 +219,26 @@ jobs:
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
           && inputs.version-update-script != ''
+        id: validate-script
         shell: bash
         env:
-          SCRIPT_PATH: ${{ inputs.version-update-script }}
+          RAW_SCRIPT_PATH: ${{ inputs.version-update-script }}
         run: |
-          if [[ ! -f "$SCRIPT_PATH" ]]; then
-            echo "::error::version-update-script not found: $SCRIPT_PATH"
+          if [[ ! -f "$RAW_SCRIPT_PATH" ]]; then
+            echo "::error::version-update-script not found: $RAW_SCRIPT_PATH"
             exit 1
           fi
-          if [[ ! -x "$SCRIPT_PATH" ]]; then
-            chmod +x "$SCRIPT_PATH"
+          # Canonicalize and verify the script is inside the workspace
+          RESOLVED=$(cd "$(dirname "$RAW_SCRIPT_PATH")" && pwd -P)/$(basename "$RAW_SCRIPT_PATH")
+          WORKSPACE=$(cd "$GITHUB_WORKSPACE" && pwd -P)
+          if [[ "$RESOLVED" != "$WORKSPACE"/* ]]; then
+            echo "::error::version-update-script is outside the workspace: $RESOLVED"
+            exit 1
           fi
+          if [[ ! -x "$RESOLVED" ]]; then
+            chmod +x "$RESOLVED"
+          fi
+          echo "resolved=$RESOLVED" >> "$GITHUB_OUTPUT"
 
       - name: Run repo-specific version update script
         # yamllint disable-line rule:line-length
@@ -240,8 +250,7 @@ jobs:
         shell: bash
         env:
           NEXT_VERSION: ${{ steps.version.outputs.next-version }}
-          # yamllint disable-line rule:line-length
-          SCRIPT_PATH: ${{ inputs.version-update-script }}
+          SCRIPT_PATH: ${{ steps.validate-script.outputs.resolved }}
         run: "$SCRIPT_PATH"
 
       - name: Check for version file changes
@@ -326,6 +335,7 @@ jobs:
           ref: ${{ steps.tooling.outputs.ref }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
+          persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
       - name: Enable auto-merge
