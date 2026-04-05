@@ -228,11 +228,13 @@ jobs:
             echo "::error::version-update-script not found: $RAW_SCRIPT_PATH"
             exit 1
           fi
-          # Canonicalize and verify the script is inside the workspace
-          RESOLVED=$(cd "$(dirname "$RAW_SCRIPT_PATH")" && pwd -P)/$(basename "$RAW_SCRIPT_PATH")
-          WORKSPACE=$(cd "$GITHUB_WORKSPACE" && pwd -P)
+          # Fully canonicalize the script path (resolves symlinks too) so
+          # a symlink inside the repo can't point at a file outside the
+          # workspace.
+          RESOLVED=$(readlink -f -- "$RAW_SCRIPT_PATH")
+          WORKSPACE=$(readlink -f -- "$GITHUB_WORKSPACE")
           if [[ "$RESOLVED" != "$WORKSPACE"/* ]]; then
-            echo "::error::version-update-script is outside the workspace: $RESOLVED"
+            echo "::error::version-update-script resolves outside the workspace: $RESOLVED"
             exit 1
           fi
           if [[ ! -x "$RESOLVED" ]]; then
