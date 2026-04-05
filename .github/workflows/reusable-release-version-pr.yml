@@ -211,6 +211,25 @@ jobs:
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
 
+      - name: Validate version update script
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.version-update-script != ''
+        shell: bash
+        env:
+          SCRIPT_PATH: ${{ inputs.version-update-script }}
+        run: |
+          if [[ ! -f "$SCRIPT_PATH" ]]; then
+            echo "::error::version-update-script not found: $SCRIPT_PATH"
+            exit 1
+          fi
+          if [[ ! -x "$SCRIPT_PATH" ]]; then
+            chmod +x "$SCRIPT_PATH"
+          fi
+
       - name: Run repo-specific version update script
         # yamllint disable-line rule:line-length
         if: >-
@@ -221,7 +240,9 @@ jobs:
         shell: bash
         env:
           NEXT_VERSION: ${{ steps.version.outputs.next-version }}
-        run: ${{ inputs.version-update-script }}
+          # yamllint disable-line rule:line-length
+          SCRIPT_PATH: ${{ inputs.version-update-script }}
+        run: "$SCRIPT_PATH"
 
       - name: Check for version file changes
         # yamllint disable-line rule:line-length
