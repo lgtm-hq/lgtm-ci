@@ -193,9 +193,11 @@ lgtm-ci uses [semantic versioning](https://semver.org/) with
 | `@v1.2.3` | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1.2.3` | Pinned exact version |
 | `@main`   | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main`   | Latest, not for prod |
 
-Releases are automated — every push to `main` with releasable commits
-(`feat:`, `fix:`, etc.) creates a new tagged release and updates the
-floating major version tag.
+Releases are automated and PR-gated. Pushes to `main` with releasable
+commits (`feat:`, `fix:`, etc.) trigger a release PR for human review;
+merging that PR creates the tagged release and updates the floating
+major version tag. See [Two-stage release model](#two-stage-release-model)
+below for how the two workflows fit together.
 
 ### Two-stage release model
 
