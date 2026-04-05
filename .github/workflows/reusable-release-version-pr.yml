@@ -263,6 +263,9 @@ jobs:
           && steps.version.outputs.release-needed == 'true'
         id: changes
         shell: bash
+        env:
+          # yamllint disable-line rule:line-length
+          EXPECT_VERSION_FILES: ${{ (inputs.ecosystems != '' || inputs.version-update-script != '') && 'true' || 'false' }}
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh
@@ -273,7 +276,7 @@ jobs:
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
-          && steps.changes.outputs.has-version-changes == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
         shell: bash
         run: rm -rf .lgtm-ci-tooling
 
@@ -283,7 +286,7 @@ jobs:
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
-          && steps.changes.outputs.has-version-changes == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
         id: create-pr
         # yamllint disable-line rule:line-length
         uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8
