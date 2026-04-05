@@ -71,7 +71,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
-      group: release-version-pr-${{ github.repository }}
+      # Distinct from the caller's workflow-level group to avoid
+      # a self-deadlock when a same-repo caller also serializes on
+      # "release-version-pr-${repo}".
+      group: reusable-release-version-pr-${{ github.repository }}
       cancel-in-progress: false
     permissions:
       contents: write
