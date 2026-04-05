@@ -143,7 +143,10 @@ write_file_atomic() {
 		rm -f "$tmpfile"
 		return 1
 	fi
-	mv "$tmpfile" "$dest"
+	mv "$tmpfile" "$dest" || {
+		rm -f "$tmpfile"
+		return 1
+	}
 }
 
 # =============================================================================
