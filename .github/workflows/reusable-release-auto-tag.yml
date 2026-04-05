@@ -34,7 +34,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:
-      group: release-auto-tag-${{ github.repository }}
+      # Distinct from the caller's workflow-level group to avoid
+      # a self-deadlock when a same-repo caller also serializes on
+      # "release-auto-tag-${repo}".
+      group: reusable-release-auto-tag-${{ github.repository }}
       cancel-in-progress: false
     permissions:
       contents: write
