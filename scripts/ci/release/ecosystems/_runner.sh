@@ -69,15 +69,22 @@ for ecosystem in "${ECOSYSTEM_LIST[@]}"; do
 		continue
 	fi
 
-	# Extract per-ecosystem config from JSON and export as env vars
-	# Each ecosystem script reads its own ECOSYSTEM_* vars
-	CONFIG_JSON=$(echo "$ECOSYSTEM_CONFIG" | jq -r --arg eco "$ecosystem" '.[$eco] // empty')
+	# Extract per-ecosystem config from JSON and export as env vars.
+	# Each ecosystem script reads its own ECOSYSTEM_CONFIG_JSON var.
+	# The value must be a JSON object — reject any other type.
+	CONFIG_TYPE=$(echo "$ECOSYSTEM_CONFIG" | jq -r --arg eco "$ecosystem" '.[$eco] | type')
 
-	if [[ -n "$CONFIG_JSON" ]]; then
+	if [[ "$CONFIG_TYPE" == "null" ]]; then
+		export ECOSYSTEM_CONFIG_JSON="{}"
+	elif [[ "$CONFIG_TYPE" == "object" ]]; then
+		CONFIG_JSON=$(echo "$ECOSYSTEM_CONFIG" | jq -c --arg eco "$ecosystem" '.[$eco]')
 		log_info "[$ecosystem] Config overrides: $CONFIG_JSON"
 		export ECOSYSTEM_CONFIG_JSON="$CONFIG_JSON"
 	else
-		export ECOSYSTEM_CONFIG_JSON="{}"
+		BAD_VALUE=$(echo "$ECOSYSTEM_CONFIG" | jq -c --arg eco "$ecosystem" '.[$eco]')
+		log_error "[$ecosystem] Config must be a JSON object, got $CONFIG_TYPE: $BAD_VALUE"
+		FAILED=1
+		continue
 	fi
 
 	log_info "[$ecosystem] Running version updater..."

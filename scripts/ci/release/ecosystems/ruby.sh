@@ -33,14 +33,24 @@ VERSION_RB=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '."version-rb" // ""')
 # =============================================================================
 
 if [[ -z "$GEM_NAME" ]]; then
-	GEMSPEC=$(find . -maxdepth 1 -name '*.gemspec' -print -quit 2>/dev/null || true)
-	if [[ -n "$GEMSPEC" ]]; then
-		GEM_NAME=$(basename "$GEMSPEC" .gemspec)
-		log_info "[ruby] Auto-detected gem name: $GEM_NAME"
-	else
+	GEMSPECS=()
+	while IFS= read -r spec; do
+		GEMSPECS+=("$spec")
+	done < <(find . -maxdepth 1 -name '*.gemspec' 2>/dev/null)
+
+	if [[ ${#GEMSPECS[@]} -eq 0 ]]; then
 		log_error "[ruby] No gem name configured and no .gemspec found"
 		exit 1
 	fi
+	if [[ ${#GEMSPECS[@]} -gt 1 ]]; then
+		log_error "[ruby] Multiple .gemspec files found — set 'gem' in config:"
+		for spec in "${GEMSPECS[@]}"; do
+			log_error "  $spec"
+		done
+		exit 1
+	fi
+	GEM_NAME=$(basename "${GEMSPECS[0]}" .gemspec)
+	log_info "[ruby] Auto-detected gem name: $GEM_NAME"
 fi
 
 # =============================================================================

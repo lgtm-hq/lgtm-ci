@@ -33,8 +33,8 @@ fi
 
 log_info "[kotlin] Updating $GRADLE → $NEXT_VERSION"
 
-# Whitespace-tolerant: handles indented lines and variable spacing
-sed "s|^[[:space:]]*version[[:space:]]*=[[:space:]]*\"[^\"]*\"|version = \"$NEXT_VERSION\"|" "$GRADLE" |
+# Whitespace-tolerant, preserves leading indentation via capture group
+sed -E "s|^([[:space:]]*)version[[:space:]]*=[[:space:]]*\"[^\"]*\"|\\1version = \"$NEXT_VERSION\"|" "$GRADLE" |
 	write_file_atomic "$GRADLE"
 
 # Verify the write

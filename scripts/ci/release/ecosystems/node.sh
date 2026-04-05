@@ -31,10 +31,18 @@ if [[ ! -f "$PACKAGE_JSON" ]]; then
 	exit 1
 fi
 
+# Ensure a version field already exists; don't silently add one
+if ! jq -e 'has("version")' "$PACKAGE_JSON" >/dev/null; then
+	log_error "[node] $PACKAGE_JSON has no 'version' field to update (expected $NEXT_VERSION)"
+	exit 1
+fi
+
 log_info "[node] Updating $PACKAGE_JSON → $NEXT_VERSION"
 
-# Detect existing indentation to preserve formatting
-INDENT=$(awk '/^[\t ]/ { match($0, /^[\t ]+/); print substr($0, RSTART, RLENGTH); exit }' "$PACKAGE_JSON")
+# Detect existing indentation by looking at the first character of
+# line 2 (the first top-level key in a well-formed package.json).
+INDENT=$(awk 'NR == 2 { match($0, /^[[:space:]]+/); if (RLENGTH > 0) print substr($0, 1, RLENGTH); exit }' "$PACKAGE_JSON")
+
 if [[ "$INDENT" == $'\t'* ]]; then
 	JQ_INDENT="--tab"
 elif [[ ${#INDENT} -gt 0 ]]; then

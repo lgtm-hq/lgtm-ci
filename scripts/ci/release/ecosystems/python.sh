@@ -30,21 +30,18 @@ PYPROJECT=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.pyproject // "pyproject.toml
 INIT_FILE=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.init // ""')
 
 # =============================================================================
-# Ensure tomlkit is available
-# =============================================================================
-
-if ! python3 -c 'import tomlkit' 2>/dev/null; then
-	log_info "[python] Installing tomlkit..."
-	pip install --quiet 'tomlkit>=0.13,<1'
-fi
-
-# =============================================================================
 # Update pyproject.toml
 # =============================================================================
 
 if [[ ! -f "$PYPROJECT" ]]; then
 	log_error "pyproject.toml not found at: $PYPROJECT"
 	exit 1
+fi
+
+# Ensure tomlkit is available (only after confirming we need it)
+if ! python3 -c 'import tomlkit' 2>/dev/null; then
+	log_info "[python] Installing tomlkit..."
+	python3 -m pip install --quiet 'tomlkit>=0.13,<1'
 fi
 
 log_info "[python] Updating $PYPROJECT → $NEXT_VERSION"
