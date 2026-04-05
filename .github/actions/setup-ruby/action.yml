@@ -53,7 +53,7 @@ runs:
 
     - name: Setup Ruby
       # Pinned to SHA for supply chain security
-      uses: ruby/setup-ruby@a4effe49ee8ee5b8224f9b18fb5c7d6ac6239857 # v1.221.0
+      uses: ruby/setup-ruby@32110d4e311bd8996b2a82bf2a43b714ccc91777 # v1.221.0
       with:
         ruby-version: ${{ inputs.ruby-version }}
         bundler: ${{ inputs.bundler-version }}
