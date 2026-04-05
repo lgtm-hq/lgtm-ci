@@ -52,7 +52,7 @@ runs:
     - name: Generate SBOM
       id: generate
       # Pinned to SHA for supply chain security
-      uses: anchore/sbom-action@55dc4ee22412511ee8c3e6b81fb5b279dd5567c5 # v0.17.9
+      uses: anchore/sbom-action@df80a981bc6edbc4e220a492d3cbe9f5547a6e75 # v0.17.9
       with:
         path: ${{ inputs.target-type == 'dir' && inputs.target || '' }}
         image: ${{ inputs.target-type == 'image' && inputs.target || '' }}

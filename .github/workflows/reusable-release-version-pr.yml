@@ -196,7 +196,7 @@ jobs:
           && steps.version.outputs.release-needed == 'true'
           && contains(format(',{0},', inputs.ecosystems), ',rust,')
         # yamllint disable-line rule:line-length
-        uses: dtolnay/rust-toolchain@a54c7afe936fefeb4456b2dd8068152669aa8211 # stable
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: stable
 
