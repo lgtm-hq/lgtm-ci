@@ -3,7 +3,7 @@
 # Purpose: Aggregator for package publishing utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/publish.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/publish.sh"
 #
 # This aggregator sources all publishing-related libraries:
 #   - publish/version.sh (version extraction)
@@ -16,7 +16,7 @@
 readonly _LGTM_CI_PUBLISH_LOADED=1
 
 # Determine library directory relative to this file
-_LGTM_CI_PUBLISH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LGTM_CI_PUBLISH_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 # Source log.sh first if not already loaded (needed by publish modules)
 if [[ -z "${_LGTM_CI_LOG_LOADED:-}" ]]; then

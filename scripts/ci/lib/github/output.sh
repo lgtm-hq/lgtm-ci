@@ -3,7 +3,7 @@
 # Purpose: GitHub Actions output and environment variable helpers
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/output.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/output.sh"
 #   set_github_output "version" "1.0.0"
 
 # Prevent multiple sourcing

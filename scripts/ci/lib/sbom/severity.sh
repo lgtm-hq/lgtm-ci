@@ -3,7 +3,7 @@
 # Purpose: Vulnerability severity utilities (conversion, comparison)
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/severity.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/severity.sh"
 #   severity_to_number "critical"
 
 # Prevent multiple sourcing

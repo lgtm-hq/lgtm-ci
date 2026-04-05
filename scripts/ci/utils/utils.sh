@@ -6,14 +6,14 @@
 # For granular imports, source individual files from lib/ directly.
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/utils.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/utils.sh"
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_UTILS_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_UTILS_LOADED=1
 
 # Determine library directory
-_LGTM_CI_UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LGTM_CI_UTILS_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 _LGTM_CI_LIB_DIR="${_LGTM_CI_UTILS_DIR}/../lib"
 
 # Source all library modules

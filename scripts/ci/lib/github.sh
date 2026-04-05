@@ -3,14 +3,14 @@
 # Purpose: Aggregator for GitHub Actions utilities (sources all github/* modules)
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/github.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/github.sh"
 #   # Now all github functions are available
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_GITHUB_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_GITHUB_LOADED=1
 
-_LGTM_CI_GITHUB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/github" && pwd)"
+_LGTM_CI_GITHUB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/github" && pwd)"
 
 # Source all GitHub modules in dependency order
 [[ -f "$_LGTM_CI_GITHUB_DIR/env.sh" ]] && source "$_LGTM_CI_GITHUB_DIR/env.sh"

@@ -3,7 +3,7 @@
 # Purpose: Platform detection utilities for CI scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/platform.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/platform.sh"
 #   platform=$(detect_platform)
 
 # Prevent multiple sourcing

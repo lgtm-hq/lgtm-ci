@@ -3,7 +3,7 @@
 # Purpose: Common test result formatting utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/common.sh"
 #   format_test_summary
 
 # Prevent multiple sourcing

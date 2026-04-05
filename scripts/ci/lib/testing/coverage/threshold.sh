@@ -3,7 +3,7 @@
 # Purpose: Coverage threshold checking utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/threshold.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/threshold.sh"
 #   check_coverage_threshold 85.5 80
 
 # Prevent multiple sourcing

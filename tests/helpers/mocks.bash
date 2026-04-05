@@ -114,6 +114,8 @@ setup_mock_git_repo() {
 		git init -q
 		git config user.email "test@test.com"
 		git config user.name "Test User"
+		git config commit.gpgsign false
+		git config tag.gpgsign false
 
 		# Create initial commit
 		echo "initial" >README.md

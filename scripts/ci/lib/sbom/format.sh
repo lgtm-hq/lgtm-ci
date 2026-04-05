@@ -3,7 +3,7 @@
 # Purpose: SBOM format utilities (extension, validation)
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/format.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/format.sh"
 #   get_sbom_extension "cyclonedx-json"
 
 # Prevent multiple sourcing

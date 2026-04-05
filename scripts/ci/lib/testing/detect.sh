@@ -3,7 +3,7 @@
 # Purpose: Test runner and coverage format detection utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/detect.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/detect.sh"
 #   runner=$(detect_test_runner)
 
 # Prevent multiple sourcing

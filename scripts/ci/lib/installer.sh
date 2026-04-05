@@ -3,7 +3,7 @@
 # Purpose: Aggregator for installer framework (sources all installer/* modules)
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/installer.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/installer.sh"
 #   installer_init
 #   installer_parse_args "$@"
 
@@ -11,7 +11,7 @@
 [[ -n "${_LGTM_CI_INSTALLER_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_INSTALLER_LOADED=1
 
-_LGTM_CI_INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/installer" && pwd)"
+_LGTM_CI_INSTALLER_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/installer" && pwd)"
 
 # Source all installer modules in dependency order
 # Core module is critical - warn if missing

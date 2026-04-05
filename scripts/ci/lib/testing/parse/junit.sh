@@ -3,7 +3,7 @@
 # Purpose: JUnit XML result parsing utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/junit.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/junit.sh"
 #   parse_junit_xml "results.xml"
 
 # Prevent multiple sourcing

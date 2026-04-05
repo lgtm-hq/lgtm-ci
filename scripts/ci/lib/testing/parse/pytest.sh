@@ -3,7 +3,7 @@
 # Purpose: Pytest result parsing utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/pytest.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/pytest.sh"
 #   parse_pytest_json "results.json"
 
 # Prevent multiple sourcing

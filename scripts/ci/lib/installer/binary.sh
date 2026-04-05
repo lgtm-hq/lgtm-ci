@@ -3,7 +3,7 @@
 # Purpose: Binary download and installation utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/binary.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/binary.sh"
 #   installer_download_binary "url" "checksum_url" "tar.gz" "binary_name"
 
 # Prevent multiple sourcing
@@ -11,7 +11,7 @@
 readonly _LGTM_CI_INSTALLER_BINARY_LOADED=1
 
 # Source shared libraries
-_LGTM_CI_INSTALLER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_LGTM_CI_INSTALLER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." && pwd)"
 
 # Source logging (with fallbacks for standalone use)
 if [[ -f "$_LGTM_CI_INSTALLER_LIB_DIR/log.sh" ]]; then

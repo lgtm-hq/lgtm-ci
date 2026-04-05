@@ -3,7 +3,7 @@
 # Purpose: Logging utilities for CI scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/log.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/log.sh"
 #   log_info "Starting process..."
 
 # Prevent multiple sourcing

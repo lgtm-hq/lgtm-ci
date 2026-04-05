@@ -3,7 +3,7 @@
 # Purpose: Version checking utilities for installer scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/version.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/version.sh"
 #   if installer_check_version "tool" "1.0.0"; then echo "Already installed"; fi
 
 # Prevent multiple sourcing

@@ -3,7 +3,7 @@
 # Purpose: GitHub Actions environment detection utilities
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/env.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/env.sh"
 #   if is_ci; then echo "Running in CI"; fi
 
 # Prevent multiple sourcing

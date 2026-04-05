@@ -20,7 +20,7 @@ set -euo pipefail
 : "${MAX_WAIT:=600}"
 : "${TEST_PYPI:=false}"
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/publish.sh"
 

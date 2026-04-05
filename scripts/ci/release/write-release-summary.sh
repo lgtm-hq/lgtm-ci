@@ -18,7 +18,7 @@
 set -euo pipefail
 
 # Source libraries
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 
 # shellcheck source=../lib/github.sh

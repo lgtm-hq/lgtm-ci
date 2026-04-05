@@ -10,7 +10,7 @@
 readonly _LGTM_CI_TESTING_COVERAGE_LOADED=1
 
 # Get directory of this script
-_LGTM_CI_TESTING_COV_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LGTM_CI_TESTING_COV_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 # Source all coverage sub-modules in dependency order
 # shellcheck source=./coverage/extract.sh

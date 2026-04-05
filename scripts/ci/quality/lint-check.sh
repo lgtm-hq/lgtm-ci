@@ -15,7 +15,7 @@ set -euo pipefail
 : "${STEP:?STEP is required}"
 
 # Source shared libraries if available
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 
 if [[ -f "$LIB_DIR/log.sh" ]]; then

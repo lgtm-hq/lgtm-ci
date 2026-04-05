@@ -3,7 +3,7 @@
 # Purpose: File system utilities for CI scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/fs.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/fs.sh"
 #   ensure_directory "./dist"
 
 # Prevent multiple sourcing
@@ -11,7 +11,7 @@
 readonly _LGTM_CI_FS_LOADED=1
 
 # Source logging if available
-_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
 	# shellcheck source=log.sh
 	source "$_LGTM_CI_LIB_DIR/log.sh"
@@ -131,9 +131,36 @@ create_temp_dir() {
 	echo "$tmpdir"
 }
 
+# Atomic file write via temp file. Runs the given command with its
+# stdout redirected to a tmpfile in dest's directory, and only moves
+# the tmpfile over dest if the command exits 0. If the producer fails
+# (or is killed mid-stream), the partial tmpfile is discarded and
+# write_file_atomic returns non-zero. This avoids the pipe-based
+# variant, where partial producer output could be committed before
+# set -o pipefail could abort the caller.
+# Usage: write_file_atomic <dest> <command> [args...]
+# Example: write_file_atomic foo.txt sed "s/a/b/" input.txt
+write_file_atomic() {
+	local dest="$1"
+	shift
+	local dest_dir tmpfile
+	dest_dir=$(dirname "$dest")
+	# Create tmpfile in the same directory as dest so mv is atomic
+	# (both paths must be on the same filesystem).
+	tmpfile=$(mktemp "${dest_dir}/.write_file_atomic.XXXXXX") || return 1
+	if ! "$@" >"$tmpfile"; then
+		rm -f "$tmpfile"
+		return 1
+	fi
+	mv "$tmpfile" "$dest" || {
+		rm -f "$tmpfile"
+		return 1
+	}
+}
+
 # =============================================================================
 # Export functions
 # =============================================================================
 export -f command_exists require_command
 export -f ensure_directory require_file check_file_exists check_dir_exists
-export -f create_temp_dir
+export -f create_temp_dir write_file_atomic

@@ -10,7 +10,7 @@
 readonly _LGTM_CI_DOCKER_LOADED=1
 
 # Get the directory of this script
-DOCKER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+DOCKER_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 # Source all docker sub-libraries in dependency order
 # shellcheck source=./docker/core.sh

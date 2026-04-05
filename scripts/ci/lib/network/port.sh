@@ -3,7 +3,7 @@
 # Purpose: Network port utilities for CI scripts
 #
 # Usage:
-#   source "$(dirname "${BASH_SOURCE[0]}")/port.sh"
+#   source "$(dirname "${BASH_SOURCE:-$0}")/port.sh"
 #   if port_available 3000; then echo "Port is free"; fi
 
 # Prevent multiple sourcing
@@ -11,7 +11,7 @@
 readonly _LGTM_CI_NETWORK_PORT_LOADED=1
 
 # Source logging if available
-_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." && pwd)"
 if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
 	# shellcheck source=../log.sh
 	source "$_LGTM_CI_LIB_DIR/log.sh"
