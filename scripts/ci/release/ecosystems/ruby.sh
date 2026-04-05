@@ -97,13 +97,17 @@ if command -v bundle >/dev/null 2>&1; then
 	bundle lock --update "$GEM_NAME" 2>&1 | tail -5
 else
 	log_warn "[ruby] bundle not found — using regex fallback for Gemfile.lock"
+	# Escape regex metacharacters in GEM_NAME for safe use in sed/grep patterns
+	# (handles gems with dots or other special chars)
+	ESC_GEM_NAME=$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')
 	# Replace version in PATH spec and CHECKSUMS sections
-	sed "s/\(^\|[[:space:]]\)${GEM_NAME} ([0-9][0-9.]*[0-9])/\1${GEM_NAME} (${NEXT_VERSION})/g" \
+	sed "s/\(^\|[[:space:]]\)${ESC_GEM_NAME} ([0-9][0-9.]*[0-9])/\1${GEM_NAME} (${NEXT_VERSION})/g" \
 		Gemfile.lock | write_file_atomic Gemfile.lock
 fi
 
 # Verify Gemfile.lock contains the updated version
-if ! grep -qE "(^|[[:space:]])${GEM_NAME} \(${NEXT_VERSION}\)" Gemfile.lock; then
+ESC_GEM_NAME=${ESC_GEM_NAME:-$(printf '%s' "$GEM_NAME" | sed 's/[][\\.*^$/]/\\&/g')}
+if ! grep -qE "(^|[[:space:]])${ESC_GEM_NAME} \(${NEXT_VERSION}\)" Gemfile.lock; then
 	log_error "[ruby] Gemfile.lock verification failed: ${GEM_NAME} (${NEXT_VERSION}) not found"
 	exit 1
 fi
