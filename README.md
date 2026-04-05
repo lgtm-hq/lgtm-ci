@@ -141,25 +141,26 @@ steps:
 
 ### Reusable Workflows
 
-| Workflow                        | Description                          |
-| ------------------------------- | ------------------------------------ |
-| `reusable-quality.yml`          | Lintro + shellcheck + action pinning |
-| `reusable-sbom.yml`             | SBOM generation with Cosign signing  |
-| `reusable-release-auto-tag.yml` | Automated release tagging            |
-| `reusable-publish-pypi.yml`     | PyPI publishing with OIDC            |
-| `reusable-publish-npm.yml`      | npm publishing                       |
-| `reusable-publish-gem.yml`      | RubyGems publishing                  |
-| `reusable-publish-homebrew.yml` | Homebrew formula publishing          |
-| `reusable-deploy-pages.yml`     | GitHub Pages deployment              |
-| `reusable-docker.yml`           | Docker build and publish             |
-| `reusable-coverage.yml`         | Test coverage collection             |
-| `reusable-test-python.yml`      | Python test execution                |
-| `reusable-test-node.yml`        | Node.js test execution               |
-| `reusable-test-shell.yml`       | Shell script testing with BATS       |
-| `reusable-test-e2e.yml`         | E2E testing with Playwright          |
-| `reusable-test-e2e-matrix.yml`  | Matrix E2E testing                   |
-| `reusable-pr-auto-assign.yml`   | PR auto-assignment                   |
-| `reusable-pr-labeler.yml`       | PR auto-labeling                     |
+| Workflow                          | Description                          |
+| --------------------------------- | ------------------------------------ |
+| `reusable-quality.yml`            | Lintro + shellcheck + action pinning |
+| `reusable-sbom.yml`               | SBOM generation with Cosign signing  |
+| `reusable-release-version-pr.yml` | Release version PR with changelog    |
+| `reusable-release-auto-tag.yml`   | Tag + GitHub release on merge        |
+| `reusable-publish-pypi.yml`       | PyPI publishing with OIDC            |
+| `reusable-publish-npm.yml`        | npm publishing                       |
+| `reusable-publish-gem.yml`        | RubyGems publishing                  |
+| `reusable-publish-homebrew.yml`   | Homebrew formula publishing          |
+| `reusable-deploy-pages.yml`       | GitHub Pages deployment              |
+| `reusable-docker.yml`             | Docker build and publish             |
+| `reusable-coverage.yml`           | Test coverage collection             |
+| `reusable-test-python.yml`        | Python test execution                |
+| `reusable-test-node.yml`          | Node.js test execution               |
+| `reusable-test-shell.yml`         | Shell script testing with BATS       |
+| `reusable-test-e2e.yml`           | E2E testing with Playwright          |
+| `reusable-test-e2e-matrix.yml`    | Matrix E2E testing                   |
+| `reusable-pr-auto-assign.yml`     | PR auto-assignment                   |
+| `reusable-pr-labeler.yml`         | PR auto-labeling                     |
 
 ### Shell Libraries
 
@@ -195,6 +196,37 @@ lgtm-ci uses [semantic versioning](https://semver.org/) with
 Releases are automated — every push to `main` with releasable commits
 (`feat:`, `fix:`, etc.) creates a new tagged release and updates the
 floating major version tag.
+
+### Two-stage release model
+
+Release automation is split across two reusable workflows that work together:
+
+1. **`reusable-release-version-pr.yml`** — Runs on pushes to `main`. When
+   releasable commits land, it opens (or updates) a release PR that bumps
+   version files and updates `CHANGELOG.md`. This PR is the human-review
+   gate before a release happens.
+2. **`reusable-release-auto-tag.yml`** — Runs after the release PR merges
+   (it triggers on `CHANGELOG.md` changes). It extracts the version from
+   the release commit, creates an annotated tag, publishes a GitHub
+   release, and updates the floating major version tag.
+
+```text
+push to main
+  ↓
+version-pr workflow → opens "chore(release): version X.Y.Z" PR
+  ↓
+PR merged
+  ↓
+auto-tag workflow → creates tag + GitHub release
+```
+
+Consumers typically wire up **both** workflows. The version-pr caller
+runs on every push; the auto-tag caller runs only on pushes that touch
+`CHANGELOG.md` (i.e., the release PR merge). See
+[`.github/workflows/release-version-pr.yml`](.github/workflows/release-version-pr.yml)
+and
+[`.github/workflows/release-auto-tag.yml`](.github/workflows/release-auto-tag.yml)
+for working examples.
 
 ## 🔨 Development
 
