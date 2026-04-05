@@ -37,8 +37,10 @@ log_info "[kotlin] Updating $GRADLE → $NEXT_VERSION"
 sed -E "s|^([[:space:]]*)version[[:space:]]*=[[:space:]]*\"[^\"]*\"|\\1version = \"$NEXT_VERSION\"|" "$GRADLE" |
 	write_file_atomic "$GRADLE"
 
-# Verify the write
-ACTUAL=$(awk -F'"' '/version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$GRADLE")
+# Verify the write (anchored to start-of-line + optional indent, same
+# as the sed that wrote the root version, so nested properties like
+# foo.version are not matched)
+ACTUAL=$(awk -F'"' '/^[[:space:]]*version[[:space:]]*=[[:space:]]*"/ {print $2; exit}' "$GRADLE")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[kotlin] Verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

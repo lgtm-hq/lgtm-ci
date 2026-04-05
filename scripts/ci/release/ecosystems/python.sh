@@ -97,6 +97,13 @@ if [[ ! -f "$INIT_FILE" ]]; then
 	exit 1
 fi
 
+# Verify the file actually has a __version__ assignment before we sed it,
+# otherwise the sed is a silent no-op and we'd only catch it at verification.
+if ! grep -qE '^__version__[[:space:]]*=' "$INIT_FILE"; then
+	log_error "[python] $INIT_FILE has no __version__ assignment to update"
+	exit 1
+fi
+
 log_info "[python] Updating $INIT_FILE → $NEXT_VERSION"
 
 sed "s|^__version__[[:space:]]*=.*|__version__ = \"$NEXT_VERSION\"|" "$INIT_FILE" |

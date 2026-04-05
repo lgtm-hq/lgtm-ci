@@ -35,9 +35,10 @@ export NEXT_VERSION
 # Allowlist of supported ecosystem identifiers
 ALLOWED_ECOSYSTEMS="node rust python ruby swift dart kotlin"
 
-# Validate ecosystem config JSON upfront
-if ! echo "$ECOSYSTEM_CONFIG" | jq empty 2>/dev/null; then
-	log_error "ECOSYSTEM_CONFIG is not valid JSON: $ECOSYSTEM_CONFIG"
+# Validate ecosystem config JSON upfront — must be a JSON object
+# so per-ecosystem lookups like .[$eco] work as expected.
+if ! echo "$ECOSYSTEM_CONFIG" | jq -e 'type == "object"' >/dev/null 2>&1; then
+	log_error "ECOSYSTEM_CONFIG is not a valid JSON object: $ECOSYSTEM_CONFIG"
 	exit 1
 fi
 
