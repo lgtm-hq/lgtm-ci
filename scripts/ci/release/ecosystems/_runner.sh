@@ -22,7 +22,7 @@ source "$LIB_DIR/log.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${ECOSYSTEMS:?ECOSYSTEMS is required}"
-: "${ECOSYSTEM_CONFIG:={}}"
+: "${ECOSYSTEM_CONFIG:="{}"}"
 
 # Validate NEXT_VERSION is a valid semver string (defense-in-depth)
 if [[ ! "$NEXT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then

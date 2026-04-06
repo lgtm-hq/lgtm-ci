@@ -21,7 +21,7 @@ source "$LIB_DIR/log.sh"
 source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
-: "${ECOSYSTEM_CONFIG_JSON:={}}"
+: "${ECOSYSTEM_CONFIG_JSON:="{}"}"
 
 # Resolve paths from config or defaults
 PACKAGE_JSON=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.package // "package.json"')

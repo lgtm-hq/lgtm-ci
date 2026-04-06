@@ -24,7 +24,7 @@ source "$LIB_DIR/log.sh"
 source "$LIB_DIR/fs.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
-: "${ECOSYSTEM_CONFIG_JSON:={}}"
+: "${ECOSYSTEM_CONFIG_JSON:="{}"}"
 
 PYPROJECT=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.pyproject // "pyproject.toml"')
 INIT_FILE=$(echo "$ECOSYSTEM_CONFIG_JSON" | jq -r '.init // ""')
