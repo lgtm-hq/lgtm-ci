@@ -100,6 +100,12 @@ capture { print }
 # to get only bullet entries (lines starting with -)
 EXISTING_ENTRIES=$(echo "$EXISTING_UNRELEASED" | grep -v '^### ' | grep -v '^\[' | sed '/^[[:space:]]*$/d') || true
 
+# Strip leading H2 heading from CHANGELOG_BODY if present.
+# generate-changelog.sh outputs "## Unreleased" or "## [version] - date"
+# as the first line, but update-changelog.sh creates its own versioned
+# heading — keeping both produces duplicate H2s that violate MD024.
+CHANGELOG_BODY=$(printf '%s' "$CHANGELOG_BODY" | sed '1{/^## /d;}' | sed '/./,$!d')
+
 # If we have both existing and generated entries, combine them
 if [[ -n "$EXISTING_ENTRIES" ]] && [[ -n "$CHANGELOG_BODY" ]]; then
 	# Append existing entries under a "Previously Unreleased" sub-section

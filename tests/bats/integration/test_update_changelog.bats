@@ -114,6 +114,58 @@ run_update_changelog() {
 	}
 }
 
+@test "update-changelog: strips leading H2 from generated body (MD024 fix)" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
+
+	# Simulate what generate-changelog.sh produces when VERSION is unset:
+	# a "## Unreleased" heading followed by section content
+	run_update_changelog "1.0.0" "## Unreleased
+
+### Features
+
+- add new feature (abc1234)"
+	assert_success
+
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	# Must NOT contain a bare "## Unreleased" sibling to "## [1.0.0]"
+	# (the [Unreleased] reset section is expected, the bare one is not)
+	local bare_count
+	bare_count=$(echo "$changelog" | grep -c '^## Unreleased$') || true
+	[[ "$bare_count" -eq 0 ]] || {
+		echo "Expected 0 bare '## Unreleased' headings, found $bare_count" >&2
+		echo "$changelog" >&2
+		return 1
+	}
+
+	# Version header should appear exactly once
+	local version_count
+	version_count=$(grep -c '## \[1\.0\.0\]' "${MOCK_GIT_REPO}/CHANGELOG.md")
+	[[ "$version_count" -eq 1 ]]
+
+	# The feature entry should still be present
+	echo "$changelog" | grep -q 'add new feature'
+}
+
 # =============================================================================
 # Tests: preserve existing unreleased entries
 # =============================================================================
