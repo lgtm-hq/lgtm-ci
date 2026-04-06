@@ -21,8 +21,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.10.0] - 2026-04-05
 
-## Unreleased
-
 ### Features
 
 - **workflows**: add reusable release-version-pr with ecosystem-based version sync (#105) (8292382)
