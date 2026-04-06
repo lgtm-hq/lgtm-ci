@@ -175,7 +175,7 @@ run_ecosystem() {
 	local script="$1"
 	local dir="$2"
 	local version="${3:-9.8.7}"
-	local config="${4:-{}}"
+	local config="${4:-"{}"}"
 	NEXT_VERSION="$version" \
 		ECOSYSTEM_CONFIG_JSON="$config" \
 		run bash -c "cd '$dir' && '$ECOSYSTEMS_DIR/$script' 2>&1"
@@ -211,7 +211,7 @@ run_runner() {
 	local dir="$1"
 	local ecosystems="$2"
 	local version="${3:-9.8.7}"
-	local config="${4:-{}}"
+	local config="${4:-"{}"}"
 	NEXT_VERSION="$version" \
 		ECOSYSTEMS="$ecosystems" \
 		ECOSYSTEM_CONFIG="$config" \
@@ -321,6 +321,102 @@ run_runner() {
 	assert_success
 
 	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: auto-derives __init__.py from standard layout" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "my_app"
+	create_init_py "$BATS_TEST_TMPDIR" "my_app" "1.0.0"
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_app/__init__.py")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: auto-derives __init__.py from src layout" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "my_app"
+	# Use src/ layout instead of flat layout
+	mkdir -p "$BATS_TEST_TMPDIR/src/my_app"
+	cat >"$BATS_TEST_TMPDIR/src/my_app/__init__.py" <<EOF
+"""My app."""
+
+__version__ = "1.0.0"
+EOF
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/src/my_app/__init__.py")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: normalizes hyphenated package name (PEP 503)" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# pyproject has hyphenated name, but filesystem uses underscores
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "my-cool-pkg"
+	create_init_py "$BATS_TEST_TMPDIR" "my_cool_pkg" "1.0.0"
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_cool_pkg/__init__.py")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: skips __init__.py gracefully when none exists" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# Only pyproject.toml, no package with __version__ (lgtm-ci case)
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "lgtm-ci"
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	assert_line --partial "skipping"
+
+	# pyproject.toml version should still be updated
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/pyproject.toml" version)
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: uses config path overrides for pyproject and init" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# turbo-themes-like layout: pyproject in subdirectory, custom init path
+	mkdir -p "$BATS_TEST_TMPDIR/python/src/turbo_themes"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/python" "1.0.0" "turbo-themes"
+	cat >"$BATS_TEST_TMPDIR/python/src/turbo_themes/__init__.py" <<EOF
+"""Turbo themes."""
+
+__version__ = "1.0.0"
+EOF
+
+	local config='{"pyproject":"python/pyproject.toml","init":"python/src/turbo_themes/__init__.py"}'
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR" "9.8.7" "$config"
+	assert_success
+
+	# Verify pyproject.toml was updated
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/python/pyproject.toml" version)
+	[[ "$ACTUAL" == "9.8.7" ]]
+
+	# Verify __init__.py was updated
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/python/src/turbo_themes/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -524,6 +620,69 @@ EOF
 
 	ACTUAL=$(sed -n 's/^version: //p' "$BATS_TEST_TMPDIR/pubspec.yaml")
 	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "runner: passes ECOSYSTEM_CONFIG overrides to scripts" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# Simulate turbo-themes layout: python in a subdirectory
+	mkdir -p "$BATS_TEST_TMPDIR/python/src/turbo_themes"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/python" "1.0.0" "turbo-themes"
+	cat >"$BATS_TEST_TMPDIR/python/src/turbo_themes/__init__.py" <<EOF
+"""Turbo themes."""
+
+__version__ = "1.0.0"
+EOF
+
+	local config
+	config='{"python":{"pyproject":"python/pyproject.toml","init":"python/src/turbo_themes/__init__.py"}}'
+
+	run_runner "$BATS_TEST_TMPDIR" "python" "9.8.7" "$config"
+	assert_success
+	assert_line --partial "Config overrides:"
+
+	# Verify the config was used: pyproject in subdirectory was updated
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/python/pyproject.toml" version)
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "runner: passes gem config override to ruby" {
+	# Ruby with explicit gem name via config (no auto-detect)
+	create_gemspec "$BATS_TEST_TMPDIR" "custom-gem"
+	create_version_rb "$BATS_TEST_TMPDIR" "custom-gem" "1.0.0"
+	create_gemfile "$BATS_TEST_TMPDIR" "custom-gem"
+	create_gemfile_lock "$BATS_TEST_TMPDIR" "custom-gem" "1.0.0"
+
+	local config='{"ruby":{"gem":"custom-gem"}}'
+
+	run_runner "$BATS_TEST_TMPDIR" "ruby" "9.8.7" "$config"
+	assert_success
+
+	ACTUAL=$(awk -F'"' '/VERSION =/ {print $2; exit}' "$BATS_TEST_TMPDIR/lib/custom/gem/version.rb")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "runner: rejects non-object ECOSYSTEM_CONFIG" {
+	run bash -c "
+		cd '$BATS_TEST_TMPDIR'
+		export NEXT_VERSION='1.0.0'
+		export ECOSYSTEMS='dart'
+		export ECOSYSTEM_CONFIG='\"not-an-object\"'
+		'$ECOSYSTEMS_DIR/_runner.sh' 2>&1
+	"
+	assert_failure
+	assert_line --partial "not a valid JSON object"
+}
+
+@test "runner: rejects non-object per-ecosystem config value" {
+	create_pubspec_yaml "$BATS_TEST_TMPDIR" "1.0.0"
+
+	local config='{"dart":"string-not-object"}'
+	run_runner "$BATS_TEST_TMPDIR" "dart" "9.8.7" "$config"
+	assert_failure
+	assert_line --partial "must be a JSON object"
 }
 
 @test "runner: fails if any ecosystem fails" {
