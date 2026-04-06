@@ -308,7 +308,7 @@ wheels = [
 
 [[package]]
 name = "lgtm-ci"
-version = "1.0.0"
+version = "0.10.1"
 source = { virtual = "." }
 
 [package.optional-dependencies]
@@ -331,7 +331,7 @@ dev = [
 requires-dist = [
     { name = "assertpy", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
-    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.60.0" },
+    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.60.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -419,7 +419,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.60.0"
+version = "0.60.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bandit" },
@@ -439,9 +439,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "yamllint" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/5a/89/65828bcb73138c8ddb72779d222ad3521ebc4c0e5124a11234049f372a59/lintro-0.60.0.tar.gz", hash = "sha256:1322ff0164f4904d5b46dde76a63477c08cf5432bc768ae9948f8c02897a3d3a", size = 2092317, upload-time = "2026-04-05T13:56:12.836Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/7a/6f/f8e6fde980c1c5fa655ecde3c3b8f378a9a0a759cf9ce13d6487bd22e376/lintro-0.60.1.tar.gz", hash = "sha256:6c0dc7dd4d6cde1b68320a65e3a75a0fa2c8f921a531d305770d9e40f3c53065", size = 2092559, upload-time = "2026-04-06T17:48:31.235Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/29/62/dda36d6a83e4ac93b429d4795ea75e6ad95fc5476d52b32a0639a0b80e12/lintro-0.60.0-py3-none-any.whl", hash = "sha256:1a87eac663fda78471f7b3908a545eb5a743410848b48e5eab51a8d3273b20e1", size = 645372, upload-time = "2026-04-05T13:56:10.84Z" },
+    { url = "https://files.pythonhosted.org/packages/8d/e8/49a4fbcd6fcf5094ae00aa47da151237c180e3a36d580db3834f3355fd7e/lintro-0.60.1-py3-none-any.whl", hash = "sha256:fb3863307f354f8c9d73e834bb175eed2f0217b59c71412a4d04821c207c3145", size = 645369, upload-time = "2026-04-06T17:48:29.415Z" },
 ]
 
 [[package]]

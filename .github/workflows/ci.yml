@@ -17,7 +17,7 @@ jobs:
     container:
       # Pinned to digest for supply chain security (sha-<commit> tag keeps it from GC)
       # yamllint disable-line rule:line-length
-      image: ghcr.io/lgtm-hq/py-lintro@sha256:2f5b0bf3092ba24440e117bfbb4cea2476ba78c0a7051aed99c055d869fbdfe8
+      image: ghcr.io/lgtm-hq/py-lintro@sha256:fbda4e021cfae129fc234756cb017b863c3aea767a8c9484d4a5e60cc0428f64
       # Run as root to avoid permission issues with GitHub Actions file commands
       options: --user 0
     outputs:
