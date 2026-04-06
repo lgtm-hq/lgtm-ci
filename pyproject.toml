@@ -1,6 +1,6 @@
 [project]
 name = "lgtm-ci"
-version = "1.0.0"
+version = "0.10.1"
 description = "Reusable CI/CD components for GitHub Actions - composite actions, reusable workflows, and shell utilities"
 readme = "README.md"
 requires-python = ">=3.11"
