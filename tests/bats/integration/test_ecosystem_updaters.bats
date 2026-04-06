@@ -398,26 +398,42 @@ EOF
 		skip "tomlkit not available"
 	fi
 
-	# turbo-themes-like layout: pyproject in subdirectory, custom init path
-	mkdir -p "$BATS_TEST_TMPDIR/python/src/turbo_themes"
-	create_pyproject_toml "$BATS_TEST_TMPDIR/python" "1.0.0" "turbo-themes"
-	cat >"$BATS_TEST_TMPDIR/python/src/turbo_themes/__init__.py" <<EOF
-"""Turbo themes."""
+	# Use paths that auto-discovery would NEVER find:
+	# - pyproject in a non-standard subdirectory
+	# - init file with a non-standard name and path that doesn't match
+	#   the auto-derivation patterns (pkg/__init__.py or src/pkg/__init__.py)
+	mkdir -p "$BATS_TEST_TMPDIR/custom/lib"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/custom" "1.0.0" "turbo-themes"
+	cat >"$BATS_TEST_TMPDIR/custom/lib/version_info.py" <<EOF
+"""Version info."""
 
 __version__ = "1.0.0"
 EOF
 
-	local config='{"pyproject":"python/pyproject.toml","init":"python/src/turbo_themes/__init__.py"}'
+	# Also create a decoy at the auto-discoverable location to prove the
+	# override is used instead of auto-discovery
+	mkdir -p "$BATS_TEST_TMPDIR/custom/turbo_themes"
+	cat >"$BATS_TEST_TMPDIR/custom/turbo_themes/__init__.py" <<EOF
+"""Decoy — should NOT be touched."""
+
+__version__ = "0.0.0"
+EOF
+
+	local config='{"pyproject":"custom/pyproject.toml","init":"custom/lib/version_info.py"}'
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR" "9.8.7" "$config"
 	assert_success
 
 	# Verify pyproject.toml was updated
-	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/python/pyproject.toml" version)
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/custom/pyproject.toml" version)
 	[[ "$ACTUAL" == "9.8.7" ]]
 
-	# Verify __init__.py was updated
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/python/src/turbo_themes/__init__.py")
+	# Verify the override init file was updated
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/version_info.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
+
+	# Verify the auto-discoverable decoy was NOT touched
+	DECOY=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/turbo_themes/__init__.py")
+	[[ "$DECOY" == "0.0.0" ]]
 }
 
 @test "python: fails when pyproject.toml missing" {
@@ -627,51 +643,58 @@ EOF
 		skip "tomlkit not available"
 	fi
 
-	# Simulate turbo-themes layout: python in a subdirectory
-	mkdir -p "$BATS_TEST_TMPDIR/python/src/turbo_themes"
-	create_pyproject_toml "$BATS_TEST_TMPDIR/python" "1.0.0" "turbo-themes"
-	cat >"$BATS_TEST_TMPDIR/python/src/turbo_themes/__init__.py" <<EOF
-"""Turbo themes."""
+	# Use non-discoverable paths: pyproject in a non-standard dir and init
+	# at a custom path that auto-derivation would never find
+	mkdir -p "$BATS_TEST_TMPDIR/custom/lib"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/custom" "1.0.0" "turbo-themes"
+	cat >"$BATS_TEST_TMPDIR/custom/lib/ver.py" <<EOF
+"""Version."""
 
 __version__ = "1.0.0"
 EOF
 
 	local config
-	config='{"python":{"pyproject":"python/pyproject.toml","init":"python/src/turbo_themes/__init__.py"}}'
+	config='{"python":{"pyproject":"custom/pyproject.toml","init":"custom/lib/ver.py"}}'
 
 	run_runner "$BATS_TEST_TMPDIR" "python" "9.8.7" "$config"
 	assert_success
 	assert_line --partial "Config overrides:"
 
-	# Verify the config was used: pyproject in subdirectory was updated
-	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/python/pyproject.toml" version)
+	# Verify the config was used: pyproject at custom path was updated
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/custom/pyproject.toml" version)
+	[[ "$ACTUAL" == "9.8.7" ]]
+
+	# Verify the custom init file was updated
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/ver.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
 @test "runner: passes gem config override to ruby" {
-	# Ruby with explicit gem name via config (no auto-detect)
-	create_gemspec "$BATS_TEST_TMPDIR" "custom-gem"
+	# No gemspec — without the config override, auto-detection would fail
+	# with "No gem name configured and no .gemspec found". Only the config
+	# provides the gem name, proving the runner wires it through.
+	# No Gemfile.lock either — isolates the test to version.rb only.
 	create_version_rb "$BATS_TEST_TMPDIR" "custom-gem" "1.0.0"
-	create_gemfile "$BATS_TEST_TMPDIR" "custom-gem"
-	create_gemfile_lock "$BATS_TEST_TMPDIR" "custom-gem" "1.0.0"
 
 	local config='{"ruby":{"gem":"custom-gem"}}'
 
 	run_runner "$BATS_TEST_TMPDIR" "ruby" "9.8.7" "$config"
 	assert_success
+	assert_line --partial "Config overrides:"
 
 	ACTUAL=$(awk -F'"' '/VERSION =/ {print $2; exit}' "$BATS_TEST_TMPDIR/lib/custom/gem/version.rb")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
 @test "runner: rejects non-object ECOSYSTEM_CONFIG" {
-	run bash -c "
-		cd '$BATS_TEST_TMPDIR'
-		export NEXT_VERSION='1.0.0'
-		export ECOSYSTEMS='dart'
-		export ECOSYSTEM_CONFIG='\"not-an-object\"'
-		'$ECOSYSTEMS_DIR/_runner.sh' 2>&1
-	"
+	# Valid JSON string (not an object) — exercises type validation
+	run bash -c '
+		cd "'"$BATS_TEST_TMPDIR"'"
+		export NEXT_VERSION="1.0.0"
+		export ECOSYSTEMS="dart"
+		export ECOSYSTEM_CONFIG="\"not-an-object\""
+		"'"$ECOSYSTEMS_DIR"'/_runner.sh" 2>&1
+	'
 	assert_failure
 	assert_line --partial "not a valid JSON object"
 }

@@ -160,10 +160,18 @@ run_update_changelog() {
 	# Version header should appear exactly once
 	local version_count
 	version_count=$(grep -c '## \[1\.0\.0\]' "${MOCK_GIT_REPO}/CHANGELOG.md")
-	[[ "$version_count" -eq 1 ]]
+	[[ "$version_count" -eq 1 ]] || {
+		echo "Expected exactly 1 version header '## [1.0.0]', found $version_count" >&2
+		echo "$changelog" >&2
+		return 1
+	}
 
 	# The feature entry should still be present
-	echo "$changelog" | grep -q 'add new feature'
+	echo "$changelog" | grep -q 'add new feature' || {
+		echo "Expected changelog to contain feature entry 'add new feature'" >&2
+		echo "$changelog" >&2
+		return 1
+	}
 }
 
 # =============================================================================
