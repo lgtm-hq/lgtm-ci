@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.10.1] - 2026-04-06
+
+### Bug Fixes
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#104) (c34c5e8)
+
+### Other Changes
+
+- **ecosystems**: fix JSON default parsing and add config override tests (#113) (ff446f9)
+- **deps**: update digest (#112) (ae47852)
+
 ## [0.10.0] - 2026-04-05
 
 ### Features
@@ -161,7 +172,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.1...HEAD
+[0.10.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.9.0...v0.10.0
 [0.9.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.2...v0.9.0
 [0.8.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.8.1...v0.8.2
