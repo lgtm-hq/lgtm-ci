@@ -131,7 +131,7 @@ runs:
     - name: Upload SARIF to GitHub Security
       if: inputs.upload-sarif == 'true' && steps.sarif.outputs.sarif-file != ''
       # Pinned to SHA for supply chain security
-      uses: github/codeql-action/upload-sarif@1b549b9259bda1cb5ddde3b41741a82a2d15a841 # v3.28.6
+      uses: github/codeql-action/upload-sarif@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
       with:
         sarif_file: ${{ steps.sarif.outputs.sarif-file }}
         category: "vulnerability-scan"
