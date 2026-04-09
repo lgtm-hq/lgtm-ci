@@ -70,7 +70,7 @@ runs:
     - name: Scan for vulnerabilities
       id: scan
       # Pinned to SHA for supply chain security
-      uses: anchore/scan-action@869c549e657a088dc0441b08ce4fc0ecdac2bb65 # v5.3.0
+      uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
       with:
         path: ${{ inputs.target-type == 'dir' && steps.target.outputs.path || '' }}
         image: ${{ inputs.target-type == 'image' && steps.target.outputs.path || '' }}
@@ -131,7 +131,7 @@ runs:
     - name: Upload SARIF to GitHub Security
       if: inputs.upload-sarif == 'true' && steps.sarif.outputs.sarif-file != ''
       # Pinned to SHA for supply chain security
-      uses: github/codeql-action/upload-sarif@5c8a8a642e79153f5d047b10ec1cba1d1cc65699 # v3.35.1
+      uses: github/codeql-action/upload-sarif@c10b8064de6f491fea524254123dbe5e09572f13 # v4.35.1
       with:
         sarif_file: ${{ steps.sarif.outputs.sarif-file }}
         category: "vulnerability-scan"
