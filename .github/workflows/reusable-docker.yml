@@ -74,6 +74,13 @@ on:
         required: false
         type: string
         default: "ubuntu-24.04"
+      enable-qemu:
+        description: >-
+          Enable QEMU for arm64 cross-compilation in the linux/arm64 build leg.
+          Set false when runner-arm64 is a native arm64 host (e.g. ubuntu-24.04-arm).
+        required: false
+        type: boolean
+        default: true
 
     outputs:
       tags:
@@ -104,7 +111,7 @@ jobs:
       attestations: write
 
     outputs:
-      tags: ${{ steps.build.outputs.tags }}
+      tags: ${{ steps.meta.outputs.tags }}
       digest: ${{ steps.metadata.outputs.digest }}
 
     steps:
@@ -128,22 +135,13 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to GHCR
-        if: inputs.push && inputs.registry == 'ghcr.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      - name: Login to registry
+        if: inputs.push
+        uses: ./.github/actions/docker-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        if: inputs.push && inputs.registry == 'docker.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ inputs.registry }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Parse additional tags
         id: extra-tags
@@ -156,20 +154,12 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        # Pinned to SHA for supply chain security
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        uses: ./.github/actions/docker-metadata
         with:
-          images: |
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
-          tags: |
-            type=sha,prefix=sha-
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}},value=${{ inputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
-            type=semver,pattern={{major}},value=${{ inputs.version }}
-            type=raw,value=latest,enable=${{ inputs.version != '' }}
-            ${{ steps.extra-tags.outputs.tags }}
+          registry: ${{ inputs.registry }}
+          image-name: ${{ inputs.image-name || github.repository }}
+          version: ${{ inputs.version }}
+          extra-tags: ${{ steps.extra-tags.outputs.tags }}
 
       - name: Build and push
         id: build
@@ -233,22 +223,12 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to GHCR
-        if: inputs.registry == 'ghcr.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      - name: Login to registry
+        uses: ./.github/actions/docker-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        if: inputs.registry == 'docker.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ inputs.registry }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push (linux/amd64)
         id: build
@@ -266,7 +246,7 @@ jobs:
           cache-from: type=gha,scope=linux-amd64
           cache-to: type=gha,mode=max,scope=linux-amd64
           provenance: false
-          sbom: false
+          sbom: ${{ inputs.sbom }}
 
   # Native linux/arm64 build leg (multi-arch split path)
   build-arm64:
@@ -294,8 +274,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup QEMU
-        # Only needed when runner is not a native arm64 host
-        if: inputs.runner-arm64 == 'ubuntu-24.04'
+        if: inputs.enable-qemu
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
@@ -303,22 +282,12 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to GHCR
-        if: inputs.registry == 'ghcr.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      - name: Login to registry
+        uses: ./.github/actions/docker-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        if: inputs.registry == 'docker.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ inputs.registry }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Build and push (linux/arm64)
         id: build
@@ -336,7 +305,7 @@ jobs:
           cache-from: type=gha,scope=linux-arm64
           cache-to: type=gha,mode=max,scope=linux-arm64
           provenance: false
-          sbom: false
+          sbom: ${{ inputs.sbom }}
 
   # Assemble multi-arch manifest from per-platform images
   merge:
@@ -366,27 +335,20 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          sparse-checkout: |
+            scripts/ci
+            .github/actions
 
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to GHCR
-        if: inputs.registry == 'ghcr.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      - name: Login to registry
+        uses: ./.github/actions/docker-login
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Login to Docker Hub
-        if: inputs.registry == 'docker.io'
-        # Pinned to SHA for supply chain security
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ${{ inputs.registry }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Parse additional tags
         id: extra-tags
@@ -399,31 +361,24 @@ jobs:
 
       - name: Extract metadata
         id: meta
-        # Pinned to SHA for supply chain security
-        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        uses: ./.github/actions/docker-metadata
         with:
-          images: |
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
-          tags: |
-            type=sha,prefix=sha-
-            type=ref,event=branch
-            type=ref,event=pr
-            type=semver,pattern={{version}},value=${{ inputs.version }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
-            type=semver,pattern={{major}},value=${{ inputs.version }}
-            type=raw,value=latest,enable=${{ inputs.version != '' }}
-            ${{ steps.extra-tags.outputs.tags }}
+          registry: ${{ inputs.registry }}
+          image-name: ${{ inputs.image-name || github.repository }}
+          version: ${{ inputs.version }}
+          extra-tags: ${{ steps.extra-tags.outputs.tags }}
 
       - name: Create multi-arch manifest
         shell: bash
         env:
           STEP: merge-manifests
+          # Reference by digest for immutability — tags can be overwritten, digests cannot
           SOURCE_AMD64: >-
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
-            github.run_id }}-linux-amd64
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
+            needs.build-amd64.outputs.digest }}
           SOURCE_ARM64: >-
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
-            github.run_id }}-linux-arm64
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
+            needs.build-arm64.outputs.digest }}
           TARGET_TAGS: ${{ steps.meta.outputs.tags }}
         run: ./scripts/ci/actions/build-docker.sh
 
@@ -443,6 +398,19 @@ jobs:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.metadata.outputs.digest }}
           push-to-registry: true
+
+      - name: Delete staging manifests
+        if: always()
+        shell: bash
+        env:
+          STAGING_AMD64: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
+            github.run_id }}-linux-amd64
+          STAGING_ARM64: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
+            github.run_id }}-linux-arm64
+        run: |
+          docker buildx imagetools rm "${STAGING_AMD64}" "${STAGING_ARM64}" || true
 
   scan:
     name: Vulnerability Scan

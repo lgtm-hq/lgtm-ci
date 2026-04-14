@@ -1,0 +1,47 @@
+---
+name: Docker Metadata
+description: Generate Docker image tags and labels via docker/metadata-action
+
+inputs:
+  registry:
+    description: "Container registry URL"
+    required: true
+  image-name:
+    description: "Image name (registry-relative, e.g. org/repo)"
+    required: true
+  version:
+    description: "Version string for semver tags"
+    required: false
+    default: ""
+  extra-tags:
+    description: "Additional tags in metadata-action format (newline-separated type=raw,... entries)"
+    required: false
+    default: ""
+
+outputs:
+  tags:
+    description: "Generated image tags (newline-separated)"
+    value: ${{ steps.meta.outputs.tags }}
+  labels:
+    description: "Generated OCI image labels"
+    value: ${{ steps.meta.outputs.labels }}
+
+runs:
+  using: composite
+  steps:
+    - name: Extract metadata
+      id: meta
+      # Pinned to SHA for supply chain security
+      uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+      with:
+        images: |
+          ${{ inputs.registry }}/${{ inputs.image-name }}
+        tags: |
+          type=sha,prefix=sha-
+          type=ref,event=branch
+          type=ref,event=pr
+          type=semver,pattern={{version}},value=${{ inputs.version }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
+          type=semver,pattern={{major}},value=${{ inputs.version }}
+          type=raw,value=latest,enable=${{ inputs.version != '' }}
+          ${{ inputs.extra-tags }}
