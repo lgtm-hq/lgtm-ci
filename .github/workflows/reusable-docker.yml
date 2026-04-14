@@ -64,14 +64,24 @@ on:
         required: false
         type: string
         default: ""
+      runner-amd64:
+        description: "Runner for linux/amd64 build leg"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      runner-arm64:
+        description: "Runner for linux/arm64 build leg (set ubuntu-24.04-arm to use native)"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
 
     outputs:
       tags:
         description: "Generated image tags"
-        value: ${{ jobs.build.outputs.tags }}
+        value: ${{ jobs.build.outputs.tags || jobs.merge.outputs.tags }}
       digest:
         description: "Image digest"
-        value: ${{ jobs.build.outputs.digest }}
+        value: ${{ jobs.build.outputs.digest || jobs.merge.outputs.digest }}
 
     secrets:
       DOCKERHUB_USERNAME:
@@ -82,9 +92,11 @@ on:
         description: "Docker Hub token (for docker.io registry)"
 
 jobs:
+  # Single-platform builds, or multi-platform when push is disabled (QEMU fallback)
   build:
     name: Build and Push
-    runs-on: ubuntu-latest
+    if: ${{ !contains(inputs.platforms, ',') || !inputs.push }}
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       packages: write
@@ -192,11 +204,255 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
+  # Native linux/amd64 build leg (multi-arch split path)
+  build-amd64:
+    name: Build linux/amd64
+    if: ${{ contains(inputs.platforms, ',') && inputs.push }}
+    runs-on: ${{ inputs.runner-amd64 }}
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Docker Buildx
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to GHCR
+        if: inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (linux/amd64)
+        id: build
+        # Pinned to SHA for supply chain security
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: linux/amd64
+          push: true
+          tags: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
+            github.run_id }}-linux-amd64
+          build-args: ${{ inputs.build-args }}
+          cache-from: type=gha,scope=linux-amd64
+          cache-to: type=gha,mode=max,scope=linux-amd64
+          provenance: false
+          sbom: false
+
+  # Native linux/arm64 build leg (multi-arch split path)
+  build-arm64:
+    name: Build linux/arm64
+    if: ${{ contains(inputs.platforms, ',') && inputs.push }}
+    runs-on: ${{ inputs.runner-arm64 }}
+    permissions:
+      contents: read
+      packages: write
+
+    outputs:
+      digest: ${{ steps.build.outputs.digest }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup QEMU
+        # Only needed when runner is not a native arm64 host
+        if: inputs.runner-arm64 == 'ubuntu-24.04'
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Setup Docker Buildx
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to GHCR
+        if: inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push (linux/arm64)
+        id: build
+        # Pinned to SHA for supply chain security
+        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: linux/arm64
+          push: true
+          tags: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
+            github.run_id }}-linux-arm64
+          build-args: ${{ inputs.build-args }}
+          cache-from: type=gha,scope=linux-arm64
+          cache-to: type=gha,mode=max,scope=linux-arm64
+          provenance: false
+          sbom: false
+
+  # Assemble multi-arch manifest from per-platform images
+  merge:
+    name: Merge Manifests
+    needs: [build-amd64, build-arm64]
+    if: ${{ contains(inputs.platforms, ',') && inputs.push }}
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+
+    outputs:
+      tags: ${{ steps.meta.outputs.tags }}
+      digest: ${{ steps.metadata.outputs.digest }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Docker Buildx
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Login to GHCR
+        if: inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Login to Docker Hub
+        if: inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Parse additional tags
+        id: extra-tags
+        if: inputs.tags != ''
+        shell: bash
+        env:
+          STEP: parse-tags
+          INPUT_TAGS: ${{ inputs.tags }}
+        run: ./scripts/ci/actions/build-docker.sh
+
+      - name: Extract metadata
+        id: meta
+        # Pinned to SHA for supply chain security
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
+        with:
+          images: |
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ inputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
+            type=semver,pattern={{major}},value=${{ inputs.version }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            ${{ steps.extra-tags.outputs.tags }}
+
+      - name: Create multi-arch manifest
+        shell: bash
+        env:
+          STEP: merge-manifests
+          SOURCE_AMD64: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
+            github.run_id }}-linux-amd64
+          SOURCE_ARM64: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
+            github.run_id }}-linux-arm64
+          TARGET_TAGS: ${{ steps.meta.outputs.tags }}
+        run: ./scripts/ci/actions/build-docker.sh
+
+      - name: Extract digest
+        id: metadata
+        shell: bash
+        env:
+          STEP: metadata
+          BUILT_TAGS: ${{ steps.meta.outputs.tags }}
+        run: ./scripts/ci/actions/build-docker.sh
+
+      - name: Generate artifact attestation
+        if: inputs.provenance
+        # Pinned to SHA for supply chain security
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          subject-digest: ${{ steps.metadata.outputs.digest }}
+          push-to-registry: true
+
   scan:
     name: Vulnerability Scan
-    needs: build
-    if: inputs.scan && inputs.push
-    runs-on: ubuntu-latest
+    needs: [build, merge]
+    if: >-
+      always() &&
+      (needs.build.result == 'success' || needs.merge.result == 'success') &&
+      inputs.scan &&
+      inputs.push
+    runs-on: ubuntu-24.04
     permissions:
       contents: read
       security-events: write
@@ -206,9 +462,9 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
         with:
-          image-ref:
+          image-ref: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
-            needs.build.outputs.digest }}
+            needs.build.outputs.digest || needs.merge.outputs.digest }}
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"

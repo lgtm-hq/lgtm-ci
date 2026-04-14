@@ -285,6 +285,31 @@ parse-tags)
 	log_info "Parsed tags for metadata-action"
 	;;
 
+merge-manifests)
+	# Assemble a multi-arch manifest list from per-platform staging images.
+	#
+	# Required environment variables:
+	#   SOURCE_AMD64 - Fully-qualified staging tag for the linux/amd64 image
+	#   SOURCE_ARM64 - Fully-qualified staging tag for the linux/arm64 image
+	#   TARGET_TAGS  - Newline-separated list of final tags to create
+	: "${SOURCE_AMD64:?SOURCE_AMD64 is required}"
+	: "${SOURCE_ARM64:?SOURCE_ARM64 is required}"
+	: "${TARGET_TAGS:?TARGET_TAGS is required}"
+
+	MERGE_CMD=("docker" "buildx" "imagetools" "create")
+
+	while IFS= read -r tag; do
+		tag=$(echo "$tag" | xargs)
+		[[ -n "$tag" ]] && MERGE_CMD+=("--tag" "$tag")
+	done <<<"$TARGET_TAGS"
+
+	MERGE_CMD+=("$SOURCE_AMD64" "$SOURCE_ARM64")
+
+	log_info "Merging manifests: ${SOURCE_AMD64} + ${SOURCE_ARM64}"
+	"${MERGE_CMD[@]}"
+	log_success "Multi-arch manifest created"
+	;;
+
 summary)
 	: "${IMAGE_NAME:=}"
 	: "${TAGS:=}"
