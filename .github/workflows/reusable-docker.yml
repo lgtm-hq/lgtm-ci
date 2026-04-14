@@ -182,8 +182,10 @@ jobs:
         id: metadata
         if: inputs.push
         shell: bash
-        run: |
-          echo "digest=${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+        env:
+          STEP: set-output-digest
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: ./scripts/ci/actions/build-docker.sh
 
       - name: Generate artifact attestation
         if: inputs.push && inputs.provenance
@@ -400,49 +402,16 @@ jobs:
           push-to-registry: true
 
       - name: Delete staging manifests
-        # Clean up per-platform staging tags that are no longer needed after the manifest merge.
-        # Only GHCR supports tag deletion via the GitHub Packages API.
+        # Clean up per-platform staging tags via the GitHub Packages API.
+        # Only runs for GHCR; other registries are skipped.
         if: always() && inputs.registry == 'ghcr.io'
         shell: bash
         env:
+          STEP: cleanup-staging
           GH_TOKEN: ${{ github.token }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
           RUN_ID: ${{ github.run_id }}
-        run: |
-          # Parse owner and package name from image ref (owner/package or owner/nested/package)
-          pkg_owner="${IMAGE_NAME%%/*}"
-          pkg_name="${IMAGE_NAME#*/}"
-          pkg_name_encoded="${pkg_name//\//%2F}"
-
-          for arch in linux-amd64 linux-arm64; do
-            tag="build-${RUN_ID}-${arch}"
-
-            # Prefer org endpoint; fall back to user endpoint for personal repos
-            version_id=$(
-              gh api "orgs/${pkg_owner}/packages/container/${pkg_name_encoded}/versions" \
-                --paginate \
-                --jq ".[] | select(.metadata.container.tags[]? == \"${tag}\") | .id" \
-                2>/dev/null ||
-              gh api "user/packages/container/${pkg_name_encoded}/versions" \
-                --paginate \
-                --jq ".[] | select(.metadata.container.tags[]? == \"${tag}\") | .id" \
-                2>/dev/null ||
-              true
-            )
-
-            if [[ -n "${version_id}" ]]; then
-              gh api --method DELETE \
-                "orgs/${pkg_owner}/packages/container/${pkg_name_encoded}/versions/${version_id}" \
-                2>/dev/null ||
-              gh api --method DELETE \
-                "user/packages/container/${pkg_name_encoded}/versions/${version_id}" \
-                2>/dev/null ||
-              true
-              echo "Deleted staging manifest: ${tag}"
-            else
-              echo "::warning::Could not locate staging manifest version for tag ${tag} — skipping deletion"
-            fi
-          done
+        run: ./scripts/ci/actions/build-docker.sh
 
   scan:
     name: Vulnerability Scan

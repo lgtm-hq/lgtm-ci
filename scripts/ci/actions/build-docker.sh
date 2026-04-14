@@ -3,7 +3,8 @@
 # Purpose: Build and push Docker images with multi-platform support
 #
 # Required environment variables:
-#   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary
+#   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
+#          set-output-digest, merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -285,6 +286,16 @@ parse-tags)
 	log_info "Parsed tags for metadata-action"
 	;;
 
+set-output-digest)
+	# Write a pre-computed digest to GITHUB_OUTPUT.
+	#
+	# Required environment variables:
+	#   DIGEST - Image digest (e.g. sha256:abc123...)
+	: "${DIGEST:?DIGEST is required}"
+	set_github_output "digest" "${DIGEST}"
+	log_info "Digest: ${DIGEST}"
+	;;
+
 merge-manifests)
 	# Assemble a multi-arch manifest list from per-platform staging images.
 	#
@@ -308,6 +319,55 @@ merge-manifests)
 	log_info "Merging manifests: ${SOURCE_AMD64} + ${SOURCE_ARM64}"
 	"${MERGE_CMD[@]}"
 	log_success "Multi-arch manifest created"
+	;;
+
+cleanup-staging)
+	# Delete per-platform staging manifests from GHCR after a multi-arch merge.
+	# Uses the GitHub Packages API; skips non-GHCR registries.
+	#
+	# Required environment variables:
+	#   IMAGE_NAME - Registry-relative image name (e.g. org/repo or org/group/repo)
+	#   RUN_ID     - GitHub Actions run ID used to construct staging tag names
+	#   GH_TOKEN   - GitHub token with packages:delete permission
+	: "${IMAGE_NAME:?IMAGE_NAME is required}"
+	: "${RUN_ID:?RUN_ID is required}"
+	: "${GH_TOKEN:?GH_TOKEN is required}"
+
+	# Parse owner and package name; URL-encode nested slashes
+	pkg_owner="${IMAGE_NAME%%/*}"
+	pkg_name="${IMAGE_NAME#*/}"
+	pkg_name_encoded="${pkg_name//\//%2F}"
+
+	for arch in linux-amd64 linux-arm64; do
+		tag="build-${RUN_ID}-${arch}"
+		log_info "Looking up staging manifest: ${tag}"
+
+		# Prefer org endpoint; fall back to user endpoint for personal repos
+		version_id=$(
+			gh api "orgs/${pkg_owner}/packages/container/${pkg_name_encoded}/versions" \
+				--paginate \
+				--jq ".[] | select(.metadata.container.tags[]? == \"${tag}\") | .id" \
+				2>/dev/null ||
+				gh api "user/packages/container/${pkg_name_encoded}/versions" \
+					--paginate \
+					--jq ".[] | select(.metadata.container.tags[]? == \"${tag}\") | .id" \
+					2>/dev/null ||
+				true
+		)
+
+		if [[ -n "${version_id}" ]]; then
+			gh api --method DELETE \
+				"orgs/${pkg_owner}/packages/container/${pkg_name_encoded}/versions/${version_id}" \
+				2>/dev/null ||
+				gh api --method DELETE \
+					"user/packages/container/${pkg_name_encoded}/versions/${version_id}" \
+					2>/dev/null ||
+				true
+			log_success "Deleted staging manifest: ${tag}"
+		else
+			log_warn "Could not locate staging manifest version for tag ${tag} — skipping deletion"
+		fi
+	done
 	;;
 
 summary)
