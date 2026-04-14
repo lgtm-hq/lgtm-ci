@@ -18,6 +18,24 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+      run: |
+        if [[ "${REGISTRY}" != "ghcr.io" && "${REGISTRY}" != "docker.io" ]]; then
+          echo "::error::Unsupported registry '${REGISTRY}'. Supported values: ghcr.io, docker.io"
+          exit 1
+        fi
+        if [[ "${REGISTRY}" == "docker.io" ]]; then
+          if [[ -z "${DOCKERHUB_USERNAME}" || -z "${DOCKERHUB_TOKEN}" ]]; then
+            echo "::error::dockerhub-username and dockerhub-token are required when registry is docker.io"
+            exit 1
+          fi
+        fi
+
     - name: Login to GHCR
       if: inputs.registry == 'ghcr.io'
       # Pinned to SHA for supply chain security
