@@ -232,6 +232,14 @@ jobs:
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Extract metadata
+        id: meta
+        uses: ./.github/actions/docker-metadata
+        with:
+          registry: ${{ inputs.registry }}
+          image-name: ${{ inputs.image-name || github.repository }}
+          version: ${{ inputs.version }}
+
       - name: Build and push (linux/amd64)
         id: build
         # Pinned to SHA for supply chain security
@@ -244,6 +252,7 @@ jobs:
           tags: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
             github.run_id }}-linux-amd64
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
           cache-from: type=gha,scope=linux-amd64
           cache-to: type=gha,mode=max,scope=linux-amd64
@@ -291,6 +300,14 @@ jobs:
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      - name: Extract metadata
+        id: meta
+        uses: ./.github/actions/docker-metadata
+        with:
+          registry: ${{ inputs.registry }}
+          image-name: ${{ inputs.image-name || github.repository }}
+          version: ${{ inputs.version }}
+
       - name: Build and push (linux/arm64)
         id: build
         # Pinned to SHA for supply chain security
@@ -303,6 +320,7 @@ jobs:
           tags: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
             github.run_id }}-linux-arm64
+          labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
           cache-from: type=gha,scope=linux-arm64
           cache-to: type=gha,mode=max,scope=linux-arm64

@@ -314,6 +314,12 @@ merge-manifests)
 		[[ -n "$tag" ]] && MERGE_CMD+=("--tag" "$tag")
 	done <<<"$TARGET_TAGS"
 
+	# Validate at least one --tag was appended (TARGET_TAGS was not all whitespace)
+	if [[ "${#MERGE_CMD[@]}" -le 4 ]]; then
+		log_error "No valid tags found in TARGET_TAGS — cannot create manifest"
+		exit 1
+	fi
+
 	MERGE_CMD+=("$SOURCE_AMD64" "$SOURCE_ARM64")
 
 	log_info "Merging manifests: ${SOURCE_AMD64} + ${SOURCE_ARM64}"
@@ -356,14 +362,21 @@ cleanup-staging)
 		)
 
 		if [[ -n "${version_id}" ]]; then
-			gh api --method DELETE \
+			deleted=false
+			if gh api --method DELETE \
 				"orgs/${pkg_owner}/packages/container/${pkg_name_encoded}/versions/${version_id}" \
-				2>/dev/null ||
-				gh api --method DELETE \
-					"user/packages/container/${pkg_name_encoded}/versions/${version_id}" \
-					2>/dev/null ||
-				true
-			log_success "Deleted staging manifest: ${tag}"
+				2>/dev/null; then
+				deleted=true
+			elif gh api --method DELETE \
+				"user/packages/container/${pkg_name_encoded}/versions/${version_id}" \
+				2>/dev/null; then
+				deleted=true
+			fi
+			if [[ "$deleted" == true ]]; then
+				log_success "Deleted staging manifest: ${tag}"
+			else
+				log_warn "Failed to delete staging manifest: ${tag} (version ${version_id})"
+			fi
 		else
 			log_warn "Could not locate staging manifest version for tag ${tag} — skipping deletion"
 		fi
