@@ -4,7 +4,7 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
-#          set-output-digest, merge-manifests, cleanup-staging
+#          set-output-digest, classify, merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -296,15 +296,103 @@ set-output-digest)
 	log_info "Digest: ${DIGEST}"
 	;;
 
+classify)
+	# Classify platforms and determine build strategy.
+	#
+	# Required environment variables:
+	#   PLATFORMS  - Comma-separated list of target platforms
+	#   PUSH       - Whether images will be pushed ("true"/"false")
+	#
+	# Optional environment variables:
+	#   RUNNER_MAP - JSON object mapping platform → runner label (default: "{}")
+	#               Platforms not in the map default to ubuntu-24.04 with QEMU.
+	#               Example: {"linux/arm64":"ubuntu-24.04-arm"}
+	#
+	# Outputs:
+	#   use-split - "true" when split per-platform build should be used
+	#   matrix    - JSON array of {platform, runner, slug, qemu} entries
+	: "${PLATFORMS:?PLATFORMS is required}"
+	: "${PUSH:?PUSH is required}"
+	: "${RUNNER_MAP:={}}"
+
+	# Validate RUNNER_MAP is parseable JSON
+	if ! echo "$RUNNER_MAP" | jq empty 2>/dev/null; then
+		die "RUNNER_MAP is not valid JSON: ${RUNNER_MAP}"
+	fi
+
+	# Parse comma-separated platforms into array, trimming whitespace
+	platforms=()
+	while IFS= read -r p; do
+		p=$(echo "$p" | xargs)
+		[[ -n "$p" ]] && platforms+=("$p")
+	done < <(echo "$PLATFORMS" | tr ',' '\n')
+
+	# Single-platform or push=false → use the QEMU build job, not split
+	if [[ "${#platforms[@]}" -lt 2 || "$PUSH" != "true" ]]; then
+		set_github_output "use-split" "false"
+		set_github_output "matrix" "[]"
+		log_info "Split disabled: ${#platforms[@]} platform(s), push=${PUSH}"
+		exit 0
+	fi
+
+	# Build matrix JSON array
+	matrix_json="[]"
+	for platform in "${platforms[@]}"; do
+		# Resolve runner from map; default to ubuntu-24.04
+		runner=$(echo "$RUNNER_MAP" | jq -r --arg p "$platform" '.[$p] // "ubuntu-24.04"')
+
+		# Generate slug: replace all / with - (e.g. linux/arm/v7 → linux-arm-v7)
+		slug=$(echo "$platform" | tr '/' '-')
+
+		# Determine runner architecture from label
+		runner_arch="amd64"
+		if [[ "$runner" == *"-arm"* ]]; then
+			runner_arch="arm64"
+		fi
+
+		# Extract platform architecture (second path component, strip variant)
+		platform_arch="${platform#*/}"       # linux/arm/v7 → arm/v7
+		platform_arch="${platform_arch%%/*}" # arm/v7 → arm
+
+		# QEMU not needed when runner and platform architectures match
+		qemu=true
+		if [[ "$runner_arch" == "amd64" && "$platform_arch" == "amd64" ]]; then
+			qemu=false
+		elif [[ "$runner_arch" == "arm64" && "$platform_arch" == "arm64" ]]; then
+			qemu=false
+		fi
+
+		# Build JSON entry and append to matrix array
+		entry=$(jq -n \
+			--arg platform "$platform" \
+			--arg runner "$runner" \
+			--arg slug "$slug" \
+			--argjson qemu "$qemu" \
+			'{platform: $platform, runner: $runner, slug: $slug, qemu: $qemu}')
+		matrix_json=$(echo "$matrix_json" | jq --argjson e "$entry" '. + [$e]')
+	done
+
+	set_github_output "use-split" "true"
+	set_github_output "matrix" "$matrix_json"
+	log_info "Split enabled: ${#platforms[@]} platform(s)"
+	for platform in "${platforms[@]}"; do
+		log_info "  ${platform}"
+	done
+	;;
+
 merge-manifests)
 	# Assemble a multi-arch manifest list from per-platform staging images.
 	#
 	# Required environment variables:
-	#   SOURCE_AMD64 - Fully-qualified staging tag for the linux/amd64 image
-	#   SOURCE_ARM64 - Fully-qualified staging tag for the linux/arm64 image
-	#   TARGET_TAGS  - Newline-separated list of final tags to create
-	: "${SOURCE_AMD64:?SOURCE_AMD64 is required}"
-	: "${SOURCE_ARM64:?SOURCE_ARM64 is required}"
+	#   MATRIX     - JSON matrix from classify step (array of {platform, runner, slug, qemu})
+	#   REGISTRY   - Container registry URL
+	#   IMAGE_NAME - Registry-relative image name
+	#   RUN_ID     - GitHub Actions run ID used to locate staging tags
+	#   TARGET_TAGS - Newline-separated list of final tags to create
+	: "${MATRIX:?MATRIX is required}"
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${IMAGE_NAME:?IMAGE_NAME is required}"
+	: "${RUN_ID:?RUN_ID is required}"
 	: "${TARGET_TAGS:?TARGET_TAGS is required}"
 
 	MERGE_CMD=("docker" "buildx" "imagetools" "create")
@@ -320,9 +408,13 @@ merge-manifests)
 		exit 1
 	fi
 
-	MERGE_CMD+=("$SOURCE_AMD64" "$SOURCE_ARM64")
+	# Add per-platform staging images as sources (referenced by staging tag)
+	while IFS= read -r slug; do
+		[[ -n "$slug" ]] && MERGE_CMD+=("${REGISTRY}/${IMAGE_NAME}:build-${RUN_ID}-${slug}")
+	done < <(echo "$MATRIX" | jq -r '.[].slug')
 
-	log_info "Merging manifests: ${SOURCE_AMD64} + ${SOURCE_ARM64}"
+	platform_count=$(echo "$MATRIX" | jq 'length')
+	log_info "Merging ${platform_count} platform(s) into manifest..."
 	"${MERGE_CMD[@]}"
 	log_success "Multi-arch manifest created"
 	;;
@@ -335,17 +427,20 @@ cleanup-staging)
 	#   IMAGE_NAME - Registry-relative image name (e.g. org/repo or org/group/repo)
 	#   RUN_ID     - GitHub Actions run ID used to construct staging tag names
 	#   GH_TOKEN   - GitHub token with packages:delete permission
+	#   MATRIX     - JSON matrix from classify step (array of {platform, runner, slug, qemu})
 	: "${IMAGE_NAME:?IMAGE_NAME is required}"
 	: "${RUN_ID:?RUN_ID is required}"
 	: "${GH_TOKEN:?GH_TOKEN is required}"
+	: "${MATRIX:?MATRIX is required}"
 
 	# Parse owner and package name; URL-encode nested slashes
 	pkg_owner="${IMAGE_NAME%%/*}"
 	pkg_name="${IMAGE_NAME#*/}"
 	pkg_name_encoded="${pkg_name//\//%2F}"
 
-	for arch in linux-amd64 linux-arm64; do
-		tag="build-${RUN_ID}-${arch}"
+	while IFS= read -r slug; do
+		[[ -z "$slug" ]] && continue
+		tag="build-${RUN_ID}-${slug}"
 		log_info "Looking up staging manifest: ${tag}"
 
 		# Prefer org endpoint; fall back to user endpoint for personal repos
@@ -380,7 +475,7 @@ cleanup-staging)
 		else
 			log_warn "Could not locate staging manifest version for tag ${tag} — skipping deletion"
 		fi
-	done
+	done < <(echo "$MATRIX" | jq -r '.[].slug')
 	;;
 
 summary)

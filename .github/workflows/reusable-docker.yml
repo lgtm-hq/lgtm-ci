@@ -64,23 +64,14 @@ on:
         required: false
         type: string
         default: ""
-      runner-amd64:
-        description: "Runner for linux/amd64 build leg"
-        required: false
-        type: string
-        default: "ubuntu-24.04"
-      runner-arm64:
-        description: "Runner for linux/arm64 build leg (set ubuntu-24.04-arm to use native)"
-        required: false
-        type: string
-        default: "ubuntu-24.04"
-      enable-qemu:
+      runner-map:
         description: >-
-          Enable QEMU for arm64 cross-compilation in the linux/arm64 build leg.
-          Set false when runner-arm64 is a native arm64 host (e.g. ubuntu-24.04-arm).
+          JSON object mapping platform to runner label.
+          Platforms not in the map default to ubuntu-24.04 with QEMU.
+          Example: {"linux/arm64":"ubuntu-24.04-arm"}
         required: false
-        type: boolean
-        default: true
+        type: string
+        default: "{}"
 
     outputs:
       tags:
@@ -99,10 +90,45 @@ on:
         description: "Docker Hub token (for docker.io registry)"
 
 jobs:
+  # Classify platforms and determine build strategy.
+  # Outputs use-split=true and a per-platform matrix when push is enabled
+  # and two or more platforms are requested; otherwise use-split=false.
+  classify:
+    name: Classify Platforms
+    runs-on: ubuntu-24.04
+    outputs:
+      use-split: ${{ steps.classify.outputs.use-split }}
+      matrix: ${{ steps.classify.outputs.matrix }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Classify platforms
+        id: classify
+        shell: bash
+        env:
+          STEP: classify
+          PLATFORMS: ${{ inputs.platforms }}
+          PUSH: ${{ inputs.push }}
+          RUNNER_MAP: ${{ inputs.runner-map }}
+        run: ./scripts/ci/actions/build-docker.sh
+
   # Single-platform builds, or multi-platform when push is disabled (QEMU fallback)
   build:
     name: Build and Push
-    if: ${{ !contains(inputs.platforms, ',') || !inputs.push }}
+    needs: classify
+    if: ${{ needs.classify.outputs.use-split == 'false' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -196,74 +222,17 @@ jobs:
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
 
-  # Native linux/amd64 build leg (multi-arch split path)
-  build-amd64:
-    name: Build linux/amd64
-    if: ${{ contains(inputs.platforms, ',') && inputs.push }}
-    runs-on: ${{ inputs.runner-amd64 }}
-    permissions:
-      contents: read
-      packages: write
-
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-
-    steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Docker Buildx
-        # Pinned to SHA for supply chain security
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
-
-      - name: Login to registry
-        uses: ./.github/actions/docker-login
-        with:
-          registry: ${{ inputs.registry }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: ./.github/actions/docker-metadata
-        with:
-          registry: ${{ inputs.registry }}
-          image-name: ${{ inputs.image-name || github.repository }}
-          version: ${{ inputs.version }}
-
-      - name: Build and push (linux/amd64)
-        id: build
-        # Pinned to SHA for supply chain security
-        uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
-        with:
-          context: ${{ inputs.context }}
-          file: ${{ inputs.file }}
-          platforms: linux/amd64
-          push: true
-          tags: >-
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
-            github.run_id }}-linux-amd64
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: ${{ inputs.build-args }}
-          cache-from: type=gha,scope=linux-amd64
-          cache-to: type=gha,mode=max,scope=linux-amd64
-          provenance: false
-          sbom: ${{ inputs.sbom }}
-
-  # Native linux/arm64 build leg (multi-arch split path)
-  build-arm64:
-    name: Build linux/arm64
-    if: ${{ contains(inputs.platforms, ',') && inputs.push }}
-    runs-on: ${{ inputs.runner-arm64 }}
+  # Per-platform native build leg (multi-arch split path).
+  # One matrix entry per platform; runner and QEMU config resolved by classify.
+  build-per-platform:
+    name: Build ${{ matrix.platform }}
+    needs: classify
+    if: ${{ needs.classify.outputs.use-split == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.classify.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       packages: write
@@ -285,7 +254,7 @@ jobs:
           persist-credentials: false
 
       - name: Setup QEMU
-        if: inputs.enable-qemu
+        if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
@@ -308,30 +277,30 @@ jobs:
           image-name: ${{ inputs.image-name || github.repository }}
           version: ${{ inputs.version }}
 
-      - name: Build and push (linux/arm64)
+      - name: Build and push (${{ matrix.platform }})
         id: build
         # Pinned to SHA for supply chain security
         uses: docker/build-push-action@d08e5c354a6adb9ed34480a06d141179aa583294 # v7.0.0
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.file }}
-          platforms: linux/arm64
+          platforms: ${{ matrix.platform }}
           push: true
           tags: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
-            github.run_id }}-linux-arm64
+            github.run_id }}-${{ matrix.slug }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
-          cache-from: type=gha,scope=linux-arm64
-          cache-to: type=gha,mode=max,scope=linux-arm64
+          cache-from: type=gha,scope=${{ matrix.slug }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.slug }}
           provenance: false
           sbom: ${{ inputs.sbom }}
 
-  # Assemble multi-arch manifest from per-platform images
+  # Assemble multi-arch manifest from per-platform staging images
   merge:
     name: Merge Manifests
-    needs: [build-amd64, build-arm64]
-    if: ${{ contains(inputs.platforms, ',') && inputs.push }}
+    needs: [classify, build-per-platform]
+    if: ${{ needs.classify.outputs.use-split == 'true' }}
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -392,13 +361,10 @@ jobs:
         shell: bash
         env:
           STEP: merge-manifests
-          # Reference by digest for immutability — tags can be overwritten, digests cannot
-          SOURCE_AMD64: >-
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
-            needs.build-amd64.outputs.digest }}
-          SOURCE_ARM64: >-
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
-            needs.build-arm64.outputs.digest }}
+          MATRIX: ${{ needs.classify.outputs.matrix }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          RUN_ID: ${{ github.run_id }}
           TARGET_TAGS: ${{ steps.meta.outputs.tags }}
         run: ./scripts/ci/actions/build-docker.sh
 
@@ -429,6 +395,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
           RUN_ID: ${{ github.run_id }}
+          MATRIX: ${{ needs.classify.outputs.matrix }}
         run: ./scripts/ci/actions/build-docker.sh
 
   scan:
