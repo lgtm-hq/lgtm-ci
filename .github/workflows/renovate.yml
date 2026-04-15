@@ -27,7 +27,7 @@ jobs:
     steps:
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@fe104658747b27e96e4f7e80cd0a94068e53901d # v2.16.1
+        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
         with:
           egress-policy: block
           allowed-endpoints: >
@@ -51,7 +51,7 @@ jobs:
 
       - name: Self-hosted Renovate
         # yamllint disable-line rule:line-length
-        uses: renovatebot/github-action@b67590ea780158ccd13192c22a3655a5231f869d # v46.1.8
+        uses: renovatebot/github-action@eb932558ad942cccfd8211cf535f17ff183a9f74 # v46.1.9
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           configurationFile: renovate.json
