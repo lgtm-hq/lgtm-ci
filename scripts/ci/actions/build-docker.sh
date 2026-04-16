@@ -339,6 +339,11 @@ classify)
 	platforms=("${deduped_platforms[@]}")
 	unset _seen_platforms deduped_platforms
 
+	# Fail fast on empty/whitespace-only PLATFORMS input
+	if [[ "${#platforms[@]}" -eq 0 ]]; then
+		die "PLATFORMS is empty or contains only whitespace"
+	fi
+
 	# push=false → always use the QEMU build job (imagetools requires a registry)
 	if [[ "$PUSH" != "true" ]]; then
 		set_github_output "use-split" "false"

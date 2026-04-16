@@ -237,9 +237,6 @@ jobs:
       contents: read
       packages: write
 
-    outputs:
-      digest: ${{ steps.build.outputs.digest }}
-
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
