@@ -327,12 +327,38 @@ classify)
 		[[ -n "$p" ]] && platforms+=("$p")
 	done < <(echo "$PLATFORMS" | tr ',' '\n')
 
-	# Single-platform or push=false → use the QEMU build job, not split
-	if [[ "${#platforms[@]}" -lt 2 || "$PUSH" != "true" ]]; then
+	# Deduplicate platform entries (preserve order, drop repeats)
+	declare -A _seen_platforms=()
+	deduped_platforms=()
+	for p in "${platforms[@]}"; do
+		if [[ -z "${_seen_platforms[$p]+x}" ]]; then
+			_seen_platforms[$p]=1
+			deduped_platforms+=("$p")
+		fi
+	done
+	platforms=("${deduped_platforms[@]}")
+	unset _seen_platforms deduped_platforms
+
+	# push=false → always use the QEMU build job (imagetools requires a registry)
+	if [[ "$PUSH" != "true" ]]; then
 		set_github_output "use-split" "false"
 		set_github_output "matrix" "[]"
-		log_info "Split disabled: ${#platforms[@]} platform(s), push=${PUSH}"
+		log_info "Split disabled: push=${PUSH}"
 		exit 0
+	fi
+
+	# Single platform: use split only if a native runner is mapped for it
+	if [[ "${#platforms[@]}" -lt 2 ]]; then
+		_single="${platforms[0]}"
+		_mapped=$(echo "$RUNNER_MAP" | jq -r --arg p "$_single" '.[$p] // empty')
+		if [[ -z "$_mapped" ]]; then
+			set_github_output "use-split" "false"
+			set_github_output "matrix" "[]"
+			log_info "Split disabled: single platform '${_single}' has no runner mapping"
+			exit 0
+		fi
+		log_info "Split enabled: single platform '${_single}' mapped to runner '${_mapped}'"
+		unset _single _mapped
 	fi
 
 	# Build matrix JSON array
@@ -373,7 +399,7 @@ classify)
 	done
 
 	set_github_output "use-split" "true"
-	set_github_output "matrix" "$matrix_json"
+	set_github_output "matrix" "$(echo "$matrix_json" | jq -c .)"
 	log_info "Split enabled: ${#platforms[@]} platform(s)"
 	for platform in "${platforms[@]}"; do
 		log_info "  ${platform}"
