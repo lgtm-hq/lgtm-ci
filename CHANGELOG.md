@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.11.0] - 2026-04-16
+
+### Features
+
+- **docker**: support configurable per-platform runners to eliminate QEMU emulation (#123) (e13f578)
+
+### Other Changes
+
+- **deps**: update actions/cache to v5.0.5 (#124) (db0f9db)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#117) (ae3c968)
+- **deps**: update digest (#121) (ab6e78a)
+- **deps**: update actions/upload-pages-artifact to v5.0.0 (major) (#120) (52fb285)
+- **deps**: update actions/attest-build-provenance to v4.1.0 (major) (major) (#119) (b986562)
+- **deps**: update actions/attest-build-provenance to v2.4.0 (minor) (#118) (38b62d9)
+
 ## [0.10.2] - 2026-04-07
 
 ### Bug Fixes
@@ -182,7 +197,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.0...v0.10.1
 [0.10.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.9.0...v0.10.0
