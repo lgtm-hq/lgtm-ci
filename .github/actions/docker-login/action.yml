@@ -1,0 +1,45 @@
+---
+name: Docker Registry Login
+description: Login to GHCR or Docker Hub based on registry input
+
+inputs:
+  registry:
+    description: "Container registry URL"
+    required: true
+  dockerhub-username:
+    description: "Docker Hub username (required when registry is docker.io)"
+    required: false
+    default: ""
+  dockerhub-token:
+    description: "Docker Hub token (required when registry is docker.io)"
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        STEP: validate
+        REGISTRY: ${{ inputs.registry }}
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+      run: ./scripts/ci/actions/docker-login.sh
+
+    - name: Login to GHCR
+      if: inputs.registry == 'ghcr.io'
+      # Pinned to SHA for supply chain security
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Login to Docker Hub
+      if: inputs.registry == 'docker.io'
+      # Pinned to SHA for supply chain security
+      uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+      with:
+        username: ${{ inputs.dockerhub-username }}
+        password: ${{ inputs.dockerhub-token }}
