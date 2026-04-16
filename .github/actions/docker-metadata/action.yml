@@ -40,8 +40,8 @@ runs:
           type=sha,prefix=sha-
           type=ref,event=branch
           type=ref,event=pr
-          type=semver,pattern={{version}},value=${{ inputs.version }}
-          type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }}
-          type=semver,pattern={{major}},value=${{ inputs.version }}
+          type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+          type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+          type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
           type=raw,value=latest,enable=${{ inputs.version != '' }}
           ${{ inputs.extra-tags }}
