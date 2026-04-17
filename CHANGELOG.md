@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.12.0] - 2026-04-17
+
+### Features
+
+- **docker**: add per-platform smoke tests before manifest merge (#127) (34758dd)
+
 ## [0.11.0] - 2026-04-16
 
 ### Features
@@ -197,7 +203,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.1...v0.10.2
 [0.10.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.0...v0.10.1
