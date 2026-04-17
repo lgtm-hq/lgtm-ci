@@ -345,7 +345,15 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout repository
+      - name: Checkout repository (full, for smoke-test-script)
+        if: inputs.smoke-test-script != ''
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout repository (sparse, smoke-test shorthand)
+        if: inputs.smoke-test-script == ''
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -353,7 +361,6 @@ jobs:
           sparse-checkout: |
             scripts/ci
             .github/actions
-            ${{ inputs.smoke-test-script }}
 
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
