@@ -4,7 +4,8 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
-#          set-output-digest, classify, merge-manifests, cleanup-staging
+#          set-output-digest, classify, record-digest, smoke-test,
+#          merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -304,9 +305,12 @@ classify)
 	#   PUSH       - Whether images will be pushed ("true"/"false")
 	#
 	# Optional environment variables:
-	#   RUNNER_MAP - JSON object mapping platform → runner label (default: "{}")
-	#               Platforms not in the map default to ubuntu-24.04 with QEMU.
-	#               Example: {"linux/arm64":"ubuntu-24.04-arm"}
+	#   RUNNER_MAP        - JSON object mapping platform → runner label (default: "{}")
+	#                       Platforms not in the map default to ubuntu-24.04 with QEMU.
+	#                       Example: {"linux/arm64":"ubuntu-24.04-arm"}
+	#   SMOKE_TEST        - Smoke-test shorthand command (validated only; not used here).
+	#   SMOKE_TEST_SCRIPT - Smoke-test script path (validated only; not used here).
+	#                       SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive.
 	#
 	# Outputs:
 	#   use-split - "true" when split per-platform build should be used
@@ -314,6 +318,13 @@ classify)
 	: "${PLATFORMS:?PLATFORMS is required}"
 	: "${PUSH:?PUSH is required}"
 	: "${RUNNER_MAP:={}}"
+	: "${SMOKE_TEST:=}"
+	: "${SMOKE_TEST_SCRIPT:=}"
+
+	# Mutex: smoke-test and smoke-test-script cannot both be set
+	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
+		die "smoke-test and smoke-test-script are mutually exclusive (set at most one)"
+	fi
 
 	# Validate RUNNER_MAP is parseable JSON
 	if ! echo "$RUNNER_MAP" | jq empty 2>/dev/null; then
@@ -409,6 +420,87 @@ classify)
 	for platform in "${platforms[@]}"; do
 		log_info "  ${platform}"
 	done
+	;;
+
+record-digest)
+	# Persist a build-push-action digest to an artifact-friendly path.
+	#
+	# Required environment variables:
+	#   DIGEST      - Image digest emitted by build-push-action (sha256:...)
+	#   DIGEST_FILE - Absolute path to write the digest to
+	: "${DIGEST:?DIGEST is required}"
+	: "${DIGEST_FILE:?DIGEST_FILE is required}"
+
+	if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "DIGEST is not a valid sha256 digest: ${DIGEST}"
+	fi
+
+	mkdir -p "$(dirname "$DIGEST_FILE")"
+	printf '%s' "$DIGEST" >"$DIGEST_FILE"
+	log_info "Recorded digest to ${DIGEST_FILE}"
+	;;
+
+smoke-test)
+	# Run a smoke test against a per-platform staging image.
+	# Pulls by immutable digest (IMAGE@sha256:...) to avoid TOCTOU between
+	# the build and verify jobs.
+	#
+	# Required environment variables:
+	#   REGISTRY    - Container registry URL
+	#   IMAGE_NAME  - Registry-relative image name
+	#   PLATFORM    - Target platform (e.g. linux/arm64)
+	#   DIGEST_FILE - Path to a file containing the sha256:... digest of the
+	#                 staging image (produced by the `record-digest` step)
+	#
+	# Optional environment variables (mutually exclusive; at least one required):
+	#   SMOKE_TEST        - Shorthand command + args; word-split into `docker run`
+	#   SMOKE_TEST_SCRIPT - Path to caller-owned script; receives IMAGE, PLATFORM,
+	#                       REGISTRY in the environment and owns the docker run
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${IMAGE_NAME:?IMAGE_NAME is required}"
+	: "${PLATFORM:?PLATFORM is required}"
+	: "${DIGEST_FILE:?DIGEST_FILE is required}"
+	: "${SMOKE_TEST:=}"
+	: "${SMOKE_TEST_SCRIPT:=}"
+
+	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
+		die "SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive"
+	fi
+	if [[ -z "$SMOKE_TEST" && -z "$SMOKE_TEST_SCRIPT" ]]; then
+		die "One of SMOKE_TEST or SMOKE_TEST_SCRIPT is required"
+	fi
+	if [[ ! -s "$DIGEST_FILE" ]]; then
+		die "DIGEST_FILE missing or empty: ${DIGEST_FILE}"
+	fi
+
+	digest=$(<"$DIGEST_FILE")
+	if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "Invalid digest in ${DIGEST_FILE}: ${digest}"
+	fi
+
+	IMAGE="${REGISTRY}/${IMAGE_NAME}@${digest}"
+	export IMAGE PLATFORM REGISTRY
+
+	echo "::group::Pulling ${IMAGE} (${PLATFORM})"
+	docker pull --platform "${PLATFORM}" "${IMAGE}"
+	echo "::endgroup::"
+
+	if [[ -n "$SMOKE_TEST_SCRIPT" ]]; then
+		if [[ ! -f "$SMOKE_TEST_SCRIPT" ]]; then
+			echo "::error::smoke-test-script not found: ${SMOKE_TEST_SCRIPT}"
+			exit 1
+		fi
+		echo "::group::${SMOKE_TEST_SCRIPT} (IMAGE=${IMAGE} PLATFORM=${PLATFORM})"
+		chmod +x "$SMOKE_TEST_SCRIPT"
+		"./${SMOKE_TEST_SCRIPT#./}"
+		echo "::endgroup::"
+	else
+		echo "::group::docker run --rm --platform ${PLATFORM} ${IMAGE} ${SMOKE_TEST}"
+		# Intentionally word-split SMOKE_TEST so callers can pass flags+args
+		# shellcheck disable=SC2086
+		docker run --rm --platform "${PLATFORM}" "${IMAGE}" ${SMOKE_TEST}
+		echo "::endgroup::"
+	fi
 	;;
 
 merge-manifests)

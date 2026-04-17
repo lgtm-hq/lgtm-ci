@@ -1426,6 +1426,10 @@ jobs:
       provenance: true
       sbom: true
       scan: true
+      # Trivial smoke check (mutually exclusive with smoke-test-script)
+      smoke-test: "--version"
+      # Or escape hatch for flag/env/network needs:
+      # smoke-test-script: "scripts/ci/smoke.sh"
 ```
 
 **Inputs:**
@@ -1440,6 +1444,18 @@ jobs:
 - `provenance` - Generate provenance attestation (default: true)
 - `sbom` - Generate SBOM attestation (default: true)
 - `scan` - Run vulnerability scan (default: false)
+- `runner-map` - JSON object mapping platform → runner label. Platforms not
+  in the map default to `ubuntu-24.04` with QEMU. Example:
+  `{"linux/arm64":"ubuntu-24.04-arm"}` (default: `{}`)
+- `smoke-test` - Shorthand command + args run inside each per-platform
+  staging image as `docker run --rm --platform <p> <image> <smoke-test>`.
+  Word-split; values with spaces or shell metacharacters need
+  `smoke-test-script`. Mutually exclusive with `smoke-test-script`. Only
+  applies to the split per-platform push path (default: '')
+- `smoke-test-script` - Path (relative to checkout root) to a caller-owned
+  script run on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. Script
+  owns the `docker run` invocation — full control over flags, env, network,
+  tmpfs, etc. Mutually exclusive with `smoke-test` (default: '')
 
 **Outputs:**
 
@@ -1448,11 +1464,24 @@ jobs:
 
 **Features:**
 
-- Multi-platform builds with QEMU
+- Multi-platform builds with QEMU or split native-runner per-platform builds
 - docker/metadata-action for intelligent tag generation
 - GitHub Actions cache for layer caching
 - Provenance and SBOM attestations
 - Optional Trivy vulnerability scanning with SARIF upload
+- Optional per-platform smoke-test gate — any failing platform blocks the
+  manifest merge, so partial multi-arch manifests are never published
+
+**Per-platform smoke tests:**
+
+When `push` is true and two or more platforms are requested, the workflow
+splits into per-platform native (or QEMU) build legs, then merges a
+multi-arch manifest. Set `smoke-test` or `smoke-test-script` to gate the
+merge on a per-platform health check against the freshly pushed staging
+image. `smoke-test` is a convenience for trivial checks like `--version`;
+reach for `smoke-test-script` when you need `-e`, `--network`, `--read-only`,
+or any other `docker run` flag. Validation is performed in the `classify`
+job, so setting both fails fast before any build runs.
 
 **Permissions Required:**
 
