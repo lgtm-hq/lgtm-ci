@@ -4,7 +4,8 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
-#          set-output-digest, classify, smoke-test, merge-manifests, cleanup-staging
+#          set-output-digest, classify, record-digest, smoke-test,
+#          merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -421,15 +422,35 @@ classify)
 	done
 	;;
 
-smoke-test)
-	# Run a smoke test against a per-platform staging image.
+record-digest)
+	# Persist a build-push-action digest to an artifact-friendly path.
 	#
 	# Required environment variables:
-	#   REGISTRY   - Container registry URL
-	#   IMAGE_NAME - Registry-relative image name
-	#   RUN_ID     - GitHub Actions run ID used to locate the staging tag
-	#   SLUG       - Platform slug component of the staging tag
-	#   PLATFORM   - Target platform (e.g. linux/arm64)
+	#   DIGEST      - Image digest emitted by build-push-action (sha256:...)
+	#   DIGEST_FILE - Absolute path to write the digest to
+	: "${DIGEST:?DIGEST is required}"
+	: "${DIGEST_FILE:?DIGEST_FILE is required}"
+
+	if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "DIGEST is not a valid sha256 digest: ${DIGEST}"
+	fi
+
+	mkdir -p "$(dirname "$DIGEST_FILE")"
+	printf '%s' "$DIGEST" >"$DIGEST_FILE"
+	log_info "Recorded digest to ${DIGEST_FILE}"
+	;;
+
+smoke-test)
+	# Run a smoke test against a per-platform staging image.
+	# Pulls by immutable digest (IMAGE@sha256:...) to avoid TOCTOU between
+	# the build and verify jobs.
+	#
+	# Required environment variables:
+	#   REGISTRY    - Container registry URL
+	#   IMAGE_NAME  - Registry-relative image name
+	#   PLATFORM    - Target platform (e.g. linux/arm64)
+	#   DIGEST_FILE - Path to a file containing the sha256:... digest of the
+	#                 staging image (produced by the `record-digest` step)
 	#
 	# Optional environment variables (mutually exclusive; at least one required):
 	#   SMOKE_TEST        - Shorthand command + args; word-split into `docker run`
@@ -437,9 +458,8 @@ smoke-test)
 	#                       REGISTRY in the environment and owns the docker run
 	: "${REGISTRY:?REGISTRY is required}"
 	: "${IMAGE_NAME:?IMAGE_NAME is required}"
-	: "${RUN_ID:?RUN_ID is required}"
-	: "${SLUG:?SLUG is required}"
 	: "${PLATFORM:?PLATFORM is required}"
+	: "${DIGEST_FILE:?DIGEST_FILE is required}"
 	: "${SMOKE_TEST:=}"
 	: "${SMOKE_TEST_SCRIPT:=}"
 
@@ -449,8 +469,16 @@ smoke-test)
 	if [[ -z "$SMOKE_TEST" && -z "$SMOKE_TEST_SCRIPT" ]]; then
 		die "One of SMOKE_TEST or SMOKE_TEST_SCRIPT is required"
 	fi
+	if [[ ! -s "$DIGEST_FILE" ]]; then
+		die "DIGEST_FILE missing or empty: ${DIGEST_FILE}"
+	fi
 
-	IMAGE="${REGISTRY}/${IMAGE_NAME}:build-${RUN_ID}-${SLUG}"
+	digest=$(<"$DIGEST_FILE")
+	if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "Invalid digest in ${DIGEST_FILE}: ${digest}"
+	fi
+
+	IMAGE="${REGISTRY}/${IMAGE_NAME}@${digest}"
 	export IMAGE
 
 	echo "::group::Pulling ${IMAGE} (${PLATFORM})"

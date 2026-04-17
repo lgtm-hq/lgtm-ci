@@ -317,6 +317,27 @@ jobs:
           provenance: false
           sbom: ${{ inputs.sbom }}
 
+      # Publish the per-platform push digest as an artifact so the verify job
+      # can pull the exact immutable image (IMAGE@sha256:...) instead of
+      # resolving the mutable staging tag — closes the TOCTOU window between
+      # build and verify.
+      - name: Record staging digest
+        shell: bash
+        env:
+          STEP: record-digest
+          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
+        run: ./scripts/ci/actions/build-docker.sh
+
+      - name: Upload staging digest
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: staging-digest-${{ matrix.slug }}
+          path: ${{ runner.temp }}/staging-digest/digest.txt
+          if-no-files-found: error
+          retention-days: 1
+
   # Optional per-platform smoke test gate.
   # Runs against each staging image on its native runner before manifest
   # merge. Any failure blocks the merge so partial multi-arch manifests are
@@ -374,14 +395,22 @@ jobs:
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Pull the immutable digest recorded by the matching build-per-platform
+      # entry so smoke-test runs against the exact pushed image.
+      - name: Download staging digest
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: staging-digest-${{ matrix.slug }}
+          path: ${{ runner.temp }}/staging-digest
+
       - name: Smoke test (${{ matrix.platform }})
         shell: bash
         env:
           STEP: smoke-test
           REGISTRY: ${{ inputs.registry }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          SLUG: ${{ matrix.slug }}
+          DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
           PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
