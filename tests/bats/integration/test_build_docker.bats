@@ -87,21 +87,15 @@ _run_script() {
 # =============================================================================
 
 @test "build-docker classify: fails when PLATFORMS is unset" {
-	if ! bash4_available; then
-		skip "requires bash 4+"
-	fi
 	unset PLATFORMS
-	run "$MODERN_BASH" "$SCRIPT"
+	_run_script
 	assert_failure
 	assert_output --partial "PLATFORMS"
 }
 
 @test "build-docker classify: fails when PUSH is unset" {
-	if ! bash4_available; then
-		skip "requires bash 4+"
-	fi
 	unset PUSH
-	run "$MODERN_BASH" "$SCRIPT"
+	_run_script
 	assert_failure
 	assert_output --partial "PUSH"
 }

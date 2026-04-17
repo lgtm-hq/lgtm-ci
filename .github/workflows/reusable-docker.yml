@@ -352,6 +352,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: |
             scripts/ci
+            .github/actions
             ${{ inputs.smoke-test-script }}
 
       - name: Setup QEMU
