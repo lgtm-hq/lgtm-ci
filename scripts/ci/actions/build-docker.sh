@@ -479,7 +479,7 @@ smoke-test)
 	fi
 
 	IMAGE="${REGISTRY}/${IMAGE_NAME}@${digest}"
-	export IMAGE
+	export IMAGE PLATFORM REGISTRY
 
 	echo "::group::Pulling ${IMAGE} (${PLATFORM})"
 	docker pull --platform "${PLATFORM}" "${IMAGE}"
