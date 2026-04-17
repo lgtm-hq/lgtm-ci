@@ -346,11 +346,13 @@ jobs:
           egress-policy: audit
 
       - name: Checkout repository
-        if: inputs.smoke-test-script != ''
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
+          sparse-checkout: |
+            scripts/ci
+            ${{ inputs.smoke-test-script }}
 
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
@@ -367,6 +369,7 @@ jobs:
       - name: Smoke test (${{ matrix.platform }})
         shell: bash
         env:
+          STEP: smoke-test
           REGISTRY: ${{ inputs.registry }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
           RUN_ID: ${{ github.run_id }}
@@ -374,30 +377,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
-        run: |
-          set -euo pipefail
-          IMAGE="${REGISTRY}/${IMAGE_NAME}:build-${RUN_ID}-${SLUG}"
-          export IMAGE
-          echo "::group::Pulling ${IMAGE} (${PLATFORM})"
-          docker pull --platform "${PLATFORM}" "${IMAGE}"
-          echo "::endgroup::"
-
-          if [[ -n "${SMOKE_TEST_SCRIPT}" ]]; then
-            if [[ ! -f "${SMOKE_TEST_SCRIPT}" ]]; then
-              echo "::error::smoke-test-script not found: ${SMOKE_TEST_SCRIPT}"
-              exit 1
-            fi
-            echo "::group::${SMOKE_TEST_SCRIPT} (IMAGE=${IMAGE} PLATFORM=${PLATFORM})"
-            chmod +x "${SMOKE_TEST_SCRIPT}"
-            "./${SMOKE_TEST_SCRIPT#./}"
-            echo "::endgroup::"
-          else
-            echo "::group::docker run --rm --platform ${PLATFORM} ${IMAGE} ${SMOKE_TEST}"
-            # Intentionally word-split SMOKE_TEST so callers can pass flags+args
-            # shellcheck disable=SC2086
-            docker run --rm --platform "${PLATFORM}" "${IMAGE}" ${SMOKE_TEST}
-            echo "::endgroup::"
-          fi
+        run: ./scripts/ci/actions/build-docker.sh
 
   # Assemble multi-arch manifest from per-platform staging images
   merge:

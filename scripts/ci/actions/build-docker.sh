@@ -4,7 +4,7 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
-#          set-output-digest, classify, merge-manifests, cleanup-staging
+#          set-output-digest, classify, smoke-test, merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -419,6 +419,60 @@ classify)
 	for platform in "${platforms[@]}"; do
 		log_info "  ${platform}"
 	done
+	;;
+
+smoke-test)
+	# Run a smoke test against a per-platform staging image.
+	#
+	# Required environment variables:
+	#   REGISTRY   - Container registry URL
+	#   IMAGE_NAME - Registry-relative image name
+	#   RUN_ID     - GitHub Actions run ID used to locate the staging tag
+	#   SLUG       - Platform slug component of the staging tag
+	#   PLATFORM   - Target platform (e.g. linux/arm64)
+	#
+	# Optional environment variables (mutually exclusive; at least one required):
+	#   SMOKE_TEST        - Shorthand command + args; word-split into `docker run`
+	#   SMOKE_TEST_SCRIPT - Path to caller-owned script; receives IMAGE, PLATFORM,
+	#                       REGISTRY in the environment and owns the docker run
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${IMAGE_NAME:?IMAGE_NAME is required}"
+	: "${RUN_ID:?RUN_ID is required}"
+	: "${SLUG:?SLUG is required}"
+	: "${PLATFORM:?PLATFORM is required}"
+	: "${SMOKE_TEST:=}"
+	: "${SMOKE_TEST_SCRIPT:=}"
+
+	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
+		die "SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive"
+	fi
+	if [[ -z "$SMOKE_TEST" && -z "$SMOKE_TEST_SCRIPT" ]]; then
+		die "One of SMOKE_TEST or SMOKE_TEST_SCRIPT is required"
+	fi
+
+	IMAGE="${REGISTRY}/${IMAGE_NAME}:build-${RUN_ID}-${SLUG}"
+	export IMAGE
+
+	echo "::group::Pulling ${IMAGE} (${PLATFORM})"
+	docker pull --platform "${PLATFORM}" "${IMAGE}"
+	echo "::endgroup::"
+
+	if [[ -n "$SMOKE_TEST_SCRIPT" ]]; then
+		if [[ ! -f "$SMOKE_TEST_SCRIPT" ]]; then
+			echo "::error::smoke-test-script not found: ${SMOKE_TEST_SCRIPT}"
+			exit 1
+		fi
+		echo "::group::${SMOKE_TEST_SCRIPT} (IMAGE=${IMAGE} PLATFORM=${PLATFORM})"
+		chmod +x "$SMOKE_TEST_SCRIPT"
+		"./${SMOKE_TEST_SCRIPT#./}"
+		echo "::endgroup::"
+	else
+		echo "::group::docker run --rm --platform ${PLATFORM} ${IMAGE} ${SMOKE_TEST}"
+		# Intentionally word-split SMOKE_TEST so callers can pass flags+args
+		# shellcheck disable=SC2086
+		docker run --rm --platform "${PLATFORM}" "${IMAGE}" ${SMOKE_TEST}
+		echo "::endgroup::"
+	fi
 	;;
 
 merge-manifests)
