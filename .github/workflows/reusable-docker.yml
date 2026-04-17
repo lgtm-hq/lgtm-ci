@@ -72,6 +72,28 @@ on:
         required: false
         type: string
         default: "{}"
+      smoke-test:
+        description: >-
+          Shorthand command + args to run inside each per-platform staging
+          image. Executed as `docker run --rm --platform <p> <image> <smoke-test>`.
+          Good for trivial checks like `--version`. Word-split; values with
+          spaces or shell metacharacters need `smoke-test-script` instead.
+          Mutually exclusive with `smoke-test-script`. Skipped when both empty.
+          Only applies to the split per-platform path (multi-arch push).
+        required: false
+        type: string
+        default: ""
+      smoke-test-script:
+        description: >-
+          Path (relative to checkout root) to a caller-owned script. Executed
+          on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. The script
+          owns the `docker run` invocation — full control over flags, env,
+          network, tmpfs, etc. Preferred over `smoke-test` for anything
+          beyond a bare command. Mutually exclusive with `smoke-test`.
+          Any failing platform blocks the entire manifest merge.
+        required: false
+        type: string
+        default: ""
 
     outputs:
       tags:
@@ -122,6 +144,8 @@ jobs:
           PLATFORMS: ${{ inputs.platforms }}
           PUSH: ${{ inputs.push }}
           RUNNER_MAP: ${{ inputs.runner-map }}
+          SMOKE_TEST: ${{ inputs.smoke-test }}
+          SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
         run: ./scripts/ci/actions/build-docker.sh
 
   # Single-platform builds, or multi-platform when push is disabled (QEMU fallback)
@@ -293,11 +317,98 @@ jobs:
           provenance: false
           sbom: ${{ inputs.sbom }}
 
+  # Optional per-platform smoke test gate.
+  # Runs against each staging image on its native runner before manifest
+  # merge. Any failure blocks the merge so partial multi-arch manifests are
+  # never published. Two modes:
+  #   - smoke-test (shorthand): `docker run --rm --platform <p> <image> <cmd>`
+  #   - smoke-test-script: caller-owned script with env IMAGE/PLATFORM/REGISTRY
+  verify-per-platform:
+    name: Verify ${{ matrix.platform }}
+    needs: [classify, build-per-platform]
+    if: >-
+      needs.classify.outputs.use-split == 'true' &&
+      (inputs.smoke-test != '' || inputs.smoke-test-script != '')
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.classify.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@f808768d1510423e83855289c910610ca9b43176 # v2.17.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        if: inputs.smoke-test-script != ''
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup QEMU
+        if: ${{ matrix.qemu }}
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Login to registry
+        uses: ./.github/actions/docker-login
+        with:
+          registry: ${{ inputs.registry }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Smoke test (${{ matrix.platform }})
+        shell: bash
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          RUN_ID: ${{ github.run_id }}
+          SLUG: ${{ matrix.slug }}
+          PLATFORM: ${{ matrix.platform }}
+          SMOKE_TEST: ${{ inputs.smoke-test }}
+          SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+        run: |
+          set -euo pipefail
+          IMAGE="${REGISTRY}/${IMAGE_NAME}:build-${RUN_ID}-${SLUG}"
+          export IMAGE
+          echo "::group::Pulling ${IMAGE} (${PLATFORM})"
+          docker pull --platform "${PLATFORM}" "${IMAGE}"
+          echo "::endgroup::"
+
+          if [[ -n "${SMOKE_TEST_SCRIPT}" ]]; then
+            if [[ ! -f "${SMOKE_TEST_SCRIPT}" ]]; then
+              echo "::error::smoke-test-script not found: ${SMOKE_TEST_SCRIPT}"
+              exit 1
+            fi
+            echo "::group::${SMOKE_TEST_SCRIPT} (IMAGE=${IMAGE} PLATFORM=${PLATFORM})"
+            chmod +x "${SMOKE_TEST_SCRIPT}"
+            "./${SMOKE_TEST_SCRIPT#./}"
+            echo "::endgroup::"
+          else
+            echo "::group::docker run --rm --platform ${PLATFORM} ${IMAGE} ${SMOKE_TEST}"
+            # Intentionally word-split SMOKE_TEST so callers can pass flags+args
+            # shellcheck disable=SC2086
+            docker run --rm --platform "${PLATFORM}" "${IMAGE}" ${SMOKE_TEST}
+            echo "::endgroup::"
+          fi
+
   # Assemble multi-arch manifest from per-platform staging images
   merge:
     name: Merge Manifests
-    needs: [classify, build-per-platform]
-    if: ${{ needs.classify.outputs.use-split == 'true' }}
+    needs: [classify, build-per-platform, verify-per-platform]
+    if: >-
+      always() &&
+      needs.classify.outputs.use-split == 'true' &&
+      needs.build-per-platform.result == 'success' &&
+      (needs.verify-per-platform.result == 'success' ||
+       needs.verify-per-platform.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
       contents: read

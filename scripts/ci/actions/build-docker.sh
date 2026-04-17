@@ -304,9 +304,12 @@ classify)
 	#   PUSH       - Whether images will be pushed ("true"/"false")
 	#
 	# Optional environment variables:
-	#   RUNNER_MAP - JSON object mapping platform → runner label (default: "{}")
-	#               Platforms not in the map default to ubuntu-24.04 with QEMU.
-	#               Example: {"linux/arm64":"ubuntu-24.04-arm"}
+	#   RUNNER_MAP        - JSON object mapping platform → runner label (default: "{}")
+	#                       Platforms not in the map default to ubuntu-24.04 with QEMU.
+	#                       Example: {"linux/arm64":"ubuntu-24.04-arm"}
+	#   SMOKE_TEST        - Smoke-test shorthand command (validated only; not used here).
+	#   SMOKE_TEST_SCRIPT - Smoke-test script path (validated only; not used here).
+	#                       SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive.
 	#
 	# Outputs:
 	#   use-split - "true" when split per-platform build should be used
@@ -314,6 +317,13 @@ classify)
 	: "${PLATFORMS:?PLATFORMS is required}"
 	: "${PUSH:?PUSH is required}"
 	: "${RUNNER_MAP:={}}"
+	: "${SMOKE_TEST:=}"
+	: "${SMOKE_TEST_SCRIPT:=}"
+
+	# Mutex: smoke-test and smoke-test-script cannot both be set
+	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
+		die "smoke-test and smoke-test-script are mutually exclusive (set at most one)"
+	fi
 
 	# Validate RUNNER_MAP is parseable JSON
 	if ! echo "$RUNNER_MAP" | jq empty 2>/dev/null; then
