@@ -125,7 +125,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
         with:
           egress-policy: audit
 
@@ -167,7 +167,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
         with:
           egress-policy: audit
 
@@ -264,7 +264,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
         with:
           egress-policy: audit
 
@@ -362,7 +362,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
         with:
           egress-policy: audit
 
@@ -440,7 +440,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@8d3c67de8e2fe68ef647c8db1e6a09f647780f40 # v2.19.0
+        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
         with:
           egress-policy: audit
 
@@ -539,7 +539,7 @@ jobs:
     steps:
       - name: Run Trivy vulnerability scanner
         # Pinned to SHA for supply chain security
-        uses: aquasecurity/trivy-action@57a97c7e7821a5776cebc9bb87c984fa69cba8f1 # v0.35.0
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
         with:
           image-ref: >-
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}@${{
@@ -550,6 +550,6 @@ jobs:
 
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@95e58e9a2cdfd71adc6e0353d5c52f41a045d225 # v4.35.2
+        uses: github/codeql-action/upload-sarif@68bde559dea0fdcac2102bfdf6230c5f70eb485e # v4.35.4
         with:
           sarif_file: "trivy-results.sarif"
