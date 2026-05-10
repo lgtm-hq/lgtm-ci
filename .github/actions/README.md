@@ -1415,9 +1415,11 @@ jobs:
 Build and push Docker images with multi-platform support and attestations.
 
 Caller repos only need to pin this workflow — **no vendored `scripts/ci`
-tree is required**. All shared shell scripts and composite actions are
-resolved from lgtm-ci via a cross-repo checkout (same pattern as
-`reusable-release-auto-tag.yml`).
+tree is required**. The workflow sparse-checks the shared shell scripts
+from lgtm-ci via a cross-repo checkout (same pattern as
+`reusable-release-auto-tag.yml`), but composite actions are not resolved
+from `.lgtm-ci-tooling`. The `docker-login` and `docker-metadata` logic is
+inlined in this workflow instead.
 
 ```yaml
 jobs:

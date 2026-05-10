@@ -101,7 +101,7 @@ on:
         default: ""
       tooling-ref:
         # yamllint disable-line rule:line-length
-        description: "Git ref for lgtm-ci tooling checkout. Same-repo callers default to github.sha; cross-repo callers default to main."
+        description: "Git ref for lgtm-ci tooling checkout. Defaults to the reusable workflow commit."
         required: false
         type: string
         default: ""
@@ -133,6 +133,7 @@ jobs:
       use-split: ${{ steps.classify.outputs.use-split }}
       matrix: ${{ steps.classify.outputs.matrix }}
       tooling-ref: ${{ steps.tooling.outputs.ref }}
+      tooling-repository: ${{ steps.tooling.outputs.repository }}
 
     steps:
       - name: Harden runner
@@ -146,21 +147,37 @@ jobs:
         shell: bash
         env:
           TOOLING_REF: ${{ inputs.tooling-ref }}
-          GH_REPO: ${{ github.repository }}
-          GH_SHA: ${{ github.sha }}
+          JOB_CONTEXT: ${{ toJson(job) }}
         run: |
-          if [[ -n "$TOOLING_REF" ]]; then
-            echo "ref=$TOOLING_REF" >> "$GITHUB_OUTPUT"
-          elif [[ "$GH_REPO" == "lgtm-hq/lgtm-ci" ]]; then
-            echo "ref=$GH_SHA" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=main" >> "$GITHUB_OUTPUT"
-          fi
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          try:
+              job_context = json.loads(os.environ["JOB_CONTEXT"])
+              workflow_sha = job_context["workflow_sha"]
+              workflow_repository = job_context["workflow_repository"]
+              github_output = os.environ["GITHUB_OUTPUT"]
+          except KeyError as exc:
+              print(f"Missing required workflow context key: {exc}", file=sys.stderr)
+              sys.exit(1)
+          except json.JSONDecodeError as exc:
+              print(f"Invalid JOB_CONTEXT JSON: {exc}", file=sys.stderr)
+              sys.exit(1)
+
+          tooling_ref = os.environ.get("TOOLING_REF", "")
+          ref = tooling_ref if tooling_ref else workflow_sha
+
+          with open(github_output, "a", encoding="utf-8") as output:
+              output.write(f"ref={ref}\n")
+              output.write(f"repository={workflow_repository}\n")
+          PY
 
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ steps.tooling.outputs.repository }}
           path: .lgtm-ci-tooling
           ref: ${{ steps.tooling.outputs.ref }}
           sparse-checkout: scripts/ci/
@@ -211,7 +228,7 @@ jobs:
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ needs.classify.outputs.tooling-repository }}
           path: .lgtm-ci-tooling
           ref: ${{ needs.classify.outputs.tooling-ref }}
           sparse-checkout: scripts/ci/
@@ -347,7 +364,7 @@ jobs:
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ needs.classify.outputs.tooling-repository }}
           path: .lgtm-ci-tooling
           ref: ${{ needs.classify.outputs.tooling-ref }}
           sparse-checkout: scripts/ci/
@@ -481,7 +498,7 @@ jobs:
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ needs.classify.outputs.tooling-repository }}
           path: .lgtm-ci-tooling
           ref: ${{ needs.classify.outputs.tooling-ref }}
           sparse-checkout: scripts/ci/
@@ -569,7 +586,7 @@ jobs:
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ needs.classify.outputs.tooling-repository }}
           path: .lgtm-ci-tooling
           ref: ${{ needs.classify.outputs.tooling-ref }}
           sparse-checkout: scripts/ci/
