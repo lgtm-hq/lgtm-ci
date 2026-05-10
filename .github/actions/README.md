@@ -1463,9 +1463,9 @@ jobs:
   script run on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. Script
   owns the `docker run` invocation — full control over flags, env, network,
   tmpfs, etc. Mutually exclusive with `smoke-test` (default: '')
-- `tooling-ref` - Git ref for the lgtm-ci tooling checkout. Same-repo
-  callers default to `github.sha`; cross-repo callers default to `main`.
-  Override to pin a specific tag or SHA (default: '')
+- `tooling-ref` - Git ref for the lgtm-ci tooling checkout. Defaults to the
+  reusable workflow commit (the workflow's own pinned commit). Override to pin
+  a specific tag or SHA (default: '')
 
 **Outputs:**
 

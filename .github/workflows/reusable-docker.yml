@@ -129,6 +129,8 @@ jobs:
   classify:
     name: Classify Platforms
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       use-split: ${{ steps.classify.outputs.use-split }}
       matrix: ${{ steps.classify.outputs.matrix }}
