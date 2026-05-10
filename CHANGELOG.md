@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.12.1] - 2026-05-10
+
+### Bug Fixes
+
+- **docker**: adopt cross-repo tooling checkout in reusable-docker (#138) (070cf3a)
+
+### Other Changes
+
+- **deps**: update digest (#136) (e4a33c3)
+- **deps**: update digest (#134) (c923a2b)
+- **deps**: update actions/setup-node to v6.4.0 (minor) (#131) (9c45c24)
+- **deps**: update digest (#130) (68d7e31)
+- **deps**: update astral-sh/setup-uv to v8.1.0 (minor) (#129) (bd46a80)
+
 ## [0.12.0] - 2026-04-17
 
 ### Features
@@ -203,7 +217,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.1...HEAD
+[0.12.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.2...v0.11.0
 [0.10.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.10.1...v0.10.2
