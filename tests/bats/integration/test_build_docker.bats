@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Integration tests for build-docker.sh action script (classify step)
+# Purpose: Integration tests for build-docker.sh action script
 
 load "../../helpers/common"
 load "../../helpers/mocks"
@@ -45,6 +45,11 @@ _run_script() {
 		skip "requires bash 4+ (classify uses associative arrays)"
 	fi
 	run "$MODERN_BASH" "$SCRIPT"
+}
+
+# Run the script with any bash (steps that don't need bash 4+ features).
+_run_script_any_bash() {
+	run bash "$SCRIPT"
 }
 
 # =============================================================================
@@ -98,4 +103,124 @@ _run_script() {
 	_run_script
 	assert_failure
 	assert_output --partial "PUSH"
+}
+
+# =============================================================================
+# record-digest step
+# =============================================================================
+
+@test "build-docker record-digest: writes valid digest to file" {
+	export STEP="record-digest"
+	export DIGEST="sha256:$(printf '%0.s0' {1..64})"
+	export DIGEST_FILE="${BATS_TEST_TMPDIR}/staging-digest/digest.txt"
+
+	_run_script_any_bash
+	assert_success
+
+	assert_file_exists "$DIGEST_FILE"
+	run cat "$DIGEST_FILE"
+	assert_output "$DIGEST"
+}
+
+@test "build-docker record-digest: creates parent directory" {
+	export STEP="record-digest"
+	export DIGEST="sha256:$(printf '%0.s0' {1..64})"
+	export DIGEST_FILE="${BATS_TEST_TMPDIR}/nested/dir/digest.txt"
+
+	_run_script_any_bash
+	assert_success
+	assert_file_exists "$DIGEST_FILE"
+}
+
+@test "build-docker record-digest: rejects invalid digest" {
+	export STEP="record-digest"
+	export DIGEST="not-a-digest"
+	export DIGEST_FILE="${BATS_TEST_TMPDIR}/digest.txt"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "not a valid sha256 digest"
+}
+
+@test "build-docker record-digest: fails when DIGEST is unset" {
+	export STEP="record-digest"
+	unset DIGEST
+	export DIGEST_FILE="${BATS_TEST_TMPDIR}/digest.txt"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "DIGEST"
+}
+
+@test "build-docker record-digest: fails when DIGEST_FILE is unset" {
+	export STEP="record-digest"
+	export DIGEST="sha256:$(printf '%0.s0' {1..64})"
+	unset DIGEST_FILE
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "DIGEST_FILE"
+}
+
+# =============================================================================
+# parse-tags step
+# =============================================================================
+
+@test "build-docker parse-tags: converts comma-separated tags to metadata-action format" {
+	export STEP="parse-tags"
+	export INPUT_TAGS="latest,stable"
+
+	_run_script_any_bash
+	assert_success
+
+	local tags
+	tags=$(get_github_output "tags")
+	[[ "$tags" == *"type=raw,value=latest"* ]]
+	[[ "$tags" == *"type=raw,value=stable"* ]]
+}
+
+@test "build-docker parse-tags: handles single tag" {
+	export STEP="parse-tags"
+	export INPUT_TAGS="nightly"
+
+	_run_script_any_bash
+	assert_success
+
+	local tags
+	tags=$(get_github_output "tags")
+	[[ "$tags" == *"type=raw,value=nightly"* ]]
+}
+
+@test "build-docker parse-tags: outputs empty when INPUT_TAGS is empty" {
+	export STEP="parse-tags"
+	export INPUT_TAGS=""
+
+	_run_script_any_bash
+	assert_success
+
+	# set_github_output writes "tags=" (empty value); verify the key exists
+	run grep "^tags=" "$GITHUB_OUTPUT"
+	assert_success
+}
+
+# =============================================================================
+# set-output-digest step
+# =============================================================================
+
+@test "build-docker set-output-digest: writes digest to GITHUB_OUTPUT" {
+	export STEP="set-output-digest"
+	export DIGEST="sha256:abc123"
+
+	_run_script_any_bash
+	assert_success
+	assert_github_output "digest" "sha256:abc123"
+}
+
+@test "build-docker set-output-digest: fails when DIGEST is unset" {
+	export STEP="set-output-digest"
+	unset DIGEST
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "DIGEST"
 }

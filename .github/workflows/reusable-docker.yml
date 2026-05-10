@@ -1,6 +1,11 @@
 ---
 name: Reusable Docker Build and Push
 
+# Caller repos only need to pin this workflow; all shared shell scripts are
+# resolved from lgtm-ci via a cross-repo checkout (same pattern as
+# reusable-release-auto-tag.yml).  No vendored scripts/ci tree is required
+# in the caller repository.
+
 on:
   workflow_call:
     inputs:
@@ -94,6 +99,12 @@ on:
         required: false
         type: string
         default: ""
+      tooling-ref:
+        # yamllint disable-line rule:line-length
+        description: "Git ref for lgtm-ci tooling checkout. Defaults to the reusable workflow commit."
+        required: false
+        type: string
+        default: ""
 
     outputs:
       tags:
@@ -118,9 +129,13 @@ jobs:
   classify:
     name: Classify Platforms
     runs-on: ubuntu-24.04
+    permissions:
+      contents: read
     outputs:
       use-split: ${{ steps.classify.outputs.use-split }}
       matrix: ${{ steps.classify.outputs.matrix }}
+      tooling-ref: ${{ steps.tooling.outputs.ref }}
+      tooling-repository: ${{ steps.tooling.outputs.repository }}
 
     steps:
       - name: Harden runner
@@ -129,12 +144,47 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
+      - name: Resolve tooling ref
+        id: tooling
+        shell: bash
+        env:
+          TOOLING_REF: ${{ inputs.tooling-ref }}
+          JOB_CONTEXT: ${{ toJson(job) }}
+        run: |
+          python3 - <<'PY'
+          import json
+          import os
+          import sys
+
+          try:
+              job_context = json.loads(os.environ["JOB_CONTEXT"])
+              workflow_sha = job_context["workflow_sha"]
+              workflow_repository = job_context["workflow_repository"]
+              github_output = os.environ["GITHUB_OUTPUT"]
+          except KeyError as exc:
+              print(f"Missing required workflow context key: {exc}", file=sys.stderr)
+              sys.exit(1)
+          except json.JSONDecodeError as exc:
+              print(f"Invalid JOB_CONTEXT JSON: {exc}", file=sys.stderr)
+              sys.exit(1)
+
+          tooling_ref = os.environ.get("TOOLING_REF", "")
+          ref = tooling_ref if tooling_ref else workflow_sha
+
+          with open(github_output, "a", encoding="utf-8") as output:
+              output.write(f"ref={ref}\n")
+              output.write(f"repository={workflow_repository}\n")
+          PY
+
+      - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ steps.tooling.outputs.repository }}
+          path: .lgtm-ci-tooling
+          ref: ${{ steps.tooling.outputs.ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
           persist-credentials: false
-          sparse-checkout: scripts/ci
 
       - name: Classify platforms
         id: classify
@@ -146,7 +196,7 @@ jobs:
           RUNNER_MAP: ${{ inputs.runner-map }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Single-platform builds, or multi-platform when push is disabled (QEMU fallback)
   build:
@@ -177,6 +227,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ needs.classify.outputs.tooling-repository }}
+          path: .lgtm-ci-tooling
+          ref: ${{ needs.classify.outputs.tooling-ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Setup QEMU
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -185,13 +245,32 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to registry
+      - name: Validate registry
         if: inputs.push
-        uses: ./.github/actions/docker-login
+        shell: bash
+        env:
+          STEP: validate
+          REGISTRY: ${{ inputs.registry }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
+
+      - name: Login to GHCR
+        if: inputs.push && inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
-          registry: ${{ inputs.registry }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Login to Docker Hub
+        if: inputs.push && inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Parse additional tags
         id: extra-tags
@@ -200,16 +279,26 @@ jobs:
         env:
           STEP: parse-tags
           INPUT_TAGS: ${{ inputs.tags }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Extract metadata
         id: meta
-        uses: ./.github/actions/docker-metadata
+        # Pinned to SHA for supply chain security
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
-          registry: ${{ inputs.registry }}
-          image-name: ${{ inputs.image-name || github.repository }}
-          version: ${{ inputs.version }}
-          extra-tags: ${{ steps.extra-tags.outputs.tags }}
+          images: |
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          # yamllint disable rule:line-length
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            ${{ steps.extra-tags.outputs.tags }}
+          # yamllint enable rule:line-length
 
       - name: Build and push
         id: build
@@ -235,7 +324,7 @@ jobs:
         env:
           STEP: set-output-digest
           DIGEST: ${{ steps.build.outputs.digest }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Generate artifact attestation
         if: inputs.push && inputs.provenance
@@ -274,6 +363,16 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ needs.classify.outputs.tooling-repository }}
+          path: .lgtm-ci-tooling
+          ref: ${{ needs.classify.outputs.tooling-ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -283,20 +382,49 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to registry
-        uses: ./.github/actions/docker-login
+      - name: Validate registry
+        shell: bash
+        env:
+          STEP: validate
+          REGISTRY: ${{ inputs.registry }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
+
+      - name: Login to GHCR
+        if: inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
-          registry: ${{ inputs.registry }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Login to Docker Hub
+        if: inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Extract metadata
         id: meta
-        uses: ./.github/actions/docker-metadata
+        # Pinned to SHA for supply chain security
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
-          registry: ${{ inputs.registry }}
-          image-name: ${{ inputs.image-name || github.repository }}
-          version: ${{ inputs.version }}
+          images: |
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          # yamllint disable rule:line-length
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+          # yamllint enable rule:line-length
 
       - name: Build and push (${{ matrix.platform }})
         id: build
@@ -317,17 +445,13 @@ jobs:
           provenance: false
           sbom: ${{ inputs.sbom }}
 
-      # Publish the per-platform push digest as an artifact so the verify job
-      # can pull the exact immutable image (IMAGE@sha256:...) instead of
-      # resolving the mutable staging tag — closes the TOCTOU window between
-      # build and verify.
       - name: Record staging digest
         shell: bash
         env:
           STEP: record-digest
           DIGEST: ${{ steps.build.outputs.digest }}
           DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Upload staging digest
         # Pinned to SHA for supply chain security
@@ -366,37 +490,54 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout repository (full, for smoke-test-script)
+      - name: Checkout repository (for smoke-test-script)
         if: inputs.smoke-test-script != ''
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
-      - name: Checkout repository (sparse, smoke-test shorthand)
-        if: inputs.smoke-test-script == ''
-        # Pinned to SHA for supply chain security
+      - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ needs.classify.outputs.tooling-repository }}
+          path: .lgtm-ci-tooling
+          ref: ${{ needs.classify.outputs.tooling-ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
           persist-credentials: false
-          sparse-checkout: |
-            scripts/ci
-            .github/actions
 
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
-      - name: Login to registry
-        uses: ./.github/actions/docker-login
-        with:
-          registry: ${{ inputs.registry }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Validate registry
+        shell: bash
+        env:
+          STEP: validate
+          REGISTRY: ${{ inputs.registry }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
 
-      # Pull the immutable digest recorded by the matching build-per-platform
-      # entry so smoke-test runs against the exact pushed image.
+      - name: Login to GHCR
+        if: inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Login to Docker Hub
+        if: inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - name: Download staging digest
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -414,7 +555,7 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Assemble multi-arch manifest from per-platform staging images
   merge:
@@ -444,25 +585,45 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
+      - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: ${{ needs.classify.outputs.tooling-repository }}
+          path: .lgtm-ci-tooling
+          ref: ${{ needs.classify.outputs.tooling-ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
           persist-credentials: false
-          sparse-checkout: |
-            scripts/ci
-            .github/actions
 
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
-      - name: Login to registry
-        uses: ./.github/actions/docker-login
+      - name: Validate registry
+        shell: bash
+        env:
+          STEP: validate
+          REGISTRY: ${{ inputs.registry }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
+
+      - name: Login to GHCR
+        if: inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
-          registry: ${{ inputs.registry }}
-          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
-          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Login to Docker Hub
+        if: inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Parse additional tags
         id: extra-tags
@@ -471,16 +632,26 @@ jobs:
         env:
           STEP: parse-tags
           INPUT_TAGS: ${{ inputs.tags }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Extract metadata
         id: meta
-        uses: ./.github/actions/docker-metadata
+        # Pinned to SHA for supply chain security
+        uses: docker/metadata-action@030e881283bb7a6894de51c315a6bfe6a94e05cf # v6.0.0
         with:
-          registry: ${{ inputs.registry }}
-          image-name: ${{ inputs.image-name || github.repository }}
-          version: ${{ inputs.version }}
-          extra-tags: ${{ steps.extra-tags.outputs.tags }}
+          images: |
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          # yamllint disable rule:line-length
+          tags: |
+            type=sha,prefix=sha-
+            type=ref,event=branch
+            type=ref,event=pr
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            ${{ steps.extra-tags.outputs.tags }}
+          # yamllint enable rule:line-length
 
       - name: Create multi-arch manifest
         shell: bash
@@ -491,7 +662,7 @@ jobs:
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
           RUN_ID: ${{ github.run_id }}
           TARGET_TAGS: ${{ steps.meta.outputs.tags }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Extract digest
         id: metadata
@@ -499,7 +670,7 @@ jobs:
         env:
           STEP: metadata
           BUILT_TAGS: ${{ steps.meta.outputs.tags }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Generate artifact attestation
         if: inputs.provenance
@@ -511,8 +682,6 @@ jobs:
           push-to-registry: true
 
       - name: Delete staging manifests
-        # Clean up per-platform staging tags via the GitHub Packages API.
-        # Only runs for GHCR; other registries are skipped.
         if: always() && inputs.registry == 'ghcr.io'
         shell: bash
         env:
@@ -521,7 +690,7 @@ jobs:
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
           RUN_ID: ${{ github.run_id }}
           MATRIX: ${{ needs.classify.outputs.matrix }}
-        run: ./scripts/ci/actions/build-docker.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   scan:
     name: Vulnerability Scan

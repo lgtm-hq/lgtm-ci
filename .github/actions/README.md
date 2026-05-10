@@ -1414,6 +1414,13 @@ jobs:
 
 Build and push Docker images with multi-platform support and attestations.
 
+Caller repos only need to pin this workflow — **no vendored `scripts/ci`
+tree is required**. The workflow sparse-checks the shared shell scripts
+from lgtm-ci via a cross-repo checkout (same pattern as
+`reusable-release-auto-tag.yml`), but composite actions are not resolved
+from `.lgtm-ci-tooling`. The `docker-login` and `docker-metadata` logic is
+inlined in this workflow instead.
+
 ```yaml
 jobs:
   docker:
@@ -1456,6 +1463,9 @@ jobs:
   script run on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. Script
   owns the `docker run` invocation — full control over flags, env, network,
   tmpfs, etc. Mutually exclusive with `smoke-test` (default: '')
+- `tooling-ref` - Git ref for the lgtm-ci tooling checkout. Defaults to the
+  reusable workflow commit (the workflow's own pinned commit). Override to pin
+  a specific tag or SHA (default: '')
 
 **Outputs:**
 
@@ -1465,6 +1475,7 @@ jobs:
 **Features:**
 
 - Multi-platform builds with QEMU or split native-runner per-platform builds
+- Cross-repo tooling checkout — caller repos stay thin, no vendored scripts
 - docker/metadata-action for intelligent tag generation
 - GitHub Actions cache for layer caching
 - Provenance and SBOM attestations
@@ -1482,6 +1493,13 @@ image. `smoke-test` is a convenience for trivial checks like `--version`;
 reach for `smoke-test-script` when you need `-e`, `--network`, `--read-only`,
 or any other `docker run` flag. Validation is performed in the `classify`
 job, so setting both fails fast before any build runs.
+
+**Migration from vendored scripts:**
+
+If your caller repo previously vendored `scripts/ci/actions/build-docker.sh`,
+`scripts/ci/lib/**`, or `.github/actions/docker-login` / `docker-metadata`,
+you can safely delete those copies after updating the workflow pin. The
+workflow now resolves all tooling from the lgtm-ci checkout.
 
 **Permissions Required:**
 
