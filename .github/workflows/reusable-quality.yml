@@ -5,12 +5,12 @@ on:
   workflow_call:
     inputs:
       python-version:
-        description: "Python version for linting tools"
+        description: "Deprecated — unused; lintro runs in full py-lintro Docker image."
         required: false
         type: string
         default: "3.11"
       node-version:
-        description: "Node.js version for JS/TS linting"
+        description: "Deprecated — unused; lintro runs in full py-lintro Docker image."
         required: false
         type: string
         default: "20"
@@ -25,7 +25,7 @@ on:
         type: boolean
         default: true
       run-actionlint:
-        description: "Run actionlint on GitHub Actions"
+        description: "Deprecated — ignored; actionlint runs inside full py-lintro image."
         required: false
         type: boolean
         default: true
@@ -46,6 +46,11 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
+      packages: read
+    env:
+      # Pinned digest — keep in sync with ci.yml / pyproject.toml lintro pin
+      # yamllint disable-line rule:line-length
+      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:6b6ee149e4daa0f17447b4c1c481e949277eb7a28453c5cb819dd95119ba42dc
 
     steps:
       - name: Harden runner
@@ -60,38 +65,12 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup Python
-        uses: ./.github/actions/setup-python
-        with:
-          python-version: ${{ inputs.python-version }}
-          cache: "true"
-          install-dependencies: "true"
-          install-extras: "dev"
-
-      - name: Setup Node.js
-        # yamllint disable-line rule:line-length
-        if:
-          contains(inputs.lintro-tools, 'prettier') || contains(inputs.lintro-tools,
-          'biome') || inputs.lintro-tools == ''
-        uses: ./.github/actions/setup-node
-        with:
-          node-version: ${{ inputs.node-version }}
-          cache: "true"
-
-      - name: Install actionlint
-        if: inputs.run-actionlint
-        shell: bash
-        working-directory: ${{ inputs.working-directory }}
-        env:
-          STEP: install
-        run: ${{ github.workspace }}/scripts/ci/quality/actionlint-check.sh
-
       - name: Run quality checks
         uses: ./.github/actions/run-quality
         with:
+          lintro-image: ${{ env.LINTRO_IMAGE }}
           tools: ${{ inputs.lintro-tools }}
           fail-on-error: ${{ inputs.fail-on-error }}
-          run-actionlint: ${{ inputs.run-actionlint }}
           working-directory: ${{ inputs.working-directory }}
 
       - name: Upload linting report
@@ -102,5 +81,6 @@ jobs:
           name: linting-report
           path: |
             ${{ inputs.working-directory }}/.lintro/
+            ${{ inputs.working-directory }}/chk-output.txt
           retention-days: 7
           if-no-files-found: ignore

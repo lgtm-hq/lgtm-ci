@@ -892,33 +892,47 @@ Build and push Docker images with multi-platform support.
 
 ### run-quality
 
-Run lintro quality checks with optional actionlint validation.
+Runs **lintro inside the full [`py-lintro`](https://github.com/lgtm-hq/py-lintro)
+Docker image** (`docker pull` + `docker run` with the repo mounted at `/code`),
+so every bundled CLI matches upstream docs — not `uv run lintro` on the runner.
+
+Callers need **`permissions: packages: read`** (and GitHub logs into GHCR via
+`GITHUB_TOKEN`) when pulling from GHCR.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/run-quality@main
-  with:
-    tools: "" # optional, comma-separated list (empty = all)
-    mode: "check" # 'check' or 'format'
-    fail-on-error: "true" # optional
-    run-actionlint: "true" # optional, run actionlint on GitHub Actions
-    working-directory: "." # optional, working directory for linting
+permissions:
+  contents: read
+  packages: read
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@…
+      - uses: lgtm-hq/lgtm-ci/.github/actions/run-quality@main
+        with:
+          # Pin digest in production (default matches this repo’s CI pin)
+          lintro-image: ghcr.io/lgtm-hq/py-lintro@sha256:…
+          tools: "" # optional, comma-separated list (empty = all)
+          mode: "check" # 'check' or 'format'
+          fail-on-error: "true" # optional
+          working-directory: "." # optional
 ```
 
 **Inputs:**
 
+- `lintro-image` - Full `ghcr.io/lgtm-hq/py-lintro` reference (**digest recommended**)
 - `tools` - Comma-separated list of lintro tools to run (empty = all)
 - `mode` - Mode: 'check' (lint only) or 'format' (auto-fix)
 - `fail-on-error` - Fail workflow if linting errors found (default: true)
-- `run-actionlint` - Run actionlint validation on GitHub Actions (default: true)
+- `run-actionlint` - Deprecated (ignored); actionlint runs inside the py-lintro image
 - `working-directory` - Working directory for linting (default: '.')
 
 **Features:**
 
-- Runs all configured lintro tools (shellcheck, shfmt, prettier, yamllint, etc.)
-- Optional actionlint validation for GitHub Actions workflows
-- Support for check mode (lint only) or format mode (auto-fix)
-- Configurable tool selection
-- Respects fail-on-error for both lintro and actionlint
+- Same toolchain as the official py-lintro container (shellcheck, prettier, semgrep, etc.)
+- Check or format mode with optional `--tools` filtering
+- Writes `chk-output.txt` in `working-directory` when `mode` is `check` (for artifacts)
 
 **Outputs:**
 

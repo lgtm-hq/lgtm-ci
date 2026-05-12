@@ -9,17 +9,19 @@ on:
 
 permissions:
   contents: read
+  packages: read
 
 jobs:
   quality:
     name: Lintro Quality Checks
     runs-on: ubuntu-latest
-    container:
-      # Pinned to digest for supply chain security (sha-<commit> tag keeps it from GC)
+    permissions:
+      contents: read
+      packages: read
+    env:
+      # Pinned digest — keep in sync with pyproject.toml lintro pin / reusable-quality.yml
       # yamllint disable-line rule:line-length
-      image: ghcr.io/lgtm-hq/py-lintro@sha256:f93473dea60ac4d28540e9e15c1d47267c2cfc3cc291beef6d4563d14a60e2f0
-      # Run as root to avoid permission issues with GitHub Actions file commands
-      options: --user 0
+      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:f93473dea60ac4d28540e9e15c1d47267c2cfc3cc291beef6d4563d14a60e2f0
     outputs:
       exit-code: ${{ steps.lintro.outputs.exit-code }}
 
@@ -30,22 +32,20 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Add lintro to PATH
-        shell: bash
-        run: echo "/app/.venv/bin" >> "$GITHUB_PATH"
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
 
       - name: Run lintro quality checks
         id: lintro
         shell: bash
-        run: |
-          # Use pipefail to capture lintro exit code through the pipe
-          # tee failures are intentionally ignored (PIPESTATUS[0] captures lintro)
-          set -o pipefail
-          set +e
-          lintro chk 2>&1 | tee chk-output.txt
-          EXIT_CODE=${PIPESTATUS[0]}
-          echo "exit-code=$EXIT_CODE" >> "$GITHUB_OUTPUT"
-          exit "$EXIT_CODE"
+        env:
+          STEP: check
+          FAIL_ON_ERROR: "true"
+        run: bash scripts/ci/quality/run-lintro-docker.sh
 
       - name: Upload linting report
         if: always()
