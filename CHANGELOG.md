@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.12.3] - 2026-05-12
+
+### Bug Fixes
+
+- make Docker build helper executable (#144) (5855bd4)
+
+### Other Changes
+
+- **deps**: update digest (#142) (e0dc2d6)
+- **deps**: update digest (#140) (7bf1e96)
+
 ## [0.12.2] - 2026-05-10
 
 ### Bug Fixes
@@ -227,7 +238,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.3...HEAD
+[0.12.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.11.0...v0.12.0
