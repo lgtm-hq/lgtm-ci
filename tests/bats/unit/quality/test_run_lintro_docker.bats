@@ -75,3 +75,51 @@ teardown() {
 	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
 	assert_file_contains "${calls}" "fmt ."
 }
+
+@test "run-lintro-docker.sh check fails when docker run exits non-zero and FAIL_ON_ERROR=true" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "${mock_bin}"
+	cat >"${mock_bin}/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == pull ]]; then exit 0; fi
+if [[ "${1:-}" == run ]]; then exit 1; fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/docker"
+	export PATH="${mock_bin}:${PATH}"
+
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
+	: >"${GITHUB_OUTPUT}"
+
+	run env STEP=check LINTRO_IMAGE=img:tag FAIL_ON_ERROR=true bash "${SCRIPT}"
+
+	assert_failure
+	assert_file_contains "${GITHUB_OUTPUT}" "exit-code=1"
+	assert_file_contains "${GITHUB_OUTPUT}" "status=failed"
+}
+
+@test "run-lintro-docker.sh check exits zero when docker run fails but FAIL_ON_ERROR=false" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "${mock_bin}"
+	cat >"${mock_bin}/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == pull ]]; then exit 0; fi
+if [[ "${1:-}" == run ]]; then exit 1; fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/docker"
+	export PATH="${mock_bin}:${PATH}"
+
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
+	: >"${GITHUB_OUTPUT}"
+
+	run env STEP=check LINTRO_IMAGE=img:tag FAIL_ON_ERROR=false bash "${SCRIPT}"
+
+	assert_success
+	assert_file_contains "${GITHUB_OUTPUT}" "exit-code=1"
+	assert_file_contains "${GITHUB_OUTPUT}" "status=failed"
+}

@@ -50,9 +50,11 @@ fi
 log_info "Pulling Lintro image: ${LINTRO_IMAGE}"
 docker pull "${LINTRO_IMAGE}"
 
+# Do not pass --user: py-lintro entrypoint starts as root, adjusts PATH for bun/cargo,
+# then gosu(1)s to the UID owning /code (the workspace mount). Passing --user skips that
+# root entrypoint and caused many external CLIs to be missing from PATH inside the container.
 declare -a docker_args=(
 	docker run --rm
-	--user "$(id -u):$(id -g)"
 	-e HOME=/tmp
 	-e LINTRO_AUTO_INSTALL_DEPS=1
 	-v "${WORKSPACE}:/code"
@@ -73,7 +75,14 @@ check)
 	set +e
 	set -o pipefail
 	"${docker_args[@]}" "${lintro_args[@]}" 2>&1 | tee "${OUTPUT_LOG}"
-	EXIT_CODE="${PIPESTATUS[0]}"
+	DOCKER_EC="${PIPESTATUS[0]}"
+	TEE_EC="${PIPESTATUS[1]:-0}"
+	if [[ "${TEE_EC}" -ne 0 ]]; then
+		log_error "tee failed (exit ${TEE_EC}) while writing ${OUTPUT_LOG}"
+		EXIT_CODE="${TEE_EC}"
+	else
+		EXIT_CODE="${DOCKER_EC}"
+	fi
 	set +o pipefail
 	set -e
 	;;

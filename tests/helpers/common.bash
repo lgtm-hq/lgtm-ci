@@ -379,15 +379,18 @@ if ! _load_bats_library "file"; then
 		fi
 	}
 
-	assert_file_contains() {
-		local file="$1"
-		local expected="$2"
-		if ! grep -qF -- "$expected" "$file" 2>/dev/null; then
-			echo "# Expected file '$file' to contain: $expected" >&2
-			return 1
-		fi
-	}
 fi
+
+# Override bats-file assert_file_contains: upstream forwards the pattern to grep in a
+# form where leading "-" is parsed as an option (e.g. "--tools"). Use fixed-string grep.
+assert_file_contains() {
+	local file="$1"
+	local expected="$2"
+	if ! grep -qF -- "$expected" "$file" 2>/dev/null; then
+		echo "# Expected file '$file' to contain: $expected" >&2
+		return 1
+	fi
+}
 
 # =============================================================================
 # Temporary directory management
