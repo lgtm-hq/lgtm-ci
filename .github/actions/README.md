@@ -925,7 +925,6 @@ jobs:
 - `tools` - Comma-separated list of lintro tools to run (empty = all)
 - `mode` - Mode: 'check' (lint only) or 'format' (auto-fix)
 - `fail-on-error` - Fail workflow if linting errors found (default: true)
-- `run-actionlint` - Deprecated (ignored); actionlint runs inside the py-lintro image
 - `working-directory` - Working directory for linting (default: '.')
 
 **Features:**

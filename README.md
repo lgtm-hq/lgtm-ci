@@ -46,6 +46,7 @@ jobs:
       contents: read
       packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@v1
+    # Optional: with: { tools: "ruff,yamllint", fail-on-error: true, working-directory: "." }
 ```
 
 ### Using Shell Libraries

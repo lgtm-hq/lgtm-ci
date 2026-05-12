@@ -20,10 +20,6 @@ inputs:
     description: "Fail if linting errors found"
     required: false
     default: "true"
-  run-actionlint:
-    description: "Deprecated — ignored; actionlint runs inside full py-lintro image."
-    required: false
-    default: "true"
   working-directory:
     description: "Working directory for linting"
     required: false

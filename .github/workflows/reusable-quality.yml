@@ -4,28 +4,13 @@ name: Reusable Quality Workflow
 on:
   workflow_call:
     inputs:
-      python-version:
-        description: "Deprecated — unused; lintro runs in full py-lintro Docker image."
-        required: false
-        type: string
-        default: "3.11"
-      node-version:
-        description: "Deprecated — unused; lintro runs in full py-lintro Docker image."
-        required: false
-        type: string
-        default: "20"
-      lintro-tools:
-        description: "Comma-separated list of lintro tools to run (empty = all)"
+      tools:
+        description: "Comma-separated lintro --tools list (empty = all tools)"
         required: false
         type: string
         default: ""
       fail-on-error:
         description: "Fail workflow if linting errors found"
-        required: false
-        type: boolean
-        default: true
-      run-actionlint:
-        description: "Deprecated — ignored; actionlint runs inside full py-lintro image."
         required: false
         type: boolean
         default: true
@@ -69,7 +54,7 @@ jobs:
         uses: ./.github/actions/run-quality
         with:
           lintro-image: ${{ env.LINTRO_IMAGE }}
-          tools: ${{ inputs.lintro-tools }}
+          tools: ${{ inputs.tools }}
           fail-on-error: ${{ inputs.fail-on-error }}
           working-directory: ${{ inputs.working-directory }}
 
