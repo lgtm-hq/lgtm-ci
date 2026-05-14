@@ -214,11 +214,13 @@ EOF
 		echo \"lines=\$COVERAGE_LINES\"
 		echo \"branches=\$COVERAGE_BRANCHES\"
 		echo \"functions=\$COVERAGE_FUNCTIONS\"
+		echo \"statements=\$COVERAGE_STATEMENTS\"
 	"
 	assert_success
 	assert_line "lines=50.00"
 	assert_line "branches=50.00"
 	assert_line "functions=100.00"
+	assert_line "statements=50.00"
 }
 
 # =============================================================================

@@ -457,6 +457,7 @@ Generate formatted PR comment from Lighthouse CI results.
 **Features:**
 
 - Parses Lighthouse JSON results
+- Generates py-lintro-style PR report comments
 - Color-coded score indicators
 - Configurable thresholds
 - Links to full report
@@ -484,6 +485,7 @@ Generate formatted PR comment from Playwright test results.
 **Features:**
 
 - Parses Playwright JSON results
+- Generates py-lintro-style PR report comments
 - Shows pass/fail/skip counts
 - Lists failed tests (collapsible)
 - Links to full report
@@ -504,14 +506,15 @@ Generate formatted PR comment from code coverage results.
 - uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-comment@main
   with:
     coverage-file: "coverage/coverage-summary.json"
-    format: "auto" # 'istanbul', 'coverage-py', or 'auto'
+    format: "auto" # 'istanbul', 'coverage-py', 'lcov', or 'auto'
     threshold-lines: "80"
     threshold-branches: "70"
 ```
 
 **Features:**
 
-- Supports Istanbul (JS) and coverage.py (Python) formats
+- Supports Istanbul (JS), coverage.py (Python), and LCOV formats
+- Generates py-lintro-style PR report comments
 - Color-coded coverage indicators
 - Configurable thresholds
 - Links to full report
