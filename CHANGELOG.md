@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.13.1] - 2026-05-14
+
+### Bug Fixes
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#151) (422fdd6)
+
+### Other Changes
+
+- **deps**: update digest (#146) (88a328e)
+- **deps**: update actions/create-github-app-token to v3.2.0 (minor) (#143) (61b1f1c)
+- **deps**: update rubygems/configure-rubygems-credentials to v2.0.0 (major) (#135) (daf090a)
+
 ## [0.13.0] - 2026-05-14
 
 ### Features
@@ -244,7 +256,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.1...HEAD
+[0.13.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.1...v0.12.2
