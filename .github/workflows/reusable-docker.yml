@@ -140,7 +140,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@9ca718d3bf646d6534007c269a635b3e54cadf99 # v2.19.2
         with:
           egress-policy: audit
 
@@ -217,7 +217,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@9ca718d3bf646d6534007c269a635b3e54cadf99 # v2.19.2
         with:
           egress-policy: audit
 
@@ -353,7 +353,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@9ca718d3bf646d6534007c269a635b3e54cadf99 # v2.19.2
         with:
           egress-policy: audit
 
@@ -486,7 +486,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@9ca718d3bf646d6534007c269a635b3e54cadf99 # v2.19.2
         with:
           egress-policy: audit
 
@@ -581,7 +581,7 @@ jobs:
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@9ca718d3bf646d6534007c269a635b3e54cadf99 # v2.19.2
         with:
           egress-policy: audit
 
