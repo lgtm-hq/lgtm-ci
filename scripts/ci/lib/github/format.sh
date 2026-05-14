@@ -172,7 +172,39 @@ format_percentage_with_color() {
 	fi
 }
 
+# Format a GitHub Actions run URL when repository metadata is available.
+# Usage: get_github_actions_run_url
+get_github_actions_run_url() {
+	local repo="${GITHUB_REPOSITORY:-}"
+	local run_id="${GITHUB_RUN_ID:-}"
+	local server_url="${GITHUB_SERVER_URL:-https://github.com}"
+
+	if [[ -z "$repo" || -z "$run_id" ]]; then
+		echo ""
+		return 1
+	fi
+
+	echo "${server_url}/${repo}/actions/runs/${run_id}"
+}
+
+# Format a commit metadata line for PR comments.
+# Usage: format_github_commit_line
+format_github_commit_line() {
+	local sha="${GITHUB_SHA:-}"
+	local repo="${GITHUB_REPOSITORY:-}"
+	local server_url="${GITHUB_SERVER_URL:-https://github.com}"
+
+	if [[ -z "$sha" ]]; then
+		echo "- **Commit:** unknown"
+	elif [[ -n "$repo" ]]; then
+		echo "- **Commit:** [${sha}](${server_url}/${repo}/commit/${sha})"
+	else
+		echo "- **Commit:** ${sha}"
+	fi
+}
+
 # =============================================================================
 # Export functions
 # =============================================================================
 export -f get_github_pages_url score_emoji format_score_with_color format_percentage_with_color
+export -f get_github_actions_run_url format_github_commit_line

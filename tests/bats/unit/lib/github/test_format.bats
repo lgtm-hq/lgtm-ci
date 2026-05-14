@@ -231,6 +231,55 @@ teardown() {
 }
 
 # =============================================================================
+# GitHub metadata helper tests
+# =============================================================================
+
+@test "get_github_actions_run_url: constructs workflow run URL" {
+	run bash -c '
+		export GITHUB_SERVER_URL="https://github.com"
+		export GITHUB_REPOSITORY="lgtm-hq/lgtm-ci"
+		export GITHUB_RUN_ID="12345"
+		source "$LIB_DIR/github/format.sh"
+		get_github_actions_run_url
+	'
+	assert_success
+	assert_output "https://github.com/lgtm-hq/lgtm-ci/actions/runs/12345"
+}
+
+@test "get_github_actions_run_url: returns empty when metadata missing" {
+	run bash -c '
+		unset GITHUB_REPOSITORY
+		unset GITHUB_RUN_ID
+		source "$LIB_DIR/github/format.sh"
+		get_github_actions_run_url
+	'
+	assert_failure
+	assert_output ""
+}
+
+@test "format_github_commit_line: links commit when repository is known" {
+	run bash -c '
+		export GITHUB_SERVER_URL="https://github.com"
+		export GITHUB_REPOSITORY="lgtm-hq/lgtm-ci"
+		export GITHUB_SHA="abc123"
+		source "$LIB_DIR/github/format.sh"
+		format_github_commit_line
+	'
+	assert_success
+	assert_output "- **Commit:** [abc123](https://github.com/lgtm-hq/lgtm-ci/commit/abc123)"
+}
+
+@test "format_github_commit_line: handles missing sha" {
+	run bash -c '
+		unset GITHUB_SHA
+		source "$LIB_DIR/github/format.sh"
+		format_github_commit_line
+	'
+	assert_success
+	assert_output "- **Commit:** unknown"
+}
+
+# =============================================================================
 # Function export tests
 # =============================================================================
 
@@ -241,6 +290,14 @@ teardown() {
 
 @test "github/format.sh: exports score_emoji function" {
 	run bash -c 'source "$LIB_DIR/github/format.sh" && bash -c "type score_emoji"'
+	assert_success
+}
+
+@test "github/format.sh: exports github metadata helper functions" {
+	run bash -c '
+		source "$LIB_DIR/github/format.sh"
+		bash -c "type get_github_actions_run_url && type format_github_commit_line"
+	'
 	assert_success
 }
 

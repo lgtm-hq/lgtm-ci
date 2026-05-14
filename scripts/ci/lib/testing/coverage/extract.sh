@@ -201,6 +201,10 @@ extract_coverage_details() {
 		if [[ -n "$ff" ]] && [[ "$ff" -gt 0 ]]; then
 			COVERAGE_FUNCTIONS=$(echo "$fh $ff" | awk '{printf "%.2f", ($1 / $2) * 100}')
 		fi
+
+		# LCOV does not report statements separately; line coverage is the
+		# closest compatible metric for consumers that expect statements.
+		COVERAGE_STATEMENTS=$COVERAGE_LINES
 		;;
 	esac
 

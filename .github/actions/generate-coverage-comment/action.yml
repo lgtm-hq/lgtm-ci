@@ -5,7 +5,7 @@ author: "lgtm-hq"
 
 inputs:
   coverage-file:
-    description: "Path to coverage summary JSON file"
+    description: "Path to coverage summary file (Istanbul JSON, coverage.py JSON, or LCOV)"
     required: false
     default: "coverage/coverage-summary.json"
   format:
