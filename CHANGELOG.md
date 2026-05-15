@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.13.3] - 2026-05-15
+
+### Bug Fixes
+
+- repair Renovate custom manager config (#164) (bd880bc)
+
+### Other Changes
+
+- extract reusable release workflow helpers (#162) (7944462)
+- centralize reusable test PR comments (#161) (984ebff)
+- standardize Lintro Quality Checks reusable workflow (#160) (88ffb0f)
+- run lintro via full py-lintro docker image (#147) (a64d972)
+
 ## [0.13.2] - 2026-05-15
 
 ### Bug Fixes
@@ -267,7 +280,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.3...HEAD
+[0.13.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.3...v0.13.0
