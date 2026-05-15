@@ -17,6 +17,8 @@ jobs:
     with:
       max-bump: minor
       ecosystems: python
+      auto-merge: true
+      auto-merge-patch-only: true
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
