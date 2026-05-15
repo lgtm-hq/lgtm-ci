@@ -13,44 +13,10 @@ permissions:
 
 jobs:
   quality:
-    name: Lintro Quality Checks
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/reusable-quality.yml
     permissions:
       contents: read
       packages: read
-    env:
-      # Pinned digest — keep in sync with pyproject.toml lintro pin / reusable-quality.yml
-      # yamllint disable-line rule:line-length
-      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:6b6ee149e4daa0f17447b4c1c481e949277eb7a28453c5cb819dd95119ba42dc
-    outputs:
-      exit-code: ${{ steps.lintro.outputs.exit-code }}
-
-    steps:
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Run lintro quality checks
-        id: lintro
-        uses: ./.github/actions/run-quality
-        with:
-          lintro-image: ${{ env.LINTRO_IMAGE }}
-          mode: check
-          fail-on-error: "true"
-
-      - name: Upload linting report
-        if: always()
-        # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: linting-report
-          path: |
-            .lintro/
-            chk-output.txt
-          retention-days: 7
-          if-no-files-found: ignore
 
   comment-lint:
     name: PR Lint Comment

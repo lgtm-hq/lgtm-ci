@@ -4,6 +4,11 @@ name: Reusable Quality Workflow
 on:
   workflow_call:
     inputs:
+      job-name:
+        description: "GitHub check run name reported for this job"
+        required: false
+        type: string
+        default: "Lintro Quality Checks"
       tools:
         description: "Comma-separated lintro --tools list (empty = all tools)"
         required: false
@@ -29,18 +34,28 @@ on:
         required: false
         type: string
         default: "."
+    outputs:
+      exit-code:
+        description: "Exit code from lintro"
+        value: ${{ jobs.quality.outputs.exit-code }}
+      status:
+        description: "passed or failed"
+        value: ${{ jobs.quality.outputs.status }}
 
 jobs:
   quality:
-    name: Quality Checks
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
       packages: read
+    outputs:
+      exit-code: ${{ steps.quality.outputs.exit-code }}
+      status: ${{ steps.quality.outputs.status }}
     env:
       # Pinned digest — keep in sync with ci.yml / pyproject.toml lintro pin
       # yamllint disable-line rule:line-length
-      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:6b6ee149e4daa0f17447b4c1c481e949277eb7a28453c5cb819dd95119ba42dc
+      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:f93473dea60ac4d28540e9e15c1d47267c2cfc3cc291beef6d4563d14a60e2f0
 
     steps:
       - name: Harden runner
@@ -55,7 +70,8 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run quality checks
+      - name: Run lintro quality checks
+        id: quality
         uses: ./.github/actions/run-quality
         with:
           lintro-image: ${{ env.LINTRO_IMAGE }}
