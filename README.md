@@ -45,8 +45,9 @@ jobs:
     permissions:
       contents: read
       packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality
+      pull-requests: write # post/update the standard lintro PR comment
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@v1
-    # Optional: with: { tools: "ruff,yamllint", fail-on-error: true, working-directory: "." }
+    # Optional: with: { tools: "ruff,yamllint", post-pr-comment: true }
 ```
 
 ### Using Shell Libraries

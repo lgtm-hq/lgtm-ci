@@ -1,5 +1,5 @@
 ---
-name: "Run Quality Checks"
+name: "Lintro Quality Checks"
 description: "Run lintro via full ghcr.io/lgtm-hq/py-lintro image (all bundled tools)"
 author: "lgtm-hq"
 
