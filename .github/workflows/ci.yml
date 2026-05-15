@@ -32,20 +32,13 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Log in to GitHub Container Registry
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
-        with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ github.token }}
-
       - name: Run lintro quality checks
         id: lintro
-        shell: bash
-        env:
-          STEP: check
-          FAIL_ON_ERROR: "true"
-        run: bash scripts/ci/quality/run-lintro-docker.sh
+        uses: ./.github/actions/run-quality
+        with:
+          lintro-image: ${{ env.LINTRO_IMAGE }}
+          mode: check
+          fail-on-error: "true"
 
       - name: Upload linting report
         if: always()

@@ -30,6 +30,27 @@ teardown() {
 	assert_failure
 }
 
+@test "run-lintro-docker.sh reports docker pull failure" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "${mock_bin}"
+	cat >"${mock_bin}/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == pull ]]; then
+	echo "pull denied" >&2
+	exit 3
+fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/docker"
+	export PATH="${mock_bin}:${PATH}"
+
+	run env STEP=check LINTRO_IMAGE=img:tag bash "${SCRIPT}"
+
+	assert_failure
+	assert_equal "3" "$status"
+	assert_output --partial "Failed to pull Lintro image img:tag: pull denied"
+}
+
 @test "run-lintro-docker.sh check invokes docker pull and chk with grid" {
 	mock_command_record docker ""
 	mkdir -p "${BATS_TEST_TMPDIR}/ws"
@@ -58,7 +79,7 @@ teardown() {
 
 	assert_success
 	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
-	assert_file_contains "${calls}" "--tools"
+	assert_file_contains_literal "${calls}" "--tools"
 	assert_file_contains "${calls}" "ruff,yamllint"
 }
 
@@ -97,6 +118,31 @@ EOF
 
 	assert_failure
 	assert_file_contains "${GITHUB_OUTPUT}" "exit-code=1"
+	assert_file_contains "${GITHUB_OUTPUT}" "status=failed"
+}
+
+@test "run-lintro-docker.sh check keeps docker exit code when tee also fails" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "${mock_bin}"
+	cat >"${mock_bin}/docker" <<'EOF'
+#!/usr/bin/env bash
+if [[ "${1:-}" == pull ]]; then exit 0; fi
+if [[ "${1:-}" == run ]]; then exit 7; fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/docker"
+	export PATH="${mock_bin}:${PATH}"
+
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
+	: >"${GITHUB_OUTPUT}"
+
+	run env STEP=check LINTRO_IMAGE=img:tag FAIL_ON_ERROR=true OUTPUT_LOG=/ bash "${SCRIPT}"
+
+	assert_failure
+	assert_equal "7" "$status"
+	assert_file_contains "${GITHUB_OUTPUT}" "exit-code=7"
 	assert_file_contains "${GITHUB_OUTPUT}" "status=failed"
 }
 

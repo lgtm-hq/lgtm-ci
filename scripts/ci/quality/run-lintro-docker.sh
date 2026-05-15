@@ -48,7 +48,15 @@ fi
 : "${OUTPUT_LOG:=chk-output.txt}"
 
 log_info "Pulling Lintro image: ${LINTRO_IMAGE}"
-docker pull "${LINTRO_IMAGE}"
+set +e
+PULL_OUTPUT="$(docker pull "${LINTRO_IMAGE}" 2>&1)"
+PULL_EC=$?
+set -e
+if [[ "${PULL_EC}" -ne 0 ]]; then
+	log_error "Failed to pull Lintro image ${LINTRO_IMAGE}: ${PULL_OUTPUT}"
+	exit "${PULL_EC}"
+fi
+printf '%s\n' "${PULL_OUTPUT}"
 
 # Do not pass --user: py-lintro entrypoint starts as root, adjusts PATH for bun/cargo,
 # then gosu(1)s to the UID owning /code (the workspace mount). Passing --user skips that
@@ -79,9 +87,13 @@ check)
 	TEE_EC="${PIPESTATUS[1]:-0}"
 	if [[ "${TEE_EC}" -ne 0 ]]; then
 		log_error "tee failed (exit ${TEE_EC}) while writing ${OUTPUT_LOG}"
+	fi
+	if [[ "${DOCKER_EC}" -ne 0 ]]; then
+		EXIT_CODE="${DOCKER_EC}"
+	elif [[ "${TEE_EC}" -ne 0 ]]; then
 		EXIT_CODE="${TEE_EC}"
 	else
-		EXIT_CODE="${DOCKER_EC}"
+		EXIT_CODE=0
 	fi
 	set +o pipefail
 	set -e

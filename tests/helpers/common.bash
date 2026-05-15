@@ -381,13 +381,22 @@ if ! _load_bats_library "file"; then
 
 fi
 
-# Override bats-file assert_file_contains: upstream forwards the pattern to grep in a
-# form where leading "-" is parsed as an option (e.g. "--tools"). Use fixed-string grep.
+# Override bats-file assert_file_contains: keep the existing regex semantics, but pass
+# "--" so patterns that start with "-" are not parsed as grep options.
 assert_file_contains() {
 	local file="$1"
 	local expected="$2"
-	if ! grep -qF -- "$expected" "$file" 2>/dev/null; then
+	if ! grep -qE -- "$expected" "$file" 2>/dev/null; then
 		echo "# Expected file '$file' to contain: $expected" >&2
+		return 1
+	fi
+}
+
+assert_file_contains_literal() {
+	local file="$1"
+	local expected="$2"
+	if ! grep -qF -- "$expected" "$file" 2>/dev/null; then
+		echo "# Expected file '$file' to contain literal: $expected" >&2
 		return 1
 	fi
 }
