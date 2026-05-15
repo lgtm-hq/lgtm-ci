@@ -44,11 +44,6 @@ on:
         required: false
         type: string
         default: "."
-      is-pr:
-        description: "Deprecated alias for post-pr-comment callers"
-        required: false
-        type: boolean
-        default: false
       post-pr-comment:
         description: "Post or update a shell test summary comment on pull requests"
         required: false
@@ -217,8 +212,11 @@ jobs:
     if: >-
       always()
       && github.event_name == 'pull_request'
-      && (inputs.post-pr-comment || inputs.is-pr)
+      && inputs.post-pr-comment
     uses: ./.github/workflows/reusable-test-pr-comment.yml
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       test-suite-name: Shell Tests
       comment-marker: ${{ inputs.comment-marker }}
