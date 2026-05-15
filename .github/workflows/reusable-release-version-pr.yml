@@ -104,30 +104,14 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
-      # Runs before tooling checkout — must be inline (bootstrap)
-      - name: Resolve tooling ref
-        id: tooling
-        shell: bash
-        env:
-          TOOLING_REF: ${{ inputs.tooling-ref }}
-          GH_REPO: ${{ github.repository }}
-          GH_SHA: ${{ github.sha }}
-        run: |
-          if [[ -n "$TOOLING_REF" ]]; then
-            echo "ref=$TOOLING_REF" >> "$GITHUB_OUTPUT"
-          elif [[ "$GH_REPO" == "lgtm-hq/lgtm-ci" ]]; then
-            echo "ref=$GH_SHA" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=main" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ steps.tooling.outputs.ref }}
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || (github.repository == 'lgtm-hq/lgtm-ci' && github.sha || 'main') }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -226,24 +210,7 @@ jobs:
         shell: bash
         env:
           RAW_SCRIPT_PATH: ${{ inputs.version-update-script }}
-        run: |
-          if [[ ! -f "$RAW_SCRIPT_PATH" ]]; then
-            echo "::error::version-update-script not found: $RAW_SCRIPT_PATH"
-            exit 1
-          fi
-          # Fully canonicalize the script path (resolves symlinks too) so
-          # a symlink inside the repo can't point at a file outside the
-          # workspace.
-          RESOLVED=$(readlink -f -- "$RAW_SCRIPT_PATH")
-          WORKSPACE=$(readlink -f -- "$GITHUB_WORKSPACE")
-          if [[ "$RESOLVED" != "$WORKSPACE"/* ]]; then
-            echo "::error::version-update-script resolves outside the workspace: $RESOLVED"
-            exit 1
-          fi
-          if [[ ! -x "$RESOLVED" ]]; then
-            chmod +x "$RESOLVED"
-          fi
-          echo "resolved=$RESOLVED" >> "$GITHUB_OUTPUT"
+        run: .lgtm-ci-tooling/scripts/ci/release/validate-version-update-script.sh
 
       - name: Run repo-specific version update script
         # yamllint disable-line rule:line-length
@@ -256,7 +223,7 @@ jobs:
         env:
           NEXT_VERSION: ${{ steps.version.outputs.next-version }}
           SCRIPT_PATH: ${{ steps.validate-script.outputs.resolved }}
-        run: "$SCRIPT_PATH"
+        run: .lgtm-ci-tooling/scripts/ci/release/run-version-update-script.sh
 
       - name: Check for version file changes
         # yamllint disable-line rule:line-length
@@ -281,7 +248,7 @@ jobs:
           && steps.version.outputs.release-needed == 'true'
           && steps.changes.outputs.has-pr-changes == 'true'
         shell: bash
-        run: rm -rf .lgtm-ci-tooling
+        run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
 
       - name: Create or update version PR
         # yamllint disable-line rule:line-length
@@ -340,7 +307,8 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ steps.tooling.outputs.ref }}
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || (github.repository == 'lgtm-hq/lgtm-ci' && github.sha || 'main') }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
