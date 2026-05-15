@@ -57,7 +57,7 @@ Checks run inside the pinned **py-lintro** container (same as the workflow quali
 ### Status: ${STATUS_EMOJI} ${STATUS_TEXT}
 
 **Workflow:**
-1. Performed code quality checks with \`lintro check\` (Docker)
+1. Performed code quality checks with \`lintro chk\` (Docker)
 
 ### Results:
 \`\`\`

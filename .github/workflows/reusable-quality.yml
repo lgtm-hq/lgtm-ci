@@ -9,6 +9,11 @@ on:
         required: false
         type: string
         default: ""
+      lintro-tools:
+        description: "Deprecated alias for tools"
+        required: false
+        type: string
+        default: ""
       fail-on-error:
         description: "Fail workflow if linting errors found"
         required: false
@@ -54,7 +59,7 @@ jobs:
         uses: ./.github/actions/run-quality
         with:
           lintro-image: ${{ env.LINTRO_IMAGE }}
-          tools: ${{ inputs.tools }}
+          tools: ${{ inputs.tools != '' && inputs.tools || inputs.lintro-tools }}
           fail-on-error: ${{ inputs.fail-on-error }}
           working-directory: ${{ inputs.working-directory }}
 
