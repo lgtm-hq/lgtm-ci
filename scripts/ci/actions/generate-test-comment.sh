@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Generate PR comment for shell test results
+# Purpose: Generate PR comment for reusable test workflow results
 #
 # Environment variables expected:
 #   TESTS_PASSED - Number of tests passed
