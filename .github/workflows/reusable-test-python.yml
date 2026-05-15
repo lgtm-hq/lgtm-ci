@@ -120,7 +120,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || 'main' }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/
             scripts/ci/
@@ -217,7 +217,11 @@ jobs:
           threshold: ${{ inputs.coverage-threshold }}
 
       - name: Upload coverage report
-        if: always() && inputs.upload-coverage && inputs.coverage
+        if: >-
+          always()
+          && inputs.upload-coverage
+          && inputs.coverage
+          && steps.run.outputs.coverage-file != ''
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -279,7 +283,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || 'main' }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/
             scripts/ci/
@@ -299,21 +303,13 @@ jobs:
         with:
           coverage-percent: ${{ needs.test.outputs.coverage-percent }}
           format: svg
-          output-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report/badge.svg' ||
-            format('coverage-report/{0}/badge.svg', inputs.working-directory) }}
+          output-path: coverage-report/badge.svg
 
       - name: Publish to GitHub Pages
         if: inputs.coverage && inputs.upload-coverage
         uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
         with:
-          results-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          coverage-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          badge-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
+          results-path: coverage-report
+          coverage-path: coverage-report
+          badge-path: coverage-report
           target-dir: python

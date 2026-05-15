@@ -17,6 +17,34 @@ load "../../../helpers/common"
 	assert_output --partial "Command failed with exit code 42"
 }
 
+@test "fail-with-exit-code: passes through maximum shell exit code" {
+	run env EXIT_CODE=255 bash "${PROJECT_ROOT}/scripts/ci/actions/fail-with-exit-code.sh"
+
+	assert_failure 255
+	assert_output --partial "Command failed with exit code 255"
+}
+
+@test "fail-with-exit-code: rejects unset exit code" {
+	run env -u EXIT_CODE bash "${PROJECT_ROOT}/scripts/ci/actions/fail-with-exit-code.sh"
+
+	assert_failure
+	assert_output --partial "EXIT_CODE not set"
+}
+
+@test "fail-with-exit-code: rejects empty exit code" {
+	run env EXIT_CODE="" bash "${PROJECT_ROOT}/scripts/ci/actions/fail-with-exit-code.sh"
+
+	assert_failure
+	assert_output --partial "Invalid exit code"
+}
+
+@test "fail-with-exit-code: rejects negative exit code" {
+	run env EXIT_CODE=-1 bash "${PROJECT_ROOT}/scripts/ci/actions/fail-with-exit-code.sh"
+
+	assert_failure
+	assert_output --partial "Invalid exit code: -1"
+}
+
 @test "fail-with-exit-code: rejects non-numeric exit code" {
 	run env EXIT_CODE=abc bash "${PROJECT_ROOT}/scripts/ci/actions/fail-with-exit-code.sh"
 

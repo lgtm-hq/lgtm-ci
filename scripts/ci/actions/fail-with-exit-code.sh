@@ -4,7 +4,10 @@
 
 set -euo pipefail
 
-: "${EXIT_CODE:?EXIT_CODE is required}"
+if [[ ! ${EXIT_CODE+x} ]]; then
+	echo "::error::EXIT_CODE not set"
+	exit 1
+fi
 
 if [[ ! "$EXIT_CODE" =~ ^[0-9]+$ ]]; then
 	echo "::error::Invalid exit code: $EXIT_CODE"
