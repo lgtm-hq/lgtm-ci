@@ -44,9 +44,8 @@ on:
         default: "unknown"
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
-        required: false
+        required: true
         type: string
-        default: ""
 
 jobs:
   comment:
@@ -68,7 +67,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || 'main' }}
+          ref: ${{ inputs.tooling-ref }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false

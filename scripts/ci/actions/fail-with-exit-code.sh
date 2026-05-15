@@ -11,6 +11,11 @@ if [[ ! "$EXIT_CODE" =~ ^[0-9]+$ ]]; then
 	exit 1
 fi
 
+if [[ "$EXIT_CODE" -gt 255 ]]; then
+	echo "::error::Exit code out of range: $EXIT_CODE (expected 0-255)"
+	exit 1
+fi
+
 if [[ "$EXIT_CODE" -ne 0 ]]; then
 	echo "::error::Command failed with exit code $EXIT_CODE"
 	exit "$EXIT_CODE"
