@@ -14,58 +14,12 @@ permissions:
 jobs:
   quality:
     uses: ./.github/workflows/reusable-quality.yml
+    with:
+      tooling-ref: ${{ github.sha }}
     permissions:
       contents: read
       packages: read
-
-  comment-lint:
-    name: PR Lint Comment
-    runs-on: ubuntu-latest
-    needs: quality
-    if: always() && github.event_name == 'pull_request'
-    permissions:
-      contents: read
       pull-requests: write
-
-    steps:
-      - name: Harden Runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
-        with:
-          egress-policy: audit
-
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Download linting report
-        id: download
-        # Pinned to SHA for supply chain security
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        continue-on-error: true
-        with:
-          name: linting-report
-          path: .
-
-      - name: Generate PR comment
-        if: steps.download.outcome == 'success'
-        shell: bash
-        env:
-          LINTRO_OUTPUT: chk-output.txt
-          LINTRO_EXIT_CODE: ${{ needs.quality.outputs.exit-code }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-        run: bash scripts/ci/actions/generate-lintro-comment.sh > pr-comment.md
-
-      - name: Post PR comment
-        if: steps.download.outcome == 'success'
-        uses: ./.github/actions/post-pr-comment
-        with:
-          file: pr-comment.md
-          marker: lintro-report
 
   shell-tests:
     name: Shell Library Tests
