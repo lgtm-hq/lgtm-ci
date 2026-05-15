@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Run lintro quality checks with configurable options
+# Purpose: Run lintro locally via uv (partial toolchains).
+#
+# GitHub Actions paths use scripts/ci/quality/run-lintro-docker.sh with the
+# full ghcr.io/lgtm-hq/py-lintro image so every bundled tool runs.
 #
 # Required environment variables:
 #   STEP - Which step to run: check or format

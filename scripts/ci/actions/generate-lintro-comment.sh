@@ -52,10 +52,12 @@ cat <<EOF
 
 This PR has been analyzed using **lintro** - our unified code quality tool.
 
+Checks run inside the pinned **py-lintro** container (same as the workflow quality job), so the summary reflects the full bundled toolchain.
+
 ### Status: ${STATUS_EMOJI} ${STATUS_TEXT}
 
 **Workflow:**
-1. Performed code quality checks with \`lintro check\`
+1. Performed code quality checks with \`lintro chk\` (Docker)
 
 ### Results:
 \`\`\`

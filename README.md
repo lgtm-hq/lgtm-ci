@@ -42,9 +42,11 @@ jobs:
 ```yaml
 jobs:
   quality:
+    permissions:
+      contents: read
+      packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@v1
-    with:
-      python-version: "3.13"
+    # Optional: with: { tools: "ruff,yamllint", fail-on-error: true, working-directory: "." }
 ```
 
 ### Using Shell Libraries
@@ -90,7 +92,7 @@ steps:
 
 | Action              | Description                              |
 | ------------------- | ---------------------------------------- |
-| `run-quality`       | Lintro quality checks with actionlint    |
+| `run-quality`       | Lintro via full py-lintro Docker image   |
 | `run-tests`         | Generic test runner                      |
 | `run-vitest`        | Vitest test execution                    |
 | `run-pytest`        | Pytest test execution                    |
@@ -141,26 +143,26 @@ steps:
 
 ### Reusable Workflows
 
-| Workflow                          | Description                          |
-| --------------------------------- | ------------------------------------ |
-| `reusable-quality.yml`            | Lintro + shellcheck + action pinning |
-| `reusable-sbom.yml`               | SBOM generation with Cosign signing  |
-| `reusable-release-version-pr.yml` | Release version PR with changelog    |
-| `reusable-release-auto-tag.yml`   | Tag + GitHub release on merge        |
-| `reusable-publish-pypi.yml`       | PyPI publishing with OIDC            |
-| `reusable-publish-npm.yml`        | npm publishing                       |
-| `reusable-publish-gem.yml`        | RubyGems publishing                  |
-| `reusable-publish-homebrew.yml`   | Homebrew formula publishing          |
-| `reusable-deploy-pages.yml`       | GitHub Pages deployment              |
-| `reusable-docker.yml`             | Docker build and publish             |
-| `reusable-coverage.yml`           | Test coverage collection             |
-| `reusable-test-python.yml`        | Python test execution                |
-| `reusable-test-node.yml`          | Node.js test execution               |
-| `reusable-test-shell.yml`         | Shell script testing with BATS       |
-| `reusable-test-e2e.yml`           | E2E testing with Playwright          |
-| `reusable-test-e2e-matrix.yml`    | Matrix E2E testing                   |
-| `reusable-pr-auto-assign.yml`     | PR auto-assignment                   |
-| `reusable-pr-labeler.yml`         | PR auto-labeling                     |
+| Workflow                          | Description                            |
+| --------------------------------- | -------------------------------------- |
+| `reusable-quality.yml`            | Lintro via full py-lintro Docker image |
+| `reusable-sbom.yml`               | SBOM generation with Cosign signing    |
+| `reusable-release-version-pr.yml` | Release version PR with changelog      |
+| `reusable-release-auto-tag.yml`   | Tag + GitHub release on merge          |
+| `reusable-publish-pypi.yml`       | PyPI publishing with OIDC              |
+| `reusable-publish-npm.yml`        | npm publishing                         |
+| `reusable-publish-gem.yml`        | RubyGems publishing                    |
+| `reusable-publish-homebrew.yml`   | Homebrew formula publishing            |
+| `reusable-deploy-pages.yml`       | GitHub Pages deployment                |
+| `reusable-docker.yml`             | Docker build and publish               |
+| `reusable-coverage.yml`           | Test coverage collection               |
+| `reusable-test-python.yml`        | Python test execution                  |
+| `reusable-test-node.yml`          | Node.js test execution                 |
+| `reusable-test-shell.yml`         | Shell script testing with BATS         |
+| `reusable-test-e2e.yml`           | E2E testing with Playwright            |
+| `reusable-test-e2e-matrix.yml`    | Matrix E2E testing                     |
+| `reusable-pr-auto-assign.yml`     | PR auto-assignment                     |
+| `reusable-pr-labeler.yml`         | PR auto-labeling                       |
 
 ### Shell Libraries
 
@@ -232,15 +234,22 @@ for working examples.
 
 ## 🔨 Development
 
+CI and `reusable-quality.yml` run **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro`
+image** so every bundled tool is available. Mirror CI locally:
+
+```bash
+export STEP=check
+export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:6b6ee149e4daa0f17447b4c1c481e949277eb7a28453c5cb819dd95119ba42dc'
+bash scripts/ci/quality/run-lintro-docker.sh
+```
+
+Quick iteration without Docker (optional tools may SKIP — same as `lint-check.sh`):
+
 ```bash
 git clone https://github.com/lgtm-hq/lgtm-ci.git
 cd lgtm-ci
-
-# Lint
-uv run lintro chk
-
-# Auto-fix formatting
-uv run lintro fmt
+uv sync --dev
+STEP=check bash scripts/ci/quality/lint-check.sh
 ```
 
 ## 🤝 Community

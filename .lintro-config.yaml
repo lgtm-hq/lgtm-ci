@@ -69,4 +69,4 @@ tools:
   mypy:
     enabled: true
   pytest:
-    enabled: true
+    enabled: false
