@@ -36,12 +36,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Resolve scripts directory
-      shell: bash
-      run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
-
     - name: Log in to GitHub Container Registry
       uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
       with:
@@ -58,7 +52,7 @@ runs:
         TOOLS: ${{ inputs.tools }}
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         LINTRO_IMAGE: ${{ inputs.lintro-image }}
-      run: "$SCRIPTS_DIR/ci/quality/run-lintro-docker.sh"
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/quality/run-lintro-docker.sh"
 
 branding:
   icon: "check-circle"
