@@ -28,6 +28,7 @@ resolved="$(resolve_path "$RAW_SCRIPT_PATH")"
 workspace="$(cd "$GITHUB_WORKSPACE" && pwd -P)"
 
 case "$resolved" in
+"$workspace") ;;
 "$workspace"/*) ;;
 *)
 	printf '::error::version-update-script resolves outside the workspace: %s\n' "$resolved" >&2
