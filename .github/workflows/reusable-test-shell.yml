@@ -44,11 +44,21 @@ on:
         required: false
         type: string
         default: "."
-      is-pr:
-        description: "Whether this is a pull request (for PR comments)"
+      post-pr-comment:
+        description: "Post or update a shell test summary comment on pull requests"
         required: false
         type: boolean
-        default: false
+        default: true
+      comment-marker:
+        description: "Unique marker for the shell test PR comment"
+        required: false
+        type: string
+        default: "shell-test-results"
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
 
     outputs:
       tests-passed:
@@ -97,19 +107,30 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Install BATS and helpers
         shell: bash
         env:
           STEP: install-bats
           BATS_VERSION: ${{ inputs.bats-version }}
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
 
       - name: Install kcov for coverage
         if: inputs.coverage
         shell: bash
         env:
           STEP: install-kcov
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
 
       - name: Run BATS tests
         if: ${{ !inputs.coverage }}
@@ -121,7 +142,7 @@ jobs:
           TEST_PATH: ${{ inputs.test-path }}
           TEST_FILTER: ${{ inputs.test-filter }}
           PARALLEL: ${{ inputs.parallel }}
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Run BATS tests with coverage
         if: ${{ inputs.coverage }}
@@ -134,7 +155,7 @@ jobs:
           TEST_FILTER: ${{ inputs.test-filter }}
           PARALLEL: ${{ inputs.parallel }}
           COVERAGE_DIR: coverage-report
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Parse test results
         id: results
@@ -143,7 +164,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           STEP: parse-results
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Parse coverage results
         id: coverage
@@ -153,7 +174,7 @@ jobs:
         env:
           STEP: parse-coverage
           COVERAGE_DIR: coverage-report
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Check coverage threshold
         if: inputs.coverage && inputs.coverage-threshold > 0
@@ -162,7 +183,7 @@ jobs:
           STEP: check-threshold
           COVERAGE_PERCENT: ${{ steps.coverage.outputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
 
       - name: Upload test results
         if: always()
@@ -187,41 +208,23 @@ jobs:
           if-no-files-found: ignore
 
   comment-pr:
-    name: PR Comment
-    runs-on: ubuntu-latest
     needs: test
-    if: inputs.is-pr && always()
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && inputs.post-pr-comment
+    uses: ./.github/workflows/reusable-test-pr-comment.yml
     permissions:
       contents: read
       pull-requests: write
-
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
-        with:
-          egress-policy: audit
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Generate PR comment
-        shell: bash
-        env:
-          TESTS_PASSED: ${{ needs.test.outputs.tests-passed }}
-          TESTS_FAILED: ${{ needs.test.outputs.tests-failed }}
-          TESTS_TOTAL: ${{ needs.test.outputs.tests-total }}
-          COVERAGE_PERCENT: ${{ needs.test.outputs.coverage-percent }}
-          COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
-          JOB_RESULT: ${{ needs.test.result }}
-          GITHUB_RUN_ID: ${{ github.run_id }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          GITHUB_SERVER_URL: ${{ github.server_url }}
-        run: bash scripts/ci/actions/generate-shell-test-comment.sh > pr-comment.md
-
-      - name: Post PR comment
-        uses: ./.github/actions/post-pr-comment
-        with:
-          file: pr-comment.md
-          marker: "shell-test-results"
+    with:
+      test-suite-name: Shell Tests
+      comment-marker: ${{ inputs.comment-marker }}
+      tests-passed: ${{ needs.test.outputs.tests-passed }}
+      tests-failed: ${{ needs.test.outputs.tests-failed }}
+      tests-total: ${{ needs.test.outputs.tests-total }}
+      coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+      coverage-threshold: ${{ inputs.coverage-threshold }}
+      job-result: ${{ needs.test.result }}
+      tooling-ref: ${{ inputs.tooling-ref }}
+    secrets: inherit

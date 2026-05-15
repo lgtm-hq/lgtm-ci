@@ -157,13 +157,18 @@ steps:
 | `reusable-deploy-pages.yml`       | GitHub Pages deployment                |
 | `reusable-docker.yml`             | Docker build and publish               |
 | `reusable-coverage.yml`           | Test coverage collection               |
-| `reusable-test-python.yml`        | Python test execution                  |
-| `reusable-test-node.yml`          | Node.js test execution                 |
-| `reusable-test-shell.yml`         | Shell script testing with BATS         |
+| `reusable-test-python.yml`        | Python tests with PR comments          |
+| `reusable-test-node.yml`          | Node.js tests with PR comments         |
+| `reusable-test-shell.yml`         | BATS shell tests with PR comments      |
+| `reusable-test-pr-comment.yml`    | Shared test PR comment workflow        |
 | `reusable-test-e2e.yml`           | E2E testing with Playwright            |
 | `reusable-test-e2e-matrix.yml`    | Matrix E2E testing                     |
 | `reusable-pr-auto-assign.yml`     | PR auto-assignment                     |
 | `reusable-pr-labeler.yml`         | PR auto-labeling                       |
+
+Test workflows are self-contained for consumers: they check out lgtm-ci
+tooling internally, run the configured test suite, and post/update the
+standard PR comment when callers grant `pull-requests: write`.
 
 ### Shell Libraries
 
@@ -240,7 +245,7 @@ image** so every bundled tool is available. Mirror CI locally:
 
 ```bash
 export STEP=check
-export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:6b6ee149e4daa0f17447b4c1c481e949277eb7a28453c5cb819dd95119ba42dc'
+export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:f93473dea60ac4d28540e9e15c1d47267c2cfc3cc291beef6d4563d14a60e2f0'
 bash scripts/ci/quality/run-lintro-docker.sh
 ```
 

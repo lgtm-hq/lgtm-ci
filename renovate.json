@@ -1,6 +1,23 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["local>lgtm-hq/.github:renovate-config"],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "description": "Track pinned py-lintro Docker image digests",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/reusable-quality\\.yml$/",
+        "/^\\.github/actions/run-quality/action\\.yml$/",
+        "/^README\\.md$/",
+        "/^\\.github/actions/README\\.md$/"
+      ],
+      "matchStrings": [
+        "ghcr\\.io/lgtm-hq/py-lintro@(?<currentDigest>sha256:[a-f0-9]+)"
+      ],
+      "depNameTemplate": "ghcr.io/lgtm-hq/py-lintro",
+      "datasourceTemplate": "docker"
+    }
+  ],
   "packageRules": [
     {
       "description": "Group lintro Docker image + PyPI pin so they update together",

@@ -32,4 +32,4 @@ jobs:
       coverage: true
       coverage-threshold: 84
       upload-coverage: true
-      is-pr: ${{ github.event_name == 'pull_request' }}
+      tooling-ref: ${{ github.sha }}

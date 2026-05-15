@@ -54,6 +54,21 @@ on:
         required: false
         type: string
         default: "."
+      post-pr-comment:
+        description: "Post or update a Python test summary comment on pull requests"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for the Python test PR comment"
+        required: false
+        type: string
+        default: "python-test-results"
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
 
     outputs:
       tests-passed:
@@ -80,11 +95,11 @@ jobs:
       contents: read
 
     outputs:
-      tests-passed: ${{ steps.test.outputs.tests-passed }}
-      tests-failed: ${{ steps.test.outputs.tests-failed }}
-      tests-total: ${{ steps.test.outputs.tests-total }}
-      coverage-percent: ${{ steps.test.outputs.coverage-percent }}
-      passed: ${{ steps.test.outputs.tests-failed == '0' }}
+      tests-passed: ${{ steps.parse.outputs.tests-passed }}
+      tests-failed: ${{ steps.parse.outputs.tests-failed }}
+      tests-total: ${{ steps.parse.outputs.tests-total }}
+      coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
+      passed: ${{ steps.run.outputs.exit-code == '0' }}
 
     steps:
       - name: Harden runner
@@ -99,36 +114,152 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Run pytest
-        id: test
-        uses: ./.github/actions/run-pytest
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          python-version: ${{ inputs.python-version }}
-          test-path: ${{ inputs.test-path }}
-          coverage: ${{ inputs.coverage }}
-          coverage-format: ${{ inputs.coverage-format }}
-          markers: ${{ inputs.markers }}
-          extra-args: ${{ inputs.extra-args }}
-          working-directory: ${{ inputs.working-directory }}
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          persist-credentials: false
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          version: latest
+          enable-cache: false
+
+      - name: Setup Python
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          STEP: python-install
+          PYTHON_VERSION: ${{ inputs.python-version }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/setup-python.sh"
+
+      - name: Cache uv dependencies
+        id: cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ~/.cache/uv
+            ${{ inputs.working-directory }}/.venv
+          # yamllint disable-line rule:line-length
+          key: uv-${{ runner.os }}-${{ inputs.python-version }}-${{ hashFiles('**/pyproject.toml', '**/requirements*.txt', '**/uv.lock') }}
+          restore-keys: |
+            uv-${{ runner.os }}-${{ inputs.python-version }}-
+            uv-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          STEP: deps
+          EXTRAS: ""
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/setup-python.sh"
+
+      - name: Setup pytest
+        shell: bash
+        env:
+          STEP: setup
+          COVERAGE: ${{ inputs.coverage }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
+
+      - name: Run pytest
+        id: run
+        shell: bash
+        env:
+          STEP: run
+          TEST_PATH: ${{ inputs.test-path }}
+          COVERAGE: ${{ inputs.coverage }}
+          COVERAGE_FORMAT: ${{ inputs.coverage-format }}
+          MARKERS: ${{ inputs.markers }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
+        continue-on-error: true
+
+      - name: Parse results
+        id: parse
+        if: always()
+        shell: bash
+        env:
+          STEP: parse
+          RESULTS_FILE: ${{ inputs.working-directory }}/pytest-results.json
+          COVERAGE_FILE: >-
+            ${{ steps.run.outputs.coverage-file != '' &&
+            format('{0}/{1}', inputs.working-directory, steps.run.outputs.coverage-file)
+            || '' }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
+
+      - name: Generate summary
+        if: always()
+        shell: bash
+        env:
+          STEP: summary
+          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
+          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
+          TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
+          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
+          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
 
       - name: Check coverage threshold
         if: inputs.coverage && inputs.coverage-threshold > 0
-        uses: ./.github/actions/check-coverage-threshold
+        uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
         with:
-          coverage-percent: ${{ steps.test.outputs.coverage-percent }}
+          coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
 
       - name: Upload coverage report
-        if: inputs.upload-coverage && inputs.coverage
+        if: >-
+          always()
+          && inputs.upload-coverage
+          && inputs.coverage
+          && steps.run.outputs.coverage-file != ''
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: python-coverage
           path: |
-            ${{ inputs.working-directory }}/${{ steps.test.outputs.coverage-file }}
+            ${{ inputs.working-directory }}/${{ steps.run.outputs.coverage-file }}
             ${{ inputs.working-directory }}/pytest-results.json
           retention-days: 7
           if-no-files-found: ignore
+
+      - name: Fail on pytest errors
+        if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
+
+  comment-pr:
+    needs: test
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && inputs.post-pr-comment
+    uses: ./.github/workflows/reusable-test-pr-comment.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      test-suite-name: Python Tests
+      comment-marker: ${{ inputs.comment-marker }}
+      tests-passed: ${{ needs.test.outputs.tests-passed }}
+      tests-failed: ${{ needs.test.outputs.tests-failed }}
+      tests-total: ${{ needs.test.outputs.tests-total }}
+      coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+      coverage-threshold: ${{ inputs.coverage-threshold }}
+      job-result: ${{ needs.test.result }}
+      tooling-ref: ${{ inputs.tooling-ref }}
+    secrets: inherit
 
   publish:
     name: Publish Results
@@ -146,6 +277,18 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          persist-credentials: false
+
       - name: Download coverage
         if: inputs.coverage && inputs.upload-coverage
         # Pinned to SHA for supply chain security
@@ -156,25 +299,17 @@ jobs:
 
       - name: Generate badge
         if: inputs.coverage && inputs.upload-coverage
-        uses: ./.github/actions/generate-coverage-badge
+        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-badge
         with:
           coverage-percent: ${{ needs.test.outputs.coverage-percent }}
           format: svg
-          output-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report/badge.svg' ||
-            format('coverage-report/{0}/badge.svg', inputs.working-directory) }}
+          output-path: coverage-report/badge.svg
 
       - name: Publish to GitHub Pages
         if: inputs.coverage && inputs.upload-coverage
-        uses: ./.github/actions/publish-test-results
+        uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
         with:
-          results-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          coverage-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          badge-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
+          results-path: coverage-report
+          coverage-path: coverage-report
+          badge-path: coverage-report
           target-dir: python
