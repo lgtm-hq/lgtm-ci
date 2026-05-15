@@ -157,13 +157,17 @@ steps:
 | `reusable-deploy-pages.yml`       | GitHub Pages deployment                |
 | `reusable-docker.yml`             | Docker build and publish               |
 | `reusable-coverage.yml`           | Test coverage collection               |
-| `reusable-test-python.yml`        | Python test execution                  |
-| `reusable-test-node.yml`          | Node.js test execution                 |
-| `reusable-test-shell.yml`         | Shell script testing with BATS         |
+| `reusable-test-python.yml`        | Python tests with PR comments          |
+| `reusable-test-node.yml`          | Node.js tests with PR comments         |
+| `reusable-test-shell.yml`         | BATS shell tests with PR comments      |
 | `reusable-test-e2e.yml`           | E2E testing with Playwright            |
 | `reusable-test-e2e-matrix.yml`    | Matrix E2E testing                     |
 | `reusable-pr-auto-assign.yml`     | PR auto-assignment                     |
 | `reusable-pr-labeler.yml`         | PR auto-labeling                       |
+
+Test workflows are self-contained for consumers: they check out lgtm-ci
+tooling internally, run the configured test suite, and post/update the
+standard PR comment when callers grant `pull-requests: write`.
 
 ### Shell Libraries
 

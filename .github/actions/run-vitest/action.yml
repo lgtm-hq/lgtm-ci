@@ -55,12 +55,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Resolve scripts directory
-      shell: bash
-      run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
-
     - name: Setup Node.js
       uses: ./.github/actions/setup-node
       with:
@@ -73,7 +67,7 @@ runs:
       env:
         STEP: setup
         COVERAGE: ${{ inputs.coverage }}
-      run: $SCRIPTS_DIR/ci/actions/run-vitest.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/run-vitest.sh"
 
     - name: Run vitest
       id: run
@@ -85,7 +79,7 @@ runs:
         COVERAGE: ${{ inputs.coverage }}
         COVERAGE_FORMAT: ${{ inputs.coverage-format }}
         EXTRA_ARGS: ${{ inputs.extra-args }}
-      run: $SCRIPTS_DIR/ci/actions/run-vitest.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/run-vitest.sh"
       continue-on-error: true
 
     - name: Parse results
@@ -96,7 +90,7 @@ runs:
         STEP: parse
         RESULTS_FILE: vitest-results.json
         COVERAGE_FILE: ${{ steps.run.outputs.coverage-file }}
-      run: $SCRIPTS_DIR/ci/actions/run-vitest.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/run-vitest.sh"
 
     - name: Generate summary
       shell: bash
@@ -108,14 +102,14 @@ runs:
         TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
         COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
         EXIT_CODE: ${{ steps.run.outputs.exit-code }}
-      run: $SCRIPTS_DIR/ci/actions/run-vitest.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/run-vitest.sh"
 
     - name: Check test result
       if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
       shell: bash
-      run: exit "${EXIT_CODE:-1}"
       env:
         EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/fail-with-exit-code.sh"
 
 branding:
   icon: "check-circle"

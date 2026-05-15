@@ -50,12 +50,6 @@ outputs:
 runs:
   using: "composite"
   steps:
-    - name: Resolve scripts directory
-      shell: bash
-      run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
-
     - name: Install uv
       # Pinned to SHA for supply chain security
       uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
@@ -68,7 +62,7 @@ runs:
       shell: bash
       env:
         STEP: uv-version
-      run: $SCRIPTS_DIR/ci/actions/setup-python.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
 
     - name: Setup Python
       shell: bash
@@ -76,7 +70,7 @@ runs:
       env:
         STEP: python-install
         PYTHON_VERSION: ${{ inputs.python-version }}
-      run: $SCRIPTS_DIR/ci/actions/setup-python.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
 
     - name: Get Python version
       id: python-version
@@ -84,7 +78,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: python-version
-      run: $SCRIPTS_DIR/ci/actions/setup-python.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
 
     - name: Cache uv dependencies
       if: inputs.cache == 'true'
@@ -110,7 +104,7 @@ runs:
       env:
         STEP: deps
         EXTRAS: ${{ inputs.install-extras }}
-      run: $SCRIPTS_DIR/ci/actions/setup-python.sh
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/setup-python.sh"
 
 branding:
   icon: "code"

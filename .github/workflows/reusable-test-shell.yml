@@ -45,10 +45,25 @@ on:
         type: string
         default: "."
       is-pr:
-        description: "Whether this is a pull request (for PR comments)"
+        description: "Deprecated alias for post-pr-comment callers"
         required: false
         type: boolean
         default: false
+      post-pr-comment:
+        description: "Post or update a shell test summary comment on pull requests"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for the shell test PR comment"
+        required: false
+        type: string
+        default: "shell-test-results"
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
 
     outputs:
       tests-passed:
@@ -97,19 +112,30 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || 'main' }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Install BATS and helpers
         shell: bash
         env:
           STEP: install-bats
           BATS_VERSION: ${{ inputs.bats-version }}
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
 
       - name: Install kcov for coverage
         if: inputs.coverage
         shell: bash
         env:
           STEP: install-kcov
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
 
       - name: Run BATS tests
         if: ${{ !inputs.coverage }}
@@ -121,7 +147,7 @@ jobs:
           TEST_PATH: ${{ inputs.test-path }}
           TEST_FILTER: ${{ inputs.test-filter }}
           PARALLEL: ${{ inputs.parallel }}
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Run BATS tests with coverage
         if: ${{ inputs.coverage }}
@@ -134,7 +160,7 @@ jobs:
           TEST_FILTER: ${{ inputs.test-filter }}
           PARALLEL: ${{ inputs.parallel }}
           COVERAGE_DIR: coverage-report
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Parse test results
         id: results
@@ -143,7 +169,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           STEP: parse-results
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Parse coverage results
         id: coverage
@@ -153,7 +179,7 @@ jobs:
         env:
           STEP: parse-coverage
           COVERAGE_DIR: coverage-report
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
 
       - name: Check coverage threshold
         if: inputs.coverage && inputs.coverage-threshold > 0
@@ -162,7 +188,7 @@ jobs:
           STEP: check-threshold
           COVERAGE_PERCENT: ${{ steps.coverage.outputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
-        run: bash scripts/ci/actions/run-bats-tests.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
 
       - name: Upload test results
         if: always()
@@ -187,10 +213,13 @@ jobs:
           if-no-files-found: ignore
 
   comment-pr:
-    name: PR Comment
+    name: Shell Tests PR Comment
     runs-on: ubuntu-latest
     needs: test
-    if: inputs.is-pr && always()
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && (inputs.post-pr-comment || inputs.is-pr)
     permissions:
       contents: read
       pull-requests: write
@@ -201,14 +230,21 @@ jobs:
         with:
           egress-policy: audit
 
-      - name: Checkout repository
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || 'main' }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
           persist-credentials: false
 
       - name: Generate PR comment
         shell: bash
         env:
+          TEST_SUITE_NAME: Shell Tests
           TESTS_PASSED: ${{ needs.test.outputs.tests-passed }}
           TESTS_FAILED: ${{ needs.test.outputs.tests-failed }}
           TESTS_TOTAL: ${{ needs.test.outputs.tests-total }}
@@ -218,10 +254,41 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
-        run: bash scripts/ci/actions/generate-shell-test-comment.sh > pr-comment.md
+          COMMENT_OUTPUT: pr-comment.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-shell-test-comment.sh
+
+      - name: Detect PR number
+        id: pr
+        shell: bash
+        env:
+          STEP: pr-number
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ""
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+
+      - name: Read comment from file
+        id: read
+        shell: bash
+        env:
+          STEP: read-file
+          COMMENT_FILE: pr-comment.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
 
       - name: Post PR comment
-        uses: ./.github/actions/post-pr-comment
-        with:
-          file: pr-comment.md
-          marker: "shell-test-results"
+        id: post
+        shell: bash
+        env:
+          STEP: post
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          MARKER: ${{ inputs.comment-marker }}
+          MODE: upsert
+          DELETE_ON_EMPTY: "false"
+          FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
+          BODY_FROM_FILE: ${{ steps.read.outputs.body }}
+          BODY_FROM_INPUT: ""
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
