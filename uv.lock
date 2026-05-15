@@ -373,7 +373,7 @@ dev = [
 requires-dist = [
     { name = "assertpy", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
-    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.62.2" },
+    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.62.4" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -461,7 +461,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.62.2"
+version = "0.62.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bandit" },
@@ -481,9 +481,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "yamllint" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f7/94/e7fd1f0fb5d1a07fab06fbb04359388594bd976e28450001fb00db5d10ea/lintro-0.62.2.tar.gz", hash = "sha256:99df716a3adc4f33f7c8526f142464aabb506832b6a072dbe07483a0fa8bc400", size = 2128414, upload-time = "2026-05-13T14:30:07.029Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b9/87/cbb7df63b8e6a484d1f271da568eda67b0f9c73846ac4ed7b01339293990/lintro-0.62.4.tar.gz", hash = "sha256:ed0cc901d428af712b988d83e50f757c8e1f53e31270c686a966366a83dccfd6", size = 2129346, upload-time = "2026-05-15T05:49:39.283Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/c6/dd/959d8b7871704293735980b24e468363c839bc8452ed22a0b309c5cebbaf/lintro-0.62.2-py3-none-any.whl", hash = "sha256:1a1d2c1628b17ee3b9cbed01202817fba0620d9d336c7c39bb63dab7c21af98d", size = 657048, upload-time = "2026-05-13T14:30:05.089Z" },
+    { url = "https://files.pythonhosted.org/packages/0f/a7/7332fdbb2be8f39bae9ff36fe4332ceb7cffcdf23143a5b6840ea57e90a6/lintro-0.62.4-py3-none-any.whl", hash = "sha256:e2b20ecc28edf16280d6396340858491b4dfa11ed934bac52a0b1b4ae2302152", size = 657044, upload-time = "2026-05-15T05:49:37.024Z" },
 ]
 
 [[package]]
