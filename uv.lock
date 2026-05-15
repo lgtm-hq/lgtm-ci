@@ -350,7 +350,7 @@ wheels = [
 
 [[package]]
 name = "lgtm-ci"
-version = "0.13.2"
+version = "0.13.3"
 source = { virtual = "." }
 
 [package.optional-dependencies]
@@ -373,7 +373,7 @@ dev = [
 requires-dist = [
     { name = "assertpy", marker = "extra == 'dev'", specifier = ">=1.1" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
-    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.62.4" },
+    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.63.1" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -461,7 +461,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.62.4"
+version = "0.63.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "bandit" },
@@ -481,9 +481,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "yamllint" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b9/87/cbb7df63b8e6a484d1f271da568eda67b0f9c73846ac4ed7b01339293990/lintro-0.62.4.tar.gz", hash = "sha256:ed0cc901d428af712b988d83e50f757c8e1f53e31270c686a966366a83dccfd6", size = 2129346, upload-time = "2026-05-15T05:49:39.283Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/01/5e/8c01328e0ac717f52e7566d2f777a86066500b4d95ecd1c785231fca2980/lintro-0.63.1.tar.gz", hash = "sha256:e2abea5936f6de50d2886dd2c46acdc9293b49e00017a8a78554cd35ab22e806", size = 2136286, upload-time = "2026-05-15T18:10:16.842Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0f/a7/7332fdbb2be8f39bae9ff36fe4332ceb7cffcdf23143a5b6840ea57e90a6/lintro-0.62.4-py3-none-any.whl", hash = "sha256:e2b20ecc28edf16280d6396340858491b4dfa11ed934bac52a0b1b4ae2302152", size = 657044, upload-time = "2026-05-15T05:49:37.024Z" },
+    { url = "https://files.pythonhosted.org/packages/46/99/580de78cd92a2348df907fddfbfd3ba037f59826e4c5cb13cb84eb5de07d/lintro-0.63.1-py3-none-any.whl", hash = "sha256:6ff8886ecbb5f65c4af2a542fd37906c8629814598b6d6b6f7c71402ddc9c0df", size = 657954, upload-time = "2026-05-15T18:10:14.731Z" },
 ]
 
 [[package]]
