@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.13.2] - 2026-05-15
+
+### Bug Fixes
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#155) (3b5c4b8)
+
+### Other Changes
+
+- **deps**: Update step-security/harden-runner action to v2.19.3 (#157) (8330615)
+- **deps**: Lock file maintenance (#156) (880cd58)
+
 ## [0.13.1] - 2026-05-14
 
 ### Bug Fixes
@@ -256,7 +267,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.2...HEAD
+[0.13.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.0...v0.13.1
 [0.13.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.12.2...v0.12.3
