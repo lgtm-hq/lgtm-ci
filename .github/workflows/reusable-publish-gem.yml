@@ -24,6 +24,11 @@ on:
         required: false
         type: string
         default: "."
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
     outputs:
       published:
         description: "Whether the gem was published"
@@ -61,8 +66,18 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          persist-credentials: false
       - name: Setup Ruby
-        uses: ./.github/actions/setup-ruby
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-ruby
         with:
           ruby-version: ${{ inputs.ruby-version }}
           working-directory: ${{ inputs.working-directory }}
@@ -73,7 +88,7 @@ jobs:
 
       - name: Publish to RubyGems
         id: gem
-        uses: ./.github/actions/publish-gem
+        uses: ./.lgtm-ci-tooling/.github/actions/publish-gem
         with:
           gemspec: ${{ inputs.gemspec }}
           dry-run: ${{ inputs.dry-run }}

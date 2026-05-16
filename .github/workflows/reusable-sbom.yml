@@ -45,6 +45,11 @@ on:
         type: string
         default: "sbom"
 
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
     outputs:
       sbom-file:
         description: "Path to the generated SBOM file, or 'none' if not generated"
@@ -86,9 +91,19 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          persist-credentials: false
       - name: Generate SBOM
         id: generate
-        uses: ./.github/actions/generate-sbom
+        uses: ./.lgtm-ci-tooling/.github/actions/generate-sbom
         with:
           target: ${{ inputs.target }}
           target-type: ${{ inputs.target-type }}
@@ -99,7 +114,7 @@ jobs:
       - name: Scan vulnerabilities
         id: scan
         if: inputs.scan-vulnerabilities
-        uses: ./.github/actions/scan-vulnerabilities
+        uses: ./.lgtm-ci-tooling/.github/actions/scan-vulnerabilities
         with:
           target: ${{ steps.generate.outputs.sbom-file }}
           target-type: sbom
@@ -109,6 +124,6 @@ jobs:
       - name: Create attestation
         id: attest
         if: inputs.create-attestation && github.event_name != 'pull_request'
-        uses: ./.github/actions/attest-build
+        uses: ./.lgtm-ci-tooling/.github/actions/attest-build
         with:
           subject-path: ${{ steps.generate.outputs.sbom-file }}

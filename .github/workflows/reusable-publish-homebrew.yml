@@ -40,6 +40,11 @@ on:
         required: false
         type: boolean
         default: false
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
     outputs:
       updated:
         description: "Whether the formula was updated"
@@ -72,9 +77,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          persist-credentials: false
       - name: Update Homebrew formula
         id: homebrew
-        uses: ./.github/actions/update-homebrew
+        uses: ./.lgtm-ci-tooling/.github/actions/update-homebrew
         with:
           tap-repository: ${{ inputs.tap-repository }}
           formula: ${{ inputs.formula }}

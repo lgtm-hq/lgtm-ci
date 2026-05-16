@@ -34,6 +34,11 @@ on:
         required: false
         type: string
         default: "."
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
     outputs:
       published:
         description: "Whether the package was published"
@@ -73,9 +78,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          persist-credentials: false
       - name: Publish to npm
         id: npm
-        uses: ./.github/actions/publish-npm
+        uses: ./.lgtm-ci-tooling/.github/actions/publish-npm
         with:
           node-version: ${{ inputs.node-version }}
           dist-tag: ${{ inputs.dist-tag }}
