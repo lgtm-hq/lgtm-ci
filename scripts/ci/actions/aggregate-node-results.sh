@@ -10,6 +10,7 @@ python3 - "$RESULTS_DIR" <<'PY'
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -34,6 +35,17 @@ if not summaries:
     print(f"No matrix summaries found in {results_dir}", file=sys.stderr)
     raise SystemExit(1)
 
+matrix_json = os.environ.get("MATRIX_JSON", "")
+if matrix_json:
+    matrix = json.loads(matrix_json)
+    expected = len(matrix.get("include", []))
+    if len(summaries) != expected:
+        print(
+            f"Expected {expected} matrix summaries, found {len(summaries)} in {results_dir}",
+            file=sys.stderr,
+        )
+        raise SystemExit(1)
+
 passed = 0
 failed = 0
 total = 0
@@ -55,7 +67,7 @@ coverage_percent = ""
 if coverage_values:
     coverage_percent = f"{sum(coverage_values) / len(coverage_values):.2f}"
 
-with Path(__import__("os").environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
     output.write(f"tests-passed={passed}\n")
     output.write(f"tests-failed={failed}\n")
     output.write(f"tests-total={total}\n")
