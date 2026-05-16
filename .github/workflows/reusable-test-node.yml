@@ -9,6 +9,11 @@ on:
         required: false
         type: string
         default: "20"
+      node-versions:
+        description: "Comma-separated Node.js versions for a test matrix"
+        required: false
+        type: string
+        default: ""
       test-path:
         description: "Path to test files or directory"
         required: false
@@ -49,6 +54,26 @@ on:
         required: false
         type: string
         default: "."
+      package-manager:
+        description: "Package manager for dependency install: npm, bun, pnpm"
+        required: false
+        type: string
+        default: "npm"
+      pre-test-command:
+        description: "Optional command to run after dependency install and before tests"
+        required: false
+        type: string
+        default: ""
+      upload-build-artifact:
+        description: "Upload a build artifact after the pre-test command"
+        required: false
+        type: boolean
+        default: false
+      build-artifact-path:
+        description: "Path to upload when upload-build-artifact is true"
+        required: false
+        type: string
+        default: "dist"
       post-pr-comment:
         description: "Post or update a Node test summary comment on pull requests"
         required: false
@@ -83,11 +108,48 @@ on:
         value: ${{ jobs.test.outputs.passed }}
 
 jobs:
-  test:
-    name: Node.js Tests
+  prepare:
+    name: Prepare Node Matrix
     runs-on: ubuntu-latest
     permissions:
       contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Generate Node.js matrix
+        id: matrix
+        shell: bash
+        env:
+          NODE_VERSION: ${{ inputs.node-version }}
+          NODE_VERSIONS: ${{ inputs.node-versions }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-node-matrix.sh
+
+  test:
+    name: Node.js Tests (${{ matrix.node-version }})
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
 
     outputs:
       tests-passed: ${{ steps.parse.outputs.tests-passed }}
@@ -124,14 +186,20 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: ${{ inputs.node-version }}
+          node-version: ${{ matrix.node-version }}
 
       - name: Setup Bun
+        if: inputs.package-manager == 'bun'
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: latest
 
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@9fd676a19091d4595eefd76e4bd31c97133911f1 # v4.2.0
+
       - name: Get bun cache directory
+        if: inputs.package-manager == 'bun'
         id: bun-cache
         shell: bash
         env:
@@ -139,6 +207,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-node.sh
 
       - name: Cache bun dependencies
+        if: inputs.package-manager == 'bun'
         id: cache
         uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
         with:
@@ -146,18 +215,35 @@ jobs:
             ${{ steps.bun-cache.outputs.dir }}
             ${{ inputs.working-directory }}/node_modules
           # yamllint disable-line rule:line-length
-          key: bun-${{ runner.os }}-${{ inputs.node-version }}-${{ hashFiles('**/bun.lockb') }}
+          key: bun-${{ runner.os }}-${{ matrix.node-version }}-${{ hashFiles('**/bun.lockb') }}
           restore-keys: |
-            bun-${{ runner.os }}-${{ inputs.node-version }}-
+            bun-${{ runner.os }}-${{ matrix.node-version }}-
             bun-${{ runner.os }}-
 
       - name: Install dependencies
         shell: bash
-        working-directory: ${{ inputs.working-directory }}
         env:
-          STEP: deps
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
           FROZEN_LOCKFILE: "true"
-        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/setup-node.sh"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
+
+      - name: Run pre-test command
+        if: inputs.pre-test-command != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.pre-test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Upload build artifact
+        if: inputs.upload-build-artifact && inputs.pre-test-command != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-build-${{ matrix.node-version }}
+          path: ${{ inputs.working-directory }}/${{ inputs.build-artifact-path }}
+          retention-days: 7
+          if-no-files-found: error
 
       - name: Setup vitest
         shell: bash
