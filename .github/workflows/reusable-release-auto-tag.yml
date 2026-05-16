@@ -14,6 +14,11 @@ name: "Reusable: Release Auto Tag"
         required: false
         type: string
         default: "v"
+      create-release:
+        description: "Create a GitHub Release after tagging"
+        required: false
+        type: boolean
+        default: true
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: "Git ref for lgtm-ci tooling checkout. Same-repo callers default to github.sha; cross-repo callers default to main."
@@ -130,7 +135,7 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/create-tag.sh
 
       - name: Create GitHub release
-        if: steps.version.outputs.found == 'true'
+        if: steps.version.outputs.found == 'true' && inputs.create-release
         id: github-release
         shell: bash
         env:

@@ -48,11 +48,17 @@ release)
 	: "${TAG_NAME:=}"
 	: "${RELEASE_URL:=}"
 
-	add_github_summary "## Release Created"
+	if [[ -n "$RELEASE_URL" ]]; then
+		add_github_summary "## Release Created"
+	else
+		add_github_summary "## Release Tag Created"
+	fi
 	add_github_summary ""
 	add_github_summary "- **Version:** $VERSION"
 	add_github_summary "- **Tag:** $TAG_NAME"
-	add_github_summary "- **Release:** $RELEASE_URL"
+	if [[ -n "$RELEASE_URL" ]]; then
+		add_github_summary "- **Release:** $RELEASE_URL"
+	fi
 	;;
 *)
 	echo "Unknown summary type: $SUMMARY_TYPE" >&2
