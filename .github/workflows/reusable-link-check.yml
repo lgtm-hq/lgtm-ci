@@ -1,0 +1,128 @@
+---
+name: Reusable Link Check
+
+on:
+  workflow_call:
+    inputs:
+      paths:
+        description: "Comma-separated files or directories to scan"
+        required: false
+        type: string
+        default: "."
+      file-extensions:
+        description: "File extensions to scan, comma-separated"
+        required: false
+        type: string
+        default: "md,html"
+      exclude-patterns:
+        description: "Comma-separated path or URL patterns to exclude"
+        required: false
+        type: string
+        default: ""
+      check-external:
+        description: "Check external HTTP(S) links"
+        required: false
+        type: boolean
+        default: true
+      timeout:
+        description: "HTTP timeout in seconds"
+        required: false
+        type: string
+        default: "10"
+      fail-on-error:
+        description: "Fail workflow if broken links are found"
+        required: false
+        type: boolean
+        default: true
+      comment-on-pr:
+        description: "Post a PR comment with broken link report"
+        required: false
+        type: boolean
+        default: false
+      working-directory:
+        description: "Working directory for link checking"
+        required: false
+        type: string
+        default: "."
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  link-check:
+    name: Link Check
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Build Lychee arguments
+        id: args
+        shell: bash
+        env:
+          PATHS: ${{ inputs.paths }}
+          FILE_EXTENSIONS: ${{ inputs.file-extensions }}
+          EXCLUDE_PATTERNS: ${{ inputs.exclude-patterns }}
+          CHECK_EXTERNAL: ${{ inputs.check-external }}
+          TIMEOUT: ${{ inputs.timeout }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/build-lychee-args.sh
+
+      - name: Check links
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          args: ${{ steps.args.outputs.args }}
+          token: ${{ github.token }}
+          fail: ${{ inputs.fail-on-error }}
+
+      - name: Read comment from file
+        if: >-
+          always()
+          && inputs.comment-on-pr
+          && github.event_name == 'pull_request'
+          && hashFiles('lychee-report.md') != ''
+        id: read
+        shell: bash
+        env:
+          STEP: read-file
+          COMMENT_FILE: lychee-report.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+
+      - name: Post PR comment
+        if: always() && steps.read.outputs.file_provided == 'true'
+        shell: bash
+        env:
+          STEP: post
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MARKER: lychee-report
+          MODE: upsert
+          DELETE_ON_EMPTY: "false"
+          FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
+          BODY_FROM_FILE: ${{ steps.read.outputs.body }}
+          BODY_FROM_INPUT: ""
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh

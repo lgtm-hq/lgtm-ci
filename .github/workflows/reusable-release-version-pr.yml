@@ -49,6 +49,12 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: ""
+      skip-patterns:
+        description: >-
+          Comma-separated commit title patterns that skip version PR creation.
+        required: false
+        type: string
+        default: "^chore\\(release\\):"
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: >-
@@ -120,6 +126,8 @@ jobs:
       - name: Guard release commit
         id: guard
         shell: bash
+        env:
+          SKIP_PATTERNS: ${{ inputs.skip-patterns }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
 

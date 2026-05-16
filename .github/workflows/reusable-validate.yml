@@ -1,0 +1,176 @@
+---
+name: Reusable Validation Script
+
+on:
+  workflow_call:
+    inputs:
+      script:
+        description: "Repo-relative validation script to execute"
+        required: true
+        type: string
+      name:
+        description: "Display name for the validation"
+        required: false
+        type: string
+        default: "Validation"
+      working-directory:
+        description: "Working directory for resolving the script path"
+        required: false
+        type: string
+        default: "."
+      setup-commands:
+        description: "Commands to run before the validation script"
+        required: false
+        type: string
+        default: ""
+      comment-on-failure:
+        description: "Post or update a PR comment when validation fails"
+        required: false
+        type: boolean
+        default: false
+      comment-marker:
+        description: "Unique marker for the validation PR comment"
+        required: false
+        type: string
+        default: "validation-report"
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+
+    outputs:
+      exit-code:
+        description: "Exit code from the validation script"
+        value: ${{ jobs.validate.outputs.exit-code }}
+      status:
+        description: "Validation status: passed or failed"
+        value: ${{ jobs.validate.outputs.status }}
+
+jobs:
+  validate:
+    name: ${{ inputs.name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      exit-code: ${{ steps.validate.outputs.exit-code }}
+      status: ${{ steps.validate.outputs.status }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Run setup commands
+        if: inputs.setup-commands != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.setup-commands }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Run validation script
+        id: validate
+        shell: bash
+        env:
+          SCRIPT_PATH: ${{ inputs.script }}
+          VALIDATION_NAME: ${{ inputs.name }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          COMMENT_OUTPUT: validation-comment.md
+          OUTPUT_FILE: validation-output.txt
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-validate-script.sh
+
+      - name: Upload validation comment
+        if: steps.validate.outputs.exit-code != '0'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: validation-comment
+          path: validation-comment.md
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Fail on validation errors
+        if: steps.validate.outputs.exit-code != '0'
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.validate.outputs.exit-code }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
+
+  comment:
+    name: PR Validation Comment
+    needs: validate
+    if: >-
+      always()
+      && inputs.comment-on-failure
+      && needs.validate.outputs.status == 'failed'
+      && github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Download validation comment
+        id: download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: validation-comment
+          path: .
+
+      - name: Read comment from file
+        if: steps.download.outcome == 'success'
+        id: read
+        shell: bash
+        env:
+          STEP: read-file
+          COMMENT_FILE: validation-comment.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+
+      - name: Post PR comment
+        if: steps.download.outcome == 'success'
+        shell: bash
+        env:
+          STEP: post
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MARKER: ${{ inputs.comment-marker }}
+          MODE: upsert
+          DELETE_ON_EMPTY: "false"
+          FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
+          BODY_FROM_FILE: ${{ steps.read.outputs.body }}
+          BODY_FROM_INPUT: ""
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
