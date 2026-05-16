@@ -237,7 +237,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
 
       - name: Upload build artifact
-        if: inputs.upload-build-artifact && inputs.pre-test-command != ''
+        if: inputs.upload-build-artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: node-build-${{ matrix.node-version }}
@@ -289,6 +289,14 @@ jobs:
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
 
+      - name: Check coverage threshold
+        id: coverage-gate
+        if: inputs.coverage && inputs.coverage-threshold > 0
+        uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
+        with:
+          coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
+          threshold: ${{ inputs.coverage-threshold }}
+
       - name: Write matrix test summary
         if: always()
         shell: bash
@@ -298,7 +306,14 @@ jobs:
           TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
           TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
           COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
-          PASSED: ${{ steps.run.outputs.exit-code == '0' }}
+          PASSED: >-
+            ${{
+              steps.run.outputs.exit-code == '0'
+              && (
+                steps.coverage-gate.outcome == 'success'
+                || steps.coverage-gate.outcome == 'skipped'
+              )
+            }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/write-node-summary.sh
 
       - name: Upload matrix test summary
@@ -310,12 +325,13 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Check coverage threshold
-        if: inputs.coverage && inputs.coverage-threshold > 0
-        uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
-        with:
-          coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
-          threshold: ${{ inputs.coverage-threshold }}
+      - name: Stage coverage report
+        if: always() && inputs.upload-coverage && inputs.coverage
+        shell: bash
+        env:
+          NODE_VERSION: ${{ matrix.node-version }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-coverage.sh
 
       - name: Upload coverage report
         if: always() && inputs.upload-coverage && inputs.coverage
@@ -323,9 +339,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: node-coverage-${{ matrix.node-version }}
-          path: |
-            ${{ inputs.working-directory }}/coverage/
-            ${{ inputs.working-directory }}/vitest-results.json
+          path: node-coverage-${{ matrix.node-version }}/
           retention-days: 7
           if-no-files-found: ignore
 
