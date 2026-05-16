@@ -215,7 +215,7 @@ jobs:
             ${{ steps.bun-cache.outputs.dir }}
             ${{ inputs.working-directory }}/node_modules
           # yamllint disable-line rule:line-length
-          key: bun-${{ runner.os }}-${{ matrix.node-version }}-${{ hashFiles('**/bun.lockb') }}
+          key: bun-${{ runner.os }}-${{ matrix.node-version }}-${{ hashFiles('**/bun.lock', '**/bun.lockb') }}
           restore-keys: |
             bun-${{ runner.os }}-${{ matrix.node-version }}-
             bun-${{ runner.os }}-

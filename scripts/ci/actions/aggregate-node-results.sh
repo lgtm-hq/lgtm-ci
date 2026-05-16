@@ -30,6 +30,9 @@ def as_float(value: object) -> float | None:
 
 results_dir = Path(sys.argv[1])
 summaries = sorted(results_dir.glob("**/summary.json"))
+if not summaries:
+    print(f"No matrix summaries found in {results_dir}", file=sys.stderr)
+    raise SystemExit(1)
 
 passed = 0
 failed = 0
