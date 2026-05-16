@@ -70,11 +70,17 @@ jobs:
 
   e2e:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       browsers: chromium
 
   e2e-matrix:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       test-suites: smoke,visual
       browsers: chromium,firefox
@@ -94,7 +100,7 @@ jobs:
       pull-requests: write
     with:
       ecosystems: node,ruby,python
-      skip-patterns: "chore(release):"
+      skip-patterns: "^chore(release):"
     secrets: inherit
 
   auto-tag:
@@ -180,8 +186,7 @@ jobs:
       packages: write
     with:
       package-name: my-image
-    secrets:
-      token: ${{ secrets.GITHUB_TOKEN }}
+    secrets: inherit
 ```
 
 ## PR Automation And Security

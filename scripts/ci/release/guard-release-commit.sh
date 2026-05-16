@@ -19,7 +19,7 @@ source "$LIB_DIR/log.sh"
 # shellcheck source=../lib/github.sh
 source "$LIB_DIR/github.sh"
 
-: "${SKIP_PATTERNS:=chore\\(release\\):}"
+: "${SKIP_PATTERNS:=^chore\\(release\\):}"
 
 LAST_COMMIT_MSG=$(git log -1 --format='%s' HEAD)
 log_info "Last commit: $LAST_COMMIT_MSG"

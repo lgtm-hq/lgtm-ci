@@ -10,7 +10,7 @@ on:
         type: string
         default: ""
       build-mode:
-        description: "CodeQL build mode: none, autobuild, or manual"
+        description: "CodeQL build mode: none or autobuild"
         required: false
         type: string
         default: "none"

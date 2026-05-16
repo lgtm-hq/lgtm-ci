@@ -54,7 +54,7 @@ name: "Reusable: Release Version PR"
           Comma-separated commit title patterns that skip version PR creation.
         required: false
         type: string
-        default: "chore\\(release\\):"
+        default: "^chore\\(release\\):"
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: >-

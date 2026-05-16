@@ -17,8 +17,11 @@ cd "$WORKING_DIRECTORY"
 
 case "$PACKAGE_MANAGER" in
 bun)
-	if [[ -f "bun.lockb" && "$FROZEN_LOCKFILE" == "true" ]]; then
+	if [[ "$FROZEN_LOCKFILE" == "true" && (-f "bun.lock" || -f "bun.lockb") ]]; then
 		bun install --frozen-lockfile
+	elif [[ "$FROZEN_LOCKFILE" == "true" ]]; then
+		echo "FROZEN_LOCKFILE=true requires bun.lock or bun.lockb for bun install" >&2
+		exit 1
 	elif [[ -f "package.json" ]]; then
 		bun install
 	else
@@ -26,8 +29,11 @@ bun)
 	fi
 	;;
 npm)
-	if [[ -f "package-lock.json" ]]; then
+	if [[ "$FROZEN_LOCKFILE" == "true" && -f "package-lock.json" ]]; then
 		npm ci
+	elif [[ "$FROZEN_LOCKFILE" == "true" ]]; then
+		echo "FROZEN_LOCKFILE=true requires package-lock.json for npm install" >&2
+		exit 1
 	elif [[ -f "package.json" ]]; then
 		npm install
 	else
@@ -35,8 +41,11 @@ npm)
 	fi
 	;;
 pnpm)
-	if [[ -f "pnpm-lock.yaml" && "$FROZEN_LOCKFILE" == "true" ]]; then
+	if [[ "$FROZEN_LOCKFILE" == "true" && -f "pnpm-lock.yaml" ]]; then
 		pnpm install --frozen-lockfile
+	elif [[ "$FROZEN_LOCKFILE" == "true" ]]; then
+		echo "FROZEN_LOCKFILE=true requires pnpm-lock.yaml for pnpm install" >&2
+		exit 1
 	elif [[ -f "package.json" ]]; then
 		pnpm install
 	else

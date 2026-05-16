@@ -10,12 +10,22 @@ set -euo pipefail
 : "${COMMENT_OUTPUT:=validation-comment.md}"
 : "${OUTPUT_FILE:=validation-output.txt}"
 
+if [[ -z "${GITHUB_OUTPUT:-}" || ! -w "$GITHUB_OUTPUT" ]]; then
+	echo "GITHUB_OUTPUT must be set to a writable file" >&2
+	exit 1
+fi
+
 if [[ "$SCRIPT_PATH" = /* || "$SCRIPT_PATH" == *".."* ]]; then
 	echo "SCRIPT_PATH must be a relative path inside the repository" >&2
 	exit 1
 fi
 
 resolved_path="$WORKING_DIRECTORY/$SCRIPT_PATH"
+if [[ "$OUTPUT_FILE" = /* ]]; then
+	output_path="$OUTPUT_FILE"
+else
+	output_path="$PWD/$OUTPUT_FILE"
+fi
 if [[ ! -f "$resolved_path" ]]; then
 	echo "Validation script does not exist: $resolved_path" >&2
 	exit 1
@@ -26,7 +36,7 @@ if [[ ! -x "$resolved_path" ]]; then
 fi
 
 exit_code=0
-"$resolved_path" >"$OUTPUT_FILE" 2>&1 || exit_code=$?
+(cd "$WORKING_DIRECTORY" && "./$SCRIPT_PATH" >"$output_path" 2>&1) || exit_code=$?
 cat "$OUTPUT_FILE"
 
 {

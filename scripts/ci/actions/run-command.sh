@@ -14,4 +14,4 @@ fi
 
 cd "$WORKING_DIRECTORY"
 echo "Running command in $WORKING_DIRECTORY"
-bash -c "$COMMAND"
+bash -e -u -o pipefail -c "$COMMAND"

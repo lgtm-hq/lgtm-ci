@@ -93,19 +93,19 @@ on:
     outputs:
       tests-passed:
         description: "Number of tests passed"
-        value: ${{ jobs.test.outputs.tests-passed }}
+        value: ${{ jobs.aggregate-tests.outputs.tests-passed }}
       tests-failed:
         description: "Number of tests failed"
-        value: ${{ jobs.test.outputs.tests-failed }}
+        value: ${{ jobs.aggregate-tests.outputs.tests-failed }}
       tests-total:
         description: "Total number of tests"
-        value: ${{ jobs.test.outputs.tests-total }}
+        value: ${{ jobs.aggregate-tests.outputs.tests-total }}
       coverage-percent:
         description: "Coverage percentage"
-        value: ${{ jobs.test.outputs.coverage-percent }}
+        value: ${{ jobs.aggregate-tests.outputs.coverage-percent }}
       passed:
         description: "Whether all tests passed"
-        value: ${{ jobs.test.outputs.passed }}
+        value: ${{ jobs.aggregate-tests.outputs.passed }}
 
 jobs:
   prepare:
@@ -289,6 +289,27 @@ jobs:
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
 
+      - name: Write matrix test summary
+        if: always()
+        shell: bash
+        env:
+          NODE_VERSION: ${{ matrix.node-version }}
+          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
+          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
+          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
+          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
+          PASSED: ${{ steps.run.outputs.exit-code == '0' }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-node-summary.sh
+
+      - name: Upload matrix test summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-results-${{ matrix.node-version }}
+          path: node-result-${{ matrix.node-version }}/summary.json
+          retention-days: 7
+          if-no-files-found: error
+
       - name: Check coverage threshold
         if: inputs.coverage && inputs.coverage-threshold > 0
         uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
@@ -301,7 +322,7 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: node-coverage
+          name: node-coverage-${{ matrix.node-version }}
           path: |
             ${{ inputs.working-directory }}/coverage/
             ${{ inputs.working-directory }}/vitest-results.json
@@ -315,8 +336,53 @@ jobs:
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
 
-  comment-pr:
+  aggregate-tests:
+    name: Aggregate Node.js Results
     needs: test
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      tests-passed: ${{ steps.aggregate.outputs.tests-passed }}
+      tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
+      tests-total: ${{ steps.aggregate.outputs.tests-total }}
+      coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
+      passed: ${{ steps.aggregate.outputs.passed }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: audit
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Download matrix test summaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: node-results-*
+          path: node-results
+          merge-multiple: false
+
+      - name: Aggregate matrix test summaries
+        id: aggregate
+        shell: bash
+        env:
+          RESULTS_DIR: node-results
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-node-results.sh
+
+  comment-pr:
+    needs: aggregate-tests
     if: >-
       always()
       && github.event_name == 'pull_request'
@@ -328,19 +394,22 @@ jobs:
     with:
       test-suite-name: Node.js Tests
       comment-marker: ${{ inputs.comment-marker }}
-      tests-passed: ${{ needs.test.outputs.tests-passed }}
-      tests-failed: ${{ needs.test.outputs.tests-failed }}
-      tests-total: ${{ needs.test.outputs.tests-total }}
-      coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+      tests-passed: ${{ needs.aggregate-tests.outputs.tests-passed }}
+      tests-failed: ${{ needs.aggregate-tests.outputs.tests-failed }}
+      tests-total: ${{ needs.aggregate-tests.outputs.tests-total }}
+      coverage-percent: ${{ needs.aggregate-tests.outputs.coverage-percent }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
-      job-result: ${{ needs.test.result }}
+      job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       tooling-ref: ${{ inputs.tooling-ref }}
     secrets: inherit
 
   publish:
     name: Publish Results
-    needs: test
-    if: inputs.publish-results && !cancelled()
+    needs: aggregate-tests
+    if: >-
+      inputs.publish-results
+      && !cancelled()
+      && needs.aggregate-tests.outputs.passed == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -370,14 +439,15 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: node-coverage
+          pattern: node-coverage-*
           path: coverage-report
+          merge-multiple: true
 
       - name: Generate badge
         if: inputs.coverage && inputs.upload-coverage
         uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-badge
         with:
-          coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+          coverage-percent: ${{ needs.aggregate-tests.outputs.coverage-percent }}
           format: svg
           output-path: >-
             ${{ inputs.working-directory == '.' && 'coverage-report/badge.svg' ||
