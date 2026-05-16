@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.13.4] - 2026-05-16
+
+### Bug Fixes
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#166) (68c7168)
+
+### Other Changes
+
+- **deps**: Update github/codeql-action action to v4.35.5 (#167) (71f2d86)
+
 ## [0.13.3] - 2026-05-15
 
 ### Bug Fixes
@@ -280,7 +290,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.4...HEAD
+[0.13.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.2...v0.13.3
 [0.13.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.1...v0.13.2
 [0.13.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.0...v0.13.1
