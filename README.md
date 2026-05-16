@@ -144,27 +144,34 @@ steps:
 
 ### Reusable Workflows
 
-| Workflow                          | Description                            |
-| --------------------------------- | -------------------------------------- |
-| `reusable-quality.yml`            | Lintro via full py-lintro Docker image |
-| `reusable-sbom.yml`               | SBOM generation with Cosign signing    |
-| `reusable-release-version-pr.yml` | Release version PR with changelog      |
-| `reusable-release-auto-tag.yml`   | Tag + GitHub release on merge          |
-| `reusable-publish-pypi.yml`       | PyPI publishing with OIDC              |
-| `reusable-publish-npm.yml`        | npm publishing                         |
-| `reusable-publish-gem.yml`        | RubyGems publishing                    |
-| `reusable-publish-homebrew.yml`   | Homebrew formula publishing            |
-| `reusable-deploy-pages.yml`       | GitHub Pages deployment                |
-| `reusable-docker.yml`             | Docker build and publish               |
-| `reusable-coverage.yml`           | Test coverage collection               |
-| `reusable-test-python.yml`        | Python tests with PR comments          |
-| `reusable-test-node.yml`          | Node.js tests with PR comments         |
-| `reusable-test-shell.yml`         | BATS shell tests with PR comments      |
-| `reusable-test-pr-comment.yml`    | Shared test PR comment workflow        |
-| `reusable-test-e2e.yml`           | E2E testing with Playwright            |
-| `reusable-test-e2e-matrix.yml`    | Matrix E2E testing                     |
-| `reusable-pr-auto-assign.yml`     | PR auto-assignment                     |
-| `reusable-pr-labeler.yml`         | PR auto-labeling                       |
+| Workflow                               | Description                            |
+| -------------------------------------- | -------------------------------------- |
+| `reusable-quality.yml`                 | Lintro via full py-lintro Docker image |
+| `reusable-sbom.yml`                    | SBOM generation with Cosign signing    |
+| `reusable-release-version-pr.yml`      | Release version PR with changelog      |
+| `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge          |
+| `reusable-publish-pypi.yml`            | PyPI publishing with OIDC              |
+| `reusable-publish-npm.yml`             | npm publishing                         |
+| `reusable-publish-gem.yml`             | RubyGems publishing                    |
+| `reusable-publish-homebrew.yml`        | Homebrew formula publishing            |
+| `reusable-deploy-pages.yml`            | GitHub Pages deployment                |
+| `reusable-docker.yml`                  | Docker build and publish               |
+| `reusable-coverage.yml`                | Test coverage collection               |
+| `reusable-test-python.yml`             | Python tests with PR comments          |
+| `reusable-test-node.yml`               | Node.js tests with PR comments         |
+| `reusable-test-shell.yml`              | BATS shell tests with PR comments      |
+| `reusable-test-pr-comment.yml`         | Shared test PR comment workflow        |
+| `reusable-test-e2e.yml`                | E2E testing with Playwright            |
+| `reusable-test-e2e-matrix.yml`         | Matrix E2E testing                     |
+| `reusable-pr-auto-assign.yml`          | PR auto-assignment                     |
+| `reusable-pr-labeler.yml`              | PR auto-labeling                       |
+| `reusable-validate.yml`                | Generic repo validation script runner  |
+| `reusable-codeql.yml`                  | CodeQL security analysis               |
+| `reusable-dependency-review.yml`       | Dependency review gate                 |
+| `reusable-scorecards.yml`              | OpenSSF Scorecard analysis             |
+| `reusable-semantic-pr-title.yml`       | Conventional PR title validation       |
+| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation   |
+| `reusable-link-check.yml`              | Markdown and HTML link checking        |
 
 Test workflows are self-contained for consumers: they check out lgtm-ci
 tooling internally, run the configured test suite, and post/update the
