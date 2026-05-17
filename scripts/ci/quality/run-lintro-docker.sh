@@ -11,6 +11,7 @@
 #   FAIL_ON_ERROR  true|false (default: true) — only for STEP=check
 #   WORKSPACE      Absolute path to mount at /code (default: current directory)
 #   OUTPUT_LOG     Log path for STEP=check tee (default: chk-output.txt)
+#   EXCLUDE        Comma-separated lintro excludes
 
 set -euo pipefail
 
@@ -20,7 +21,7 @@ run-lintro-docker.sh — run lintro inside the full py-lintro container.
 
 Requires: STEP=check|format, LINTRO_IMAGE=ghcr.io/lgtm-hq/py-lintro@sha256:...
 
-Optional: TOOLS, FAIL_ON_ERROR, WORKSPACE, OUTPUT_LOG
+Optional: TOOLS, FAIL_ON_ERROR, WORKSPACE, OUTPUT_LOG, EXCLUDE
 
 Matches https://github.com/lgtm-hq/py-lintro documented docker invocation.
 EOF
@@ -46,6 +47,7 @@ fi
 : "${FAIL_ON_ERROR:=true}"
 : "${WORKSPACE:=$(pwd)}"
 : "${OUTPUT_LOG:=chk-output.txt}"
+: "${EXCLUDE:=.lgtm-ci-tooling,.lgtm-ci-tooling/**,./.lgtm-ci-tooling,./.lgtm-ci-tooling/**}"
 
 log_info "Pulling Lintro image: ${LINTRO_IMAGE}"
 set +e
@@ -75,6 +77,7 @@ declare -a lintro_args=()
 case "$STEP" in
 check)
 	lintro_args+=(chk)
+	lintro_args+=(--exclude "${EXCLUDE}")
 	if [[ -n "$TOOLS" ]]; then
 		lintro_args+=(--tools "${TOOLS}")
 	fi
@@ -100,6 +103,7 @@ check)
 	;;
 format)
 	lintro_args+=(fmt)
+	lintro_args+=(--exclude "${EXCLUDE}")
 	if [[ -n "$TOOLS" ]]; then
 		lintro_args+=(--tools "${TOOLS}")
 	fi

@@ -63,7 +63,10 @@ EOF
 	assert_success
 	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
 	assert_file_contains "${calls}" "pull ghcr.io/test/img:tag"
-	assert_file_contains "${calls}" "chk . --output-format grid"
+	assert_file_contains_literal "${calls}" "--exclude"
+	assert_file_contains_literal "${calls}" ".lgtm-ci-tooling"
+	assert_file_contains "${calls}" "chk --exclude"
+	assert_file_contains "${calls}" ". --output-format grid"
 	assert_file_contains "${GITHUB_OUTPUT}" "exit-code=0"
 	assert_file_exists "${BATS_TEST_TMPDIR}/ws/chk-output.txt"
 }
@@ -83,6 +86,20 @@ EOF
 	assert_file_contains "${calls}" "ruff,yamllint"
 }
 
+@test "run-lintro-docker.sh check allows custom excludes" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+
+	run env STEP=check LINTRO_IMAGE=img:tag EXCLUDE="dist/**" bash "${SCRIPT}"
+
+	assert_success
+	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
+	assert_file_contains_literal "${calls}" "chk"
+	assert_file_contains_literal "${calls}" "--exclude"
+	assert_file_contains_literal "${calls}" "dist/**"
+}
+
 @test "run-lintro-docker.sh format invokes docker with fmt" {
 	mock_command_record docker ""
 	mkdir -p "${BATS_TEST_TMPDIR}/ws"
@@ -94,7 +111,8 @@ EOF
 
 	assert_success
 	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
-	assert_file_contains "${calls}" "fmt ."
+	assert_file_contains "${calls}" "fmt --exclude"
+	assert_file_contains_literal "${calls}" ".lgtm-ci-tooling"
 }
 
 @test "run-lintro-docker.sh check fails when docker run exits non-zero and FAIL_ON_ERROR=true" {
