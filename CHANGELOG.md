@@ -9,7 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-test-rust-workspace` for Cargo workspace build,
+  optional Rust `llvm-cov` and web Vitest coverage jobs with separate PR comments
+- **docs**: Rust workspace testing guide (`docs/rust-workspace-testing.md`)
+
 ### Changed
+
+- **workflows**: `reusable-quality` accepts `egress-policy` and
+  `allowed-endpoints` for hardened-runner passthrough
+- **workflows**: `reusable-release-version-pr` adds `auto-merge-patch-only`,
+  `release-branch-prefix`, and Rustume-compatible release branch naming
 
 ### Deprecated
 
