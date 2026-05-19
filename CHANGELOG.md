@@ -9,18 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: `reusable-test-rust` for Cargo workspace build and `llvm-cov`
-  coverage with PR comments (compose with `reusable-test-node` for frontends)
-- **workflows**: extend `reusable-test-node` with `job-name`, `test-command`,
-  and `coverage-pr-comment` for Vitest/Istanbul coverage reports
-- **docs**: Rust testing guide (`docs/rust-testing.md`)
-
 ### Changed
-
-- **workflows**: `reusable-quality` accepts `egress-policy` and
-  `allowed-endpoints` for hardened-runner passthrough
-- **workflows**: `reusable-release-version-pr` adds `auto-merge-patch-only`,
-  `release-branch-prefix`, and configurable release branch naming
 
 ### Deprecated
 
@@ -29,6 +18,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.15.0] - 2026-05-19
+
+### Features
+
+- **workflows**: add Rust workspace test reusable and consumer release extensions (#187) (11e23b4)
+
+### Other Changes
+
+- **deps**: update digest (#186) (a2033ae)
+
+### Previously Unreleased
+
+- **workflows**: `reusable-test-rust` for Cargo workspace build and `llvm-cov`
+  coverage with PR comments (compose with `reusable-test-node` for frontends)
+- **workflows**: extend `reusable-test-node` with `job-name`, `test-command`,
+  and `coverage-pr-comment` for Vitest/Istanbul coverage reports
+- **docs**: Rust testing guide (`docs/rust-testing.md`)
+- **workflows**: `reusable-quality` accepts `egress-policy` and
+  `allowed-endpoints` for hardened-runner passthrough
+- **workflows**: `reusable-release-version-pr` adds `auto-merge-patch-only`,
+  `release-branch-prefix`, and configurable release branch naming
 
 ## [0.14.0] - 2026-05-16
 
@@ -307,7 +318,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.14.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.15.0...HEAD
+[0.15.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.4...v0.14.0
 [0.13.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.3...v0.13.4
 [0.13.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.2...v0.13.3
