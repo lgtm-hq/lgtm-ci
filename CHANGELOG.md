@@ -20,7 +20,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: `reusable-quality` accepts `egress-policy` and
   `allowed-endpoints` for hardened-runner passthrough
 - **workflows**: `reusable-release-version-pr` adds `auto-merge-patch-only`,
-  `release-branch-prefix`, and Rustume-compatible release branch naming
+  `release-branch-prefix`, and configurable release branch naming
 
 ### Deprecated
 

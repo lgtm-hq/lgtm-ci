@@ -133,11 +133,10 @@ jobs:
 
       - name: Build workspace
         shell: bash
-        run: >-
-          bash "${{
-            inputs.build-script != '' && inputs.build-script ||
-            '.lgtm-ci-tooling/scripts/ci/testing/rust/build-workspace.sh'
-          }}"
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.build-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/build-workspace.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
 
   coverage:
     name: ${{ inputs.job-name-coverage }}
@@ -186,20 +185,18 @@ jobs:
 
       - name: Setup Rust coverage toolchain
         shell: bash
-        run: >-
-          bash "${{
-            inputs.setup-script != '' && inputs.setup-script ||
-            '.lgtm-ci-tooling/scripts/ci/testing/rust/setup-rust-coverage.sh'
-          }}"
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.setup-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/setup-rust-coverage.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
 
       - name: Run Rust coverage
         id: rust-coverage
         shell: bash
-        run: >-
-          bash "${{
-            inputs.coverage-script != '' && inputs.coverage-script ||
-            '.lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage.sh'
-          }}"
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.coverage-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
         continue-on-error: true
 
       - name: Generate coverage PR comment

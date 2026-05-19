@@ -58,8 +58,7 @@ Use **`reusable-test-node`** for the web app (Vitest/Istanbul or a package
 
 ```yaml
 jobs:
-  rust-build:
-  rust-coverage:
+  # See "Build and coverage as separate checks" above for rust-build / rust-coverage.
   web-coverage:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@<sha>
     with:
@@ -74,6 +73,8 @@ jobs:
       coverage-comment-marker: web-coverage-report
       coverage-comment-title: Web Coverage Report
       draft-pr-skip: true
+      # Use node-versions (e.g. "20,22") to run a matrix; each version gets its own
+      # PR comment marker suffix. A single node-version keeps the marker as-is.
     permissions:
       contents: read
       pull-requests: write

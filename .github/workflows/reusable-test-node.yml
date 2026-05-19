@@ -152,6 +152,10 @@ jobs:
   prepare:
     name: Prepare Node Matrix
     runs-on: ubuntu-latest
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     permissions:
       contents: read
     outputs:
@@ -461,7 +465,14 @@ jobs:
     needs:
       - prepare
       - test
-    if: always() && inputs.test-command == ''
+    if: >-
+      always()
+      && inputs.test-command == ''
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -516,6 +527,11 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
       && inputs.post-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -545,15 +561,24 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
         with:
           file: node-coverage-pr-comment.txt
-          marker: ${{ inputs.coverage-comment-marker }}
+          marker: >-
+            ${{ inputs.node-versions != '' && format('{0}-{1}',
+            inputs.coverage-comment-marker, matrix.node-version) ||
+            inputs.coverage-comment-marker }}
 
   comment-pr:
     needs: aggregate-tests
     if: >-
       always()
+      && inputs.test-command == ''
       && github.event_name == 'pull_request'
       && inputs.post-pr-comment
       && !inputs.coverage-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     uses: ./.github/workflows/reusable-test-pr-comment.yml
     permissions:
       contents: read
