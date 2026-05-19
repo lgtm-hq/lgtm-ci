@@ -1,0 +1,287 @@
+---
+name: Reusable Rust Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name-build:
+        description: "GitHub check name for the workspace build job"
+        required: false
+        type: string
+        default: "Rust Build"
+      job-name-coverage:
+        description: "GitHub check name for Rust coverage"
+        required: false
+        type: string
+        default: "Rust Coverage"
+      run-build:
+        description: "Run the workspace compile job"
+        required: false
+        type: boolean
+        default: true
+      run-coverage:
+        description: "Run Rust llvm-cov coverage and optional PR comment"
+        required: false
+        type: boolean
+        default: true
+      build-script:
+        description: "Path to workspace build script"
+        required: false
+        type: string
+        default: ""
+      setup-script:
+        description: "Path to Rust coverage setup script"
+        required: false
+        type: string
+        default: ""
+      coverage-script:
+        description: "Path to Rust coverage run script"
+        required: false
+        type: string
+        default: ""
+      post-pr-comment:
+        description: "Post coverage summary comment on pull requests"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "PR comment marker for Rust coverage"
+        required: false
+        type: string
+        default: "rust-coverage-report"
+      comment-title:
+        description: "Heading title for the Rust coverage PR comment"
+        required: false
+        type: string
+        default: "Rust Coverage Report"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+    outputs:
+      coverage-percent:
+        description: "Line coverage percentage from the LCOV report"
+        value: ${{ jobs.coverage.outputs.coverage-percent }}
+
+jobs:
+  build:
+    name: ${{ inputs.job-name-build }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 30
+    if: >-
+      inputs.run-build
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    concurrency:
+      group: rust-build-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+
+      - name: Build workspace
+        shell: bash
+        run: >-
+          bash "${{
+            inputs.build-script != '' && inputs.build-script ||
+            '.lgtm-ci-tooling/scripts/ci/testing/rust/build-workspace.sh'
+          }}"
+
+  coverage:
+    name: ${{ inputs.job-name-coverage }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 45
+    if: >-
+      inputs.run-coverage
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    outputs:
+      pr_comment_ready: ${{ steps.generate-comment.outcome == 'success' }}
+      coverage-percent: ${{ steps.generate-comment.outputs.lines-coverage }}
+    concurrency:
+      group: rust-coverage-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust coverage toolchain
+        shell: bash
+        run: >-
+          bash "${{
+            inputs.setup-script != '' && inputs.setup-script ||
+            '.lgtm-ci-tooling/scripts/ci/testing/rust/setup-rust-coverage.sh'
+          }}"
+
+      - name: Run Rust coverage
+        id: rust-coverage
+        shell: bash
+        run: >-
+          bash "${{
+            inputs.coverage-script != '' && inputs.coverage-script ||
+            '.lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage.sh'
+          }}"
+        continue-on-error: true
+
+      - name: Generate coverage PR comment
+        id: generate-comment
+        if: always() && github.event_name == 'pull_request'
+        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-comment
+        with:
+          coverage-file: rust-coverage.lcov
+          format: lcov
+          threshold-lines: "0"
+          threshold-branches: "0"
+          threshold-functions: "0"
+
+      - name: Write coverage PR comment artifact
+        if: steps.generate-comment.outcome == 'success'
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ steps.generate-comment.outputs.comment-body }}
+          COMMENT_TITLE: ${{ inputs.comment-title }}
+          COMMENT_OUTPUT: rust-coverage-pr-comment.txt
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/prepare-coverage-comment.sh
+
+      - name: Upload coverage PR comment artifact
+        if: >-
+          steps.generate-comment.outcome == 'success' &&
+          github.event.pull_request.head.repo.fork == false
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-coverage-pr-comment
+          path: rust-coverage-pr-comment.txt
+
+      - name: Fail if Rust coverage failed
+        if: env.RUST_COVERAGE_EXIT_CODE != '0'
+        shell: bash
+        env:
+          COVERAGE_NAME: Rust
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/testing/rust/fail-on-coverage.sh
+
+  coverage-pr-comment:
+    name: Rust coverage PR comment
+    runs-on: ${{ inputs.runner-image }}
+    needs: coverage
+    if: >-
+      inputs.run-coverage
+      && always()
+      && inputs.post-pr-comment
+      && github.event_name == 'pull_request'
+      && needs.coverage.outputs.pr_comment_ready == 'true'
+    permissions:
+      contents: read
+      pull-requests: write
+    timeout-minutes: 5
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Download coverage PR comment artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: rust-coverage-pr-comment
+
+      - name: Comment PR with Rust coverage
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: rust-coverage-pr-comment.txt
+          marker: ${{ inputs.comment-marker }}

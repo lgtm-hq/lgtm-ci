@@ -91,25 +91,21 @@ jobs:
 `reusable-test-pr-comment.yml` is the shared internal comment workflow used by
 the language-specific test workflows.
 
-### Rust workspace
+### Rust
 
-`reusable-test-rust-workspace.yml` runs a Cargo workspace build, optional
-`llvm-cov` coverage with a PR comment, and an optional frontend coverage job.
-Use for any Rust repo; set `enable-web-coverage: false` when there is no web
-package. See [rust-workspace-testing.md](rust-workspace-testing.md).
+`reusable-test-rust.yml` runs Cargo workspace build and/or `llvm-cov` coverage
+with an optional PR comment. Frontend packages use `reusable-test-node.yml`
+separately. See [rust-testing.md](rust-testing.md).
 
 ```yaml
 jobs:
-  test:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust-workspace.yml@<sha>
+  rust:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
     with:
       tooling-ref: "<sha>"
-      enable-web-coverage: true
-      package-manager: bun
-      web-working-directory: apps/web
 ```
 
 ## Release

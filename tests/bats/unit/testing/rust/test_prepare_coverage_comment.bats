@@ -4,7 +4,7 @@
 load "../../../../helpers/common"
 
 setup() {
-	export SCRIPT="$PROJECT_ROOT/scripts/ci/testing/rust/prepare-coverage-comment.sh"
+	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/prepare-coverage-comment.sh"
 	export COMMENT_OUTPUT="${BATS_TEST_TMPDIR}/comment.md"
 }
 

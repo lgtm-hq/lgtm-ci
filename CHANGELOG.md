@@ -9,9 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: `reusable-test-rust-workspace` for Cargo workspace build,
-  optional Rust `llvm-cov` and web Vitest coverage jobs with separate PR comments
-- **docs**: Rust workspace testing guide (`docs/rust-workspace-testing.md`)
+- **workflows**: `reusable-test-rust` for Cargo workspace build and `llvm-cov`
+  coverage with PR comments (compose with `reusable-test-node` for frontends)
+- **workflows**: extend `reusable-test-node` with `job-name`, `test-command`,
+  and `coverage-pr-comment` for Vitest/Istanbul coverage reports
+- **docs**: Rust testing guide (`docs/rust-testing.md`)
 
 ### Changed
 

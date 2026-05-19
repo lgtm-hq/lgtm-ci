@@ -1,0 +1,91 @@
+# Rust testing
+
+Rust CI follows the same model as Python and Node: **one language reusable per
+stack**, composed in the consumer caller workflow.
+
+| Language | Reusable |
+| --- | --- |
+| Python | `reusable-test-python.yml` |
+| Node / TypeScript | `reusable-test-node.yml` |
+| Rust | `reusable-test-rust.yml` |
+
+## Rust-only repository
+
+```yaml
+jobs:
+  rust:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
+    with:
+      tooling-ref: "<sha>"
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+## Build and coverage as separate checks
+
+`reusable-test-rust` exposes `run-build` and `run-coverage`. Call it twice when
+your org ruleset requires distinct check names:
+
+```yaml
+jobs:
+  rust-build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
+    with:
+      tooling-ref: "<sha>"
+      run-build: true
+      run-coverage: false
+      job-name-build: "Rust Build"
+    permissions:
+      contents: read
+
+  rust-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
+    with:
+      tooling-ref: "<sha>"
+      run-build: false
+      run-coverage: true
+      job-name-coverage: "Rust Coverage"
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+## Rust workspace with a frontend package
+
+Use **`reusable-test-node`** for the web app (Vitest/Istanbul or a package
+`test:coverage` script). Do not bundle web jobs into the Rust reusable.
+
+```yaml
+jobs:
+  rust-build:
+  rust-coverage:
+  web-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@<sha>
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Web Coverage"
+      working-directory: apps/web
+      package-manager: bun
+      node-version: "20"
+      coverage: true
+      test-command: bun run test:coverage
+      coverage-pr-comment: true
+      coverage-comment-marker: web-coverage-report
+      coverage-comment-title: Web Coverage Report
+      draft-pr-skip: true
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+Pin `uses:` and `tooling-ref` to the same commit SHA. Path filters belong on the
+caller workflow (`on.push.paths` / `on.pull_request.paths`).
+
+## Example: Rustume
+
+Rustume composes three reusables (quality is separate). Override `job-name*`
+inputs to match org ruleset check names (for example emoji-prefixed labels).
+
+See [reusable-workflows.md](reusable-workflows.md) for quality and release
+callers.
