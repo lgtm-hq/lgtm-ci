@@ -152,8 +152,10 @@ jobs:
     permissions:
       contents: read
     outputs:
-      pr_comment_ready: ${{ steps.generate-comment.outcome == 'success' }}
-      coverage-percent: ${{ steps.generate-comment.outputs.lines-coverage }}
+      pr_comment_ready: >-
+        ${{ steps.generate-comment.outcome == 'success' }}
+      coverage-percent: >-
+        ${{ steps.generate-comment.outputs.lines-coverage || '' }}
     concurrency:
       group: rust-coverage-${{ github.ref }}
       cancel-in-progress: true

@@ -32,3 +32,12 @@ teardown() {
 		bash "$SCRIPT"
 	[ "$status" -eq 1 ]
 }
+
+@test "run-caller-script rejects paths containing .." {
+	run env \
+		DEFAULT_SCRIPT_PATH=scripts/default.sh \
+		RAW_SCRIPT_PATH=scripts/../outside.sh \
+		bash "$SCRIPT" 2>&1
+	[ "$status" -eq 1 ]
+	[[ "$output" == *"must not contain"* ]]
+}
