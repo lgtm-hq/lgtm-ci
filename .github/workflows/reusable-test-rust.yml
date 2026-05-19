@@ -104,6 +104,11 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -122,11 +127,6 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
 
       - name: Setup Rust
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
@@ -161,6 +161,11 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -179,11 +184,6 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
 
       - name: Setup Rust coverage toolchain
         shell: bash
