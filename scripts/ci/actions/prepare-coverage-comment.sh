@@ -13,5 +13,10 @@ set -euo pipefail
 : "${COMMENT_TITLE:?COMMENT_TITLE is required}"
 : "${COMMENT_OUTPUT:?COMMENT_OUTPUT is required}"
 
-printf '%s\n' "$COMMENT_BODY" |
-	sed "1s/^## Coverage Report$/## ${COMMENT_TITLE}/" >"$COMMENT_OUTPUT"
+printf '%s\n' "$COMMENT_BODY" | awk -v title="$COMMENT_TITLE" '
+NR == 1 && $0 == "## Coverage Report" {
+	print "## " title
+	next
+}
+{ print }
+' >"$COMMENT_OUTPUT"

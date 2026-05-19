@@ -16,3 +16,12 @@ setup() {
 	[ "$status" -eq 0 ]
 	grep -q "## Rust Coverage Report" "$COMMENT_OUTPUT"
 }
+
+@test "prepare-coverage-comment handles special characters in title" {
+	COMMENT_BODY=$'## Coverage Report\n\nbody' \
+		COMMENT_TITLE="A/B & C" \
+		COMMENT_OUTPUT="$COMMENT_OUTPUT" \
+		run bash "$SCRIPT"
+	[ "$status" -eq 0 ]
+	grep -q "## A/B & C" "$COMMENT_OUTPUT"
+}

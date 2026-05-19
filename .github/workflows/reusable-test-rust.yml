@@ -249,6 +249,7 @@ jobs:
       && always()
       && inputs.post-pr-comment
       && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
       && needs.coverage.outputs.pr_comment_ready == 'true'
     permissions:
       contents: read

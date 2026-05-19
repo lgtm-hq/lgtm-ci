@@ -514,6 +514,7 @@ jobs:
       && inputs.coverage-pr-comment
       && inputs.coverage
       && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
       && inputs.post-pr-comment
     runs-on: ubuntu-latest
     permissions:
