@@ -84,6 +84,47 @@ on:
         required: false
         type: string
         default: "node-test-results"
+      job-name:
+        description: "GitHub check name for the test job"
+        required: false
+        type: string
+        default: "Node.js Tests"
+      test-command:
+        description: >-
+          Optional shell command to run instead of vitest (e.g. bun run
+          test:coverage). Runs in working-directory after dependency install.
+        required: false
+        type: string
+        default: ""
+      coverage-pr-comment:
+        description: >-
+          Post a generate-coverage-comment PR summary instead of the default
+          Node test results comment
+        required: false
+        type: boolean
+        default: false
+      coverage-comment-marker:
+        description: "PR comment marker when coverage-pr-comment is true"
+        required: false
+        type: string
+        default: "node-coverage-report"
+      coverage-comment-title:
+        description: "Heading title for the coverage PR comment"
+        required: false
+        type: string
+        default: "Coverage Report"
+      coverage-summary-file:
+        description: >-
+          Coverage summary path relative to working-directory for coverage PR
+          comments (Istanbul JSON)
+        required: false
+        type: string
+        default: "coverage/coverage-summary.json"
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -111,6 +152,10 @@ jobs:
   prepare:
     name: Prepare Node Matrix
     runs-on: ubuntu-latest
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     permissions:
       contents: read
     outputs:
@@ -142,9 +187,17 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-node-matrix.sh
 
   test:
-    name: Node.js Tests (${{ matrix.node-version }})
+    name: >-
+      ${{
+        inputs.node-versions == '' && inputs.job-name ||
+        format('{0} ({1})', inputs.job-name, matrix.node-version)
+      }}
     needs: prepare
     runs-on: ubuntu-latest
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     permissions:
       contents: read
     strategy:
@@ -246,6 +299,7 @@ jobs:
           if-no-files-found: error
 
       - name: Setup vitest
+        if: inputs.test-command == ''
         shell: bash
         env:
           STEP: setup
@@ -255,6 +309,7 @@ jobs:
 
       - name: Run vitest
         id: run
+        if: inputs.test-command == ''
         shell: bash
         env:
           STEP: run
@@ -266,9 +321,19 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
         continue-on-error: true
 
+      - name: Run custom test command
+        id: custom-run
+        if: inputs.test-command != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+        continue-on-error: true
+
       - name: Parse results
         id: parse
-        if: always()
+        if: always() && inputs.test-command == ''
         shell: bash
         env:
           STEP: parse
@@ -277,7 +342,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
 
       - name: Generate summary
-        if: always()
+        if: always() && inputs.test-command == ''
         shell: bash
         env:
           STEP: summary
@@ -291,14 +356,17 @@ jobs:
 
       - name: Check coverage threshold
         id: coverage-gate
-        if: inputs.coverage && inputs.coverage-threshold > 0
+        if: >-
+          inputs.test-command == ''
+          && inputs.coverage
+          && inputs.coverage-threshold > 0
         uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
 
       - name: Write matrix test summary
-        if: always()
+        if: always() && inputs.test-command == ''
         shell: bash
         env:
           NODE_VERSION: ${{ matrix.node-version }}
@@ -317,13 +385,48 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/write-node-summary.sh
 
       - name: Upload matrix test summary
-        if: always()
+        if: always() && inputs.test-command == ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: node-results-${{ matrix.node-version }}
           path: node-result-${{ matrix.node-version }}/summary.json
           retention-days: 7
           if-no-files-found: error
+
+      - name: Generate coverage PR comment
+        id: generate-coverage-comment
+        if: >-
+          always()
+          && inputs.coverage-pr-comment
+          && inputs.coverage
+          && github.event_name == 'pull_request'
+        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-comment
+        with:
+          coverage-file: >-
+            ${{ inputs.working-directory }}/${{ inputs.coverage-summary-file }}
+          format: istanbul
+          threshold-lines: "0"
+          threshold-branches: "0"
+          threshold-functions: "0"
+
+      - name: Write coverage PR comment artifact
+        if: steps.generate-coverage-comment.outcome == 'success'
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ steps.generate-coverage-comment.outputs.comment-body }}
+          COMMENT_TITLE: ${{ inputs.coverage-comment-title }}
+          COMMENT_OUTPUT: node-coverage-pr-comment.txt
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/prepare-coverage-comment.sh
+
+      - name: Upload coverage PR comment artifact
+        if: >-
+          steps.generate-coverage-comment.outcome == 'success' &&
+          github.event.pull_request.head.repo.fork == false
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-coverage-pr-comment-${{ matrix.node-version }}
+          path: node-coverage-pr-comment.txt
 
       - name: Stage coverage report
         if: always() && inputs.upload-coverage && inputs.coverage
@@ -344,18 +447,32 @@ jobs:
           if-no-files-found: ignore
 
       - name: Fail on vitest errors
-        if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
+        if: >-
+          inputs.test-command == ''
+          && steps.run.outputs.exit-code != ''
+          && steps.run.outputs.exit-code != '0'
         shell: bash
         env:
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
+
+      - name: Fail on custom test command errors
+        if: inputs.test-command != '' && steps.custom-run.outcome == 'failure'
+        run: exit 1
 
   aggregate-tests:
     name: Aggregate Node.js Results
     needs:
       - prepare
       - test
-    if: always()
+    if: >-
+      always()
+      && inputs.test-command == ''
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -398,12 +515,70 @@ jobs:
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-node-results.sh
 
+  coverage-pr-comment:
+    name: Node coverage PR comment
+    needs:
+      - prepare
+      - test
+    if: >-
+      always()
+      && inputs.coverage-pr-comment
+      && inputs.coverage
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && inputs.post-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    strategy:
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Download coverage PR comment artifact
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: node-coverage-pr-comment-${{ matrix.node-version }}
+
+      - name: Comment PR with Node coverage
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: node-coverage-pr-comment.txt
+          marker: >-
+            ${{ inputs.node-versions != '' && format('{0}-{1}',
+            inputs.coverage-comment-marker, matrix.node-version) ||
+            inputs.coverage-comment-marker }}
+
   comment-pr:
     needs: aggregate-tests
     if: >-
       always()
+      && inputs.test-command == ''
       && github.event_name == 'pull_request'
       && inputs.post-pr-comment
+      && !inputs.coverage-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     uses: ./.github/workflows/reusable-test-pr-comment.yml
     permissions:
       contents: read
@@ -424,7 +599,8 @@ jobs:
     name: Publish Results
     needs: aggregate-tests
     if: >-
-      inputs.publish-results
+      inputs.test-command == ''
+      && inputs.publish-results
       && !cancelled()
       && needs.aggregate-tests.outputs.passed == 'true'
     runs-on: ubuntu-latest

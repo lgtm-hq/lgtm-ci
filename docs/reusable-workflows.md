@@ -27,6 +27,8 @@ jobs:
       pull-requests: write
     with:
       post-pr-comment: true
+      job-name: "Lintro Quality Checks"
+      egress-policy: audit
 
   validate:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate.yml@<sha>
@@ -89,6 +91,23 @@ jobs:
 `reusable-test-pr-comment.yml` is the shared internal comment workflow used by
 the language-specific test workflows.
 
+### Rust
+
+`reusable-test-rust.yml` runs Cargo workspace build and/or `llvm-cov` coverage
+with an optional PR comment. Frontend packages use `reusable-test-node.yml`
+separately. See [rust-testing.md](rust-testing.md).
+
+```yaml
+jobs:
+  rust:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+```
+
 ## Release
 
 ```yaml
@@ -101,6 +120,7 @@ jobs:
     with:
       ecosystems: node,ruby,python
       skip-patterns: "^chore(release):"
+      auto-merge-patch-only: false
     secrets: inherit
 
   auto-tag:

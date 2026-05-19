@@ -40,6 +40,17 @@ name: "Reusable: Release Version PR"
         required: false
         type: boolean
         default: false
+      auto-merge-patch-only:
+        description: >-
+          When auto-merge is true, only enable auto-merge for patch bumps
+        required: false
+        type: boolean
+        default: false
+      release-branch-prefix:
+        description: "Prefix for the release PR branch (e.g. release/)"
+        required: false
+        type: string
+        default: "release/"
       version-update-script:
         # yamllint disable-line rule:line-length
         description: >-
@@ -271,7 +282,7 @@ jobs:
         with:
           token: ${{ steps.app-token.outputs.token }}
           branch: >-
-            release/${{ inputs.tag-prefix }}${{
+            ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{
             steps.version.outputs.next-version }}
           base: ${{ github.event.repository.default_branch }}
           delete-branch: true
@@ -327,6 +338,10 @@ jobs:
         if: >-
           inputs.auto-merge
           && steps.create-pr.outputs.pull-request-number
+          && (
+            !inputs.auto-merge-patch-only
+            || steps.version.outputs.bump-type == 'patch'
+          )
         shell: bash
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}

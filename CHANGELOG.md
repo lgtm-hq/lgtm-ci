@@ -9,7 +9,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-test-rust` for Cargo workspace build and `llvm-cov`
+  coverage with PR comments (compose with `reusable-test-node` for frontends)
+- **workflows**: extend `reusable-test-node` with `job-name`, `test-command`,
+  and `coverage-pr-comment` for Vitest/Istanbul coverage reports
+- **docs**: Rust testing guide (`docs/rust-testing.md`)
+
 ### Changed
+
+- **workflows**: `reusable-quality` accepts `egress-policy` and
+  `allowed-endpoints` for hardened-runner passthrough
+- **workflows**: `reusable-release-version-pr` adds `auto-merge-patch-only`,
+  `release-branch-prefix`, and configurable release branch naming
 
 ### Deprecated
 
