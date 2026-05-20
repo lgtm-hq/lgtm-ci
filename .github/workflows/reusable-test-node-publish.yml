@@ -35,11 +35,27 @@ on:
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the publish job"
+        required: false
+        type: string
+        default: "Publish Results"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 30
 
 jobs:
   publish:
-    name: Publish Results
-    runs-on: ubuntu-latest
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: write
       pages: write

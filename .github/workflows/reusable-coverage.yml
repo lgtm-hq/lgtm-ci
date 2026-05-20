@@ -179,6 +179,11 @@ jobs:
       pages-url: ${{ steps.publish.outputs.pages-url }}
 
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -213,3 +218,77 @@ jobs:
             ${{ inputs.working-directory == '.' && 'coverage-report/coverage' ||
             format('coverage-report/{0}/coverage', inputs.working-directory) }}
           target-dir: coverage
+
+  comment-pr:
+    name: Coverage PR Comment
+    needs: coverage
+    if: >-
+      always()
+      && inputs.post-pr-comment
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && needs.coverage.outputs.coverage-percent != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          persist-credentials: false
+
+      - name: Generate coverage comment body
+        id: body
+        shell: bash
+        env:
+          COVERAGE_PERCENT: ${{ needs.coverage.outputs.coverage-percent }}
+          THRESHOLD: ${{ inputs.threshold }}
+          COMMENT_TITLE: ${{ inputs.comment-title }}
+          PASSED: ${{ needs.coverage.outputs.passed }}
+        run: |
+          STATUS_EMOJI="✅"
+          if [[ "$PASSED" != "true" ]]; then
+            STATUS_EMOJI="❌"
+          fi
+          BODY="## ${COMMENT_TITLE}
+
+          ${STATUS_EMOJI} **Coverage: ${COVERAGE_PERCENT}%**"
+          if [[ "$THRESHOLD" -gt 0 ]]; then
+            BODY="${BODY} (threshold: ${THRESHOLD}%)"
+          fi
+          EOF_MARKER="LGTM_EOF_$$"
+          {
+            echo "comment-body<<${EOF_MARKER}"
+            echo "$BODY"
+            echo "${EOF_MARKER}"
+          } >>"$GITHUB_OUTPUT"
+
+      - name: Post PR comment
+        shell: bash
+        env:
+          STEP: post
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          MARKER: ${{ inputs.comment-marker }}
+          MODE: upsert
+          DELETE_ON_EMPTY: "false"
+          FILE_PROVIDED: "false"
+          BODY_FROM_INPUT: ${{ steps.body.outputs.comment-body }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh

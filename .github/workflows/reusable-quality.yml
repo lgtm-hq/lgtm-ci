@@ -173,6 +173,11 @@ jobs:
           name: linting-report
           path: ${{ inputs.working-directory }}
 
+      - name: Warn on missing artifact
+        if: steps.download.outcome != 'success'
+        shell: bash
+        run: echo "::warning::Linting report artifact not found — quality job may have failed before producing output"
+
       - name: Generate PR comment
         if: steps.download.outcome == 'success'
         shell: bash

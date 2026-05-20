@@ -25,7 +25,7 @@ teardown() {
 		STEP="post" \
 		EVENT_NAME="pull_request" \
 		EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME="fork-user/consumer" \
-		COMMENT_BODY="hello" \
+		BODY_FROM_INPUT="hello" \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/post-pr-comment.sh"
 
 	assert_success
@@ -40,7 +40,7 @@ teardown() {
 		STEP="post" \
 		EVENT_NAME="pull_request" \
 		EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME="lgtm-hq/consumer" \
-		COMMENT_BODY="hello" \
+		BODY_FROM_INPUT="hello" \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/post-pr-comment.sh"
 
 	assert_failure

@@ -70,3 +70,6 @@ tools:
     enabled: true
   pytest:
     enabled: false
+  bats:
+    enabled: true
+    path: "tests/bats"

@@ -69,8 +69,8 @@ name: "Reusable: Release Version PR"
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: >-
-          Git ref for lgtm-ci tooling checkout. Same-repo callers default
-          to github.sha; cross-repo callers default to main.
+          Git ref for lgtm-ci tooling checkout. Defaults to
+          github.workflow_sha when unset.
         required: false
         type: string
         default: ""

@@ -90,4 +90,3 @@ jobs:
       allowed-endpoints: ${{ inputs.allowed-endpoints }}
       runner-image: ${{ inputs.runner-image }}
       timeout-minutes: ${{ inputs.timeout-minutes }}
-    secrets: inherit

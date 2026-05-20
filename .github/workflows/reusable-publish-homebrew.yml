@@ -55,6 +55,11 @@ on:
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the publish job"
+        required: false
+        type: string
+        default: "Update Homebrew Formula"
 
     outputs:
       updated:
@@ -69,7 +74,7 @@ on:
 
 jobs:
   update:
-    name: Update Homebrew Formula
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -51,6 +51,11 @@ on:
         required: false
         type: string
         default: "."
+      package-manager:
+        description: "Package manager for dependency install: npm, bun, pnpm"
+        required: false
+        type: string
+        default: "npm"
 
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"

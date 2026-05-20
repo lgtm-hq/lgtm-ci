@@ -59,6 +59,11 @@ on:
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the publish job"
+        required: false
+        type: string
+        default: "Publish to PyPI"
 
     outputs:
       published:
@@ -73,7 +78,7 @@ on:
 
 jobs:
   publish:
-    name: Publish to PyPI
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

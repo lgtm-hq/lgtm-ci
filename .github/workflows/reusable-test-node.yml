@@ -717,6 +717,11 @@ jobs:
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -750,6 +755,7 @@ jobs:
       always()
       && inputs.test-command == ''
       && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
       && inputs.post-pr-comment
       && !inputs.coverage-pr-comment
       && (
@@ -771,4 +777,5 @@ jobs:
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       tooling-ref: ${{ inputs.tooling-ref }}
-    secrets: inherit
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}

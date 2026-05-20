@@ -37,6 +37,11 @@ name: "Reusable: Release Auto Tag"
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the release job"
+        required: false
+        type: string
+        default: "Create Release"
 
     secrets:
       RELEASE_APP_ID:
@@ -48,7 +53,7 @@ name: "Reusable: Release Auto Tag"
 
 jobs:
   auto-tag:
-    name: Create Release
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     timeout-minutes: 20
     concurrency:

@@ -60,6 +60,11 @@ on:
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the SBOM job"
+        required: false
+        type: string
+        default: "SBOM & Supply Chain"
 
     outputs:
       sbom-file:
@@ -76,7 +81,7 @@ on:
 
 jobs:
   sbom:
-    name: SBOM & Supply Chain
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read

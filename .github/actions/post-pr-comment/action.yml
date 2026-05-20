@@ -89,6 +89,8 @@ runs:
         FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
         BODY_FROM_FILE: ${{ steps.read.outputs.body }}
         BODY_FROM_INPUT: ${{ inputs.body }}
+        EVENT_NAME: ${{ github.event_name }}
+        EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
       run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
 branding:

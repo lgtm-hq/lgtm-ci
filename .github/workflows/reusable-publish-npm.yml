@@ -49,6 +49,11 @@ on:
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the publish job"
+        required: false
+        type: string
+        default: "Publish to npm"
 
     outputs:
       published:
@@ -66,7 +71,7 @@ on:
 
 jobs:
   publish:
-    name: Publish to npm
+    name: ${{ inputs.job-name }}
     # CRITICAL: Must use GitHub-hosted runner for provenance attestation
     runs-on: ubuntu-latest
     permissions:

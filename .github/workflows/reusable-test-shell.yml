@@ -249,6 +249,10 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
       && inputs.post-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
     uses: ./.github/workflows/reusable-test-pr-comment.yml
     permissions:
       contents: read
@@ -263,4 +267,5 @@ jobs:
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.test.result }}
       tooling-ref: ${{ inputs.tooling-ref }}
-    secrets: inherit
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}

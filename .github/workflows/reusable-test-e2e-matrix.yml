@@ -70,6 +70,11 @@ on:
         required: false
         type: string
         default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
 
     outputs:
       total-passed:
@@ -86,7 +91,7 @@ jobs:
   # Generate matrix from inputs
   setup:
     name: Setup Matrix
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
@@ -127,7 +132,7 @@ jobs:
   test:
     name: E2E ${{ matrix.suite }} (${{ matrix.browser }})
     needs: setup
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -206,7 +211,7 @@ jobs:
     name: Merge Reports
     needs: test
     if: always() && inputs.upload-report
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
 
@@ -215,6 +220,11 @@ jobs:
       total-failed: ${{ steps.merge.outputs.total-failed }}
 
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -261,7 +271,7 @@ jobs:
     name: Publish Results
     needs: merge
     if: inputs.publish-results && !cancelled()
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: write
       pages: write
@@ -270,6 +280,11 @@ jobs:
       pages-url: ${{ steps.publish.outputs.pages-url }}
 
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

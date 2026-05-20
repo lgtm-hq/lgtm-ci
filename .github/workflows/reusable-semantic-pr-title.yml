@@ -30,10 +30,15 @@ on:
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the semantic title check"
+        required: false
+        type: string
+        default: "Semantic PR Title"
 
 jobs:
   semantic-title:
-    name: Semantic PR Title
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     permissions:
       pull-requests: read

@@ -79,6 +79,11 @@ on:
         required: false
         type: string
         default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
 
     outputs:
       coverage-percent:
@@ -94,7 +99,7 @@ jobs:
   build:
     name: ${{ inputs.job-name-build }}
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: 30
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       inputs.run-build
       && (
@@ -159,7 +164,7 @@ jobs:
   coverage:
     name: ${{ inputs.job-name-coverage }}
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: 45
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       inputs.run-coverage
       && (
