@@ -267,7 +267,7 @@ jobs:
           BODY="## ${COMMENT_TITLE}
 
           ${STATUS_EMOJI} **Coverage: ${COVERAGE_PERCENT}%**"
-          if [[ "$THRESHOLD" -gt 0 ]]; then
+          if awk "BEGIN{exit(!($THRESHOLD > 0))}"; then
             BODY="${BODY} (threshold: ${THRESHOLD}%)"
           fi
           EOF_MARKER="LGTM_EOF_$$"

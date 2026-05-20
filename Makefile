@@ -1,6 +1,8 @@
 # SPDX-License-Identifier: MIT
 
-.PHONY: test test-bats lint fmt
+.PHONY: all test test-bats lint fmt clean
+
+all: test
 
 test: test-bats
 
@@ -12,3 +14,6 @@ lint:
 
 fmt:
 	uv run lintro fmt
+
+clean:
+	rm -rf .lintro/ coverage-report/

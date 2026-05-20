@@ -60,6 +60,16 @@ on:
         required: false
         type: string
         default: "Update Homebrew Formula"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
 
     outputs:
       updated:
@@ -75,7 +85,8 @@ on:
 jobs:
   update:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: write
 

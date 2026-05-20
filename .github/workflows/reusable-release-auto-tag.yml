@@ -42,6 +42,16 @@ name: "Reusable: Release Auto Tag"
         required: false
         type: string
         default: "Create Release"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 20
 
     secrets:
       RELEASE_APP_ID:
@@ -54,8 +64,8 @@ name: "Reusable: Release Auto Tag"
 jobs:
   auto-tag:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
       # Distinct from the caller's workflow-level group to avoid
       # a self-deadlock when a same-repo caller also serializes on
