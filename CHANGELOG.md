@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.16.0] - 2026-05-20
+
+### Features
+
+- **workflows**: release standardized workflow contract (5e69e53)
+
+### Bug Fixes
+
+- **workflows**: swap checkout order in auto-assign to prevent clean wipe (39f296a)
+
+### Other Changes
+
+- standardize reusable workflow contract (#190) (028dc37)
+- **deps**: update actions/dependency-review-action to v5.0.0 (major) (major) (#184) (5177dd6)
+- **deps**: update actions/dependency-review-action to v4.9.0 (minor) (#183) (613b159)
+
 ## [0.15.0] - 2026-05-19
 
 ### Features
@@ -318,7 +334,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.4...v0.14.0
 [0.13.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.3...v0.13.4
