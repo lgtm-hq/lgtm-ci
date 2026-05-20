@@ -50,6 +50,22 @@ on:
         required: false
         type: string
         default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      job-name:
+        description: "GitHub check name for the SBOM job"
+        required: false
+        type: string
+        default: "SBOM & Supply Chain"
+
     outputs:
       sbom-file:
         description: "Path to the generated SBOM file, or 'none' if not generated"
@@ -65,7 +81,7 @@ on:
 
 jobs:
   sbom:
-    name: SBOM & Supply Chain
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -83,8 +99,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
-
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

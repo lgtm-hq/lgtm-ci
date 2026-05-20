@@ -140,6 +140,7 @@ jobs:
       !cancelled()
       && inputs.post-pr-comment
       && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
     permissions:
       contents: read
       pull-requests: write
@@ -171,6 +172,11 @@ jobs:
         with:
           name: linting-report
           path: ${{ inputs.working-directory }}
+
+      - name: Warn on missing artifact
+        if: steps.download.outcome != 'success'
+        shell: bash
+        run: echo "::warning::Linting report artifact not found — quality job may have failed before producing output"
 
       - name: Generate PR comment
         if: steps.download.outcome == 'success'
@@ -214,6 +220,8 @@ jobs:
           STEP: post
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
           PR_NUMBER: ${{ steps.pr.outputs.number }}
           MARKER: lintro-report
           MODE: upsert

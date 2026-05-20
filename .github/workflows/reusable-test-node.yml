@@ -40,7 +40,9 @@ on:
         type: boolean
         default: false
       publish-results:
-        description: "Publish results to GitHub Pages"
+        description: >-
+          Deprecated: use reusable-test-node-publish.yml in a separate caller job.
+          Ignored in this workflow so callers are not required to grant pages write.
         required: false
         type: boolean
         default: false
@@ -131,27 +133,54 @@ on:
         type: string
         default: ""
 
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Timeout for test jobs in minutes"
+        required: false
+        type: number
+        default: 60
+
     outputs:
       tests-passed:
         description: "Number of tests passed"
-        value: ${{ jobs.aggregate-tests.outputs.tests-passed }}
+        value: >-
+          ${{ inputs.test-command == '' && jobs.aggregate-tests.outputs.tests-passed || '' }}
       tests-failed:
         description: "Number of tests failed"
-        value: ${{ jobs.aggregate-tests.outputs.tests-failed }}
+        value: >-
+          ${{ inputs.test-command == '' && jobs.aggregate-tests.outputs.tests-failed || '' }}
       tests-total:
         description: "Total number of tests"
-        value: ${{ jobs.aggregate-tests.outputs.tests-total }}
+        value: >-
+          ${{ inputs.test-command == '' && jobs.aggregate-tests.outputs.tests-total || '' }}
       coverage-percent:
         description: "Coverage percentage"
-        value: ${{ jobs.aggregate-tests.outputs.coverage-percent }}
+        value: >-
+          ${{ inputs.test-command == '' && jobs.aggregate-tests.outputs.coverage-percent || '' }}
       passed:
         description: "Whether all tests passed"
-        value: ${{ jobs.aggregate-tests.outputs.passed }}
+        value: >-
+          ${{ inputs.test-command == '' && jobs.aggregate-tests.outputs.passed ||
+          (inputs.test-command != '' && jobs.test-custom.outputs.passed == 'true') }}
 
 jobs:
   prepare:
     name: Prepare Node Matrix
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     if: >-
       !inputs.draft-pr-skip ||
       github.event_name != 'pull_request' ||
@@ -165,7 +194,8 @@ jobs:
       - name: Harden runner
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
@@ -186,18 +216,22 @@ jobs:
           NODE_VERSIONS: ${{ inputs.node-versions }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-node-matrix.sh
 
-  test:
+  test-vitest:
     name: >-
       ${{
         inputs.node-versions == '' && inputs.job-name ||
         format('{0} ({1})', inputs.job-name, matrix.node-version)
       }}
     needs: prepare
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
-      !inputs.draft-pr-skip ||
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.draft == false
+      inputs.test-command == ''
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     permissions:
       contents: read
     strategy:
@@ -216,8 +250,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
-
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -299,7 +333,6 @@ jobs:
           if-no-files-found: error
 
       - name: Setup vitest
-        if: inputs.test-command == ''
         shell: bash
         env:
           STEP: setup
@@ -309,7 +342,6 @@ jobs:
 
       - name: Run vitest
         id: run
-        if: inputs.test-command == ''
         shell: bash
         env:
           STEP: run
@@ -321,19 +353,9 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
         continue-on-error: true
 
-      - name: Run custom test command
-        id: custom-run
-        if: inputs.test-command != ''
-        shell: bash
-        env:
-          COMMAND: ${{ inputs.test-command }}
-          WORKING_DIRECTORY: ${{ inputs.working-directory }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
-        continue-on-error: true
-
       - name: Parse results
         id: parse
-        if: always() && inputs.test-command == ''
+        if: always()
         shell: bash
         env:
           STEP: parse
@@ -342,7 +364,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
 
       - name: Generate summary
-        if: always() && inputs.test-command == ''
+        if: always()
         shell: bash
         env:
           STEP: summary
@@ -356,17 +378,14 @@ jobs:
 
       - name: Check coverage threshold
         id: coverage-gate
-        if: >-
-          inputs.test-command == ''
-          && inputs.coverage
-          && inputs.coverage-threshold > 0
+        if: inputs.coverage && inputs.coverage-threshold > 0
         uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
 
       - name: Write matrix test summary
-        if: always() && inputs.test-command == ''
+        if: always()
         shell: bash
         env:
           NODE_VERSION: ${{ matrix.node-version }}
@@ -385,7 +404,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/write-node-summary.sh
 
       - name: Upload matrix test summary
-        if: always() && inputs.test-command == ''
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: node-results-${{ matrix.node-version }}
@@ -448,23 +467,176 @@ jobs:
 
       - name: Fail on vitest errors
         if: >-
-          inputs.test-command == ''
-          && steps.run.outputs.exit-code != ''
+          steps.run.outputs.exit-code != ''
           && steps.run.outputs.exit-code != '0'
         shell: bash
         env:
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
 
+  test-custom:
+    name: >-
+      ${{
+        inputs.node-versions == '' && inputs.job-name ||
+        format('{0} ({1})', inputs.job-name, matrix.node-version)
+      }}
+    needs: prepare
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      inputs.test-command != ''
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    outputs:
+      passed: ${{ steps.record.outputs.passed }}
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Setup Bun
+        if: inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Get bun cache directory
+        if: inputs.package-manager == 'bun'
+        id: bun-cache
+        shell: bash
+        env:
+          STEP: bun-cache
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-node.sh
+
+      - name: Cache bun dependencies
+        if: inputs.package-manager == 'bun'
+        id: cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ steps.bun-cache.outputs.dir }}
+            ${{ inputs.working-directory }}/node_modules
+          key: bun-${{ runner.os }}-${{ matrix.node-version }}-${{ hashFiles('**/bun.lock', '**/bun.lockb') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ matrix.node-version }}-
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          FROZEN_LOCKFILE: "true"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
+
+      - name: Run pre-test command
+        if: inputs.pre-test-command != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.pre-test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Run custom test command
+        id: custom-run
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Generate coverage PR comment
+        id: generate-coverage-comment
+        if: >-
+          always()
+          && inputs.coverage-pr-comment
+          && inputs.coverage
+          && github.event_name == 'pull_request'
+        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-comment
+        with:
+          coverage-file: >-
+            ${{ inputs.working-directory }}/${{ inputs.coverage-summary-file }}
+          format: istanbul
+          threshold-lines: "0"
+          threshold-branches: "0"
+          threshold-functions: "0"
+
+      - name: Write coverage PR comment artifact
+        if: steps.generate-coverage-comment.outcome == 'success'
+        shell: bash
+        env:
+          COMMENT_BODY: ${{ steps.generate-coverage-comment.outputs.comment-body }}
+          COMMENT_TITLE: ${{ inputs.coverage-comment-title }}
+          COMMENT_OUTPUT: node-coverage-pr-comment.txt
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/prepare-coverage-comment.sh
+
+      - name: Upload coverage PR comment artifact
+        if: >-
+          steps.generate-coverage-comment.outcome == 'success' &&
+          github.event.pull_request.head.repo.fork == false
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-coverage-pr-comment-${{ matrix.node-version }}
+          path: node-coverage-pr-comment.txt
+
       - name: Fail on custom test command errors
-        if: inputs.test-command != '' && steps.custom-run.outcome == 'failure'
+        if: steps.custom-run.outcome == 'failure'
         run: exit 1
+
+      - name: Record custom test result
+        if: always()
+        id: record
+        shell: bash
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
 
   aggregate-tests:
     name: Aggregate Node.js Results
     needs:
       - prepare
-      - test
+      - test-vitest
     if: >-
       always()
       && inputs.test-command == ''
@@ -481,13 +653,14 @@ jobs:
       tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
       tests-total: ${{ steps.aggregate.outputs.tests-total }}
       coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
-      passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
+      passed: ${{ needs.test-vitest.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
 
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
@@ -519,7 +692,8 @@ jobs:
     name: Node coverage PR comment
     needs:
       - prepare
-      - test
+      - test-vitest
+      - test-custom
     if: >-
       always()
       && inputs.coverage-pr-comment
@@ -528,17 +702,26 @@ jobs:
       && github.event.pull_request.head.repo.fork == false
       && inputs.post-pr-comment
       && (
+        needs.test-vitest.result == 'success'
+        || needs.test-custom.result == 'success'
+      )
+      && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
       pull-requests: write
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -572,6 +755,7 @@ jobs:
       always()
       && inputs.test-command == ''
       && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
       && inputs.post-pr-comment
       && !inputs.coverage-pr-comment
       && (
@@ -584,7 +768,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      test-suite-name: Node.js Tests
+      test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
       tests-passed: ${{ needs.aggregate-tests.outputs.tests-passed }}
       tests-failed: ${{ needs.aggregate-tests.outputs.tests-failed }}
@@ -593,79 +777,5 @@ jobs:
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       tooling-ref: ${{ inputs.tooling-ref }}
-    secrets: inherit
-
-  publish:
-    name: Publish Results
-    needs: aggregate-tests
-    if: >-
-      inputs.test-command == ''
-      && inputs.publish-results
-      && !cancelled()
-      && needs.aggregate-tests.outputs.passed == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pages: write
-
-    steps:
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/
-            scripts/ci/
-          persist-credentials: false
-
-      - name: Download coverage
-        if: inputs.coverage && inputs.upload-coverage
-        # Pinned to SHA for supply chain security
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: node-coverage-*
-          path: node-coverage-artifacts
-          merge-multiple: false
-
-      - name: Merge coverage report
-        if: inputs.coverage && inputs.upload-coverage
-        shell: bash
-        env:
-          ARTIFACTS_DIR: node-coverage-artifacts
-          OUTPUT_DIR: coverage-report
-          WORKING_DIRECTORY: ${{ inputs.working-directory }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/merge-node-coverage.sh
-
-      - name: Generate badge
-        if: inputs.coverage && inputs.upload-coverage
-        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-badge
-        with:
-          coverage-percent: ${{ needs.aggregate-tests.outputs.coverage-percent }}
-          format: svg
-          output-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report/badge.svg' ||
-            format('coverage-report/{0}/badge.svg', inputs.working-directory) }}
-
-      - name: Publish to GitHub Pages
-        if: inputs.coverage && inputs.upload-coverage
-        uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
-        with:
-          results-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          coverage-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          badge-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          target-dir: vitest
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}

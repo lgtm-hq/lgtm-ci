@@ -1,34 +1,15 @@
+# SPDX-License-Identifier: MIT
 ---
-name: Reusable Rust Test Workflow
+name: Reusable Rust Coverage Only Workflow
 
 on:
   workflow_call:
     inputs:
-      job-name-build:
-        description: "GitHub check name for the workspace build job"
-        required: false
-        type: string
-        default: "Rust Build"
-      job-name-coverage:
+      job-name:
         description: "GitHub check name for Rust coverage"
         required: false
         type: string
         default: "Rust Coverage"
-      run-build:
-        description: "Run the workspace compile job"
-        required: false
-        type: boolean
-        default: true
-      run-coverage:
-        description: "Run Rust llvm-cov coverage and optional PR comment"
-        required: false
-        type: boolean
-        default: true
-      build-script:
-        description: "Path to workspace build script"
-        required: false
-        type: string
-        default: ""
       setup-script:
         description: "Path to Rust coverage setup script"
         required: false
@@ -80,7 +61,7 @@ on:
         type: string
         default: "ubuntu-24.04"
       timeout-minutes:
-        description: "Job timeout in minutes"
+        description: "Coverage job timeout in minutes"
         required: false
         type: number
         default: 45
@@ -90,88 +71,18 @@ on:
         description: "Line coverage percentage from the LCOV report"
         value: ${{ jobs.coverage.outputs.coverage-percent }}
       passed:
-        description: "Whether build and coverage succeeded for enabled jobs"
-        value: >-
-          ${{ (inputs.run-build == false || jobs.build.outputs.passed == 'true')
-          && (inputs.run-coverage == false || jobs.coverage.outputs.passed == 'true') }}
+        description: "Whether coverage succeeded"
+        value: ${{ jobs.coverage.outputs.passed == 'true' }}
 
 jobs:
-  build:
-    name: ${{ inputs.job-name-build }}
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    if: >-
-      inputs.run-build
-      && (
-        !inputs.draft-pr-skip ||
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.draft == false
-      )
-    permissions:
-      contents: read
-    outputs:
-      passed: ${{ steps.record.outputs.passed }}
-    concurrency:
-      group: rust-build-${{ github.ref }}
-      cancel-in-progress: true
-
-    steps:
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Harden runner
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Setup Rust
-        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
-
-      - name: Build workspace
-        shell: bash
-        env:
-          RAW_SCRIPT_PATH: ${{ inputs.build-script }}
-          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/build-workspace.sh
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
-
-      - name: Record build result
-        if: always()
-        id: record
-        shell: bash
-        run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
-
   coverage:
-    name: ${{ inputs.job-name-coverage }}
+    name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
-      inputs.run-coverage
-      && (
-        !inputs.draft-pr-skip ||
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.draft == false
-      )
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     permissions:
       contents: read
     outputs:
@@ -186,7 +97,6 @@ jobs:
 
     steps:
       - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
@@ -279,8 +189,7 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     needs: coverage
     if: >-
-      inputs.run-coverage
-      && always()
+      always()
       && inputs.post-pr-comment
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
@@ -292,7 +201,6 @@ jobs:
 
     steps:
       - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci

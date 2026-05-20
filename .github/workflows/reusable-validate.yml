@@ -9,7 +9,12 @@ on:
         required: true
         type: string
       name:
-        description: "Display name for the validation"
+        description: "Deprecated alias for job-name"
+        required: false
+        type: string
+        default: ""
+      job-name:
+        description: "Display name for the validation check"
         required: false
         type: string
         default: "Validation"
@@ -39,6 +44,17 @@ on:
         type: string
         default: ""
 
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
     outputs:
       exit-code:
         description: "Exit code from the validation script"
@@ -49,7 +65,9 @@ on:
 
 jobs:
   validate:
-    name: ${{ inputs.name }}
+    name: >-
+      ${{ inputs.job-name != '' && inputs.job-name ||
+      (inputs.name != '' && inputs.name || 'Validation') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -61,7 +79,8 @@ jobs:
       - name: Harden runner
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -91,7 +110,8 @@ jobs:
         shell: bash
         env:
           SCRIPT_PATH: ${{ inputs.script }}
-          VALIDATION_NAME: ${{ inputs.name }}
+          # yamllint disable-line rule:line-length
+          VALIDATION_NAME: ${{ inputs.job-name != '' && inputs.job-name || (inputs.name != '' && inputs.name || 'Validation') }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           COMMENT_OUTPUT: validation-comment.md
           OUTPUT_FILE: validation-output.txt
@@ -121,6 +141,7 @@ jobs:
       && inputs.comment-on-failure
       && needs.validate.outputs.status == 'failed'
       && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -130,7 +151,8 @@ jobs:
       - name: Harden runner
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -150,6 +172,12 @@ jobs:
           name: validation-comment
           path: .
 
+      - name: Warn on missing artifact
+        if: steps.download.outcome != 'success'
+        shell: bash
+        # yamllint disable-line rule:line-length
+        run: echo "::warning::Validation comment artifact not found — upstream may have failed"
+
       - name: Read comment from file
         if: steps.download.outcome == 'success'
         id: read
@@ -167,6 +195,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
           MARKER: ${{ inputs.comment-marker }}
           MODE: upsert
           DELETE_ON_EMPTY: "false"

@@ -59,6 +59,36 @@ on:
         required: false
         type: string
         default: ""
+      job-name:
+        description: "GitHub check name for the test job"
+        required: false
+        type: string
+        default: "Shell Tests"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: false
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 60
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
 
     outputs:
       tests-passed:
@@ -79,8 +109,13 @@ on:
 
 jobs:
   test:
-    name: Shell Tests
-    runs-on: ubuntu-latest
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
     permissions:
       contents: read
 
@@ -99,8 +134,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
-
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -212,13 +247,18 @@ jobs:
     if: >-
       always()
       && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
       && inputs.post-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
     uses: ./.github/workflows/reusable-test-pr-comment.yml
     permissions:
       contents: read
       pull-requests: write
     with:
-      test-suite-name: Shell Tests
+      test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
       tests-passed: ${{ needs.test.outputs.tests-passed }}
       tests-failed: ${{ needs.test.outputs.tests-failed }}
@@ -227,4 +267,5 @@ jobs:
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.test.result }}
       tooling-ref: ${{ inputs.tooling-ref }}
-    secrets: inherit
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}
