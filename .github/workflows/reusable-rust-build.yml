@@ -1,0 +1,66 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Build Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check name for the workspace build job"
+        required: false
+        type: string
+        default: "Rust Build"
+      build-script:
+        description: "Path to workspace build script"
+        required: false
+        type: string
+        default: ""
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 30
+
+    outputs:
+      passed:
+        description: "Whether the build job succeeded"
+        value: ${{ jobs.build.outputs.passed }}
+
+jobs:
+  build:
+    uses: ./.github/workflows/reusable-test-rust-build.yml
+    with:
+      job-name: ${{ inputs.job-name }}
+      build-script: ${{ inputs.build-script }}
+      tooling-ref: ${{ inputs.tooling-ref }}
+      draft-pr-skip: ${{ inputs.draft-pr-skip }}
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      runner-image: ${{ inputs.runner-image }}
+      timeout-minutes: ${{ inputs.timeout-minutes }}
+    secrets: inherit

@@ -15,6 +15,9 @@ jobs:
 Pass `tooling-ref` when testing an unreleased lgtm-ci branch. Production callers
 should pin the workflow ref to a commit SHA.
 
+See [workflow-contract.md](workflow-contract.md) for the standard input contract,
+permissions by mode, egress allowlists, and Rustume migration examples.
+
 ## Quality And Validation
 
 ```yaml
@@ -93,19 +96,30 @@ the language-specific test workflows.
 
 ### Rust
 
-`reusable-test-rust.yml` runs Cargo workspace build and/or `llvm-cov` coverage
-with an optional PR comment. Frontend packages use `reusable-test-node.yml`
-separately. See [rust-testing.md](rust-testing.md).
+Prefer `reusable-rust-build.yml` and `reusable-rust-coverage.yml` for separate
+required checks without skipped sibling jobs. `reusable-test-rust.yml` remains
+for backward compatibility. See [rust-testing.md](rust-testing.md).
 
 ```yaml
 jobs:
-  rust:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
+  rust-build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Build"
+      egress-policy: block
+
+  rust-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-coverage.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
     with:
       tooling-ref: "<sha>"
+      job-name: "Rust Coverage"
+      egress-policy: block
 ```
 
 ## Release

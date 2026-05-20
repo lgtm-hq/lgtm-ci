@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Build Only Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check name for the workspace build job"
+        required: false
+        type: string
+        default: "Rust Build"
+      build-script:
+        description: "Path to workspace build script"
+        required: false
+        type: string
+        default: ""
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 30
+
+    outputs:
+      passed:
+        description: "Whether the build job succeeded"
+        value: ${{ jobs.build.outputs.passed == 'true' }}
+
+jobs:
+  build:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.record.outputs.passed }}
+    concurrency:
+      group: rust-build-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+
+      - name: Build workspace
+        shell: bash
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.build-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/build-workspace.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
+
+      - name: Record build result
+        if: always()
+        id: record
+        shell: bash
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi

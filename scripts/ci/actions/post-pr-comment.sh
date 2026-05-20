@@ -78,6 +78,15 @@ fi
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${PR_NUMBER:?PR_NUMBER is required}"
 : "${MARKER:?MARKER is required}"
+
+if [[ "${EVENT_NAME:-}" == "pull_request" ]]; then
+	HEAD_REPO="${EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME:-}"
+	if [[ -n "$HEAD_REPO" && "$HEAD_REPO" != "$GITHUB_REPOSITORY" ]]; then
+		echo "action-taken=skipped" >>"$GITHUB_OUTPUT"
+		echo "Skipped: fork PR cannot receive workflow comments ($HEAD_REPO)"
+		exit 0
+	fi
+fi
 : "${MODE:=upsert}"
 : "${DELETE_ON_EMPTY:=false}"
 

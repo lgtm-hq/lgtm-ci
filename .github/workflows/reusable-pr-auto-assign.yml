@@ -12,30 +12,59 @@ name: Reusable PR Auto Assign
         required: false
         type: string
         default: ".github/CODEOWNERS"
-
-permissions:
-  contents: read
-  pull-requests: write
+      job-name:
+        description: "GitHub check name for the assign job"
+        required: false
+        type: string
+        default: "PR Auto Assign"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   assign:
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Harden Runner
-        # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
-      - name: Checkout
-        # Pinned to SHA for supply chain security
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/actions/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout repository CODEOWNERS
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           sparse-checkout: |
             ${{ inputs.codeowners-path }}
-            scripts/ci/actions/assign-codeowner.sh
           sparse-checkout-cone-mode: false
+          persist-credentials: false
 
       - name: Assign random CODEOWNER
         env:
@@ -45,4 +74,4 @@ jobs:
           PR_AUTHOR_TYPE: ${{ github.event.pull_request.user.type }}
           CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
         shell: bash
-        run: ${{ github.workspace }}/scripts/ci/actions/assign-codeowner.sh
+        run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh

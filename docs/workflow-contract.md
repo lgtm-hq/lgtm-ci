@@ -1,0 +1,170 @@
+# Reusable Workflow Contract
+
+All `lgtm-ci` reusable workflows share a common consumer contract.
+
+## Standard inputs
+
+Where applicable, workflows accept:
+
+| Input | Purpose |
+| --- | --- |
+| `tooling-ref` | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA) |
+| `egress-policy` | `audit` or `block` for StepSecurity harden-runner |
+| `allowed-endpoints` | Allowlist when `egress-policy: block` |
+| `job-name` | Visible GitHub check name |
+| `runner-image` | Runner label for long-running jobs |
+| `timeout-minutes` | Job timeout |
+| `post-pr-comment` | Enable PR summary comments |
+| `comment-marker` / `comment-title` | PR comment identity |
+| `draft-pr-skip` | Skip PR jobs on draft pull requests |
+
+## Permissions by mode
+
+| Mode | Caller permissions |
+| --- | --- |
+| Test / quality only | `contents: read` |
+| PR comments | `contents: read`, `pull-requests: write` |
+| Publish to Pages | `contents: write`, `pages: write`, `id-token: write` (separate workflow) |
+| Release version PR | `contents: write`, `pull-requests: write` + app secrets |
+| Package publish | `contents: read`, `id-token: write`, `attestations: write` (as required) |
+
+`reusable-test-node.yml` no longer includes a publish job. Use
+`reusable-test-node-publish.yml` in a separate caller job when publishing is
+required.
+
+## Low-noise Rust and Node checks
+
+Prefer split workflows to avoid skipped checks in PR UI:
+
+| Use case | Workflow |
+| --- | --- |
+| Rust build only | `reusable-rust-build.yml` or `reusable-test-rust-build.yml` |
+| Rust coverage only | `reusable-rust-coverage.yml` or `reusable-test-rust-coverage.yml` |
+| Node Vitest tests | `reusable-test-node.yml` with `test-command` empty |
+| Node custom command | `reusable-test-node.yml` with `test-command` set |
+
+`reusable-test-rust.yml` remains for backward compatibility but may show
+skipped jobs when only build or only coverage is enabled.
+
+## Egress block examples
+
+### Node / Bun (web)
+
+```yaml
+egress-policy: block
+allowed-endpoints: >
+  github.com:443
+  api.github.com:443
+  codeload.github.com:443
+  objects.githubusercontent.com:443
+  registry.npmjs.org:443
+```
+
+### Rust
+
+```yaml
+egress-policy: block
+allowed-endpoints: >
+  github.com:443
+  api.github.com:443
+  codeload.github.com:443
+  static.rust-lang.org:443
+  sh.rustup.rs:443
+  crates.io:443
+  static.crates.io:443
+  index.crates.io:443
+```
+
+### Quality / Lintro
+
+```yaml
+egress-policy: block
+allowed-endpoints: >
+  github.com:443
+  api.github.com:443
+  ghcr.io:443
+  index.crates.io:443
+  registry.npmjs.org:443
+  api.osv.dev:443
+  semgrep.dev:443
+  metrics.semgrep.dev:443
+```
+
+## Dependency review
+
+`reusable-dependency-review.yml` only runs on `pull_request` events. Do not
+invoke it from `push` workflows unless you accept the job being skipped.
+
+## Fork PR comments
+
+PR comments are skipped automatically on fork PRs (`head.repo.fork == true`).
+This is enforced in `scripts/ci/actions/post-pr-comment.sh` and workflow `if`
+conditions.
+
+## Rustume migration example
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🛠️ Lintro Code Quality & Analysis"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        ghcr.io:443
+        api.osv.dev:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+
+  rust-build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🔨 Build Check"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        static.rust-lang.org:443
+        crates.io:443
+
+  rust-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-coverage.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🦀 Rust Coverage"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        static.rust-lang.org:443
+        crates.io:443
+
+  web-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🌐 Web Coverage"
+      working-directory: apps/web
+      package-manager: bun
+      test-command: bun run test:coverage
+      coverage: true
+      coverage-pr-comment: true
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        registry.npmjs.org:443
+```

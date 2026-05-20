@@ -74,6 +74,17 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
     secrets:
       RELEASE_APP_ID:
         description: "GitHub App ID for creating release tokens"
@@ -102,8 +113,8 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
-
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Create GitHub App installation token
         id: app-token
         # yamllint disable-line rule:line-length
@@ -128,7 +139,7 @@ jobs:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           # yamllint disable-line rule:line-length
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || (github.repository == 'lgtm-hq/lgtm-ci' && github.sha || 'main') }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -327,7 +338,7 @@ jobs:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           # yamllint disable-line rule:line-length
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || (github.repository == 'lgtm-hq/lgtm-ci' && github.sha || 'main') }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false

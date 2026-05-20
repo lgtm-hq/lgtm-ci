@@ -1,0 +1,113 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Node.js Test Publish Workflow
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: "Working directory for published results"
+        required: false
+        type: string
+        default: "."
+      coverage-percent:
+        description: "Coverage percentage for badge generation"
+        required: false
+        type: string
+        default: "0"
+      upload-coverage:
+        description: "Whether coverage artifacts were uploaded by the test workflow"
+        required: false
+        type: boolean
+        default: true
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+jobs:
+  publish:
+    name: Publish Results
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pages: write
+      id-token: write
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Download coverage
+        if: inputs.upload-coverage
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: node-coverage-*
+          path: node-coverage-artifacts
+          merge-multiple: false
+
+      - name: Merge coverage report
+        if: inputs.upload-coverage
+        shell: bash
+        env:
+          ARTIFACTS_DIR: node-coverage-artifacts
+          OUTPUT_DIR: coverage-report
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/merge-node-coverage.sh
+
+      - name: Generate badge
+        if: inputs.upload-coverage
+        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-badge
+        with:
+          coverage-percent: ${{ inputs.coverage-percent }}
+          format: svg
+          output-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report/badge.svg' ||
+            format('coverage-report/{0}/badge.svg', inputs.working-directory) }}
+
+      - name: Publish to GitHub Pages
+        if: inputs.upload-coverage
+        uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
+        with:
+          results-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report' ||
+            format('coverage-report/{0}', inputs.working-directory) }}
+          coverage-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report' ||
+            format('coverage-report/{0}', inputs.working-directory) }}
+          badge-path: >-
+            ${{ inputs.working-directory == '.' && 'coverage-report' ||
+            format('coverage-report/{0}', inputs.working-directory) }}
+          target-dir: vitest

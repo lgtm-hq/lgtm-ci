@@ -50,6 +50,9 @@ jobs:
     # Optional: with: { tools: "ruff,yamllint", post-pr-comment: true }
 ```
 
+Reusable workflows share a standard contract (`tooling-ref`, `egress-policy`,
+`job-name`, permissions by mode). See [docs/workflow-contract.md](docs/workflow-contract.md).
+
 ### Using Shell Libraries
 
 ```yaml

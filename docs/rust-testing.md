@@ -7,7 +7,9 @@ stack**, composed in the consumer caller workflow.
 | --- | --- |
 | Python | `reusable-test-python.yml` |
 | Node / TypeScript | `reusable-test-node.yml` |
-| Rust | `reusable-test-rust.yml` |
+| Rust (build) | `reusable-rust-build.yml` |
+| Rust (coverage) | `reusable-rust-coverage.yml` |
+| Rust (legacy) | `reusable-test-rust.yml` |
 
 ## Rust-only repository
 
@@ -24,32 +26,32 @@ jobs:
 
 ## Build and coverage as separate checks
 
-`reusable-test-rust` exposes `run-build` and `run-coverage`. Call it twice when
-your org ruleset requires distinct check names:
+Use the split workflows so PR checks do not show skipped sibling jobs:
 
 ```yaml
 jobs:
   rust-build:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@<sha>
     with:
       tooling-ref: "<sha>"
-      run-build: true
-      run-coverage: false
-      job-name-build: "Rust Build"
+      job-name: "Rust Build"
+      egress-policy: block
     permissions:
       contents: read
 
   rust-coverage:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-rust.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-coverage.yml@<sha>
     with:
       tooling-ref: "<sha>"
-      run-build: false
-      run-coverage: true
-      job-name-coverage: "Rust Coverage"
+      job-name: "Rust Coverage"
+      egress-policy: block
     permissions:
       contents: read
       pull-requests: write
 ```
+
+`reusable-test-rust.yml` with `run-build` / `run-coverage` remains available but
+may leave skipped jobs in the PR UI when only one mode is enabled.
 
 ## Rust workspace with a frontend package
 

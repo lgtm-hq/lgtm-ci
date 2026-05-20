@@ -17,24 +17,37 @@ name: Reusable PR Auto Label
         required: false
         type: boolean
         default: false
-
-permissions:
-  contents: read
-  pull-requests: write
+      job-name:
+        description: "GitHub check name for the label job"
+        required: false
+        type: string
+        default: "PR Labeler"
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
 
 jobs:
   label:
+    name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
+    permissions:
+      contents: read
+      pull-requests: write
     steps:
       - name: Harden Runner
-        # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
         with:
-          egress-policy: audit
-
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Apply labels based on changed files
-        # Pinned to SHA for supply chain security
         uses: actions/labeler@f27b608878404679385c85cfa523b85ccb86e213 # v6.1.0
         with:
           repo-token: ${{ github.token }}
