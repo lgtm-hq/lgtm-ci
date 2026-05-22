@@ -374,8 +374,8 @@ jobs:
             ${{ inputs.no-cache == false && 'type=gha,mode=max' || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0},mode=max', inputs.cache-registry-ref) || '' }}
           # yamllint enable rule:line-length
-          provenance: ${{ inputs.provenance }}
-          sbom: ${{ inputs.sbom }}
+          provenance: ${{ inputs.provenance && inputs.push }}
+          sbom: ${{ inputs.sbom && inputs.push }}
 
       - name: Extract digest
         id: metadata
@@ -569,7 +569,7 @@ jobs:
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0}-{1},mode=max', inputs.cache-registry-ref, matrix.slug) || '' }}
           # yamllint enable rule:line-length
           provenance: false
-          sbom: ${{ inputs.sbom }}
+          sbom: ${{ inputs.sbom && inputs.push }}
 
       - name: Record staging digest
         shell: bash

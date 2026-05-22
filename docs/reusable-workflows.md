@@ -283,6 +283,14 @@ jobs:
 | `cache-registry-ref` | `""` | Registry cache fallback (e.g. `ghcr.io/org/repo:cache`) |
 | `cosign-sign` | `false` | Keyless Cosign signature on pushed manifests |
 | `no-cache` | `false` | Disable GHA/registry cache for clean release builds |
+| `provenance` | `true` | Generate provenance attestation (only when `push: true`) |
+| `sbom` | `true` | Generate SBOM attestation (only when `push: true`) |
+
+`sbom` and `provenance` only apply when `push: true`. PR validation
+(`validate-on-pr` with `scan`) loads images locally via `--load`; buildx cannot
+export manifest lists from SBOM attestations, so attestations are intentionally
+skipped on that path. The publish path (main/tags with `push: true`) still
+receives full SBOM and provenance attestations.
 
 All inputs are opt-in; existing callers keep current behavior without changes.
 
