@@ -156,6 +156,7 @@ _run_script_any_bash() {
 	export REGISTRY="ghcr.io"
 	export IMAGE_NAME="lgtm-hq/example"
 	export PLATFORMS="linux/amd64,linux/arm64"
+	export PUSH="false"
 	export VALIDATE_ON_PR="true"
 	export MATRIX='[{"platform":"linux/amd64","runner":"ubuntu-24.04","slug":"linux-amd64","qemu":false},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm","slug":"linux-arm64","qemu":false}]'
 
