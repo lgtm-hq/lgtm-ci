@@ -337,3 +337,40 @@ _run_script_any_bash() {
 	assert_failure
 	assert_output --partial "No image tag available"
 }
+
+# =============================================================================
+# sign-image step
+# =============================================================================
+
+@test "build-docker sign-image: fails when DIGEST is unset" {
+	export STEP="sign-image"
+	unset DIGEST
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="org/repo"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "DIGEST"
+}
+
+@test "build-docker sign-image: fails when DIGEST is empty" {
+	export STEP="sign-image"
+	export DIGEST=""
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="org/repo"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "DIGEST"
+}
+
+@test "build-docker sign-image: fails when DIGEST is invalid" {
+	export STEP="sign-image"
+	export DIGEST="not-a-digest"
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="org/repo"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "not a valid sha256 digest"
+}

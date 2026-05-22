@@ -5,7 +5,7 @@
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
 #          set-output-digest, classify, record-digest, smoke-test, smoke-test-local,
-#          resolve-local-scan-image, merge-manifests, cleanup-staging
+#          resolve-local-scan-image, sign-image, merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -665,6 +665,35 @@ cleanup-staging)
 			log_warn "Could not locate staging manifest version for tag ${tag} — skipping deletion"
 		fi
 	done < <(echo "$MATRIX" | jq -r '.[].slug')
+	;;
+
+sign-image)
+	# Sign a pushed image manifest with Cosign keyless signing.
+	#
+	# Required environment variables:
+	#   DIGEST     - Image digest (sha256:...)
+	#   REGISTRY   - Container registry URL
+	#   IMAGE_NAME - Registry-relative image name
+	: "${DIGEST:?DIGEST is required}"
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${IMAGE_NAME:?IMAGE_NAME is required}"
+
+	if [[ -z "$DIGEST" ]]; then
+		die "DIGEST is empty — cannot sign image"
+	fi
+
+	if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "DIGEST is not a valid sha256 digest: ${DIGEST}"
+	fi
+
+	if ! command -v cosign >/dev/null 2>&1; then
+		die "cosign not found. Install via sigstore/cosign-installer action."
+	fi
+
+	image_ref="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+	log_info "Signing image: ${image_ref}"
+	cosign sign --yes "${image_ref}"
+	log_success "Signed image: ${image_ref}"
 	;;
 
 summary)

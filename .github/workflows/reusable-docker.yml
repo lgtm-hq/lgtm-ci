@@ -430,11 +430,11 @@ jobs:
         if: inputs.push && inputs.cosign-sign
         shell: bash
         env:
+          STEP: sign-image
           DIGEST: ${{ steps.build.outputs.digest }}
           REGISTRY: ${{ inputs.registry }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
-        run: |
-          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Build summary
         if: always()
@@ -859,11 +859,11 @@ jobs:
         if: inputs.cosign-sign
         shell: bash
         env:
+          STEP: sign-image
           DIGEST: ${{ steps.metadata.outputs.digest }}
           REGISTRY: ${{ inputs.registry }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
-        run: |
-          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Delete staging manifests
         if: always() && inputs.registry == 'ghcr.io'
