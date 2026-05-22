@@ -199,7 +199,7 @@ jobs:
       attestations: write
       security-events: write
     with:
-      push: true
+      push: ${{ github.event_name != 'pull_request' }}
       validate-on-pr: ${{ github.event_name == 'pull_request' }}
       scan: true
       scan-exit-code: "1"

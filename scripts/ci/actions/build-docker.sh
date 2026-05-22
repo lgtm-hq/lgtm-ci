@@ -458,8 +458,6 @@ smoke-test)
 	#   SMOKE_TEST        - Shorthand command + args; word-split into `docker run`
 	#   SMOKE_TEST_SCRIPT - Path to caller-owned script; receives IMAGE, PLATFORM,
 	#                       REGISTRY in the environment and owns the docker run
-	#   SMOKE_TEST_SCRIPT - Path to caller-owned script; receives IMAGE, PLATFORM,
-	#                       REGISTRY in the environment and owns the docker run
 	#
 	# Optional environment variables:
 	#   LOCAL_VALIDATE - When "true", use a locally loaded image tag (no registry pull)
@@ -679,13 +677,17 @@ summary)
 	fi
 
 	if [[ "$COSIGN_SIGNED" == "true" && -n "$DIGEST" ]]; then
+		# Default identity matches the signing repo; callers may tighten further.
+		: "${GITHUB_REPOSITORY:=ORG/REPO}"
+		cosign_identity="https://github.com/${GITHUB_REPOSITORY}/.*"
+
 		add_github_summary "### Image signature"
 		add_github_summary ""
 		add_github_summary "Verify with:"
 		add_github_summary ""
 		add_github_summary "\`\`\`bash"
 		add_github_summary "cosign verify ${full_image}@${DIGEST} \\"
-		add_github_summary "  --certificate-identity-regexp='.*' \\"
+		add_github_summary "  --certificate-identity-regexp='${cosign_identity}' \\"
 		add_github_summary "  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'"
 		add_github_summary "\`\`\`"
 		add_github_summary ""
