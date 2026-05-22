@@ -7,10 +7,10 @@ load "../../helpers/common"
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 
 @test "reusable-docker: build job gates sbom and provenance on push" {
-	run grep -E '^\s+provenance: \$\{\{ inputs\.provenance && inputs\.push \}\}$' "$WORKFLOW"
+	run grep -E '^[[:space:]]+provenance: \$\{\{ inputs\.provenance && inputs\.push \}\}$' "$WORKFLOW"
 	assert_success
 
-	run grep -E '^\s+sbom: \$\{\{ inputs\.sbom && inputs\.push \}\}$' "$WORKFLOW"
+	run grep -E '^[[:space:]]+sbom: \$\{\{ inputs\.sbom && inputs\.push \}\}$' "$WORKFLOW"
 	assert_success
 }
 
@@ -24,6 +24,6 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 }
 
 @test "reusable-docker: build job does not pass raw sbom or provenance inputs" {
-	run grep -E '^\s+(provenance|sbom): \$\{\{ inputs\.(provenance|sbom) \}\}$' "$WORKFLOW"
+	run grep -E '^[[:space:]]+(provenance|sbom): \$\{\{ inputs\.(provenance|sbom) \}\}$' "$WORKFLOW"
 	assert_failure
 }
