@@ -437,6 +437,7 @@ jobs:
     permissions:
       contents: read
       packages: write
+      security-events: write
 
     steps:
       - name: Harden runner
@@ -550,16 +551,6 @@ jobs:
           DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
-      - name: Upload staging digest
-        if: inputs.push
-        # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: staging-digest-${{ matrix.slug }}
-          path: ${{ runner.temp }}/staging-digest/digest.txt
-          if-no-files-found: error
-          retention-days: 1
-
       - name: Smoke test (${{ matrix.platform }})
         if: >-
           inputs.validate-on-pr && !inputs.push &&
@@ -593,10 +584,42 @@ jobs:
             echo "::endgroup::"
           fi
 
+      - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
+        if: inputs.validate-on-pr && !inputs.push && inputs.scan
+        # Pinned to SHA for supply chain security
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          format: "sarif"
+          output: "trivy-results-${{ matrix.slug }}.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: ${{ inputs.scan-exit-code }}
+
+      - name: Upload Trivy scan results (${{ matrix.platform }})
+        if: always() && inputs.validate-on-pr && !inputs.push && inputs.scan
+        # Pinned to SHA for supply chain security
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          sarif_file: "trivy-results-${{ matrix.slug }}.sarif"
+          category: "trivy-${{ matrix.slug }}"
+
+      - name: Upload staging digest
+        if: inputs.push
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: staging-digest-${{ matrix.slug }}
+          path: ${{ runner.temp }}/staging-digest/digest.txt
+          if-no-files-found: error
+          retention-days: 1
+
   # Optional per-platform smoke test gate (push path only).
   # Runs against each staging image on its native runner before manifest
-  # merge. PR validation smoke tests run inline in build-per-platform because
-  # locally-loaded images are not available across job boundaries.
+  # merge. PR validation smoke tests and Trivy scans run inline in
+  # build-per-platform because locally-loaded images are not available
+  # across job boundaries.
   # Two modes:
   #   - smoke-test (shorthand): `docker run --rm --platform <p> <image> <cmd>`
   #   - smoke-test-script: caller-owned script with env IMAGE/PLATFORM/REGISTRY
@@ -858,56 +881,9 @@ jobs:
           MATRIX: ${{ needs.classify.outputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
-  scan-per-platform:
-    name: Scan ${{ matrix.platform }}
-    needs: [classify, build-per-platform]
-    if: >-
-      always() &&
-      needs.classify.outputs.use-split == 'true' &&
-      inputs.scan &&
-      inputs.validate-on-pr &&
-      inputs.push == false &&
-      needs.build-per-platform.result == 'success'
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.classify.outputs.matrix) }}
-    runs-on: ${{ matrix.runner }}
-    permissions:
-      contents: read
-      security-events: write
-
-    steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
-        # Pinned to SHA for supply chain security
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          image-ref: >-
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
-            matrix.slug }}
-          format: "sarif"
-          output: "trivy-results-${{ matrix.slug }}.sarif"
-          severity: "CRITICAL,HIGH"
-          exit-code: ${{ inputs.scan-exit-code }}
-
-      - name: Upload Trivy scan results (${{ matrix.platform }})
-        if: always()
-        # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
-        with:
-          sarif_file: "trivy-results-${{ matrix.slug }}.sarif"
-          category: "trivy-${{ matrix.slug }}"
-
   summary-validate:
     name: Validation Summary
-    needs: [classify, build-per-platform, verify-per-platform, scan-per-platform]
+    needs: [classify, build-per-platform, verify-per-platform]
     if: >-
       always() &&
       needs.classify.outputs.use-split == 'true' &&
