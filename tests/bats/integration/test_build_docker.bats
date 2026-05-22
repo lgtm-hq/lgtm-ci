@@ -306,3 +306,34 @@ _run_script_any_bash() {
 	assert_failure
 	assert_output --partial "DIGEST"
 }
+
+# =============================================================================
+# resolve-local-scan-image step
+# =============================================================================
+
+@test "build-docker resolve-local-scan-image: writes first tag to GITHUB_OUTPUT" {
+	export STEP="resolve-local-scan-image"
+	export TAGS=$'ghcr.io/org/repo:sha-abc123\nghcr.io/org/repo:main'
+
+	_run_script_any_bash
+	assert_success
+	assert_github_output "ref" "ghcr.io/org/repo:sha-abc123"
+}
+
+@test "build-docker resolve-local-scan-image: fails when TAGS is unset" {
+	export STEP="resolve-local-scan-image"
+	unset TAGS
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "TAGS"
+}
+
+@test "build-docker resolve-local-scan-image: fails when TAGS has no usable tag" {
+	export STEP="resolve-local-scan-image"
+	export TAGS=$' \n '
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "No image tag available"
+}

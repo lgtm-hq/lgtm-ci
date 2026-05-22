@@ -4,8 +4,8 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
-#          set-output-digest, classify, record-digest, smoke-test,
-#          merge-manifests, cleanup-staging
+#          set-output-digest, classify, record-digest, smoke-test, smoke-test-local,
+#          resolve-local-scan-image, merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -486,6 +486,70 @@ smoke-test)
 	echo "::group::Pulling ${IMAGE} (${PLATFORM})"
 	docker pull --platform "${PLATFORM}" "${IMAGE}"
 	echo "::endgroup::"
+
+	if [[ -n "$SMOKE_TEST_SCRIPT" ]]; then
+		if [[ ! -f "$SMOKE_TEST_SCRIPT" ]]; then
+			echo "::error::smoke-test-script not found: ${SMOKE_TEST_SCRIPT}"
+			exit 1
+		fi
+		echo "::group::${SMOKE_TEST_SCRIPT} (IMAGE=${IMAGE} PLATFORM=${PLATFORM})"
+		chmod +x "$SMOKE_TEST_SCRIPT"
+		"./${SMOKE_TEST_SCRIPT#./}"
+		echo "::endgroup::"
+	else
+		echo "::group::docker run --rm --platform ${PLATFORM} ${IMAGE} ${SMOKE_TEST}"
+		# Intentionally word-split SMOKE_TEST so callers can pass flags+args
+		# shellcheck disable=SC2086
+		docker run --rm --platform "${PLATFORM}" "${IMAGE}" ${SMOKE_TEST}
+		echo "::endgroup::"
+	fi
+	;;
+
+resolve-local-scan-image)
+	# Resolve the first metadata tag for scanning a locally loaded image.
+	#
+	# Required environment variables:
+	#   TAGS - Newline-separated image tags from docker/metadata-action
+	#
+	# Outputs:
+	#   ref - First tag suitable for Trivy image-ref
+	: "${TAGS:?TAGS is required}"
+
+	first_tag=$(echo "$TAGS" | head -1 | tr -d '[:space:]')
+	if [[ -z "$first_tag" ]]; then
+		die "No image tag available for local Trivy scan"
+	fi
+
+	set_github_output "ref" "$first_tag"
+	log_info "Local scan image: ${first_tag}"
+	;;
+
+smoke-test-local)
+	# Run a smoke test against a locally loaded image (no registry pull).
+	#
+	# Required environment variables:
+	#   IMAGE     - Full local image reference (registry/name:tag)
+	#   PLATFORM  - Target platform (e.g. linux/arm64)
+	#   REGISTRY  - Container registry URL
+	#
+	# Optional environment variables (mutually exclusive; at least one required):
+	#   SMOKE_TEST        - Shorthand command + args; word-split into `docker run`
+	#   SMOKE_TEST_SCRIPT - Path to caller-owned script; receives IMAGE, PLATFORM,
+	#                       REGISTRY in the environment and owns the docker run
+	: "${IMAGE:?IMAGE is required}"
+	: "${PLATFORM:?PLATFORM is required}"
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${SMOKE_TEST:=}"
+	: "${SMOKE_TEST_SCRIPT:=}"
+
+	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
+		die "SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive"
+	fi
+	if [[ -z "$SMOKE_TEST" && -z "$SMOKE_TEST_SCRIPT" ]]; then
+		die "One of SMOKE_TEST or SMOKE_TEST_SCRIPT is required"
+	fi
+
+	export IMAGE PLATFORM REGISTRY
 
 	if [[ -n "$SMOKE_TEST_SCRIPT" ]]; then
 		if [[ ! -f "$SMOKE_TEST_SCRIPT" ]]; then
