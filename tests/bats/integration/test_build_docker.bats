@@ -118,6 +118,13 @@ _run_script_any_bash() {
 	_run_script
 	assert_success
 	assert_github_output "use-split" "true"
+
+	local matrix
+	matrix=$(get_github_output "matrix")
+	[[ "$matrix" == *"linux/arm64"* ]]
+	[[ "$(echo "$matrix" | jq 'length')" -eq 1 ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].platform')" == "linux/arm64" ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].runner')" == "ubuntu-24.04-arm" ]]
 }
 
 @test "build-docker summary: writes digest and cosign verify command" {
@@ -129,6 +136,7 @@ _run_script_any_bash() {
 	export DIGEST="sha256:abc123"
 	export COSIGN_SIGNED="true"
 	export SCAN_ENABLED="true"
+	export GITHUB_REPOSITORY="lgtm-hq/example"
 
 	_run_script_any_bash
 	assert_success
@@ -137,6 +145,7 @@ _run_script_any_bash() {
 	summary=$(get_github_step_summary)
 	[[ "$summary" == *"sha256:abc123"* ]]
 	[[ "$summary" == *"cosign verify"* ]]
+	[[ "$summary" == *"https://github.com/lgtm-hq/example/.*"* ]]
 	[[ "$summary" == *"Vulnerability scan"* ]]
 }
 
