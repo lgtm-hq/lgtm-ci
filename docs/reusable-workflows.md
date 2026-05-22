@@ -197,8 +197,16 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      security-events: write
     with:
       push: true
+      validate-on-pr: ${{ github.event_name == 'pull_request' }}
+      scan: true
+      scan-exit-code: "1"
+      cosign-sign: true
+      cache-registry-ref: ghcr.io/org/repo:cache
+      no-cache: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
 
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
@@ -222,6 +230,18 @@ jobs:
       package-name: my-image
     secrets: inherit
 ```
+
+### Docker workflow inputs
+
+| Input | Default | Description |
+| ----- | ------- | ----------- |
+| `validate-on-pr` | `false` | Use native split builds on PRs without pushing staging images |
+| `scan-exit-code` | `"0"` | Trivy exit code; set `"1"` to block PRs on CRITICAL/HIGH CVEs |
+| `cache-registry-ref` | `""` | Registry cache fallback (e.g. `ghcr.io/org/repo:cache`) |
+| `cosign-sign` | `false` | Keyless Cosign signature on pushed manifests |
+| `no-cache` | `false` | Disable GHA/registry cache for clean release builds |
+
+All inputs are opt-in; existing callers keep current behavior without changes.
 
 ## PR Automation And Security
 

@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: enterprise Docker CI enhancements for `reusable-docker.yml` (#193)
+  - `validate-on-pr` — native split builds on PRs without registry push
+  - `scan-exit-code` — block PRs on CRITICAL/HIGH Trivy findings
+  - `cache-registry-ref` — registry cache fallback when GHA cache evicts
+  - `cosign-sign` — keyless Sigstore image signing on push
+  - `no-cache` — clean release builds without cache layers
+  - Build observability via `$GITHUB_STEP_SUMMARY`
+
 ### Changed
 
 ### Deprecated
