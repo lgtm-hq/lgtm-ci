@@ -560,10 +560,44 @@ jobs:
           if-no-files-found: error
           retention-days: 1
 
-  # Optional per-platform smoke test gate.
+      - name: Smoke test (${{ matrix.platform }})
+        if: >-
+          inputs.validate-on-pr && !inputs.push &&
+          (inputs.smoke-test != '' || inputs.smoke-test-script != '')
+        shell: bash
+        env:
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          IMAGE: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          PLATFORM: ${{ matrix.platform }}
+          SMOKE_TEST: ${{ inputs.smoke-test }}
+          SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+        run: |
+          export IMAGE PLATFORM REGISTRY
+          if [[ -n "$SMOKE_TEST_SCRIPT" ]]; then
+            if [[ ! -f "$SMOKE_TEST_SCRIPT" ]]; then
+              echo "::error::smoke-test-script not found: ${SMOKE_TEST_SCRIPT}"
+              exit 1
+            fi
+            echo "::group::${SMOKE_TEST_SCRIPT} (IMAGE=${IMAGE} PLATFORM=${PLATFORM})"
+            chmod +x "$SMOKE_TEST_SCRIPT"
+            "./${SMOKE_TEST_SCRIPT#./}"
+            echo "::endgroup::"
+          else
+            echo "::group::docker run --rm --platform ${PLATFORM} ${IMAGE} ${SMOKE_TEST}"
+            # Intentionally word-split SMOKE_TEST so callers can pass flags+args
+            # shellcheck disable=SC2086
+            docker run --rm --platform "${PLATFORM}" "${IMAGE}" ${SMOKE_TEST}
+            echo "::endgroup::"
+          fi
+
+  # Optional per-platform smoke test gate (push path only).
   # Runs against each staging image on its native runner before manifest
-  # merge. Any failure blocks the merge so partial multi-arch manifests are
-  # never published. Two modes:
+  # merge. PR validation smoke tests run inline in build-per-platform because
+  # locally-loaded images are not available across job boundaries.
+  # Two modes:
   #   - smoke-test (shorthand): `docker run --rm --platform <p> <image> <cmd>`
   #   - smoke-test-script: caller-owned script with env IMAGE/PLATFORM/REGISTRY
   verify-per-platform:
@@ -571,6 +605,7 @@ jobs:
     needs: [classify, build-per-platform]
     if: >-
       needs.classify.outputs.use-split == 'true' &&
+      inputs.push &&
       (inputs.smoke-test != '' || inputs.smoke-test-script != '')
     strategy:
       fail-fast: false
@@ -655,8 +690,6 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
-          LOCAL_VALIDATE: ${{ inputs.validate-on-pr && !inputs.push }}
-          LOCAL_TAG: validate-${{ matrix.slug }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Assemble multi-arch manifest from per-platform staging images

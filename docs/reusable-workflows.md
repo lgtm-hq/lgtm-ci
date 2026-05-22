@@ -188,6 +188,49 @@ jobs:
 
 ## Build, Coverage, And Supply Chain
 
+### Push (publish to registry)
+
+```yaml
+jobs:
+  docker:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      push: true
+      scan: true
+      scan-exit-code: "1"
+      cosign-sign: true
+      cache-registry-ref: ghcr.io/org/repo:cache
+      no-cache: ${{ startsWith(github.ref, 'refs/tags/v') }}
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+```
+
+### PR validation (build-only, no push)
+
+```yaml
+jobs:
+  docker:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      file: docker/Dockerfile
+      push: false
+      validate-on-pr: true
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      scan: true
+      scan-exit-code: "1"
+      smoke-test: --version
+```
+
+### Combined push and PR validation
+
 ```yaml
 jobs:
   docker:

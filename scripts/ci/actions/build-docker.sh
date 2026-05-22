@@ -458,18 +458,12 @@ smoke-test)
 	#   SMOKE_TEST        - Shorthand command + args; word-split into `docker run`
 	#   SMOKE_TEST_SCRIPT - Path to caller-owned script; receives IMAGE, PLATFORM,
 	#                       REGISTRY in the environment and owns the docker run
-	#
-	# Optional environment variables:
-	#   LOCAL_VALIDATE - When "true", use a locally loaded image tag (no registry pull)
-	#   LOCAL_TAG      - Local tag suffix when LOCAL_VALIDATE is true (e.g. validate-amd64)
 	: "${REGISTRY:?REGISTRY is required}"
 	: "${IMAGE_NAME:?IMAGE_NAME is required}"
 	: "${PLATFORM:?PLATFORM is required}"
-	: "${DIGEST_FILE:=}"
+	: "${DIGEST_FILE:?DIGEST_FILE is required}"
 	: "${SMOKE_TEST:=}"
 	: "${SMOKE_TEST_SCRIPT:=}"
-	: "${LOCAL_VALIDATE:=false}"
-	: "${LOCAL_TAG:=}"
 
 	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
 		die "SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive"
@@ -477,32 +471,21 @@ smoke-test)
 	if [[ -z "$SMOKE_TEST" && -z "$SMOKE_TEST_SCRIPT" ]]; then
 		die "One of SMOKE_TEST or SMOKE_TEST_SCRIPT is required"
 	fi
-
-	if [[ "$LOCAL_VALIDATE" == "true" ]]; then
-		if [[ -z "$LOCAL_TAG" ]]; then
-			die "LOCAL_TAG is required when LOCAL_VALIDATE is true"
-		fi
-		IMAGE="${REGISTRY}/${IMAGE_NAME}:${LOCAL_TAG}"
-	else
-		: "${DIGEST_FILE:?DIGEST_FILE is required}"
-		if [[ ! -s "$DIGEST_FILE" ]]; then
-			die "DIGEST_FILE missing or empty: ${DIGEST_FILE}"
-		fi
-
-		digest=$(<"$DIGEST_FILE")
-		if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-			die "Invalid digest in ${DIGEST_FILE}: ${digest}"
-		fi
-
-		IMAGE="${REGISTRY}/${IMAGE_NAME}@${digest}"
+	if [[ ! -s "$DIGEST_FILE" ]]; then
+		die "DIGEST_FILE missing or empty: ${DIGEST_FILE}"
 	fi
+
+	digest=$(<"$DIGEST_FILE")
+	if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "Invalid digest in ${DIGEST_FILE}: ${digest}"
+	fi
+
+	IMAGE="${REGISTRY}/${IMAGE_NAME}@${digest}"
 	export IMAGE PLATFORM REGISTRY
 
-	if [[ "$LOCAL_VALIDATE" != "true" ]]; then
-		echo "::group::Pulling ${IMAGE} (${PLATFORM})"
-		docker pull --platform "${PLATFORM}" "${IMAGE}"
-		echo "::endgroup::"
-	fi
+	echo "::group::Pulling ${IMAGE} (${PLATFORM})"
+	docker pull --platform "${PLATFORM}" "${IMAGE}"
+	echo "::endgroup::"
 
 	if [[ -n "$SMOKE_TEST_SCRIPT" ]]; then
 		if [[ ! -f "$SMOKE_TEST_SCRIPT" ]]; then

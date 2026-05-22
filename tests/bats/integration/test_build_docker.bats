@@ -125,6 +125,8 @@ _run_script_any_bash() {
 	[[ "$(echo "$matrix" | jq 'length')" -eq 1 ]]
 	[[ "$(echo "$matrix" | jq -r '.[0].platform')" == "linux/arm64" ]]
 	[[ "$(echo "$matrix" | jq -r '.[0].runner')" == "ubuntu-24.04-arm" ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].slug')" == "linux-arm64" ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].qemu')" == "false" ]]
 }
 
 @test "build-docker summary: writes digest and cosign verify command" {
