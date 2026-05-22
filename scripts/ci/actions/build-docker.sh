@@ -678,10 +678,6 @@ sign-image)
 	: "${REGISTRY:?REGISTRY is required}"
 	: "${IMAGE_NAME:?IMAGE_NAME is required}"
 
-	if [[ -z "$DIGEST" ]]; then
-		die "DIGEST is empty — cannot sign image"
-	fi
-
 	if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
 		die "DIGEST is not a valid sha256 digest: ${DIGEST}"
 	fi
