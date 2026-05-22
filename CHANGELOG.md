@@ -9,14 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: enterprise Docker CI enhancements for `reusable-docker.yml` (#193)
-  - `validate-on-pr` — native split builds on PRs without registry push
-  - `scan-exit-code` — block PRs on CRITICAL/HIGH Trivy findings
-  - `cache-registry-ref` — registry cache fallback when GHA cache evicts
-  - `cosign-sign` — keyless Sigstore image signing on push
-  - `no-cache` — clean release builds without cache layers
-  - Build observability via `$GITHUB_STEP_SUMMARY`
-
 ### Changed
 
 ### Deprecated
@@ -26,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.17.0] - 2026-05-22
+
+### Features
+
+- **docker**: enterprise-grade reusable Docker workflow enhancements (#194) (49cf79a)
+
+### Previously Unreleased
+
+- **workflows**: enterprise Docker CI enhancements for `reusable-docker.yml` (#193)
+  - `validate-on-pr` — native split builds on PRs without registry push
+  - `scan-exit-code` — block PRs on CRITICAL/HIGH Trivy findings
+  - `cache-registry-ref` — registry cache fallback when GHA cache evicts
+  - `cosign-sign` — keyless Sigstore image signing on push
+  - `no-cache` — clean release builds without cache layers
+  - Build observability via `$GITHUB_STEP_SUMMARY`
 
 ## [0.16.0] - 2026-05-20
 
@@ -342,7 +350,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.16.0...v0.17.0
 [0.16.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.15.0...v0.16.0
 [0.15.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.13.4...v0.14.0
