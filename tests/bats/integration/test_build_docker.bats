@@ -87,6 +87,77 @@ _run_script_any_bash() {
 	assert_github_output "use-split" "true"
 }
 
+@test "build-docker classify: disables split when push is false and validate-on-pr is false" {
+	export PUSH="false"
+
+	_run_script
+	assert_success
+	assert_github_output "use-split" "false"
+	assert_github_output "matrix" "[]"
+}
+
+@test "build-docker classify: enables split when push is false and validate-on-pr is true" {
+	export PUSH="false"
+	export VALIDATE_ON_PR="true"
+
+	_run_script
+	assert_success
+	assert_github_output "use-split" "true"
+
+	local matrix
+	matrix=$(get_github_output "matrix")
+	[[ "$matrix" == *"linux/amd64"* ]]
+	[[ "$matrix" == *"linux/arm64"* ]]
+}
+
+@test "build-docker classify: validate-on-pr with single mapped platform enables split" {
+	export PLATFORMS="linux/arm64"
+	export PUSH="false"
+	export VALIDATE_ON_PR="true"
+
+	_run_script
+	assert_success
+	assert_github_output "use-split" "true"
+}
+
+@test "build-docker summary: writes digest and cosign verify command" {
+	export STEP="summary"
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="lgtm-hq/example"
+	export PLATFORMS="linux/amd64,linux/arm64"
+	export PUSH="true"
+	export DIGEST="sha256:abc123"
+	export COSIGN_SIGNED="true"
+	export SCAN_ENABLED="true"
+
+	_run_script_any_bash
+	assert_success
+
+	local summary
+	summary=$(get_github_step_summary)
+	[[ "$summary" == *"sha256:abc123"* ]]
+	[[ "$summary" == *"cosign verify"* ]]
+	[[ "$summary" == *"Vulnerability scan"* ]]
+}
+
+@test "build-docker summary: includes per-platform matrix when provided" {
+	export STEP="summary"
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="lgtm-hq/example"
+	export PLATFORMS="linux/amd64,linux/arm64"
+	export VALIDATE_ON_PR="true"
+	export MATRIX='[{"platform":"linux/amd64","runner":"ubuntu-24.04","slug":"linux-amd64","qemu":false},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm","slug":"linux-arm64","qemu":false}]'
+
+	_run_script_any_bash
+	assert_success
+
+	local summary
+	summary=$(get_github_step_summary)
+	[[ "$summary" == *"linux/amd64"* ]]
+	[[ "$summary" == *"linux/arm64"* ]]
+	[[ "$summary" == *"PR validation"* ]]
+}
+
 # =============================================================================
 # Sanity: required-input validation is unchanged by the smoke additions
 # =============================================================================
