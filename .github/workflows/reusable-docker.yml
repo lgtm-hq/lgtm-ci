@@ -99,6 +99,46 @@ on:
         required: false
         type: string
         default: ""
+      validate-on-pr:
+        description: >-
+          When true AND push is false, use the split per-platform path (native
+          runners) without pushing staging images. Enables full Dockerfile
+          validation on PRs without QEMU overhead.
+        required: false
+        type: boolean
+        default: false
+      scan-exit-code:
+        description: >-
+          Exit code for Trivy when findings match severity filter. Set to "1"
+          to fail the workflow on CRITICAL/HIGH CVEs. Set to "0" for
+          advisory-only SARIF upload.
+        required: false
+        type: string
+        default: "0"
+      cache-registry-ref:
+        description: >-
+          Registry reference for cache fallback (e.g. ghcr.io/org/repo:cache).
+          When set, adds type=registry as a secondary cache-from source and
+          writes to it on push events. GHA cache remains primary. Per-platform
+          scope is appended automatically (-amd64, -arm64).
+        required: false
+        type: string
+        default: ""
+      cosign-sign:
+        description: >-
+          Sign the final image manifest with Sigstore Cosign (keyless OIDC).
+          Requires id-token: write permission in caller. Only runs when push
+          is true and a digest is available.
+        required: false
+        type: boolean
+        default: false
+      no-cache:
+        description: >-
+          Disable build cache entirely. Use for release builds to ensure fully
+          reproducible images. When true, cache-from and cache-to are omitted.
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: "Git ref for lgtm-ci tooling checkout. Defaults to the reusable workflow commit."
@@ -135,8 +175,8 @@ on:
 
 jobs:
   # Classify platforms and determine build strategy.
-  # Outputs use-split=true and a per-platform matrix when push is enabled
-  # and two or more platforms are requested; otherwise use-split=false.
+  # Outputs use-split=true and a per-platform matrix when push or validate-on-pr
+  # is enabled and two or more platforms are requested; otherwise use-split=false.
   classify:
     name: Classify Platforms
     runs-on: ubuntu-24.04
@@ -204,6 +244,7 @@ jobs:
           STEP: classify
           PLATFORMS: ${{ inputs.platforms }}
           PUSH: ${{ inputs.push }}
+          VALIDATE_ON_PR: ${{ inputs.validate-on-pr }}
           RUNNER_MAP: ${{ inputs.runner-map }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
@@ -320,17 +361,24 @@ jobs:
           file: ${{ inputs.file }}
           platforms: ${{ inputs.platforms }}
           push: ${{ inputs.push }}
+          load: ${{ inputs.validate-on-pr && !inputs.push }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          # yamllint disable rule:line-length
+          cache-from: |
+            ${{ inputs.no-cache == false && 'type=gha' || '' }}
+            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}', inputs.cache-registry-ref) || '' }}
+          cache-to: |
+            ${{ inputs.no-cache == false && 'type=gha,mode=max' || '' }}
+            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0},mode=max', inputs.cache-registry-ref) || '' }}
+          # yamllint enable rule:line-length
           provenance: ${{ inputs.provenance }}
           sbom: ${{ inputs.sbom }}
 
       - name: Extract digest
         id: metadata
-        if: inputs.push
+        if: inputs.push || inputs.validate-on-pr
         shell: bash
         env:
           STEP: set-output-digest
@@ -345,6 +393,35 @@ jobs:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.build.outputs.digest }}
           push-to-registry: true
+
+      - name: Install Cosign
+        if: inputs.push && inputs.cosign-sign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign image
+        if: inputs.push && inputs.cosign-sign
+        shell: bash
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+        run: |
+          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        env:
+          STEP: summary
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          PLATFORMS: ${{ inputs.platforms }}
+          PUSH: ${{ inputs.push }}
+          DIGEST: ${{ steps.metadata.outputs.digest || '' }}
+          COSIGN_SIGNED: ${{ inputs.cosign-sign && inputs.push }}
+          SCAN_ENABLED: ${{ inputs.scan }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Per-platform native build leg (multi-arch split path).
   # One matrix entry per platform; runner and QEMU config resolved by classify.
@@ -394,6 +471,7 @@ jobs:
         uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
 
       - name: Validate registry
+        if: inputs.push
         shell: bash
         env:
           STEP: validate
@@ -403,7 +481,7 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
 
       - name: Login to GHCR
-        if: inputs.registry == 'ghcr.io'
+        if: inputs.push && inputs.registry == 'ghcr.io'
         # Pinned to SHA for supply chain security
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
@@ -412,7 +490,7 @@ jobs:
           password: ${{ github.token }}
 
       - name: Login to Docker Hub
-        if: inputs.registry == 'docker.io'
+        if: inputs.push && inputs.registry == 'docker.io'
         # Pinned to SHA for supply chain security
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
@@ -445,14 +523,22 @@ jobs:
           context: ${{ inputs.context }}
           file: ${{ inputs.file }}
           platforms: ${{ matrix.platform }}
-          push: true
+          push: ${{ inputs.push }}
+          load: ${{ inputs.validate-on-pr && !inputs.push }}
+          # yamllint disable rule:line-length
           tags: >-
-            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:build-${{
-            github.run_id }}-${{ matrix.slug }}
+            ${{ inputs.push
+              && format('{0}/{1}:build-{2}-{3}', inputs.registry, inputs.image-name || github.repository, github.run_id, matrix.slug)
+              || format('{0}/{1}:validate-{2}', inputs.registry, inputs.image-name || github.repository, matrix.slug) }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
-          cache-from: type=gha,scope=${{ matrix.slug }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.slug }}
+          cache-from: |
+            ${{ inputs.no-cache == false && format('type=gha,scope={0}', matrix.slug) || '' }}
+            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}-{1}', inputs.cache-registry-ref, matrix.slug) || '' }}
+          cache-to: |
+            ${{ inputs.no-cache == false && format('type=gha,mode=max,scope={0}', matrix.slug) || '' }}
+            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0}-{1},mode=max', inputs.cache-registry-ref, matrix.slug) || '' }}
+          # yamllint enable rule:line-length
           provenance: false
           sbom: ${{ inputs.sbom }}
 
@@ -465,6 +551,7 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Upload staging digest
+        if: inputs.push
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -524,6 +611,7 @@ jobs:
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
 
       - name: Validate registry
+        if: inputs.push
         shell: bash
         env:
           STEP: validate
@@ -533,7 +621,7 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
 
       - name: Login to GHCR
-        if: inputs.registry == 'ghcr.io'
+        if: inputs.push && inputs.registry == 'ghcr.io'
         # Pinned to SHA for supply chain security
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
@@ -542,7 +630,7 @@ jobs:
           password: ${{ github.token }}
 
       - name: Login to Docker Hub
-        if: inputs.registry == 'docker.io'
+        if: inputs.push && inputs.registry == 'docker.io'
         # Pinned to SHA for supply chain security
         uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
         with:
@@ -550,6 +638,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Download staging digest
+        if: inputs.push
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -566,6 +655,8 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+          LOCAL_VALIDATE: ${{ inputs.validate-on-pr && !inputs.push }}
+          LOCAL_TAG: validate-${{ matrix.slug }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Assemble multi-arch manifest from per-platform staging images
@@ -574,6 +665,7 @@ jobs:
     needs: [classify, build-per-platform, verify-per-platform]
     if: >-
       always() &&
+      inputs.push &&
       needs.classify.outputs.use-split == 'true' &&
       needs.build-per-platform.result == 'success' &&
       (needs.verify-per-platform.result == 'success' ||
@@ -692,6 +784,20 @@ jobs:
           subject-digest: ${{ steps.metadata.outputs.digest }}
           push-to-registry: true
 
+      - name: Install Cosign
+        if: inputs.cosign-sign
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+
+      - name: Sign image
+        if: inputs.cosign-sign
+        shell: bash
+        env:
+          DIGEST: ${{ steps.metadata.outputs.digest }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+        run: |
+          cosign sign --yes "${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+
       - name: Delete staging manifests
         if: always() && inputs.registry == 'ghcr.io'
         shell: bash
@@ -703,14 +809,124 @@ jobs:
           MATRIX: ${{ needs.classify.outputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
-  scan:
-    name: Vulnerability Scan
-    needs: [build, merge]
+      - name: Build summary
+        if: always()
+        shell: bash
+        env:
+          STEP: summary
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          TAGS: ${{ steps.meta.outputs.tags }}
+          PLATFORMS: ${{ inputs.platforms }}
+          PUSH: ${{ inputs.push }}
+          DIGEST: ${{ steps.metadata.outputs.digest || '' }}
+          COSIGN_SIGNED: ${{ inputs.cosign-sign && inputs.push }}
+          SCAN_ENABLED: ${{ inputs.scan }}
+          MATRIX: ${{ needs.classify.outputs.matrix }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+  scan-per-platform:
+    name: Scan ${{ matrix.platform }}
+    needs: [classify, build-per-platform]
     if: >-
       always() &&
-      (needs.build.result == 'success' || needs.merge.result == 'success') &&
+      needs.classify.outputs.use-split == 'true' &&
       inputs.scan &&
-      inputs.push
+      inputs.validate-on-pr &&
+      inputs.push == false &&
+      needs.build-per-platform.result == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.classify.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
+        # Pinned to SHA for supply chain security
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          format: "sarif"
+          output: "trivy-results-${{ matrix.slug }}.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: ${{ inputs.scan-exit-code }}
+
+      - name: Upload Trivy scan results (${{ matrix.platform }})
+        if: always()
+        # Pinned to SHA for supply chain security
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          sarif_file: "trivy-results-${{ matrix.slug }}.sarif"
+          category: "trivy-${{ matrix.slug }}"
+
+  summary-validate:
+    name: Validation Summary
+    needs: [classify, build-per-platform, verify-per-platform, scan-per-platform]
+    if: >-
+      always() &&
+      needs.classify.outputs.use-split == 'true' &&
+      inputs.validate-on-pr &&
+      inputs.push == false
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@ab7a9404c0f3da075243ca237b5fac12c98deaa5 # v2.19.3
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ${{ needs.classify.outputs.tooling-repository }}
+          path: .lgtm-ci-tooling
+          ref: ${{ needs.classify.outputs.tooling-ref }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Build summary
+        if: always()
+        shell: bash
+        env:
+          STEP: summary
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          PLATFORMS: ${{ inputs.platforms }}
+          PUSH: ${{ inputs.push }}
+          SCAN_ENABLED: ${{ inputs.scan }}
+          VALIDATE_ON_PR: true
+          MATRIX: ${{ needs.classify.outputs.matrix }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+  scan:
+    name: Vulnerability Scan
+    needs: [classify, build, merge]
+    if: >-
+      always() &&
+      inputs.scan &&
+      (inputs.push || (inputs.validate-on-pr && needs.classify.outputs.use-split == 'false')) &&
+      (
+        (needs.classify.outputs.use-split == 'false' && needs.build.result == 'success') ||
+        (needs.classify.outputs.use-split == 'true' && inputs.push && needs.merge.result == 'success')
+      )
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -727,6 +943,7 @@ jobs:
           format: "sarif"
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
+          exit-code: ${{ inputs.scan-exit-code }}
 
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
