@@ -87,6 +87,89 @@ _run_script_any_bash() {
 	assert_github_output "use-split" "true"
 }
 
+@test "build-docker classify: disables split when push is false and validate-on-pr is false" {
+	export PUSH="false"
+
+	_run_script
+	assert_success
+	assert_github_output "use-split" "false"
+	assert_github_output "matrix" "[]"
+}
+
+@test "build-docker classify: enables split when push is false and validate-on-pr is true" {
+	export PUSH="false"
+	export VALIDATE_ON_PR="true"
+
+	_run_script
+	assert_success
+	assert_github_output "use-split" "true"
+
+	local matrix
+	matrix=$(get_github_output "matrix")
+	[[ "$matrix" == *"linux/amd64"* ]]
+	[[ "$matrix" == *"linux/arm64"* ]]
+}
+
+@test "build-docker classify: validate-on-pr with single mapped platform enables split" {
+	export PLATFORMS="linux/arm64"
+	export PUSH="false"
+	export VALIDATE_ON_PR="true"
+
+	_run_script
+	assert_success
+	assert_github_output "use-split" "true"
+
+	local matrix
+	matrix=$(get_github_output "matrix")
+	[[ "$matrix" == *"linux/arm64"* ]]
+	[[ "$(echo "$matrix" | jq 'length')" -eq 1 ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].platform')" == "linux/arm64" ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].runner')" == "ubuntu-24.04-arm" ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].slug')" == "linux-arm64" ]]
+	[[ "$(echo "$matrix" | jq -r '.[0].qemu')" == "false" ]]
+}
+
+@test "build-docker summary: writes digest and cosign verify command" {
+	export STEP="summary"
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="lgtm-hq/example"
+	export PLATFORMS="linux/amd64,linux/arm64"
+	export PUSH="true"
+	export DIGEST="sha256:abc123"
+	export COSIGN_SIGNED="true"
+	export SCAN_ENABLED="true"
+	export GITHUB_REPOSITORY="lgtm-hq/example"
+
+	_run_script_any_bash
+	assert_success
+
+	local summary
+	summary=$(get_github_step_summary)
+	[[ "$summary" == *"sha256:abc123"* ]]
+	[[ "$summary" == *"cosign verify"* ]]
+	[[ "$summary" == *"https://github.com/lgtm-hq/example/.*"* ]]
+	[[ "$summary" == *"Vulnerability scan"* ]]
+}
+
+@test "build-docker summary: includes per-platform matrix when provided" {
+	export STEP="summary"
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="lgtm-hq/example"
+	export PLATFORMS="linux/amd64,linux/arm64"
+	export PUSH="false"
+	export VALIDATE_ON_PR="true"
+	export MATRIX='[{"platform":"linux/amd64","runner":"ubuntu-24.04","slug":"linux-amd64","qemu":false},{"platform":"linux/arm64","runner":"ubuntu-24.04-arm","slug":"linux-arm64","qemu":false}]'
+
+	_run_script_any_bash
+	assert_success
+
+	local summary
+	summary=$(get_github_step_summary)
+	[[ "$summary" == *"linux/amd64"* ]]
+	[[ "$summary" == *"linux/arm64"* ]]
+	[[ "$summary" == *"PR validation"* ]]
+}
+
 # =============================================================================
 # Sanity: required-input validation is unchanged by the smoke additions
 # =============================================================================
@@ -223,4 +306,72 @@ _run_script_any_bash() {
 	_run_script_any_bash
 	assert_failure
 	assert_output --partial "DIGEST"
+}
+
+# =============================================================================
+# resolve-local-scan-image step
+# =============================================================================
+
+@test "build-docker resolve-local-scan-image: writes first tag to GITHUB_OUTPUT" {
+	export STEP="resolve-local-scan-image"
+	export TAGS=$'ghcr.io/org/repo:sha-abc123\nghcr.io/org/repo:main'
+
+	_run_script_any_bash
+	assert_success
+	assert_github_output "ref" "ghcr.io/org/repo:sha-abc123"
+}
+
+@test "build-docker resolve-local-scan-image: fails when TAGS is unset" {
+	export STEP="resolve-local-scan-image"
+	unset TAGS
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "TAGS"
+}
+
+@test "build-docker resolve-local-scan-image: fails when TAGS has no usable tag" {
+	export STEP="resolve-local-scan-image"
+	export TAGS=$' \n '
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "No image tag available"
+}
+
+# =============================================================================
+# sign-image step
+# =============================================================================
+
+@test "build-docker sign-image: fails when DIGEST is unset" {
+	export STEP="sign-image"
+	unset DIGEST
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="org/repo"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "DIGEST"
+}
+
+@test "build-docker sign-image: fails when DIGEST is empty" {
+	export STEP="sign-image"
+	export DIGEST=""
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="org/repo"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "DIGEST"
+}
+
+@test "build-docker sign-image: fails when DIGEST is invalid" {
+	export STEP="sign-image"
+	export DIGEST="not-a-digest"
+	export REGISTRY="ghcr.io"
+	export IMAGE_NAME="org/repo"
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "not a valid sha256 digest"
 }

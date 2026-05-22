@@ -4,8 +4,8 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
-#          set-output-digest, classify, record-digest, smoke-test,
-#          merge-manifests, cleanup-staging
+#          set-output-digest, classify, record-digest, smoke-test, smoke-test-local,
+#          resolve-local-scan-image, sign-image, merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -305,6 +305,7 @@ classify)
 	#   PUSH       - Whether images will be pushed ("true"/"false")
 	#
 	# Optional environment variables:
+	#   VALIDATE_ON_PR    - Enable split builds without push for PR validation
 	#   RUNNER_MAP        - JSON object mapping platform → runner label (default: "{}")
 	#                       Platforms not in the map default to ubuntu-24.04 with QEMU.
 	#                       Example: {"linux/arm64":"ubuntu-24.04-arm"}
@@ -317,6 +318,7 @@ classify)
 	#   matrix    - JSON array of {platform, runner, slug, qemu} entries
 	: "${PLATFORMS:?PLATFORMS is required}"
 	: "${PUSH:?PUSH is required}"
+	: "${VALIDATE_ON_PR:=false}"
 	: "${RUNNER_MAP:={}}"
 	: "${SMOKE_TEST:=}"
 	: "${SMOKE_TEST_SCRIPT:=}"
@@ -355,11 +357,11 @@ classify)
 		die "PLATFORMS is empty or contains only whitespace"
 	fi
 
-	# push=false → always use the QEMU build job (imagetools requires a registry)
-	if [[ "$PUSH" != "true" ]]; then
+	# push=false and validate-on-pr=false → use the QEMU build job
+	if [[ "$PUSH" != "true" && "$VALIDATE_ON_PR" != "true" ]]; then
 		set_github_output "use-split" "false"
 		set_github_output "matrix" "[]"
-		log_info "Split disabled: push=${PUSH}"
+		log_info "Split disabled: push=${PUSH}, validate-on-pr=${VALIDATE_ON_PR}"
 		exit 0
 	fi
 
@@ -503,6 +505,70 @@ smoke-test)
 	fi
 	;;
 
+resolve-local-scan-image)
+	# Resolve the first metadata tag for scanning a locally loaded image.
+	#
+	# Required environment variables:
+	#   TAGS - Newline-separated image tags from docker/metadata-action
+	#
+	# Outputs:
+	#   ref - First tag suitable for Trivy image-ref
+	: "${TAGS:?TAGS is required}"
+
+	first_tag=$(echo "$TAGS" | head -1 | tr -d '[:space:]')
+	if [[ -z "$first_tag" ]]; then
+		die "No image tag available for local Trivy scan"
+	fi
+
+	set_github_output "ref" "$first_tag"
+	log_info "Local scan image: ${first_tag}"
+	;;
+
+smoke-test-local)
+	# Run a smoke test against a locally loaded image (no registry pull).
+	#
+	# Required environment variables:
+	#   IMAGE     - Full local image reference (registry/name:tag)
+	#   PLATFORM  - Target platform (e.g. linux/arm64)
+	#   REGISTRY  - Container registry URL
+	#
+	# Optional environment variables (mutually exclusive; at least one required):
+	#   SMOKE_TEST        - Shorthand command + args; word-split into `docker run`
+	#   SMOKE_TEST_SCRIPT - Path to caller-owned script; receives IMAGE, PLATFORM,
+	#                       REGISTRY in the environment and owns the docker run
+	: "${IMAGE:?IMAGE is required}"
+	: "${PLATFORM:?PLATFORM is required}"
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${SMOKE_TEST:=}"
+	: "${SMOKE_TEST_SCRIPT:=}"
+
+	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
+		die "SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive"
+	fi
+	if [[ -z "$SMOKE_TEST" && -z "$SMOKE_TEST_SCRIPT" ]]; then
+		die "One of SMOKE_TEST or SMOKE_TEST_SCRIPT is required"
+	fi
+
+	export IMAGE PLATFORM REGISTRY
+
+	if [[ -n "$SMOKE_TEST_SCRIPT" ]]; then
+		if [[ ! -f "$SMOKE_TEST_SCRIPT" ]]; then
+			echo "::error::smoke-test-script not found: ${SMOKE_TEST_SCRIPT}"
+			exit 1
+		fi
+		echo "::group::${SMOKE_TEST_SCRIPT} (IMAGE=${IMAGE} PLATFORM=${PLATFORM})"
+		chmod +x "$SMOKE_TEST_SCRIPT"
+		"./${SMOKE_TEST_SCRIPT#./}"
+		echo "::endgroup::"
+	else
+		echo "::group::docker run --rm --platform ${PLATFORM} ${IMAGE} ${SMOKE_TEST}"
+		# Intentionally word-split SMOKE_TEST so callers can pass flags+args
+		# shellcheck disable=SC2086
+		docker run --rm --platform "${PLATFORM}" "${IMAGE}" ${SMOKE_TEST}
+		echo "::endgroup::"
+	fi
+	;;
+
 merge-manifests)
 	# Assemble a multi-arch manifest list from per-platform staging images.
 	#
@@ -601,34 +667,109 @@ cleanup-staging)
 	done < <(echo "$MATRIX" | jq -r '.[].slug')
 	;;
 
+sign-image)
+	# Sign a pushed image manifest with Cosign keyless signing.
+	#
+	# Required environment variables:
+	#   DIGEST     - Image digest (sha256:...)
+	#   REGISTRY   - Container registry URL
+	#   IMAGE_NAME - Registry-relative image name
+	: "${DIGEST:?DIGEST is required}"
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${IMAGE_NAME:?IMAGE_NAME is required}"
+
+	if ! [[ "$DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "DIGEST is not a valid sha256 digest: ${DIGEST}"
+	fi
+
+	if ! command -v cosign >/dev/null 2>&1; then
+		die "cosign not found. Install via sigstore/cosign-installer action."
+	fi
+
+	image_ref="${REGISTRY}/${IMAGE_NAME}@${DIGEST}"
+	log_info "Signing image: ${image_ref}"
+	cosign sign --yes "${image_ref}"
+	log_success "Signed image: ${image_ref}"
+	;;
+
 summary)
+	: "${REGISTRY:=ghcr.io}"
 	: "${IMAGE_NAME:=}"
 	: "${TAGS:=}"
 	: "${PLATFORMS:=}"
 	: "${PUSH:=false}"
+	: "${DIGEST:=}"
+	: "${COSIGN_SIGNED:=false}"
+	: "${SCAN_ENABLED:=false}"
+	: "${VALIDATE_ON_PR:=false}"
+	: "${MATRIX:=}"
+
+	full_image="${REGISTRY}/${IMAGE_NAME}"
 
 	add_github_summary "## Docker Build Results"
 	add_github_summary ""
 
 	add_github_summary "| Property | Value |"
 	add_github_summary "|----------|-------|"
-	add_github_summary "| Image | \`$IMAGE_NAME\` |"
-	add_github_summary "| Platforms | \`$PLATFORMS\` |"
-	add_github_summary "| Pushed | $PUSH |"
+	add_github_summary "| Image | \`${full_image}\` |"
+	add_github_summary "| Platforms | \`${PLATFORMS}\` |"
+	add_github_summary "| Pushed | ${PUSH} |"
+	if [[ "$VALIDATE_ON_PR" == "true" ]]; then
+		add_github_summary "| PR validation | enabled |"
+	fi
 	add_github_summary ""
+
+	if [[ -n "$DIGEST" ]]; then
+		add_github_summary "### Digest"
+		add_github_summary ""
+		add_github_summary "\`${DIGEST}\`"
+		add_github_summary ""
+	fi
+
+	if [[ -n "$MATRIX" && "$MATRIX" != "[]" ]]; then
+		add_github_summary "### Per-platform build matrix"
+		add_github_summary ""
+		while IFS= read -r platform; do
+			[[ -n "$platform" ]] && add_github_summary "- \`${platform}\`"
+		done < <(echo "$MATRIX" | jq -r '.[].platform')
+		add_github_summary ""
+	fi
 
 	if [[ -n "$TAGS" ]]; then
 		add_github_summary "### Tags"
 		add_github_summary ""
-		# TAGS is newline-separated, read into array properly
 		readarray -t tag_array <<<"$TAGS"
 		for tag in "${tag_array[@]}"; do
-			# Trim whitespace
 			tag=$(echo "$tag" | xargs)
 			if [[ -n "$tag" ]]; then
 				add_github_summary "- \`$tag\`"
 			fi
 		done
+		add_github_summary ""
+	fi
+
+	if [[ "$COSIGN_SIGNED" == "true" && -n "$DIGEST" ]]; then
+		# Default identity matches the signing repo; callers may tighten further.
+		: "${GITHUB_REPOSITORY:=ORG/REPO}"
+		cosign_identity="https://github.com/${GITHUB_REPOSITORY}/.*"
+
+		add_github_summary "### Image signature"
+		add_github_summary ""
+		add_github_summary "Verify with:"
+		add_github_summary ""
+		add_github_summary "\`\`\`bash"
+		add_github_summary "cosign verify ${full_image}@${DIGEST} \\"
+		add_github_summary "  --certificate-identity-regexp='${cosign_identity}' \\"
+		add_github_summary "  --certificate-oidc-issuer='https://token.actions.githubusercontent.com'"
+		add_github_summary "\`\`\`"
+		add_github_summary ""
+	fi
+
+	if [[ "$SCAN_ENABLED" == "true" ]]; then
+		add_github_summary "### Vulnerability scan"
+		add_github_summary ""
+		add_github_summary "Trivy scanned CRITICAL/HIGH findings. Review the Security tab for SARIF results."
+		add_github_summary ""
 	fi
 
 	add_github_summary ""
