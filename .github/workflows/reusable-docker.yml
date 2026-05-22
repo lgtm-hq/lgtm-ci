@@ -261,6 +261,7 @@ jobs:
       packages: write
       id-token: write
       attestations: write
+      security-events: write
 
     outputs:
       tags: ${{ steps.meta.outputs.tags }}
@@ -384,6 +385,38 @@ jobs:
           STEP: set-output-digest
           DIGEST: ${{ steps.build.outputs.digest }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Resolve local image for scan
+        if: inputs.validate-on-pr && !inputs.push && inputs.scan
+        id: local-scan-image
+        shell: bash
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          first_tag=$(echo "$TAGS" | head -1 | tr -d '[:space:]')
+          if [[ -z "$first_tag" ]]; then
+            echo "::error::No image tag available for local Trivy scan"
+            exit 1
+          fi
+          echo "ref=${first_tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Run Trivy vulnerability scanner
+        if: inputs.validate-on-pr && !inputs.push && inputs.scan
+        # Pinned to SHA for supply chain security
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ steps.local-scan-image.outputs.ref }}
+          format: "sarif"
+          output: "trivy-results.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: ${{ inputs.scan-exit-code }}
+
+      - name: Upload Trivy scan results
+        if: always() && inputs.validate-on-pr && !inputs.push && inputs.scan
+        # Pinned to SHA for supply chain security
+        uses: github/codeql-action/upload-sarif@9e0d7b8d25671d64c341c19c0152d693099fb5ba # v4.35.5
+        with:
+          sarif_file: "trivy-results.sarif"
 
       - name: Generate artifact attestation
         if: inputs.push && inputs.provenance
@@ -931,10 +964,10 @@ jobs:
     if: >-
       always() &&
       inputs.scan &&
-      (inputs.push || (inputs.validate-on-pr && needs.classify.outputs.use-split == 'false')) &&
+      inputs.push &&
       (
         (needs.classify.outputs.use-split == 'false' && needs.build.result == 'success') ||
-        (needs.classify.outputs.use-split == 'true' && inputs.push && needs.merge.result == 'success')
+        (needs.classify.outputs.use-split == 'true' && needs.merge.result == 'success')
       )
     runs-on: ubuntu-24.04
     permissions:
