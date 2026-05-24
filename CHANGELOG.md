@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.18.1] - 2026-05-24
+
+### Bug Fixes
+
+- **ci**: map host user and pass tool-options in run-lintro-docker (#206) (3631024)
+
 ## [0.18.0] - 2026-05-24
 
 ### Features
@@ -372,7 +378,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.17.2...v0.18.0
 [0.17.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.17.1...v0.17.2
 [0.17.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.17.0...v0.17.1
