@@ -63,3 +63,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-test-python: coverage merge continues on error when no artifacts exist" {
+	run awk '
+		/Merge per-version coverage artifacts/ { in_step = 1 }
+		in_step && /continue-on-error: true/ { found = 1; exit }
+		in_step && /^      - name:/ && !/Merge per-version coverage artifacts/ { exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
