@@ -121,7 +121,6 @@ jobs:
           STEP: check
           TOOLS: ${{ inputs.tools != '' && inputs.tools || inputs.lintro-tools }}
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
-          LINTRO_IMAGE: ${{ env.LINTRO_IMAGE }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
 
       - name: Upload linting report

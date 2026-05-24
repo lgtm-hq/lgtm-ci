@@ -29,6 +29,8 @@ versions = [
 if not versions:
     versions = [fallback_version]
 
+versions = list(dict.fromkeys(versions))
+
 matrix = {"include": [{"python-version": version} for version in versions]}
 
 with open(github_output, "a", encoding="utf-8") as output:

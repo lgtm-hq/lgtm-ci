@@ -43,6 +43,15 @@ teardown() {
 	assert_file_contains "$GITHUB_OUTPUT" '"python-version":"3.13"'
 }
 
+@test "generate-python-matrix: deduplicates python versions" {
+	run env PYTHON_VERSION=3.12 PYTHON_VERSIONS="3.12,3.12,3.14,3.14" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-python-matrix.sh"
+
+	assert_success
+	assert_output --partial "Python matrix: 3.12, 3.14"
+	assert_file_contains "$GITHUB_OUTPUT" 'matrix=\{"include":\[\{"python-version":"3.12"\},\{"python-version":"3.14"\}\]\}'
+}
+
 @test "generate-python-matrix: fails without GITHUB_OUTPUT" {
 	run env -u GITHUB_OUTPUT PYTHON_VERSION=3.12 \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-python-matrix.sh"
