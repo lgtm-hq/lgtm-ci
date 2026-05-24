@@ -54,6 +54,12 @@ on:
         required: false
         type: string
         default: ""
+      lintro-image:
+        description: "Pinned ghcr.io/lgtm-hq/py-lintro image (digest strongly recommended)"
+        required: false
+        type: string
+        # yamllint disable-line rule:line-length
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578"
     outputs:
       exit-code:
         description: "Exit code from lintro"
@@ -73,9 +79,7 @@ jobs:
       exit-code: ${{ steps.quality.outputs.exit-code }}
       status: ${{ steps.quality.outputs.status }}
     env:
-      # Pinned digest — keep in sync with ci.yml / pyproject.toml lintro pin
-      # yamllint disable-line rule:line-length
-      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578
+      LINTRO_IMAGE: ${{ inputs.lintro-image }}
 
     steps:
       - name: Harden runner
