@@ -54,6 +54,13 @@ on:
         required: false
         type: string
         default: ""
+      lintro-tool-options:
+        description: >-
+          Comma-separated lintro --tool-options passed to the quality check
+          (e.g. pydoclint:timeout=120,osv_scanner:check_suppressions=false)
+        required: false
+        type: string
+        default: ""
       lintro-image:
         description: "Pinned ghcr.io/lgtm-hq/py-lintro image (digest strongly recommended)"
         required: false
@@ -120,7 +127,9 @@ jobs:
         env:
           STEP: check
           TOOLS: ${{ inputs.tools != '' && inputs.tools || inputs.lintro-tools }}
+          TOOL_OPTIONS: ${{ inputs.lintro-tool-options }}
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+          MAP_HOST_USER: "true"
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
 
       - name: Upload linting report
