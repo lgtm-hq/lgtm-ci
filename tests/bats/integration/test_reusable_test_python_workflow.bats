@@ -43,3 +43,23 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-test-python: coverage merge omits delete-merged to avoid actions write" {
+	run awk '
+		/^  aggregate:/ { in_aggregate = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate:/ { in_aggregate = 0 }
+		in_aggregate && /delete-merged:/ { found = 1; exit }
+		END { exit found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-python: aggregate job grants actions read for artifact merge" {
+	run awk '
+		/^  aggregate:/ { in_aggregate = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate:/ { in_aggregate = 0 }
+		in_aggregate && /actions: read/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}

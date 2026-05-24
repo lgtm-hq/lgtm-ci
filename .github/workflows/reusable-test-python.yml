@@ -438,7 +438,6 @@ jobs:
         with:
           name: python-coverage
           pattern: python-coverage-*
-          delete-merged: true
           retention-days: 7
 
   comment-pr:
