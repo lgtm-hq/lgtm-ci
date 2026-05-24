@@ -69,6 +69,11 @@ on:
         required: false
         type: string
         default: ""
+      target:
+        description: "Docker build target stage (e.g. 'full', 'base')"
+        required: false
+        type: string
+        default: ""
       runner-map:
         description: >-
           JSON object mapping platform to runner label.
@@ -366,6 +371,7 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
           # yamllint disable rule:line-length
           cache-from: |
             ${{ inputs.no-cache == false && 'type=gha' || '' }}
@@ -561,6 +567,7 @@ jobs:
               || format('{0}/{1}:validate-{2}', inputs.registry, inputs.image-name || github.repository, matrix.slug) }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
           cache-from: |
             ${{ inputs.no-cache == false && format('type=gha,scope={0}', matrix.slug) || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}-{1}', inputs.cache-registry-ref, matrix.slug) || '' }}
