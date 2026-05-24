@@ -92,8 +92,24 @@ allowed-endpoints: >
 
 ## Dependency review
 
-`reusable-dependency-review.yml` only runs on `pull_request` events. Do not
-invoke it from `push` workflows unless you accept the job being skipped.
+`reusable-dependency-review.yml` runs on `pull_request` and `merge_group`
+events. Do not invoke it from plain `push` workflows unless you accept the job
+being skipped.
+
+## Merge queue (`merge_group`)
+
+Callers using GitHub merge queue can add `merge_group:` triggers to thin
+caller workflows alongside `pull_request:`.
+
+| Workflow | `merge_group` behavior |
+| --- | --- |
+| `reusable-codeql.yml` | Safe to run — no PR context required |
+| `reusable-validate-action-pinning.yml` | Safe to run — no PR context required |
+| `reusable-dependency-review.yml` | Runs on `merge_group` (same as PR) |
+| `reusable-semantic-pr-title.yml` | Skips on `merge_group` — title validated on PR |
+
+Semantic title validation is intentionally skipped in the merge queue because
+`amannn/action-semantic-pull-request` requires pull request context.
 
 ## Fork PR comments
 

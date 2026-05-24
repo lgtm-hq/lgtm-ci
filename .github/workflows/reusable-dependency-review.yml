@@ -31,7 +31,7 @@ on:
         type: string
         default: ""
       job-name:
-        description: "GitHub check name (only runs on pull_request events)"
+        description: "GitHub check name (runs on pull_request and merge_group events)"
         required: false
         type: string
         default: "Dependency Review"
@@ -40,7 +40,7 @@ jobs:
   dependency-review:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     permissions:
       contents: read
       pull-requests: read
