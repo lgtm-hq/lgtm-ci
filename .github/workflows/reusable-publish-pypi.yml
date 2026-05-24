@@ -39,6 +39,21 @@ on:
         required: false
         type: boolean
         default: false
+      verify-tag-version:
+        description: "Verify git tag matches pyproject.toml version"
+        required: false
+        type: boolean
+        default: true
+      ensure-tag-on-default-branch:
+        description: "Verify tagged commit is on the default branch"
+        required: false
+        type: boolean
+        default: true
+      default-branch:
+        description: "Default branch name for tag-on-default-branch check"
+        required: false
+        type: string
+        default: "main"
       working-directory:
         description: "Working directory containing the package"
         required: false
@@ -99,6 +114,8 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -110,6 +127,7 @@ jobs:
             .github/actions/
             scripts/ci/
           persist-credentials: false
+
       - name: Publish to PyPI
         id: pypi
         uses: ./.lgtm-ci-tooling/.github/actions/publish-pypi
@@ -117,6 +135,9 @@ jobs:
           validate: ${{ inputs.validate }}
           test-pypi: ${{ inputs.test-pypi }}
           dry-run: ${{ inputs.dry-run }}
+          verify-tag-version: ${{ inputs.verify-tag-version }}
+          ensure-tag-on-default-branch: ${{ inputs.ensure-tag-on-default-branch }}
+          default-branch: ${{ inputs.default-branch }}
           working-directory: ${{ inputs.working-directory }}
 
       - name: Attest build provenance
