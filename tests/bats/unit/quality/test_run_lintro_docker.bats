@@ -75,7 +75,7 @@ EOF
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
 	: >"${GITHUB_OUTPUT}"
 
-	run env STEP=check LINTRO_IMAGE=img:tag TOOL_OPTIONS="pydoclint:timeout=120" FAIL_ON_ERROR=true bash "${SCRIPT}"
+	run env STEP=check LINTRO_IMAGE=img:tag TOOL_OPTIONS="pydoclint:timeout=120" FAIL_ON_ERROR=true MAP_HOST_USER=false bash "${SCRIPT}"
 
 	assert_success
 	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
