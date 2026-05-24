@@ -389,6 +389,7 @@ jobs:
       )
     runs-on: ubuntu-latest
     permissions:
+      actions: read
       contents: read
     outputs:
       tests-passed: ${{ steps.aggregate.outputs.tests-passed }}
@@ -429,6 +430,16 @@ jobs:
           RESULTS_DIR: python-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-python-results.sh
+
+      - name: Merge per-version coverage artifacts
+        if: inputs.upload-coverage && inputs.coverage
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: python-coverage
+          pattern: python-coverage-*
+          delete-merged: true
+          retention-days: 7
 
   comment-pr:
     needs:
