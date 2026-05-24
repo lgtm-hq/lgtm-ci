@@ -58,7 +58,7 @@ EOF
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
 	: >"${GITHUB_OUTPUT}"
 
-	run env STEP=check LINTRO_IMAGE=ghcr.io/test/img:tag FAIL_ON_ERROR=true bash "${SCRIPT}"
+	run env STEP=check LINTRO_IMAGE=ghcr.io/test/img:tag FAIL_ON_ERROR=true MAP_HOST_USER=false bash "${SCRIPT}"
 
 	assert_success
 	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
@@ -68,6 +68,64 @@ EOF
 	assert_file_exists "${BATS_TEST_TMPDIR}/ws/chk-output.txt"
 }
 
+@test "run-lintro-docker.sh check passes --tool-options when TOOL_OPTIONS is set" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
+	: >"${GITHUB_OUTPUT}"
+
+	run env STEP=check LINTRO_IMAGE=img:tag TOOL_OPTIONS="pydoclint:timeout=120" FAIL_ON_ERROR=true MAP_HOST_USER=false bash "${SCRIPT}"
+
+	assert_success
+	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
+	assert_file_contains_literal "${calls}" "--tool-options"
+	assert_file_contains "${calls}" "pydoclint:timeout=120"
+}
+
+@test "run-lintro-docker.sh check maps host user when MAP_HOST_USER=true" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
+	: >"${GITHUB_OUTPUT}"
+
+	run env STEP=check LINTRO_IMAGE=img:tag MAP_HOST_USER=true FAIL_ON_ERROR=true bash "${SCRIPT}"
+
+	assert_success
+	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
+	assert_file_contains "${calls}" "--user $(id -u):$(id -g)"
+}
+
+@test "run-lintro-docker.sh check maps host user by default on GitHub Actions" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
+	: >"${GITHUB_OUTPUT}"
+
+	run env STEP=check LINTRO_IMAGE=img:tag GITHUB_ACTIONS=true FAIL_ON_ERROR=true bash "${SCRIPT}"
+
+	assert_success
+	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
+	assert_file_contains "${calls}" "--user $(id -u):$(id -g)"
+}
+
+@test "run-lintro-docker.sh check omits --user when MAP_HOST_USER is unset locally" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
+	: >"${GITHUB_OUTPUT}"
+
+	run env -u GITHUB_ACTIONS STEP=check LINTRO_IMAGE=img:tag FAIL_ON_ERROR=true bash "${SCRIPT}"
+
+	assert_success
+	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
+	run grep -qF -- "--user" "$calls"
+	assert_failure
+}
+
 @test "run-lintro-docker.sh check passes --tools when TOOLS is set" {
 	mock_command_record docker ""
 	mkdir -p "${BATS_TEST_TMPDIR}/ws"
@@ -75,7 +133,7 @@ EOF
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/gh_out"
 	: >"${GITHUB_OUTPUT}"
 
-	run env STEP=check LINTRO_IMAGE=img:tag TOOLS=ruff,yamllint FAIL_ON_ERROR=true bash "${SCRIPT}"
+	run env STEP=check LINTRO_IMAGE=img:tag TOOLS=ruff,yamllint FAIL_ON_ERROR=true MAP_HOST_USER=false bash "${SCRIPT}"
 
 	assert_success
 	local calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
