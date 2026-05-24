@@ -3,8 +3,11 @@
 # Purpose: Build and publish Python packages to PyPI
 #
 # Environment variables:
-#   STEP: validate | build | validate-dist | summary
+#   STEP: preflight | validate | build | validate-dist | summary
 #   WORKING_DIRECTORY: Directory containing the package (default: .)
+#   VERIFY_TAG_VERSION: Verify git tag matches pyproject.toml version
+#   ENSURE_TAG_ON_DEFAULT_BRANCH: Verify tagged commit is on the default branch
+#   DEFAULT_BRANCH: Default branch name (default: main)
 #   PACKAGE_NAME: Package name (for summary)
 #   PACKAGE_VERSION: Package version (for summary)
 #   DRY_RUN: Whether this is a dry run
@@ -23,6 +26,44 @@ source "$SCRIPT_DIR/../lib/publish.sh"
 cd "$WORKING_DIRECTORY"
 
 case "$STEP" in
+preflight)
+	: "${VERIFY_TAG_VERSION:=false}"
+	: "${ENSURE_TAG_ON_DEFAULT_BRANCH:=false}"
+	: "${DEFAULT_BRANCH:=main}"
+
+	if [[ "$VERIFY_TAG_VERSION" != "true" && "$ENSURE_TAG_ON_DEFAULT_BRANCH" != "true" ]]; then
+		log_info "Preflight checks disabled, skipping"
+		exit 0
+	fi
+
+	tag="${GITHUB_REF_NAME:-}"
+	if [[ -z "$tag" ]]; then
+		die "GITHUB_REF_NAME not set; cannot run tag preflight"
+	fi
+
+	if [[ "$VERIFY_TAG_VERSION" == "true" ]]; then
+		version=$(extract_pypi_version ".") || die "Could not extract version from pyproject.toml"
+		tag_stripped="${tag#v}"
+		log_info "pyproject version: ${version} / tag: ${tag} (stripped: ${tag_stripped})"
+		if [[ "$version" != "$tag_stripped" ]]; then
+			die "Version mismatch: pyproject=${version} tag=${tag}"
+		fi
+		log_success "Tag version matches pyproject.toml"
+	fi
+
+	if [[ "$ENSURE_TAG_ON_DEFAULT_BRANCH" == "true" ]]; then
+		git fetch --no-tags origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+		ref="${GITHUB_REF:-refs/tags/${tag}}"
+		tag_commit=$(git rev-parse "${ref}^{}")
+		log_info "Tag ${tag} -> ${tag_commit}"
+		if git merge-base --is-ancestor "$tag_commit" "origin/${DEFAULT_BRANCH}"; then
+			log_success "Tag commit is on ${DEFAULT_BRANCH}"
+		else
+			die "Tag commit is not on ${DEFAULT_BRANCH}; aborting publish"
+		fi
+	fi
+	;;
+
 validate)
 	log_info "Validating package metadata..."
 

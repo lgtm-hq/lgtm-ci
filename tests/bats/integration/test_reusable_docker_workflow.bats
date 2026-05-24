@@ -6,6 +6,22 @@ load "../../helpers/common"
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 
+@test "reusable-docker: build job passes target input to build-push-action" {
+	run grep -E '^[[:space:]]+target: \$\{\{ inputs\.target \}\}$' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: build-per-platform job passes target input to build-push-action" {
+	run grep -cE '^[[:space:]]+target: \$\{\{ inputs\.target \}\}$' "$WORKFLOW"
+	assert_success
+	assert_output "2"
+}
+
+@test "reusable-docker: exposes target workflow input" {
+	run grep -E '^[[:space:]]+target:$' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-docker: build job gates sbom and provenance on push" {
 	run grep -E '^[[:space:]]+provenance: \$\{\{ inputs\.provenance && inputs\.push \}\}$' "$WORKFLOW"
 	assert_success
