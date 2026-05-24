@@ -75,6 +75,16 @@ EOF
 	assert_output --partial "Expected 2 matrix summaries, found 1"
 }
 
+@test "aggregate-python-results: fails without GITHUB_OUTPUT" {
+	_write_summary "3.12" 5 0 5 80.00 true
+
+	run env -u GITHUB_OUTPUT RESULTS_DIR=python-results \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-python-results.sh"
+
+	assert_failure
+	assert_output --partial "GITHUB_OUTPUT is required"
+}
+
 @test "aggregate-python-results: fails when no summaries exist" {
 	run env RESULTS_DIR=python-results \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-python-results.sh"

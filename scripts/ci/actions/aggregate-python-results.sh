@@ -35,6 +35,11 @@ if not summaries:
     print(f"No matrix summaries found in {results_dir}", file=sys.stderr)
     raise SystemExit(1)
 
+github_output = os.environ.get("GITHUB_OUTPUT")
+if not github_output:
+    print("GITHUB_OUTPUT is required", file=sys.stderr)
+    raise SystemExit(1)
+
 matrix_json = os.environ.get("MATRIX_JSON", "")
 if matrix_json:
     matrix = json.loads(matrix_json)
@@ -67,7 +72,7 @@ coverage_percent = ""
 if coverage_values:
     coverage_percent = f"{sum(coverage_values) / len(coverage_values):.2f}"
 
-with Path(os.environ["GITHUB_OUTPUT"]).open("a", encoding="utf-8") as output:
+with Path(github_output).open("a", encoding="utf-8") as output:
     output.write(f"tests-passed={passed}\n")
     output.write(f"tests-failed={failed}\n")
     output.write(f"tests-total={total}\n")
