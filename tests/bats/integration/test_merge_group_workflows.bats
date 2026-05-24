@@ -7,7 +7,15 @@ load "../../helpers/common"
 @test "reusable-dependency-review: runs on pull_request and merge_group" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-dependency-review.yml"
 
-	run grep -E "if: github.event_name == 'pull_request' \|\| github.event_name == 'merge_group'" "$workflow"
+	run awk '
+		/^[[:space:]]*if:/ {
+			if ($0 ~ /github\.event_name/ && $0 ~ /pull_request/ && $0 ~ /merge_group/) {
+				found = 1
+				exit
+			}
+		}
+		END { exit !found }
+	' "$workflow"
 	assert_success
 }
 
