@@ -33,11 +33,8 @@ prepare)
 	USE_DIGEST=false
 	if [[ -n "$SUBJECT_DIGEST" ]]; then
 		USE_DIGEST=true
-	elif [[ -f "$SUBJECT_PATH" ]]; then
-		SUBJECT_DIGEST="sha256:$(sha256sum "$SUBJECT_PATH" | cut -d' ' -f1)"
-		log_info "Calculated digest: $SUBJECT_DIGEST"
-	else
-		log_warn "Cannot calculate digest for non-file subject"
+	elif [[ ! -f "$SUBJECT_PATH" ]]; then
+		log_warn "Non-file subject; passing subject-path to attest-build-provenance"
 	fi
 
 	# Determine subject name if not provided
@@ -47,7 +44,11 @@ prepare)
 
 	log_info "Subject: $SUBJECT_NAME"
 	log_info "Path: $SUBJECT_PATH"
-	log_info "Digest: ${SUBJECT_DIGEST:-not calculated}"
+	if [[ "$USE_DIGEST" == "true" ]]; then
+		log_info "Digest: $SUBJECT_DIGEST"
+	else
+		log_info "Attestation input: subject-path (digest computed by attest-build-provenance)"
+	fi
 
 	# actions/attest-build-provenance v4+ accepts only one subject parameter.
 	set_github_output "subject-name" "$SUBJECT_NAME"

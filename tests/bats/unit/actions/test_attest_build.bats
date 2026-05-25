@@ -32,16 +32,18 @@ _run_prepare() {
 	_run_prepare
 
 	assert_success
-	grep -q '^subject-path=' "$GITHUB_OUTPUT"
-	grep -q '^subject-name=' "$GITHUB_OUTPUT"
-	! grep -q '^subject-digest=' "$GITHUB_OUTPUT"
+	assert_file_contains "$GITHUB_OUTPUT" '^subject-path='
+	assert_file_contains "$GITHUB_OUTPUT" '^subject-name='
+	run grep -qE -- '^subject-digest=' "$GITHUB_OUTPUT"
+	assert_failure
 }
 
 @test "attest-build prepare: outputs subject-digest when digest provided" {
 	_run_prepare "${BATS_TEST_TMPDIR}/artifact.txt" "sha256:deadbeef"
 
 	assert_success
-	grep -q '^subject-digest=sha256:deadbeef' "$GITHUB_OUTPUT"
-	grep -q '^subject-name=' "$GITHUB_OUTPUT"
-	! grep -q '^subject-path=' "$GITHUB_OUTPUT"
+	assert_file_contains "$GITHUB_OUTPUT" '^subject-digest=sha256:deadbeef'
+	assert_file_contains "$GITHUB_OUTPUT" '^subject-name='
+	run grep -qE -- '^subject-path=' "$GITHUB_OUTPUT"
+	assert_failure
 }
