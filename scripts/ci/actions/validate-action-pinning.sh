@@ -86,6 +86,7 @@ extract_literal_ref() {
 	fi
 
 	value="${BASH_REMATCH[1]}"
+	value="${value%%#*}"
 	value="${value%"${value##*[![:space:]]}"}"
 	value="${value#\"}"
 	value="${value%\"}"
@@ -217,7 +218,7 @@ scan_file() {
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line_number=$((line_number + 1))
 
-		if [[ "$line" =~ ^[[:space:]]*-?[[:space:]]*(uses|name):[[:space:]]* ]]; then
+		if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(uses|name):[[:space:]]* ]]; then
 			in_lgtm_ci_checkout=false
 		fi
 
