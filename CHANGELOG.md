@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.18.3] - 2026-05-25
+
+### Bug Fixes
+
+- **ci**: resolve 3 main-branch failures after v0.18.2 adoption (#215) (e62885b)
+
+### Other Changes
+
+- **deps**: update digest (#213) (970c50a)
+
 ## [0.18.2] - 2026-05-24
 
 ### Bug Fixes
@@ -384,7 +394,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.3...HEAD
+[0.18.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.17.2...v0.18.0
