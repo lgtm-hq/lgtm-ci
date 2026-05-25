@@ -51,7 +51,7 @@ runs:
 
     - name: Install Rust toolchain
       # Pinned to SHA for supply chain security
-      uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # master
+      uses: dtolnay/rust-toolchain@3c5f7ea28cd621ae0bf5283f0e981fb97b8a7af9 # v1
       with:
         toolchain: ${{ inputs.toolchain }}
         components: ${{ inputs.components }}
