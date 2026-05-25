@@ -106,6 +106,33 @@ allowed-endpoints: >
   metrics.semgrep.dev:443
 ```
 
+## Action pinning policy
+
+Org repos must pin GitHub Actions to **commit SHAs only** and add a trailing
+Renovate version comment on the same line. Tag refs (for example `@v4`) fail
+`reusable-validate-action-pinning.yml` unless the action is listed in the narrow
+`allow-tag-exceptions` input.
+
+| Pin | Result |
+| --- | --- |
+| `uses: org/action@sha` | Fail — missing `# vX.Y.Z` |
+| `uses: org/action@v1.2.3` | Fail — tag pin |
+| `uses: org/action@sha # v1.2.3` | Pass |
+| `tooling-ref: 'sha'` | Fail — missing `# vX.Y.Z` |
+| `tooling-ref: 'sha' # v0.18.4` | Pass |
+| `ref: 'sha'` under `repository: lgtm-hq/lgtm-ci` checkout | Same rule as `tooling-ref` |
+
+Canonical examples:
+
+```yaml
+uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+tooling-ref: '95e202aed67142e8429bd8d37a0e45886f0d6218' # v0.18.4
+```
+
+Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.
+Bare SHA pins without version comments are invisible to Renovate and are blocked
+by design.
+
 ## Dependency review
 
 `reusable-dependency-review.yml` runs on `pull_request` and `merge_group`
