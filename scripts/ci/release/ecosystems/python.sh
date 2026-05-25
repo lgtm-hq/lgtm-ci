@@ -110,7 +110,12 @@ write_file_atomic "$INIT_FILE" \
 	sed "s|^__version__[[:space:]]*=.*|__version__ = \"$NEXT_VERSION\"|" "$INIT_FILE"
 
 # Verify the write
-ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$INIT_FILE")
+ACTUAL=$(awk '/^__version__[[:space:]]*=/ {
+		gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, "")
+		gsub(/["'"'"'].*/, "")
+		print
+		exit
+	}' "$INIT_FILE")
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[python] __init__.py verification failed: expected $NEXT_VERSION, got $ACTUAL"
 	exit 1

@@ -304,7 +304,7 @@ run_runner() {
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -320,7 +320,7 @@ run_runner() {
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -335,7 +335,7 @@ run_runner() {
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_app/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_app/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -356,7 +356,27 @@ EOF
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/src/my_app/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/src/my_app/__init__.py")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: verifies __init__.py after update when file has leading docstring" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "0.64.2" "lintro"
+	mkdir -p "$BATS_TEST_TMPDIR/lintro"
+	cat >"$BATS_TEST_TMPDIR/lintro/__init__.py" <<EOF
+"""Lintro - A unified CLI core for code formatting, linting, and quality assurance."""
+
+__version__ = "0.64.2"
+EOF
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/lintro/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -372,7 +392,7 @@ EOF
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_cool_pkg/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_cool_pkg/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -428,11 +448,11 @@ EOF
 	[[ "$ACTUAL" == "9.8.7" ]]
 
 	# Verify the override init file was updated
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/version_info.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/version_info.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 
 	# Verify the auto-discoverable decoy was NOT touched
-	DECOY=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/turbo_themes/__init__.py")
+	DECOY=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/turbo_themes/__init__.py")
 	[[ "$DECOY" == "0.0.0" ]]
 }
 
@@ -665,7 +685,7 @@ EOF
 	[[ "$ACTUAL" == "9.8.7" ]]
 
 	# Verify the custom init file was updated
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/ver.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/ver.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
