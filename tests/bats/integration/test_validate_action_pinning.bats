@@ -364,6 +364,34 @@ jobs:
 	assert_github_output "offenders" "1"
 }
 
+@test "validate-action-pinning: non-Renovate tooling-ref comment fails validation" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on:
+  workflow_call:
+    inputs:
+      tooling-ref:
+        type: string
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    with:
+      tooling-ref: '"'"'95e202aed67142e8429bd8d37a0e45886f0d6218'"'"' # stable
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "tooling-ref: 95e202aed67142e8429bd8d37a0e45886f0d6218"
+	assert_output --partial "missing Renovate version comment"
+	assert_github_output "offenders" "1"
+}
+
 @test "validate-action-pinning: lgtm-ci checkout ref requires version comment" {
 	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
 	create_workflow "$scan_dir" "ci.yml" '
@@ -404,6 +432,35 @@ jobs:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: '"'"'95e202aed67142e8429bd8d37a0e45886f0d6218'"'"'
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "ref: 95e202aed67142e8429bd8d37a0e45886f0d6218"
+	assert_output --partial "missing Renovate version comment"
+	assert_github_output "offenders" "1"
+}
+
+@test "validate-action-pinning: non-Renovate lgtm-ci checkout ref comment fails validation" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          name: custom-checkout-name
+          ref: '"'"'95e202aed67142e8429bd8d37a0e45886f0d6218'"'"' # main
 '
 
 	run bash -c '

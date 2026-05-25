@@ -44,12 +44,12 @@ runs:
     - name: Validate action pinning
       id: validate
       shell: bash
-      run: |
-        export INPUT_ENFORCE="${{ inputs.enforce }}"
-        export INPUT_ALLOW_TAG_EXCEPTIONS="${{ inputs['allow-tag-exceptions'] != '' \
-          && inputs['allow-tag-exceptions'] || inputs['allow-org-versions'] }}"
-        export INPUT_SCAN_PATHS="${{ inputs['scan-paths'] }}"
-        "$SCRIPTS_DIR/ci/actions/validate-action-pinning.sh"
+      env:
+        INPUT_ENFORCE: ${{ inputs.enforce }}
+        INPUT_ALLOW_TAG_EXCEPTIONS: ${{ inputs['allow-tag-exceptions'] }}
+        INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}
+        INPUT_SCAN_PATHS: ${{ inputs['scan-paths'] }}
+      run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh
 
 branding:
   icon: "shield"
