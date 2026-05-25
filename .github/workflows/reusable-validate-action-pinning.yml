@@ -9,8 +9,11 @@ on:
         required: false
         type: boolean
         default: true
-      allow-list:
-        description: "Comma-separated action prefixes exempt from SHA pinning"
+      allow-tag-exceptions:
+        description: >-
+          Comma-separated full action names allowed to use tag refs when no SHA
+          is available (narrow escape hatch; SHA + version comment is required
+          otherwise)
         required: false
         type: string
         default: ""
@@ -70,5 +73,5 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/validate-action-pinning
         with:
           enforce: ${{ inputs.fail-on-error }}
-          allow-org-versions: ${{ inputs.allow-list }}
+          allow-tag-exceptions: ${{ inputs.allow-tag-exceptions }}
           scan-paths: ${{ inputs.scan-paths }}

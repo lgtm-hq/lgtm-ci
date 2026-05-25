@@ -1,17 +1,23 @@
 ---
 name: "Validate Action Pinning"
-description: "Ensure all GitHub Actions references are pinned to commit SHAs"
+description: >-
+  Ensure GitHub Actions references use SHA pins with Renovate version comments
 author: "lgtm-hq"
 
 inputs:
   enforce:
-    description: "Fail if non-pinned actions are found"
+    description: "Fail if pinning policy violations are found"
     required: false
     default: "true"
+  allow-tag-exceptions:
+    description: >-
+      Comma-separated full action names allowed to use tag refs when no SHA is
+      available (e.g., some-org/action-without-shas)
+    required: false
+    default: ""
   allow-org-versions:
     description: >-
-      Comma-separated org/repo prefixes allowed to use version tags
-      (e.g., lgtm-hq/lgtm-ci)
+      Deprecated alias for allow-tag-exceptions. Prefer allow-tag-exceptions.
     required: false
     default: ""
   scan-paths:
@@ -23,7 +29,7 @@ inputs:
 
 outputs:
   offenders:
-    description: "Count of non-pinned action references found"
+    description: "Count of pinning policy violations found"
     value: ${{ steps.validate.outputs.offenders }}
 
 runs:
@@ -40,6 +46,7 @@ runs:
       shell: bash
       env:
         INPUT_ENFORCE: ${{ inputs.enforce }}
+        INPUT_ALLOW_TAG_EXCEPTIONS: ${{ inputs['allow-tag-exceptions'] }}
         INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}
         INPUT_SCAN_PATHS: ${{ inputs['scan-paths'] }}
       run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh

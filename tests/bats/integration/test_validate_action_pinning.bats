@@ -34,10 +34,34 @@ create_workflow() {
 }
 
 # =============================================================================
-# SHA-pinned actions pass
+# SHA-pinned actions with version comments pass
 # =============================================================================
 
-@test "validate-action-pinning: SHA-pinned actions pass validation" {
+@test "validate-action-pinning: annotated SHA-pinned actions pass validation" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+      - uses: actions/setup-node@1a4442cacd436585916f16a2e5b1385ca3b5e13c # v4
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
+	assert_output --partial "All action references follow SHA pinning with Renovate version comments"
+	assert_github_output "offenders" "0"
+}
+
+@test "validate-action-pinning: bare SHA pins fail without Renovate version comment" {
 	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
 	create_workflow "$scan_dir" "ci.yml" '
 name: CI
@@ -47,25 +71,27 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29
-      - uses: actions/setup-node@1a4442cacd436585916f16a2e5b1385ca3b5e13c
+      - uses: actions/setup-node@1a4442cacd436585916f16a2e5b1385ca3b5e13c # v4
 '
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
-	assert_success
-	assert_output --partial "All action references are properly pinned"
-	assert_github_output "offenders" "0"
+	assert_failure
+	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29"
+	refute_output --partial "actions/setup-node"
+	assert_github_output "offenders" "1"
 }
 
 # =============================================================================
 # Version-tagged actions fail
 # =============================================================================
 
-@test "validate-action-pinning: version-tagged actions fail when not in allow list" {
+@test "validate-action-pinning: version-tagged actions fail when not in exception list" {
 	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
 	create_workflow "$scan_dir" "ci.yml" '
 name: CI
@@ -80,12 +106,12 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_failure
-	assert_output --partial "unpinned action reference"
+	assert_output --partial "action pinning violation"
 	assert_output --partial "actions/checkout@v4"
 	assert_output --partial "actions/setup-node@v3"
 	assert_github_output "offenders" "2"
@@ -105,12 +131,12 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=false
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_success
-	assert_output --partial "unpinned action reference"
+	assert_output --partial "action pinning violation"
 	assert_github_output "offenders" "1"
 }
 
@@ -133,12 +159,12 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_success
-	assert_output --partial "All action references are properly pinned"
+	assert_output --partial "All action references follow SHA pinning with Renovate version comments"
 	assert_github_output "offenders" "0"
 }
 
@@ -161,20 +187,20 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_success
-	assert_output --partial "All action references are properly pinned"
+	assert_output --partial "All action references follow SHA pinning with Renovate version comments"
 	assert_github_output "offenders" "0"
 }
 
 # =============================================================================
-# Allowed org prefixes are respected
+# Tag pin exceptions are respected
 # =============================================================================
 
-@test "validate-action-pinning: allowed org prefixes bypass SHA requirement" {
+@test "validate-action-pinning: tag pin exceptions bypass SHA requirement" {
 	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
 	create_workflow "$scan_dir" "ci.yml" '
 name: CI
@@ -190,20 +216,19 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS="lgtm-hq/lgtm-ci"
+		export INPUT_ALLOW_TAG_EXCEPTIONS="lgtm-hq/lgtm-ci/.github/actions/setup-env,lgtm-hq/lgtm-ci/.github/actions/run-tests"
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_failure
-	assert_output --partial "unpinned action reference"
+	assert_output --partial "action pinning violation"
 	assert_output --partial "actions/checkout@v4"
-	# lgtm-hq actions should not appear in offender lines
 	refute_output --partial "lgtm-hq/lgtm-ci/.github/actions/setup-env@v1"
 	refute_output --partial "lgtm-hq/lgtm-ci/.github/actions/run-tests@main"
 	assert_github_output "offenders" "1"
 }
 
-@test "validate-action-pinning: allow-list prefix does not match colliding repo names" {
+@test "validate-action-pinning: tag exceptions require exact action name match" {
 	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
 	create_workflow "$scan_dir" "ci.yml" '
 name: CI
@@ -218,18 +243,18 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS="org/repo"
+		export INPUT_ALLOW_TAG_EXCEPTIONS="org/repo"
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_failure
-	assert_output --partial "unpinned action reference"
+	assert_output --partial "action pinning violation"
 	assert_output --partial "org/repo-evil@v1"
 	refute_output --partial "ci.yml:8: org/repo@v1"
 	assert_github_output "offenders" "1"
 }
 
-@test "validate-action-pinning: multiple allowed org prefixes work" {
+@test "validate-action-pinning: multiple tag pin exceptions work" {
 	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
 	create_workflow "$scan_dir" "ci.yml" '
 name: CI
@@ -244,12 +269,12 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS="lgtm-hq/lgtm-ci, my-org/my-action"
+		export INPUT_ALLOW_TAG_EXCEPTIONS="lgtm-hq/lgtm-ci/.github/actions/setup-env, my-org/my-action"
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_success
-	assert_output --partial "All action references are properly pinned"
+	assert_output --partial "All action references follow SHA pinning with Renovate version comments"
 	assert_github_output "offenders" "0"
 }
 
@@ -272,12 +297,211 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_success
-	assert_output --partial "All action references are properly pinned"
+	assert_output --partial "All action references follow SHA pinning with Renovate version comments"
+	assert_github_output "offenders" "0"
+}
+
+# =============================================================================
+# tooling-ref and lgtm-ci checkout ref scanning
+# =============================================================================
+
+@test "validate-action-pinning: annotated tooling-ref passes validation" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on:
+  workflow_call:
+    inputs:
+      tooling-ref:
+        type: string
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    with:
+      tooling-ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # v0.18.4
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
+	assert_github_output "offenders" "0"
+}
+
+@test "validate-action-pinning: bare tooling-ref fails without version comment" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on:
+  workflow_call:
+    inputs:
+      tooling-ref:
+        type: string
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    with:
+      tooling-ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"'
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "tooling-ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
+	assert_output --partial "missing Renovate version comment"
+	assert_github_output "offenders" "1"
+}
+
+@test "validate-action-pinning: non-Renovate tooling-ref comment fails validation" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on:
+  workflow_call:
+    inputs:
+      tooling-ref:
+        type: string
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    with:
+      tooling-ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # stable
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "tooling-ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
+	assert_output --partial "missing Renovate version comment"
+	assert_github_output "offenders" "1"
+}
+
+@test "validate-action-pinning: lgtm-ci checkout ref requires version comment" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # v0.18.4
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
+	assert_github_output "offenders" "0"
+}
+
+@test "validate-action-pinning: bare lgtm-ci checkout ref fails without version comment" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"'
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
+	assert_output --partial "missing Renovate version comment"
+	assert_github_output "offenders" "1"
+}
+
+@test "validate-action-pinning: non-Renovate lgtm-ci checkout ref comment fails validation" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          name: custom-checkout-name
+          ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # main
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
+	assert_output --partial "missing Renovate version comment"
+	assert_github_output "offenders" "1"
+}
+
+@test "validate-action-pinning: lgtm-ci checkout context does not leak across jobs" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  tooling:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # v0.18.4
+  caller:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    with:
+      ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"'
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
 	assert_github_output "offenders" "0"
 }
 
@@ -294,7 +518,7 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29
+      - uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
       - uses: actions/setup-node@v3
       - uses: ./local-action
       - uses: docker://alpine:3.18
@@ -303,14 +527,13 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
 	assert_failure
 	assert_output --partial "actions/setup-node@v3"
 	assert_output --partial "some-org/some-action@main"
-	# Pinned actions, local refs, and docker refs should not appear in offender lines
 	refute_output --partial "ci.yml:8: actions/checkout"
 	refute_output --partial "ci.yml:10: ./local-action"
 	refute_output --partial "ci.yml:11: docker://"
@@ -345,7 +568,7 @@ runs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$workflows_dir"' '"$actions_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
@@ -365,7 +588,7 @@ runs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
@@ -377,7 +600,7 @@ runs:
 @test "validate-action-pinning: warns when scan path does not exist" {
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="/nonexistent/path"
 		bash "$SCRIPT" 2>&1
 	'
@@ -400,7 +623,7 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
@@ -416,7 +639,7 @@ jobs:
 
 	run bash -c '
 		export INPUT_ENFORCE=true
-		export INPUT_ALLOW_ORG_VERSIONS=""
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
 		export INPUT_SCAN_PATHS="'"$scan_dir"'"
 		bash "$SCRIPT" 2>&1
 	'
