@@ -17,7 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **workflows**: reverse checkout order in test publish workflows so Pages deploy keeps tooling (#217)
+- **workflows**: reverse checkout order in test publish workflows so Pages deploy keeps tooling (#218)
 
 ### Security
 
