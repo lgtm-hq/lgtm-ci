@@ -122,11 +122,15 @@ Renovate version comment on the same line. Tag refs (for example `@v4`) fail
 | `tooling-ref: 'sha' # v0.18.4` | Pass |
 | `ref: 'sha'` under `repository: lgtm-hq/lgtm-ci` checkout | Same rule as `tooling-ref` |
 
+Use the **release commit SHA** for `tooling-ref` and lgtm-ci checkout `ref` pins, not the
+annotated tag object SHA. For example, `v0.18.4` resolves to release commit
+`d3736367191ddaf56c41804d2dd5174732ed2d2b`, not tag object `95e202ae…`.
+
 Canonical examples:
 
 ```yaml
 uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
-tooling-ref: '95e202aed67142e8429bd8d37a0e45886f0d6218' # v0.18.4
+tooling-ref: 'd3736367191ddaf56c41804d2dd5174732ed2d2b' # v0.18.4
 ```
 
 Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.

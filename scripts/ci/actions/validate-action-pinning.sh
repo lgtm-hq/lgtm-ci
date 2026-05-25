@@ -21,6 +21,7 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 
 readonly VERSION_COMMENT_PATTERN='#[[:space:]]*v[0-9]+(\.[0-9]+)*'
 readonly LGTM_CI_REPOSITORY_PATTERN='repository:[[:space:]]*['\''"]?lgtm-hq/lgtm-ci['\''"]?'
+readonly LGTM_CI_RELEASE_COMMIT_SHA='d3736367191ddaf56c41804d2dd5174732ed2d2b'
 
 # =============================================================================
 # Parse allowed tag exceptions (exact action names)
@@ -218,6 +219,11 @@ scan_file() {
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line_number=$((line_number + 1))
 
+		if [[ "$line" =~ ^jobs:[[:space:]]*$ ]] ||
+			[[ "$line" =~ ^[[:space:]]{2}[a-zA-Z_][a-zA-Z0-9_-]*:[[:space:]]*($|[[:space:]]*#) ]]; then
+			in_lgtm_ci_checkout=false
+		fi
+
 		if [[ "$line" =~ ^[[:space:]]*-[[:space:]]+(uses|name):[[:space:]]* ]]; then
 			in_lgtm_ci_checkout=false
 		fi
@@ -252,7 +258,7 @@ if [[ $offender_count -gt 0 ]]; then
 	echo "" >&2
 	log_info "LGTM HQ policy: SHA-only pins with a trailing Renovate version comment."
 	log_info "Example uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4"
-	log_info "Example tooling-ref: '95e202aed67142e8429bd8d37a0e45886f0d6218' # v0.18.4"
+	log_info "Example tooling-ref: '${LGTM_CI_RELEASE_COMMIT_SHA}' # v0.18.4"
 
 	if [[ "$INPUT_ENFORCE" == "true" ]]; then
 		exit 1
