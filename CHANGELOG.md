@@ -17,9 +17,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **workflows**: reverse checkout order in test publish workflows so Pages deploy keeps tooling (#218)
-
 ### Security
+
+## [0.18.4] - 2026-05-25
+
+### Bug Fixes
+
+- **ci**: reverse checkout order in test publish workflows for Pages deploy (#218) (862b139)
+
+### Previously Unreleased
+
+- **workflows**: reverse checkout order in test publish workflows so Pages deploy keeps tooling (#218)
 
 ## [0.18.3] - 2026-05-25
 
@@ -396,7 +404,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.4...HEAD
+[0.18.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.0...v0.18.1
