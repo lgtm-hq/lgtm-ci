@@ -32,6 +32,22 @@ Where applicable, workflows accept:
 `reusable-test-node-publish.yml` in a separate caller job when publishing is
 required.
 
+### Isolated publish jobs (Pages / coverage badge)
+
+`reusable-test-python-publish.yml` and `reusable-test-node-publish.yml` run in a
+**fresh workspace** (separate reusable-workflow job from the test matrix). The
+caller repository checkout must initialize `.git` before tooling is added:
+
+1. Harden runner (`step-security/harden-runner` — no tooling checkout yet)
+2. Checkout repository (caller repo at workspace root)
+3. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` alongside the repo)
+4. Download artifacts, badge generation, GitHub Pages publish (local tooling actions)
+
+`clean: false` on the repository checkout does **not** help here: without an
+existing `.git`, `actions/checkout` wipes the workspace and deletes
+`.lgtm-ci-tooling/` if tooling was checked out first. Match
+`reusable-publish-pypi.yml` and `reusable-pr-auto-assign.yml`.
+
 ## Low-noise Rust and Node checks
 
 Prefer split workflows to avoid skipped checks in PR UI:
