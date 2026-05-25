@@ -55,7 +55,7 @@ runs:
       # Pinned to SHA for supply chain security
       uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
       with:
-        subject-path: ${{ steps.prepare.outputs.subject-path }}
+        subject-path: ${{ steps.prepare.outputs.subject-digest == '' && steps.prepare.outputs.subject-path || '' }}
         subject-digest: ${{ steps.prepare.outputs.subject-digest }}
         subject-name: ${{ steps.prepare.outputs.subject-name }}
         push-to-registry: ${{ inputs.push-to-registry }}
