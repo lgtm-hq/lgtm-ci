@@ -62,3 +62,11 @@ _publish_tooling_actions_ok() {
 	run grep -q 'clean: false' "$workflow"
 	assert_failure
 }
+
+@test "publish-test-results: uses official GitHub Pages actions" {
+	local action="${PROJECT_ROOT}/.github/actions/publish-test-results/action.yml"
+	run grep -E 'peaceiris|actions-gh-pages' "$action"
+	assert_failure
+	run grep -qE 'actions/(configure-pages|upload-pages-artifact|deploy-pages)@' "$action"
+	assert_success
+}

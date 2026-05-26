@@ -216,6 +216,23 @@ deploy)
 
 pages-url)
 	: "${TARGET_DIR:=.}"
+	: "${BASE_PAGE_URL:=}"
+
+	# Prefer deploy-pages output when available (official Pages workflow)
+	if [[ -n "$BASE_PAGE_URL" ]]; then
+		base="${BASE_PAGE_URL%/}/"
+		target_dir="${TARGET_DIR#.}"
+		target_dir="${target_dir%/}"
+		target_dir="${target_dir#/}"
+		if [[ -n "$target_dir" && "$target_dir" != "." ]]; then
+			pages_url="${base}${target_dir}/"
+		else
+			pages_url="$base"
+		fi
+		set_github_output "pages-url" "$pages_url"
+		log_info "GitHub Pages URL: $pages_url"
+		exit 0
+	fi
 
 	owner=""
 	repo=""
