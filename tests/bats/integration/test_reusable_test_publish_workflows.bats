@@ -27,6 +27,29 @@ _publish_tooling_actions_ok() {
 	' "$workflow"
 }
 
+_publish_pages_contract_ok() {
+	local workflow="$1"
+	awk '
+		/^  publish:/ { in_publish = 1 }
+		in_publish && /name: github-pages/ { env = 1 }
+		in_publish && /id-token: write/ { id_token = 1 }
+		in_publish && /contents: read/ { contents_read = 1 }
+		in_publish && /group: pages-\$\{\{ github.repository \}\}-\$\{\{ github.ref \}\}/ {
+			concurrency = 1
+		}
+		END { exit !(env && id_token && contents_read && concurrency) }
+	' "$workflow"
+}
+
+_publish_no_contents_write_ok() {
+	local workflow="$1"
+	awk '
+		/^  publish:/ { in_publish = 1 }
+		in_publish && /contents: write/ { exit 1 }
+		END { exit 0 }
+	' "$workflow"
+}
+
 @test "reusable-test-python-publish: checkout order preserves tooling in isolated jobs" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-python-publish.yml"
 	run _publish_checkout_order_ok "$workflow"
@@ -111,17 +134,17 @@ _publish_tooling_actions_ok() {
 
 @test "reusable-coverage: publish job uses official Pages contract" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-coverage.yml"
-	run awk '/^  publish:/{p=1} p&&/name: github-pages/{e=1} p&&/id-token: write/{i=1} p&&/contents: read/{r=1} p&&/group: pages-\$\{\{ github.repository \}\}-\$\{\{ github.ref \}\}/{c=1} END{exit !(e&&i&&r&&c)}' "$workflow"
+	run _publish_pages_contract_ok "$workflow"
 	assert_success
-	run awk '/^  publish:/{p=1} p&&/contents: write/{exit 1} END{exit 0}' "$workflow"
+	run _publish_no_contents_write_ok "$workflow"
 	assert_success
 }
 
 @test "reusable-test-e2e-matrix: publish job uses official Pages contract" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-e2e-matrix.yml"
-	run awk '/^  publish:/{p=1} p&&/name: github-pages/{e=1} p&&/id-token: write/{i=1} p&&/contents: read/{r=1} p&&/group: pages-\$\{\{ github.repository \}\}-\$\{\{ github.ref \}\}/{c=1} END{exit !(e&&i&&r&&c)}' "$workflow"
+	run _publish_pages_contract_ok "$workflow"
 	assert_success
-	run awk '/^  publish:/{p=1} p&&/contents: write/{exit 1} END{exit 0}' "$workflow"
+	run _publish_no_contents_write_ok "$workflow"
 	assert_success
 }
 
