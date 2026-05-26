@@ -57,14 +57,27 @@ This serializes deployments to the same site on the same ref (including
 ## Multi-publisher limitation
 
 If a repository runs **more than one** publish workflow to the same GitHub Pages
-site in the same pipeline (for example `reusable-test-python-publish` and
-`reusable-test-node-publish` on one push), the **last** deployment wins and
-**removes** content from earlier jobs. The old gh-pages branch model could keep
-both `python/` and `vitest/` on one branch; the artifact model cannot without
-merging files in a single publish job.
+site in the same pipeline (for example `reusable-test-python-publish` deploying
+`python/` and `reusable-test-node-publish` deploying `vitest/` on one push),
+the shared concurrency group
+`pages-${{ github.repository }}-${{ github.ref }}` **queues** those jobs—but
+**does not merge** their artifacts. Each `upload-pages-artifact` +
+`deploy-pages` run replaces the **entire** site. The **last** job wins and
+**removes** subtrees from earlier jobs (for example only `vitest/` remains if
+node publish runs after python publish).
 
-**Mitigation:** Use one publish job per site per event, or merge all subtrees
-into one staging directory before calling `publish-test-results` once.
+The old `peaceiris/actions-gh-pages` model pushed to one branch with
+`keep_files: true`, so `python/` and `vitest/` could coexist. The official
+artifact model cannot do that without an explicit merge step.
+
+| Mitigation                | When                                                                                               |
+| ------------------------- | -------------------------------------------------------------------------------------------------- |
+| One publish job per event | Combine subtrees in one `publish-test-results` call                                                |
+| Model B site bundle       | [lgtm-hq/lgtm-ci#226](https://github.com/lgtm-hq/lgtm-ci/issues/226) (turbo-themes-style)          |
+| Optional live-site merge  | [lgtm-hq/lgtm-ci#225](https://github.com/lgtm-hq/lgtm-ci/issues/225) (multiple Model A publishers) |
+
+**Current org usage:** py-lintro calls only `reusable-test-python-publish`—not
+affected.
 
 ## Isolated publish jobs
 

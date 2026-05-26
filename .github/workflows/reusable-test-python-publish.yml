@@ -46,6 +46,11 @@ on:
         type: number
         default: 30
 
+# Shared Pages concurrency serializes deploys per repository/ref.
+# WARNING: Do not invoke this workflow alongside reusable-test-node-publish
+# (or another publish-test-results caller) on the same event unless all subtrees
+# are bundled in one publish job. Each deploy replaces the entire site; the
+# last queued job wins. See docs/pages-publishing.md and lgtm-hq/lgtm-ci#225.
 concurrency:
   group: pages-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
