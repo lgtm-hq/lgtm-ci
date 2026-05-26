@@ -56,6 +56,9 @@ if [[ -z "${TYPES_INPUT//[[:space:]]/}" ]]; then
 	types="$default_types"
 else
 	types="$(normalize_list "$TYPES_INPUT")"
+	if [[ -z "${types//[[:space:]]/}" ]]; then
+		types="$default_types"
+	fi
 fi
 set_github_output_multiline types "$types"
 

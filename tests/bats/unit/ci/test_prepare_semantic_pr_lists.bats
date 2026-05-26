@@ -21,6 +21,12 @@ teardown() {
 	assert_failure
 }
 
+@test "prepare-semantic-pr-lists: falls back to default when types normalize empty" {
+	TYPES_INPUT="," SCOPES_INPUT="" run bash "$SCRIPT"
+	assert_success
+	assert_github_output types $'feat\nfix\ndocs\nstyle\nrefactor\nperf\ntest\nbuild\nci\nchore\nrevert'
+}
+
 @test "prepare-semantic-pr-lists: normalizes comma-separated types" {
 	TYPES_INPUT="feat,fix,ci" SCOPES_INPUT="" run bash "$SCRIPT"
 	assert_success

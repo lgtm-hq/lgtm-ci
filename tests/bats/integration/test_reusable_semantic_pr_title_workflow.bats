@@ -53,11 +53,16 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 }
 
 @test "reusable-semantic-pr-title: checks out tooling scripts via sparse-checkout" {
-	local expected='          sparse-checkout: |'
+	local expected_key='          sparse-checkout: |'
+	local expected_entry='            scripts/ci/'
 
 	run grep -F 'sparse-checkout: |' "$WORKFLOW"
 	assert_success
-	assert_equal "$expected" "$output"
+	assert_equal "$expected_key" "$output"
+
+	run grep -E '^            scripts/ci/$' "$WORKFLOW"
+	assert_success
+	assert_equal "$expected_entry" "$output"
 }
 
 @test "reusable-semantic-pr-title: types input default is empty" {
