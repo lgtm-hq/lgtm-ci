@@ -9,30 +9,47 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+LIB_DIR="$SCRIPT_DIR/../lib"
+
+if [[ -f "$LIB_DIR/github/output.sh" ]]; then
+	# shellcheck source=../lib/github/output.sh
+	source "$LIB_DIR/github/output.sh"
+fi
+
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 : "${TYPES_INPUT:=}"
 : "${SCOPES_INPUT:=}"
 
 normalize_list() {
 	local value="$1"
+	local -a lines=()
+	local line trimmed
+
 	if [[ -z "${value//[[:space:]]/}" ]]; then
 		printf ''
 		return
 	fi
-	if [[ "$value" != *$'\n'* ]] && [[ "$value" == *","* ]]; then
+
+	if [[ "$value" == *","* ]]; then
 		value="${value//,/$'\n'}"
 	fi
-	printf '%s' "$value"
-}
 
-write_output() {
-	local name="$1"
-	local value="$2"
-	{
-		echo "${name}<<EOF"
-		printf '%s\n' "$value"
-		echo EOF
-	} >>"$GITHUB_OUTPUT"
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		trimmed="${line#"${line%%[![:space:]]*}"}"
+		trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
+		if [[ -n "$trimmed" ]]; then
+			lines+=("$trimmed")
+		fi
+	done <<<"$value"
+
+	if ((${#lines[@]} == 0)); then
+		printf ''
+		return
+	fi
+
+	local IFS=$'\n'
+	printf '%s' "${lines[*]}"
 }
 
 default_types=$'feat\nfix\ndocs\nstyle\nrefactor\nperf\ntest\nbuild\nci\nchore\nrevert'
@@ -42,7 +59,9 @@ if [[ -z "${TYPES_INPUT//[[:space:]]/}" ]]; then
 else
 	types="$(normalize_list "$TYPES_INPUT")"
 fi
-write_output types "$types"
+set_github_output_multiline types "$types"
 
 scopes="$(normalize_list "$SCOPES_INPUT")"
-write_output scopes "$scopes"
+if [[ -n "${scopes//[[:space:]]/}" ]]; then
+	set_github_output_multiline scopes "$scopes"
+fi

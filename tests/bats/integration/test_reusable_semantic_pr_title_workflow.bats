@@ -51,4 +51,16 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 @test "prepare-semantic-pr-lists: normalizes comma-separated lists" {
 	run grep -F 'value="${value//,/$'\''\n'\''}"' "$SCRIPT"
 	assert_success
+	run grep -F 'set_github_output_multiline' "$SCRIPT"
+	assert_success
+}
+
+@test "prepare-semantic-pr-lists: writes scopes only when non-empty" {
+	run awk '
+		/set_github_output_multiline scopes/ { found = 1 }
+		END { exit !found }
+	' "$SCRIPT"
+	assert_success
+	run grep -F 'if [[ -n "${scopes//[[:space:]]/}" ]]; then' "$SCRIPT"
+	assert_success
 }
