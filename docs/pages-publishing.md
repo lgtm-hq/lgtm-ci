@@ -70,11 +70,14 @@ The old `peaceiris/actions-gh-pages` model pushed to one branch with
 `keep_files: true`, so `python/` and `vitest/` could coexist. The official
 artifact model cannot do that without an explicit merge step.
 
-| Mitigation                | When                                                                                               |
-| ------------------------- | -------------------------------------------------------------------------------------------------- |
-| One publish job per event | Combine subtrees in one `publish-test-results` call                                                |
-| Model B site bundle       | [lgtm-hq/lgtm-ci#226](https://github.com/lgtm-hq/lgtm-ci/issues/226) (turbo-themes-style)          |
-| Optional live-site merge  | [lgtm-hq/lgtm-ci#225](https://github.com/lgtm-hq/lgtm-ci/issues/225) (multiple Model A publishers) |
+| Mitigation                | When                                              |
+| ------------------------- | ------------------------------------------------- |
+| One publish job per event | One `publish-test-results` with combined subtrees |
+| Model B site bundle       | Issue #226 (turbo-style bundle) [226]             |
+| Optional live-site merge  | Issue #225 (multi Model A publishers) [225]       |
+
+[225]: https://github.com/lgtm-hq/lgtm-ci/issues/225
+[226]: https://github.com/lgtm-hq/lgtm-ci/issues/226
 
 **Current org usage:** py-lintro calls only `reusable-test-python-publish`—not
 affected.
