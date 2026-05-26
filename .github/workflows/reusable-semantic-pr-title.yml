@@ -5,12 +5,17 @@ on:
   workflow_call:
     inputs:
       types:
-        description: "Allowed conventional commit types"
+        description: >-
+          Allowed conventional commit types (newline-delimited; legacy
+          comma-separated values are normalized automatically). Leave empty
+          for the default list.
         required: false
         type: string
-        default: "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert"
+        default: ""
       scopes:
-        description: "Allowed scopes, comma-separated. Empty allows any scope."
+        description: >-
+          Allowed scopes (newline-delimited; legacy comma-separated values are
+          normalized automatically). Empty allows any scope.
         required: false
         type: string
         default: ""
@@ -19,6 +24,11 @@ on:
         required: false
         type: boolean
         default: false
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
 
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
@@ -51,11 +61,28 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+          persist-credentials: false
+
+      - name: Prepare semantic PR lists
+        id: prepare
+        env:
+          TYPES_INPUT: ${{ inputs.types }}
+          SCOPES_INPUT: ${{ inputs.scopes }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/prepare-semantic-pr-lists.sh
+
       - name: Validate semantic PR title
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          types: ${{ inputs.types }}
-          scopes: ${{ inputs.scopes }}
+          types: ${{ steps.prepare.outputs.types }}
+          scopes: ${{ steps.prepare.outputs.scopes }}
           requireScope: ${{ inputs.require-scope }}

@@ -299,6 +299,30 @@ All inputs are opt-in; existing callers keep current behavior without changes.
 
 ## PR Automation And Security
 
+### Semantic PR title
+
+`amannn/action-semantic-pull-request` expects **newline-delimited** `types` and
+`scopes`. The reusable workflow normalizes legacy comma-separated overrides and
+ships a correct default when `types` is omitted.
+
+Callers must grant `pull-requests: read` (workflow root `permissions: {}`
+otherwise strips PR access from the reusable job).
+
+```yaml
+jobs:
+  semantic-title:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@<sha>
+    permissions:
+      pull-requests: read
+    with:
+      egress-policy: audit
+      # Optional: override types (newline-delimited; CSV is normalized)
+      # types: |
+      #   feat
+      #   fix
+      #   ci
+```
+
 ```yaml
 jobs:
   label:
@@ -311,11 +335,6 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-pr-auto-assign.yml@<sha>
     permissions:
       pull-requests: write
-
-  semantic-title:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@<sha>
-    permissions:
-      contents: read
 
   action-pinning:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate-action-pinning.yml@<sha>
