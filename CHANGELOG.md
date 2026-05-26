@@ -9,29 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **docs**: GitHub Pages publishing guide (`docs/pages-publishing.md`)
-
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.19.1] - 2026-05-26
+
+### Bug Fixes
+
+- publish test results with official GitHub Pages actions (#223) (a240f51)
+
+### Previously Unreleased
+
+- **docs**: GitHub Pages publishing guide (`docs/pages-publishing.md`)
 - **ci**: migrate `publish-test-results` from `peaceiris/actions-gh-pages` to official
   `configure-pages` / `upload-pages-artifact` / `deploy-pages` (#224)
 - **workflows**: align Pages publish jobs (`reusable-test-*-publish`, `reusable-coverage`,
   `reusable-test-e2e-matrix`) with `github-pages` environment, OIDC permissions, and
   shared concurrency group
 - **workflows**: unify `reusable-deploy-pages` concurrency with other Pages publishers
-
-### Deprecated
-
-### Removed
-
 - **actions**: `publish-test-results` inputs `target-branch`, `keep-history`, and
   `retention-days` (peaceiris-only; no consumers)
-
-### Fixed
-
 - **ci**: unblock org repos where third-party Pages actions are denied (#224)
-
-### Security
 
 ## [0.19.0] - 2026-05-25
 
@@ -424,7 +429,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.1...HEAD
+[0.19.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.4...v0.19.0
 [0.18.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.2...v0.18.3
