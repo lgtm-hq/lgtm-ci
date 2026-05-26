@@ -7,10 +7,13 @@ lgtm-ci uses a single deployment model: **GitHub Actions OIDC** via
 
 ## Entry points
 
-| Workflow / action | Content | Typical `target-dir` |
-| --- | --- | --- |
-| `publish-test-results` | Coverage, badges, test HTML | `python`, `vitest`, `coverage`, `playwright` |
-| `deploy-pages` + `reusable-deploy-pages` | Built static sites | site root (`dist`) |
+| Workflow / action                        | Content                     | `target-dir`       |
+| ---------------------------------------- | --------------------------- | ------------------ |
+| `publish-test-results`                   | Coverage, badges, test HTML | configurable       |
+| `deploy-pages` + `reusable-deploy-pages` | Built static sites          | `dist` (site root) |
+
+Typical `publish-test-results` directories include `python`, `vitest`,
+`coverage`, and `playwright`.
 
 Both paths upload a **full site artifact** per deployment. Each deploy replaces
 the entire published site with that artifact.

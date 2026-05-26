@@ -67,7 +67,11 @@ _publish_tooling_actions_ok() {
 	local action="${PROJECT_ROOT}/.github/actions/publish-test-results/action.yml"
 	run grep -E 'peaceiris|actions-gh-pages' "$action"
 	assert_failure
-	run grep -qE 'actions/(configure-pages|upload-pages-artifact|deploy-pages)@' "$action"
+	run grep -q 'actions/configure-pages@' "$action"
+	assert_success
+	run grep -q 'actions/upload-pages-artifact@' "$action"
+	assert_success
+	run grep -q 'actions/deploy-pages@' "$action"
 	assert_success
 }
 
