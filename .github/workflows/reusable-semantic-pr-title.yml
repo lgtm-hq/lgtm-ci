@@ -24,6 +24,11 @@ on:
         required: false
         type: boolean
         default: false
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
 
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
@@ -56,48 +61,22 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+          persist-credentials: false
+
       - name: Prepare semantic PR lists
         id: prepare
-        shell: bash
         env:
           TYPES_INPUT: ${{ inputs.types }}
           SCOPES_INPUT: ${{ inputs.scopes }}
-        run: |
-          set -euo pipefail
-
-          normalize_list() {
-            local value="$1"
-            if [[ -z "${value//[[:space:]]/}" ]]; then
-              printf ''
-              return
-            fi
-            if [[ "$value" != *$'\n'* ]] && [[ "$value" == *","* ]]; then
-              value="${value//,/$'\n'}"
-            fi
-            printf '%s' "$value"
-          }
-
-          write_output() {
-            local name="$1"
-            local value="$2"
-            {
-              echo "${name}<<EOF"
-              printf '%s\n' "$value"
-              echo EOF
-            } >>"$GITHUB_OUTPUT"
-          }
-
-          default_types=$'feat\nfix\ndocs\nstyle\nrefactor\nperf\ntest\nbuild\nci\nchore\nrevert'
-
-          if [[ -z "${TYPES_INPUT//[[:space:]]/}" ]]; then
-            types="$default_types"
-          else
-            types="$(normalize_list "$TYPES_INPUT")"
-          fi
-          write_output types "$types"
-
-          scopes="$(normalize_list "$SCOPES_INPUT")"
-          write_output scopes "$scopes"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/prepare-semantic-pr-lists.sh
 
       - name: Validate semantic PR title
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1

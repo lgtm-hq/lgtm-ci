@@ -175,9 +175,10 @@ caller workflows alongside `pull_request:`.
 Semantic title validation is intentionally skipped in the merge queue because
 `amannn/action-semantic-pull-request` requires pull request context.
 
-Callers need `pull-requests: read`. The workflow passes newline-delimited
-`types`/`scopes` to the action (empty `types` uses the built-in default;
-comma-separated overrides are normalized).
+Callers need `pull-requests: read`. Tooling is loaded from `lgtm-ci` via
+`prepare-semantic-pr-lists.sh` (supports `tooling-ref` for unreleased fixes).
+The workflow passes newline-delimited `types`/`scopes` to the action (empty
+`types` uses the built-in default; comma-separated overrides are normalized).
 
 ## Fork PR comments
 
