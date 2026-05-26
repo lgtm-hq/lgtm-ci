@@ -768,7 +768,8 @@ Generate coverage badge SVG/JSON for README display.
 
 ### publish-test-results
 
-Publish test results and coverage to GitHub Pages.
+Publish test results and coverage to GitHub Pages via official OIDC deploy
+actions.
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@main
@@ -776,9 +777,7 @@ Publish test results and coverage to GitHub Pages.
     results-path: "test-results/" # optional
     coverage-path: "coverage/" # optional
     badge-path: "coverage/badge.svg" # optional
-    target-branch: "gh-pages" # optional
     target-dir: "." # optional
-    keep-history: "false" # optional
 ```
 
 **Outputs:**
@@ -787,14 +786,18 @@ Publish test results and coverage to GitHub Pages.
 
 **Features:**
 
-- Deploys to gh-pages branch
-- Optional historical report retention
-- Generates index.html for coverage reports
+- Stages coverage, badges, and test HTML under `target-dir`
+- Deploys with `actions/configure-pages`, `upload-pages-artifact`, `deploy-pages`
+- Generates index.html for coverage reports when missing
 
-**Required Permissions:**
+**Required Permissions (caller job):**
 
-- `contents: write` - For gh-pages deployment
-- `pages: write` - For GitHub Pages
+- `contents: read`
+- `pages: write`
+- `id-token: write`
+
+See [docs/pages-publishing.md](../../docs/pages-publishing.md) for concurrency and
+multi-publisher limits.
 
 ---
 
@@ -1560,11 +1563,11 @@ jobs:
 - `pages-url` - GitHub Pages URL
 - `passed` - Whether coverage meets threshold
 
-**Permissions Required:**
+**Permissions Required (publish job):**
 
-- `contents: write` - For gh-pages deployment
-- `pages: write` - For GitHub Pages
-- `id-token: write` - For pages deployment
+- `contents: read`
+- `pages: write`
+- `id-token: write`
 
 ---
 

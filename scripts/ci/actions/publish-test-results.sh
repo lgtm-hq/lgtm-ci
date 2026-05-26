@@ -9,10 +9,8 @@
 #   RESULTS_PATH - Path to test results directory
 #   COVERAGE_PATH - Path to coverage report directory
 #   BADGE_PATH - Path to badge files
-#   TARGET_BRANCH - Branch to deploy to (default: gh-pages)
-#   TARGET_DIR - Directory on target branch (default: .)
-#   KEEP_HISTORY - Keep historical reports (true/false, default: false)
-#   RETENTION_DAYS - Days to keep historical reports (default: 30)
+#   TARGET_DIR - Subdirectory under the Pages site root (default: .)
+#   BASE_PAGE_URL - Deployed site URL from actions/deploy-pages
 #   WORKING_DIRECTORY - Directory to run in
 
 set -euo pipefail
@@ -30,8 +28,12 @@ prepare)
 	: "${COVERAGE_PATH:=}"
 	: "${BADGE_PATH:=}"
 	: "${TARGET_DIR:=.}"
-	: "${KEEP_HISTORY:=false}"
 	: "${WORKING_DIRECTORY:=.}"
+
+	if [[ -n "${TARGET_BRANCH:-}" || -n "${KEEP_HISTORY:-}" || -n "${RETENTION_DAYS:-}" ]]; then
+		log_error "target-branch, keep-history, and retention-days were removed; use official Pages deploy only (see docs/pages-publishing.md)"
+		exit 1
+	fi
 
 	cd "$WORKING_DIRECTORY"
 
@@ -94,22 +96,6 @@ prepare)
 		fi
 	fi
 
-	# Add history directory if keeping history
-	if [[ "$KEEP_HISTORY" == "true" ]]; then
-		history_dir="$staging_dir/$TARGET_DIR/history/$(date +%Y-%m-%d)"
-		mkdir -p "$history_dir"
-
-		# Copy current results to history
-		if [[ -d "$staging_dir/$TARGET_DIR/tests" ]]; then
-			cp -r "$staging_dir/$TARGET_DIR/tests" "$history_dir/"
-		fi
-		if [[ -d "$staging_dir/$TARGET_DIR/coverage" ]]; then
-			cp -r "$staging_dir/$TARGET_DIR/coverage" "$history_dir/"
-		fi
-
-		log_info "Created history snapshot: $history_dir"
-	fi
-
 	# Create index.html if coverage report exists
 	if [[ -d "$staging_dir/$TARGET_DIR/coverage" ]]; then
 		if [[ ! -f "$staging_dir/$TARGET_DIR/coverage/index.html" ]]; then
@@ -143,75 +129,6 @@ EOF
 
 	set_github_output "staging-dir" "$staging_dir"
 	log_success "Staging directory prepared: $staging_dir"
-	;;
-
-deploy)
-	: "${STAGING_DIR:=}"
-	: "${TARGET_BRANCH:=gh-pages}"
-
-	if [[ -z "$STAGING_DIR" ]] || [[ ! -d "$STAGING_DIR" ]]; then
-		log_error "Staging directory not found: $STAGING_DIR"
-		exit 1
-	fi
-
-	log_info "Deploying to $TARGET_BRANCH branch..."
-
-	# Get repository info
-	repo_url=$(git config --get remote.origin.url)
-
-	# Configure git
-	configure_git_ci_user
-
-	# Create a new orphan branch or checkout existing
-	if git show-ref --verify --quiet "refs/heads/$TARGET_BRANCH"; then
-		# Branch exists
-		git fetch origin "$TARGET_BRANCH"
-		git checkout "$TARGET_BRANCH"
-		git reset --hard "origin/$TARGET_BRANCH"
-	else
-		# Create orphan branch
-		git checkout --orphan "$TARGET_BRANCH"
-		git reset --hard
-	fi
-
-	# Clean working tree (remove all except .git) to avoid stale files
-	find . -mindepth 1 -maxdepth 1 ! -name '.git' -exec rm -rf {} + 2>/dev/null || true
-
-	# Copy staging content (use /. to include dotfiles and handle empty dirs)
-	if [[ -n "$(ls -A "$STAGING_DIR" 2>/dev/null)" ]]; then
-		cp -r "$STAGING_DIR"/. .
-	fi
-
-	# Add and commit
-	git add -A
-	if git diff --staged --quiet; then
-		log_info "No changes to deploy"
-	else
-		git commit -m "Deploy test results and coverage [skip ci]"
-		git push origin "$TARGET_BRANCH" --force
-		log_success "Deployed to $TARGET_BRANCH"
-	fi
-
-	# Generate pages URL (respect TARGET_DIR if set)
-	: "${TARGET_DIR:=.}"
-	# Extract owner/repo from remote URL
-	if [[ "$repo_url" =~ github\.com[:/]([^/]+)/([^/.]+) ]]; then
-		owner="${BASH_REMATCH[1]}"
-		repo="${BASH_REMATCH[2]}"
-		# Clean up target_dir
-		target_dir="${TARGET_DIR#.}"
-		target_dir="${target_dir#/}"
-		if [[ -n "$target_dir" ]]; then
-			pages_url="https://${owner}.github.io/${repo}/${target_dir}/"
-		else
-			pages_url="https://${owner}.github.io/${repo}/"
-		fi
-		set_github_output "pages-url" "$pages_url"
-		log_info "GitHub Pages URL: $pages_url"
-	fi
-
-	# Cleanup staging directory
-	rm -rf "$STAGING_DIR"
 	;;
 
 pages-url)
@@ -271,7 +188,6 @@ pages-url)
 
 summary)
 	: "${PAGES_URL:=}"
-	: "${TARGET_BRANCH:=gh-pages}"
 
 	add_github_summary "## Published Test Results"
 	add_github_summary ""
@@ -283,7 +199,7 @@ summary)
 		add_github_summary "- **Test Results:** [${PAGES_URL}tests/](${PAGES_URL}tests/)"
 		add_github_summary "- **Coverage Badge:** [${PAGES_URL}coverage/badge.svg](${PAGES_URL}coverage/badge.svg)"
 	else
-		add_github_summary "Results deployed to \`$TARGET_BRANCH\` branch."
+		add_github_summary "Pages URL was not available from the deployment step."
 	fi
 
 	add_github_summary ""

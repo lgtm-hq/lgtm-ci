@@ -70,3 +70,59 @@ _publish_tooling_actions_ok() {
 	run grep -qE 'actions/(configure-pages|upload-pages-artifact|deploy-pages)@' "$action"
 	assert_success
 }
+
+@test "publish-test-results: no legacy gh-pages branch inputs" {
+	local action="${PROJECT_ROOT}/.github/actions/publish-test-results/action.yml"
+	run grep -qE 'target-branch|keep-history|retention-days' "$action"
+	assert_failure
+}
+
+@test "reusable-test-python-publish: official Pages job contract" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-python-publish.yml"
+	run grep -q 'group: pages-${{ github.repository }}-${{ github.ref }}' "$workflow"
+	assert_success
+	run grep -q 'name: github-pages' "$workflow"
+	assert_success
+	run grep -q 'id-token: write' "$workflow"
+	assert_success
+	run grep -q 'contents: read' "$workflow"
+	assert_success
+	run grep -q 'contents: write' "$workflow"
+	assert_failure
+}
+
+@test "reusable-test-node-publish: official Pages job contract" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-node-publish.yml"
+	run grep -q 'group: pages-${{ github.repository }}-${{ github.ref }}' "$workflow"
+	assert_success
+	run grep -q 'name: github-pages' "$workflow"
+	assert_success
+	run grep -q 'id-token: write' "$workflow"
+	assert_success
+	run grep -q 'contents: read' "$workflow"
+	assert_success
+	run grep -q 'contents: write' "$workflow"
+	assert_failure
+}
+
+@test "reusable-coverage: publish job uses official Pages contract" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-coverage.yml"
+	run awk '/^  publish:/{p=1} p&&/name: github-pages/{e=1} p&&/id-token: write/{i=1} p&&/contents: read/{r=1} p&&/group: pages-\$\{\{ github.repository \}\}-\$\{\{ github.ref \}\}/{c=1} END{exit !(e&&i&&r&&c)}' "$workflow"
+	assert_success
+	run awk '/^  publish:/{p=1} p&&/contents: write/{exit 1} END{exit 0}' "$workflow"
+	assert_success
+}
+
+@test "reusable-test-e2e-matrix: publish job uses official Pages contract" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-e2e-matrix.yml"
+	run awk '/^  publish:/{p=1} p&&/name: github-pages/{e=1} p&&/id-token: write/{i=1} p&&/contents: read/{r=1} p&&/group: pages-\$\{\{ github.repository \}\}-\$\{\{ github.ref \}\}/{c=1} END{exit !(e&&i&&r&&c)}' "$workflow"
+	assert_success
+	run awk '/^  publish:/{p=1} p&&/contents: write/{exit 1} END{exit 0}' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-pages: shares Pages concurrency group" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-pages.yml"
+	run grep -q 'group: pages-${{ github.repository }}-${{ github.ref }}' "$workflow"
+	assert_success
+}

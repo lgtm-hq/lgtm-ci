@@ -16,22 +16,10 @@ inputs:
     description: "Path to badge files"
     required: false
     default: ""
-  target-branch:
-    description: "Legacy gh-pages branch name (unused; kept for callers)"
-    required: false
-    default: "gh-pages"
   target-dir:
     description: "Subdirectory under the Pages site root"
     required: false
     default: "."
-  keep-history:
-    description: "Keep historical reports (true/false)"
-    required: false
-    default: "false"
-  retention-days:
-    description: "Days to keep historical reports"
-    required: false
-    default: "30"
   working-directory:
     description: "Working directory"
     required: false
@@ -55,8 +43,6 @@ runs:
         COVERAGE_PATH: ${{ inputs.coverage-path }}
         BADGE_PATH: ${{ inputs.badge-path }}
         TARGET_DIR: ${{ inputs.target-dir }}
-        KEEP_HISTORY: ${{ inputs.keep-history }}
-        RETENTION_DAYS: ${{ inputs.retention-days }}
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/publish-test-results.sh"
 
     - name: Configure GitHub Pages
@@ -85,7 +71,6 @@ runs:
       env:
         STEP: summary
         PAGES_URL: ${{ steps.pages-url.outputs.pages-url }}
-        TARGET_BRANCH: ${{ inputs.target-branch }}
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/publish-test-results.sh"
 
 branding:

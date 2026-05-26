@@ -272,9 +272,16 @@ jobs:
     needs: merge
     if: inputs.publish-results && !cancelled()
     runs-on: ${{ inputs.runner-image }}
+    concurrency:
+      group: pages-${{ github.repository }}-${{ github.ref }}
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.pages-url }}
     permissions:
-      contents: write
+      contents: read
       pages: write
+      id-token: write
 
     outputs:
       pages-url: ${{ steps.publish.outputs.pages-url }}
