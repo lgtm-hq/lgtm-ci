@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.19.2] - 2026-05-26
+
+### Bug Fixes
+
+- **ci**: use newline-delimited types in reusable-semantic-pr-title (#229) (f396eef)
+
 ## [0.19.1] - 2026-05-26
 
 ### Bug Fixes
@@ -429,7 +435,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.2...HEAD
+[0.19.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.1...v0.19.2
 [0.19.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.0...v0.19.1
 [0.19.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.4...v0.19.0
 [0.18.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.18.3...v0.18.4
