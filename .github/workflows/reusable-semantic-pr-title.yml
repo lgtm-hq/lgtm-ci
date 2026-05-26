@@ -5,12 +5,17 @@ on:
   workflow_call:
     inputs:
       types:
-        description: "Allowed conventional commit types"
+        description: >-
+          Allowed conventional commit types (newline-delimited; legacy
+          comma-separated values are normalized automatically). Leave empty
+          for the default list.
         required: false
         type: string
-        default: "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert"
+        default: ""
       scopes:
-        description: "Allowed scopes, comma-separated. Empty allows any scope."
+        description: >-
+          Allowed scopes (newline-delimited; legacy comma-separated values are
+          normalized automatically). Empty allows any scope.
         required: false
         type: string
         default: ""
@@ -51,11 +56,54 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
+      - name: Prepare semantic PR lists
+        id: prepare
+        shell: bash
+        env:
+          TYPES_INPUT: ${{ inputs.types }}
+          SCOPES_INPUT: ${{ inputs.scopes }}
+        run: |
+          set -euo pipefail
+
+          normalize_list() {
+            local value="$1"
+            if [[ -z "${value//[[:space:]]/}" ]]; then
+              printf ''
+              return
+            fi
+            if [[ "$value" != *$'\n'* ]] && [[ "$value" == *","* ]]; then
+              value="${value//,/$'\n'}"
+            fi
+            printf '%s' "$value"
+          }
+
+          write_output() {
+            local name="$1"
+            local value="$2"
+            {
+              echo "${name}<<EOF"
+              printf '%s\n' "$value"
+              echo EOF
+            } >>"$GITHUB_OUTPUT"
+          }
+
+          default_types=$'feat\nfix\ndocs\nstyle\nrefactor\nperf\ntest\nbuild\nci\nchore\nrevert'
+
+          if [[ -z "${TYPES_INPUT//[[:space:]]/}" ]]; then
+            types="$default_types"
+          else
+            types="$(normalize_list "$TYPES_INPUT")"
+          fi
+          write_output types "$types"
+
+          scopes="$(normalize_list "$SCOPES_INPUT")"
+          write_output scopes "$scopes"
+
       - name: Validate semantic PR title
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          types: ${{ inputs.types }}
-          scopes: ${{ inputs.scopes }}
+          types: ${{ steps.prepare.outputs.types }}
+          scopes: ${{ steps.prepare.outputs.scopes }}
           requireScope: ${{ inputs.require-scope }}
