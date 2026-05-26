@@ -24,7 +24,7 @@ Where applicable, workflows accept:
 | --- | --- |
 | Test / quality only | `contents: read` |
 | PR comments | `contents: read`, `pull-requests: write` |
-| Publish to Pages | `contents: write`, `pages: write`, `id-token: write` (separate workflow) |
+| Publish to Pages | `contents: read`, `pages: write`, `id-token: write` (separate workflow/job) |
 | Release version PR | `contents: write`, `pull-requests: write` + app secrets |
 | Package publish | `contents: read`, `id-token: write`, `attestations: write` (as required) |
 
@@ -42,6 +42,10 @@ caller repository checkout must initialize `.git` before tooling is added:
 2. Checkout repository (caller repo at workspace root)
 3. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` alongside the repo)
 4. Download artifacts, badge generation, GitHub Pages publish (local tooling actions)
+
+Deploy uses official `actions/deploy-pages` (not gh-pages branch push). See
+[pages-publishing.md](pages-publishing.md) for permissions, egress, and
+multi-publisher limits.
 
 `clean: false` on the repository checkout does **not** help here: without an
 existing `.git`, `actions/checkout` wipes the workspace and deletes
@@ -104,6 +108,19 @@ allowed-endpoints: >
   api.osv.dev:443
   semgrep.dev:443
   metrics.semgrep.dev:443
+```
+
+### GitHub Pages publish (OIDC)
+
+```yaml
+egress-policy: block
+allowed-endpoints: >
+  github.com:443
+  api.github.com:443
+  actions.githubusercontent.com:443
+  codeload.github.com:443
+  objects.githubusercontent.com:443
+  release-assets.githubusercontent.com:443
 ```
 
 ## Action pinning policy

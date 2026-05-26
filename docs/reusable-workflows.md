@@ -18,6 +18,9 @@ should pin the workflow ref to a commit SHA.
 See [workflow-contract.md](workflow-contract.md) for the standard input contract,
 permissions by mode, egress allowlists, and Rustume migration examples.
 
+For GitHub Pages (coverage, test reports, and static sites), see
+[pages-publishing.md](pages-publishing.md).
+
 ## Quality And Validation
 
 ```yaml

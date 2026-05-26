@@ -51,13 +51,25 @@ on:
         type: number
         default: 30
 
+# Shared Pages concurrency serializes deploys per repository/ref.
+# WARNING: Do not invoke this workflow alongside reusable-test-python-publish
+# (or another publish-test-results caller) on the same event unless all subtrees
+# are bundled in one publish job. Each deploy replaces the entire site; the
+# last queued job wins. See docs/pages-publishing.md and lgtm-hq/lgtm-ci#225.
+concurrency:
+  group: pages-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.pages-url }}
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
 
@@ -118,6 +130,7 @@ jobs:
 
       - name: Publish to GitHub Pages
         if: inputs.upload-coverage
+        id: publish
         uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
         with:
           results-path: >-

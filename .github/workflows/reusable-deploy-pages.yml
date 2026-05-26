@@ -68,7 +68,7 @@ on:
 
 # Allow only one deployment at a time
 concurrency:
-  group: pages-${{ github.ref }}
+  group: pages-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

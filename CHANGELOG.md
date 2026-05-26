@@ -9,13 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **docs**: GitHub Pages publishing guide (`docs/pages-publishing.md`)
+
 ### Changed
+
+- **ci**: migrate `publish-test-results` from `peaceiris/actions-gh-pages` to official
+  `configure-pages` / `upload-pages-artifact` / `deploy-pages` (#224)
+- **workflows**: align Pages publish jobs (`reusable-test-*-publish`, `reusable-coverage`,
+  `reusable-test-e2e-matrix`) with `github-pages` environment, OIDC permissions, and
+  shared concurrency group
+- **workflows**: unify `reusable-deploy-pages` concurrency with other Pages publishers
 
 ### Deprecated
 
 ### Removed
 
+- **actions**: `publish-test-results` inputs `target-branch`, `keep-history`, and
+  `retention-days` (peaceiris-only; no consumers)
+
 ### Fixed
+
+- **ci**: unblock org repos where third-party Pages actions are denied (#224)
 
 ### Security
 
