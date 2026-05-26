@@ -12,10 +12,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 
-if [[ -f "$LIB_DIR/github/output.sh" ]]; then
-	# shellcheck source=../lib/github/output.sh
-	source "$LIB_DIR/github/output.sh"
-fi
+# shellcheck source=../lib/github/output.sh
+source "$LIB_DIR/github/output.sh"
 
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 : "${TYPES_INPUT:=}"

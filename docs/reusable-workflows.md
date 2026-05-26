@@ -336,13 +336,6 @@ jobs:
     permissions:
       pull-requests: write
 
-  semantic-title:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@<sha>
-    permissions:
-      pull-requests: read
-    with:
-      egress-policy: audit
-
   action-pinning:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate-action-pinning.yml@<sha>
     permissions:
