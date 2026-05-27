@@ -318,7 +318,7 @@ bundle_run_manifest() {
 		fi
 
 		if [[ "$used_fallback" == "true" ]]; then
-			log_warn "Bundle ${bundle_id}: using fallback run ${run_id} from ${FALLBACK_REF}"
+			log_info "Bundle ${bundle_id}: using fallback run ${run_id} from ${FALLBACK_REF}"
 		fi
 
 		artifact_id=$(bundle_get_artifact_id "$run_id" "$artifact")
