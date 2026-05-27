@@ -25,19 +25,6 @@ _orchestrator_delegates_comment() {
 	' "$workflow"
 }
 
-_orchestrator_has_no_inline_pr_comment_job() {
-	local workflow="$1"
-	run awk '
-		function job_name() {
-			match($0, /^  ([a-zA-Z0-9_-]+):/, m)
-			return m[1]
-		}
-		/^  comment(-pr)?:/ { in_comment = 1; comment_job = job_name() }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  comment(-pr)?:/ { in_comment = 0 }
-		in_comment && /^    runs-on:/ { found = 1; exit }
-		END { exit found }
-	' "$workflow"
-}
 
 @test "reusable-quality-lint: no pull-requests permission" {
 	run _lint_only_has_no_pr_permissions \
@@ -65,9 +52,11 @@ _orchestrator_has_no_inline_pr_comment_job() {
 	assert_success
 }
 
-@test "reusable-quality.yml orchestrator does not exist" {
+@test "reusable-quality.yml exists as deprecated shim" {
 	run test -f "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
-	assert_failure
+	assert_success
+	run grep -q "DEPRECATED" "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
+	assert_success
 }
 
 @test "reusable-coverage: coverage job has no pull-requests permission" {

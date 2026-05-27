@@ -36,17 +36,19 @@ nesting hop (`ci.yml` → `reusable-quality-lint.yml`) so check names read
 Checks`. The pattern matches `reusable-test-python.yml` +
 `reusable-test-pr-comment.yml`.
 
-Jobs that need a `strategy:` matrix cannot call a reusable workflow (`uses:`);
-use inline steps instead (see `reusable-test-node.yml` `coverage-pr-comment`).
+A `strategy: matrix` job **can** call a reusable workflow via `uses:` — GitHub
+Actions maps matrix values to reusable workflow inputs. `reusable-test-node.yml`
+`coverage-pr-comment` uses inline steps to avoid an extra nesting level (which
+would worsen check-name readability) and to access matrix-specific artifacts.
 
 | Mode | Caller permissions | Workflow |
 | --- | --- | --- |
 | Quality / lint only | `contents: read`, `packages: read` | `reusable-quality-lint.yml` |
-| Quality PR comment | `contents: read`, `pull-requests: write` | `reusable-quality-pr-comment` |
+| Quality PR comment | `contents: read`, `pull-requests: write` | `reusable-quality-pr-comment.yml` |
 | Test / coverage only | `contents: read` | Reusables with `post-pr-comment: false` |
 | PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
-| Release version PR | `contents/pull-requests: write` | `reusable-release-version-pr.yml` |
+| Release version PR | `contents: write`, `pull-requests: write` | `reusable-release-version-pr.yml` |
 | Package publish | `contents: read`, `id-token: write`, `attestations: write` | Publish reusables |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
