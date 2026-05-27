@@ -1,0 +1,148 @@
+---
+name: Reusable GitHub Release Workflow
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: "Artifact to download and attach to the release"
+        required: false
+        type: string
+        default: "python-dist"
+      artifact-path:
+        description: "Directory to extract the artifact into"
+        required: false
+        type: string
+        default: "dist"
+      tag-name:
+        description: "Release tag (defaults to github.ref_name)"
+        required: false
+        type: string
+        default: ""
+      release-name:
+        description: "Release title (defaults to tag name)"
+        required: false
+        type: string
+        default: ""
+      generate-release-notes:
+        description: "Use GitHub auto-generated release notes"
+        required: false
+        type: boolean
+        default: true
+      files:
+        description: >-
+          Newline-separated asset globs for softprops/action-gh-release.
+          Defaults to "{artifact-path}/*" when empty.
+        required: false
+        type: string
+        default: ""
+      draft:
+        description: "Create as draft release"
+        required: false
+        type: boolean
+        default: false
+      prerelease:
+        description: "Mark as prerelease"
+        required: false
+        type: boolean
+        default: false
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      job-name:
+        description: "GitHub check name for the release job"
+        required: false
+        type: string
+        default: "Create GitHub Release"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
+    outputs:
+      release-url:
+        description: "URL of the created GitHub release"
+        value: ${{ jobs.release.outputs.release-url }}
+      release-id:
+        description: "ID of the created GitHub release"
+        value: ${{ jobs.release.outputs.release-id }}
+
+jobs:
+  release:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write # create GitHub releases and upload release assets
+
+    outputs:
+      release-url: ${{ steps.gh-release.outputs.url }}
+      release-id: ${{ steps.gh-release.outputs.id }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Download release assets
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+
+      - name: Verify release assets exist
+        shell: bash
+        env:
+          FILES: >-
+            ${{ inputs.files != '' && inputs.files ||
+            format('{0}/*', inputs.artifact-path) }}
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/verify-release-assets.sh
+
+      - name: Create GitHub Release
+        id: gh-release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        with:
+          tag_name: >-
+            ${{ inputs.tag-name != '' && inputs.tag-name || github.ref_name }}
+          name: >-
+            ${{ inputs.release-name != '' && inputs.release-name ||
+            (inputs.tag-name != '' && inputs.tag-name || github.ref_name) }}
+          generate_release_notes: ${{ inputs.generate-release-notes }}
+          draft: ${{ inputs.draft }}
+          prerelease: ${{ inputs.prerelease }}
+          files: >-
+            ${{ inputs.files != '' && inputs.files ||
+            format('{0}/*', inputs.artifact-path) }}

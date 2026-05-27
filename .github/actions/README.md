@@ -1614,6 +1614,58 @@ jobs:
 
 ---
 
+### reusable-publish-pypi-release.yml
+
+Split build and publish jobs for production tag releases. Uploads a distribution
+artifact from the build job and publishes it with OIDC + provenance attestation
+in a separate job.
+
+```yaml
+jobs:
+  publish:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@main
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      python-version: "3.12"
+      artifact-name: python-dist
+      tooling-ref: "<sha>" # vX.Y.Z
+```
+
+Pair with `reusable-github-release.yml` using the same `artifact-name`. See
+[docs/python-release-publish.md](../../docs/python-release-publish.md).
+
+**Outputs:** `published`, `version`, `package-name`
+
+---
+
+### reusable-github-release.yml
+
+Download a workflow artifact and create a GitHub Release with attached assets
+via `softprops/action-gh-release`.
+
+```yaml
+jobs:
+  github-release:
+    needs: publish
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@main
+    permissions:
+      contents: write
+    with:
+      artifact-name: python-dist
+      generate-release-notes: true
+```
+
+**Outputs:** `release-url`, `release-id`
+
+**Permissions Required:**
+
+- `contents: write` - Create release and upload assets
+
+---
+
 ### reusable-publish-npm.yml
 
 Publish Node.js packages to npm with provenance attestation.

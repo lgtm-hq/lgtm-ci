@@ -9,15 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-publish-pypi-release.yml` and
+  `reusable-github-release.yml` for split Python release publishing (#232)
+- **docs**: Python release publishing guide (`docs/python-release-publish.md`) (#232)
+
 ### Changed
 
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
+- **workflows**: `reusable-publish-pypi.yml` installs Python via `setup-python`
+  before building (#232)
 
 ## [0.20.0] - 2026-05-27
 

@@ -166,6 +166,8 @@ steps:
 | `reusable-release-version-pr.yml`      | Release version PR with changelog      |
 | `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge          |
 | `reusable-publish-pypi.yml`            | PyPI publishing with OIDC              |
+| `reusable-publish-pypi-release.yml`    | Split PyPI build and publish           |
+| `reusable-github-release.yml`          | GitHub Release with artifact assets    |
 | `reusable-publish-npm.yml`             | npm publishing                         |
 | `reusable-publish-gem.yml`             | RubyGems publishing                    |
 | `reusable-publish-homebrew.yml`        | Homebrew formula publishing            |
