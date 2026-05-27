@@ -103,11 +103,14 @@ jobs:
 
 Use the same `artifact-name` for `reusable-publish-pypi-release.yml` and
 `reusable-github-release.yml` so the release job downloads the wheel/sdist
-uploaded by the build job. The release workflow defaults to uploading all files
-from `{artifact-path}/*` as release assets. Only override the `files` input if
-you need custom globbing patterns or if you change the default `artifact-path`.
-Changing `files` without updating `artifact-path` points at the wrong uploaded
-assets.
+uploaded by the build job. When `inputs.files` is empty, the release workflow
+defaults asset globs to `{artifact-path}/*` (via `format('{0}/*',
+inputs.artifact-path)`; default `artifact-path` is `dist`) for both the verify
+step (`FILES`) and `softprops/action-gh-release` (`files`). If you override
+`inputs.files`, ensure those glob patterns match the files actually placed in
+the artifact download path — you do not need to change `inputs.artifact-path`
+just because you customized `files`. `ARTIFACT_PATH` is only used in verify
+error messages.
 
 ## TestPyPI (single job)
 

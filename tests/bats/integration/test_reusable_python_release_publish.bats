@@ -51,6 +51,7 @@ _tooling_sparse_cone_ok() {
 @test "reusable-publish-pypi-release: publish job validates dist and attests" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
 	run awk '
+		/^  [a-zA-Z0-9_-]+:/ { in_publish = 0 }
 		/^  publish:/ { in_publish = 1 }
 		in_publish && /STEP: validate-dist/ { validate = 1 }
 		in_publish && /scripts\/ci\/actions\/publish-pypi\.sh/ { validate_script = 1 }
@@ -65,6 +66,7 @@ _tooling_sparse_cone_ok() {
 @test "reusable-publish-pypi-release: publish job installs Python before validate" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
 	run awk '
+		/^  [a-zA-Z0-9_-]+:/ { in_publish = 0 }
 		/^  publish:/ { in_publish = 1 }
 		in_publish && /setup-python/ { setup = NR }
 		in_publish && /STEP: validate-dist/ { validate = NR }
@@ -76,6 +78,7 @@ _tooling_sparse_cone_ok() {
 @test "reusable-publish-pypi-release: sets published output after attestation" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
 	run awk '
+		/^  [a-zA-Z0-9_-]+:/ { in_publish = 0 }
 		/^  publish:/ { in_publish = 1 }
 		in_publish && /attest-build-provenance@/ { attest = NR }
 		in_publish && /id: set-published/ { published = NR }
@@ -147,9 +150,9 @@ _tooling_sparse_cone_ok() {
 		/^  [a-zA-Z0-9_-]+:/ && !/^  release:/ { in_release = 0 }
 		in_release && /^    permissions:/ { in_permissions = 1 }
 		in_permissions && /^    [a-zA-Z0-9_-]+:/ && !/^    permissions:/ { in_permissions = 0 }
-		in_permissions && /^      [a-zA-Z0-9_-]+: write/ {
+		in_permissions && /^      [a-zA-Z0-9_-]+: / {
 			total_permissions++
-			if ($1 == "contents:") {
+			if ($1 == "contents:" && $2 == "write") {
 				contents_count++
 			}
 		}
