@@ -52,10 +52,8 @@ _orchestrator_delegates_comment() {
 	assert_success
 }
 
-@test "reusable-quality.yml exists as deprecated shim" {
-	run test -f "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
-	assert_success
-	run grep -q "DEPRECATED" "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
+@test "reusable-quality.yml removed in favor of split reusables" {
+	run test ! -f "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
 	assert_success
 }
 

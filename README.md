@@ -44,10 +44,18 @@ jobs:
   quality:
     permissions:
       contents: read
-      packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality
-      pull-requests: write # post/update the standard lintro PR comment
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@v1
-    # Optional: with: { tools: "ruff,yamllint", post-pr-comment: true }
+      packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality-lint
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
+
+  quality-pr-comment:
+    if: github.event_name == 'pull_request'
+    needs: quality
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@v1
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
 
 Reusable workflows share a standard contract (`tooling-ref`, `egress-policy`,
@@ -149,7 +157,8 @@ steps:
 
 | Workflow                               | Description                            |
 | -------------------------------------- | -------------------------------------- |
-| `reusable-quality.yml`                 | Lintro via full py-lintro Docker image |
+| `reusable-quality-lint.yml`            | Lintro via full py-lintro Docker image |
+| `reusable-quality-pr-comment.yml`      | Lintro PR summary comment              |
 | `reusable-sbom.yml`                    | SBOM generation with Cosign signing    |
 | `reusable-release-version-pr.yml`      | Release version PR with changelog      |
 | `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge          |
@@ -250,7 +259,7 @@ for working examples.
 
 ## 🔨 Development
 
-CI and `reusable-quality.yml` run **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro`
+CI and `reusable-quality-lint.yml` run **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro`
 image** so every bundled tool is available. Mirror CI locally:
 
 ```bash

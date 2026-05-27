@@ -321,7 +321,7 @@ on:
         type: string
 jobs:
   build:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
     with:
       tooling-ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # v0.18.4
 '
@@ -347,7 +347,7 @@ on:
         type: string
 jobs:
   build:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
     with:
       tooling-ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"'
 '
@@ -375,7 +375,7 @@ on:
         type: string
 jobs:
   build:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
     with:
       tooling-ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # stable
 '
@@ -490,7 +490,7 @@ jobs:
           path: .lgtm-ci-tooling
           ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"' # v0.18.4
   caller:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@a5ac7e51b41094c92402da3b24376905380afc29 # v4
     with:
       ref: '"'"'d3736367191ddaf56c41804d2dd5174732ed2d2b'"'"'
 '
