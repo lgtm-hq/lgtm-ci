@@ -110,7 +110,9 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
 
       - name: Post PR comment
-        if: steps.download.outcome == 'success'
+        if: >-
+          steps.download.outcome == 'success'
+          && steps.pr.outputs.number != ''
         id: post
         shell: bash
         env:

@@ -27,6 +27,17 @@ optional PR comments therefore split comment posting into dedicated reusables
 Callers that disable comments or run on tag/release events should invoke the
 lint/test/coverage reusable only and omit the comment reusable entirely.
 
+### Reusable workflow nesting limit
+
+GitHub allows at most **three levels** of reusable-workflow nesting. Workflows
+that delegate to child reusables consume depth budget from the caller chain.
+
+`reusable-quality.yml` calls `reusable-quality-lint.yml` and
+`reusable-quality-pr-comment.yml`, so it must be invoked from a **top-level
+caller workflow** (or at most one reusable deep). Do not call it from a reusable
+that is itself nested two or more levels below the top-level workflow, or the
+child lint/comment reusables will exceed the nesting limit.
+
 | Mode | Caller permissions | Workflow |
 | --- | --- | --- |
 | Quality / lint only | `contents: read`, `packages: read` | `reusable-quality-lint.yml` |
@@ -35,7 +46,7 @@ lint/test/coverage reusable only and omit the comment reusable entirely.
 | PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
 | Release version PR | `contents: write`, `pull-requests: write` | `reusable-release-version-pr` |
-| Package publish | `contents: read`, `id-token: write` | Publish reusables |
+| Package publish | `contents: read`, `id-token: write`, `attestations: write` | Publish reusables |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
 `reusable-test-node-publish.yml` in a separate caller job when publishing is

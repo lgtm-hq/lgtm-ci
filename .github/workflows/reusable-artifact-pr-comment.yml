@@ -97,7 +97,9 @@ jobs:
       - name: Warn on missing artifact
         if: steps.download.outcome != 'success'
         shell: bash
-        run: echo "::warning::${{ inputs.missing-artifact-warning }}"
+        env:
+          MISSING_ARTIFACT_WARNING: ${{ inputs.missing-artifact-warning }}
+        run: echo "::warning::${MISSING_ARTIFACT_WARNING}"
 
       - name: Post PR comment
         if: steps.download.outcome == 'success'
