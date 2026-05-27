@@ -127,6 +127,19 @@ EOF
 # parse_vitest_json tests - alternative format (numTotalTests)
 # =============================================================================
 
+@test "parse_vitest_json: parses Vitest 3 aggregate JSON reporter under set -u" {
+	local fixture="${PROJECT_ROOT}/tests/fixtures/json/vitest-3-results.json"
+
+	run bash -c "
+		set -u
+		source \"\$LIB_DIR/testing/parse/vitest.sh\"
+		parse_vitest_json \"${fixture}\"
+		echo \"passed=\$TESTS_PASSED failed=\$TESTS_FAILED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL\"
+	"
+	assert_success
+	assert_output "passed=1 failed=1 skipped=0 total=2"
+}
+
 @test "parse_vitest_json: falls back to numTotalTests format" {
 	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
 {

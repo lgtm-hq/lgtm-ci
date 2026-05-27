@@ -5,6 +5,10 @@
 # Usage:
 #   source "$(dirname "${BASH_SOURCE:-$0}")/vitest.sh"
 #   parse_vitest_json "results.json"
+#
+# Supported JSON reporter shapes:
+# - Vitest 3 / Jest aggregate: numPassedTests, numFailedTests, numTotalTests at root
+# - Legacy vitest JSON: testResults[].assertionResults[] with status per test
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_TESTING_PARSE_VITEST_LOADED:-}" ]] && return 0
@@ -16,30 +20,42 @@ readonly _LGTM_CI_TESTING_PARSE_VITEST_LOADED=1
 parse_vitest_json() {
 	local file="${1:-}"
 
+	TESTS_PASSED=0
+	TESTS_FAILED=0
+	TESTS_SKIPPED=0
+	TESTS_TOTAL=0
+	TESTS_DURATION="0"
+
 	if [[ ! -f "$file" ]]; then
-		TESTS_PASSED=0
-		TESTS_FAILED=0
-		TESTS_SKIPPED=0
-		TESTS_TOTAL=0
-		TESTS_DURATION="0"
 		return 1
 	fi
 
-	# Vitest JSON reporter format
-	TESTS_PASSED=$(jq -r '[.testResults[].assertionResults[] | select(.status == "passed")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_FAILED=$(jq -r '[.testResults[].assertionResults[] | select(.status == "failed")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_SKIPPED=$(jq -r '[.testResults[].assertionResults[] | select(.status == "pending" or .status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
-
-	# Try alternative format (vitest built-in json reporter)
-	# Only fallback when ALL counts are zero (avoid overwriting skipped-only results)
-	if [[ "$TESTS_PASSED" == "0" ]] && [[ "$TESTS_FAILED" == "0" ]] && [[ "$TESTS_SKIPPED" == "0" ]]; then
+	# Vitest 3 / Jest aggregate JSON reporter (root-level num* fields)
+	local has_aggregate_counts
+	has_aggregate_counts=$(
+		jq -r 'if (.numTotalTests | type) == "number" then "yes" else "no" end' "$file" 2>/dev/null || echo "no"
+	)
+	if [[ "$has_aggregate_counts" == "yes" ]]; then
 		TESTS_PASSED=$(jq -r '.numPassedTests // 0' "$file" 2>/dev/null || echo "0")
 		TESTS_FAILED=$(jq -r '.numFailedTests // 0' "$file" 2>/dev/null || echo "0")
-		TESTS_SKIPPED=$(jq -r '.numPendingTests // 0' "$file" 2>/dev/null || echo "0")
+		TESTS_SKIPPED=$(
+			jq -r '(.numPendingTests // 0) + (.numTodoTests // 0)' "$file" 2>/dev/null || echo "0"
+		)
 		TESTS_TOTAL=$(jq -r '.numTotalTests // 0' "$file" 2>/dev/null || echo "0")
+	else
+		# Legacy vitest JSON reporter: testResults[].assertionResults[]
+		TESTS_PASSED=$(
+			jq -r '[.testResults[].assertionResults[]? | select(.status == "passed")] | length' "$file" 2>/dev/null || echo "0"
+		)
+		TESTS_FAILED=$(
+			jq -r '[.testResults[].assertionResults[]? | select(.status == "failed")] | length' "$file" 2>/dev/null || echo "0"
+		)
+		TESTS_SKIPPED=$(
+			jq -r '[.testResults[].assertionResults[]? | select(.status == "pending" or .status == "skipped")] | length' "$file" 2>/dev/null || echo "0"
+		)
 	fi
 
-	if [[ "$TESTS_TOTAL" == "0" ]] || [[ -z "$TESTS_TOTAL" ]]; then
+	if [[ "${TESTS_TOTAL:-0}" -eq 0 ]]; then
 		TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED))
 	fi
 
