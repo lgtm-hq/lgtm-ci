@@ -56,6 +56,11 @@ on:
         required: false
         type: string
         default: ""
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
       job-name:
         description: "GitHub check name for the release job"
         required: false
@@ -99,6 +104,17 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Download release assets
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -112,22 +128,8 @@ jobs:
             ${{ inputs.files != '' && inputs.files ||
             format('{0}/*', inputs.artifact-path) }}
           ARTIFACT_PATH: ${{ inputs.artifact-path }}
-        run: |
-          shopt -s nullglob
-          count=0
-          while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-            [[ -z "${pattern// /}" ]] && continue
-            for file in $pattern; do
-              if [[ -f "$file" ]]; then
-                count=$((count + 1))
-              fi
-            done
-          done <<< "$FILES"
-          if (( count == 0 )); then
-            echo "::error::No release assets matched FILES patterns (artifact-path=${ARTIFACT_PATH})"
-            exit 1
-          fi
-          echo "Found ${count} release asset(s)"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/verify-release-assets.sh
 
       - name: Create GitHub Release
         id: gh-release

@@ -212,9 +212,8 @@ jobs:
         env:
           STEP: validate-dist
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
-        run: |
-          uv pip install --system twine
-          bash .lgtm-ci-tooling/scripts/ci/actions/publish-pypi.sh
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/publish-pypi.sh
 
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
@@ -232,4 +231,7 @@ jobs:
       - name: Set publish output
         id: set-published
         shell: bash
-        run: echo "published=true" >> "$GITHUB_OUTPUT"
+        env:
+          STEP: set-published
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/publish-pypi.sh

@@ -224,6 +224,7 @@ jobs:
       contents: write
     with:
       artifact-name: python-dist
+      tooling-ref: "<sha>" # vX.Y.Z
 
   gem:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-gem.yml@<sha>

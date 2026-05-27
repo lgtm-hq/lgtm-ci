@@ -3,7 +3,7 @@
 # Purpose: Build and publish Python packages to PyPI
 #
 # Environment variables:
-#   STEP: preflight | validate | build | validate-dist | summary
+#   STEP: preflight | validate | build | validate-dist | set-published | summary
 #   WORKING_DIRECTORY: Directory containing the package (default: .)
 #   VERIFY_TAG_VERSION: Verify git tag matches pyproject.toml version
 #   ENSURE_TAG_ON_DEFAULT_BRANCH: Verify tagged commit is on the default branch
@@ -136,11 +136,20 @@ validate-dist)
 		die "dist/ directory not found"
 	fi
 
+	if command -v uv >/dev/null 2>&1 && ! command -v twine >/dev/null 2>&1; then
+		log_info "Installing twine for validation..."
+		uv pip install --system twine
+	fi
+
 	if validate_pypi_package "dist"; then
 		log_success "Distribution validation passed"
 	else
 		die "Distribution validation failed"
 	fi
+	;;
+
+set-published)
+	set_github_output "published" "true"
 	;;
 
 summary)

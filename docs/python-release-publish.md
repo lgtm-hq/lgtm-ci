@@ -89,6 +89,7 @@ jobs:
       contents: write
     with:
       artifact-name: python-dist
+      tooling-ref: "<sha>" # vX.Y.Z
       generate-release-notes: true
       egress-policy: block
       allowed-endpoints: >
