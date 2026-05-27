@@ -838,6 +838,44 @@ Prepare and upload content for GitHub Pages deployment using OIDC.
 
 ---
 
+### bundle-workflow-artifacts
+
+Download HTML report artifacts from other workflow runs into a site tree before
+Pages deployment (Model B).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/bundle-workflow-artifacts@main
+  with:
+    commit-sha: ${{ github.sha }}
+    site-root: apps/site/dist
+    bundle-manifest: examples/bundle-manifest-turbo-themes.json
+    fallback-ref: main
+    strict: "false"
+```
+
+**Inputs:**
+
+- `commit-sha` - Commit SHA to resolve workflow runs (default: `github.sha`)
+- `site-root` - Site directory to copy bundled reports into (default: `dist`)
+- `bundle-manifest` - Inline JSON or path to `.json`/`.yaml`/`.yml` manifest
+- `fallback-ref` - Optional branch ref for fallback lookup (for example `main`)
+- `strict` - Fail when any manifest entry cannot be resolved (default: `false`)
+
+**Outputs:**
+
+- `files-bundled` - Number of files copied from downloaded artifacts
+- `bundles-applied` - Number of manifest entries successfully applied
+- `bundle-warnings` - Number of manifest entries that logged warnings
+
+**Required Permissions:**
+
+- `actions: read` - Resolve and download artifacts from other workflow runs
+
+See [pages-publishing.md](../../docs/pages-publishing.md) for Model A vs B and
+manifest schema.
+
+---
+
 ## Docker Actions
 
 ### build-docker
@@ -1426,6 +1464,65 @@ jobs:
 
 - `pages: write` - For GitHub Pages deployment
 - `id-token: write` - For OIDC authentication
+
+---
+
+### reusable-deploy-site-with-reports.yml
+
+Build a static site, bundle HTML report artifacts from other workflows via a
+manifest, and deploy once to GitHub Pages (Model B).
+
+```yaml
+jobs:
+  deploy:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@main
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read
+    with:
+      site-root: apps/site/dist
+      build-command: bun run build
+      package-manager: bun
+      bundle-manifest: examples/bundle-manifest-turbo-themes.json
+      commit-sha: ${{ github.event.workflow_run.head_sha }}
+      fallback-ref: main
+```
+
+**Inputs:**
+
+- `site-root` - Deploy root (default: `dist`)
+- `build-command` - Optional site build command
+- `bundle-manifest` - Inline JSON or path to manifest in caller repo
+- `bundle-after-build` - Run bundle after build (default: `true`)
+- `commit-sha` - SHA for checkout and artifact resolution (default: `github.sha`)
+- `fallback-ref` - Optional branch for fallback artifact lookup (default: strict)
+- `strict-bundle` - Fail when any manifest entry is missing (default: `false`)
+- `node-version`, `package-manager`, `working-directory`, `frozen-lockfile` -
+  Same as `reusable-deploy-pages`
+- `tooling-ref`, `egress-policy`, `allowed-endpoints`, `runner-image`,
+  `timeout-minutes`, `artifact-name`, `environment` - Standard contract
+
+**Outputs:**
+
+- `page-url` - URL of the deployed site
+
+**Features:**
+
+- Manifest-driven cross-workflow artifact download (no repo-local API scripts)
+- Optional `main` (or other branch) fallback per caller configuration
+- Two-job workflow (build + deploy) with official OIDC Pages actions
+- Shared `pages-${{ github.repository }}-${{ github.ref }}` concurrency
+
+**Permissions Required (caller):**
+
+- `contents: read` - Checkout repository
+- `pages: write` - GitHub Pages deployment
+- `id-token: write` - OIDC authentication
+- `actions: read` - Download artifacts from other workflow runs (build job)
+
+See [pages-publishing.md](../../docs/pages-publishing.md) for Model A vs B.
 
 ---
 

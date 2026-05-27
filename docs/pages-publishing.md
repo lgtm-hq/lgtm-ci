@@ -5,18 +5,116 @@ lgtm-ci uses a single deployment model: **GitHub Actions OIDC** via
 `actions/deploy-pages`. Third-party branch-push actions (for example
 `peaceiris/actions-gh-pages`) are not supported and are blocked by org policy.
 
+## Model A vs Model B
+
+| Model | Use when | Entry point |
+| ----- | -------- | ----------- |
+| **A — report subtree** | Single-report repos (py-lintro) | `publish-test-results` |
+| **B — bundled site** | Docs site + CI HTML on one origin | `reusable-deploy-site-with-reports` |
+
+**Model A** uploads one subtree (`python/`, `vitest/`, …) per job. Each deploy
+replaces the **entire** published site.
+
+**Model B** builds (or reuses) a static site tree, downloads HTML artifacts from
+other workflows via a manifest, copies them into configured destinations under
+`site-root`, then deploys once. Prefer Model B over parallel Model A publishers
+when you need `/coverage/`, `/playwright/`, and a docs site on one `github.io`
+origin.
+
+Issue [#225](https://github.com/lgtm-hq/lgtm-ci/issues/225) (merge existing live
+site on deploy) is a fallback for legacy multi-publisher Model A setups. New
+monorepos should use Model B ([#226](https://github.com/lgtm-hq/lgtm-ci/issues/226))
+instead.
+
 ## Entry points
 
-| Workflow / action                        | Content                     | `target-dir`       |
-| ---------------------------------------- | --------------------------- | ------------------ |
-| `publish-test-results`                   | Coverage, badges, test HTML | configurable       |
-| `deploy-pages` + `reusable-deploy-pages` | Built static sites          | `dist` (site root) |
+| Workflow / action | Content | `target-dir` / `site-root` |
+| ----------------- | ------- | -------------------------- |
+| `publish-test-results` | Coverage, badges, test HTML | configurable (`target-dir`) |
+| `deploy-pages` + `reusable-deploy-pages` | Built static sites | `dist` (site root) |
+| `reusable-deploy-site-with-reports` | Site + CI HTML bundles | `site-root` |
 
 Typical `publish-test-results` directories include `python`, `vitest`,
 `coverage`, and `playwright`.
 
+Typical Model B destinations include `coverage`, `playwright`, `lighthouse`,
+`playwright-examples`, and language-specific coverage folders.
+
 Both paths upload a **full site artifact** per deployment. Each deploy replaces
 the entire published site with that artifact.
+
+## Model B caller example
+
+Deploy after CI completes (`workflow_run`), bundling turbo-themes-equivalent
+reports:
+
+```yaml
+name: Deploy site with reports
+
+on:
+  workflow_run:
+    workflows:
+      - Quality Check - CI Pipeline
+      - Quality Check - E2E Tests
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+  actions: read # required to download workflow artifacts
+
+jobs:
+  deploy:
+    if: >-
+      github.event.workflow_run.conclusion == 'success'
+      && github.event.workflow_run.head_branch == 'main'
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@<sha>
+    with:
+      site-root: apps/site/dist
+      build-command: bun run build
+      package-manager: bun
+      bundle-manifest: examples/bundle-manifest-turbo-themes.json
+      commit-sha: ${{ github.event.workflow_run.head_sha }}
+      fallback-ref: main # optional; omit for strict commit-only resolution
+      tooling-ref: "<sha>"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        actions.githubusercontent.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+```
+
+See `examples/bundle-manifest-turbo-themes.json` for a manifest that mirrors
+turbo-themes report destinations. Workflow fields match workflow **display names**
+or file stems (for example `quality-ci-main` matches `.github/workflows/quality-ci-main.yml`).
+
+### Bundle manifest schema
+
+```json
+{
+  "strict": false,
+  "bundles": [
+    {
+      "id": "vitest-coverage",
+      "workflow": "quality-ci-main",
+      "artifact": "coverage-html",
+      "dest": "coverage",
+      "require_success": true
+    }
+  ]
+}
+```
+
+- `strict: true` (manifest or `strict-bundle` input) fails the step when any
+  entry is missing.
+- `fallback-ref` (for example `main`) retries lookup on a branch when no run
+  exists for `commit-sha`. Default is strict (no fallback).
+- `require_success: false` includes failed runs (artifacts uploaded with
+  `if: always()`).
 
 ## Caller permissions
 
@@ -29,10 +127,13 @@ permissions:
   id-token: write
 ```
 
+Model B build jobs also require `actions: read` on the caller workflow so the
+bundle step can resolve and download artifacts from other workflow runs.
+
 Do **not** grant `contents: write` for Pages publish; branch-push deploy is no
 longer used.
 
-When `egress-policy: block`, allow OIDC and artifact upload:
+When `egress-policy: block`, allow OIDC, artifact upload, and GitHub API access:
 
 ```yaml
 allowed-endpoints: >
@@ -52,11 +153,12 @@ pages-${{ github.repository }}-${{ github.ref }}
 ```
 
 This serializes deployments to the same site on the same ref (including
-`reusable-deploy-pages` and coverage/test publish workflows).
+`reusable-deploy-pages`, `reusable-deploy-site-with-reports`, and coverage/test
+publish workflows).
 
-## Multi-publisher limitation
+## Multi-publisher limitation (Model A)
 
-If a repository runs **more than one** publish workflow to the same GitHub Pages
+If a repository runs **more than one** Model A publish workflow to the same GitHub Pages
 site in the same pipeline (for example `reusable-test-python-publish` deploying
 `python/` and `reusable-test-node-publish` deploying `vitest/` on one push),
 the shared concurrency group
@@ -70,11 +172,11 @@ The old `peaceiris/actions-gh-pages` model pushed to one branch with
 `keep_files: true`, so `python/` and `vitest/` could coexist. The official
 artifact model cannot do that without an explicit merge step.
 
-| Mitigation                | When                                              |
-| ------------------------- | ------------------------------------------------- |
+| Mitigation | When |
+| ---------- | ---- |
 | One publish job per event | One `publish-test-results` with combined subtrees |
-| Model B site bundle       | Issue #226 (turbo-style bundle) [226]             |
-| Optional live-site merge  | Issue #225 (multi Model A publishers) [225]       |
+| Model B site bundle | Monorepos — `reusable-deploy-site-with-reports` [226] |
+| Optional live-site merge | Legacy Model A multi-publisher fallback [225] |
 
 [225]: https://github.com/lgtm-hq/lgtm-ci/issues/225
 [226]: https://github.com/lgtm-hq/lgtm-ci/issues/226

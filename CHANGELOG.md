@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-deploy-site-with-reports.yml` for Model B Pages (site +
+  bundled CI report artifacts) (#226)
+- **actions**: `bundle-workflow-artifacts` composite and manifest-driven bundling
+  script (#226)
+- **docs**: Model A vs Model B in `docs/pages-publishing.md`; turbo-themes example
+  manifest in `examples/bundle-manifest-turbo-themes.json` (#226)
+
 ### Changed
 
 ### Deprecated
