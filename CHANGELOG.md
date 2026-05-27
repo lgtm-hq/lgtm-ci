@@ -18,14 +18,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: `reusable-publish-pypi.yml` installs Python via `setup-python`
   before building (#232)
 
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
-
 ## [0.20.0] - 2026-05-27
 
 ### Features

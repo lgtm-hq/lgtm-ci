@@ -86,7 +86,7 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
-      contents: write
+      contents: write # create GitHub releases and upload release assets
 
     outputs:
       release-url: ${{ steps.gh-release.outputs.url }}

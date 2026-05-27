@@ -166,8 +166,8 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
-      id-token: write
-      attestations: write
+      id-token: write # OIDC token for PyPI Trusted Publishing
+      attestations: write # build provenance attestation
 
     outputs:
       published: ${{ steps.set-published.outputs.published }}

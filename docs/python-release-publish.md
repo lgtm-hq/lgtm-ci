@@ -14,8 +14,9 @@ lgtm-ci.
 | `reusable-github-release.yml` | Attach artifacts to a GitHub Release |
 
 There is **no orchestrator** workflow. Compose jobs in the caller repository,
-matching the pattern from #231 (`reusable-quality-lint.yml` +
-`reusable-quality-pr-comment.yml` invoked directly).
+matching the pattern from the split quality workflows PR
+([#231](https://github.com/lgtm-hq/lgtm-ci/pull/231): `reusable-quality-lint.yml`
+and `reusable-quality-pr-comment.yml` invoked directly).
 
 ## Production tag push (recommended layout)
 
@@ -101,9 +102,11 @@ jobs:
 
 Use the same `artifact-name` for `reusable-publish-pypi-release.yml` and
 `reusable-github-release.yml` so the release job downloads the wheel/sdist
-uploaded by the build job. `reusable-github-release.yml` defaults release asset
-globs to `{artifact-path}/*`; override `files` only when you also change
-`artifact-path`.
+uploaded by the build job. The release workflow defaults to uploading all files
+from `{artifact-path}/*` as release assets. Only override the `files` input if
+you need custom globbing patterns or if you change the default `artifact-path`.
+Changing `files` without updating `artifact-path` points at the wrong uploaded
+assets.
 
 ## TestPyPI (single job)
 
