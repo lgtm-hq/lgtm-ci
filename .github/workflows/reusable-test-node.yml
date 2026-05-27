@@ -712,44 +712,24 @@ jobs:
         github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
-    runs-on: ${{ inputs.runner-image }}
+    uses: ./.github/workflows/reusable-artifact-pr-comment.yml
     permissions:
       contents: read
       pull-requests: write
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Download coverage PR comment artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: node-coverage-pr-comment-${{ matrix.node-version }}
-
-      - name: Comment PR with Node coverage
-        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
-        with:
-          file: node-coverage-pr-comment.txt
-          marker: >-
-            ${{ inputs.node-versions != '' && format('{0}-{1}',
-            inputs.coverage-comment-marker, matrix.node-version) ||
-            inputs.coverage-comment-marker }}
+    with:
+      artifact-name: node-coverage-pr-comment-${{ matrix.node-version }}
+      comment-file: node-coverage-pr-comment.txt
+      marker: >-
+        ${{ inputs.node-versions != '' && format('{0}-{1}',
+        inputs.coverage-comment-marker, matrix.node-version) ||
+        inputs.coverage-comment-marker }}
+      job-name: Node coverage PR comment
+      tooling-ref: ${{ inputs.tooling-ref }}
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      runner-image: ${{ inputs.runner-image }}
 
   comment-pr:
     needs: aggregate-tests

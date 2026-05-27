@@ -1,0 +1,151 @@
+#!/usr/bin/env bats
+# SPDX-License-Identifier: MIT
+# Purpose: Contract tests for split PR-comment reusable workflows (#231)
+
+load "../../helpers/common"
+
+_lint_only_has_no_pr_permissions() {
+	local workflow="$1"
+	run awk '
+		/^jobs:/ { in_jobs = 1 }
+		in_jobs && /^[^ ]/ && !/^jobs:/ { in_jobs = 0 }
+		in_jobs && /pull-requests:/ { found = 1; exit }
+		END { exit found }
+	' "$workflow"
+}
+
+_orchestrator_delegates_comment() {
+	local workflow="$1"
+	local comment_reusable="$2"
+	run awk -v reusable="$comment_reusable" '
+		/^  comment(-pr)?:/ { in_comment = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  comment(-pr)?:/ { in_comment = 0 }
+		in_comment && $0 ~ "uses: \\./\\.github/workflows/" reusable { found = 1; exit }
+		END { exit !found }
+	' "$workflow"
+}
+
+_orchestrator_has_no_inline_pr_comment_job() {
+	local workflow="$1"
+	run awk '
+		function job_name() {
+			match($0, /^  ([a-zA-Z0-9_-]+):/, m)
+			return m[1]
+		}
+		/^  comment(-pr)?:/ { in_comment = 1; comment_job = job_name() }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  comment(-pr)?:/ { in_comment = 0 }
+		in_comment && /^    runs-on:/ { found = 1; exit }
+		END { exit found }
+	' "$workflow"
+}
+
+@test "reusable-quality-lint: no pull-requests permission" {
+	run _lint_only_has_no_pr_permissions \
+		"${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
+	assert_success
+}
+
+@test "reusable-quality: delegates PR comment to reusable-quality-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-quality.yml" \
+		"reusable-quality-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-quality: comment job is not inline runs-on" {
+	run _orchestrator_has_no_inline_pr_comment_job \
+		"${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
+	assert_success
+}
+
+@test "reusable-quality: lint job delegates to reusable-quality-lint" {
+	run awk '
+		/^  quality:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  quality:/ { in_job = 0 }
+		in_job && /uses: \.\/\.github\/workflows\/reusable-quality-lint\.yml/ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
+	assert_success
+}
+
+@test "reusable-coverage: coverage job has no pull-requests permission" {
+	run awk '
+		/^  coverage:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  coverage:/ { in_job = 0 }
+		in_job && /pull-requests:/ { found = 1; exit }
+		END { exit found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-coverage.yml"
+	assert_success
+}
+
+@test "reusable-coverage: delegates PR comment to reusable-coverage-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-coverage.yml" \
+		"reusable-coverage-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-validate: validate job has no pull-requests permission" {
+	run awk '
+		/^  validate:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  validate:/ { in_job = 0 }
+		in_job && /pull-requests:/ { found = 1; exit }
+		END { exit found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-validate.yml"
+	assert_success
+}
+
+@test "reusable-validate: delegates PR comment to reusable-artifact-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-validate.yml" \
+		"reusable-artifact-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-link-check: link-check job has no pull-requests permission" {
+	run awk '
+		/^  link-check:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  link-check:/ { in_job = 0 }
+		in_job && /pull-requests:/ { found = 1; exit }
+		END { exit found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-link-check.yml"
+	assert_success
+}
+
+@test "reusable-link-check: delegates PR comment to reusable-artifact-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-link-check.yml" \
+		"reusable-artifact-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-test-rust-coverage: delegates coverage comment to reusable-artifact-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-rust-coverage.yml" \
+		"reusable-artifact-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-test-node: delegates coverage comment to reusable-artifact-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml" \
+		"reusable-artifact-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-test-python: still delegates test comment to reusable-test-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml" \
+		"reusable-test-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-quality-pr-comment: grants pull-requests write on comment job only" {
+	run awk '
+		/^  comment:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  comment:/ { in_job = 0 }
+		in_job && /pull-requests: write/ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-quality-pr-comment.yml"
+	assert_success
+}

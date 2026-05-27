@@ -1,0 +1,141 @@
+---
+name: Reusable Quality Lint Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check run name reported for this job"
+        required: false
+        type: string
+        default: "Lintro Quality Checks"
+      tools:
+        description: "Comma-separated lintro --tools list (empty = all tools)"
+        required: false
+        type: string
+        default: ""
+      lintro-tools:
+        description: "Deprecated alias for tools"
+        required: false
+        type: string
+        default: ""
+      fail-on-error:
+        description: "Fail workflow if linting errors found"
+        required: false
+        type: boolean
+        default: true
+      upload-report:
+        description: "Upload linting report as artifact"
+        required: false
+        type: boolean
+        default: true
+      working-directory:
+        description: "Working directory for linting"
+        required: false
+        type: string
+        default: "."
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      lintro-tool-options:
+        description: >-
+          Comma-separated lintro --tool-options passed to the quality check
+          (e.g. pydoclint:timeout=120,osv_scanner:check_suppressions=false)
+        required: false
+        type: string
+        default: ""
+      lintro-image:
+        description: "Pinned ghcr.io/lgtm-hq/py-lintro image (digest strongly recommended)"
+        required: false
+        type: string
+        # yamllint disable-line rule:line-length
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578"
+
+    outputs:
+      exit-code:
+        description: "Exit code from lintro"
+        value: ${{ jobs.quality.outputs.exit-code }}
+      status:
+        description: "passed or failed"
+        value: ${{ jobs.quality.outputs.status }}
+
+jobs:
+  quality:
+    name: ${{ inputs.job-name }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      exit-code: ${{ steps.quality.outputs.exit-code }}
+      status: ${{ steps.quality.outputs.status }}
+    env:
+      LINTRO_IMAGE: ${{ inputs.lintro-image }}
+
+    steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Run lintro quality checks
+        id: quality
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          STEP: check
+          TOOLS: ${{ inputs.tools != '' && inputs.tools || inputs.lintro-tools }}
+          TOOL_OPTIONS: ${{ inputs.lintro-tool-options }}
+          FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
+          MAP_HOST_USER: "true"
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
+
+      - name: Upload linting report
+        if: inputs.upload-report && always()
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linting-report
+          path: |
+            ${{ inputs.working-directory }}/.lintro/
+            ${{ inputs.working-directory }}/chk-output.txt
+          retention-days: 7
+          if-no-files-found: ignore

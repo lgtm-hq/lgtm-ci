@@ -20,13 +20,22 @@ Where applicable, workflows accept:
 
 ## Permissions by mode
 
-| Mode | Caller permissions |
-| --- | --- |
-| Test / quality only | `contents: read` |
-| PR comments | `contents: read`, `pull-requests: write` |
-| Publish to Pages | `contents: read`, `pages: write`, `id-token: write` (separate workflow/job) |
-| Release version PR | `contents: write`, `pull-requests: write` + app secrets |
-| Package publish | `contents: read`, `id-token: write`, `attestations: write` (as required) |
+GitHub validates **all** jobs in a called reusable workflow at parse time,
+regardless of job `if:` conditions. Workflows that bundle lint/test/coverage with
+optional PR comments therefore split comment posting into dedicated reusables
+(for example `reusable-quality-lint.yml` + `reusable-quality-pr-comment.yml`).
+Callers that disable comments or run on tag/release events should invoke the
+lint/test/coverage reusable only and omit the comment reusable entirely.
+
+| Mode | Caller permissions | Workflow |
+| --- | --- | --- |
+| Quality / lint only | `contents: read`, `packages: read` | `reusable-quality-lint.yml` |
+| Quality + comments | `contents/packages: read`, `pull-requests: write` | `reusable-quality.yml` |
+| Test / coverage only | `contents: read` | Reusables with `post-pr-comment: false` |
+| PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
+| Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
+| Release version PR | `contents: write`, `pull-requests: write` | `reusable-release-version-pr` |
+| Package publish | `contents: read`, `id-token: write` | Publish reusables |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
 `reusable-test-node-publish.yml` in a separate caller job when publishing is
@@ -187,6 +196,30 @@ This is enforced in `scripts/ci/actions/post-pr-comment.sh` and workflow `if`
 conditions.
 
 ## Rustume migration example
+
+Tag/release pipelines should call lint-only reusables (no `pull-requests: write`):
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🛠️ Lintro Code Quality & Analysis"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        ghcr.io:443
+        api.osv.dev:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+```
+
+Pull-request pipelines with comments use the orchestrator or split comment reusables:
 
 ```yaml
 jobs:
