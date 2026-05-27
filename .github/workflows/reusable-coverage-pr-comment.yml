@@ -95,23 +95,7 @@ jobs:
           THRESHOLD: ${{ inputs.threshold }}
           COMMENT_TITLE: ${{ inputs.comment-title }}
           PASSED: ${{ inputs.passed }}
-        run: |
-          STATUS_EMOJI="✅"
-          if [[ "$PASSED" != "true" ]]; then
-            STATUS_EMOJI="❌"
-          fi
-          BODY="## ${COMMENT_TITLE}
-
-          ${STATUS_EMOJI} **Coverage: ${COVERAGE_PERCENT}%**"
-          if awk "BEGIN{exit(!($THRESHOLD > 0))}"; then
-            BODY="${BODY} (threshold: ${THRESHOLD}%)"
-          fi
-          EOF_MARKER="LGTM_EOF_$$"
-          {
-            echo "comment-body<<${EOF_MARKER}"
-            echo "$BODY"
-            echo "${EOF_MARKER}"
-          } >>"$GITHUB_OUTPUT"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-coverage-pr-comment.sh
 
       - name: Post PR comment
         shell: bash

@@ -149,3 +149,20 @@ _orchestrator_has_no_inline_pr_comment_job() {
 	' "${PROJECT_ROOT}/.github/workflows/reusable-quality-pr-comment.yml"
 	assert_success
 }
+
+@test "reusable-coverage-pr-comment: delegates body generation to script" {
+	run awk '
+		/Generate coverage comment body/ { in_step = 1 }
+		in_step && /generate-coverage-pr-comment\.sh/ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-coverage-pr-comment.yml"
+	assert_success
+}
+
+@test "reusable-coverage-pr-comment: has no multiline inline run blocks" {
+	run awk '
+		/^        run: \|/ { found = 1; exit }
+		END { exit found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-coverage-pr-comment.yml"
+	assert_success
+}
