@@ -50,6 +50,8 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
 | Release version | `contents: write`, `pull-requests: write` | `reusable-release-version-pr.yml` |
 | Package publish | `contents: read`, `id-token: write`, `attestations: write` | Publish reusables |
+| Split PyPI publish | Same as Package publish | `reusable-publish-pypi-release.yml` |
+| GitHub Release assets | `contents: write` | `reusable-github-release.yml` |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
 `reusable-test-node-publish.yml` in a separate caller job when publishing is
@@ -144,6 +146,40 @@ allowed-endpoints: >
   codeload.github.com:443
   objects.githubusercontent.com:443
   release-assets.githubusercontent.com:443
+```
+
+### PyPI publish (OIDC + attestation)
+
+```yaml
+egress-policy: block
+allowed-endpoints: >
+  github.com:443
+  api.github.com:443
+  codeload.github.com:443
+  pypi.org:443
+  upload.pypi.org:443
+  files.pythonhosted.org:443
+  test.pypi.org:443
+  upload.test.pypi.org:443
+  astral.sh:443
+  releases.astral.sh:443
+  fulcio.sigstore.dev:443
+  rekor.sigstore.dev:443
+  tuf-repo-cdn.sigstore.dev:443
+  oauth2.sigstore.dev:443
+```
+
+### GitHub Release (artifact upload)
+
+```yaml
+egress-policy: block
+allowed-endpoints: >
+  github.com:443
+  api.github.com:443
+  uploads.github.com:443
+  codeload.github.com:443
+  release-assets.githubusercontent.com:443
+  objects.githubusercontent.com:443
 ```
 
 ## Action pinning policy

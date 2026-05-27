@@ -208,6 +208,21 @@ jobs:
       id-token: write
       attestations: write
 
+  pypi-release:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@<sha>
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+
+  github-release:
+    needs: pypi-release
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@<sha>
+    permissions:
+      contents: write
+    with:
+      artifact-name: python-dist
+
   gem:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-gem.yml@<sha>
     permissions:
@@ -229,6 +244,9 @@ jobs:
       build-command: bun run build
       package-manager: bun
 ```
+
+See [python-release-publish.md](python-release-publish.md) for a full production
+tag-push layout (quality, SBOM, split publish, release assets).
 
 ## Build, Coverage, And Supply Chain
 
