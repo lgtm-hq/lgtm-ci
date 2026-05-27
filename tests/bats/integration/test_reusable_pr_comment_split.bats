@@ -126,10 +126,23 @@ _orchestrator_has_no_inline_pr_comment_job() {
 	assert_success
 }
 
-@test "reusable-test-node: delegates coverage comment to reusable-artifact-pr-comment" {
-	run _orchestrator_delegates_comment \
-		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml" \
-		"reusable-artifact-pr-comment.yml"
+@test "reusable-test-node: coverage comment uses inline matrix job not reusable" {
+	run awk '
+		/^  coverage-pr-comment:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  coverage-pr-comment:/ { in_job = 0 }
+		in_job && /^    uses: \.\/\.github\/workflows\// { found = 1; exit }
+		END { exit found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
+	assert_success
+}
+
+@test "reusable-test-node: coverage comment job has strategy matrix" {
+	run awk '
+		/^  coverage-pr-comment:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  coverage-pr-comment:/ { in_job = 0 }
+		in_job && /^    strategy:/ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
 	assert_success
 }
 

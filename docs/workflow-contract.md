@@ -29,14 +29,28 @@ lint/test/coverage reusable only and omit the comment reusable entirely.
 
 ### Reusable workflow nesting limit
 
-GitHub allows at most **three levels** of reusable-workflow nesting. Workflows
-that delegate to child reusables consume depth budget from the caller chain.
+On GitHub.com, a workflow run may chain at most **ten levels** of workflows: the
+top-level caller counts as level 1, with up to nine nested reusable workflows
+after it (for example `ci.yml` → `wrapper.yml` → … → leaf reusable, max depth
+10). GitHub Enterprise Server limits this to four levels (top-level caller plus
+three nested reusables).
 
+Workflows that delegate to child reusables consume depth from the caller chain.
 `reusable-quality.yml` calls `reusable-quality-lint.yml` and
-`reusable-quality-pr-comment.yml`, so it must be invoked from a **top-level
-caller workflow** (or at most one reusable deep). Do not call it from a reusable
-that is itself nested two or more levels below the top-level workflow, or the
-child lint/comment reusables will exceed the nesting limit.
+`reusable-quality-pr-comment.yml`, so a direct invocation from a top-level
+caller uses three levels:
+
+`ci.yml` (L1) → `reusable-quality.yml` (L2) →
+`reusable-quality-lint.yml` or `reusable-quality-pr-comment.yml` (L3).
+
+Ensure the caller of `reusable-quality.yml` is at level **8 or shallower**
+(L1–L8) so its child lint/comment reusables stay at or below level 10. Prefer
+invoking `reusable-quality.yml` from top-level caller workflows; when nesting
+deeper, call `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml`
+directly to avoid an extra orchestration level.
+
+Jobs that need a `strategy:` matrix cannot call a reusable workflow (`uses:`);
+use inline steps instead (see `reusable-test-node.yml` `coverage-pr-comment`).
 
 | Mode | Caller permissions | Workflow |
 | --- | --- | --- |
@@ -45,7 +59,7 @@ child lint/comment reusables will exceed the nesting limit.
 | Test / coverage only | `contents: read` | Reusables with `post-pr-comment: false` |
 | PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
-| Release version PR | `contents: write`, `pull-requests: write` | `reusable-release-version-pr` |
+| Release version PR | `contents/pull-requests: write` | `reusable-release-version-pr.yml` |
 | Package publish | `contents: read`, `id-token: write`, `attestations: write` | Publish reusables |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
