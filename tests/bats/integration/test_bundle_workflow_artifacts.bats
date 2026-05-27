@@ -25,7 +25,7 @@ _checkout_order_ok() {
 	local action="${PROJECT_ROOT}/.github/actions/bundle-workflow-artifacts/action.yml"
 	run grep -q 'bundle-workflow-artifacts.sh' "$action"
 	assert_success
-	run grep -q 'run: \|' "$action"
+	run grep -Fq 'run: |' "$action"
 	assert_failure
 }
 

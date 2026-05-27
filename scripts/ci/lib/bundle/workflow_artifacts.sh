@@ -205,7 +205,6 @@ bundle_copy_to_site() {
 	fi
 
 	mkdir -p "$target_dir"
-	# shellcheck disable=SC2115
 	cp -R "${source_dir}/." "$target_dir/"
 }
 
