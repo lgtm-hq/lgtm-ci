@@ -45,27 +45,29 @@ _orchestrator_has_no_inline_pr_comment_job() {
 	assert_success
 }
 
-@test "reusable-quality: delegates PR comment to reusable-quality-pr-comment" {
-	run _orchestrator_delegates_comment \
-		"${PROJECT_ROOT}/.github/workflows/reusable-quality.yml" \
-		"reusable-quality-pr-comment.yml"
-	assert_success
-}
-
-@test "reusable-quality: comment job is not inline runs-on" {
-	run _orchestrator_has_no_inline_pr_comment_job \
-		"${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
-	assert_success
-}
-
-@test "reusable-quality: lint job delegates to reusable-quality-lint" {
+@test "ci.yml: calls reusable-quality-lint directly" {
 	run awk '
 		/^  quality:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  quality:/ { in_job = 0 }
 		in_job && /uses: \.\/\.github\/workflows\/reusable-quality-lint\.yml/ { found = 1; exit }
 		END { exit !found }
-	' "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
+	' "${PROJECT_ROOT}/.github/workflows/ci.yml"
 	assert_success
+}
+
+@test "ci.yml: calls reusable-quality-pr-comment directly" {
+	run awk '
+		/^  quality-pr-comment:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  quality-pr-comment:/ { in_job = 0 }
+		in_job && /uses: \.\/\.github\/workflows\/reusable-quality-pr-comment\.yml/ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/ci.yml"
+	assert_success
+}
+
+@test "reusable-quality.yml orchestrator does not exist" {
+	run test -f "${PROJECT_ROOT}/.github/workflows/reusable-quality.yml"
+	assert_failure
 }
 
 @test "reusable-coverage: coverage job has no pull-requests permission" {

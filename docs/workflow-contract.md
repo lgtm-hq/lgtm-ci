@@ -27,27 +27,14 @@ optional PR comments therefore split comment posting into dedicated reusables
 Callers that disable comments or run on tag/release events should invoke the
 lint/test/coverage reusable only and omit the comment reusable entirely.
 
-### Reusable workflow nesting limit
+### Direct caller pattern (no orchestrator)
 
-On GitHub.com, a workflow run may chain at most **ten levels** of workflows: the
-top-level caller counts as level 1, with up to nine nested reusable workflows
-after it (for example `ci.yml` → `wrapper.yml` → … → leaf reusable, max depth
-10). GitHub Enterprise Server limits this to four levels (top-level caller plus
-three nested reusables).
-
-Workflows that delegate to child reusables consume depth from the caller chain.
-`reusable-quality.yml` calls `reusable-quality-lint.yml` and
-`reusable-quality-pr-comment.yml`, so a direct invocation from a top-level
-caller uses three levels:
-
-`ci.yml` (L1) → `reusable-quality.yml` (L2) →
-`reusable-quality-lint.yml` or `reusable-quality-pr-comment.yml` (L3).
-
-Ensure the caller of `reusable-quality.yml` is at level **8 or shallower**
-(L1–L8) so its child lint/comment reusables stay at or below level 10. Prefer
-invoking `reusable-quality.yml` from top-level caller workflows; when nesting
-deeper, call `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml`
-directly to avoid an extra orchestration level.
+Callers invoke `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml`
+directly — there is no intermediate orchestrator workflow. This produces a single
+nesting hop (`ci.yml` → `reusable-quality-lint.yml`) so check names read
+`quality / Lintro Quality Checks` instead of `quality / quality / Lintro Quality
+Checks`. The pattern matches `reusable-test-python.yml` +
+`reusable-test-pr-comment.yml`.
 
 Jobs that need a `strategy:` matrix cannot call a reusable workflow (`uses:`);
 use inline steps instead (see `reusable-test-node.yml` `coverage-pr-comment`).
@@ -55,7 +42,7 @@ use inline steps instead (see `reusable-test-node.yml` `coverage-pr-comment`).
 | Mode | Caller permissions | Workflow |
 | --- | --- | --- |
 | Quality / lint only | `contents: read`, `packages: read` | `reusable-quality-lint.yml` |
-| Quality + comments | `contents/packages: read`, `pull-requests: write` | `reusable-quality.yml` |
+| Quality PR comment | `contents: read`, `pull-requests: write` | `reusable-quality-pr-comment` |
 | Test / coverage only | `contents: read` | Reusables with `post-pr-comment: false` |
 | PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
@@ -244,16 +231,15 @@ jobs:
         metrics.semgrep.dev:443
 ```
 
-Pull-request pipelines with comments use the orchestrator or split comment reusables:
+Pull-request pipelines with comments call both reusables directly:
 
 ```yaml
 jobs:
   quality:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
     permissions:
       contents: read
       packages: read
-      pull-requests: write
     with:
       tooling-ref: "<sha>"
       job-name: "🛠️ Lintro Code Quality & Analysis"
@@ -265,6 +251,20 @@ jobs:
         api.osv.dev:443
         semgrep.dev:443
         metrics.semgrep.dev:443
+
+  quality-pr-comment:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: "<sha>"
 
   rust-build:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@<sha>

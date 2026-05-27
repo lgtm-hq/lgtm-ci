@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **workflows**: split PR-comment jobs into dedicated reusables for least-privilege
   callers (#231)
+- **workflows**: remove `reusable-quality.yml` orchestrator; callers invoke
+  `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml` directly (#231)
 
 ### Deprecated
 
