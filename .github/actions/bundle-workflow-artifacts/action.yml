@@ -15,7 +15,6 @@ inputs:
   bundle-manifest:
     description: "Inline JSON manifest or path to a .json/.yaml/.yml manifest file"
     required: true
-    default: ""
   fallback-ref:
     description: "Optional branch ref for fallback workflow lookup (e.g. main)"
     required: false

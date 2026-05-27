@@ -150,6 +150,17 @@ EOF
 	assert_failure
 }
 
+@test "bundle_run_manifest: rejects dest path traversal" {
+	_setup_bundle_gh_mock
+	bundle_load_manifest '{"bundles":[{"id":"escape","workflow":"quality-ci-main","artifact":"coverage-html","dest":"../outside"}]}'
+
+	run bundle_run_manifest
+	assert_success
+	assert_output --partial "must not contain .. segments"
+	run test ! -e "${BATS_TEST_TMPDIR}/outside"
+	assert_success
+}
+
 @test "bundle-workflow-artifacts action script: runs end-to-end" {
 	_setup_bundle_gh_mock
 	local manifest="${BATS_TEST_TMPDIR}/manifest.json"

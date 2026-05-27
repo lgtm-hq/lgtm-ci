@@ -71,10 +71,10 @@ bundle_find_workflow_run() {
 	local jq_filter
 	if [[ "$require_success" == "false" ]]; then
 		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | test("/" + $wf + "\\.ya?ml$"; "i"))) and (.conclusion == "success" or .conclusion == "failure")) | .id) // empty'
+		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and (.conclusion == "success" or .conclusion == "failure")) | .id) // empty'
 	else
 		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | test("/" + $wf + "\\.ya?ml$"; "i"))) and .conclusion == "success") | .id) // empty'
+		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and .conclusion == "success") | .id) // empty'
 	fi
 
 	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${commit_sha}&per_page=100" \
@@ -91,10 +91,10 @@ bundle_find_workflow_run_on_ref() {
 	local jq_filter
 	if [[ "$require_success" == "false" ]]; then
 		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | test("/" + $wf + "\\.ya?ml$"; "i"))) and .head_branch == $branch and (.conclusion == "success" or .conclusion == "failure")) | .id) // empty'
+		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and .head_branch == $branch and (.conclusion == "success" or .conclusion == "failure")) | .id) // empty'
 	else
 		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | test("/" + $wf + "\\.ya?ml$"; "i"))) and .head_branch == $branch and .conclusion == "success") | .id) // empty'
+		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and .head_branch == $branch and .conclusion == "success") | .id) // empty'
 	fi
 
 	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${fallback_ref}&per_page=50" \
@@ -129,10 +129,63 @@ bundle_download_artifact() {
 	fi
 
 	temp_zip="$(mktemp "${TMPDIR:-/tmp}/bundle-artifact.XXXXXX.zip")"
-	gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" >"$temp_zip"
+	if ! gh api "repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" >"$temp_zip"; then
+		log_error "Failed to download artifact ${artifact_id}"
+		rm -f "$temp_zip"
+		return 1
+	fi
+	if [[ ! -s "$temp_zip" ]]; then
+		log_error "Downloaded artifact ${artifact_id} is empty"
+		rm -f "$temp_zip"
+		return 1
+	fi
+	if ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
+		log_error "Downloaded artifact ${artifact_id} is not a valid zip archive"
+		rm -f "$temp_zip"
+		return 1
+	fi
 	mkdir -p "$dest_dir"
 	unzip -o -q "$temp_zip" -d "$dest_dir/"
 	rm -f "$temp_zip"
+}
+
+# Resolve and validate a manifest dest path under SITE_ROOT.
+# Prints the absolute target directory on success.
+# Usage: bundle_resolve_site_dest SITE_ROOT DEST_SUBDIR
+bundle_resolve_site_dest() {
+	local site_root="$1"
+	local dest_subdir="$2"
+	local site_root_abs target_dir
+
+	if [[ -z "$dest_subdir" || "$dest_subdir" == "null" ]]; then
+		log_error "Bundle dest is required"
+		return 1
+	fi
+	if [[ "$dest_subdir" == /* ]]; then
+		log_error "Bundle dest must be relative to site root: ${dest_subdir}"
+		return 1
+	fi
+	if [[ "$dest_subdir" == *".."* ]]; then
+		log_error "Bundle dest must not contain .. segments: ${dest_subdir}"
+		return 1
+	fi
+
+	site_root_abs=$(python3 -c 'import os, sys; print(os.path.realpath(sys.argv[1]))' "$site_root")
+	target_dir=$(
+		python3 -c 'import os, sys; print(os.path.realpath(os.path.join(sys.argv[1], sys.argv[2])))' \
+			"$site_root_abs" "$dest_subdir"
+	)
+
+	case "$target_dir" in
+	"$site_root_abs" | "$site_root_abs"/*)
+		printf '%s\n' "$target_dir"
+		return 0
+		;;
+	*)
+		log_error "Bundle dest escapes site root: ${dest_subdir}"
+		return 1
+		;;
+	esac
 }
 
 # Copy extracted artifact contents into SITE_ROOT/dest.
@@ -141,9 +194,13 @@ bundle_copy_to_site() {
 	local source_dir="$1"
 	local site_root="$2"
 	local dest_subdir="$3"
-	local target_dir="${site_root}/${dest_subdir}"
+	local target_dir
 
 	if [[ ! -d "$source_dir" ]] || [[ -z "$(ls -A "$source_dir" 2>/dev/null || true)" ]]; then
+		return 1
+	fi
+
+	if ! target_dir=$(bundle_resolve_site_dest "$site_root" "$dest_subdir"); then
 		return 1
 	fi
 
@@ -197,6 +254,7 @@ bundle_run_manifest() {
 	fi
 
 	temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bundle-workflow-artifacts.XXXXXX")"
+	trap 'rm -rf "${temp_root:-}"' EXIT INT TERM
 	local applied=0
 	local index
 	for ((index = 0; index < bundle_count; index++)); do
@@ -227,6 +285,14 @@ bundle_run_manifest() {
 		fi
 		if [[ -z "$dest" || "$dest" == "null" ]]; then
 			log_error "Bundle ${bundle_id}: dest is required"
+			((warnings++)) || true
+			if [[ "$strict" == "true" ]]; then
+				return 1
+			fi
+			continue
+		fi
+		if ! bundle_resolve_site_dest "$SITE_ROOT" "$dest" >/dev/null; then
+			log_warn "Bundle ${bundle_id}: invalid dest ${dest}"
 			((warnings++)) || true
 			if [[ "$strict" == "true" ]]; then
 				return 1
@@ -292,6 +358,7 @@ bundle_run_manifest() {
 		fi
 	done
 
+	trap - EXIT INT TERM
 	rm -rf "$temp_root"
 
 	set_github_output "files-bundled" "$files_bundled"
@@ -308,4 +375,5 @@ bundle_run_manifest() {
 
 export -f bundle_load_manifest bundle_find_workflow_run
 export -f bundle_find_workflow_run_on_ref bundle_get_artifact_id
-export -f bundle_download_artifact bundle_copy_to_site bundle_run_manifest
+export -f bundle_download_artifact bundle_resolve_site_dest
+export -f bundle_copy_to_site bundle_run_manifest
