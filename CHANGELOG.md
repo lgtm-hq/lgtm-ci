@@ -9,22 +9,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: `reusable-quality-lint.yml`, `reusable-quality-pr-comment.yml`,
-  `reusable-coverage-pr-comment.yml`, and `reusable-artifact-pr-comment.yml` (#231)
-
 ### Changed
 
-- **workflows**: split PR-comment jobs into dedicated reusables for least-privilege
-  callers (#231)
+### Deprecated
 
 ### Removed
-
-- **workflows**: `reusable-quality.yml` orchestrator — invoke
-  `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml` directly (#231)
 
 ### Fixed
 
 ### Security
+
+## [0.20.0] - 2026-05-27
+
+### Features
+
+- **workflows**: split PR-comment into dedicated reusables (#231) (#236) (720c9b5)
+
+### Previously Unreleased
+
+- **workflows**: `reusable-quality-lint.yml`, `reusable-quality-pr-comment.yml`,
+  `reusable-coverage-pr-comment.yml`, and `reusable-artifact-pr-comment.yml` (#231)
+- **workflows**: split PR-comment jobs into dedicated reusables for least-privilege
+  callers (#231)
+- **workflows**: `reusable-quality.yml` orchestrator — invoke
+  `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml` directly (#231)
 
 ## [0.19.3] - 2026-05-27
 
@@ -448,7 +456,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.3...v0.20.0
 [0.19.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.2...v0.19.3
 [0.19.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.1...v0.19.2
 [0.19.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.0...v0.19.1
