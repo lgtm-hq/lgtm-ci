@@ -30,11 +30,12 @@ on:
         type: boolean
         default: true
       files:
-        description: "Newline-separated asset globs for softprops/action-gh-release"
+        description: >-
+          Newline-separated asset globs for softprops/action-gh-release.
+          Defaults to "{artifact-path}/*" when empty.
         required: false
         type: string
-        default: |
-          dist/*
+        default: ""
       draft:
         description: "Create as draft release"
         required: false
@@ -116,4 +117,6 @@ jobs:
           generate_release_notes: ${{ inputs.generate-release-notes }}
           draft: ${{ inputs.draft }}
           prerelease: ${{ inputs.prerelease }}
-          files: ${{ inputs.files }}
+          files: >-
+            ${{ inputs.files != '' && inputs.files ||
+            format('{0}/*', inputs.artifact-path) }}

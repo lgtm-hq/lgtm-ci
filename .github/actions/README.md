@@ -1631,7 +1631,7 @@ jobs:
     with:
       python-version: "3.12"
       artifact-name: python-dist
-      tooling-ref: "<sha> # vX.Y.Z"
+      tooling-ref: "<sha>" # vX.Y.Z
 ```
 
 Pair with `reusable-github-release.yml` using the same `artifact-name`. See

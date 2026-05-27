@@ -37,7 +37,7 @@ jobs:
       contents: read
       packages: read
     with:
-      tooling-ref: "<sha> # vX.Y.Z"
+      tooling-ref: "<sha>" # vX.Y.Z
       egress-policy: block
       allowed-endpoints: >
         github.com:443
@@ -53,7 +53,7 @@ jobs:
       id-token: write
       attestations: write
     with:
-      tooling-ref: "<sha> # vX.Y.Z"
+      tooling-ref: "<sha>" # vX.Y.Z
       egress-policy: block
 
   publish:
@@ -65,7 +65,7 @@ jobs:
       attestations: write
     with:
       python-version: "3.12"
-      tooling-ref: "<sha> # vX.Y.Z"
+      tooling-ref: "<sha>" # vX.Y.Z
       artifact-name: python-dist
       egress-policy: block
       allowed-endpoints: >
@@ -97,7 +97,9 @@ jobs:
 
 Use the same `artifact-name` for `reusable-publish-pypi-release.yml` and
 `reusable-github-release.yml` so the release job downloads the wheel/sdist
-uploaded by the build job.
+uploaded by the build job. `reusable-github-release.yml` defaults release asset
+globs to `{artifact-path}/*`; override `files` only when you also change
+`artifact-path`.
 
 ## TestPyPI (single job)
 
@@ -115,7 +117,7 @@ jobs:
       test-pypi: true
       update-homebrew: false
       python-version: "3.12"
-      tooling-ref: "<sha> # vX.Y.Z"
+      tooling-ref: "<sha>" # vX.Y.Z
 ```
 
 ## Caller permissions summary

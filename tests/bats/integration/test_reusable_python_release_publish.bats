@@ -23,7 +23,7 @@ _checkout_order_ok() {
 
 _tooling_sparse_cone_ok() {
 	local workflow="$1"
-	run awk '
+	awk '
 		/sparse-checkout-cone-mode: true/ { found = 1; exit }
 		END { exit !found }
 	' "$workflow"
@@ -56,6 +56,17 @@ _tooling_sparse_cone_ok() {
 		in_publish && /gh-action-pypi-publish@/ { pypi = 1 }
 		in_publish && /attest-build-provenance@/ { attest = 1 }
 		END { exit !(validate && pypi && attest) }
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-publish-pypi-release: sets published output after attestation" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
+	run awk '
+		/^  publish:/ { in_publish = 1 }
+		in_publish && /attest-build-provenance@/ { attest = NR }
+		in_publish && /id: set-published/ { published = NR }
+		END { exit !(attest > 0 && published > 0 && attest < published) }
 	' "$workflow"
 	assert_success
 }
@@ -108,6 +119,8 @@ _tooling_sparse_cone_ok() {
 		/softprops\/action-gh-release@/ { release = 1 }
 		END { exit !(download && release) }
 	' "$workflow"
+	assert_success
+	run grep -Fq "format('{0}/*', inputs.artifact-path)" "$workflow"
 	assert_success
 }
 
