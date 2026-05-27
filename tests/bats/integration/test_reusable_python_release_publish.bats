@@ -53,7 +53,7 @@ _tooling_sparse_cone_ok() {
 	run awk '
 		/^  publish:/ { in_publish = 1 }
 		in_publish && /STEP: validate-dist/ { validate = 1 }
-		in_publish && /uv pip install twine/ { twine = 1 }
+		in_publish && /uv pip install --system twine/ { twine = 1 }
 		in_publish && /gh-action-pypi-publish@/ { pypi = 1 }
 		in_publish && /attest-build-provenance@/ { attest = 1 }
 		END { exit !(validate && twine && pypi && attest) }
@@ -133,7 +133,7 @@ _tooling_sparse_cone_ok() {
 		END { exit !(download && verify && release) }
 	' "$workflow"
 	assert_success
-	run grep -Fq "format('{0}/*', inputs.artifact-path)" "$workflow"
+	run grep -Eq "format\\(['\"]\\{0\\}/\\*['\"],\\s*inputs\\.artifact-path\\)" "$workflow"
 	assert_success
 }
 

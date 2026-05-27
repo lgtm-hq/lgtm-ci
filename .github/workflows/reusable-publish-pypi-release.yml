@@ -213,7 +213,7 @@ jobs:
           STEP: validate-dist
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
-          uv pip install twine
+          uv pip install --system twine
           bash .lgtm-ci-tooling/scripts/ci/actions/publish-pypi.sh
 
       - name: Publish to PyPI
