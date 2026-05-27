@@ -40,95 +40,11 @@ teardown() {
 }
 
 # =============================================================================
-# parse_vitest_json tests - testResults format (vitest JSON reporter)
+# parse_vitest_json tests - Vitest 4 aggregate JSON reporter
 # =============================================================================
 
-@test "parse_vitest_json: parses vitest JSON reporter testResults format" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "testResults": [
-    {
-      "assertionResults": [
-        {"status": "passed", "title": "test1"},
-        {"status": "passed", "title": "test2"},
-        {"status": "failed", "title": "test3"}
-      ]
-    },
-    {
-      "assertionResults": [
-        {"status": "passed", "title": "test4"},
-        {"status": "skipped", "title": "test5"}
-      ]
-    }
-  ],
-  "startTime": 1700000000000,
-  "endTime": 1700000005000
-}
-EOF
-
-	run bash -c "
-		source \"\$LIB_DIR/testing/parse/vitest.sh\"
-		parse_vitest_json \"${BATS_TEST_TMPDIR}/vitest.json\"
-		echo \"passed=\$TESTS_PASSED failed=\$TESTS_FAILED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL\"
-	"
-	assert_success
-	assert_output "passed=3 failed=1 skipped=1 total=5"
-}
-
-@test "parse_vitest_json: handles pending status as skipped" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "testResults": [
-    {
-      "assertionResults": [
-        {"status": "passed", "title": "test1"},
-        {"status": "pending", "title": "test2"},
-        {"status": "pending", "title": "test3"}
-      ]
-    }
-  ]
-}
-EOF
-
-	run bash -c "
-		source \"\$LIB_DIR/testing/parse/vitest.sh\"
-		parse_vitest_json \"${BATS_TEST_TMPDIR}/vitest.json\"
-		echo \"passed=\$TESTS_PASSED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL\"
-	"
-	assert_success
-	assert_output "passed=1 skipped=2 total=3"
-}
-
-@test "parse_vitest_json: calculates duration from timestamps" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "testResults": [
-    {
-      "assertionResults": [
-        {"status": "passed", "title": "test1"}
-      ]
-    }
-  ],
-  "startTime": 1700000000000,
-  "endTime": 1700000010000
-}
-EOF
-
-	run bash -c "
-		source \"\$LIB_DIR/testing/parse/vitest.sh\"
-		parse_vitest_json \"${BATS_TEST_TMPDIR}/vitest.json\"
-		echo \"duration=\$TESTS_DURATION\"
-	"
-	assert_success
-	assert_output "duration=10"
-}
-
-# =============================================================================
-# parse_vitest_json tests - alternative format (numTotalTests)
-# =============================================================================
-
-@test "parse_vitest_json: parses Vitest 3 aggregate JSON reporter under set -u" {
-	local fixture="${PROJECT_ROOT}/tests/fixtures/json/vitest-3-results.json"
+@test "parse_vitest_json: parses Vitest 4 aggregate JSON reporter under set -u" {
+	local fixture="${PROJECT_ROOT}/tests/fixtures/json/vitest-4-results.json"
 
 	run bash -c "
 		set -u
@@ -140,7 +56,7 @@ EOF
 	assert_output "passed=1 failed=1 skipped=0 total=2"
 }
 
-@test "parse_vitest_json: falls back to numTotalTests format" {
+@test "parse_vitest_json: parses aggregate num* fields" {
 	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
 {
   "numPassedTests": 8,
@@ -159,7 +75,7 @@ EOF
 	assert_output "passed=8 failed=2 skipped=1 total=11"
 }
 
-@test "parse_vitest_json: handles all passing in alternative format" {
+@test "parse_vitest_json: handles all passing in aggregate format" {
 	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
 {
   "numPassedTests": 15,
@@ -178,30 +94,95 @@ EOF
 	assert_output "passed=15 failed=0 total=15"
 }
 
-# =============================================================================
-# parse_vitest_json tests - edge cases
-# =============================================================================
-
-@test "parse_vitest_json: handles empty testResults" {
+@test "parse_vitest_json: includes numTodoTests in skipped count" {
 	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
 {
-  "testResults": []
+  "numPassedTests": 1,
+  "numFailedTests": 0,
+  "numPendingTests": 1,
+  "numTodoTests": 2,
+  "numTotalTests": 4
 }
 EOF
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
 		parse_vitest_json \"${BATS_TEST_TMPDIR}/vitest.json\"
-		echo \"total=\$TESTS_TOTAL\"
+		echo \"passed=\$TESTS_PASSED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL\"
 	"
 	assert_success
-	assert_output "total=0"
+	assert_output "passed=1 skipped=3 total=4"
+}
+
+@test "parse_vitest_json: calculates duration from timestamps" {
+	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
+{
+  "numPassedTests": 1,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTotalTests": 1,
+  "startTime": 1700000000000,
+  "endTime": 1700000010000
+}
+EOF
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/vitest.sh\"
+		parse_vitest_json \"${BATS_TEST_TMPDIR}/vitest.json\"
+		echo \"duration=\$TESTS_DURATION\"
+	"
+	assert_success
+	assert_output "duration=10"
+}
+
+# =============================================================================
+# parse_vitest_json tests - edge cases
+# =============================================================================
+
+@test "parse_vitest_json: returns failure when numTotalTests is missing" {
+	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
+{
+  "numPassedTests": 1,
+  "numFailedTests": 0
+}
+EOF
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/vitest.sh\"
+		parse_vitest_json \"${BATS_TEST_TMPDIR}/vitest.json\"
+		ret=\$?
+		echo \"total=\$TESTS_TOTAL ret=\$ret\"
+	"
+	assert_success
+	assert_output "total=0 ret=1"
+}
+
+@test "parse_vitest_json: returns failure when numTotalTests is not a number" {
+	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
+{
+  "numPassedTests": 1,
+  "numFailedTests": 0,
+  "numTotalTests": "2"
+}
+EOF
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/vitest.sh\"
+		parse_vitest_json \"${BATS_TEST_TMPDIR}/vitest.json\"
+		ret=\$?
+		echo \"total=\$TESTS_TOTAL ret=\$ret\"
+	"
+	assert_success
+	assert_output "total=0 ret=1"
 }
 
 @test "parse_vitest_json: handles missing endTime" {
 	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
 {
-  "testResults": [],
+  "numPassedTests": 0,
+  "numFailedTests": 0,
+  "numPendingTests": 0,
+  "numTotalTests": 0,
   "startTime": 1700000000000
 }
 EOF
