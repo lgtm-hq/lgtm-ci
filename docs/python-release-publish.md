@@ -79,6 +79,7 @@ jobs:
         fulcio.sigstore.dev:443
         rekor.sigstore.dev:443
         tuf-repo-cdn.sigstore.dev:443
+        oauth2.sigstore.dev:443
 
   github-release:
     needs: [publish]
@@ -93,6 +94,9 @@ jobs:
         github.com:443
         api.github.com:443
         uploads.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
 ```
 
 Use the same `artifact-name` for `reusable-publish-pypi-release.yml` and

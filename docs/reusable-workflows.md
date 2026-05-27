@@ -214,6 +214,8 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    with:
+      tooling-ref: "<sha>" # vX.Y.Z
 
   github-release:
     needs: pypi-release

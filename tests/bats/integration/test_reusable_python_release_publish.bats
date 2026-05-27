@@ -53,9 +53,21 @@ _tooling_sparse_cone_ok() {
 	run awk '
 		/^  publish:/ { in_publish = 1 }
 		in_publish && /STEP: validate-dist/ { validate = 1 }
+		in_publish && /uv pip install twine/ { twine = 1 }
 		in_publish && /gh-action-pypi-publish@/ { pypi = 1 }
 		in_publish && /attest-build-provenance@/ { attest = 1 }
-		END { exit !(validate && pypi && attest) }
+		END { exit !(validate && twine && pypi && attest) }
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-publish-pypi-release: publish job installs Python before validate" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
+	run awk '
+		/^  publish:/ { in_publish = 1 }
+		in_publish && /setup-python/ { setup = NR }
+		in_publish && /STEP: validate-dist/ { validate = NR }
+		END { exit !(setup > 0 && validate > 0 && setup < validate) }
 	' "$workflow"
 	assert_success
 }
@@ -116,8 +128,9 @@ _tooling_sparse_cone_ok() {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-github-release.yml"
 	run awk '
 		/actions\/download-artifact@/ { download = 1 }
+		/Verify release assets exist/ { verify = 1 }
 		/softprops\/action-gh-release@/ { release = 1 }
-		END { exit !(download && release) }
+		END { exit !(download && verify && release) }
 	' "$workflow"
 	assert_success
 	run grep -Fq "format('{0}/*', inputs.artifact-path)" "$workflow"
@@ -128,9 +141,16 @@ _tooling_sparse_cone_ok() {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-github-release.yml"
 	run awk '
 		/^  release:/ { in_release = 1 }
-		in_release && /contents: write/ { contents_write = 1 }
-		in_release && /id-token: write/ { bad = 1 }
-		END { exit !(contents_write && !bad) }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  release:/ { in_release = 0 }
+		in_release && /^    permissions:/ { in_permissions = 1 }
+		in_permissions && /^    [a-zA-Z0-9_-]+:/ && !/^    permissions:/ { in_permissions = 0 }
+		in_permissions && /^      [a-zA-Z0-9_-]+: write/ {
+			total_permissions++
+			if ($1 == "contents:") {
+				contents_count++
+			}
+		}
+		END { exit !(contents_count == 1 && total_permissions == 1) }
 	' "$workflow"
 	assert_success
 }

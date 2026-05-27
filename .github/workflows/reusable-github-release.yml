@@ -105,6 +105,30 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.artifact-path }}
 
+      - name: Verify release assets exist
+        shell: bash
+        env:
+          FILES: >-
+            ${{ inputs.files != '' && inputs.files ||
+            format('{0}/*', inputs.artifact-path) }}
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+        run: |
+          shopt -s nullglob
+          count=0
+          while IFS= read -r pattern || [[ -n "$pattern" ]]; do
+            [[ -z "${pattern// /}" ]] && continue
+            for file in $pattern; do
+              if [[ -f "$file" ]]; then
+                count=$((count + 1))
+              fi
+            done
+          done <<< "$FILES"
+          if (( count == 0 )); then
+            echo "::error::No release assets matched FILES patterns (artifact-path=${ARTIFACT_PATH})"
+            exit 1
+          fi
+          echo "Found ${count} release asset(s)"
+
       - name: Create GitHub Release
         id: gh-release
         uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
