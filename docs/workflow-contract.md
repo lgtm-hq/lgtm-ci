@@ -44,11 +44,11 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | Mode | Caller permissions | Workflow |
 | --- | --- | --- |
 | Quality / lint only | `contents: read`, `packages: read` | `reusable-quality-lint.yml` |
-| Quality PR comment | `contents: read`, `pull-requests: write` | `reusable-quality-pr-comment.yml` |
+| Quality comment | `contents: read`, `pull-requests: write` | `reusable-quality-pr-comment.yml` |
 | Test / coverage only | `contents: read` | Reusables with `post-pr-comment: false` |
 | PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
-| Release version PR | `contents: write`, `pull-requests: write` | `reusable-release-version-pr.yml` |
+| Release version | `contents: write`, `pull-requests: write` | `reusable-release-version-pr.yml` |
 | Package publish | `contents: read`, `id-token: write`, `attestations: write` | Publish reusables |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
