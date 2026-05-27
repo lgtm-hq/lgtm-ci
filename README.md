@@ -48,8 +48,11 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
 
   quality-pr-comment:
-    if: github.event_name == 'pull_request'
     needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
     permissions:
       contents: read
       pull-requests: write
