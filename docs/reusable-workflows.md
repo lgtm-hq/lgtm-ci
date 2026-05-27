@@ -1,15 +1,42 @@
 # Reusable Workflows
 
-Use reusable workflows from consumer repositories with a thin caller job:
+Use reusable workflows from consumer repositories with a thin caller job.
+
+**Tag/release and non-PR pipelines** should call lint/test/coverage reusables
+directly (for example `reusable-quality-lint.yml`) with `contents: read` only.
+Grant `pull-requests: write` only when invoking workflows that post PR comments.
 
 ```yaml
 jobs:
   quality:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
     permissions:
       contents: read
       packages: read
+```
+
+Pull-request pipelines with PR comments call both reusables directly:
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+
+  quality-pr-comment:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    permissions:
+      contents: read
       pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
 
 Pass `tooling-ref` when testing an unreleased lgtm-ci branch. Production callers
@@ -26,15 +53,26 @@ For GitHub Pages (coverage, test reports, and static sites), see
 ```yaml
 jobs:
   quality:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
     permissions:
       contents: read
       packages: read
-      pull-requests: write
     with:
-      post-pr-comment: true
       job-name: "Lintro Quality Checks"
       egress-policy: audit
+
+  quality-pr-comment:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
 
   validate:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate.yml@<sha>
@@ -95,7 +133,10 @@ jobs:
 ```
 
 `reusable-test-pr-comment.yml` is the shared internal comment workflow used by
-the language-specific test workflows.
+the language-specific test workflows. Coverage and artifact-based comments use
+`reusable-coverage-pr-comment.yml` and `reusable-artifact-pr-comment.yml`.
+Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
+`reusable-quality-pr-comment.yml` (called directly by the caller workflow).
 
 ### Rust
 

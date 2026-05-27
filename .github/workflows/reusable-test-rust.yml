@@ -276,7 +276,6 @@ jobs:
 
   coverage-pr-comment:
     name: Rust coverage PR comment
-    runs-on: ${{ inputs.runner-image }}
     needs: coverage
     if: >-
       inputs.run-coverage
@@ -285,38 +284,17 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
       && needs.coverage.outputs.pr_comment_ready == 'true'
+    uses: ./.github/workflows/reusable-artifact-pr-comment.yml
     permissions:
       contents: read
       pull-requests: write
-    timeout-minutes: 5
-
-    steps:
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Harden runner
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Download coverage PR comment artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: rust-coverage-pr-comment
-
-      - name: Comment PR with Rust coverage
-        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
-        with:
-          file: rust-coverage-pr-comment.txt
-          marker: ${{ inputs.comment-marker }}
+    with:
+      artifact-name: rust-coverage-pr-comment
+      comment-file: rust-coverage-pr-comment.txt
+      marker: ${{ inputs.comment-marker }}
+      job-name: Rust coverage PR comment
+      tooling-ref: ${{ inputs.tooling-ref }}
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      runner-image: ${{ inputs.runner-image }}
+      timeout-minutes: 5

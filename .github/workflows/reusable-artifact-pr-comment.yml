@@ -1,0 +1,109 @@
+---
+name: Reusable Artifact PR Comment Workflow
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: "Artifact name to download"
+        required: true
+        type: string
+      comment-file:
+        description: "Path to comment file relative to artifact download path"
+        required: true
+        type: string
+      marker:
+        description: "PR comment marker"
+        required: true
+        type: string
+      artifact-path:
+        description: "Directory to download artifact into"
+        required: false
+        type: string
+        default: "."
+      job-name:
+        description: "Display name for the PR comment job"
+        required: false
+        type: string
+        default: "PR Comment"
+      missing-artifact-warning:
+        description: "Warning message when artifact download fails"
+        required: false
+        type: string
+        default: "Comment artifact not found — upstream may have failed"
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
+jobs:
+  comment:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Download comment artifact
+        id: download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.artifact-path }}
+
+      - name: Warn on missing artifact
+        if: steps.download.outcome != 'success'
+        shell: bash
+        env:
+          MISSING_ARTIFACT_WARNING: ${{ inputs.missing-artifact-warning }}
+        run: echo "::warning::${MISSING_ARTIFACT_WARNING}"
+
+      - name: Post PR comment
+        if: steps.download.outcome == 'success'
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: ${{ inputs.artifact-path }}/${{ inputs.comment-file }}
+          marker: ${{ inputs.marker }}

@@ -20,13 +20,36 @@ Where applicable, workflows accept:
 
 ## Permissions by mode
 
-| Mode | Caller permissions |
-| --- | --- |
-| Test / quality only | `contents: read` |
-| PR comments | `contents: read`, `pull-requests: write` |
-| Publish to Pages | `contents: read`, `pages: write`, `id-token: write` (separate workflow/job) |
-| Release version PR | `contents: write`, `pull-requests: write` + app secrets |
-| Package publish | `contents: read`, `id-token: write`, `attestations: write` (as required) |
+GitHub validates **all** jobs in a called reusable workflow at parse time,
+regardless of job `if:` conditions. Workflows that bundle lint/test/coverage with
+optional PR comments therefore split comment posting into dedicated reusables
+(for example `reusable-quality-lint.yml` + `reusable-quality-pr-comment.yml`).
+Callers that disable comments or run on tag/release events should invoke the
+lint/test/coverage reusable only and omit the comment reusable entirely.
+
+### Direct caller pattern (no orchestrator)
+
+Callers invoke `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml`
+directly — there is no intermediate orchestrator workflow. This produces a single
+nesting hop (`ci.yml` → `reusable-quality-lint.yml`) so check names read
+`quality / Lintro Quality Checks` instead of `quality / quality / Lintro Quality
+Checks`. The pattern matches `reusable-test-python.yml` +
+`reusable-test-pr-comment.yml`.
+
+A `strategy: matrix` job **can** call a reusable workflow via `uses:` — GitHub
+Actions maps matrix values to reusable workflow inputs. `reusable-test-node.yml`
+`coverage-pr-comment` uses inline steps to avoid an extra nesting level (which
+would worsen check-name readability) and to access matrix-specific artifacts.
+
+| Mode | Caller permissions | Workflow |
+| --- | --- | --- |
+| Quality / lint only | `contents: read`, `packages: read` | `reusable-quality-lint.yml` |
+| Quality comment | `contents: read`, `pull-requests: write` | `reusable-quality-pr-comment.yml` |
+| Test / coverage only | `contents: read` | Reusables with `post-pr-comment: false` |
+| PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
+| Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
+| Release version | `contents: write`, `pull-requests: write` | `reusable-release-version-pr.yml` |
+| Package publish | `contents: read`, `id-token: write`, `attestations: write` | Publish reusables |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
 `reusable-test-node-publish.yml` in a separate caller job when publishing is
@@ -188,14 +211,15 @@ conditions.
 
 ## Rustume migration example
 
+Tag/release pipelines should call lint-only reusables (no `pull-requests: write`):
+
 ```yaml
 jobs:
   quality:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
     permissions:
       contents: read
       packages: read
-      pull-requests: write
     with:
       tooling-ref: "<sha>"
       job-name: "🛠️ Lintro Code Quality & Analysis"
@@ -207,6 +231,42 @@ jobs:
         api.osv.dev:443
         semgrep.dev:443
         metrics.semgrep.dev:443
+```
+
+Pull-request pipelines with comments call both reusables directly:
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🛠️ Lintro Code Quality & Analysis"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        ghcr.io:443
+        api.osv.dev:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+
+  quality-pr-comment:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: "<sha>"
 
   rust-build:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@<sha>

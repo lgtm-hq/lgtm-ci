@@ -1,0 +1,127 @@
+---
+name: Reusable Coverage PR Comment Workflow
+
+on:
+  workflow_call:
+    inputs:
+      coverage-percent:
+        description: "Overall coverage percentage"
+        required: true
+        type: string
+      threshold:
+        description: "Minimum coverage percentage threshold"
+        required: false
+        type: number
+        default: 0
+      comment-title:
+        description: "PR comment title for coverage reports"
+        required: false
+        type: string
+        default: "Coverage Report"
+      comment-marker:
+        description: "PR comment marker for coverage reports"
+        required: false
+        type: string
+        default: "coverage-report"
+      passed:
+        description: "Whether coverage meets threshold"
+        required: false
+        type: string
+        default: "true"
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      job-name:
+        description: "Display name for the PR comment job"
+        required: false
+        type: string
+        default: "Coverage PR Comment"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
+jobs:
+  comment:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Generate coverage comment body
+        id: body
+        shell: bash
+        env:
+          COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
+          THRESHOLD: ${{ inputs.threshold }}
+          COMMENT_TITLE: ${{ inputs.comment-title }}
+          PASSED: ${{ inputs.passed }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-coverage-pr-comment.sh
+
+      - name: Detect PR number
+        id: pr
+        shell: bash
+        env:
+          STEP: pr-number
+          GH_TOKEN: ${{ github.token }}
+          INPUT_PR_NUMBER: ""
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+
+      - name: Post PR comment
+        if: steps.pr.outputs.number != ''
+        shell: bash
+        env:
+          STEP: post
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          MARKER: ${{ inputs.comment-marker }}
+          MODE: upsert
+          DELETE_ON_EMPTY: "false"
+          FILE_PROVIDED: "false"
+          BODY_FROM_INPUT: ${{ steps.body.outputs.comment-body }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
