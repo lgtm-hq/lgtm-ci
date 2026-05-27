@@ -30,8 +30,8 @@ _test_custom_checkout_order_ok() {
 	run awk '
 		/^  test-custom:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test-custom:/ { in_job = 0 }
-		in_job && /clean: false/ { exit 1 }
-		END { exit 0 }
+		in_job && /clean: false/ { found = 1 }
+		END { exit found }
 	' "$WORKFLOW"
 	assert_success
 }

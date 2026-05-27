@@ -53,7 +53,7 @@ teardown() {
 		echo \"passed=\$TESTS_PASSED failed=\$TESTS_FAILED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL\"
 	"
 	assert_success
-	assert_output "passed=1 failed=1 skipped=0 total=2"
+	assert_line "passed=1 failed=1 skipped=0 total=2"
 }
 
 @test "parse_vitest_json: parses aggregate num* fields" {
