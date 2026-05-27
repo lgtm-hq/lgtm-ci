@@ -44,6 +44,20 @@ teardown() {
 	assert_failure
 }
 
+@test "generate-coverage-pr-comment: rejects awk injection in threshold" {
+	local pwned="${BATS_TEST_TMPDIR}/awk-injection-pwned"
+	rm -f "$pwned"
+
+	run env \
+		COVERAGE_PERCENT="90" \
+		THRESHOLD="1; system(\"touch ${pwned}\")" \
+		PASSED="true" \
+		bash "$SCRIPT"
+
+	assert_success
+	[[ ! -f "$pwned" ]]
+}
+
 @test "generate-coverage-pr-comment: writes multiline output to GITHUB_OUTPUT" {
 	run env \
 		COVERAGE_PERCENT="100" \

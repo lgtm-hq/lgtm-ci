@@ -31,14 +31,14 @@ fi
 BODY="## ${COMMENT_TITLE}
 
 ${STATUS_EMOJI} **Coverage: ${COVERAGE_PERCENT}%**"
-if awk "BEGIN{exit(!($THRESHOLD > 0))}"; then
+if awk -v t="$THRESHOLD" 'BEGIN{exit(!(t > 0))}'; then
 	BODY="${BODY} (threshold: ${THRESHOLD}%)"
 fi
 
 if declare -f set_github_output_multiline &>/dev/null; then
 	set_github_output_multiline "comment-body" "$BODY"
 elif [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	EOF_MARKER="LGTM_EOF_$$"
+	EOF_MARKER="LGTM_CI_EOF_$$_$(date +%s)"
 	{
 		echo "comment-body<<${EOF_MARKER}"
 		echo "$BODY"
