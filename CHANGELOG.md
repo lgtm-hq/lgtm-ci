@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **actions**: optional `merge-existing-site` and `base-site-path` inputs on
+  `publish-test-results` to merge existing Pages content before deploy (#225)
+
 ### Changed
 
 ### Deprecated

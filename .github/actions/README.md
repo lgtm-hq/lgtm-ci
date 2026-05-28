@@ -778,6 +778,8 @@ actions.
     coverage-path: "coverage/" # optional
     badge-path: "coverage/badge.svg" # optional
     target-dir: "." # optional
+    merge-existing-site: "false" # optional Model A multi-publisher merge
+    base-site-path: "" # optional local site tree instead of HTTP mirror
 ```
 
 **Outputs:**
@@ -787,6 +789,8 @@ actions.
 **Features:**
 
 - Stages coverage, badges, and test HTML under `target-dir`
+- Optional `merge-existing-site` preserves sibling subtrees when multiple Model A
+  publishers deploy to the same Pages site (see `docs/pages-publishing.md`)
 - Deploys with `actions/configure-pages`, `upload-pages-artifact`, `deploy-pages`
 - Generates index.html for coverage reports when missing
 

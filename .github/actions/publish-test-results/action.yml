@@ -20,6 +20,18 @@ inputs:
     description: "Subdirectory under the Pages site root"
     required: false
     default: "."
+  merge-existing-site:
+    description: >-
+      When true, merge existing live site content (or base-site-path) before
+      uploading so parallel Model A publishers retain sibling target-dir trees
+    required: false
+    default: "false"
+  base-site-path:
+    description: >-
+      Optional local directory tree to use as the existing site instead of
+      mirroring the public GitHub Pages URL
+    required: false
+    default: ""
   working-directory:
     description: "Working directory"
     required: false
@@ -43,6 +55,8 @@ runs:
         COVERAGE_PATH: ${{ inputs.coverage-path }}
         BADGE_PATH: ${{ inputs.badge-path }}
         TARGET_DIR: ${{ inputs.target-dir }}
+        MERGE_EXISTING_SITE: ${{ inputs.merge-existing-site }}
+        BASE_SITE_PATH: ${{ inputs.base-site-path }}
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/publish-test-results.sh"
 
     - name: Configure GitHub Pages
