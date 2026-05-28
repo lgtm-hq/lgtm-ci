@@ -40,8 +40,18 @@ bundle_load_manifest() {
 				return 1
 			fi
 			BUNDLE_MANIFEST_JSON=$(
-				ruby -ryaml -rjson -e 'puts JSON.generate(YAML.load_file(ARGV[0]))' \
-					"$manifest_input"
+				ruby -ryaml -rjson -e '
+					permitted = [
+						Hash, Array, String, Integer, Float, TrueClass, FalseClass, NilClass
+					]
+					data = YAML.safe_load(
+						File.read(ARGV[0]),
+						permitted_classes: permitted,
+						permitted_symbols: [],
+						aliases: false,
+					)
+					puts JSON.generate(data)
+				' "$manifest_input"
 			)
 			;;
 		*)
@@ -74,7 +84,7 @@ bundle_find_workflow_run() {
 	# shellcheck disable=SC2016
 	workflow_match='((.name | ascii_downcase) == ($wf | ascii_downcase)) or ((.path | split("/")[-1] | sub("\\.ya?ml$"; "") | ascii_downcase) == ($wf | ascii_downcase))'
 	if [[ "$require_success" == "false" ]]; then
-		jq_filter="first(.workflow_runs[] | select(${workflow_match} and (.conclusion == \"success\" or .conclusion == \"failure\")) | .id) // empty"
+		jq_filter="first(.workflow_runs[] | select(${workflow_match} and (.conclusion == \"success\" or .conclusion == \"failure\" or .conclusion == \"cancelled\" or .conclusion == \"timed_out\")) | .id) // empty"
 	else
 		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .conclusion == \"success\") | .id) // empty"
 	fi
@@ -95,7 +105,7 @@ bundle_find_workflow_run_on_ref() {
 	# shellcheck disable=SC2016
 	workflow_match='((.name | ascii_downcase) == ($wf | ascii_downcase)) or ((.path | split("/")[-1] | sub("\\.ya?ml$"; "") | ascii_downcase) == ($wf | ascii_downcase))'
 	if [[ "$require_success" == "false" ]]; then
-		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and (.conclusion == \"success\" or .conclusion == \"failure\")) | .id) // empty"
+		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and (.conclusion == \"success\" or .conclusion == \"failure\" or .conclusion == \"cancelled\" or .conclusion == \"timed_out\")) | .id) // empty"
 	else
 		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and .conclusion == \"success\") | .id) // empty"
 	fi
@@ -118,6 +128,59 @@ bundle_get_artifact_id() {
 	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
 		--jq 'first(.artifacts[] | select(.name == $name) | .id) // empty' \
 		--arg name "$artifact_name" 2>/dev/null || true
+}
+
+# Validate zip member paths and types before extraction (zip-slip / symlink defense).
+# Usage: bundle_validate_zip_members TEMP_ZIP ARTIFACT_ID
+bundle_validate_zip_members() {
+	local temp_zip="$1"
+	local artifact_id="$2"
+	local entry line perms
+
+	while IFS= read -r entry || [[ -n "$entry" ]]; do
+		[[ -z "$entry" ]] && continue
+		entry="${entry#./}"
+		while [[ "$entry" == /* ]]; do
+			entry="${entry#/}"
+		done
+		if [[ -z "$entry" ]]; then
+			log_error "Zip entry resolves to root for artifact ${artifact_id}"
+			return 1
+		fi
+		if [[ "$entry" == *".."* ]]; then
+			log_error "Zip entry contains path traversal for artifact ${artifact_id}: ${entry}"
+			return 1
+		fi
+	done < <(unzip -Z1 "$temp_zip" 2>/dev/null) || {
+		log_error "Failed to list zip members for artifact ${artifact_id}"
+		return 1
+	}
+
+	while IFS= read -r line; do
+		[[ "$line" == Archive:* || "$line" == *"Zip file size"* || "$line" == *"----"* ]] && continue
+		[[ "$line" =~ ^[[:space:]]*[0-9]+[[:space:]]+files, ]] && break
+		[[ -z "${line// /}" ]] && continue
+		perms="${line%% *}"
+		case "${perms:0:1}" in
+		- | d)
+			continue
+			;;
+		l)
+			log_error "Zip entry is a symlink for artifact ${artifact_id}: ${line}"
+			return 1
+			;;
+		'?')
+			log_error "Zip entry has unsupported type for artifact ${artifact_id}: ${line}"
+			return 1
+			;;
+		*)
+			continue
+			;;
+		esac
+	done < <(unzip -Zvl "$temp_zip" 2>/dev/null) || {
+		log_error "Failed to inspect zip metadata for artifact ${artifact_id}"
+		return 1
+	}
 }
 
 # Download and extract an artifact zip into a destination directory.
@@ -144,6 +207,10 @@ bundle_download_artifact() {
 	fi
 	if ! unzip -tq "$temp_zip" >/dev/null 2>&1; then
 		log_error "Downloaded artifact ${artifact_id} is not a valid zip archive"
+		rm -f "$temp_zip"
+		return 1
+	fi
+	if ! bundle_validate_zip_members "$temp_zip" "$artifact_id"; then
 		rm -f "$temp_zip"
 		return 1
 	fi
@@ -313,7 +380,9 @@ bundle_run_manifest() {
 		if [[ -z "$run_id" && -n "${FALLBACK_REF:-}" ]]; then
 			log_info "Bundle ${bundle_id}: no run for commit; trying ${FALLBACK_REF}"
 			run_id=$(bundle_find_workflow_run_on_ref "$workflow" "$FALLBACK_REF" "$require_success")
-			used_fallback=true
+			if [[ -n "$run_id" ]]; then
+				used_fallback=true
+			fi
 		fi
 
 		if [[ -z "$run_id" ]]; then
@@ -382,5 +451,5 @@ bundle_run_manifest() {
 
 export -f bundle_load_manifest bundle_find_workflow_run
 export -f bundle_find_workflow_run_on_ref bundle_get_artifact_id
-export -f bundle_download_artifact bundle_resolve_site_dest
-export -f bundle_copy_to_site bundle_run_manifest
+export -f bundle_validate_zip_members bundle_download_artifact
+export -f bundle_resolve_site_dest bundle_copy_to_site bundle_run_manifest

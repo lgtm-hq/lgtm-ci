@@ -90,12 +90,13 @@ fi
 
 # Add files if specified
 if [[ -n "$FILE_PATTERNS" ]]; then
-	count=$(release_collect_asset_files "$FILE_PATTERNS")
+	release_collect_asset_files "$FILE_PATTERNS"
+	count=${#RELEASE_ASSET_FILES[@]}
 	if ((count == 0)); then
 		log_error "No release assets matched FILE_PATTERNS"
 		exit 1
 	fi
-	for file in "${RELEASE_ASSET_FILES[@]}"; do
+	for file in ${RELEASE_ASSET_FILES[@]+"${RELEASE_ASSET_FILES[@]}"}; do
 		GH_ARGS+=("$file")
 	done
 elif [[ -n "$FILES" ]]; then

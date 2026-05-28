@@ -113,8 +113,8 @@ or file stems (for example `quality-ci-main` matches `.github/workflows/quality-
   entry is missing.
 - `fallback-ref` (for example `main`) retries lookup on a branch when no run
   exists for `commit-sha`. Default is strict (no fallback).
-- `require_success: false` includes failed runs (artifacts uploaded with
-  `if: always()`).
+- `require_success: false` includes failed, cancelled, and timed-out runs
+  (artifacts uploaded with `if: always()`).
 
 ## Caller permissions
 

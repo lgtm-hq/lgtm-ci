@@ -23,6 +23,62 @@ teardown() {
 	teardown_temp_dir
 }
 
+_create_traversal_artifact_zip() {
+	local zip_path="${BATS_TEST_TMPDIR}/traversal.zip"
+	python3 - "$zip_path" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr("../../outside.txt", "pwned")
+PY
+	echo "$zip_path"
+}
+
+_create_symlink_artifact_zip() {
+	local zip_path="${BATS_TEST_TMPDIR}/symlink.zip"
+	python3 - "$zip_path" <<'PY'
+import sys
+import zipfile
+
+info = zipfile.ZipInfo("link")
+info.external_attr = (0o120777 << 16)
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr(info, "target")
+PY
+	echo "$zip_path"
+}
+
+_setup_artifact_zip_gh_mock() {
+	local zip_path="$1"
+	local artifact_id="${2:-99}"
+
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+url=""
+for ((i = 1; i <= \$#; i++)); do
+	case "\${!i}" in
+	repos/*) url="\${!i}" ;;
+	esac
+done
+
+case "\$url" in
+*actions/artifacts/${artifact_id}/zip*)
+	cat "${zip_path}"
+	;;
+*)
+	echo ""
+	;;
+esac
+exit 0
+EOF
+	chmod +x "${mock_bin}/gh"
+	export PATH="${mock_bin}:$PATH"
+}
+
 _create_artifact_zip() {
 	local zip_path="${BATS_TEST_TMPDIR}/artifact.zip"
 	local root="${BATS_TEST_TMPDIR}/artifact-root"
@@ -86,6 +142,56 @@ exit 0
 EOF
 	chmod +x "${mock_bin}/gh"
 	export PATH="${mock_bin}:$PATH"
+}
+
+@test "bundle_validate_zip_members: rejects path traversal entries" {
+	local zip_path
+	zip_path=$(_create_traversal_artifact_zip)
+
+	run bundle_validate_zip_members "$zip_path" 42
+	assert_failure
+	assert_output --partial "path traversal"
+}
+
+@test "bundle_validate_zip_members: rejects symlink entries" {
+	local zip_path
+	zip_path=$(_create_symlink_artifact_zip)
+
+	run bundle_validate_zip_members "$zip_path" 42
+	assert_failure
+	assert_output --partial "symlink"
+}
+
+@test "bundle_download_artifact: rejects zip slip before extraction" {
+	local zip_path dest_dir
+	zip_path=$(_create_traversal_artifact_zip)
+	dest_dir="${BATS_TEST_TMPDIR}/dest"
+	_setup_artifact_zip_gh_mock "$zip_path"
+
+	run bundle_download_artifact 99 "$dest_dir"
+	assert_failure
+	assert_output --partial "path traversal"
+	run test ! -e "${BATS_TEST_TMPDIR}/outside.txt"
+	assert_success
+}
+
+@test "bundle_run_manifest: does not claim fallback when lookup fails" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/gh" <<'EOF'
+#!/usr/bin/env bash
+echo ""
+exit 0
+EOF
+	chmod +x "${mock_bin}/gh"
+	export PATH="${mock_bin}:$PATH"
+	export FALLBACK_REF="main"
+	bundle_load_manifest '{"bundles":[{"id":"missing","workflow":"missing-workflow","artifact":"coverage-html","dest":"coverage"}]}'
+
+	run bundle_run_manifest
+	assert_success
+	assert_output --partial "no workflow run found"
+	refute_output --partial "using fallback run"
 }
 
 @test "bundle_load_manifest: loads inline JSON" {
