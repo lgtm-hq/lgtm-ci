@@ -31,7 +31,7 @@ on:
         default: true
       files:
         description: >-
-          Newline-separated asset globs for softprops/action-gh-release.
+          Newline-separated asset globs attached to the release.
           Defaults to "{artifact-path}/*" when empty.
         required: false
         type: string
@@ -94,8 +94,8 @@ jobs:
       contents: write # create GitHub releases and upload release assets
 
     outputs:
-      release-url: ${{ steps.gh-release.outputs.url }}
-      release-id: ${{ steps.gh-release.outputs.id }}
+      release-url: ${{ steps.gh-release.outputs.release-url }}
+      release-id: ${{ steps.gh-release.outputs.release-id }}
 
     steps:
       - name: Harden runner
@@ -133,16 +133,19 @@ jobs:
 
       - name: Create GitHub Release
         id: gh-release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
-        with:
-          tag_name: >-
+        shell: bash
+        env:
+          TAG: >-
             ${{ inputs.tag-name != '' && inputs.tag-name || github.ref_name }}
-          name: >-
+          TITLE: >-
             ${{ inputs.release-name != '' && inputs.release-name ||
             (inputs.tag-name != '' && inputs.tag-name || github.ref_name) }}
-          generate_release_notes: ${{ inputs.generate-release-notes }}
-          draft: ${{ inputs.draft }}
-          prerelease: ${{ inputs.prerelease }}
-          files: >-
+          GENERATE_NOTES: ${{ inputs.generate-release-notes }}
+          DRAFT: ${{ inputs.draft }}
+          PRERELEASE: ${{ inputs.prerelease }}
+          FILE_PATTERNS: >-
             ${{ inputs.files != '' && inputs.files ||
             format('{0}/*', inputs.artifact-path) }}
+          REPO: ${{ github.repository }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh

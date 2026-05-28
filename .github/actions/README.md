@@ -1741,7 +1741,7 @@ Pair with `reusable-github-release.yml` using the same `artifact-name`. See
 ### reusable-github-release.yml
 
 Download a workflow artifact and create a GitHub Release with attached assets
-via `softprops/action-gh-release`.
+via `gh release create` (`scripts/ci/release/create-github-release.sh`).
 
 ```yaml
 jobs:
