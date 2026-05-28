@@ -185,6 +185,20 @@ EOF
 	assert_output --partial "path traversal"
 }
 
+@test "bundle_validate_zip_members: allows double dots in filenames" {
+	local zip_path="${BATS_TEST_TMPDIR}/double-dot.zip"
+	python3 - "$zip_path" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr("report..2024.html", "ok")
+PY
+
+	run bundle_validate_zip_members "$zip_path" 42
+	assert_success
+}
+
 @test "bundle_validate_zip_members: rejects symlink entries" {
 	local zip_path
 	zip_path=$(_create_symlink_artifact_zip)

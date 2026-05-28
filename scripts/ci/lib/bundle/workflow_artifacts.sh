@@ -148,7 +148,7 @@ bundle_validate_zip_members() {
 			log_error "Zip entry is empty for artifact ${artifact_id}"
 			return 1
 		fi
-		if [[ "$entry" == *".."* ]]; then
+		if [[ "$entry" == ".." || "$entry" == ../* || "$entry" == */../* || "$entry" == */.. ]]; then
 			log_error "Zip entry contains path traversal for artifact ${artifact_id}: ${entry}"
 			return 1
 		fi
