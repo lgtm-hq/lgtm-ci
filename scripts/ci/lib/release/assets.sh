@@ -16,9 +16,11 @@ release_collect_asset_files() {
 	shopt -s nullglob
 	while IFS= read -r pattern || [[ -n "$pattern" ]]; do
 		[[ -z "${pattern// /}" ]] && continue
+		local -a matches=()
 		# shellcheck disable=SC2206 # Glob expansion is intentional for release patterns
-		local -a matches=($pattern)
-		for file in "${matches[@]}"; do
+		matches=($pattern)
+		local file
+		for file in ${matches[@]+"${matches[@]}"}; do
 			if [[ -f "$file" ]]; then
 				collected+=("$file")
 			fi
@@ -26,7 +28,7 @@ release_collect_asset_files() {
 	done <<<"$patterns_input"
 	shopt -u nullglob
 
-	RELEASE_ASSET_FILES=("${collected[@]}")
+	RELEASE_ASSET_FILES=("${collected[@]+"${collected[@]}"}")
 	echo "${#collected[@]}"
 }
 

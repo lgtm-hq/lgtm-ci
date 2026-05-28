@@ -12,7 +12,8 @@
 #   PRERELEASE - Mark as prerelease (default: false)
 #   GENERATE_NOTES - Use GitHub's auto-generated notes (default: false)
 #   FILES - Space-separated list of files to attach
-#   REPO - Repository in owner/repo format (default: from git remote)
+#   FILE_PATTERNS - Newline-separated glob patterns (used by reusable workflows)
+#   REPO - Repository in owner/repo format (default: GITHUB_REPOSITORY or git remote)
 
 set -euo pipefail
 

@@ -68,13 +68,14 @@ bundle_find_workflow_run() {
 	local commit_sha="$2"
 	local require_success="${3:-true}"
 
+	local workflow_match
 	local jq_filter
+	# shellcheck disable=SC2016
+	workflow_match='((.name | ascii_downcase) == ($wf | ascii_downcase)) or ((.path | split("/")[-1] | sub("\\.ya?ml$"; "") | ascii_downcase) == ($wf | ascii_downcase))'
 	if [[ "$require_success" == "false" ]]; then
-		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and (.conclusion == "success" or .conclusion == "failure")) | .id) // empty'
+		jq_filter="first(.workflow_runs[] | select(${workflow_match} and (.conclusion == \"success\" or .conclusion == \"failure\")) | .id) // empty"
 	else
-		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and .conclusion == "success") | .id) // empty'
+		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .conclusion == \"success\") | .id) // empty"
 	fi
 
 	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${commit_sha}&per_page=100" \
@@ -88,13 +89,14 @@ bundle_find_workflow_run_on_ref() {
 	local fallback_ref="$2"
 	local require_success="${3:-true}"
 
+	local workflow_match
 	local jq_filter
+	# shellcheck disable=SC2016
+	workflow_match='((.name | ascii_downcase) == ($wf | ascii_downcase)) or ((.path | split("/")[-1] | sub("\\.ya?ml$"; "") | ascii_downcase) == ($wf | ascii_downcase))'
 	if [[ "$require_success" == "false" ]]; then
-		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and .head_branch == $branch and (.conclusion == "success" or .conclusion == "failure")) | .id) // empty'
+		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and (.conclusion == \"success\" or .conclusion == \"failure\")) | .id) // empty"
 	else
-		# shellcheck disable=SC2016
-		jq_filter='first(.workflow_runs[] | select((.name == $wf or (.path | split("/")[-1] | test("^" + $wf + "\\.ya?ml$"; "i"))) and .head_branch == $branch and .conclusion == "success") | .id) // empty'
+		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and .conclusion == \"success\") | .id) // empty"
 	fi
 
 	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${fallback_ref}&per_page=50" \
@@ -235,6 +237,11 @@ bundle_run_manifest() {
 
 	if ! command -v jq >/dev/null 2>&1; then
 		log_error "jq is required but not found"
+		return 1
+	fi
+
+	if ! command -v python3 >/dev/null 2>&1; then
+		log_error "python3 is required but not found"
 		return 1
 	fi
 
