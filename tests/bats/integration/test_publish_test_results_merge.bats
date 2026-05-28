@@ -159,6 +159,28 @@ _run_prepare() {
 	assert_output --partial "merge-existing-site requires base-site-path or GITHUB_REPOSITORY"
 }
 
+@test "publish-test-results prepare: merge fails when live site mirror fails" {
+	local fake_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$fake_bin"
+	cat >"${fake_bin}/wget" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+	chmod +x "${fake_bin}/wget"
+
+	export PATH="${fake_bin}:${PATH}"
+	export MERGE_EXISTING_SITE=true
+	export BASE_SITE_PATH=""
+	export GITHUB_REPOSITORY="lgtm-hq/example"
+	export TARGET_DIR="vitest"
+	export COVERAGE_PATH=""
+
+	_run_prepare
+	assert_failure
+	assert_output --partial "Live site mirror failed"
+	assert_output --partial "::warning::Live site mirror failed for https://lgtm-hq.github.io/example/"
+}
+
 @test "publish-test-results action: exposes merge inputs" {
 	local action="${PROJECT_ROOT}/.github/actions/publish-test-results/action.yml"
 	run grep -q 'merge-existing-site:' "$action"

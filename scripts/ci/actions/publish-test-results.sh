@@ -145,25 +145,20 @@ _publish_test_results_copy_existing_site() {
 		return 1
 	fi
 
-	local cut_dirs=1
-	if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
-		local repo_name="${GITHUB_REPOSITORY##*/}"
-		local owner="${GITHUB_REPOSITORY%%/*}"
-		local owner_lower repo_lower
-		owner_lower=$(echo "$owner" | tr '[:upper:]' '[:lower:]')
-		repo_lower=$(echo "$repo_name" | tr '[:upper:]' '[:lower:]')
-		if [[ "$repo_lower" == "${owner_lower}.github.io" ]]; then
-			cut_dirs=0
-		fi
-	fi
+	local cut_dirs=""
+	cut_dirs=$(get_github_pages_wget_cut_dirs "$site_url") || {
+		log_error "Could not derive wget cut-dirs from site URL: ${site_url}"
+		return 1
+	}
 
 	log_warn "Mirroring live site from ${site_url} (CDN/cache may serve stale content)"
 	local wget_root="${staging_dir}/.lgtm-wget-root"
 	mkdir -p "$wget_root"
 	if ! wget -q -e robots=off -r -l 10 -np -nH --cut-dirs="$cut_dirs" -P "$wget_root" "$site_url"; then
-		log_warn "Live site mirror failed or site is empty; continuing with new content only"
+		log_error "Live site mirror failed; merge-existing-site cannot preserve sibling trees"
+		echo "::warning::Live site mirror failed for ${site_url}; existing Pages content was not merged"
 		rm -rf "$wget_root"
-		return 0
+		return 1
 	fi
 
 	if [[ -d "$wget_root" ]] && [[ -n "$(ls -A "$wget_root" 2>/dev/null)" ]]; then
@@ -213,10 +208,12 @@ prepare)
 
 	if [[ "$MERGE_EXISTING_SITE" == "true" ]]; then
 		overlay_root=$(mktemp -d)
+		trap 'rm -rf "${overlay_root:-}"' EXIT
 		_publish_test_results_build_content "$overlay_root" "$normalized_target_dir"
 		_publish_test_results_copy_existing_site "$staging_dir"
 		_publish_test_results_overlay_content "$staging_dir" "$overlay_root" "$normalized_target_dir"
 		rm -rf "$overlay_root"
+		trap - EXIT
 	else
 		_publish_test_results_build_content "$staging_dir" "$normalized_target_dir"
 	fi
