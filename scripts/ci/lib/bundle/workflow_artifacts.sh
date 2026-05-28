@@ -333,35 +333,42 @@ bundle_run_manifest() {
 	fi
 
 	temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bundle-workflow-artifacts.XXXXXX")"
-	local old_trap_exit old_trap_int old_trap_term cleanup_cmd
-	old_trap_exit=$(trap -p EXIT | sed "s/trap -- '\(.*\)' EXIT/\1/" || true)
-	old_trap_int=$(trap -p INT | sed "s/trap -- '\(.*\)' INT/\1/" || true)
-	old_trap_term=$(trap -p TERM | sed "s/trap -- '\(.*\)' TERM/\1/" || true)
-	cleanup_cmd="rm -rf '$temp_root'"
-	# RETURN traps are function-scoped; callers cannot be read via trap -p RETURN here.
-	# shellcheck disable=SC2064
-	trap "$cleanup_cmd" RETURN
-	if [[ -n "$old_trap_exit" ]]; then
-		# shellcheck disable=SC2064
-		trap "$cleanup_cmd; $old_trap_exit" EXIT
-	else
-		# shellcheck disable=SC2064
-		trap "$cleanup_cmd" EXIT
-	fi
-	if [[ -n "$old_trap_int" ]]; then
-		# shellcheck disable=SC2064
-		trap "$cleanup_cmd; $old_trap_int" INT
-	else
-		# shellcheck disable=SC2064
-		trap "$cleanup_cmd" INT
-	fi
-	if [[ -n "$old_trap_term" ]]; then
-		# shellcheck disable=SC2064
-		trap "$cleanup_cmd; $old_trap_term" TERM
-	else
-		# shellcheck disable=SC2064
-		trap "$cleanup_cmd" TERM
-	fi
+	local old_trap_return_cmd old_trap_exit_cmd old_trap_int_cmd old_trap_term_cmd
+	old_trap_return_cmd=$(trap -p RETURN 2>/dev/null || true)
+	old_trap_exit_cmd=$(trap -p EXIT || true)
+	old_trap_int_cmd=$(trap -p INT || true)
+	old_trap_term_cmd=$(trap -p TERM || true)
+
+	__bundle_run_manifest_restore_traps() {
+		if [[ -n "$old_trap_return_cmd" ]]; then
+			eval "$old_trap_return_cmd"
+		else
+			trap - RETURN
+		fi
+		if [[ -n "$old_trap_exit_cmd" ]]; then
+			eval "$old_trap_exit_cmd"
+		else
+			trap - EXIT
+		fi
+		if [[ -n "$old_trap_int_cmd" ]]; then
+			eval "$old_trap_int_cmd"
+		else
+			trap - INT
+		fi
+		if [[ -n "$old_trap_term_cmd" ]]; then
+			eval "$old_trap_term_cmd"
+		else
+			trap - TERM
+		fi
+	}
+
+	__bundle_run_manifest_temp_trap() {
+		rm -rf "${temp_root:-}"
+		__bundle_run_manifest_restore_traps
+	}
+
+	# shellcheck disable=SC2064 # Invoke nested trap helpers when signals fire
+	trap '__bundle_run_manifest_temp_trap' RETURN EXIT INT TERM
 	local applied=0
 	local index
 	for ((index = 0; index < bundle_count; index++)); do
@@ -467,8 +474,8 @@ bundle_run_manifest() {
 		fi
 	done
 
-	trap - RETURN EXIT INT TERM
 	rm -rf "$temp_root"
+	__bundle_run_manifest_restore_traps
 
 	set_github_output "files-bundled" "$files_bundled"
 	set_github_output "bundles-applied" "$applied"
