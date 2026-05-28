@@ -9,13 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: `reusable-deploy-site-with-reports.yml` for Model B Pages (site +
-  bundled CI report artifacts) (#226)
-- **actions**: `bundle-workflow-artifacts` composite and manifest-driven bundling
-  script (#226)
-- **docs**: Model A vs Model B in `docs/pages-publishing.md`; turbo-themes example
-  manifest in `examples/bundle-manifest-turbo-themes.json` (#226)
-
 ### Changed
 
 ### Deprecated
@@ -24,6 +17,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.22.0] - 2026-05-28
+
+### Features
+
+- **ci**: bundle workflow artifacts into unified Pages site deploy (#242) (657ee6b)
+
+### Previously Unreleased
+
+- **workflows**: `reusable-deploy-site-with-reports.yml` for Model B Pages (site +
+  bundled CI report artifacts) (#226)
+- **actions**: `bundle-workflow-artifacts` composite and manifest-driven bundling
+  script (#226)
+- **docs**: Model A vs Model B in `docs/pages-publishing.md`; turbo-themes example
+  manifest in `examples/bundle-manifest-turbo-themes.json` (#226)
 - **release**: quote-safe glob expansion for release asset preflight and uploads
   (#232)
 - **workflows**: download Python dist artifacts before setup-python in publish job
@@ -31,8 +40,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: create GitHub releases via `gh` in `reusable-github-release.yml`
   (#232)
 - **workflows**: fail publish-pypi validate when twine cannot be installed (#232)
-
-### Security
 
 ## [0.21.0] - 2026-05-27
 
@@ -485,7 +492,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.3...v0.20.0
 [0.19.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.2...v0.19.3
