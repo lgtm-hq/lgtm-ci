@@ -181,6 +181,24 @@ EOF
 	assert_output --partial "::warning::Live site mirror failed for https://lgtm-hq.github.io/example/"
 }
 
+@test "publish-test-results prepare: rejects absolute target-dir" {
+	export TARGET_DIR="/vitest"
+	export MERGE_EXISTING_SITE=false
+
+	_run_prepare
+	assert_failure
+	assert_output --partial "target-dir must be relative"
+}
+
+@test "publish-test-results prepare: rejects target-dir with .. segments" {
+	export TARGET_DIR="../vitest"
+	export MERGE_EXISTING_SITE=false
+
+	_run_prepare
+	assert_failure
+	assert_output --partial "target-dir must not contain .. segments"
+}
+
 @test "publish-test-results action: exposes merge inputs" {
 	local action="${PROJECT_ROOT}/.github/actions/publish-test-results/action.yml"
 	run grep -q 'merge-existing-site:' "$action"

@@ -25,9 +25,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 
 _publish_test_results_normalize_target_dir() {
-	local target_dir="${1#.}"
+	local raw_target_dir="$1"
+
+	if [[ "$raw_target_dir" == /* ]]; then
+		log_error "target-dir must be relative: ${raw_target_dir}"
+		exit 1
+	fi
+
+	if [[ "$raw_target_dir" == *".."* ]]; then
+		log_error "target-dir must not contain .. segments: ${raw_target_dir}"
+		exit 1
+	fi
+
+	local target_dir="${raw_target_dir#.}"
 	target_dir="${target_dir%/}"
 	target_dir="${target_dir#/}"
+
 	if [[ -z "$target_dir" ]]; then
 		echo "."
 	else
