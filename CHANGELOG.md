@@ -24,6 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **release**: quote-safe glob expansion for release asset preflight and uploads
+  (#232)
+- **workflows**: download Python dist artifacts before setup-python in publish job
+  (#232)
+- **workflows**: create GitHub releases via `gh` in `reusable-github-release.yml`
+  (#232)
+- **workflows**: fail publish-pypi validate when twine cannot be installed (#232)
+
 ### Security
 
 ## [0.21.0] - 2026-05-27

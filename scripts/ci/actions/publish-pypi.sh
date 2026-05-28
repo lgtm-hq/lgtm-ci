@@ -139,6 +139,8 @@ validate-dist)
 	if command -v uv >/dev/null 2>&1 && ! command -v twine >/dev/null 2>&1; then
 		log_info "Installing twine for validation..."
 		uv pip install --system twine
+	elif ! command -v twine >/dev/null 2>&1; then
+		die "twine is not available and uv is not available to install it"
 	fi
 
 	if validate_pypi_package "dist"; then
