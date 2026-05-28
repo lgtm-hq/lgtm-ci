@@ -25,8 +25,13 @@ _checkout_order_ok() {
 	local action="${PROJECT_ROOT}/.github/actions/bundle-workflow-artifacts/action.yml"
 	run grep -q 'bundle-workflow-artifacts.sh' "$action"
 	assert_success
-	run grep -Fq 'run: |' "$action"
-	assert_failure
+	run awk '
+		/^    - name: Bundle workflow artifacts/ { in_bundle = 1 }
+		in_bundle && /^    - name:/ && $0 !~ /Bundle workflow artifacts/ { exit 0 }
+		in_bundle && /run: \|/ { exit 1 }
+		END { exit 0 }
+	' "$action"
+	assert_success
 }
 
 @test "bundle-workflow-artifacts action: exposes bundle outputs" {
