@@ -56,7 +56,7 @@ teardown() {
 	assert_output --partial "Found 1 release asset(s)"
 }
 
-@test "verify-release-assets: matches multiple patterns without double-counting" {
+@test "verify-release-assets: matches multiple non-overlapping patterns" {
 	mkdir -p dist release
 	echo "wheel" >dist/example-1.0.0-py3-none-any.whl
 	echo "sdist" >release/example-1.0.0.tar.gz

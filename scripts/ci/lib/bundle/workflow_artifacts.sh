@@ -21,6 +21,7 @@
 
 [[ -n "${_LGTM_CI_BUNDLE_WORKFLOW_ARTIFACTS_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_BUNDLE_WORKFLOW_ARTIFACTS_LOADED=1
+readonly BUNDLE_WORKFLOW_RUNS_PER_PAGE=100
 
 # Load manifest JSON from inline JSON or a .json/.yaml/.yml file path.
 # Sets BUNDLE_MANIFEST_JSON.
@@ -78,7 +79,7 @@ bundle_find_workflow_run() {
 		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .conclusion == \"success\") | .id) // empty"
 	fi
 
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${commit_sha}&per_page=100" \
+	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${commit_sha}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" \
 		--jq "$jq_filter" --arg wf "$workflow_key"
 }
 
@@ -99,7 +100,7 @@ bundle_find_workflow_run_on_ref() {
 		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and .conclusion == \"success\") | .id) // empty"
 	fi
 
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${fallback_ref}&per_page=50" \
+	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${fallback_ref}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" \
 		--jq "$jq_filter" --arg wf "$workflow_key" --arg branch "$fallback_ref"
 }
 
