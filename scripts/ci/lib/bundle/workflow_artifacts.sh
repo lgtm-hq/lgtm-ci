@@ -333,7 +333,35 @@ bundle_run_manifest() {
 	fi
 
 	temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bundle-workflow-artifacts.XXXXXX")"
-	trap 'rm -rf "${temp_root:-}"' RETURN EXIT INT TERM
+	local old_trap_exit old_trap_int old_trap_term cleanup_cmd
+	old_trap_exit=$(trap -p EXIT | sed "s/trap -- '\(.*\)' EXIT/\1/" || true)
+	old_trap_int=$(trap -p INT | sed "s/trap -- '\(.*\)' INT/\1/" || true)
+	old_trap_term=$(trap -p TERM | sed "s/trap -- '\(.*\)' TERM/\1/" || true)
+	cleanup_cmd="rm -rf '$temp_root'"
+	# RETURN traps are function-scoped; callers cannot be read via trap -p RETURN here.
+	# shellcheck disable=SC2064
+	trap "$cleanup_cmd" RETURN
+	if [[ -n "$old_trap_exit" ]]; then
+		# shellcheck disable=SC2064
+		trap "$cleanup_cmd; $old_trap_exit" EXIT
+	else
+		# shellcheck disable=SC2064
+		trap "$cleanup_cmd" EXIT
+	fi
+	if [[ -n "$old_trap_int" ]]; then
+		# shellcheck disable=SC2064
+		trap "$cleanup_cmd; $old_trap_int" INT
+	else
+		# shellcheck disable=SC2064
+		trap "$cleanup_cmd" INT
+	fi
+	if [[ -n "$old_trap_term" ]]; then
+		# shellcheck disable=SC2064
+		trap "$cleanup_cmd; $old_trap_term" TERM
+	else
+		# shellcheck disable=SC2064
+		trap "$cleanup_cmd" TERM
+	fi
 	local applied=0
 	local index
 	for ((index = 0; index < bundle_count; index++)); do
