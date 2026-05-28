@@ -10,6 +10,8 @@
 #   COVERAGE_PATH - Path to coverage report directory
 #   BADGE_PATH - Path to badge files
 #   TARGET_DIR - Subdirectory under the Pages site root (default: .)
+#   MERGE_EXISTING_SITE - When true, merge live or base-site content before upload
+#   BASE_SITE_PATH - Optional local tree to use instead of HTTP mirror
 #   BASE_PAGE_URL - Deployed site URL from actions/deploy-pages
 #   WORKING_DIRECTORY - Directory to run in
 
@@ -22,84 +24,73 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
 
-case "$STEP" in
-prepare)
-	: "${RESULTS_PATH:=}"
-	: "${COVERAGE_PATH:=}"
-	: "${BADGE_PATH:=}"
-	: "${TARGET_DIR:=.}"
-	: "${WORKING_DIRECTORY:=.}"
-
-	if [[ -n "${TARGET_BRANCH:-}" || -n "${KEEP_HISTORY:-}" || -n "${RETENTION_DAYS:-}" ]]; then
-		log_error "target-branch, keep-history, and retention-days were removed; use official Pages deploy only (see docs/pages-publishing.md)"
-		exit 1
+_publish_test_results_normalize_target_dir() {
+	local target_dir="${1#.}"
+	target_dir="${target_dir%/}"
+	target_dir="${target_dir#/}"
+	if [[ -z "$target_dir" ]]; then
+		echo "."
+	else
+		echo "$target_dir"
 	fi
+}
 
-	cd "$WORKING_DIRECTORY"
+_publish_test_results_build_content() {
+	local content_root="$1"
+	local target_dir="$2"
 
-	# Create staging directory
-	staging_dir=$(mktemp -d)
-	log_info "Preparing files in staging directory: $staging_dir"
+	mkdir -p "$content_root/$target_dir"
 
-	# Create target directory structure
-	mkdir -p "$staging_dir/$TARGET_DIR"
-
-	# Copy test results if provided
-	if [[ -n "$RESULTS_PATH" ]]; then
+	if [[ -n "${RESULTS_PATH:-}" ]]; then
 		if [[ -d "$RESULTS_PATH" ]]; then
-			# Check if directory is non-empty before copying
 			if [[ -n "$(ls -A "$RESULTS_PATH" 2>/dev/null)" ]]; then
-				mkdir -p "$staging_dir/$TARGET_DIR/tests"
-				cp -r "$RESULTS_PATH"/* "$staging_dir/$TARGET_DIR/tests/"
+				mkdir -p "$content_root/$target_dir/tests"
+				cp -r "$RESULTS_PATH"/* "$content_root/$target_dir/tests/"
 				log_info "Copied test results from $RESULTS_PATH"
 			else
 				log_warn "Test results directory is empty: $RESULTS_PATH"
 			fi
 		elif [[ -f "$RESULTS_PATH" ]]; then
-			mkdir -p "$staging_dir/$TARGET_DIR/tests"
-			cp "$RESULTS_PATH" "$staging_dir/$TARGET_DIR/tests/"
+			mkdir -p "$content_root/$target_dir/tests"
+			cp "$RESULTS_PATH" "$content_root/$target_dir/tests/"
 			log_info "Copied test results file: $RESULTS_PATH"
 		fi
 	fi
 
-	# Copy coverage report if provided
-	if [[ -n "$COVERAGE_PATH" ]]; then
+	if [[ -n "${COVERAGE_PATH:-}" ]]; then
 		if [[ -d "$COVERAGE_PATH" ]]; then
-			# Check if directory is non-empty before copying
 			if [[ -n "$(ls -A "$COVERAGE_PATH" 2>/dev/null)" ]]; then
-				mkdir -p "$staging_dir/$TARGET_DIR/coverage"
-				cp -r "$COVERAGE_PATH"/* "$staging_dir/$TARGET_DIR/coverage/"
+				mkdir -p "$content_root/$target_dir/coverage"
+				cp -r "$COVERAGE_PATH"/* "$content_root/$target_dir/coverage/"
 				log_info "Copied coverage report from $COVERAGE_PATH"
 			else
 				log_warn "Coverage directory is empty: $COVERAGE_PATH"
 			fi
 		elif [[ -f "$COVERAGE_PATH" ]]; then
-			mkdir -p "$staging_dir/$TARGET_DIR/coverage"
-			cp "$COVERAGE_PATH" "$staging_dir/$TARGET_DIR/coverage/"
+			mkdir -p "$content_root/$target_dir/coverage"
+			cp "$COVERAGE_PATH" "$content_root/$target_dir/coverage/"
 			log_info "Copied coverage file: $COVERAGE_PATH"
 		fi
 	fi
 
-	# Copy badges if provided
-	if [[ -n "$BADGE_PATH" ]]; then
+	if [[ -n "${BADGE_PATH:-}" ]]; then
 		if [[ -d "$BADGE_PATH" ]]; then
-			mkdir -p "$staging_dir/$TARGET_DIR/coverage"
+			mkdir -p "$content_root/$target_dir/coverage"
 			# shellcheck disable=SC2086
 			for f in "$BADGE_PATH"/*.svg "$BADGE_PATH"/*.json; do
-				[[ -f "$f" ]] && cp "$f" "$staging_dir/$TARGET_DIR/coverage/"
+				[[ -f "$f" ]] && cp "$f" "$content_root/$target_dir/coverage/"
 			done
 			log_info "Copied badges from $BADGE_PATH"
 		elif [[ -f "$BADGE_PATH" ]]; then
-			mkdir -p "$staging_dir/$TARGET_DIR/coverage"
-			cp "$BADGE_PATH" "$staging_dir/$TARGET_DIR/coverage/"
+			mkdir -p "$content_root/$target_dir/coverage"
+			cp "$BADGE_PATH" "$content_root/$target_dir/coverage/"
 			log_info "Copied badge file: $BADGE_PATH"
 		fi
 	fi
 
-	# Create index.html if coverage report exists
-	if [[ -d "$staging_dir/$TARGET_DIR/coverage" ]]; then
-		if [[ ! -f "$staging_dir/$TARGET_DIR/coverage/index.html" ]]; then
-			cat >"$staging_dir/$TARGET_DIR/coverage/index.html" <<'EOF'
+	if [[ -d "$content_root/$target_dir/coverage" ]]; then
+		if [[ ! -f "$content_root/$target_dir/coverage/index.html" ]]; then
+			cat >"$content_root/$target_dir/coverage/index.html" <<'EOF'
 <!DOCTYPE html>
 <html>
 <head>
@@ -125,6 +116,109 @@ prepare)
 </html>
 EOF
 		fi
+	fi
+}
+
+_publish_test_results_copy_existing_site() {
+	local staging_dir="$1"
+
+	if [[ -n "${BASE_SITE_PATH:-}" ]]; then
+		if [[ ! -d "$BASE_SITE_PATH" ]]; then
+			log_error "base-site-path is not a directory: ${BASE_SITE_PATH}"
+			return 1
+		fi
+		log_info "Merging existing site from base-site-path: ${BASE_SITE_PATH}"
+		cp -a "${BASE_SITE_PATH}/." "$staging_dir/"
+		return 0
+	fi
+
+	local site_url=""
+	site_url=$(get_github_pages_url "") || site_url=""
+
+	if [[ -z "$site_url" ]]; then
+		log_error "merge-existing-site requires base-site-path or GITHUB_REPOSITORY for live site mirror"
+		return 1
+	fi
+
+	if ! command -v wget >/dev/null 2>&1; then
+		log_error "wget is required to mirror live GitHub Pages when base-site-path is unset"
+		return 1
+	fi
+
+	local cut_dirs=1
+	if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+		local repo_name="${GITHUB_REPOSITORY##*/}"
+		local owner="${GITHUB_REPOSITORY%%/*}"
+		local owner_lower repo_lower
+		owner_lower=$(echo "$owner" | tr '[:upper:]' '[:lower:]')
+		repo_lower=$(echo "$repo_name" | tr '[:upper:]' '[:lower:]')
+		if [[ "$repo_lower" == "${owner_lower}.github.io" ]]; then
+			cut_dirs=0
+		fi
+	fi
+
+	log_warn "Mirroring live site from ${site_url} (CDN/cache may serve stale content)"
+	local wget_root="${staging_dir}/.lgtm-wget-root"
+	mkdir -p "$wget_root"
+	if ! wget -q -e robots=off -r -l 10 -np -nH --cut-dirs="$cut_dirs" -P "$wget_root" "$site_url"; then
+		log_warn "Live site mirror failed or site is empty; continuing with new content only"
+		rm -rf "$wget_root"
+		return 0
+	fi
+
+	if [[ -d "$wget_root" ]] && [[ -n "$(ls -A "$wget_root" 2>/dev/null)" ]]; then
+		cp -a "$wget_root"/. "$staging_dir/"
+	fi
+	rm -rf "$wget_root"
+}
+
+_publish_test_results_overlay_content() {
+	local staging_dir="$1"
+	local content_root="$2"
+	local target_dir="$3"
+
+	if [[ "$target_dir" == "." ]]; then
+		cp -a "$content_root"/. "$staging_dir/"
+		return 0
+	fi
+
+	mkdir -p "$staging_dir/$target_dir"
+	if [[ -d "$content_root/$target_dir" ]]; then
+		cp -a "$content_root/$target_dir"/. "$staging_dir/$target_dir/"
+	fi
+}
+
+case "$STEP" in
+prepare)
+	: "${RESULTS_PATH:=}"
+	: "${COVERAGE_PATH:=}"
+	: "${BADGE_PATH:=}"
+	: "${TARGET_DIR:=.}"
+	: "${WORKING_DIRECTORY:=.}"
+	: "${MERGE_EXISTING_SITE:=false}"
+	: "${BASE_SITE_PATH:=}"
+
+	if [[ -n "${TARGET_BRANCH:-}" || -n "${KEEP_HISTORY:-}" || -n "${RETENTION_DAYS:-}" ]]; then
+		log_error "target-branch, keep-history, and retention-days were removed; use official Pages deploy only (see docs/pages-publishing.md)"
+		exit 1
+	fi
+
+	cd "$WORKING_DIRECTORY"
+
+	normalized_target_dir=$(_publish_test_results_normalize_target_dir "$TARGET_DIR")
+
+	staging_dir=$(mktemp -d)
+	overlay_root=""
+	log_info "Preparing files in staging directory: $staging_dir"
+
+	if [[ "$MERGE_EXISTING_SITE" == "true" ]]; then
+		overlay_root=$(mktemp -d)
+		_publish_test_results_build_content "$overlay_root" "$normalized_target_dir"
+		_publish_test_results_copy_existing_site "$staging_dir"
+		_publish_test_results_overlay_content "$staging_dir" "$overlay_root" "$normalized_target_dir"
+		rm -rf "$overlay_root"
+	else
+		_publish_test_results_build_content "$staging_dir" "$normalized_target_dir"
 	fi
 
 	set_github_output "staging-dir" "$staging_dir"

@@ -176,10 +176,30 @@ artifact model cannot do that without an explicit merge step.
 | ---------- | ---- |
 | One publish job per event | One `publish-test-results` with combined subtrees |
 | Model B site bundle | Monorepos — `reusable-deploy-site-with-reports` [226] |
-| Optional live-site merge | Legacy Model A multi-publisher fallback [225] |
+| Optional live-site merge | Legacy Model A multi-publisher fallback [225] — set `merge-existing-site: true` on `publish-test-results` (and optionally `base-site-path` to skip HTTP mirror) |
 
 [225]: https://github.com/lgtm-hq/lgtm-ci/issues/225
 [226]: https://github.com/lgtm-hq/lgtm-ci/issues/226
+
+### Optional Model A merge (`merge-existing-site`)
+
+When a repository must keep **separate** Model A publish jobs (for example python
+then node on the same ref), enable merge on each job after the first:
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@v0.22.0
+  with:
+    target-dir: vitest
+    coverage-path: coverage/
+    merge-existing-site: "true"
+    # Optional: copy a local tree instead of mirroring the public Pages URL
+    # base-site-path: /path/to/previous/site
+```
+
+By default the prepare step mirrors `https://<owner>.github.io/<repo>/` with
+`wget`. That mirror can be **stale** (CDN/cache) and is unsuitable for private
+Pages without supplying `base-site-path`. Prefer **Model B**
+(`reusable-deploy-site-with-reports`) for monorepos that own the full site tree.
 
 **Current org usage:** py-lintro calls only `reusable-test-python-publish`—not
 affected.

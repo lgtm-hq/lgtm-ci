@@ -53,12 +53,12 @@ on:
 
 # Shared Pages concurrency serializes deploys per repository/ref.
 # WARNING: Do not invoke this workflow alongside reusable-test-python-publish
-# (or another publish-test-results caller) on the same event unless all subtrees
-# are bundled in one publish job. Each deploy replaces the entire site; the
-# last queued job wins. Monorepos needing a site plus multiple report subtrees on
-# one Pages origin should use reusable-deploy-site-with-reports (Model B, #226)
-# instead of parallel python + node publish workflows. See docs/pages-publishing.md
-# and lgtm-hq/lgtm-ci#226.
+# on the same event unless subtrees are combined in one publish job or each job
+# uses publish-test-results merge-existing-site: true (Model A fallback, #225).
+# Without merge, each deploy replaces the entire site and the last queued job
+# wins. Monorepos needing a site plus multiple report subtrees on one Pages
+# origin should prefer reusable-deploy-site-with-reports (Model B, #226).
+# See docs/pages-publishing.md.
 concurrency:
   group: pages-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
