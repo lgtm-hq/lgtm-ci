@@ -63,6 +63,19 @@ _tooling_sparse_cone_ok() {
 	assert_success
 }
 
+@test "reusable-publish-pypi-release: publish job downloads artifact before setup python" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
+	run awk '
+		/^  [a-zA-Z0-9_-]+:/ { in_publish = 0 }
+		/^  publish:/ { in_publish = 1 }
+		in_publish && /name: Download Python distribution/ { download = NR }
+		in_publish && /name: Setup Python/ { setup = NR }
+		in_publish && /STEP: validate-dist/ { validate = NR }
+		END { exit !(download > 0 && setup > 0 && validate > 0 && download < setup && setup < validate) }
+	' "$workflow"
+	assert_success
+}
+
 @test "reusable-publish-pypi-release: publish job installs Python before validate" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
 	run awk '
@@ -128,14 +141,14 @@ _tooling_sparse_cone_ok() {
 	assert_success
 }
 
-@test "reusable-github-release: downloads artifact and uses softprops action" {
+@test "reusable-github-release: downloads artifact and creates release via gh script" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-github-release.yml"
 	run awk '
 		/actions\/download-artifact@/ { download = 1 }
 		/Verify release assets exist/ { verify = 1 }
 		/verify-release-assets\.sh/ { verify_script = 1 }
 		/run: \|/ { inline_shell = 1 }
-		/softprops\/action-gh-release@/ { release = 1 }
+		/create-github-release\.sh/ { release = 1 }
 		END { exit !(download && verify && verify_script && release && !inline_shell) }
 	' "$workflow"
 	assert_success
@@ -165,6 +178,6 @@ _tooling_sparse_cone_ok() {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-github-release.yml"
 	run grep -q 'jobs.release.outputs.release-url' "$workflow"
 	assert_success
-	run grep -q 'steps.gh-release.outputs.url' "$workflow"
+	run grep -q 'steps.gh-release.outputs.release-url' "$workflow"
 	assert_success
 }

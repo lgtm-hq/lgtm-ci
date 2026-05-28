@@ -106,7 +106,7 @@ Use the same `artifact-name` for `reusable-publish-pypi-release.yml` and
 uploaded by the build job. When `inputs.files` is empty, the release workflow
 defaults asset globs to `{artifact-path}/*` (via `format('{0}/*',
 inputs.artifact-path)`; default `artifact-path` is `dist`) for both the verify
-step (`FILES`) and `softprops/action-gh-release` (`files`). If you override
+step (`FILES`) and `create-github-release.sh` (`FILE_PATTERNS`). If you override
 `inputs.files`, ensure those glob patterns match the files actually placed in
 the artifact download path — you do not need to change `inputs.artifact-path`
 just because you customized `files`. `ARTIFACT_PATH` is only used in verify

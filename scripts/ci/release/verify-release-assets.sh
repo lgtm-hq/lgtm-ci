@@ -16,17 +16,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=../lib/log.sh
 source "$SCRIPT_DIR/../lib/log.sh"
+# shellcheck source=../lib/release/assets.sh
+source "$SCRIPT_DIR/../lib/release/assets.sh"
 
-shopt -s nullglob
-count=0
-while IFS= read -r pattern || [[ -n "$pattern" ]]; do
-	[[ -z "${pattern// /}" ]] && continue
-	for file in $pattern; do
-		if [[ -f "$file" ]]; then
-			count=$((count + 1))
-		fi
-	done
-done <<<"$FILES"
+count=$(release_collect_asset_files "$FILES")
 
 if ((count == 0)); then
 	log_error "No release assets matched FILES patterns (artifact-path=${ARTIFACT_PATH})"

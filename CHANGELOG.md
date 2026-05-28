@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-deploy-site-with-reports.yml` for Model B Pages (site +
+  bundled CI report artifacts) (#226)
+- **actions**: `bundle-workflow-artifacts` composite and manifest-driven bundling
+  script (#226)
+- **docs**: Model A vs Model B in `docs/pages-publishing.md`; turbo-themes example
+  manifest in `examples/bundle-manifest-turbo-themes.json` (#226)
+
 ### Changed
 
 ### Deprecated
@@ -16,6 +23,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+
+- **release**: quote-safe glob expansion for release asset preflight and uploads
+  (#232)
+- **workflows**: download Python dist artifacts before setup-python in publish job
+  (#232)
+- **workflows**: create GitHub releases via `gh` in `reusable-github-release.yml`
+  (#232)
+- **workflows**: fail publish-pypi validate when twine cannot be installed (#232)
 
 ### Security
 

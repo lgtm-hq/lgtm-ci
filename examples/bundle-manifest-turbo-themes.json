@@ -1,0 +1,54 @@
+{
+  "strict": false,
+  "bundles": [
+    {
+      "id": "vitest-coverage",
+      "workflow": "Quality Check - CI Pipeline",
+      "artifact": "coverage-html",
+      "dest": "coverage",
+      "require_success": true
+    },
+    {
+      "id": "playwright",
+      "workflow": "Quality Check - E2E Tests",
+      "artifact": "playwright-report",
+      "dest": "playwright",
+      "require_success": true
+    },
+    {
+      "id": "lighthouse",
+      "workflow": "Reporting - Lighthouse CI",
+      "artifact": "lighthouse-reports",
+      "dest": "lighthouse",
+      "require_success": true
+    },
+    {
+      "id": "playwright-examples",
+      "workflow": "Quality Check - Examples",
+      "artifact": "examples-playwright-report",
+      "dest": "playwright-examples",
+      "require_success": true
+    },
+    {
+      "id": "coverage-python",
+      "workflow": "Quality Check - Multi-Language Coverage",
+      "artifact": "coverage-python-html",
+      "dest": "coverage-python",
+      "require_success": false
+    },
+    {
+      "id": "coverage-ruby",
+      "workflow": "Quality Check - Multi-Language Coverage",
+      "artifact": "coverage-ruby-html",
+      "dest": "coverage-ruby",
+      "require_success": false
+    },
+    {
+      "id": "coverage-swift",
+      "workflow": "Quality Check - Multi-Language Coverage",
+      "artifact": "coverage-swift-html",
+      "dest": "coverage-swift",
+      "require_success": false
+    }
+  ]
+}

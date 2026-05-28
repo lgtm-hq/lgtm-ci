@@ -248,6 +248,29 @@ jobs:
       package-manager: bun
 ```
 
+### Site + bundled CI reports (Model B)
+
+```yaml
+  deploy-site:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@<sha>
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read
+    with:
+      site-root: apps/site/dist
+      build-command: bun run build
+      package-manager: bun
+      bundle-manifest: examples/bundle-manifest-turbo-themes.json
+      commit-sha: ${{ github.event.workflow_run.head_sha }}
+      fallback-ref: main
+      tooling-ref: "<sha>"
+```
+
+See [pages-publishing.md](pages-publishing.md) for manifest schema, egress
+allowlist, and `workflow_run` caller patterns.
+
 See [python-release-publish.md](python-release-publish.md) for a full production
 tag-push layout (quality, SBOM, split publish, release assets).
 
