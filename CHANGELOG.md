@@ -9,9 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **actions**: optional `merge-existing-site` and `base-site-path` inputs on
-  `publish-test-results` to merge existing Pages content before deploy (#225)
-
 ### Changed
 
 ### Deprecated
@@ -21,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.23.0] - 2026-05-28
+
+### Features
+
+- **ci**: merge existing Pages site when multiple publishers deploy (#244) (ea34cc2)
+
+### Previously Unreleased
+
+- **actions**: optional `merge-existing-site` and `base-site-path` inputs on
+  `publish-test-results` to merge existing Pages content before deploy (#225)
 
 ## [0.22.0] - 2026-05-28
 
@@ -495,7 +503,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.23.0...HEAD
+[0.23.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.21.0...v0.22.0
 [0.21.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.19.3...v0.20.0
