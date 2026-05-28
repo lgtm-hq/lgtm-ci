@@ -12,7 +12,9 @@ release_collect_asset_files() {
 	local patterns_input="${1:?file patterns are required}"
 	local -a collected=()
 	local pattern file
+	local nullglob_was_set=0
 
+	shopt -q nullglob && nullglob_was_set=1
 	shopt -s nullglob
 	while IFS= read -r pattern || [[ -n "$pattern" ]]; do
 		[[ -z "${pattern// /}" ]] && continue
@@ -26,7 +28,9 @@ release_collect_asset_files() {
 			fi
 		done
 	done <<<"$patterns_input"
-	shopt -u nullglob
+	if ((nullglob_was_set == 0)); then
+		shopt -u nullglob
+	fi
 
 	RELEASE_ASSET_FILES=("${collected[@]+"${collected[@]}"}")
 	echo "${#collected[@]}"

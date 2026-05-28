@@ -35,6 +35,18 @@ PY
 	echo "$zip_path"
 }
 
+_create_absolute_artifact_zip() {
+	local zip_path="${BATS_TEST_TMPDIR}/absolute.zip"
+	python3 - "$zip_path" <<'PY'
+import sys
+import zipfile
+
+with zipfile.ZipFile(sys.argv[1], "w") as archive:
+    archive.writestr("/etc/passwd", "pwned")
+PY
+	echo "$zip_path"
+}
+
 _create_symlink_artifact_zip() {
 	local zip_path="${BATS_TEST_TMPDIR}/symlink.zip"
 	python3 - "$zip_path" <<'PY'
@@ -142,6 +154,26 @@ exit 0
 EOF
 	chmod +x "${mock_bin}/gh"
 	export PATH="${mock_bin}:$PATH"
+}
+
+@test "bundle_run_manifest: ignores malicious bundle id in staging paths" {
+	_setup_bundle_gh_mock
+	bundle_load_manifest '{"bundles":[{"id":"../../outside","workflow":"quality-ci-main","artifact":"coverage-html","dest":"coverage"}]}'
+
+	run bundle_run_manifest
+	assert_success
+	assert_file_exists "${SITE_ROOT}/coverage/index.html"
+	run test ! -e "${BATS_TEST_TMPDIR}/outside"
+	assert_success
+}
+
+@test "bundle_validate_zip_members: rejects absolute zip entries" {
+	local zip_path
+	zip_path=$(_create_absolute_artifact_zip)
+
+	run bundle_validate_zip_members "$zip_path" 42
+	assert_failure
+	assert_output --partial "Zip entry is absolute"
 }
 
 @test "bundle_validate_zip_members: rejects path traversal entries" {

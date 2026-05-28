@@ -96,7 +96,7 @@ if [[ -n "$FILE_PATTERNS" ]]; then
 		log_error "No release assets matched FILE_PATTERNS"
 		exit 1
 	fi
-	for file in ${RELEASE_ASSET_FILES[@]+"${RELEASE_ASSET_FILES[@]}"}; do
+	for file in "${RELEASE_ASSET_FILES[@]}"; do
 		GH_ARGS+=("$file")
 	done
 elif [[ -n "$FILES" ]]; then

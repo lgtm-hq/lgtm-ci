@@ -139,12 +139,13 @@ bundle_validate_zip_members() {
 
 	while IFS= read -r entry || [[ -n "$entry" ]]; do
 		[[ -z "$entry" ]] && continue
+		if [[ "$entry" == /* ]]; then
+			log_error "Zip entry is absolute for artifact ${artifact_id}: ${entry}"
+			return 1
+		fi
 		entry="${entry#./}"
-		while [[ "$entry" == /* ]]; do
-			entry="${entry#/}"
-		done
 		if [[ -z "$entry" ]]; then
-			log_error "Zip entry resolves to root for artifact ${artifact_id}"
+			log_error "Zip entry is empty for artifact ${artifact_id}"
 			return 1
 		fi
 		if [[ "$entry" == *".."* ]]; then
@@ -215,7 +216,11 @@ bundle_download_artifact() {
 		return 1
 	fi
 	mkdir -p "$dest_dir"
-	unzip -o -q "$temp_zip" -d "$dest_dir/"
+	if ! unzip -o -q "$temp_zip" -d "$dest_dir/"; then
+		log_error "Failed to extract artifact ${artifact_id}"
+		rm -f "$temp_zip"
+		return 1
+	fi
 	rm -f "$temp_zip"
 }
 
@@ -328,12 +333,12 @@ bundle_run_manifest() {
 	fi
 
 	temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bundle-workflow-artifacts.XXXXXX")"
-	trap 'rm -rf "${temp_root:-}"' EXIT INT TERM
+	trap 'rm -rf "${temp_root:-}"' RETURN EXIT INT TERM
 	local applied=0
 	local index
 	for ((index = 0; index < bundle_count; index++)); do
 		local bundle_id workflow artifact dest require_success run_id artifact_id
-		local staging_dir used_fallback=false
+		local staging_dir staging_key="bundle-${index}" used_fallback=false
 
 		bundle_id=$(jq -r ".bundles[$index].id // \"bundle-${index}\"" <<<"$BUNDLE_MANIFEST_JSON")
 		workflow=$(jq -r ".bundles[$index].workflow" <<<"$BUNDLE_MANIFEST_JSON")
@@ -408,7 +413,7 @@ bundle_run_manifest() {
 			continue
 		fi
 
-		staging_dir="${temp_root}/${bundle_id}"
+		staging_dir="${temp_root}/${staging_key}"
 		mkdir -p "$staging_dir"
 		if ! bundle_download_artifact "$artifact_id" "$staging_dir"; then
 			log_warn "Bundle ${bundle_id}: failed to download artifact ${artifact_id}"
@@ -434,7 +439,7 @@ bundle_run_manifest() {
 		fi
 	done
 
-	trap - EXIT INT TERM
+	trap - RETURN EXIT INT TERM
 	rm -rf "$temp_root"
 
 	set_github_output "files-bundled" "$files_bundled"
