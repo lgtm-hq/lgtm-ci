@@ -283,6 +283,20 @@ bundle_copy_to_site() {
 	cp -R "${source_dir}/." "$target_dir/"
 }
 
+__bundle_run_manifest_temp_root=""
+__bundle_run_manifest_saved_return_cmd=""
+
+__bundle_run_manifest_on_return() {
+	rm -rf "${__bundle_run_manifest_temp_root:-}"
+	__bundle_run_manifest_temp_root=""
+	if [[ -n "$__bundle_run_manifest_saved_return_cmd" ]]; then
+		eval "$__bundle_run_manifest_saved_return_cmd"
+	else
+		trap - RETURN
+	fi
+	__bundle_run_manifest_saved_return_cmd=""
+}
+
 # Process all manifest bundles.
 # Requires: BUNDLE_MANIFEST_JSON, COMMIT_SHA, SITE_ROOT, GITHUB_REPOSITORY
 # Optional: FALLBACK_REF, STRICT (true|false)
@@ -333,42 +347,10 @@ bundle_run_manifest() {
 	fi
 
 	temp_root="$(mktemp -d "${TMPDIR:-/tmp}/bundle-workflow-artifacts.XXXXXX")"
-	local old_trap_return_cmd old_trap_exit_cmd old_trap_int_cmd old_trap_term_cmd
-	old_trap_return_cmd=$(trap -p RETURN 2>/dev/null || true)
-	old_trap_exit_cmd=$(trap -p EXIT || true)
-	old_trap_int_cmd=$(trap -p INT || true)
-	old_trap_term_cmd=$(trap -p TERM || true)
-
-	__bundle_run_manifest_restore_traps() {
-		if [[ -n "$old_trap_return_cmd" ]]; then
-			eval "$old_trap_return_cmd"
-		else
-			trap - RETURN
-		fi
-		if [[ -n "$old_trap_exit_cmd" ]]; then
-			eval "$old_trap_exit_cmd"
-		else
-			trap - EXIT
-		fi
-		if [[ -n "$old_trap_int_cmd" ]]; then
-			eval "$old_trap_int_cmd"
-		else
-			trap - INT
-		fi
-		if [[ -n "$old_trap_term_cmd" ]]; then
-			eval "$old_trap_term_cmd"
-		else
-			trap - TERM
-		fi
-	}
-
-	__bundle_run_manifest_temp_trap() {
-		rm -rf "${temp_root:-}"
-		__bundle_run_manifest_restore_traps
-	}
-
-	# shellcheck disable=SC2064 # Invoke nested trap helpers when signals fire
-	trap '__bundle_run_manifest_temp_trap' RETURN EXIT INT TERM
+	__bundle_run_manifest_temp_root="$temp_root"
+	__bundle_run_manifest_saved_return_cmd=$(trap -p RETURN 2>/dev/null || true)
+	# shellcheck disable=SC2064 # Invoke file-scoped RETURN handler on function exit
+	trap '__bundle_run_manifest_on_return' RETURN
 	local applied=0
 	local index
 	for ((index = 0; index < bundle_count; index++)); do
@@ -473,9 +455,6 @@ bundle_run_manifest() {
 			fi
 		fi
 	done
-
-	rm -rf "$temp_root"
-	__bundle_run_manifest_restore_traps
 
 	set_github_output "files-bundled" "$files_bundled"
 	set_github_output "bundles-applied" "$applied"
