@@ -201,7 +201,7 @@ summary)
 		add_github_summary '```'
 		while IFS= read -r line; do
 			add_github_summary "$line"
-		done < <(find dist/ -type f -exec ls -la {} \;)
+		done < <(find dist/ -type f -ls)
 		add_github_summary '```'
 	fi
 	;;

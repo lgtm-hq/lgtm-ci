@@ -9,7 +9,7 @@ setup() {
 	export REPO_ROOT="${BATS_TEST_TMPDIR}/repo"
 	export ORIGIN="${BATS_TEST_TMPDIR}/origin.git"
 	mkdir -p "$REPO_ROOT"
-	cd "$REPO_ROOT" || exit 1
+	cd "$REPO_ROOT" || return 1
 }
 
 teardown() {

@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Target release: **v0.24.0** (breaking; `feat(ci)!`).
+
 ### Added
 
 - **actions**: `build-python-package` and `upload-pypi-oidc` composites for PyPI

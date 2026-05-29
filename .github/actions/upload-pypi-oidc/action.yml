@@ -90,6 +90,7 @@ runs:
       shell: bash
       env:
         STEP: set-published
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: $SCRIPTS_DIR/ci/actions/python-dist.sh
 
 branding:
