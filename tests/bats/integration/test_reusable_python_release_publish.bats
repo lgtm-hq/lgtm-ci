@@ -51,10 +51,10 @@ _tooling_sparse_cone_ok() {
 @test "reusable-publish-pypi-release: publish job uses github-environment input" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-publish-pypi-release.yml"
 	run awk '
-		/github-environment:/ { input = 1 }
-		/^  publish:/ { in_publish = 1 }
-		in_publish && /^  [a-zA-Z0-9_-]+:/ && $0 !~ /^  publish:/ { in_publish = 0 }
-		in_publish && /environment: \$\{\{ inputs\.github-environment \}\}/ { env = 1 }
+		/^      github-environment:/ { input = 1 }
+		/^  publish:$/ { in_publish = 1 }
+		in_publish && /^  [a-zA-Z0-9_-]+:/ && $0 !~ /^  publish:$/ { in_publish = 0 }
+		in_publish && /^    environment: \$\{\{ inputs\.github-environment \}\}$/ { env = 1 }
 		END { exit !(input && env) }
 	' "$workflow"
 	assert_success
