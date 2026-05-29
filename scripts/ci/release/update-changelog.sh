@@ -96,9 +96,76 @@ capture && /^## \[/ { exit }
 capture { print }
 ' "$CHANGELOG_FILE")
 
-# Strip Keep-a-Changelog sub-headers, reference-style links, and blank lines
-# to get only bullet entries (lines starting with -)
-EXISTING_ENTRIES=$(echo "$EXISTING_UNRELEASED" | grep -v '^### ' | grep -v '^\[' | sed '/^[[:space:]]*$/d') || true
+# Hand-curated bullets only (including indented continuation lines). Table rows,
+# prose, and ### Breaking changes blocks are extracted separately (MD032).
+EXISTING_ENTRIES=$(
+	echo "$EXISTING_UNRELEASED" | awk '
+		/^### / { if (in_bullet) print ""; in_bullet = 0; next }
+		/^\[/ { next }
+		/^$/ { if (in_bullet) print ""; in_bullet = 0; next }
+		/^-/ { if (in_bullet) print ""; print; in_bullet = 1; next }
+		in_bullet && /^[[:space:]]/ { print; next }
+		{ if (in_bullet) print ""; in_bullet = 0 }
+	'
+) || true
+
+# Prose lines (e.g. "Target release: …") outside Keep-a-Changelog sub-sections.
+EXISTING_PROSE=$(
+	echo "$EXISTING_UNRELEASED" | awk '
+		/^### / { next }
+		/^\[/ { next }
+		/^$/ { next }
+		/^\|/ { next }
+		/^-/ { next }
+		/^[[:space:]]/ { next }
+		{ print }
+	'
+) || true
+
+# Migration table and trailing docs link under ### Breaking changes.
+EXISTING_BREAKING=$(
+	echo "$EXISTING_UNRELEASED" | awk '
+		/^### [Bb]reaking changes/ { capture = 1; next }
+		capture && /^### / { exit }
+		capture { lines[++n] = $0 }
+		END {
+			while (n > 0 && lines[n] ~ /^[[:space:]]*$/) {
+				n--
+			}
+			for (i = 1; i <= n; i++) {
+				print lines[i]
+			}
+		}
+	'
+) || true
+
+# Assemble Previously Unreleased with blank lines between list, prose, and table.
+PREVIOUSLY_UNRELEASED=""
+if [[ -n "$EXISTING_PROSE" ]]; then
+	PREVIOUSLY_UNRELEASED="$EXISTING_PROSE"
+fi
+if [[ -n "$EXISTING_ENTRIES" ]]; then
+	if [[ -n "$PREVIOUSLY_UNRELEASED" ]]; then
+		PREVIOUSLY_UNRELEASED="${PREVIOUSLY_UNRELEASED}
+
+${EXISTING_ENTRIES}"
+	else
+		PREVIOUSLY_UNRELEASED="$EXISTING_ENTRIES"
+	fi
+fi
+if [[ -n "$EXISTING_BREAKING" ]]; then
+	if [[ -n "$PREVIOUSLY_UNRELEASED" ]]; then
+		PREVIOUSLY_UNRELEASED="${PREVIOUSLY_UNRELEASED}
+
+### Breaking changes
+
+${EXISTING_BREAKING}"
+	else
+		PREVIOUSLY_UNRELEASED="### Breaking changes
+
+${EXISTING_BREAKING}"
+	fi
+fi
 
 # Strip leading H2 heading from CHANGELOG_BODY if present.
 # generate-changelog.sh outputs "## Unreleased" or "## [version] - date"
@@ -107,18 +174,18 @@ EXISTING_ENTRIES=$(echo "$EXISTING_UNRELEASED" | grep -v '^### ' | grep -v '^\['
 CHANGELOG_BODY=$(printf '%s' "$CHANGELOG_BODY" | sed '1{/^## /d;}' | sed '/./,$!d')
 
 # If we have both existing and generated entries, combine them
-if [[ -n "$EXISTING_ENTRIES" ]] && [[ -n "$CHANGELOG_BODY" ]]; then
+if [[ -n "$PREVIOUSLY_UNRELEASED" ]] && [[ -n "$CHANGELOG_BODY" ]]; then
 	# Append existing entries under a "Previously Unreleased" sub-section
 	# to distinguish hand-curated entries from auto-generated ones
 	CHANGELOG_BODY="${CHANGELOG_BODY}
 
 ### Previously Unreleased
 
-${EXISTING_ENTRIES}"
-elif [[ -n "$EXISTING_ENTRIES" ]]; then
+${PREVIOUSLY_UNRELEASED}"
+elif [[ -n "$PREVIOUSLY_UNRELEASED" ]]; then
 	CHANGELOG_BODY="### Previously Unreleased
 
-${EXISTING_ENTRIES}"
+${PREVIOUSLY_UNRELEASED}"
 fi
 
 # Rebuild NEW_SECTION with the merged content
