@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **ci**: validate PyPI dist via `uv run twine check` instead of
+- **ci**: validate PyPI dist via `uv run --with twine twine check` instead of
   `uv pip install --system twine` (PEP 668 on Ubuntu 24.04 runners) (#246)
 
 ### Security

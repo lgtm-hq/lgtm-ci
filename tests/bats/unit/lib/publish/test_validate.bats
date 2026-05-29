@@ -109,6 +109,25 @@ teardown() {
 	assert_output --partial "twine check failed"
 }
 
+@test "validate_pypi_package: provisions twine via uv when twine not on PATH" {
+	local dist_dir="${BATS_TEST_TMPDIR}/dist"
+	mkdir -p "$dist_dir"
+	touch "$dist_dir/package-1.0.0.tar.gz"
+	mock_command_record "uv" "Checking dist/package-1.0.0.tar.gz: PASSED"
+
+	run bash -c "
+		source \"\$LIB_DIR/log.sh\"
+		source \"\$LIB_DIR/publish/validate.sh\"
+		validate_pypi_package \"$dist_dir\" 2>&1
+	"
+	assert_success
+	assert_output --partial "twine check via uv"
+	assert_output --partial "twine check passed"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_uv"
+	assert_output --partial "--with twine"
+	assert_output --partial "twine check"
+}
+
 # =============================================================================
 # validate_npm_package tests
 # =============================================================================

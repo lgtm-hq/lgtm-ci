@@ -136,8 +136,8 @@ validate-dist)
 		die "dist/ directory not found"
 	fi
 
-	# validate_pypi_package runs twine when available, or `uv run twine check`
-	# (no `uv pip install --system` — PEP 668 blocks that on Ubuntu runners).
+	# validate_pypi_package runs twine when available, or provisions it via
+	# `uv run --with twine twine check` (no `uv pip install --system` — PEP 668).
 	if validate_pypi_package "dist"; then
 		log_success "Distribution validation passed"
 	else

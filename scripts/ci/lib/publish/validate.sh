@@ -43,7 +43,7 @@ validate_pypi_package() {
 		log_success "twine check passed"
 	elif command -v uv >/dev/null 2>&1; then
 		log_info "Running twine check via uv..."
-		if ! uv run twine check "$dist_dir"/*; then
+		if ! uv run --with twine twine check "$dist_dir"/*; then
 			log_error "twine check failed"
 			return 1
 		fi

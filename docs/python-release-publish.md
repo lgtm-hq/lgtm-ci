@@ -180,7 +180,8 @@ in [workflow-contract.md](workflow-contract.md) (§ PyPI publish).
 | --- | --- |
 | `ghcr.io:443` | `pypa/gh-action-pypi-publish` Docker image pull |
 | `pkg-containers.githubusercontent.com:443` | Container registry routing |
-| `github-releases.githubusercontent.com:443`, `raw.githubusercontent.com:443` | `setup-python` / uv Python install |
+| `github-releases.githubusercontent.com:443` | `setup-python` / uv Python install |
+| `raw.githubusercontent.com:443` | `setup-python` / uv Python install |
 | `astral.sh:443`, `releases.astral.sh:443` | uv |
 | `upload.pypi.org:443`, `pypi.org:443`, `files.pythonhosted.org:443` | PyPI upload |
 | Sigstore hosts | OIDC publish + `attest-build-provenance` |
