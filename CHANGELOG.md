@@ -7,33 +7,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-Target release: **v0.24.0** (breaking; `feat(ci)!`).
-
 ### Added
 
-- **actions**: `build-python-package` and `upload-pypi-oidc` composites for PyPI
-  releases (#248)
-- **workflows**: `reusable-build-python-dist.yml` — build artifact only (#248)
-
 ### Changed
-
-- **ci**: PyPI OIDC upload must run in caller workflow jobs, not cross-repo
-  reusables (#248)
 
 ### Deprecated
 
 ### Removed
 
-- **workflows**: `reusable-publish-pypi.yml`, `reusable-publish-pypi-release.yml`
-  (#248)
-- **actions**: `publish-pypi` (#248)
-
 ### Fixed
 
 ### Security
 
-### Breaking changes
+## [0.24.0] - 2026-05-29
 
+### Breaking Changes
+
+- **ci**: split PyPI build/upload for OIDC (#248) (#249) (435f9a2)
+
+### Previously Unreleased
+
+Target release: **v0.24.0** (breaking; `feat(ci)!`).
+- **actions**: `build-python-package` and `upload-pypi-oidc` composites for PyPI
+  releases (#248)
+- **workflows**: `reusable-build-python-dist.yml` — build artifact only (#248)
+- **ci**: PyPI OIDC upload must run in caller workflow jobs, not cross-repo
+  reusables (#248)
+- **workflows**: `reusable-publish-pypi.yml`, `reusable-publish-pypi-release.yml`
+  (#248)
+- **actions**: `publish-pypi` (#248)
 | Removed | Use instead |
 | --- | --- |
 | `reusable-publish-pypi-release.yml` | `reusable-build-python-dist.yml` + `upload-pypi-oidc` |
@@ -41,7 +43,6 @@ Target release: **v0.24.0** (breaking; `feat(ci)!`).
 | `publish-pypi` action | `build-python-package` + `upload-pypi-oidc` |
 | `publish-pypi.sh` | `python-dist.sh` |
 | `github-environment` on reusable `with:` | `environment:` on caller upload job |
-
 See [docs/python-release-publish.md](docs/python-release-publish.md).
 
 ## [0.23.1] - 2026-05-29
@@ -545,7 +546,8 @@ See [docs/python-release-publish.md](docs/python-release-publish.md).
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.23.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.24.0...HEAD
+[0.24.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.22.0...v0.23.0
 [0.22.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.21.0...v0.22.0
