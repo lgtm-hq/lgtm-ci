@@ -23,7 +23,7 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/publish.sh"
 
 if [[ "$STEP" == "build" ]]; then
-	if [[ -z "$WORKING_DIRECTORY" || "$WORKING_DIRECTORY" == "/" || "$WORKING_DIRECTORY" == "~" || "$WORKING_DIRECTORY" == ~/* ]]; then
+	if [[ -z "$WORKING_DIRECTORY" || "$WORKING_DIRECTORY" == "/" || "$WORKING_DIRECTORY" == "~" || "$WORKING_DIRECTORY" == ~/* || "$WORKING_DIRECTORY" =~ ^~(/|$) ]]; then
 		die "Refusing to build with unsafe WORKING_DIRECTORY: ${WORKING_DIRECTORY:-<empty>}"
 	fi
 fi
