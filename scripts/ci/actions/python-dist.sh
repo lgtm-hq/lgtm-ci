@@ -89,8 +89,19 @@ validate)
 build)
 	log_info "Building Python package..."
 
-	# Clean previous builds
-	rm -rf dist/ build/ ./*.egg-info/
+	if [[ -z "$WORKING_DIRECTORY" || "$WORKING_DIRECTORY" == "/" || "$WORKING_DIRECTORY" == "~" ]]; then
+		die "Refusing to build with unsafe WORKING_DIRECTORY: ${WORKING_DIRECTORY:-<empty>}"
+	fi
+	abs_pwd=$(pwd -P)
+	if [[ "$abs_pwd" == "/" ]]; then
+		die "Refusing to run build from filesystem root"
+	fi
+
+	# Clean previous builds (paths relative to WORKING_DIRECTORY after cd above)
+	rm -rf dist/ build/
+	shopt -s nullglob
+	rm -rf ./*.egg-info/
+	shopt -u nullglob
 
 	# Extract version and name
 	version=$(extract_pypi_version ".") || die "Could not extract version"
