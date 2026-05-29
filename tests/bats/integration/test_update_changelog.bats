@@ -730,6 +730,82 @@ run_update_changelog() {
 	echo "$changelog" | grep -q 'hotfix after version PR merged' || fail "'hotfix after version PR merged' not found in changelog"
 }
 
+@test "update-changelog: preserves breaking changes table with MD032 spacing" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+Target release: **v0.25.0** (breaking).
+
+### Added
+
+- **actions**: new composite (#99)
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Breaking changes
+
+| Removed | Use instead |
+| --- | --- |
+| old-workflow.yml | new-workflow.yml |
+
+See [docs/example.md](docs/example.md).
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
+
+	run_update_changelog "0.25.0" "### Breaking Changes
+
+- **ci**: breaking change (abc1234)"
+	assert_success
+
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	echo "$changelog" | grep -q 'Target release: \*\*v0.25.0\*\*' || fail "prose line missing"
+	echo "$changelog" | grep -q 'new composite' || fail "bullet missing"
+	echo "$changelog" | grep -q '| Removed | Use instead |' || fail "table missing"
+	echo "$changelog" | grep -q '### Breaking changes' || fail "breaking changes heading missing"
+
+	# MD032: blank line between list and table (no bullet line immediately before |)
+	run bash -c "
+		awk '
+			/^-/ { last = \$0; next }
+			/^\|/ && last ~ /^-/ {
+				print \"bullet immediately before table row\" > \"/dev/stderr\"
+				exit 1
+			}
+			{ last = \"\" }
+		' '${MOCK_GIT_REPO}/CHANGELOG.md'
+	"
+	assert_success
+
+	# MD032: blank line between prose and first bullet
+	run bash -c "
+		awk '
+			/^Target release:/ { prose = 1; next }
+			prose && /^-/ {
+				if (prev !~ /^$/) {
+					print \"prose immediately before bullet\" > \"/dev/stderr\"
+					exit 1
+				}
+				prose = 0
+			}
+			{ prev = \$0 }
+		' '${MOCK_GIT_REPO}/CHANGELOG.md'
+	"
+	assert_success
+}
+
 @test "update-changelog: no triple-blank-line runs" {
 	setup_changelog_repo
 
