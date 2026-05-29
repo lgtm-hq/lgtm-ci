@@ -209,6 +209,7 @@ jobs:
       attestations: write
 
   pypi-release:
+    environment: pypi
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@<sha>
     permissions:
       contents: read
@@ -216,6 +217,8 @@ jobs:
       attestations: write
     with:
       tooling-ref: "<sha>" # vX.Y.Z
+      egress-policy: block
+      # See workflow-contract.md § PyPI publish for allowed-endpoints.
 
   github-release:
     needs: pypi-release

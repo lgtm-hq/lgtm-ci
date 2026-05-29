@@ -11,11 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **docs**: document full PyPI publish egress (ghcr.io, setup-python hosts) and
+  caller `environment` for trusted publishing (#246)
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **ci**: validate PyPI dist via `uv run twine check` instead of
+  `uv pip install --system twine` (PEP 668 on Ubuntu 24.04 runners) (#246)
 
 ### Security
 

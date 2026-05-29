@@ -1,4 +1,8 @@
 ---
+# Split build + OIDC publish for production tag releases.
+# Caller: set `environment` on the workflow_call job for PyPI trusted publishing.
+# Caller: pass full PyPI egress (incl. ghcr.io) when egress-policy is block —
+# see docs/python-release-publish.md and docs/workflow-contract.md.
 name: Reusable PyPI Release Publishing Workflow
 
 on:
