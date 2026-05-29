@@ -79,10 +79,14 @@ _tooling_sparse_cone_ok() {
 @test "upload-pypi-oidc: attestation is best-effort before set-published" {
 	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
 	run awk '
-		/attest-build-provenance@/ { attest = NR }
-		/continue-on-error: true/ { coe = NR }
+		/Attest build provenance/ { in_attest_step = 1 }
+		in_attest_step && /continue-on-error: true/ { coe = NR }
+		in_attest_step && /attest-build-provenance@/ { attest = NR }
 		/id: set-published/ { published = NR }
-		END { exit !(attest > 0 && coe > 0 && published > 0 && attest < published) }
+		END {
+			exit !(attest > 0 && coe > 0 && published > 0 &&
+				coe < attest && attest < published)
+		}
 	' "$action"
 	assert_success
 }
@@ -99,8 +103,13 @@ _tooling_sparse_cone_ok() {
 		/actions\/download-artifact@/ { download = 1 }
 		/Verify release assets exist/ { verify = 1 }
 		/verify-release-assets\.sh/ { verify_script = 1 }
-		/run: \|/ { inline_shell = 1 }
-		/create-github-release\.sh/ { release = 1 }
+		/create-github-release\.sh/ { release = 1; in_release_step = 1 }
+		/^      - name:/ {
+			if (in_release_step) {
+				in_release_step = 0
+			}
+		}
+		in_release_step && /run: \|/ { inline_shell = 1 }
 		END { exit !(download && verify && verify_script && release && !inline_shell) }
 	' "$workflow"
 	assert_success

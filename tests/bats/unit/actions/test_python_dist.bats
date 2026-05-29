@@ -55,6 +55,15 @@ _run_preflight() {
 		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
 }
 
+_run_build() {
+	local working_directory="${1:-.}"
+	run env \
+		STEP=build \
+		WORKING_DIRECTORY="$working_directory" \
+		GITHUB_WORKSPACE="$REPO_ROOT" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+}
+
 @test "python-dist preflight: passes when tag matches pyproject version on main" {
 	_init_repo_on_main "1.2.3"
 	export GITHUB_REF_NAME="v1.2.3"
@@ -109,4 +118,31 @@ _run_preflight() {
 
 	assert_failure
 	assert_output --partial "Tag commit is not on main"
+}
+
+@test "python-dist build: refuses filesystem root WORKING_DIRECTORY" {
+	_init_repo_on_main "1.0.0"
+
+	_run_build /
+
+	assert_failure
+	assert_output --partial "unsafe WORKING_DIRECTORY"
+}
+
+@test "python-dist build: refuses home WORKING_DIRECTORY" {
+	_init_repo_on_main "1.0.0"
+
+	_run_build '~'
+
+	assert_failure
+	assert_output --partial "unsafe WORKING_DIRECTORY"
+}
+
+@test "python-dist build: refuses parent directory outside repository root" {
+	_init_repo_on_main "1.0.0"
+
+	_run_build ..
+
+	assert_failure
+	assert_output --partial "outside repository root"
 }
