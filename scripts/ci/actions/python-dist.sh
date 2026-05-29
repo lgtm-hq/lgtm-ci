@@ -22,6 +22,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/publish.sh"
 
+if [[ "$STEP" == "build" ]]; then
+	if [[ -z "$WORKING_DIRECTORY" || "$WORKING_DIRECTORY" == "/" || "$WORKING_DIRECTORY" == "~" || "$WORKING_DIRECTORY" == ~/* ]]; then
+		die "Refusing to build with unsafe WORKING_DIRECTORY: ${WORKING_DIRECTORY:-<empty>}"
+	fi
+fi
+
 # Change to working directory
 cd "$WORKING_DIRECTORY"
 
@@ -89,13 +95,26 @@ validate)
 build)
 	log_info "Building Python package..."
 
-	if [[ -z "$WORKING_DIRECTORY" || "$WORKING_DIRECTORY" == "/" || "$WORKING_DIRECTORY" == "~" ]]; then
-		die "Refusing to build with unsafe WORKING_DIRECTORY: ${WORKING_DIRECTORY:-<empty>}"
-	fi
 	abs_pwd=$(pwd -P)
 	if [[ "$abs_pwd" == "/" ]]; then
 		die "Refusing to run build from filesystem root"
 	fi
+
+	repo_root=""
+	if [[ -n "${GITHUB_WORKSPACE:-}" ]]; then
+		repo_root=$(cd "$GITHUB_WORKSPACE" && pwd -P)
+	elif git rev-parse --show-toplevel >/dev/null 2>&1; then
+		repo_root=$(cd "$(git rev-parse --show-toplevel)" && pwd -P)
+	fi
+	if [[ -z "$repo_root" ]]; then
+		die "Cannot determine repository root; refusing build cleanup"
+	fi
+	case "$abs_pwd" in
+	"$repo_root" | "$repo_root"/*) ;;
+	*)
+		die "Refusing to build outside repository root: $abs_pwd (root: $repo_root)"
+		;;
+	esac
 
 	# Clean previous builds (paths relative to WORKING_DIRECTORY after cd above)
 	rm -rf dist/ build/
