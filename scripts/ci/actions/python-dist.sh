@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Build and publish Python packages to PyPI
+# Purpose: Build and upload Python packages to PyPI (STEP dispatch)
 #
 # Environment variables:
 #   STEP: preflight | validate | build | validate-dist | set-published | summary

@@ -172,7 +172,7 @@ wheels = [
 
 [[package]]
 name = "lgtm-ci"
-version = "0.18.2"
+version = "0.23.1"
 source = { virtual = "." }
 
 [package.optional-dependencies]

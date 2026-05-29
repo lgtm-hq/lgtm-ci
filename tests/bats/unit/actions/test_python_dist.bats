@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Tests for scripts/ci/actions/publish-pypi.sh preflight step
+# Purpose: Tests for scripts/ci/actions/python-dist.sh preflight step
 
 load "../../../helpers/common"
 
@@ -52,10 +52,10 @@ _run_preflight() {
 		DEFAULT_BRANCH=main \
 		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
 		GITHUB_REF="$GITHUB_REF" \
-		bash "${PROJECT_ROOT}/scripts/ci/actions/publish-pypi.sh"
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
 }
 
-@test "publish-pypi preflight: passes when tag matches pyproject version on main" {
+@test "python-dist preflight: passes when tag matches pyproject version on main" {
 	_init_repo_on_main "1.2.3"
 	export GITHUB_REF_NAME="v1.2.3"
 	export GITHUB_REF="refs/tags/v1.2.3"
@@ -67,7 +67,7 @@ _run_preflight() {
 	assert_output --partial "Tag commit is on main"
 }
 
-@test "publish-pypi preflight: fails when tag version mismatches pyproject" {
+@test "python-dist preflight: fails when tag version mismatches pyproject" {
 	_init_repo_on_main "1.2.3"
 	export GITHUB_REF_NAME="v9.9.9"
 	export GITHUB_REF="refs/tags/v9.9.9"
@@ -80,7 +80,7 @@ _run_preflight() {
 	assert_output --partial "Version mismatch: pyproject=1.2.3 tag=v9.9.9"
 }
 
-@test "publish-pypi preflight: fails when tag is not on default branch" {
+@test "python-dist preflight: fails when tag is not on default branch" {
 	git init -b main
 	git config user.email "test@example.com"
 	git config user.name "Test User"

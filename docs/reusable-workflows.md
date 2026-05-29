@@ -201,27 +201,30 @@ jobs:
       id-token: write
       attestations: write
 
-  pypi:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@<sha>
+  pypi-build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@<sha>
     permissions:
       contents: read
-      id-token: write
-      attestations: write
-
-  pypi-release:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@<sha>
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
     with:
       tooling-ref: "<sha>" # vX.Y.Z
-      github-environment: pypi
-      egress-policy: block
-      # See workflow-contract.md § PyPI publish for allowed-endpoints.
+      artifact-name: python-dist
+
+  pypi-upload:
+    needs: pypi-build
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@<sha>
+        with:
+          artifact-name: python-dist
+          tooling-ref: "<sha>"
 
   github-release:
-    needs: pypi-release
+    needs: pypi-upload
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@<sha>
     permissions:
       contents: write

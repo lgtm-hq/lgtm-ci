@@ -1,21 +1,15 @@
 ---
-name: "Publish to PyPI"
-description: "Build and publish Python package to PyPI using OIDC trusted publishing"
+name: "Build Python package"
+description: >-
+  Preflight tag checks, validate metadata, build sdist/wheel, and twine-check dist.
+  Does not upload to PyPI.
 author: "lgtm-hq"
 
 inputs:
   validate:
-    description: "Run twine check before publishing"
+    description: "Run twine check on built distributions"
     required: false
     default: "true"
-  test-pypi:
-    description: "Publish to TestPyPI instead of PyPI"
-    required: false
-    default: "false"
-  dry-run:
-    description: "Build only, do not publish"
-    required: false
-    default: "false"
   verify-tag-version:
     description: "Verify git tag matches pyproject.toml version"
     required: false
@@ -34,9 +28,6 @@ inputs:
     default: "."
 
 outputs:
-  published:
-    description: "Whether the package was published"
-    value: ${{ steps.set-published.outputs.published || 'false' }}
   version:
     description: "Package version"
     value: ${{ steps.build.outputs.version }}
@@ -54,7 +45,9 @@ runs:
           >> "$GITHUB_ENV"
 
     - name: Preflight tag validation
-      if: inputs.verify-tag-version == 'true' || inputs.ensure-tag-on-default-branch == 'true'
+      if: >-
+        inputs.verify-tag-version == 'true' ||
+        inputs.ensure-tag-on-default-branch == 'true'
       shell: bash
       env:
         STEP: preflight
@@ -62,7 +55,7 @@ runs:
         VERIFY_TAG_VERSION: ${{ inputs.verify-tag-version }}
         ENSURE_TAG_ON_DEFAULT_BRANCH: ${{ inputs.ensure-tag-on-default-branch }}
         DEFAULT_BRANCH: ${{ inputs.default-branch }}
-      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
+      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
 
     - name: Validate package metadata
       id: validate
@@ -71,7 +64,7 @@ runs:
       env:
         STEP: validate
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
+      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
 
     - name: Build package
       id: build
@@ -79,7 +72,7 @@ runs:
       env:
         STEP: build
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
+      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
 
     - name: Validate distribution
       if: inputs.validate == 'true'
@@ -87,23 +80,7 @@ runs:
       env:
         STEP: validate-dist
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
-
-    - name: Publish to PyPI
-      id: publish
-      if: inputs.dry-run != 'true'
-      uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
-      with:
-        repository-url: >-
-          ${{ inputs.test-pypi == 'true' && 'https://test.pypi.org/legacy/' ||
-          'https://upload.pypi.org/legacy/' }}
-        packages-dir: ${{ inputs.working-directory }}/dist/
-
-    - name: Set publish output
-      id: set-published
-      if: inputs.dry-run != 'true'
-      shell: bash
-      run: echo "published=true" >> "$GITHUB_OUTPUT"
+      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
 
     - name: Generate summary
       shell: bash
@@ -112,11 +89,11 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
         PACKAGE_NAME: ${{ steps.build.outputs.name }}
         PACKAGE_VERSION: ${{ steps.build.outputs.version }}
-        DRY_RUN: ${{ inputs.dry-run }}
-        TEST_PYPI: ${{ inputs.test-pypi }}
-        PUBLISHED: ${{ steps.set-published.outputs.published || 'false' }}
-      run: $SCRIPTS_DIR/ci/actions/publish-pypi.sh
+        DRY_RUN: "true"
+        TEST_PYPI: "false"
+        PUBLISHED: "false"
+      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
 
 branding:
-  icon: "upload-cloud"
+  icon: "package"
   color: "blue"

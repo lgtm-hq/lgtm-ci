@@ -146,15 +146,16 @@ steps:
 
 #### Publishing & Deployment
 
-| Action             | Description                  |
-| ------------------ | ---------------------------- |
-| `publish-npm`      | npm package publishing       |
-| `publish-pypi`     | PyPI publishing with OIDC    |
-| `publish-gem`      | RubyGems publishing          |
-| `update-homebrew`  | Homebrew formula updates     |
-| `validate-package` | Package validation           |
-| `wait-for-package` | Package availability polling |
-| `deploy-pages`     | GitHub Pages deployment      |
+| Action                 | Description                   |
+| ---------------------- | ----------------------------- |
+| `publish-npm`          | npm package publishing        |
+| `build-python-package` | Build Python sdist/wheel      |
+| `upload-pypi-oidc`     | PyPI OIDC upload (caller job) |
+| `publish-gem`          | RubyGems publishing           |
+| `update-homebrew`      | Homebrew formula updates      |
+| `validate-package`     | Package validation            |
+| `wait-for-package`     | Package availability polling  |
+| `deploy-pages`         | GitHub Pages deployment       |
 
 ### Reusable Workflows
 
@@ -165,8 +166,7 @@ steps:
 | `reusable-sbom.yml`                    | SBOM generation with Cosign signing    |
 | `reusable-release-version-pr.yml`      | Release version PR with changelog      |
 | `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge          |
-| `reusable-publish-pypi.yml`            | PyPI publishing with OIDC              |
-| `reusable-publish-pypi-release.yml`    | Split PyPI build and publish           |
+| `reusable-build-python-dist.yml`       | Build Python dist artifact             |
 | `reusable-github-release.yml`          | GitHub Release with artifact assets    |
 | `reusable-publish-npm.yml`             | npm publishing                         |
 | `reusable-publish-gem.yml`             | RubyGems publishing                    |
