@@ -59,8 +59,6 @@ jobs:
 
   publish:
     needs: [quality, sbom]
-    # Trusted publishing: match the Environment name configured on PyPI (if any).
-    environment: pypi
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
@@ -70,6 +68,7 @@ jobs:
       python-version: "3.12"
       tooling-ref: "<sha>" # vX.Y.Z
       artifact-name: python-dist
+      github-environment: pypi
       egress-policy: block
       # Full list: workflow-contract.md § PyPI publish (build + publish jobs).
       allowed-endpoints: >
@@ -156,14 +155,16 @@ each job needs; do not set top-level `permissions: write-all`.
 
 ## PyPI trusted publishing
 
-`reusable-publish-pypi-release.yml` does not define a GitHub Environment
-internally. Set it on the **caller** job that invokes the reusable workflow:
+Pass `github-environment` on the reusable workflow `with:` block. The publish
+job inside `reusable-publish-pypi-release.yml` sets `environment` from that
+input (caller jobs that use `uses:` cannot set `environment` themselves).
 
 ```yaml
 jobs:
   publish:
-    environment: pypi
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@<sha>
+    with:
+      github-environment: pypi
 ```
 
 Ensure the PyPI project trusted publisher matches this repository, workflow

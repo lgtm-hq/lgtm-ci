@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **docs**: document full PyPI publish egress (ghcr.io, setup-python hosts) and
-  caller `environment` for trusted publishing (#246)
+  `github-environment` input for trusted publishing (#246)
+- **workflows**: `reusable-publish-pypi-release.yml` adds `github-environment`
+  input for publish-job OIDC environments (#246)
 
 ### Deprecated
 

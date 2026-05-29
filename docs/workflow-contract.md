@@ -185,8 +185,8 @@ allowed-endpoints: >
   oauth2.sigstore.dev:443
 ```
 
-Set `environment: <name>` on the **caller** job that invokes the reusable
-workflow when PyPI trusted publishing is bound to a GitHub Environment (see
+Pass `github-environment: <name>` in the reusable workflow `with:` block when
+PyPI trusted publishing is bound to a GitHub Environment (see
 [python-release-publish.md](python-release-publish.md)).
 
 ### GitHub Release (artifact upload)
