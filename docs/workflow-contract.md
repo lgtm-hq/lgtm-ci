@@ -49,7 +49,7 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
 | Release version | `contents: write`, `pull-requests: write` | `reusable-release-version-pr.yml` |
-| PyPI upload (OIDC) | `id-token: write`, `attestations: write` | `upload-pypi-oidc` |
+| PyPI upload (OIDC) | `contents: read`; `id-token` + `attestations: write` | `upload-pypi-oidc` |
 | PyPI build | `contents: read` | `reusable-build-python-dist.yml` |
 | GitHub Release assets | `contents: write` | `reusable-github-release.yml` |
 
