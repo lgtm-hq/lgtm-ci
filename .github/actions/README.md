@@ -1111,6 +1111,9 @@ a job defined in the **caller** repository workflow (see
 **Requirements:** `id-token: write` on the job; `environment: pypi`; PyPI trusted
 publisher matches the caller workflow file.
 
+Provenance attestation uses `continue-on-error: true` so Sigstore failures do not
+block `published` or downstream release jobs after a successful PyPI upload.
+
 ---
 
 ### publish-npm

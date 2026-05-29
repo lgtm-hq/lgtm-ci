@@ -76,6 +76,17 @@ _tooling_sparse_cone_ok() {
 	assert_success
 }
 
+@test "upload-pypi-oidc: attestation is best-effort before set-published" {
+	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
+	run awk '
+		/attest-build-provenance@/ { attest = NR }
+		/continue-on-error: true/ { coe = NR }
+		/id: set-published/ { published = NR }
+		END { exit !(attest > 0 && coe > 0 && published > 0 && attest < published) }
+	' "$action"
+	assert_success
+}
+
 @test "upload-pypi-oidc: exposes published output" {
 	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
 	run grep -q 'steps.set-published.outputs.published' "$action"

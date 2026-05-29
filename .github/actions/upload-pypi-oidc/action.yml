@@ -2,7 +2,8 @@
 name: "Upload Python distribution to PyPI (OIDC)"
 description: >-
   Download a workflow artifact, optionally validate with twine, upload to PyPI or
-  TestPyPI via OIDC, and attest provenance. Run only from a job in the caller
+  TestPyPI via OIDC, and optionally attest provenance (best-effort). Run only
+  from a job in the caller
   repository workflow (not from a cross-repo reusable workflow) with
   environment and id-token: write set on that job.
 author: "lgtm-hq"
@@ -81,6 +82,7 @@ runs:
         packages-dir: ${{ inputs.working-directory }}/dist/
 
     - name: Attest build provenance
+      continue-on-error: true
       uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
       with:
         subject-path: ${{ inputs.working-directory }}/dist/*

@@ -9,7 +9,7 @@ workflows (tag push or manual dispatch). Callers keep product-specific steps
 | Component | Purpose |
 | --- | --- |
 | `reusable-build-python-dist.yml` | Build sdist/wheel and upload workflow artifact |
-| `upload-pypi-oidc` action | OIDC upload + attestation (caller job only) |
+| `upload-pypi-oidc` action | OIDC upload + best-effort attestation (caller job only) |
 | `build-python-package` action | Build/validate (used inside build reusable) |
 | `reusable-github-release.yml` | Attach artifacts to a GitHub Release |
 
@@ -129,6 +129,13 @@ Do **not** register `lgtm-hq/lgtm-ci` as a trusted publisher.
 
 Cross-repo reusables cannot perform OIDC upload until PyPI supports it
 ([warehouse#11096](https://github.com/pypi/warehouse/issues/11096)).
+
+## Provenance attestation
+
+`upload-pypi-oidc` runs `attest-build-provenance` with `continue-on-error: true`
+after a successful PyPI upload. Sigstore outages must not fail the release job or
+skip `published: true` — the wheel is already on the index and retries would not
+be idempotent.
 
 ## Egress allowlists
 
