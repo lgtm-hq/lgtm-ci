@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Tests for scripts/ci/actions/publish-pypi.sh preflight step
+# Purpose: Tests for scripts/ci/actions/python-dist.sh preflight step
 
 load "../../../helpers/common"
 
@@ -9,7 +9,7 @@ setup() {
 	export REPO_ROOT="${BATS_TEST_TMPDIR}/repo"
 	export ORIGIN="${BATS_TEST_TMPDIR}/origin.git"
 	mkdir -p "$REPO_ROOT"
-	cd "$REPO_ROOT" || exit 1
+	cd "$REPO_ROOT" || return 1
 }
 
 teardown() {
@@ -52,10 +52,19 @@ _run_preflight() {
 		DEFAULT_BRANCH=main \
 		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
 		GITHUB_REF="$GITHUB_REF" \
-		bash "${PROJECT_ROOT}/scripts/ci/actions/publish-pypi.sh"
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
 }
 
-@test "publish-pypi preflight: passes when tag matches pyproject version on main" {
+_run_build() {
+	local working_directory="${1:-.}"
+	run env \
+		STEP=build \
+		WORKING_DIRECTORY="$working_directory" \
+		GITHUB_WORKSPACE="$REPO_ROOT" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+}
+
+@test "python-dist preflight: passes when tag matches pyproject version on main" {
 	_init_repo_on_main "1.2.3"
 	export GITHUB_REF_NAME="v1.2.3"
 	export GITHUB_REF="refs/tags/v1.2.3"
@@ -67,7 +76,7 @@ _run_preflight() {
 	assert_output --partial "Tag commit is on main"
 }
 
-@test "publish-pypi preflight: fails when tag version mismatches pyproject" {
+@test "python-dist preflight: fails when tag version mismatches pyproject" {
 	_init_repo_on_main "1.2.3"
 	export GITHUB_REF_NAME="v9.9.9"
 	export GITHUB_REF="refs/tags/v9.9.9"
@@ -80,7 +89,7 @@ _run_preflight() {
 	assert_output --partial "Version mismatch: pyproject=1.2.3 tag=v9.9.9"
 }
 
-@test "publish-pypi preflight: fails when tag is not on default branch" {
+@test "python-dist preflight: fails when tag is not on default branch" {
 	git init -b main
 	git config user.email "test@example.com"
 	git config user.name "Test User"
@@ -109,4 +118,31 @@ _run_preflight() {
 
 	assert_failure
 	assert_output --partial "Tag commit is not on main"
+}
+
+@test "python-dist build: refuses filesystem root WORKING_DIRECTORY" {
+	_init_repo_on_main "1.0.0"
+
+	_run_build /
+
+	assert_failure
+	assert_output --partial "unsafe WORKING_DIRECTORY"
+}
+
+@test "python-dist build: refuses home WORKING_DIRECTORY" {
+	_init_repo_on_main "1.0.0"
+
+	_run_build '~'
+
+	assert_failure
+	assert_output --partial "unsafe WORKING_DIRECTORY"
+}
+
+@test "python-dist build: refuses parent directory outside repository root" {
+	_init_repo_on_main "1.0.0"
+
+	_run_build ..
+
+	assert_failure
+	assert_output --partial "outside repository root"
 }

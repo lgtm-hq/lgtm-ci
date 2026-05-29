@@ -1,0 +1,149 @@
+---
+# Build Python sdist/wheel and upload as a workflow artifact.
+# OIDC upload to PyPI must run in the caller workflow via upload-pypi-oidc composite
+# (see docs/python-release-publish.md).
+name: Reusable Python Distribution Build Workflow
+
+on:
+  workflow_call:
+    inputs:
+      python-version:
+        description: "Python version for building"
+        required: false
+        type: string
+        default: "3.12"
+      validate:
+        description: "Run twine check on built distributions"
+        required: false
+        type: boolean
+        default: true
+      verify-tag-version:
+        description: "Verify git tag matches pyproject.toml version"
+        required: false
+        type: boolean
+        default: true
+      ensure-tag-on-default-branch:
+        description: "Verify tagged commit is on the default branch"
+        required: false
+        type: boolean
+        default: true
+      default-branch:
+        description: "Default branch name for tag-on-default-branch check"
+        required: false
+        type: string
+        default: "main"
+      working-directory:
+        description: "Working directory containing the package"
+        required: false
+        type: string
+        default: "."
+      artifact-name:
+        description: "Name of the uploaded Python distribution artifact"
+        required: false
+        type: string
+        default: "python-dist"
+      artifact-retention-days:
+        description: "Days to retain the distribution artifact"
+        required: false
+        type: number
+        default: 7
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      build-job-name:
+        description: "GitHub check name for the build job"
+        required: false
+        type: string
+        default: "Build Python distribution"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
+    outputs:
+      version:
+        description: "Built package version"
+        value: ${{ jobs.build.outputs.version }}
+      package-name:
+        description: "Built package name"
+        value: ${{ jobs.build.outputs.package-name }}
+
+jobs:
+  build:
+    name: ${{ inputs.build-job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+
+    outputs:
+      version: ${{ steps.build-package.outputs.version }}
+      package-name: ${{ steps.build-package.outputs.package-name }}
+
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Setup Python
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+        with:
+          python-version: ${{ inputs.python-version }}
+          working-directory: ${{ inputs.working-directory }}
+          install-dependencies: "false"
+
+      - name: Build Python distribution
+        id: build-package
+        uses: ./.lgtm-ci-tooling/.github/actions/build-python-package
+        with:
+          validate: ${{ inputs.validate }}
+          verify-tag-version: ${{ inputs.verify-tag-version }}
+          ensure-tag-on-default-branch: ${{ inputs.ensure-tag-on-default-branch }}
+          default-branch: ${{ inputs.default-branch }}
+          working-directory: ${{ inputs.working-directory }}
+
+      - name: Upload Python distribution
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}/dist/
+          retention-days: ${{ inputs.artifact-retention-days }}
+          if-no-files-found: error

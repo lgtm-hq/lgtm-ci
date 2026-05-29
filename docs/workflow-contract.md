@@ -49,8 +49,8 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | PR comments | `contents: read`, `pull-requests: write` | `reusable-*-pr-comment.yml` |
 | Publish to Pages | `contents: read`, `pages: write`, `id-token: write` | Separate publish job |
 | Release version | `contents: write`, `pull-requests: write` | `reusable-release-version-pr.yml` |
-| Package publish | `contents: read`, `id-token: write`, `attestations: write` | Publish reusables |
-| Split PyPI publish | Same as Package publish | `reusable-publish-pypi-release.yml` |
+| PyPI upload (OIDC) | `contents: read`; `id-token` + `attestations: write` | `upload-pypi-oidc` |
+| PyPI build | `contents: read` | `reusable-build-python-dist.yml` |
 | GitHub Release assets | `contents: write` | `reusable-github-release.yml` |
 
 `reusable-test-node.yml` no longer includes a publish job. Use
@@ -75,7 +75,7 @@ multi-publisher limits.
 `clean: false` on the repository checkout does **not** help here: without an
 existing `.git`, `actions/checkout` wipes the workspace and deletes
 `.lgtm-ci-tooling/` if tooling was checked out first. Match
-`reusable-publish-pypi.yml` and `reusable-pr-auto-assign.yml`.
+`reusable-build-python-dist.yml` and `reusable-pr-auto-assign.yml`.
 
 ## Low-noise Rust and Node checks
 
@@ -148,16 +148,10 @@ allowed-endpoints: >
   release-assets.githubusercontent.com:443
 ```
 
-### PyPI publish (OIDC + attestation)
+### PyPI build
 
-Used by `reusable-publish-pypi.yml` and `reusable-publish-pypi-release.yml`
-(build and publish jobs share the caller's `allowed-endpoints`).
-
-`pypa/gh-action-pypi-publish` runs as a **Docker** action and pulls
-`ghcr.io/pypa/gh-action-pypi-publish` — include `ghcr.io:443` and
-`pkg-containers.githubusercontent.com:443`.
-
-`setup-python` (uv-managed interpreters) needs GitHub release asset hosts.
+Used by `reusable-build-python-dist.yml` (`allowed-endpoints` on the reusable
+`with:` block). Does not upload to PyPI.
 
 ```yaml
 egress-policy: block
@@ -169,7 +163,22 @@ allowed-endpoints: >
   objects.githubusercontent.com:443
   github-releases.githubusercontent.com:443
   raw.githubusercontent.com:443
-  uploads.github.com:443
+  astral.sh:443
+  releases.astral.sh:443
+```
+
+### PyPI upload (OIDC + attestation)
+
+Used on the **caller** upload job (`upload-pypi-oidc` composite). Set
+`environment: pypi` on that job. `pypa/gh-action-pypi-publish` pulls
+`ghcr.io/pypa/gh-action-pypi-publish` — include `ghcr.io:443` and
+`pkg-containers.githubusercontent.com:443`.
+
+```yaml
+egress-policy: block
+allowed-endpoints: >
+  github.com:443
+  api.github.com:443
   ghcr.io:443
   pkg-containers.githubusercontent.com:443
   pypi.org:443
@@ -177,17 +186,14 @@ allowed-endpoints: >
   files.pythonhosted.org:443
   test.pypi.org:443
   upload.test.pypi.org:443
-  astral.sh:443
-  releases.astral.sh:443
   fulcio.sigstore.dev:443
   rekor.sigstore.dev:443
   tuf-repo-cdn.sigstore.dev:443
   oauth2.sigstore.dev:443
 ```
 
-Pass `github-environment: <name>` in the reusable workflow `with:` block when
-PyPI trusted publishing is bound to a GitHub Environment (see
-[python-release-publish.md](python-release-publish.md)).
+See [python-release-publish.md](python-release-publish.md) for trusted
+publishing requirements.
 
 ### GitHub Release (artifact upload)
 

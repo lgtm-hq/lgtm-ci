@@ -7,17 +7,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+Target release: **v0.24.0** (breaking; `feat(ci)!`).
+
 ### Added
 
+- **actions**: `build-python-package` and `upload-pypi-oidc` composites for PyPI
+  releases (#248)
+- **workflows**: `reusable-build-python-dist.yml` — build artifact only (#248)
+
 ### Changed
+
+- **ci**: PyPI OIDC upload must run in caller workflow jobs, not cross-repo
+  reusables (#248)
 
 ### Deprecated
 
 ### Removed
 
+- **workflows**: `reusable-publish-pypi.yml`, `reusable-publish-pypi-release.yml`
+  (#248)
+- **actions**: `publish-pypi` (#248)
+
 ### Fixed
 
 ### Security
+
+### Breaking changes
+
+| Removed | Use instead |
+| --- | --- |
+| `reusable-publish-pypi-release.yml` | `reusable-build-python-dist.yml` + `upload-pypi-oidc` |
+| `reusable-publish-pypi.yml` | Same split; `test-pypi: true` on upload action |
+| `publish-pypi` action | `build-python-package` + `upload-pypi-oidc` |
+| `publish-pypi.sh` | `python-dist.sh` |
+| `github-environment` on reusable `with:` | `environment:` on caller upload job |
+
+See [docs/python-release-publish.md](docs/python-release-publish.md).
 
 ## [0.23.1] - 2026-05-29
 

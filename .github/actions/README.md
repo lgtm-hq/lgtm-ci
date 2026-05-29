@@ -1077,29 +1077,42 @@ Create a GitHub release with changelog and optional assets.
 
 ## Publishing Actions
 
-### publish-pypi
+### build-python-package
 
-Build and publish Python packages to PyPI using OIDC trusted publishing.
+Build Python sdist/wheel and validate with twine. Does not upload to PyPI.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/publish-pypi@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@main
   with:
-    validate: "true" # optional, run twine check
-    test-pypi: "false" # optional, publish to TestPyPI
-    dry-run: "false" # optional, build only
-    working-directory: "." # optional
+    validate: "true"
+    working-directory: "."
 ```
 
-**Outputs:**
+**Outputs:** `version`, `package-name`
 
-- `published` - Whether the package was published
-- `version` - Package version
-- `package-name` - Package name
+---
 
-**Requirements:**
+### upload-pypi-oidc
 
-- `id-token: write` permission for OIDC authentication
-- Configure trusted publisher in PyPI project settings
+Download a workflow artifact and upload to PyPI or TestPyPI via OIDC. Use only in
+a job defined in the **caller** repository workflow (see
+[python-release-publish.md](../../docs/python-release-publish.md)).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@main
+  with:
+    artifact-name: python-dist
+    test-pypi: "false"
+    tooling-ref: "<sha>"
+```
+
+**Outputs:** `published`
+
+**Requirements:** `contents: read`, `id-token: write`, `attestations: write` on the
+job; `environment: pypi`; PyPI trusted publisher matches the caller workflow file.
+
+Provenance attestation uses `continue-on-error: true` so Sigstore failures do not
+block `published` or downstream release jobs after a successful PyPI upload.
 
 ---
 
@@ -1672,73 +1685,13 @@ jobs:
 
 ---
 
-### reusable-publish-pypi.yml
+### reusable-build-python-dist.yml
 
-Publish Python packages to PyPI using OIDC trusted publishing.
-
-```yaml
-jobs:
-  publish:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@main
-    with:
-      python-version: "3.12"
-      validate: true
-      test-pypi: false
-      dry-run: false
-      update-homebrew: false
-      homebrew-tap: "owner/homebrew-tap"
-      homebrew-formula: "mypackage"
-```
-
-**Inputs:**
-
-- `python-version` - Python version for building (default: '3.12')
-- `validate` - Run twine check before publishing (default: true)
-- `test-pypi` - Publish to TestPyPI instead of PyPI (default: false)
-- `update-homebrew` - Update Homebrew formula after publishing (default: false)
-- `homebrew-tap` - Homebrew tap repository (owner/repo) (default: '')
-- `homebrew-formula` - Homebrew formula name (default: '')
-- `dry-run` - Build only, do not publish (default: false)
-- `working-directory` - Working directory containing the package (default: '.')
-
-**Outputs:**
-
-- `published` - Whether the package was published
-- `version` - Published package version
-- `package-name` - Published package name
-
-**Permissions Required:**
-
-- `contents: read` - For checkout
-- `id-token: write` - For OIDC authentication
-- `attestations: write` - For build provenance
-
----
-
-### reusable-publish-pypi-release.yml
-
-Split build and publish jobs for production tag releases. Uploads a distribution
-artifact from the build job and publishes it with OIDC + provenance attestation
-in a separate job.
-
-```yaml
-jobs:
-  publish:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@main
-    permissions:
-      contents: read
-      id-token: write
-      attestations: write
-    with:
-      python-version: "3.12"
-      artifact-name: python-dist
-      tooling-ref: "<sha>" # vX.Y.Z
-```
-
-Pair with `reusable-github-release.yml` using the same `artifact-name`. See
+Build Python distribution and upload a workflow artifact. Pair with a caller job
+using `upload-pypi-oidc` for OIDC upload. See
 [docs/python-release-publish.md](../../docs/python-release-publish.md).
 
-**Outputs:** `published`, `version`, `package-name`
+**Outputs:** `version`, `package-name`
 
 ---
 
