@@ -136,13 +136,8 @@ validate-dist)
 		die "dist/ directory not found"
 	fi
 
-	if command -v uv >/dev/null 2>&1 && ! command -v twine >/dev/null 2>&1; then
-		log_info "Installing twine for validation..."
-		uv pip install --system twine
-	elif ! command -v twine >/dev/null 2>&1; then
-		die "twine is not available and uv is not available to install it"
-	fi
-
+	# validate_pypi_package runs twine when available, or provisions it via
+	# `uv run --with twine twine check` (no `uv pip install --system` — PEP 668).
 	if validate_pypi_package "dist"; then
 		log_success "Distribution validation passed"
 	else

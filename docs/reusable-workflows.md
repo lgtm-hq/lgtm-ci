@@ -216,6 +216,9 @@ jobs:
       attestations: write
     with:
       tooling-ref: "<sha>" # vX.Y.Z
+      github-environment: pypi
+      egress-policy: block
+      # See workflow-contract.md § PyPI publish for allowed-endpoints.
 
   github-release:
     needs: pypi-release

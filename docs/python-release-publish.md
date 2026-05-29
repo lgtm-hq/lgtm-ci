@@ -68,10 +68,20 @@ jobs:
       python-version: "3.12"
       tooling-ref: "<sha>" # vX.Y.Z
       artifact-name: python-dist
+      github-environment: pypi
       egress-policy: block
+      # Full list: workflow-contract.md § PyPI publish (build + publish jobs).
       allowed-endpoints: >
         github.com:443
         api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        uploads.github.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
         pypi.org:443
         upload.pypi.org:443
         files.pythonhosted.org:443
@@ -143,11 +153,46 @@ jobs:
 Nested reusable workflows validate permissions at parse time. Grant only what
 each job needs; do not set top-level `permissions: write-all`.
 
+## PyPI trusted publishing
+
+Pass `github-environment` on the reusable workflow `with:` block. The publish
+job inside `reusable-publish-pypi-release.yml` sets `environment` from that
+input (caller jobs that use `uses:` cannot set `environment` themselves).
+
+```yaml
+jobs:
+  publish:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi-release.yml@<sha>
+    with:
+      github-environment: pypi
+```
+
+Ensure the PyPI project trusted publisher matches this repository, workflow
+file name, and environment (if used).
+
 ## Egress allowlists
 
-When `egress-policy: block`, pass `allowed-endpoints` from the caller or rely
-on audit mode during rollout. See [workflow-contract.md](workflow-contract.md)
-for shared endpoint patterns.
+When `egress-policy: block`, pass `allowed-endpoints` from the caller for
+**both** nested jobs (`build-artifacts` and `publish`). Use the canonical list
+in [workflow-contract.md](workflow-contract.md) (§ PyPI publish).
+
+| Endpoint | Why |
+| --- | --- |
+| `ghcr.io:443` | `pypa/gh-action-pypi-publish` Docker image pull |
+| `pkg-containers.githubusercontent.com:443` | Container registry routing |
+| `github-releases.githubusercontent.com:443` | `setup-python` / uv Python install |
+| `raw.githubusercontent.com:443` | `setup-python` / uv Python install |
+| `astral.sh:443`, `releases.astral.sh:443` | uv |
+| `upload.pypi.org:443`, `pypi.org:443`, `files.pythonhosted.org:443` | PyPI upload |
+| Sigstore hosts | OIDC publish + `attest-build-provenance` |
+
+Run an end-to-end tag publish (or TestPyPI) in `audit` mode first, then copy
+any additional hosts from the Harden Runner report into the allowlist.
+
+## Product-specific jobs
+
+Run Homebrew tap or other release-asset consumers **`needs: [publish,
+github-release]`** when they expect GitHub Release assets to exist.
 
 ## Related docs
 

@@ -150,12 +150,28 @@ allowed-endpoints: >
 
 ### PyPI publish (OIDC + attestation)
 
+Used by `reusable-publish-pypi.yml` and `reusable-publish-pypi-release.yml`
+(build and publish jobs share the caller's `allowed-endpoints`).
+
+`pypa/gh-action-pypi-publish` runs as a **Docker** action and pulls
+`ghcr.io/pypa/gh-action-pypi-publish` — include `ghcr.io:443` and
+`pkg-containers.githubusercontent.com:443`.
+
+`setup-python` (uv-managed interpreters) needs GitHub release asset hosts.
+
 ```yaml
 egress-policy: block
 allowed-endpoints: >
   github.com:443
   api.github.com:443
   codeload.github.com:443
+  release-assets.githubusercontent.com:443
+  objects.githubusercontent.com:443
+  github-releases.githubusercontent.com:443
+  raw.githubusercontent.com:443
+  uploads.github.com:443
+  ghcr.io:443
+  pkg-containers.githubusercontent.com:443
   pypi.org:443
   upload.pypi.org:443
   files.pythonhosted.org:443
@@ -168,6 +184,10 @@ allowed-endpoints: >
   tuf-repo-cdn.sigstore.dev:443
   oauth2.sigstore.dev:443
 ```
+
+Pass `github-environment: <name>` in the reusable workflow `with:` block when
+PyPI trusted publishing is bound to a GitHub Environment (see
+[python-release-publish.md](python-release-publish.md)).
 
 ### GitHub Release (artifact upload)
 

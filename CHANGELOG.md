@@ -11,11 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **docs**: document full PyPI publish egress (ghcr.io, setup-python hosts) and
+  `github-environment` input for trusted publishing (#246)
+- **workflows**: `reusable-publish-pypi-release.yml` adds `github-environment`
+  input for publish-job OIDC environments (#246)
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **ci**: validate PyPI dist with twine when available, or `uv run --with twine
+  twine check` when only uv is present; `validate_pypi_package` warns and skips
+  validation when neither tool is available (replaces PEP 668-breaking
+  `uv pip install --system twine`) (#246)
 
 ### Security
 

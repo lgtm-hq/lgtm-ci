@@ -1,4 +1,8 @@
 ---
+# Split build + OIDC publish for production tag releases.
+# Caller: pass `github-environment` (e.g. pypi) for PyPI trusted publishing.
+# Caller: pass full PyPI egress (incl. ghcr.io) when egress-policy is block —
+# see docs/python-release-publish.md and docs/workflow-contract.md.
 name: Reusable PyPI Release Publishing Workflow
 
 on:
@@ -84,6 +88,13 @@ on:
         required: false
         type: number
         default: 15
+      github-environment:
+        description: >-
+          GitHub Environment for the publish job (PyPI OIDC trusted publishing).
+          Leave empty to omit the environment.
+        required: false
+        type: string
+        default: ""
 
     outputs:
       published:
@@ -164,6 +175,7 @@ jobs:
     needs: build-artifacts
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment: ${{ inputs.github-environment }}
     permissions:
       contents: read
       id-token: write # OIDC token for PyPI Trusted Publishing
