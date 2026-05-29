@@ -93,6 +93,6 @@ _tooling_sparse_cone_ok() {
 		END { exit !(download && verify && verify_script && release && !inline_shell) }
 	' "$workflow"
 	assert_success
-	run grep -Eq "format\\(['\"]\\{0\\}/\\*['\"],\\s*inputs\\.artifact-path\\)" "$workflow"
+	run grep -Eq 'format\(\s*['\''"]\{0\}/\*\s*['\''"],\s*inputs\.artifact-path\s*\)' "$workflow"
 	assert_success
 }

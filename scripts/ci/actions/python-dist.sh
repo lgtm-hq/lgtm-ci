@@ -188,7 +188,9 @@ summary)
 		add_github_summary "### Distribution Files"
 		add_github_summary ""
 		add_github_summary '```'
-		find dist/ -type f -exec ls -la {} \;
+		while IFS= read -r line; do
+			add_github_summary "$line"
+		done < <(find dist/ -type f -exec ls -la {} \;)
 		add_github_summary '```'
 	fi
 	;;
