@@ -83,6 +83,26 @@ jobs:
       script: scripts/ci/validate.sh
 ```
 
+### Org ruleset gate (`reusable-required-check.yml`)
+
+Thin aggregate-status gate for branch-protection check names that differ from
+the work reusable’s `job-name`. See [workflow-contract.md](workflow-contract.md)
+(Org ruleset check names).
+
+```yaml
+test-suite-coverage:
+  needs: test
+  if: always()
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@<sha>
+  permissions:
+    contents: read
+  with:
+    tooling-ref: <sha>
+    job-name: "🧪 Test Suite & Coverage"
+    upstream-result: ${{ needs.test.result }}
+    passed-output: ${{ needs.test.outputs.passed }}
+```
+
 ## Tests
 
 ```yaml

@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-required-check.yml` org-ruleset gate for branch-protection check
+  names that differ from the reusable workflow `job-name`
+- **ci**: `assert-required-check.sh` for reusable required-check upstream validation
+
 ### Changed
 
 ### Deprecated
@@ -16,6 +20,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+
+- **ci**: `validate-static-job-names.sh` detects dynamic expressions in YAML block-scalar
+  `job.name` continuations (#168 §12 guardrail)
 
 ### Security
 

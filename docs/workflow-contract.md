@@ -125,6 +125,42 @@ expressions in `job.name` on jobs that have `if:`.
 Custom package scripts use `reusable-test-node-custom.yml` with required
 `test-command` and `job-name`.
 
+## Org ruleset check names
+
+Reusable workflows report checks as **`caller_job_id / inner_job_name`**. Org
+rulesets may require a **legacy display name** that does not match the inner
+`job-name` on the work job (for example ruleset `🧪 Test Suite & Coverage` vs
+`test / Python Compatibility`).
+
+**Preferred (no shim):** Update the org ruleset to require the actual check path
+after repinning, and set `job-name` (and caller job `id` when helpful) to match.
+
+**Legacy gate:** When the ruleset cannot change yet, add a thin caller job that
+calls `reusable-required-check.yml` instead of hand-rolled `runs-on` shims. Pass
+`upstream-result` and optional `passed-output` / `status-output` from the work
+job. Use `always()` on the caller job so the gate still runs when the upstream
+job fails.
+
+```yaml
+test:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
+  with:
+    job-name: Python Compatibility
+    tooling-ref: <sha>
+
+test-suite-coverage:
+  needs: test
+  if: always()
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@<sha>
+  with:
+    tooling-ref: <sha>
+    job-name: "🧪 Test Suite & Coverage"
+    upstream-result: ${{ needs.test.result }}
+    passed-output: ${{ needs.test.outputs.passed }}
+```
+
+Do not add per-consumer `job-name` aliases inside work reusables.
+
 ## Egress block examples
 
 ### Node / Bun (web)
