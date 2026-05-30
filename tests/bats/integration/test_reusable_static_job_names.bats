@@ -36,7 +36,7 @@ jobs:
       - run: echo ok
 YAML
 
-	REPO_ROOT="${BATS_TEST_TMPDIR}" run "${VALIDATOR}"
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
 	assert_output --partial "dynamic job.name"
 }

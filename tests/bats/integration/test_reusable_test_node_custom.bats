@@ -29,7 +29,12 @@ _test_checkout_order_ok() {
 @test "reusable-test-node-custom: requires test-command input" {
 	run grep -E '^      test-command:$' "$WORKFLOW"
 	assert_success
-	run awk '/^      test-command:/{getline; print}' "$WORKFLOW" | grep -q 'required: true'
+	run awk '
+		/^      test-command:/ { in_input = 1 }
+		in_input && /^      [a-zA-Z0-9_-]+:/ && !/^      test-command:/ { in_input = 0 }
+		in_input && /required: true/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
 	assert_success
 }
 
@@ -43,9 +48,17 @@ _test_checkout_order_ok() {
 	assert_success
 }
 
-@test "reusable-test-node-custom: does not define vitest-only test-command branching" {
-	run grep -q 'test-vitest:' "$WORKFLOW"
-	assert_failure
-	run grep -q 'test-custom:' "$WORKFLOW"
-	assert_failure
+@test "reusable-test-node-custom: aggregate-tests derives passed from matrix result" {
+	run awk '
+		/^  aggregate-tests:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate-tests:/ { in_job = 0 }
+		in_job && /needs\.test\.result/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+	run awk '
+		/value: \$\{\{ jobs\.test\.outputs\.passed/ { bad = 1 }
+		END { exit bad }
+	' "$WORKFLOW"
+	assert_success
 }

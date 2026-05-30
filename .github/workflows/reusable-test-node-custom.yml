@@ -129,8 +129,8 @@ on:
 
     outputs:
       passed:
-        description: "Whether the custom test command succeeded"
-        value: ${{ jobs.test.outputs.passed == 'true' }}
+        description: "Whether every matrix test leg succeeded"
+        value: ${{ jobs.aggregate-tests.outputs.passed == 'true' }}
       pages-coverage-artifact-name:
         description: "Resolved flat HTML coverage artifact name"
         value: ${{ inputs.pages-coverage-artifact-name }}
@@ -378,6 +378,35 @@ jobs:
             echo "passed=false" >>"$GITHUB_OUTPUT"
           fi
 
+  aggregate-tests:
+    name: Aggregate Node.js Results
+    needs:
+      - prepare
+      - test
+    if: >-
+      always()
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.aggregate.outputs.passed }}
+
+    steps:
+      - name: Aggregate matrix custom test results
+        id: aggregate
+        shell: bash
+        run: |
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+
   pages-coverage-status:
     name: Pages coverage upload status
     needs:
@@ -434,7 +463,6 @@ jobs:
       && needs.test.result == 'success'
       && (
         !inputs.draft-pr-skip ||
-        github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
     runs-on: ${{ inputs.runner-image }}

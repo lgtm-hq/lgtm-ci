@@ -5,8 +5,10 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
-WORKFLOWS_DIR="${REPO_ROOT}/.github/workflows"
+if [[ -z "${REPO_ROOT:-}" ]]; then
+	REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+fi
+WORKFLOWS_DIR="${WORKFLOWS_DIR:-${REPO_ROOT}/.github/workflows}"
 
 if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 	echo "ERROR: workflows directory not found: ${WORKFLOWS_DIR}" >&2
@@ -16,7 +18,8 @@ fi
 violations=0
 
 while IFS= read -r -d '' workflow; do
-	awk -v file="${workflow#"${REPO_ROOT}/"}" '
+	set +e
+	awk -v file="${workflow#"${WORKFLOWS_DIR%/}/"}" '
 		function flush_job() {
 			if (in_job && has_if && name ~ /\$\{\{|format\(/) {
 				if (name ~ /matrix\./ || name ~ /format\(/ || name ~ /&&.*\|\|/) {
@@ -53,8 +56,9 @@ while IFS= read -r -d '' workflow; do
 		}
 	' "${workflow}"
 	awk_exit=$?
+	set -e
 	if [[ ${awk_exit} -gt 0 ]]; then
-		violations=${awk_exit}
+		violations=$((violations + awk_exit))
 	fi
 done < <(find "${WORKFLOWS_DIR}" -maxdepth 1 -name 'reusable-*.yml' -print0)
 
