@@ -180,7 +180,7 @@ poster job by design.
 ### Rust
 
 Prefer `reusable-rust-build.yml`, `reusable-rust-coverage.yml`, and
-`reusable-rust-checks.yml` for separate required checks without skipped sibling
+`reusable-rust-test.yml` for separate required checks without skipped sibling
 jobs. `reusable-test-rust.yml` remains for backward compatibility. See
 [rust-testing.md](rust-testing.md).
 
@@ -207,8 +207,8 @@ jobs:
       upload-pages-coverage-html: true
       pages-coverage-artifact-name: rust-coverage-html
 
-  rust-checks:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-checks.yml@<sha>
+  rust-test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
