@@ -217,9 +217,8 @@ extract-dist-metadata)
 				sdist_basename=$(basename "$sdist_file")
 				sdist_basename="${sdist_basename%.tar.gz}"
 				sdist_basename="${sdist_basename%.zip}"
-				sdist_name="${sdist_basename%%-*}"
-				sdist_remainder="${sdist_basename#*-}"
-				sdist_version="${sdist_remainder%%-*}"
+				sdist_version="${sdist_basename##*-}"
+				sdist_name="${sdist_basename%-*}"
 				name="${name:-${sdist_name//_/-}}"
 				version="${version:-$sdist_version}"
 			fi

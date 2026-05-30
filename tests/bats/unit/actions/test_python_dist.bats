@@ -178,6 +178,20 @@ _run_build() {
 	assert_equal "4.5.6" "$(get_github_output version)"
 }
 
+@test "python-dist extract-dist-metadata: reads hyphenated name from sdist" {
+	mkdir -p dist
+	touch dist/my-package-1.2.3.tar.gz
+
+	run env \
+		STEP=extract-dist-metadata \
+		WORKING_DIRECTORY=. \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_success
+	assert_equal "my-package" "$(get_github_output name)"
+	assert_equal "1.2.3" "$(get_github_output version)"
+}
+
 @test "python-dist extract-dist-metadata: prefers pyproject over wheel" {
 	_write_pyproject "9.9.9"
 	mkdir -p dist
