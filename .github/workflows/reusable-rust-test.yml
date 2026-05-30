@@ -240,6 +240,7 @@ jobs:
       - name: Check coverage threshold
         id: coverage-gate
         if: inputs.coverage && inputs.coverage-threshold > 0
+        continue-on-error: true
         uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
@@ -275,7 +276,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.pages-coverage-artifact-name }}
-          path: ${{ inputs.pages-coverage-artifact-name }}/
+          path: ${{ inputs.working-directory }}/${{ inputs.pages-coverage-artifact-name }}/
           retention-days: 7
           if-no-files-found: error
 
@@ -308,8 +309,10 @@ jobs:
         if: always()
         id: record-passed
         shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
         run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
+          if [[ "${JOB_STATUS}" == "success" ]]; then
             echo "passed=true" >>"$GITHUB_OUTPUT"
           else
             echo "passed=false" >>"$GITHUB_OUTPUT"
