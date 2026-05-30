@@ -115,6 +115,23 @@ _orchestrator_delegates_comment() {
 	assert_success
 }
 
+@test "reusable-test-rust-test: test job has no pull-requests permission" {
+	run awk '
+		/^  test:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
+		in_job && /pull-requests:/ { found = 1; exit }
+		END { exit found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-rust-test.yml"
+	assert_success
+}
+
+@test "reusable-test-rust-test: delegates PR comment to reusable-test-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-rust-test.yml" \
+		"reusable-test-pr-comment.yml"
+	assert_success
+}
+
 @test "reusable-test-node: coverage comment uses inline matrix job not reusable" {
 	run awk '
 		/^  coverage-pr-comment:/ { in_job = 1 }

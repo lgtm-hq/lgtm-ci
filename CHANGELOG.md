@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-rust-test` and `reusable-test-rust-test` for workspace
+  `cargo test` with PR comments (#68). Clippy, rustfmt, and security scans remain
+  in `reusable-quality-lint` (lintro).
+
 ### Changed
 
 ### Deprecated

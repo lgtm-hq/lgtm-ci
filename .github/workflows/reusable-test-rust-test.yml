@@ -1,0 +1,198 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: "Rust toolchain version"
+        required: false
+        type: string
+        default: "stable"
+      features:
+        description: "Feature flags for cargo (e.g., --all-features)"
+        required: false
+        type: string
+        default: "--all-features"
+      workspace:
+        description: "Run cargo test with --workspace"
+        required: false
+        type: boolean
+        default: true
+      extra-args:
+        description: "Additional arguments for cargo test"
+        required: false
+        type: string
+        default: ""
+      test-script:
+        description: "Path to cargo test script"
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: "Working directory for cargo test"
+        required: false
+        type: string
+        default: "."
+      post-pr-comment:
+        description: "Post test summary as a PR comment"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for the Rust test PR comment"
+        required: false
+        type: string
+        default: "rust-test-results"
+      job-name:
+        description: "GitHub check name for the cargo test job"
+        required: false
+        type: string
+        default: "Rust Tests"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
+
+    outputs:
+      tests-passed:
+        description: "Number of tests passed"
+        value: ${{ jobs.test.outputs.tests-passed }}
+      tests-failed:
+        description: "Number of tests failed"
+        value: ${{ jobs.test.outputs.tests-failed }}
+      tests-total:
+        description: "Number of executed tests (passed + failed, excludes ignored)"
+        value: ${{ jobs.test.outputs.tests-total }}
+      passed:
+        description: "Whether cargo test passed"
+        value: ${{ jobs.test.outputs.passed }}
+
+jobs:
+  test:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      tests-passed: ${{ steps.parse.outputs.tests-passed }}
+      tests-failed: ${{ steps.parse.outputs.tests-failed }}
+      tests-total: ${{ steps.parse.outputs.tests-total }}
+      passed: ${{ steps.run.outcome == 'success' }}
+    concurrency:
+      group: rust-test-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Run cargo test
+        id: run
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.test-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-cargo-test.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Parse test results
+        id: parse
+        if: always()
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TEST_LOG_FILE: rust-test.log
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-cargo-test-results.sh"
+
+      - name: Fail on test errors
+        if: steps.run.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+  comment-pr:
+    needs: test
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && inputs.post-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+    uses: ./.github/workflows/reusable-test-pr-comment.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      test-suite-name: ${{ inputs.job-name }}
+      comment-marker: ${{ inputs.comment-marker }}
+      tests-passed: ${{ needs.test.outputs.tests-passed }}
+      tests-failed: ${{ needs.test.outputs.tests-failed }}
+      tests-total: ${{ needs.test.outputs.tests-total }}
+      job-result: ${{ needs.test.result }}
+      tooling-ref: ${{ inputs.tooling-ref }}
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}

@@ -95,6 +95,7 @@ Prefer split workflows to avoid skipped checks in PR UI:
 | ------------------- | ----------------------------------------------------------------- |
 | Rust build only     | `reusable-rust-build.yml` or `reusable-test-rust-build.yml`       |
 | Rust coverage only  | `reusable-rust-coverage.yml` or `reusable-test-rust-coverage.yml` |
+| Rust test           | `reusable-rust-test.yml` or `reusable-test-rust-test.yml`         |
 | Node Vitest tests   | `reusable-test-node.yml` with `test-command` empty                |
 | Node custom command | `reusable-test-node.yml` with `test-command` set                  |
 

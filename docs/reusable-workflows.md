@@ -179,9 +179,10 @@ poster job by design.
 
 ### Rust
 
-Prefer `reusable-rust-build.yml` and `reusable-rust-coverage.yml` for separate
-required checks without skipped sibling jobs. `reusable-test-rust.yml` remains
-for backward compatibility. See [rust-testing.md](rust-testing.md).
+Prefer `reusable-rust-build.yml`, `reusable-rust-coverage.yml`, and
+`reusable-rust-test.yml` for separate required checks without skipped sibling
+jobs. `reusable-test-rust.yml` remains for backward compatibility. See
+[rust-testing.md](rust-testing.md).
 
 ```yaml
 jobs:
@@ -205,6 +206,16 @@ jobs:
       egress-policy: block
       upload-pages-coverage-html: true
       pages-coverage-artifact-name: rust-coverage-html
+
+  rust-test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Tests"
+      egress-policy: block
 ```
 
 ### Pages coverage HTML inputs (`reusable-rust-coverage` / `reusable-test-rust-coverage`)

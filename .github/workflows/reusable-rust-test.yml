@@ -1,0 +1,116 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Test Workflow (Facade)
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: "Rust toolchain version"
+        required: false
+        type: string
+        default: "stable"
+      features:
+        description: "Feature flags for cargo (e.g., --all-features)"
+        required: false
+        type: string
+        default: "--all-features"
+      workspace:
+        description: "Run cargo test with --workspace"
+        required: false
+        type: boolean
+        default: true
+      extra-args:
+        description: "Additional arguments for cargo test"
+        required: false
+        type: string
+        default: ""
+      test-script:
+        description: "Path to cargo test script"
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: "Working directory for cargo test"
+        required: false
+        type: string
+        default: "."
+      post-pr-comment:
+        description: "Post test summary as a PR comment"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for the Rust test PR comment"
+        required: false
+        type: string
+        default: "rust-test-results"
+      job-name:
+        description: "GitHub check name for the cargo test job"
+        required: false
+        type: string
+        default: "Rust Tests"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
+
+    outputs:
+      tests-passed:
+        description: "Number of tests passed"
+        value: ${{ jobs.test.outputs.tests-passed }}
+      tests-failed:
+        description: "Number of tests failed"
+        value: ${{ jobs.test.outputs.tests-failed }}
+      tests-total:
+        description: "Number of executed tests (passed + failed, excludes ignored)"
+        value: ${{ jobs.test.outputs.tests-total }}
+      passed:
+        description: "Whether cargo test passed"
+        value: ${{ jobs.test.outputs.passed }}
+
+jobs:
+  test:
+    uses: ./.github/workflows/reusable-test-rust-test.yml
+    with:
+      toolchain: ${{ inputs.toolchain }}
+      features: ${{ inputs.features }}
+      workspace: ${{ inputs.workspace }}
+      extra-args: ${{ inputs.extra-args }}
+      test-script: ${{ inputs.test-script }}
+      working-directory: ${{ inputs.working-directory }}
+      post-pr-comment: ${{ inputs.post-pr-comment }}
+      comment-marker: ${{ inputs.comment-marker }}
+      job-name: ${{ inputs.job-name }}
+      tooling-ref: ${{ inputs.tooling-ref }}
+      draft-pr-skip: ${{ inputs.draft-pr-skip }}
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      runner-image: ${{ inputs.runner-image }}
+      timeout-minutes: ${{ inputs.timeout-minutes }}

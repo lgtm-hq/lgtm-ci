@@ -1,7 +1,9 @@
 # Rust testing
 
 Rust CI follows the same model as Python and Node: **one language reusable per
-stack**, composed in the consumer caller workflow.
+stack**, composed in the consumer caller workflow. Clippy, rustfmt, and security
+scans run through **`reusable-quality-lint`** (lintro); this repo only adds a
+native reusable for **`cargo test`**, which lintro does not yet support.
 
 | Language          | Reusable                     |
 | ----------------- | ---------------------------- |
@@ -9,6 +11,7 @@ stack**, composed in the consumer caller workflow.
 | Node / TypeScript | `reusable-test-node.yml`     |
 | Rust (build)      | `reusable-rust-build.yml`    |
 | Rust (coverage)   | `reusable-rust-coverage.yml` |
+| Rust (test)       | `reusable-rust-test.yml`     |
 | Rust (legacy)     | `reusable-test-rust.yml`     |
 
 ## Rust-only repository
@@ -53,6 +56,63 @@ jobs:
 `reusable-test-rust.yml` with `run-build` / `run-coverage` remains available but
 may leave skipped jobs in the PR UI when only one mode is enabled.
 
+## Cargo test (lint via lintro)
+
+Use `reusable-rust-test.yml` for workspace `cargo test` with a PR comment.
+Run clippy, rustfmt, and `cargo audit` / `cargo deny` through
+`reusable-quality-lint` — do not duplicate those tools here.
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    with:
+      tooling-ref: "<sha>"
+      egress-policy: block
+    permissions:
+      contents: read
+      packages: read
+
+  quality-pr-comment:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: "<sha>"
+
+  rust-test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Tests"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        static.rust-lang.org:443
+        sh.rustup.rs:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+When `egress-policy: block`, include `api.github.com:443` if PR comments are enabled.
+
+`reusable-test-rust-test.yml` is the internal implementation; callers should
+prefer the facade. The legacy name `reusable-test-rust.yml` is reserved for the
+build/coverage orchestrator added in v0.15.0.
+
 ## Rust workspace with a frontend package
 
 Use **`reusable-test-node`** for the web app (Vitest/Istanbul or a package
@@ -87,8 +147,9 @@ caller workflow (`on.push.paths` / `on.pull_request.paths`).
 
 ## Example: Rustume
 
-Rustume composes three reusables (quality is separate). Override `job-name*`
-inputs to match org ruleset check names (for example emoji-prefixed labels).
+Rustume composes quality (lintro), build, coverage, and rust-test reusables.
+Override `job-name` inputs to match org ruleset check names (for example
+emoji-prefixed labels).
 
 See [reusable-workflows.md](reusable-workflows.md) for quality and release
 callers.
