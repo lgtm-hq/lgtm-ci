@@ -135,32 +135,34 @@ parse)
 	: "${RESULTS_FILE:=vitest-results.json}"
 	: "${COVERAGE_FILE:=coverage/coverage-summary.json}"
 
-	# Parse test results
-	if [[ -f "$RESULTS_FILE" ]]; then
-		parse_vitest_json "$RESULTS_FILE"
-
-		set_github_output "tests-passed" "$TESTS_PASSED"
-		set_github_output "tests-failed" "$TESTS_FAILED"
-		set_github_output "tests-skipped" "$TESTS_SKIPPED"
-		set_github_output "tests-total" "$TESTS_TOTAL"
-
-		log_info "Test results: $(format_test_summary)"
-	else
-		log_warn "Results file not found: $RESULTS_FILE"
-		set_github_output "tests-passed" "0"
-		set_github_output "tests-failed" "0"
-		set_github_output "tests-skipped" "0"
-		set_github_output "tests-total" "0"
+	if [[ ! -f "$RESULTS_FILE" ]]; then
+		log_error "Results file not found: $RESULTS_FILE"
+		exit 1
 	fi
 
-	# Parse coverage if available
+	if ! parse_vitest_json "$RESULTS_FILE"; then
+		log_error "Failed to parse vitest JSON at $RESULTS_FILE"
+		exit 1
+	fi
+
+	set_github_output "tests-passed" "$TESTS_PASSED"
+	set_github_output "tests-failed" "$TESTS_FAILED"
+	set_github_output "tests-skipped" "$TESTS_SKIPPED"
+	set_github_output "tests-total" "$TESTS_TOTAL"
+	set_github_output "parse-succeeded" "true"
+
+	log_info "Test results: $(format_test_summary)"
+
 	if [[ -f "$COVERAGE_FILE" ]]; then
-		parse_vitest_coverage "$COVERAGE_FILE"
-		set_github_output "coverage-percent" "$COVERAGE_PERCENT"
-		set_github_output "lines-coverage" "$COVERAGE_LINES"
-		set_github_output "branches-coverage" "$COVERAGE_BRANCHES"
-		set_github_output "functions-coverage" "$COVERAGE_FUNCTIONS"
-		log_info "Coverage: ${COVERAGE_PERCENT}%"
+		if parse_vitest_coverage "$COVERAGE_FILE"; then
+			set_github_output "coverage-percent" "$COVERAGE_PERCENT"
+			set_github_output "lines-coverage" "$COVERAGE_LINES"
+			set_github_output "branches-coverage" "$COVERAGE_BRANCHES"
+			set_github_output "functions-coverage" "$COVERAGE_FUNCTIONS"
+			log_info "Coverage: ${COVERAGE_PERCENT}%"
+		else
+			log_warn "Failed to parse coverage file: $COVERAGE_FILE"
+		fi
 	fi
 	;;
 

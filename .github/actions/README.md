@@ -507,6 +507,7 @@ Generate formatted PR comment from code coverage results.
   with:
     coverage-file: "coverage/coverage-summary.json"
     format: "auto" # 'istanbul', 'coverage-py', 'lcov', or 'auto'
+    comment-mode: "report" # or 'unavailable' for an explicit not-collected message
     threshold-lines: "80"
     threshold-branches: "70"
 ```
@@ -518,10 +519,14 @@ Generate formatted PR comment from code coverage results.
 - Color-coded coverage indicators
 - Configurable thresholds
 - Links to full report
+- Default `comment-mode: report` fails when the coverage file is missing (no fake
+  `0%` comment); use `unavailable` to post that coverage was not collected on
+  this workflow run
 
 **Outputs:**
 
 - `comment-body` - Generated Markdown comment
+- `comment-ready` - Whether downstream PR comment steps should run
 - `lines-coverage`, `branches-coverage`, `functions-coverage`
 - `passed` - Whether all thresholds are met
 

@@ -455,7 +455,7 @@ jobs:
           threshold-functions: "0"
 
       - name: Write coverage PR comment artifact
-        if: steps.generate-coverage-comment.outcome == 'success'
+        if: steps.generate-coverage-comment.outputs.comment-ready == 'true'
         shell: bash
         env:
           COMMENT_BODY: ${{ steps.generate-coverage-comment.outputs.comment-body }}
@@ -466,7 +466,7 @@ jobs:
 
       - name: Upload coverage PR comment artifact
         if: >-
-          steps.generate-coverage-comment.outcome == 'success' &&
+          steps.generate-coverage-comment.outputs.comment-ready == 'true' &&
           github.event.pull_request.head.repo.fork == false
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -672,7 +672,7 @@ jobs:
           threshold-functions: "0"
 
       - name: Write coverage PR comment artifact
-        if: steps.generate-coverage-comment.outcome == 'success'
+        if: steps.generate-coverage-comment.outputs.comment-ready == 'true'
         shell: bash
         env:
           COMMENT_BODY: ${{ steps.generate-coverage-comment.outputs.comment-body }}
@@ -683,7 +683,7 @@ jobs:
 
       - name: Upload coverage PR comment artifact
         if: >-
-          steps.generate-coverage-comment.outcome == 'success' &&
+          steps.generate-coverage-comment.outputs.comment-ready == 'true' &&
           github.event.pull_request.head.repo.fork == false
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

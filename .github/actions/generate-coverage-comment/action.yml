@@ -36,6 +36,12 @@ inputs:
     description: "Maximum number of files to show in breakdown"
     required: false
     default: "10"
+  comment-mode:
+    description: >-
+      report: fail when coverage file is missing (no misleading 0% comment).
+      unavailable: post an explicit not-collected-on-this-run message instead.
+    required: false
+    default: "report"
 
 outputs:
   comment-body:
@@ -56,6 +62,9 @@ outputs:
   passed:
     description: "Whether coverage meets all thresholds"
     value: ${{ steps.generate.outputs.passed }}
+  comment-ready:
+    description: "Whether a PR comment with real or explicit unavailable coverage should be posted"
+    value: ${{ steps.generate.outputs.comment-ready }}
 
 runs:
   using: "composite"
@@ -78,6 +87,7 @@ runs:
         THRESHOLD_FUNCTIONS: ${{ inputs['threshold-functions'] }}
         SHOW_FILE_COVERAGE: ${{ inputs['show-file-coverage'] }}
         MAX_FILES: ${{ inputs['max-files'] }}
+        COMMENT_MODE: ${{ inputs.comment-mode }}
       run: $SCRIPTS_DIR/ci/actions/generate-coverage-comment.sh
 
 branding:

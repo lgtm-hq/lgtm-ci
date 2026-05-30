@@ -188,6 +188,58 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "Code Coverage Report"
 }
 
+@test "generate-coverage-comment: fails when coverage file is missing (report mode)" {
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="${BATS_TEST_TMPDIR}/missing-coverage.json" \
+		FORMAT="istanbul" \
+		COMMENT_MODE="report" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_failure
+	assert_file_contains "$GITHUB_OUTPUT" "comment-ready=false"
+	! grep -q "MISSING" "$GITHUB_OUTPUT" || false
+	! grep -q "body<<" "$GITHUB_OUTPUT" || false
+}
+
+@test "generate-coverage-comment: unavailable mode posts explicit not-collected message" {
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="${BATS_TEST_TMPDIR}/missing-coverage.json" \
+		COMMENT_MODE="unavailable" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "comment-ready=true"
+	assert_file_contains "$GITHUB_OUTPUT" "not collected in this workflow run"
+	! grep -q "MISSING" "$GITHUB_OUTPUT" || false
+	! grep -q "0%" "$GITHUB_OUTPUT" || false
+}
+
+@test "generate-coverage-comment: sets comment-ready on successful report" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage-summary.json"
+	cat >"$coverage_file" <<'EOF'
+{
+  "total": {
+    "lines": {"pct": 50},
+    "branches": {"pct": 40},
+    "functions": {"pct": 45},
+    "statements": {"pct": 48}
+  }
+}
+EOF
+
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="$coverage_file" \
+		FORMAT="istanbul" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "comment-ready=true"
+	assert_file_contains "$GITHUB_OUTPUT" "lines=50"
+}
+
 @test "generate-coverage-comment: preserves coverage-py coverage extraction" {
 	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json"
 	cat >"$coverage_file" <<'EOF'

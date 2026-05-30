@@ -139,6 +139,45 @@ EOF
 # parse_vitest_json tests - edge cases
 # =============================================================================
 
+@test "run-vitest parse step: fails when results file is missing" {
+	run env \
+		STEP=parse \
+		RESULTS_FILE="${BATS_TEST_TMPDIR}/missing-vitest-results.json" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/run-vitest.sh"
+
+	assert_failure
+}
+
+@test "run-vitest parse step: fails when vitest JSON cannot be parsed" {
+	cat >"${BATS_TEST_TMPDIR}/vitest-results.json" <<'EOF'
+{
+  "numPassedTests": 1,
+  "numFailedTests": 0
+}
+EOF
+
+	run env \
+		STEP=parse \
+		RESULTS_FILE="${BATS_TEST_TMPDIR}/vitest-results.json" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/run-vitest.sh"
+
+	assert_failure
+}
+
+@test "run-vitest parse step: exports tests-total for valid aggregate JSON" {
+	local fixture="${PROJECT_ROOT}/tests/fixtures/json/vitest-4-results.json"
+
+	run env \
+		STEP=parse \
+		RESULTS_FILE="$fixture" \
+		GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github-output" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/run-vitest.sh"
+
+	assert_success
+	assert_file_contains "${BATS_TEST_TMPDIR}/github-output" "tests-total=2"
+	assert_file_contains "${BATS_TEST_TMPDIR}/github-output" "parse-succeeded=true"
+}
+
 @test "parse_vitest_json: returns failure when numTotalTests is missing" {
 	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
 {

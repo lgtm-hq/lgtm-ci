@@ -17,6 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **coverage**: stop posting misleading `MISSING` / `0%` PR comments when coverage
+  artifacts are absent; gate uploads on `comment-ready` and fail Vitest parse on
+  missing or invalid JSON (#168)
+
 ### Security
 
 ## [0.26.0] - 2026-05-30
