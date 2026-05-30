@@ -493,7 +493,7 @@ jobs:
 
       - name: Evaluate pages coverage upload gate
         id: pages-upload-gate
-        if: inputs.upload-pages-coverage-html && inputs.coverage
+        if: always() && inputs.upload-pages-coverage-html && inputs.coverage
         shell: bash
         env:
           PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
@@ -535,7 +535,9 @@ jobs:
           && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
         id: record-pages-upload-outcome
         shell: bash
-        run: echo "outcome=${{ steps.pages-upload.outcome }}" >>"$GITHUB_OUTPUT"
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-upload-outcome.sh
 
       - name: Fail on vitest errors
         if: >-
@@ -690,7 +692,7 @@ jobs:
 
       - name: Evaluate pages coverage upload gate
         id: pages-upload-gate
-        if: inputs.upload-pages-coverage-html && inputs.coverage
+        if: always() && inputs.upload-pages-coverage-html && inputs.coverage
         shell: bash
         env:
           PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
@@ -732,7 +734,9 @@ jobs:
           && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
         id: record-pages-upload-outcome
         shell: bash
-        run: echo "outcome=${{ steps.pages-upload.outcome }}" >>"$GITHUB_OUTPUT"
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-upload-outcome.sh
 
       - name: Fail on custom test command errors
         if: steps.custom-run.outcome == 'failure'

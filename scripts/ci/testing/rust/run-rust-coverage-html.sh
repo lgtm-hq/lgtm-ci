@@ -54,12 +54,12 @@ PY
 	return 0
 }
 
-if ! _validate_rust_coverage_html_dir "$OUTPUT_DIR"; then
+if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
+	echo "cargo-llvm-cov is required; run setup-rust-coverage.sh and run-rust-coverage.sh first." >&2
 	exit 1
 fi
 
-if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
-	echo "cargo-llvm-cov is required; run setup-rust-coverage.sh and run-rust-coverage.sh first." >&2
+if ! _validate_rust_coverage_html_dir "$OUTPUT_DIR"; then
 	exit 1
 fi
 

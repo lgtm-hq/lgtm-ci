@@ -771,19 +771,19 @@ See [docs/example.md](docs/example.md).
 	local changelog
 	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
 
-	run bash -c 'grep -c "Target release: \*\*v0.25.0\*\*" "$1"' _ "$changelog"
+	run bash -c 'grep -c "Target release: \*\*v0.25.0\*\*" <<<"$1"' _ "$changelog"
 	assert_success
 	[ "$output" -eq 1 ] || fail "expected exactly one Target release line, found ${output}"
 
-	run bash -c 'grep -c "new composite" "$1"' _ "$changelog"
+	run bash -c 'grep -c "new composite" <<<"$1"' _ "$changelog"
 	assert_success
 	[ "$output" -eq 1 ] || fail "expected exactly one new composite line, found ${output}"
 
-	run bash -c 'grep -c "| Removed | Use instead |" "$1"' _ "$changelog"
+	run bash -c 'grep -c "| Removed | Use instead |" <<<"$1"' _ "$changelog"
 	assert_success
 	[ "$output" -eq 1 ] || fail "expected exactly one migration table header, found ${output}"
 
-	run bash -c 'grep -c "### Breaking changes" "$1"' _ "$changelog"
+	run bash -c 'grep -c "### Breaking changes" <<<"$1"' _ "$changelog"
 	assert_success
 	[ "$output" -eq 1 ] || fail "expected exactly one breaking changes heading, found ${output}"
 

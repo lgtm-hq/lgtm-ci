@@ -117,7 +117,7 @@ teardown() {
 
 	run bash -c "
 		command() {
-			if [[ \"\$2\" == \"twine\" ]] || [[ \"\$2\" == \"uv\" ]]; then return 1; fi
+			if [[ \"\$1\" == \"-v\" && \"\$2\" == \"twine\" ]]; then return 1; fi
 			builtin command \"\$@\"
 		}
 		source \"\$LIB_DIR/log.sh\"

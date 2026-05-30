@@ -42,9 +42,8 @@ teardown() {
 	mkdir -p reports/html
 	echo '<html>report</html>' >reports/html/index.html
 
-	WORKING_DIRECTORY=. PAGES_COVERAGE_SOURCE_SUBPATH=reports/html \
-		PAGES_COVERAGE_STAGING_DIR=staged \
-		run bash "$SCRIPT"
+	run env WORKING_DIRECTORY=. PAGES_COVERAGE_SOURCE_SUBPATH=reports/html \
+		PAGES_COVERAGE_STAGING_DIR=staged bash "$SCRIPT"
 	assert_success
 	assert_file_exists staged/index.html
 }
