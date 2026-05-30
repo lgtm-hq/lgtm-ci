@@ -108,26 +108,15 @@ _orchestrator_delegates_comment() {
 	assert_success
 }
 
-@test "reusable-test-rust-coverage: delegates coverage comment to reusable-artifact-pr-comment" {
-	run _orchestrator_delegates_comment \
-		"${PROJECT_ROOT}/.github/workflows/reusable-test-rust-coverage.yml" \
-		"reusable-artifact-pr-comment.yml"
-	assert_success
+@test "reusable-rust-test: does not use reusable-artifact-pr-comment for PR comments" {
+	run grep -q 'reusable-artifact-pr-comment.yml' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
+	assert_failure
 }
 
-@test "reusable-test-rust-test: test job has no pull-requests permission" {
-	run awk '
-		/^  test:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && /pull-requests:/ { found = 1; exit }
-		END { exit found }
-	' "${PROJECT_ROOT}/.github/workflows/reusable-test-rust-test.yml"
-	assert_success
-}
-
-@test "reusable-test-rust-test: delegates PR comment to reusable-test-pr-comment" {
+@test "reusable-rust-test: delegates PR comment to reusable-test-pr-comment" {
 	run _orchestrator_delegates_comment \
-		"${PROJECT_ROOT}/.github/workflows/reusable-test-rust-test.yml" \
+		"${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml" \
 		"reusable-test-pr-comment.yml"
 	assert_success
 }

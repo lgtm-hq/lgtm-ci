@@ -1,6 +1,6 @@
 # SPDX-License-Identifier: MIT
 ---
-name: Reusable Rust Test Workflow (Facade)
+name: Reusable Rust Test Workflow
 
 on:
   workflow_call:
@@ -16,27 +16,59 @@ on:
         type: string
         default: "--all-features"
       workspace:
-        description: "Run cargo test with --workspace"
+        description: "Run tests with --workspace"
         required: false
         type: boolean
         default: true
       extra-args:
-        description: "Additional arguments for cargo test"
+        description: "Additional arguments passed to cargo nextest"
+        required: false
+        type: string
+        default: ""
+      coverage:
+        description: >-
+          When true, run cargo llvm-cov nextest once (tests + LCOV). When false,
+          run cargo nextest only. Never runs both in the same workflow.
+        required: false
+        type: boolean
+        default: false
+      coverage-threshold:
+        description: "Minimum line coverage percentage to pass (coverage mode only)"
+        required: false
+        type: number
+        default: 0
+      setup-script:
+        description: "Optional override for nextest/coverage toolchain setup script"
         required: false
         type: string
         default: ""
       test-script:
-        description: "Path to cargo test script"
+        description: "Optional override for the test run script"
         required: false
         type: string
         default: ""
       working-directory:
-        description: "Working directory for cargo test"
+        description: "Working directory for Rust tests"
         required: false
         type: string
         default: "."
+      upload-pages-coverage-html:
+        description: "Upload flat HTML coverage artifact for Model B Pages bundling"
+        required: false
+        type: boolean
+        default: false
+      pages-coverage-artifact-name:
+        description: "Artifact name for flat Rust HTML coverage upload"
+        required: false
+        type: string
+        default: "rust-coverage-html"
+      pages-coverage-upload-on:
+        description: "When to upload flat Rust HTML coverage (v1: push-main only)"
+        required: false
+        type: string
+        default: "push-main"
       post-pr-comment:
-        description: "Post test summary as a PR comment"
+        description: "Post test/coverage summary as a PR comment"
         required: false
         type: boolean
         default: true
@@ -46,7 +78,7 @@ on:
         type: string
         default: "rust-test-results"
       job-name:
-        description: "GitHub check name for the cargo test job"
+        description: "GitHub check name for the Rust test job"
         required: false
         type: string
         default: "Rust Tests"
@@ -89,28 +121,228 @@ on:
         description: "Number of tests failed"
         value: ${{ jobs.test.outputs.tests-failed }}
       tests-total:
-        description: "Number of executed tests (passed + failed, excludes ignored)"
+        description: "Number of tests executed (passed + failed)"
         value: ${{ jobs.test.outputs.tests-total }}
+      coverage-percent:
+        description: "Line coverage percentage when coverage mode ran"
+        value: ${{ jobs.test.outputs.coverage-percent }}
       passed:
-        description: "Whether cargo test passed"
+        description: "Whether the Rust test job passed"
         value: ${{ jobs.test.outputs.passed }}
+      pages-coverage-artifact-name:
+        description: "Resolved flat HTML coverage artifact name"
+        value: ${{ jobs.test.outputs.pages-coverage-artifact-name }}
+      pages-coverage-uploaded:
+        description: "Whether flat HTML coverage artifact was uploaded this run"
+        value: ${{ jobs.test.outputs.pages-coverage-uploaded }}
 
 jobs:
   test:
-    uses: ./.github/workflows/reusable-test-rust-test.yml
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      tests-passed: ${{ steps.parse.outputs.tests-passed }}
+      tests-failed: ${{ steps.parse.outputs.tests-failed }}
+      tests-total: ${{ steps.parse.outputs.tests-total }}
+      coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
+      passed: ${{ steps.record-passed.outputs.passed }}
+      pages-coverage-artifact-name: ${{ inputs.pages-coverage-artifact-name }}
+      pages-coverage-uploaded: ${{ steps.record-pages-upload.outputs.uploaded }}
+    concurrency:
+      group: rust-test-${{ inputs.job-name }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Setup nextest toolchain
+        shell: bash
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.setup-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/setup-rust-nextest.sh
+          INSTALL_COVERAGE_TOOLS: ${{ inputs.coverage }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
+
+      - name: Run Rust tests (nextest)
+        id: run-nextest
+        if: ${{ !inputs.coverage }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.test-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-nextest.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Run Rust tests with coverage (llvm-cov nextest)
+        id: run-coverage
+        if: inputs.coverage
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.test-script }}
+          DEFAULT_SCRIPT_PATH: >-
+            .lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-nextest-coverage.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Parse test results
+        id: parse
+        if: always()
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          JUNIT_FILE: target/nextest/ci/junit.xml
+          LCOV_FILE: rust-coverage.lcov
+          COVERAGE_ENABLED: ${{ inputs.coverage }}
+        run: >-
+          bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-rust-test-results.sh"
+
+      - name: Check coverage threshold
+        id: coverage-gate
+        if: inputs.coverage && inputs.coverage-threshold > 0
+        continue-on-error: true
+        uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
+        with:
+          coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
+          threshold: ${{ inputs.coverage-threshold }}
+
+      - name: Generate Rust coverage HTML
+        if: >-
+          inputs.coverage
+          && inputs.upload-pages-coverage-html
+          && steps.run-coverage.outcome == 'success'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RUST_COVERAGE_HTML_DIR: ${{ inputs.pages-coverage-artifact-name }}
+        run: >-
+          bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage-html.sh"
+
+      - name: Evaluate pages coverage upload gate
+        id: pages-upload-gate
+        if: inputs.coverage && inputs.upload-pages-coverage-html
+        shell: bash
+        env:
+          PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
+
+      - name: Upload pages coverage HTML artifact
+        id: pages-upload
+        if: >-
+          inputs.coverage
+          && inputs.upload-pages-coverage-html
+          && steps.run-coverage.outcome == 'success'
+          && steps.pages-upload-gate.outputs.should-upload == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.pages-coverage-artifact-name }}
+          path: ${{ inputs.working-directory }}/${{ inputs.pages-coverage-artifact-name }}/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Fail on test errors
+        if: >-
+          (!inputs.coverage && steps.run-nextest.outcome == 'failure')
+          || (inputs.coverage && steps.run-coverage.outcome == 'failure')
+        shell: bash
+        run: exit 1
+
+      - name: Fail on coverage threshold
+        if: steps.coverage-gate.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+      - name: Record pages coverage upload result
+        if: always()
+        id: record-pages-upload
+        shell: bash
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
+        run: |
+          if [[ "${PAGES_UPLOAD_OUTCOME}" == "success" ]]; then
+            echo "uploaded=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "uploaded=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Record job passed output
+        if: always()
+        id: record-passed
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [[ "${JOB_STATUS}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  comment-pr:
+    needs: test
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && inputs.post-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+    uses: ./.github/workflows/reusable-test-pr-comment.yml
+    permissions:
+      contents: read
+      # Post/update the Rust test results PR comment via reusable-test-pr-comment
+      pull-requests: write
     with:
-      toolchain: ${{ inputs.toolchain }}
-      features: ${{ inputs.features }}
-      workspace: ${{ inputs.workspace }}
-      extra-args: ${{ inputs.extra-args }}
-      test-script: ${{ inputs.test-script }}
-      working-directory: ${{ inputs.working-directory }}
-      post-pr-comment: ${{ inputs.post-pr-comment }}
+      test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
-      job-name: ${{ inputs.job-name }}
+      tests-passed: ${{ needs.test.outputs.tests-passed }}
+      tests-failed: ${{ needs.test.outputs.tests-failed }}
+      tests-total: ${{ needs.test.outputs.tests-total }}
+      coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+      coverage-threshold: ${{ inputs.coverage-threshold }}
+      job-result: ${{ needs.test.result }}
       tooling-ref: ${{ inputs.tooling-ref }}
-      draft-pr-skip: ${{ inputs.draft-pr-skip }}
       egress-policy: ${{ inputs.egress-policy }}
       allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      runner-image: ${{ inputs.runner-image }}
-      timeout-minutes: ${{ inputs.timeout-minutes }}

@@ -179,9 +179,9 @@ poster job by design.
 
 ### Rust
 
-Prefer `reusable-rust-build.yml`, `reusable-rust-coverage.yml`, and
-`reusable-rust-test.yml` for separate required checks without skipped sibling
-jobs. `reusable-test-rust.yml` remains for backward compatibility. See
+Use `reusable-rust-build.yml` for compile checks and `reusable-rust-test.yml` for
+tests. Set `coverage: false` for fast nextest-only runs or `coverage: true` for a
+single instrumented `llvm-cov nextest` run (tests + LCOV). See
 [rust-testing.md](rust-testing.md).
 
 ```yaml
@@ -195,18 +195,6 @@ jobs:
       job-name: "Rust Build"
       egress-policy: block
 
-  rust-coverage:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-coverage.yml@<sha>
-    permissions:
-      contents: read
-      pull-requests: write
-    with:
-      tooling-ref: "<sha>"
-      job-name: "Rust Coverage"
-      egress-policy: block
-      upload-pages-coverage-html: true
-      pages-coverage-artifact-name: rust-coverage-html
-
   rust-test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
@@ -215,10 +203,24 @@ jobs:
     with:
       tooling-ref: "<sha>"
       job-name: "Rust Tests"
+      coverage: false
       egress-policy: block
+
+  rust-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Coverage"
+      coverage: true
+      egress-policy: block
+      upload-pages-coverage-html: true
+      pages-coverage-artifact-name: rust-coverage-html
 ```
 
-### Pages coverage HTML inputs (`reusable-rust-coverage` / `reusable-test-rust-coverage`)
+### Pages coverage HTML inputs (`reusable-rust-test` with `coverage: true`)
 
 | Input | Type | Required | Default | Purpose |
 | ----- | ---- | -------- | ------- | ------- |

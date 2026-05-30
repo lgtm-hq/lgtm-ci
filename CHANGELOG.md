@@ -9,11 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **rust**: `setup-rust-nextest.sh`, `run-rust-nextest.sh`, `run-rust-nextest-coverage.sh`,
+  and `parse-rust-test-results.sh` (JUnit + optional LCOV) for unified Rust CI
+- **examples**: `examples/nextest-ci.toml` profile for consumer `.config/nextest.toml`
+
 ### Changed
+
+- **workflows**: `reusable-rust-test.yml` is the single entry point for Rust tests;
+  `coverage: true` runs `cargo llvm-cov nextest` once; `coverage: false` runs
+  `cargo nextest` only. PR comments align with Python via `reusable-test-pr-comment`
+  (#168 §13)
 
 ### Deprecated
 
 ### Removed
+
+- **workflows**: `reusable-test-rust-test.yml`, `reusable-test-rust-coverage.yml`,
+  `reusable-rust-coverage.yml`, `reusable-test-rust.yml` (no compatibility shim)
+- **scripts**: `run-cargo-test.sh`, `parse-cargo-test-results.sh`, `setup-rust-coverage.sh`,
+  `run-rust-coverage.sh`
 
 ### Fixed
 
