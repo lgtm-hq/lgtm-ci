@@ -192,7 +192,7 @@ jobs:
           WORKSPACE: ${{ inputs.workspace }}
           FEATURES: ${{ inputs.features }}
           EXTRA_ARGS: ${{ inputs.extra-args }}
-        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
         continue-on-error: true
 
       - name: Parse test results
@@ -202,7 +202,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           TEST_LOG_FILE: rust-test.log
-        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-cargo-test-results.sh"
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-cargo-test-results.sh"
 
       - name: Fail on test errors
         if: steps.run.outcome == 'failure'
@@ -268,7 +268,7 @@ jobs:
           WORKSPACE: ${{ inputs.workspace }}
           FEATURES: ${{ inputs.features }}
           CLIPPY_ARGS: ${{ inputs.clippy-args }}
-        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
         continue-on-error: true
 
       - name: Fail on clippy errors
@@ -333,8 +333,7 @@ jobs:
           RAW_SCRIPT_PATH: ${{ inputs.fmt-script }}
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-fmt-check.sh
           WORKSPACE: ${{ inputs.workspace }}
-          FEATURES: ${{ inputs.features }}
-        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
         continue-on-error: true
 
       - name: Fail on fmt errors
@@ -365,6 +364,7 @@ jobs:
     timeout-minutes: 10
     permissions:
       contents: read
+      # pull-requests: write — post/update aggregated Rust checks PR comment
       pull-requests: write
 
     steps:

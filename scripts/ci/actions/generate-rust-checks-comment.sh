@@ -30,6 +30,7 @@ COMMENT_OUTPUT="${COMMENT_OUTPUT:-rust-checks-pr-comment.md}"
 sanitize_int() {
 	local value="$1"
 	value="${value//[^0-9]/}"
+	value="${value#"${value%%[!0]*}"}"
 	if [[ -z "$value" ]]; then
 		echo "0"
 	else
@@ -84,6 +85,11 @@ else
 	PASS_RATE=0
 fi
 
+FAILED_EMOJI=""
+if [[ "$TESTS_FAILED" -gt 0 ]]; then
+	FAILED_EMOJI="❌"
+fi
+
 BUILD_URL=""
 if declare -f get_github_actions_run_url &>/dev/null; then
 	BUILD_URL=$(get_github_actions_run_url || true)
@@ -127,7 +133,7 @@ This PR has been analyzed using **lgtm-ci** reusable Rust checks.
 |--------|-------|
 | **Total Tests** | ${TESTS_TOTAL} |
 | **Passed** | ${TESTS_PASSED} ✅ |
-| **Failed** | ${TESTS_FAILED} |
+| **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
 | **Pass Rate** | ${PASS_RATE}% |
 
 ${COMMIT_LINE}

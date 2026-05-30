@@ -68,10 +68,21 @@ jobs:
       tooling-ref: "<sha>"
       job-name: "Rust Tests"
       egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        static.rust-lang.org:443
+        sh.rustup.rs:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
     permissions:
       contents: read
       pull-requests: write
 ```
+
+When `egress-policy: block`, include `api.github.com:443` if PR comments are enabled.
 
 `reusable-test-rust-checks.yml` is the internal implementation; callers should
 prefer the facade. The legacy name `reusable-test-rust.yml` is reserved for the

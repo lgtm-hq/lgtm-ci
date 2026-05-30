@@ -37,6 +37,10 @@ tests_total=$((tests_passed + tests_failed + tests_ignored))
 set_github_output "tests-passed" "$tests_passed"
 set_github_output "tests-failed" "$tests_failed"
 set_github_output "tests-total" "$tests_total"
-set_github_output "tests-ran" "$([[ "$tests_total" -gt 0 ]] && echo true || echo false)"
+if [[ "$tests_total" -gt 0 ]]; then
+	set_github_output "tests-ran" "true"
+else
+	set_github_output "tests-ran" "false"
+fi
 
 log_info "Parsed tests: passed=$tests_passed failed=$tests_failed total=$tests_total"
