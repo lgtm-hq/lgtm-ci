@@ -34,11 +34,12 @@ fi
 
 # Total executed tests only — ignored tests must not reduce pass rate in PR comments.
 tests_total=$((tests_passed + tests_failed))
+tests_observed=$((tests_passed + tests_failed + tests_ignored))
 
 set_github_output "tests-passed" "$tests_passed"
 set_github_output "tests-failed" "$tests_failed"
 set_github_output "tests-total" "$tests_total"
-if [[ "$tests_total" -gt 0 ]]; then
+if [[ "$tests_observed" -gt 0 ]]; then
 	set_github_output "tests-ran" "true"
 else
 	set_github_output "tests-ran" "false"

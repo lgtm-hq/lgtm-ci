@@ -23,6 +23,18 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "tests-ran=true"
 }
 
+@test "parse-cargo-test-results marks tests-ran when only ignored tests ran" {
+	cat >"$BATS_TEST_TMPDIR/rust-test.log" <<'EOF'
+test result: ok. 0 passed; 0 failed; 5 ignored; 0 measured; 0 filtered out
+EOF
+
+	cd "$BATS_TEST_TMPDIR"
+	TEST_LOG_FILE=rust-test.log run bash "$SCRIPT"
+	[ "$status" -eq 0 ]
+	assert_file_contains "$GITHUB_OUTPUT" "tests-total=0"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-ran=true"
+}
+
 @test "parse-cargo-test-results aggregates workspace test result lines" {
 	cat >"$BATS_TEST_TMPDIR/rust-test.log" <<'EOF'
 test result: ok. 3 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out

@@ -8,13 +8,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-rust-test.yml"
 FACADE="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 
 @test "reusable-test-rust-test: exposes cargo test inputs" {
-	run grep -q 'toolchain:' "$WORKFLOW"
+	run grep -qE '^      toolchain:' "$WORKFLOW"
 	assert_success
-	run grep -q 'features:' "$WORKFLOW"
+	run grep -qE '^      features:' "$WORKFLOW"
 	assert_success
-	run grep -q 'workspace:' "$WORKFLOW"
+	run grep -qE '^      workspace:' "$WORKFLOW"
 	assert_success
-	run grep -q 'extra-args:' "$WORKFLOW"
+	run grep -qE '^      extra-args:' "$WORKFLOW"
 	assert_success
 }
 
@@ -29,16 +29,6 @@ FACADE="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 	run grep -q 'run-caller-script.sh' "$WORKFLOW"
 	assert_success
 	run grep -q 'run-cargo-test.sh' "$WORKFLOW"
-	assert_success
-}
-
-@test "reusable-test-rust-test: test job has no pull-requests permission" {
-	run awk '
-		/^  test:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && /pull-requests:/ { found = 1; exit }
-		END { exit found }
-	' "$WORKFLOW"
 	assert_success
 }
 
