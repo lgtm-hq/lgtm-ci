@@ -15,13 +15,20 @@ teardown() {
 }
 
 _install_fake_cargo_llvm_cov() {
+	local mode="${1:-html}"
 	local bin_dir="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$bin_dir"
 	cat >"${bin_dir}/cargo-llvm-cov" <<'EOF'
 #!/usr/bin/env bash
 exit 0
 EOF
-	cat >"${bin_dir}/cargo" <<'EOF'
+	if [[ "$mode" == "no-html" ]]; then
+		cat >"${bin_dir}/cargo" <<'EOF'
+#!/usr/bin/env bash
+exit 0
+EOF
+	else
+		cat >"${bin_dir}/cargo" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 if [[ "${1:-}" == "llvm-cov" && "${2:-}" == "report" && "${3:-}" == "--html" ]]; then
@@ -39,6 +46,7 @@ fi
 echo "unexpected cargo invocation: $*" >&2
 exit 1
 EOF
+	fi
 	chmod +x "${bin_dir}/cargo-llvm-cov" "${bin_dir}/cargo"
 	export PATH="${bin_dir}:$PATH"
 }
@@ -65,18 +73,7 @@ EOF
 }
 
 @test "run-rust-coverage-html: fails when html directory is missing" {
-	local bin_dir="${BATS_TEST_TMPDIR}/bin"
-	mkdir -p "$bin_dir"
-	cat >"${bin_dir}/cargo-llvm-cov" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-	cat >"${bin_dir}/cargo" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-	chmod +x "${bin_dir}/cargo-llvm-cov" "${bin_dir}/cargo"
-	export PATH="${bin_dir}:$PATH"
+	_install_fake_cargo_llvm_cov no-html
 
 	run bash "$SCRIPT"
 	assert_failure
