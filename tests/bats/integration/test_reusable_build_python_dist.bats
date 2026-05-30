@@ -72,13 +72,14 @@ _tooling_sparse_cone_ok() {
 		/gh-action-pypi-publish@/ { pypi = NR }
 		/attest-build-provenance@/ { attest = NR }
 		/STEP: validate-dist/ { validate = NR }
+		/id: extract-metadata/ { extract = NR }
 		/Generate upload summary/ { summary = NR }
 		/id: set-published/ { published = NR }
 		END {
 			exit !(download > 0 && validate > 0 && pypi > 0 && attest > 0 &&
-				published > 0 && summary > 0 && download < validate &&
+				published > 0 && extract > 0 && summary > 0 && download < validate &&
 				validate < pypi && pypi < attest && attest < published &&
-				published < summary)
+				published < extract && extract < summary)
 		}
 	' "$action"
 	assert_success
@@ -103,6 +104,19 @@ _tooling_sparse_cone_ok() {
 @test "upload-pypi-oidc: exposes published output" {
 	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
 	run grep -q 'steps.set-published.outputs.published' "$action"
+	assert_success
+}
+
+@test "upload-pypi-oidc: summary wires package metadata from extract-metadata step" {
+	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
+	run awk '
+		/Generate upload summary/ { in_summary = 1; next }
+		in_summary && /STEP: summary/ { step = 1 }
+		in_summary && /PACKAGE_NAME: \$\{\{ steps\.extract-metadata\.outputs\.name \}\}/ { name = 1 }
+		in_summary && /PACKAGE_VERSION: \$\{\{ steps\.extract-metadata\.outputs\.version \}\}/ { version = 1 }
+		in_summary && /^    - name:/ { in_summary = 0 }
+		END { exit !(step && name && version) }
+	' "$action"
 	assert_success
 }
 

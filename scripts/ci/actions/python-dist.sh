@@ -3,7 +3,8 @@
 # Purpose: Build and upload Python packages to PyPI (STEP dispatch)
 #
 # Environment variables:
-#   STEP: preflight | validate | build | validate-dist | set-published | summary
+#   STEP: preflight | validate | build | validate-dist | extract-dist-metadata |
+#         set-published | summary
 #   WORKING_DIRECTORY: Directory containing the package (default: .)
 #   VERIFY_TAG_VERSION: Verify git tag matches pyproject.toml version
 #   ENSURE_TAG_ON_DEFAULT_BRANCH: Verify tagged commit is on the default branch
@@ -190,6 +191,43 @@ validate-dist)
 
 set-published)
 	set_github_output "published" "true"
+	;;
+
+extract-dist-metadata)
+	name=""
+	version=""
+
+	if [[ -f "pyproject.toml" ]]; then
+		version=$(extract_pypi_version ".") || true
+		name=$(extract_pypi_name ".") || true
+	fi
+
+	if [[ (-z "$name" || -z "$version") && -d "dist" ]]; then
+		wheel_file=$(find dist -name "*.whl" -print -quit 2>/dev/null || true)
+		if [[ -n "$wheel_file" ]]; then
+			wheel_basename=$(basename "$wheel_file")
+			wheel_name="${wheel_basename%%-*}"
+			wheel_remainder="${wheel_basename#*-}"
+			wheel_version="${wheel_remainder%%-*}"
+			name="${name:-${wheel_name//_/-}}"
+			version="${version:-$wheel_version}"
+		else
+			sdist_file=$(find dist \( -name "*.tar.gz" -o -name "*.zip" \) -print -quit 2>/dev/null || true)
+			if [[ -n "$sdist_file" ]]; then
+				sdist_basename=$(basename "$sdist_file")
+				sdist_basename="${sdist_basename%.tar.gz}"
+				sdist_basename="${sdist_basename%.zip}"
+				sdist_name="${sdist_basename%%-*}"
+				sdist_remainder="${sdist_basename#*-}"
+				sdist_version="${sdist_remainder%%-*}"
+				name="${name:-${sdist_name//_/-}}"
+				version="${version:-$sdist_version}"
+			fi
+		fi
+	fi
+
+	set_github_output "name" "${name:-unknown}"
+	set_github_output "version" "${version:-unknown}"
 	;;
 
 summary)
