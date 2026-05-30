@@ -79,3 +79,15 @@ EOF
 	assert_failure
 	assert_output --partial "Expected"
 }
+
+@test "run-rust-coverage-html: rejects unsafe output directory" {
+	_install_fake_cargo_llvm_cov
+
+	run env RUST_COVERAGE_HTML_DIR=".." bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Unsafe RUST_COVERAGE_HTML_DIR"
+
+	run env RUST_COVERAGE_HTML_DIR="/tmp/rust-coverage" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "repo-relative"
+}

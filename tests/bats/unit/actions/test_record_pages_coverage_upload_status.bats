@@ -17,32 +17,34 @@ setup() {
 	assert_success
 }
 
-@test "record-pages-coverage-upload-status: reports true after successful main push" {
-	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true \
-		TEST_COMMAND="" TEST_VITEST_RESULT=success TEST_CUSTOM_RESULT=skipped \
-		GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main \
+@test "record-pages-coverage-upload-status: reports true when upload step succeeded" {
+	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true PAGES_UPLOAD_OUTCOME=success \
 		run bash "$SCRIPT"
 	assert_success
 	run grep -q '^uploaded=true$' "$GITHUB_OUTPUT"
 	assert_success
 }
 
-@test "record-pages-coverage-upload-status: reports false on pull requests" {
-	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true \
-		TEST_COMMAND="" TEST_VITEST_RESULT=success TEST_CUSTOM_RESULT=skipped \
-		GITHUB_EVENT_NAME=pull_request GITHUB_REF=refs/pull/1/merge \
+@test "record-pages-coverage-upload-status: reports false when upload step failed" {
+	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true PAGES_UPLOAD_OUTCOME=failure \
 		run bash "$SCRIPT"
 	assert_success
 	run grep -q '^uploaded=false$' "$GITHUB_OUTPUT"
 	assert_success
 }
 
-@test "record-pages-coverage-upload-status: uses custom test job result" {
-	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true \
-		TEST_COMMAND="bun run test:coverage" TEST_VITEST_RESULT=skipped \
-		TEST_CUSTOM_RESULT=success GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main \
+@test "record-pages-coverage-upload-status: reports false when upload step skipped" {
+	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true PAGES_UPLOAD_OUTCOME=skipped \
 		run bash "$SCRIPT"
 	assert_success
-	run grep -q '^uploaded=true$' "$GITHUB_OUTPUT"
+	run grep -q '^uploaded=false$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "record-pages-coverage-upload-status: reports false when upload outcome missing" {
+	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true PAGES_UPLOAD_OUTCOME="" \
+		run bash "$SCRIPT"
+	assert_success
+	run grep -q '^uploaded=false$' "$GITHUB_OUTPUT"
 	assert_success
 }

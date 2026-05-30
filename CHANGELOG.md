@@ -7,9 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
-
 ### Changed
+
+- **workflows**: `reusable-test-node` matrix job display names are now static
+  (`Node.js tests (Vitest)` / `Node.js tests (custom command)`). Update branch
+  protection required checks that matched the previous `inputs.job-name`-based
+  names when upgrading.
+
+### Added
 
 ### Deprecated
 

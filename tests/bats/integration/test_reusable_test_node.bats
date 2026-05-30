@@ -59,4 +59,13 @@ _test_custom_checkout_order_ok() {
 	assert_success
 	run grep -q 'record-pages-coverage-upload-status.sh' "$WORKFLOW"
 	assert_success
+	run grep -q 'pages-upload-outcome:' "$WORKFLOW"
+	assert_success
+	run grep -q 'PAGES_UPLOAD_OUTCOME:' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-node: gates pages upload on successful staging" {
+	run grep -Fq "steps.stage-pages-coverage.outcome == 'success'" "$WORKFLOW"
+	assert_success
 }

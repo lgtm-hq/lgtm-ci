@@ -269,6 +269,7 @@ jobs:
       tests-total: ${{ steps.parse.outputs.tests-total }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
       passed: ${{ steps.run.outputs.exit-code == '0' }}
+      pages-upload-outcome: ${{ steps.record-pages-upload-outcome.outputs.outcome }}
 
     steps:
       - name: Harden runner
@@ -499,6 +500,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
 
       - name: Stage pages coverage HTML
+        id: stage-pages-coverage
         if: >-
           always()
           && inputs.upload-pages-coverage-html
@@ -519,12 +521,21 @@ jobs:
           && inputs.coverage
           && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
           && steps.pages-upload-gate.outputs.should-upload == 'true'
+          && steps.stage-pages-coverage.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.pages-coverage-artifact-name }}
           path: ${{ inputs.pages-coverage-artifact-name }}/
           retention-days: 7
           if-no-files-found: error
+
+      - name: Record pages upload outcome
+        if: >-
+          always()
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        id: record-pages-upload-outcome
+        shell: bash
+        run: echo "outcome=${{ steps.pages-upload.outcome }}" >>"$GITHUB_OUTPUT"
 
       - name: Fail on vitest errors
         if: >-
@@ -554,6 +565,7 @@ jobs:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     outputs:
       passed: ${{ steps.record.outputs.passed }}
+      pages-upload-outcome: ${{ steps.record-pages-upload-outcome.outputs.outcome }}
 
     steps:
       - name: Harden runner
@@ -685,6 +697,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
 
       - name: Stage pages coverage HTML
+        id: stage-pages-coverage
         if: >-
           always()
           && inputs.upload-pages-coverage-html
@@ -705,12 +718,21 @@ jobs:
           && inputs.coverage
           && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
           && steps.pages-upload-gate.outputs.should-upload == 'true'
+          && steps.stage-pages-coverage.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.pages-coverage-artifact-name }}
           path: ${{ inputs.pages-coverage-artifact-name }}/
           retention-days: 7
           if-no-files-found: error
+
+      - name: Record pages upload outcome
+        if: >-
+          always()
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        id: record-pages-upload-outcome
+        shell: bash
+        run: echo "outcome=${{ steps.pages-upload.outcome }}" >>"$GITHUB_OUTPUT"
 
       - name: Fail on custom test command errors
         if: steps.custom-run.outcome == 'failure'
@@ -765,10 +787,9 @@ jobs:
         env:
           UPLOAD_PAGES_COVERAGE_HTML: ${{ inputs.upload-pages-coverage-html }}
           COVERAGE: ${{ inputs.coverage }}
-          TEST_COMMAND: ${{ inputs.test-command }}
-          TEST_VITEST_RESULT: ${{ needs.test-vitest.result }}
-          TEST_CUSTOM_RESULT: ${{ needs.test-custom.result }}
-          PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
+          PAGES_UPLOAD_OUTCOME: >-
+            ${{ inputs.test-command == '' && needs.test-vitest.outputs.pages-upload-outcome ||
+            needs.test-custom.outputs.pages-upload-outcome }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-coverage-upload-status.sh
 

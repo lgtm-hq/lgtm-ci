@@ -144,19 +144,33 @@ Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 | ----- | ---- | -------- | ------- | ------- |
 | `upload-pages-coverage-html` | boolean | no | `false` | Upload flat HTML for Model B bundling |
 | `pages-coverage-artifact-name` | string | no | `coverage-html` | Flat HTML artifact name |
-| `pages-coverage-upload-on` | string | no | `push-main` | Upload only on push to `main` (v1) |
+| `pages-coverage-upload-on` | string | no | `push-main` | Upload gate selector (v1) |
 | `pages-coverage-source-subpath` | string | no | `coverage` | HTML dir under `working-directory` |
 
 Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
+
+**`pages-coverage-upload-on` (v1):** The `(v1)` suffix marks the first supported
+upload-gating behavior. Additional values may be added in later releases without
+breaking existing callers. Use the literal string values below — they are not
+Git ref aliases.
+
+| Value | Meaning |
+| ----- | ------- |
+| `push-main` | Upload only when `github.event_name == push` and `github.ref == refs/heads/main` |
 
 When `node-versions` is a matrix, only the **first** listed version uploads the
 flat artifact (avoids `upload-artifact` name collisions). Matrix debug artifacts
 (`node-coverage-<version>/…`) are unchanged when `upload-coverage: true`.
 
-**Skipped jobs:** `test-vitest` and `test-custom` use static job names so PR
-checks do not show unevaluated `${{ … }}` for the path that is skipped by design.
-When `test-command` is set, Vitest is skipped and the custom-command job runs;
-when `test-command` is empty, the opposite applies.
+**Job display names:** `test-vitest` and `test-custom` use static names
+(`Node.js tests (Vitest)` / `Node.js tests (custom command)`) so skipped matrix
+jobs do not show unevaluated `${{ … }}` in the PR checks UI. This replaces the
+previous dynamic names derived from `inputs.job-name` and matrix versions.
+Update branch protection required-status checks that matched the old names when
+upgrading to this tooling version.
+
+**Skipped jobs:** When `test-command` is set, Vitest is skipped and the
+custom-command job runs; when `test-command` is empty, the opposite applies.
 
 **PR comments:** `coverage-pr-comment: true` builds the comment artifact inside
 the test job, but the separate `Node coverage PR comment` job also requires
@@ -199,9 +213,14 @@ jobs:
 | ----- | ---- | -------- | ------- | ------- |
 | `upload-pages-coverage-html` | boolean | no | `false` | Upload flat HTML for Model B sites |
 | `pages-coverage-artifact-name` | string | no | `rust-coverage-html` | Rust HTML artifact name |
-| `pages-coverage-upload-on` | string | no | `push-main` | Upload only on push to `main` (v1) |
+| `pages-coverage-upload-on` | string | no | `push-main` | Upload gate selector (v1) |
 
 Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
+
+**`pages-coverage-upload-on` (v1):** Same gating semantics as the Node reusable
+(see table above). `push-main` is a literal selector meaning push events to
+`refs/heads/main`; it is not a Git ref alias. The `(v1)` suffix denotes the
+current upload-gating API; new non-breaking values may appear in later releases.
 
 HTML is generated in the same job as the LCOV run via `cargo llvm-cov report --html`
 (no second test run). The script flattens cargo-llvm-cov's `<output-dir>/html/`
