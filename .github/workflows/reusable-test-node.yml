@@ -738,6 +738,8 @@ jobs:
       && inputs.upload-pages-coverage-html
       && inputs.coverage
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       pages-coverage-uploaded: ${{ steps.record.outputs.uploaded }}
     steps:

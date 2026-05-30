@@ -231,8 +231,10 @@ jobs:
         if: always()
         id: record-pages-upload
         shell: bash
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
         run: |
-          if [[ "${{ steps.pages-upload.outcome }}" == "success" ]]; then
+          if [[ "${PAGES_UPLOAD_OUTCOME}" == "success" ]]; then
             echo "uploaded=true" >>"$GITHUB_OUTPUT"
           else
             echo "uploaded=false" >>"$GITHUB_OUTPUT"
