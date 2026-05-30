@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Parse cargo test output for reusable Rust checks workflows
+# Purpose: Parse cargo test output for reusable Rust test workflows
 #
 # Environment variables:
 #   TEST_LOG_FILE - Path to cargo test log (default: rust-test.log)
@@ -32,7 +32,8 @@ if grep -q 'test result:' "$TEST_LOG_FILE"; then
 	tests_ignored="$(grep -oE '[0-9]+ ignored' "$TEST_LOG_FILE" | awk '{sum += $1} END {print sum + 0}')"
 fi
 
-tests_total=$((tests_passed + tests_failed + tests_ignored))
+# Total executed tests only — ignored tests must not reduce pass rate in PR comments.
+tests_total=$((tests_passed + tests_failed))
 
 set_github_output "tests-passed" "$tests_passed"
 set_github_output "tests-failed" "$tests_failed"
@@ -43,4 +44,4 @@ else
 	set_github_output "tests-ran" "false"
 fi
 
-log_info "Parsed tests: passed=$tests_passed failed=$tests_failed total=$tests_total"
+log_info "Parsed tests: passed=$tests_passed failed=$tests_failed ignored=$tests_ignored total=$tests_total"
