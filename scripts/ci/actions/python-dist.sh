@@ -3,7 +3,8 @@
 # Purpose: Build and upload Python packages to PyPI (STEP dispatch)
 #
 # Environment variables:
-#   STEP: preflight | validate | build | validate-dist | set-published | summary
+#   STEP: preflight | validate | build | validate-dist | extract-dist-metadata |
+#         set-published | summary
 #   WORKING_DIRECTORY: Directory containing the package (default: .)
 #   VERIFY_TAG_VERSION: Verify git tag matches pyproject.toml version
 #   ENSURE_TAG_ON_DEFAULT_BRANCH: Verify tagged commit is on the default branch
@@ -22,13 +23,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/publish.sh"
 
-if [[ "$STEP" == "build" ]]; then
-	if [[ -z "$WORKING_DIRECTORY" || "$WORKING_DIRECTORY" == "/" || "$WORKING_DIRECTORY" == "~" || "$WORKING_DIRECTORY" == ~/* || "$WORKING_DIRECTORY" =~ ^~(/|$) ]]; then
-		die "Refusing to build with unsafe WORKING_DIRECTORY: ${WORKING_DIRECTORY:-<empty>}"
-	fi
-fi
+_validate_working_directory() {
+	local dir="${1:-.}"
 
-# Change to working directory
+	if [[ -z "$dir" || "$dir" == "/" || "$dir" == "~" || "$dir" == ~/* || "$dir" =~ ^~(/|$) ]]; then
+		die "Refusing to use unsafe WORKING_DIRECTORY: ${dir:-<empty>}"
+	fi
+
+	if [[ -n "${HOME:-}" && ("$dir" == "$HOME" || "$dir" == "${HOME}/"*) ]]; then
+		die "Refusing to use unsafe WORKING_DIRECTORY: ${dir}"
+	fi
+
+	if [[ ! -d "$dir" ]]; then
+		die "WORKING_DIRECTORY does not exist: ${dir}"
+	fi
+}
+
+_validate_working_directory "$WORKING_DIRECTORY"
 cd "$WORKING_DIRECTORY"
 
 case "$STEP" in
@@ -124,7 +135,10 @@ build)
 
 	# Extract version and name
 	version=$(extract_pypi_version ".") || die "Could not extract version"
-	name=$(extract_pypi_name ".") || true
+	name=$(extract_pypi_name ".") || die "Could not extract package name from pyproject.toml"
+	if [[ -z "$name" ]]; then
+		die "Could not extract package name from pyproject.toml"
+	fi
 
 	# Build using uv or python -m build
 	if command -v uv >/dev/null 2>&1; then
@@ -177,6 +191,42 @@ validate-dist)
 
 set-published)
 	set_github_output "published" "true"
+	;;
+
+extract-dist-metadata)
+	name=""
+	version=""
+
+	if [[ -f "pyproject.toml" ]]; then
+		version=$(extract_pypi_version ".") || true
+		name=$(extract_pypi_name ".") || true
+	fi
+
+	if [[ (-z "$name" || -z "$version") && -d "dist" ]]; then
+		wheel_file=$(find dist -name "*.whl" -print -quit 2>/dev/null || true)
+		if [[ -n "$wheel_file" ]]; then
+			wheel_basename=$(basename "$wheel_file")
+			wheel_name="${wheel_basename%%-*}"
+			wheel_remainder="${wheel_basename#*-}"
+			wheel_version="${wheel_remainder%%-*}"
+			name="${name:-${wheel_name//_/-}}"
+			version="${version:-$wheel_version}"
+		else
+			sdist_file=$(find dist \( -name "*.tar.gz" -o -name "*.zip" \) -print -quit 2>/dev/null || true)
+			if [[ -n "$sdist_file" ]]; then
+				sdist_basename=$(basename "$sdist_file")
+				sdist_basename="${sdist_basename%.tar.gz}"
+				sdist_basename="${sdist_basename%.zip}"
+				sdist_version="${sdist_basename##*-}"
+				sdist_name="${sdist_basename%-*}"
+				name="${name:-${sdist_name//_/-}}"
+				version="${version:-$sdist_version}"
+			fi
+		fi
+	fi
+
+	set_github_output "name" "${name:-unknown}"
+	set_github_output "version" "${version:-unknown}"
 	;;
 
 summary)

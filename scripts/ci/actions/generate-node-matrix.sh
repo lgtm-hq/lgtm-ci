@@ -33,6 +33,8 @@ matrix = {"include": [{"node-version": version} for version in versions]}
 
 with open(github_output, "a", encoding="utf-8") as output:
     output.write(f"matrix={json.dumps(matrix, separators=(',', ':'))}\n")
+    output.write(f"pages-coverage-node-version={versions[0]}\n")
 
 print(f"Node.js matrix: {', '.join(versions)}")
+print(f"Pages coverage node version: {versions[0]}")
 PY

@@ -101,6 +101,25 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
+    - name: Extract package metadata
+      id: extract-metadata
+      shell: bash
+      env:
+        STEP: extract-dist-metadata
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+    - name: Generate upload summary
+      shell: bash
+      env:
+        STEP: summary
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        PACKAGE_NAME: ${{ steps.extract-metadata.outputs.name }}
+        PACKAGE_VERSION: ${{ steps.extract-metadata.outputs.version }}
+        PUBLISHED: "true"
+        TEST_PYPI: ${{ inputs.test-pypi }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
 branding:
   icon: "upload-cloud"
   color: "blue"

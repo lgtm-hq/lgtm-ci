@@ -39,6 +39,7 @@ _tooling_sparse_cone_ok() {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-build-python-dist.yml"
 	run awk '
 		/^  build:/ { in_build = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  build:/ { in_build = 0 }
 		in_build && /build-python-package/ { action = 1 }
 		in_build && /actions\/upload-artifact@/ { upload = 1 }
 		in_build && /publish-pypi/ { bad = 1 }
@@ -71,7 +72,15 @@ _tooling_sparse_cone_ok() {
 		/gh-action-pypi-publish@/ { pypi = NR }
 		/attest-build-provenance@/ { attest = NR }
 		/STEP: validate-dist/ { validate = NR }
-		END { exit !(download > 0 && validate > 0 && pypi > 0 && attest > 0 && download < validate && validate < pypi && pypi < attest) }
+		/id: extract-metadata/ { extract = NR }
+		/Generate upload summary/ { summary = NR }
+		/id: set-published/ { published = NR }
+		END {
+			exit !(download > 0 && validate > 0 && pypi > 0 && attest > 0 &&
+				published > 0 && extract > 0 && summary > 0 && download < validate &&
+				validate < pypi && pypi < attest && attest < published &&
+				published < extract && extract < summary)
+		}
 	' "$action"
 	assert_success
 }
@@ -79,7 +88,8 @@ _tooling_sparse_cone_ok() {
 @test "upload-pypi-oidc: attestation is best-effort before set-published" {
 	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
 	run awk '
-		/Attest build provenance/ { in_attest_step = 1 }
+		/Attest build provenance/ { in_attest_step = 1; next }
+		/^      - name:/ { in_attest_step = 0 }
 		in_attest_step && /continue-on-error: true/ { coe = NR }
 		in_attest_step && /attest-build-provenance@/ { attest = NR }
 		/id: set-published/ { published = NR }
@@ -97,20 +107,30 @@ _tooling_sparse_cone_ok() {
 	assert_success
 }
 
+@test "upload-pypi-oidc: summary wires package metadata from extract-metadata step" {
+	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
+	run awk '
+		/Generate upload summary/ { in_summary = 1; next }
+		in_summary && /STEP: summary/ { step = 1 }
+		in_summary && /PACKAGE_NAME: \$\{\{ steps\.extract-metadata\.outputs\.name \}\}/ { name = 1 }
+		in_summary && /PACKAGE_VERSION: \$\{\{ steps\.extract-metadata\.outputs\.version \}\}/ { version = 1 }
+		in_summary && /^    - name:/ { in_summary = 0 }
+		END { exit !(step && name && version) }
+	' "$action"
+	assert_success
+}
+
 @test "reusable-github-release: downloads artifact and creates release via gh script" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-github-release.yml"
 	run awk '
 		/actions\/download-artifact@/ { download = 1 }
 		/Verify release assets exist/ { verify = 1 }
 		/verify-release-assets\.sh/ { verify_script = 1 }
-		/create-github-release\.sh/ { release = 1; in_release_step = 1 }
-		/^      - name:/ {
-			if (in_release_step) {
-				in_release_step = 0
-			}
-		}
+		/Create GitHub Release/ { in_release_step = 1; release = 1; next }
+		in_release_step && /create-github-release\.sh/ { release_script = 1 }
+		in_release_step && /^      - name:/ { in_release_step = 0 }
 		in_release_step && /run: \|/ { inline_shell = 1 }
-		END { exit !(download && verify && verify_script && release && !inline_shell) }
+		END { exit !(download && verify && verify_script && release && release_script && !inline_shell) }
 	' "$workflow"
 	assert_success
 	run grep -Eq 'format\(\s*['\''"]\{0\}/\*\s*['\''"],\s*inputs\.artifact-path\s*\)' "$workflow"

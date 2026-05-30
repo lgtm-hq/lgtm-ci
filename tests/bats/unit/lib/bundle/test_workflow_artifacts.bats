@@ -272,6 +272,17 @@ EOF
 	assert_success
 }
 
+@test "bundle_run_manifest: copies rust-coverage-html artifact into site root" {
+	_setup_bundle_gh_mock
+	bundle_load_manifest '{"bundles":[{"id":"rust-coverage","workflow":"coverage-reports","artifact":"rust-coverage-html","dest":"coverage-rust"}]}'
+
+	run bundle_run_manifest
+	assert_success
+	assert_file_exists "${SITE_ROOT}/coverage-rust/index.html"
+	run grep -q 'report' "${SITE_ROOT}/coverage-rust/index.html"
+	assert_success
+}
+
 @test "bundle_run_manifest: records github outputs" {
 	_setup_bundle_gh_mock
 	bundle_load_manifest '{"bundles":[{"id":"coverage","workflow":"quality-ci-main","artifact":"coverage-html","dest":"coverage"}]}'

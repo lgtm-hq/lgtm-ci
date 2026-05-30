@@ -39,6 +39,28 @@ on:
         required: false
         type: boolean
         default: false
+      upload-pages-coverage-html:
+        description: "Upload flat HTML coverage artifact for Model B Pages bundling"
+        required: false
+        type: boolean
+        default: false
+      pages-coverage-artifact-name:
+        description: "Artifact name for flat Node HTML coverage upload"
+        required: false
+        type: string
+        default: "coverage-html"
+      pages-coverage-upload-on:
+        description: "When to upload flat Node HTML coverage (v1: push-main only)"
+        required: false
+        type: string
+        default: "push-main"
+      pages-coverage-source-subpath:
+        description: >-
+          Coverage HTML directory relative to working-directory for flat Pages
+          artifact staging
+        required: false
+        type: string
+        default: "coverage"
       publish-results:
         description: >-
           Deprecated: use reusable-test-node-publish.yml in a separate caller job.
@@ -176,6 +198,12 @@ on:
         value: >-
           ${{ inputs.test-command == '' && jobs.aggregate-tests.outputs.passed ||
           (inputs.test-command != '' && jobs.test-custom.outputs.passed == 'true') }}
+      pages-coverage-artifact-name:
+        description: "Resolved flat HTML coverage artifact name"
+        value: ${{ inputs.pages-coverage-artifact-name }}
+      pages-coverage-uploaded:
+        description: "Whether flat HTML coverage artifact was uploaded this run"
+        value: ${{ jobs.pages-coverage-status.outputs.pages-coverage-uploaded || 'false' }}
 
 jobs:
   prepare:
@@ -189,6 +217,7 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      pages-coverage-node-version: ${{ steps.matrix.outputs.pages-coverage-node-version }}
 
     steps:
       - name: Harden runner
@@ -217,11 +246,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-node-matrix.sh
 
   test-vitest:
-    name: >-
-      ${{
-        inputs.node-versions == '' && inputs.job-name ||
-        format('{0} ({1})', inputs.job-name, matrix.node-version)
-      }}
+    name: Node.js tests (Vitest)
     needs: prepare
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -244,6 +269,7 @@ jobs:
       tests-total: ${{ steps.parse.outputs.tests-total }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
       passed: ${{ steps.run.outputs.exit-code == '0' }}
+      pages-upload-outcome: ${{ steps.record-pages-upload-outcome.outputs.outcome }}
 
     steps:
       - name: Harden runner
@@ -465,6 +491,54 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
+      - name: Evaluate pages coverage upload gate
+        id: pages-upload-gate
+        if: always() && inputs.upload-pages-coverage-html && inputs.coverage
+        shell: bash
+        env:
+          PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
+
+      - name: Stage pages coverage HTML
+        id: stage-pages-coverage
+        if: >-
+          always()
+          && inputs.upload-pages-coverage-html
+          && inputs.coverage
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          PAGES_COVERAGE_SOURCE_SUBPATH: ${{ inputs.pages-coverage-source-subpath }}
+          PAGES_COVERAGE_STAGING_DIR: ${{ inputs.pages-coverage-artifact-name }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-pages-coverage.sh
+
+      - name: Upload pages coverage HTML artifact
+        id: pages-upload
+        if: >-
+          always()
+          && inputs.upload-pages-coverage-html
+          && inputs.coverage
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+          && steps.pages-upload-gate.outputs.should-upload == 'true'
+          && steps.stage-pages-coverage.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.pages-coverage-artifact-name }}
+          path: ${{ inputs.pages-coverage-artifact-name }}/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Record pages upload outcome
+        if: >-
+          always()
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        id: record-pages-upload-outcome
+        shell: bash
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-upload-outcome.sh
+
       - name: Fail on vitest errors
         if: >-
           steps.run.outputs.exit-code != ''
@@ -475,11 +549,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
 
   test-custom:
-    name: >-
-      ${{
-        inputs.node-versions == '' && inputs.job-name ||
-        format('{0} ({1})', inputs.job-name, matrix.node-version)
-      }}
+    name: Node.js tests (custom command)
     needs: prepare
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -497,6 +567,7 @@ jobs:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     outputs:
       passed: ${{ steps.record.outputs.passed }}
+      pages-upload-outcome: ${{ steps.record-pages-upload-outcome.outputs.outcome }}
 
     steps:
       - name: Harden runner
@@ -619,6 +690,54 @@ jobs:
           name: node-coverage-pr-comment-${{ matrix.node-version }}
           path: node-coverage-pr-comment.txt
 
+      - name: Evaluate pages coverage upload gate
+        id: pages-upload-gate
+        if: always() && inputs.upload-pages-coverage-html && inputs.coverage
+        shell: bash
+        env:
+          PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
+
+      - name: Stage pages coverage HTML
+        id: stage-pages-coverage
+        if: >-
+          always()
+          && inputs.upload-pages-coverage-html
+          && inputs.coverage
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          PAGES_COVERAGE_SOURCE_SUBPATH: ${{ inputs.pages-coverage-source-subpath }}
+          PAGES_COVERAGE_STAGING_DIR: ${{ inputs.pages-coverage-artifact-name }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-pages-coverage.sh
+
+      - name: Upload pages coverage HTML artifact
+        id: pages-upload
+        if: >-
+          always()
+          && inputs.upload-pages-coverage-html
+          && inputs.coverage
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+          && steps.pages-upload-gate.outputs.should-upload == 'true'
+          && steps.stage-pages-coverage.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.pages-coverage-artifact-name }}
+          path: ${{ inputs.pages-coverage-artifact-name }}/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Record pages upload outcome
+        if: >-
+          always()
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        id: record-pages-upload-outcome
+        shell: bash
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-upload-outcome.sh
+
       - name: Fail on custom test command errors
         if: steps.custom-run.outcome == 'failure'
         run: exit 1
@@ -633,6 +752,50 @@ jobs:
           else
             echo "passed=false" >>"$GITHUB_OUTPUT"
           fi
+
+  pages-coverage-status:
+    name: Pages coverage upload status
+    needs:
+      - prepare
+      - test-vitest
+      - test-custom
+    if: >-
+      always()
+      && inputs.upload-pages-coverage-html
+      && inputs.coverage
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      pages-coverage-uploaded: ${{ steps.record.outputs.uploaded }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Record pages coverage upload status
+        id: record
+        shell: bash
+        env:
+          UPLOAD_PAGES_COVERAGE_HTML: ${{ inputs.upload-pages-coverage-html }}
+          COVERAGE: ${{ inputs.coverage }}
+          PAGES_UPLOAD_OUTCOME: >-
+            ${{ inputs.test-command == '' && needs.test-vitest.outputs.pages-upload-outcome ||
+            needs.test-custom.outputs.pages-upload-outcome }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-coverage-upload-status.sh
 
   aggregate-tests:
     name: Aggregate Node.js Results

@@ -116,6 +116,10 @@ teardown() {
 	mock_command_record "uv" "Checking dist/package-1.0.0.tar.gz: PASSED"
 
 	run bash -c "
+		command() {
+			if [[ \"\$1\" == \"-v\" && \"\$2\" == \"twine\" ]]; then return 1; fi
+			builtin command \"\$@\"
+		}
 		source \"\$LIB_DIR/log.sh\"
 		source \"\$LIB_DIR/publish/validate.sh\"
 		validate_pypi_package \"$dist_dir\" 2>&1

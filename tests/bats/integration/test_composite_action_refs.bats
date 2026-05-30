@@ -6,6 +6,7 @@ load "../../helpers/common"
 
 _forbidden_dynamic_lgtm_ci_uses() {
 	local scan_path="$1"
+	local rc=0
 
 	while IFS= read -r -d '' action; do
 		awk -v file="$action" '
@@ -42,8 +43,10 @@ _forbidden_dynamic_lgtm_ci_uses() {
 			END {
 				exit found
 			}
-		' "$action"
+		' "$action" || rc=1
 	done < <(find "$scan_path" -path "*/action.yml" -type f -print0)
+
+	return "$rc"
 }
 
 @test "composite actions: forbid dynamic lgtm-ci remote uses refs" {

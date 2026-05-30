@@ -3,9 +3,11 @@
 # Purpose: Tests for scripts/ci/actions/python-dist.sh preflight step
 
 load "../../../helpers/common"
+load "../../../helpers/github_env"
 
 setup() {
 	setup_temp_dir
+	setup_github_env
 	export REPO_ROOT="${BATS_TEST_TMPDIR}/repo"
 	export ORIGIN="${BATS_TEST_TMPDIR}/origin.git"
 	mkdir -p "$REPO_ROOT"
@@ -13,6 +15,7 @@ setup() {
 }
 
 teardown() {
+	teardown_github_env
 	teardown_temp_dir
 }
 
@@ -145,4 +148,82 @@ _run_build() {
 
 	assert_failure
 	assert_output --partial "outside repository root"
+}
+
+@test "python-dist extract-dist-metadata: reads name and version from wheel" {
+	mkdir -p dist
+	touch dist/example-1.2.3-py3-none-any.whl
+
+	run env \
+		STEP=extract-dist-metadata \
+		WORKING_DIRECTORY=. \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_success
+	assert_equal "example" "$(get_github_output name)"
+	assert_equal "1.2.3" "$(get_github_output version)"
+}
+
+@test "python-dist extract-dist-metadata: reads name and version from sdist" {
+	mkdir -p dist
+	touch dist/example-4.5.6.tar.gz
+
+	run env \
+		STEP=extract-dist-metadata \
+		WORKING_DIRECTORY=. \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_success
+	assert_equal "example" "$(get_github_output name)"
+	assert_equal "4.5.6" "$(get_github_output version)"
+}
+
+@test "python-dist extract-dist-metadata: reads hyphenated name from sdist" {
+	mkdir -p dist
+	touch dist/my-package-1.2.3.tar.gz
+
+	run env \
+		STEP=extract-dist-metadata \
+		WORKING_DIRECTORY=. \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_success
+	assert_equal "my-package" "$(get_github_output name)"
+	assert_equal "1.2.3" "$(get_github_output version)"
+}
+
+@test "python-dist extract-dist-metadata: prefers pyproject over wheel" {
+	_write_pyproject "9.9.9"
+	mkdir -p dist
+	touch dist/example-1.2.3-py3-none-any.whl
+
+	run env \
+		STEP=extract-dist-metadata \
+		WORKING_DIRECTORY=. \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_success
+	assert_equal "example" "$(get_github_output name)"
+	assert_equal "9.9.9" "$(get_github_output version)"
+}
+
+@test "python-dist summary: uses PACKAGE_NAME and PACKAGE_VERSION env" {
+	mkdir -p dist
+	touch dist/example-1.2.3-py3-none-any.whl
+
+	run env \
+		STEP=summary \
+		WORKING_DIRECTORY=. \
+		PACKAGE_NAME=example \
+		PACKAGE_VERSION=1.2.3 \
+		PUBLISHED=true \
+		TEST_PYPI=false \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_success
+	local summary
+	summary=$(get_github_step_summary)
+	[[ "$summary" == *"| Package | example |"* ]]
+	[[ "$summary" == *"| Version | 1.2.3 |"* ]]
+	[[ "$summary" == *"https://pypi.org/project/example/1.2.3/"* ]]
 }

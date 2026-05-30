@@ -112,6 +112,7 @@ EXISTING_ENTRIES=$(
 # Prose lines (e.g. "Target release: …") outside Keep-a-Changelog sub-sections.
 EXISTING_PROSE=$(
 	echo "$EXISTING_UNRELEASED" | awk '
+		/^### [Bb]reaking changes/ { exit }
 		/^### / { next }
 		/^\[/ { next }
 		/^$/ { next }
