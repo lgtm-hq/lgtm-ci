@@ -12,6 +12,36 @@ VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-static-job-names.sh"
 	assert_output --partial "OK:"
 }
 
+@test "validate-static-job-names: flags block-scalar job.name with dynamic continuation" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-block-scalar-bad.yml" <<'YAML'
+---
+name: Block scalar bad example
+on:
+  workflow_call:
+    inputs:
+      flag:
+        type: boolean
+        default: false
+jobs:
+  matrix-job:
+    name: >-
+      ${{ matrix.platform }}
+    if: ${{ inputs.flag }}
+    strategy:
+      matrix:
+        platform: [linux]
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "dynamic job.name"
+}
+
 @test "validate-static-job-names: flags dynamic matrix job.name on skippable jobs" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"

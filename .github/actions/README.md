@@ -1400,6 +1400,43 @@ jobs:
 
 ---
 
+### reusable-required-check.yml
+
+Org ruleset gate: asserts an upstream reusable job succeeded (and optional
+outputs) under a caller-controlled `job-name`. Replaces consumer-local shim
+`runs-on` jobs. See `docs/workflow-contract.md` (Org ruleset check names).
+
+```yaml
+lintro-code-quality:
+  needs: dogfooding-lint
+  if: always()
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@main
+  permissions:
+    contents: read
+  with:
+    job-name: "🛠️ Lintro Code Quality"
+    upstream-result: ${{ needs.dogfooding-lint.result }}
+    status-output: ${{ needs.dogfooding-lint.outputs.status }}
+```
+
+**Inputs:**
+
+- `job-name` - **Required.** GitHub check name for this gate
+- `upstream-result` - **Required.** Upstream `needs.*.result`
+- `passed-output` - When set, must be the string `true`
+- `status-output` / `status-expected` - Optional status string gate (default
+  expected `passed`)
+- `draft-pr-skip` - Skip gate on draft PRs (default: false)
+- `tooling-ref`, `egress-policy`, `allowed-endpoints`, `runner-image`,
+  `timeout-minutes`
+
+**Outputs:**
+
+- `exit-code` - `0` or `1`
+- `status` - `passed` or `failed`
+
+---
+
 ### reusable-test-e2e.yml
 
 E2E testing workflow with Playwright.

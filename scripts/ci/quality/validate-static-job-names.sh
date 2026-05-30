@@ -48,6 +48,18 @@ while IFS= read -r -d '' workflow; do
 			name = $0
 			sub(/^    name:[[:space:]]*/, "", name)
 			name_line = NR
+			if (name ~ /^[>|][-+]?$/) {
+				while ((getline continuation) > 0) {
+					if (continuation ~ /^    [a-zA-Z0-9_-]+:/) {
+						break
+					}
+					if (continuation !~ /^[[:space:]]/) {
+						break
+					}
+					sub(/^[[:space:]]+/, "", continuation)
+					name = continuation
+				}
+			}
 			next
 		}
 		END {
