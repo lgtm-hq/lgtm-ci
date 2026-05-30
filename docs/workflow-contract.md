@@ -240,15 +240,20 @@ allowed-endpoints: >
 ### PyPI upload (OIDC + attestation)
 
 Used on the **caller** upload job (`upload-pypi-oidc` composite). Set
-`environment: pypi` on that job. `pypa/gh-action-pypi-publish` pulls
-`ghcr.io/pypa/gh-action-pypi-publish` — include `ghcr.io:443` and
-`pkg-containers.githubusercontent.com:443`.
+`environment: pypi` on that job. The composite downloads workflow artifacts and
+checks out lgtm-ci tooling — include artifact and GitHub hosts below.
+`pypa/gh-action-pypi-publish` pulls `ghcr.io/pypa/gh-action-pypi-publish` —
+include `ghcr.io:443` and `pkg-containers.githubusercontent.com:443`.
 
 ```yaml
 egress-policy: block
 allowed-endpoints: >
   github.com:443
   api.github.com:443
+  codeload.github.com:443
+  objects.githubusercontent.com:443
+  actions.githubusercontent.com:443
+  blob.core.windows.net:443
   ghcr.io:443
   pkg-containers.githubusercontent.com:443
   pypi.org:443

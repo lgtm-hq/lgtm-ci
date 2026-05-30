@@ -44,7 +44,7 @@ teardown() {
 	assert_output --partial "No distribution files found"
 }
 
-@test "validate_pypi_package: passes with wheel files and no twine" {
+@test "validate_pypi_package: passes with wheel files and no twine when not strict" {
 	local dist_dir="${BATS_TEST_TMPDIR}/dist"
 	mkdir -p "$dist_dir"
 	touch "$dist_dir/package-1.0.0-py3-none-any.whl"
@@ -60,6 +60,24 @@ teardown() {
 	"
 	assert_success
 	assert_output --partial "twine not available"
+}
+
+@test "validate_pypi_package: fails with wheel files when strict and no twine or uv" {
+	local dist_dir="${BATS_TEST_TMPDIR}/dist"
+	mkdir -p "$dist_dir"
+	touch "$dist_dir/package-1.0.0-py3-none-any.whl"
+
+	run bash -c "
+		command() {
+			if [[ \"\$2\" == \"twine\" ]] || [[ \"\$2\" == \"uv\" ]]; then return 1; fi
+			builtin command \"\$@\"
+		}
+		source \"\$LIB_DIR/log.sh\"
+		source \"\$LIB_DIR/publish/validate.sh\"
+		VALIDATE_STRICT=true validate_pypi_package \"$dist_dir\" 2>&1
+	"
+	assert_failure
+	assert_output --partial "cannot validate distribution"
 }
 
 @test "validate_pypi_package: passes with tar.gz files" {

@@ -308,6 +308,27 @@ jobs:
       id-token: write
       attestations: write
     steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@<pin> # v2.19.4
+        with:
+          egress-policy: block
+          # workflow-contract.md § PyPI upload (OIDC)
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            blob.core.windows.net:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            pypi.org:443
+            upload.pypi.org:443
+            files.pythonhosted.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
       - uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@<sha>
         with:
           artifact-name: python-dist

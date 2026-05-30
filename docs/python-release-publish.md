@@ -26,6 +26,8 @@ Typical caller jobs:
 5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`)
 6. **Product-specific** — Homebrew, Docker, etc.
 
+Copy-paste starter: [`examples/publish-python-release.yml`](../examples/publish-python-release.yml).
+
 ```yaml
 permissions: {}
 
@@ -73,6 +75,10 @@ jobs:
           allowed-endpoints: >
             github.com:443
             api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            blob.core.windows.net:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
@@ -140,6 +146,14 @@ Cross-repo reusables cannot perform OIDC upload until PyPI supports it
 after a successful PyPI upload. Sigstore outages must not fail the release job or
 skip `published: true` — the wheel is already on the index and retries would not
 be idempotent.
+
+## Upload validation
+
+When `validate: true` (default), `upload-pypi-oidc` runs twine check with
+`VALIDATE_STRICT=true` after `setup-python`. Validation tries `twine check`
+directly, then `uv run --with twine twine check` when twine is not on PATH. The
+upload job **fails** if neither method can run — distributions are never uploaded
+without a passing check.
 
 ## Egress allowlists
 

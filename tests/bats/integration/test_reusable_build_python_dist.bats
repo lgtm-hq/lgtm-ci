@@ -120,6 +120,44 @@ _tooling_sparse_cone_ok() {
 	assert_success
 }
 
+@test "upload-pypi-oidc: validate step uses strict distribution validation" {
+	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
+	run awk '
+		/Validate distribution/ { in_step = 1; next }
+		in_step && /^      - name:/ { in_step = 0 }
+		in_step && /STEP: validate-dist/ { step = 1 }
+		in_step && /VALIDATE_STRICT: "true"/ { strict = 1 }
+		END { exit !(step && strict) }
+	' "$action"
+	assert_success
+}
+
+@test "upload-pypi-oidc: sparse checkout includes actions and scripts" {
+	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
+	run awk '
+		/sparse-checkout: \|/ { in_sparse = 1; next }
+		in_sparse && /^        [^ ]/ { in_sparse = 0 }
+		in_sparse && /\.github\/actions\// { actions = 1 }
+		in_sparse && /scripts\/ci\// { scripts = 1 }
+		END { exit !(actions && scripts) }
+	' "$action"
+	assert_success
+}
+
+@test "examples/publish-python-release: references split PyPI publish contract" {
+	local example="${PROJECT_ROOT}/examples/publish-python-release.yml"
+	run grep -q 'reusable-build-python-dist.yml' "$example"
+	assert_success
+	run grep -q 'upload-pypi-oidc' "$example"
+	assert_success
+	run grep -q 'reusable-github-release.yml' "$example"
+	assert_success
+	run grep -q 'step-security/harden-runner@' "$example"
+	assert_success
+	run grep -q 'reusable-publish-pypi' "$example"
+	assert_failure
+}
+
 @test "reusable-github-release: downloads artifact and creates release via gh script" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-github-release.yml"
 	run awk '

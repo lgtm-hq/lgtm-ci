@@ -1,0 +1,98 @@
+# SPDX-License-Identifier: MIT
+# Canonical caller layout for Python tag releases using lgtm-ci reusables.
+# Copy into your repository as .github/workflows/publish-pypi-on-tag.yml (or similar).
+# PyPI trusted publishing must reference THIS workflow filename and the upload job.
+# See docs/python-release-publish.md and docs/workflow-contract.md.
+---
+name: Publish - PyPI Production
+
+'on':
+  push:
+    tags:
+      - '*.*.*'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-pypi-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  pypi-build:
+    name: Build Python distribution
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: read
+    with:
+      python-version: "3.12"
+      artifact-name: python-dist
+      tooling-ref: "<sha>"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        astral.sh:443
+        releases.astral.sh:443
+        pypi.org:443
+        files.pythonhosted.org:443
+
+  pypi-upload:
+    name: Upload to PyPI
+    needs: [pypi-build]
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: block
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            blob.core.windows.net:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            pypi.org:443
+            upload.pypi.org:443
+            files.pythonhosted.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
+      - uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@<sha>
+        with:
+          artifact-name: python-dist
+          python-version: "3.12"
+          tooling-ref: "<sha>"
+
+  github-release:
+    name: Create GitHub Release
+    needs: [pypi-upload]
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: write
+    with:
+      artifact-name: python-dist
+      generate-release-notes: true
+      tooling-ref: "<sha>"
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        uploads.github.com:443
+        codeload.github.com:443
+        release-assets.githubusercontent.com:443
+        objects.githubusercontent.com:443

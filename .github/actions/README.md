@@ -1111,6 +1111,10 @@ a job defined in the **caller** repository workflow (see
 **Requirements:** `contents: read`, `id-token: write`, `attestations: write` on the
 job; `environment: pypi`; PyPI trusted publisher matches the caller workflow file.
 
+When `validate: true` (default), distribution validation runs with
+`VALIDATE_STRICT=true` — the step fails if twine check cannot run (via twine or
+`uv run --with twine`).
+
 Provenance attestation uses `continue-on-error: true` so Sigstore failures do not
 block `published` or downstream release jobs after a successful PyPI upload.
 
