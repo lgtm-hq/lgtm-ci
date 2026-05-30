@@ -22,13 +22,23 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/publish.sh"
 
-if [[ "$STEP" == "build" ]]; then
-	if [[ -z "$WORKING_DIRECTORY" || "$WORKING_DIRECTORY" == "/" || "$WORKING_DIRECTORY" == "~" || "$WORKING_DIRECTORY" == ~/* || "$WORKING_DIRECTORY" =~ ^~(/|$) ]]; then
-		die "Refusing to build with unsafe WORKING_DIRECTORY: ${WORKING_DIRECTORY:-<empty>}"
-	fi
-fi
+_validate_working_directory() {
+	local dir="${1:-.}"
 
-# Change to working directory
+	if [[ -z "$dir" || "$dir" == "/" || "$dir" == "~" || "$dir" == ~/* || "$dir" =~ ^~(/|$) ]]; then
+		die "Refusing to use unsafe WORKING_DIRECTORY: ${dir:-<empty>}"
+	fi
+
+	if [[ -n "${HOME:-}" && ("$dir" == "$HOME" || "$dir" == "${HOME}/"*) ]]; then
+		die "Refusing to use unsafe WORKING_DIRECTORY: ${dir}"
+	fi
+
+	if [[ ! -d "$dir" ]]; then
+		die "WORKING_DIRECTORY does not exist: ${dir}"
+	fi
+}
+
+_validate_working_directory "$WORKING_DIRECTORY"
 cd "$WORKING_DIRECTORY"
 
 case "$STEP" in
@@ -124,7 +134,10 @@ build)
 
 	# Extract version and name
 	version=$(extract_pypi_version ".") || die "Could not extract version"
-	name=$(extract_pypi_name ".") || true
+	name=$(extract_pypi_name ".") || die "Could not extract package name from pyproject.toml"
+	if [[ -z "$name" ]]; then
+		die "Could not extract package name from pyproject.toml"
+	fi
 
 	# Build using uv or python -m build
 	if command -v uv >/dev/null 2>&1; then

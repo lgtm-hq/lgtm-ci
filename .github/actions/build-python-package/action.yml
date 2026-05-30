@@ -40,8 +40,10 @@ runs:
     - name: Resolve scripts directory
       shell: bash
       run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
+        action_dir="${GITHUB_ACTION_PATH//\\//}"
+        repo_root="$(cd "$action_dir" && git rev-parse --show-toplevel 2>/dev/null \
+          || echo "${action_dir%/.github/actions/*}")"
+        echo "SCRIPTS_DIR=${repo_root}/scripts" >> "$GITHUB_ENV"
 
     - name: Preflight tag validation
       if: >-
