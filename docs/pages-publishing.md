@@ -7,10 +7,15 @@ lgtm-ci uses a single deployment model: **GitHub Actions OIDC** via
 
 ## Model A vs Model B
 
-| Model | Use when | Entry point |
-| ----- | -------- | ----------- |
-| **A — report subtree** | Single-report repos (py-lintro) | `publish-test-results` |
-| **B — bundled site** | Docs site + CI HTML on one origin | `reusable-deploy-site-with-reports` |
+<!-- Wide table kept to compare the two Pages deployment models side by side. -->
+<!-- markdownlint-disable MD013 -->
+
+| Model                  | Use when                          | Entry point                         |
+| ---------------------- | --------------------------------- | ----------------------------------- |
+| **A — report subtree** | Single-report repos (py-lintro)   | `publish-test-results`              |
+| **B — bundled site**   | Docs site + CI HTML on one origin | `reusable-deploy-site-with-reports` |
+
+<!-- markdownlint-enable MD013 -->
 
 **Model A** uploads one subtree (`python/`, `vitest/`, …) per job. Each deploy
 replaces the **entire** published site.
@@ -28,11 +33,16 @@ instead.
 
 ## Entry points
 
-| Workflow / action | Content | `target-dir` / `site-root` |
-| ----------------- | ------- | -------------------------- |
-| `publish-test-results` | Coverage, badges, test HTML | configurable (`target-dir`) |
-| `deploy-pages` + `reusable-deploy-pages` | Built static sites | `dist` (site root) |
-| `reusable-deploy-site-with-reports` | Site + CI HTML bundles | `site-root` |
+<!-- Wide table kept to compare page-publishing entry points and output paths. -->
+<!-- markdownlint-disable MD013 -->
+
+| Workflow / action                        | Content                     | `target-dir` / `site-root`  |
+| ---------------------------------------- | --------------------------- | --------------------------- |
+| `publish-test-results`                   | Coverage, badges, test HTML | configurable (`target-dir`) |
+| `deploy-pages` + `reusable-deploy-pages` | Built static sites          | `dist` (site root)          |
+| `reusable-deploy-site-with-reports`      | Site + CI HTML bundles      | `site-root`                 |
+
+<!-- markdownlint-enable MD013 -->
 
 Typical `publish-test-results` directories include `python`, `vitest`,
 `coverage`, and `playwright`.
@@ -172,11 +182,16 @@ The old `peaceiris/actions-gh-pages` model pushed to one branch with
 `keep_files: true`, so `python/` and `vitest/` could coexist. The official
 artifact model cannot do that without an explicit merge step.
 
-| Mitigation | When |
-| ---------- | ---- |
-| One publish job per event | One `publish-test-results` with combined subtrees |
-| Model B site bundle | Monorepos — `reusable-deploy-site-with-reports` [226] |
-| Optional live-site merge | Legacy Model A multi-publisher fallback [225] — set `merge-existing-site: true` on `publish-test-results` (and optionally `base-site-path` to skip HTTP mirror) |
+<!-- Wide table kept to compare mitigation choices and selection criteria. -->
+<!-- markdownlint-disable MD013 -->
+
+| Mitigation                | When                                                                                                                                                            |
+| ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| One publish job per event | One `publish-test-results` with combined subtrees                                                                                                               |
+| Model B site bundle       | Monorepos — `reusable-deploy-site-with-reports` [226]                                                                                                           |
+| Optional live-site merge  | Legacy Model A multi-publisher fallback [225] — set `merge-existing-site: true` on `publish-test-results` (and optionally `base-site-path` to skip HTTP mirror) |
+
+<!-- markdownlint-enable MD013 -->
 
 [225]: https://github.com/lgtm-hq/lgtm-ci/issues/225
 [226]: https://github.com/lgtm-hq/lgtm-ci/issues/226

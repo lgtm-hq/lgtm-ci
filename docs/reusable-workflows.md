@@ -257,21 +257,21 @@ jobs:
 ### Site + bundled CI reports (Model B)
 
 ```yaml
-  deploy-site:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@<sha>
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
-      actions: read
-    with:
-      site-root: apps/site/dist
-      build-command: bun run build
-      package-manager: bun
-      bundle-manifest: examples/bundle-manifest-turbo-themes.json
-      commit-sha: ${{ github.event.workflow_run.head_sha }}
-      fallback-ref: main
-      tooling-ref: "<sha>"
+deploy-site:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@<sha>
+  permissions:
+    contents: read
+    pages: write
+    id-token: write
+    actions: read
+  with:
+    site-root: apps/site/dist
+    build-command: bun run build
+    package-manager: bun
+    bundle-manifest: examples/bundle-manifest-turbo-themes.json
+    commit-sha: ${{ github.event.workflow_run.head_sha }}
+    fallback-ref: main
+    tooling-ref: "<sha>"
 ```
 
 See [pages-publishing.md](pages-publishing.md) for manifest schema, egress
@@ -370,15 +370,15 @@ jobs:
 
 ### Docker workflow inputs
 
-| Input | Default | Description |
-| ----- | ------- | ----------- |
-| `validate-on-pr` | `false` | Use native split builds on PRs without pushing staging images |
-| `scan-exit-code` | `"0"` | Trivy exit code; set `"1"` to block PRs on CRITICAL/HIGH CVEs |
-| `cache-registry-ref` | `""` | Registry cache fallback (e.g. `ghcr.io/org/repo:cache`) |
-| `cosign-sign` | `false` | Keyless Cosign signature on pushed manifests |
-| `no-cache` | `false` | Disable GHA/registry cache for clean release builds |
-| `provenance` | `true` | Generate provenance attestation (only when `push: true`) |
-| `sbom` | `true` | Generate SBOM attestation (only when `push: true`) |
+| Input                | Default | Description                                                   |
+| -------------------- | ------- | ------------------------------------------------------------- |
+| `validate-on-pr`     | `false` | Use native split builds on PRs without pushing staging images |
+| `scan-exit-code`     | `"0"`   | Trivy exit code; set `"1"` to block PRs on CRITICAL/HIGH CVEs |
+| `cache-registry-ref` | `""`    | Registry cache fallback (e.g. `ghcr.io/org/repo:cache`)       |
+| `cosign-sign`        | `false` | Keyless Cosign signature on pushed manifests                  |
+| `no-cache`           | `false` | Disable GHA/registry cache for clean release builds           |
+| `provenance`         | `true`  | Generate provenance attestation (only when `push: true`)      |
+| `sbom`               | `true`  | Generate SBOM attestation (only when `push: true`)            |
 
 `sbom` and `provenance` only apply when `push: true`. PR validation
 (`validate-on-pr` with `scan`) loads images locally via `--load`; buildx cannot

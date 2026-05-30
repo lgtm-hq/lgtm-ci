@@ -3,7 +3,6 @@ name: "Validate Action Pinning"
 description: >-
   Ensure GitHub Actions references use SHA pins with Renovate version comments
 author: "lgtm-hq"
-
 inputs:
   enforce:
     description: "Fail if pinning policy violations are found"

@@ -6,12 +6,12 @@ workflows (tag push or manual dispatch). Callers keep product-specific steps
 
 ## Components
 
-| Component | Purpose |
-| --- | --- |
-| `reusable-build-python-dist.yml` | Build sdist/wheel and upload workflow artifact |
-| `upload-pypi-oidc` action | OIDC upload + best-effort attestation (caller job only) |
-| `build-python-package` action | Build/validate (used inside build reusable) |
-| `reusable-github-release.yml` | Attach artifacts to a GitHub Release |
+| Component                        | Purpose                                                 |
+| -------------------------------- | ------------------------------------------------------- |
+| `reusable-build-python-dist.yml` | Build sdist/wheel and upload workflow artifact          |
+| `upload-pypi-oidc` action        | OIDC upload + best-effort attestation (caller job only) |
+| `build-python-package` action    | Build/validate (used inside build reusable)             |
+| `reusable-github-release.yml`    | Attach artifacts to a GitHub Release                    |
 
 There is **no orchestrator** workflow. Compose jobs in the caller repository.
 
@@ -101,6 +101,10 @@ jobs:
 Use the same `artifact-name` for `reusable-build-python-dist.yml` and
 `reusable-github-release.yml`.
 
+`upload-pypi-oidc` checks out lgtm-ci tooling and calls sibling actions by local
+path. See [workflow-contract.md](workflow-contract.md) for the composite action
+local-path contract.
+
 ## TestPyPI
 
 Same split: build reusable + caller upload job with `test-pypi: true` on
@@ -108,11 +112,11 @@ Same split: build reusable + caller upload job with `test-pypi: true` on
 
 ## Caller permissions summary
 
-| Job | Required permissions |
-| --- | --- |
-| PyPI build (reusable) | `contents: read` |
-| PyPI upload (local) | `contents: read`, `id-token: write`, `attestations: write` |
-| GitHub Release | `contents: write` |
+| Job                   | Required permissions                                       |
+| --------------------- | ---------------------------------------------------------- |
+| PyPI build (reusable) | `contents: read`                                           |
+| PyPI upload (local)   | `contents: read`, `id-token: write`, `attestations: write` |
+| GitHub Release        | `contents: write`                                          |
 
 ## PyPI trusted publishing
 
@@ -150,12 +154,12 @@ depend on a published GitHub Release.
 
 ## Migration from v0.23.x
 
-| Removed | Replacement |
-| --- | --- |
-| `reusable-publish-pypi-release.yml` | `reusable-build-python-dist.yml` + `upload-pypi-oidc` |
-| `reusable-publish-pypi.yml` | Same pattern; set `test-pypi: true` on upload action |
-| `publish-pypi` action | `build-python-package` + `upload-pypi-oidc` |
-| `github-environment` on reusable `with:` | `environment:` on caller upload **job** |
+| Removed                                  | Replacement                                           |
+| ---------------------------------------- | ----------------------------------------------------- |
+| `reusable-publish-pypi-release.yml`      | `reusable-build-python-dist.yml` + `upload-pypi-oidc` |
+| `reusable-publish-pypi.yml`              | Same pattern; set `test-pypi: true` on upload action  |
+| `publish-pypi` action                    | `build-python-package` + `upload-pypi-oidc`           |
+| `github-environment` on reusable `with:` | `environment:` on caller upload **job**               |
 
 ## Related docs
 
