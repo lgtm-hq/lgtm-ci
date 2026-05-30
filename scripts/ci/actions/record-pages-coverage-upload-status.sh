@@ -4,6 +4,10 @@
 
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+# shellcheck source=../lib/pages_coverage.sh
+source "$SCRIPT_DIR/../lib/pages_coverage.sh"
+
 if [[ "${UPLOAD_PAGES_COVERAGE_HTML:-false}" != "true" || "${COVERAGE:-false}" != "true" ]]; then
 	echo "uploaded=false" >>"${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 	exit 0
@@ -19,21 +23,9 @@ if [[ "$active_result" != "success" ]]; then
 	exit 0
 fi
 
-PAGES_COVERAGE_UPLOAD_ON="${PAGES_COVERAGE_UPLOAD_ON:-push-main}"
-EVENT="${GITHUB_EVENT_NAME:-}"
-REF="${GITHUB_REF:-}"
-
-should_upload=false
-case "$PAGES_COVERAGE_UPLOAD_ON" in
-push-main)
-	if [[ "$EVENT" == "push" && "$REF" == "refs/heads/main" ]]; then
-		should_upload=true
-	fi
-	;;
-*)
-	echo "Unsupported pages-coverage-upload-on value: ${PAGES_COVERAGE_UPLOAD_ON}" >&2
-	exit 1
-	;;
-esac
+should_upload=$(resolve_pages_coverage_should_upload \
+	"${PAGES_COVERAGE_UPLOAD_ON:-push-main}" \
+	"${GITHUB_EVENT_NAME:-}" \
+	"${GITHUB_REF:-}")
 
 echo "uploaded=${should_upload}" >>"$GITHUB_OUTPUT"
