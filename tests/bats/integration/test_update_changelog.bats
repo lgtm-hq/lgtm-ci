@@ -771,10 +771,21 @@ See [docs/example.md](docs/example.md).
 	local changelog
 	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
 
-	echo "$changelog" | grep -q 'Target release: \*\*v0.25.0\*\*' || fail "prose line missing"
-	echo "$changelog" | grep -q 'new composite' || fail "bullet missing"
-	echo "$changelog" | grep -q '| Removed | Use instead |' || fail "table missing"
-	echo "$changelog" | grep -q '### Breaking changes' || fail "breaking changes heading missing"
+	run bash -c 'grep -c "Target release: \*\*v0.25.0\*\*" "$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one Target release line, found ${output}"
+
+	run bash -c 'grep -c "new composite" "$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one new composite line, found ${output}"
+
+	run bash -c 'grep -c "| Removed | Use instead |" "$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one migration table header, found ${output}"
+
+	run bash -c 'grep -c "### Breaking changes" "$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one breaking changes heading, found ${output}"
 
 	# MD032: blank line between list and table (no bullet line immediately before |)
 	run bash -c "
@@ -792,7 +803,7 @@ See [docs/example.md](docs/example.md).
 	# MD032: blank line between prose and first bullet
 	run bash -c "
 		awk '
-			/^Target release:/ { prose = 1; next }
+			/^Target release:/ { prose = 1; prev = \$0; next }
 			prose && /^-/ {
 				if (prev !~ /^$/) {
 					print \"prose immediately before bullet\" > \"/dev/stderr\"

@@ -27,10 +27,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.24.0] - 2026-05-29
 
-### Breaking Changes
-
-- **ci**: split PyPI build/upload for OIDC (#248) (#249) (435f9a2)
-
 ### Previously Unreleased
 
 Target release: **v0.24.0** (breaking; `feat(ci)!`).
@@ -45,6 +41,8 @@ Target release: **v0.24.0** (breaking; `feat(ci)!`).
 - **actions**: `publish-pypi` (#248)
 
 ### Breaking changes
+
+- **ci**: split PyPI build/upload for OIDC (#248) (#249) (435f9a2)
 
 | Removed                                  | Use instead                                           |
 | ---------------------------------------- | ----------------------------------------------------- |
