@@ -42,6 +42,34 @@ YAML
 	assert_output --partial "dynamic job.name"
 }
 
+@test "validate-static-job-names: flags multi-line block-scalar with dynamic first line" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-block-scalar-multiline-bad.yml" <<'YAML'
+---
+name: Block scalar multiline bad example
+on:
+  workflow_call:
+    inputs:
+      flag:
+        type: boolean
+        default: false
+jobs:
+  matrix-job:
+    name: >-
+      ${{ matrix.platform }}
+      suffix label
+    if: ${{ inputs.flag }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "dynamic job.name"
+}
+
 @test "validate-static-job-names: flags dynamic matrix job.name on skippable jobs" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"

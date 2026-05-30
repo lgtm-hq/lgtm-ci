@@ -8,7 +8,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-required-check.yml"
 
 @test "reusable-required-check: job-name input is required" {
 	run awk '
-		/^      job-name:/ { if ($0 ~ /required: true/) found = 1 }
+		/^      job-name:/ {
+			while ((getline line) > 0) {
+				if (line ~ /^      [a-zA-Z0-9_-]+:/) {
+					break
+				}
+				if (line ~ /^        required: true$/) {
+					found = 1
+					break
+				}
+			}
+		}
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
@@ -26,7 +36,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-required-check.yml"
 
 @test "reusable-required-check: upstream-result input is required" {
 	run awk '
-		/^      upstream-result:/ { if ($0 ~ /required: true/) found = 1 }
+		/^      upstream-result:/ {
+			while ((getline line) > 0) {
+				if (line ~ /^      [a-zA-Z0-9_-]+:/) {
+					break
+				}
+				if (line ~ /^        required: true$/) {
+					found = 1
+					break
+				}
+			}
+		}
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success

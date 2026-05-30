@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: `reusable-required-check.yml` org-ruleset gate for legacy required check names
+- **workflows**: `reusable-required-check.yml` org-ruleset gate for branch-protection check
+  names that differ from the reusable workflow `job-name`
 - **ci**: `assert-required-check.sh` for reusable required-check upstream validation
 
 ### Changed

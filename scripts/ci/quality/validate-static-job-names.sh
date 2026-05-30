@@ -33,6 +33,19 @@ while IFS= read -r -d '' workflow; do
 			job_id = ""
 			name_line = 0
 		}
+		function append_pending(line) {
+			if (pending == "") {
+				pending = line
+			} else {
+				pending = pending " " line
+			}
+		}
+		function finalize_name() {
+			if (pending != "") {
+				name = pending
+				pending = ""
+			}
+		}
 		/^  [a-zA-Z0-9_-]+:$/ {
 			flush_job()
 			job_id = $1
@@ -48,8 +61,12 @@ while IFS= read -r -d '' workflow; do
 			name = $0
 			sub(/^    name:[[:space:]]*/, "", name)
 			name_line = NR
+			pending = ""
 			if (name ~ /^[>|][-+]?$/) {
 				while ((getline continuation) > 0) {
+					if (continuation ~ /^    if:/) {
+						has_if = 1
+					}
 					if (continuation ~ /^    [a-zA-Z0-9_-]+:/) {
 						break
 					}
@@ -57,8 +74,9 @@ while IFS= read -r -d '' workflow; do
 						break
 					}
 					sub(/^[[:space:]]+/, "", continuation)
-					name = continuation
+					append_pending(continuation)
 				}
+				finalize_name()
 			}
 			next
 		}
