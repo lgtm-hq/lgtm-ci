@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.24.1] - 2026-05-30
+
+### Bug Fixes
+
+- **ci**: checkout tooling for setup-python in upload-pypi-oidc (#252) (c6c2bf8)
+
 ## [0.24.0] - 2026-05-29
 
 ### Breaking Changes
@@ -551,7 +557,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.24.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.24.1...HEAD
+[0.24.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.24.0...v0.24.1
 [0.24.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.23.1...v0.24.0
 [0.23.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.23.0...v0.23.1
 [0.23.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.22.0...v0.23.0
