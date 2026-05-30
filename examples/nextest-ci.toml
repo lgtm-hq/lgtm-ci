@@ -1,0 +1,8 @@
+# Example nextest profile for lgtm-ci reusable-rust-test.yml
+# Copy to your repo as .config/nextest.toml (merge with existing profiles if needed).
+
+[profile.ci]
+retries = 0
+
+[profile.ci.junit]
+path = "target/nextest/ci/junit.xml"

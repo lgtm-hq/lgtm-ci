@@ -55,7 +55,7 @@ PY
 }
 
 if ! command -v cargo-llvm-cov >/dev/null 2>&1; then
-	echo "cargo-llvm-cov is required; run setup-rust-coverage.sh and run-rust-coverage.sh first." >&2
+	echo "cargo-llvm-cov is required; run setup-rust-nextest.sh with INSTALL_COVERAGE_TOOLS=true and run-rust-nextest-coverage.sh first." >&2
 	exit 1
 fi
 

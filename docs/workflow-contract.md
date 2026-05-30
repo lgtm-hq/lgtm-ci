@@ -91,16 +91,16 @@ existing `.git`, `actions/checkout` wipes the workspace and deletes
 
 Prefer split workflows to avoid skipped checks in PR UI:
 
-| Use case            | Workflow                                                          |
-| ------------------- | ----------------------------------------------------------------- |
-| Rust build only     | `reusable-rust-build.yml` or `reusable-test-rust-build.yml`       |
-| Rust coverage only  | `reusable-rust-coverage.yml` or `reusable-test-rust-coverage.yml` |
-| Rust test           | `reusable-rust-test.yml` or `reusable-test-rust-test.yml`         |
-| Node Vitest tests   | `reusable-test-node.yml` with `test-command` empty                |
-| Node custom command | `reusable-test-node.yml` with `test-command` set                  |
+| Use case            | Workflow                                                    |
+| ------------------- | ----------------------------------------------------------- |
+| Rust build only     | `reusable-rust-build.yml` or `reusable-test-rust-build.yml` |
+| Rust test (fast)    | `reusable-rust-test.yml` with `coverage: false`             |
+| Rust test + cov     | `reusable-rust-test.yml` with `coverage: true`              |
+| Node Vitest tests   | `reusable-test-node.yml` with `test-command` empty          |
+| Node custom command | `reusable-test-node.yml` with `test-command` set            |
 
-`reusable-test-rust.yml` remains for backward compatibility but may show
-skipped jobs when only build or only coverage is enabled.
+Use separate caller jobs (different `job-name`) when rulesets require distinct
+required checks; the reusable never runs nextest and llvm-cov in one job.
 
 ## Egress block examples
 
@@ -400,16 +400,18 @@ jobs:
         crates.io:443
 
   rust-coverage:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-coverage.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
     with:
       tooling-ref: "<sha>"
       job-name: "🦀 Rust Coverage"
+      coverage: true
       egress-policy: block
       allowed-endpoints: >
         github.com:443
+        api.github.com:443
         static.rust-lang.org:443
         crates.io:443
 
