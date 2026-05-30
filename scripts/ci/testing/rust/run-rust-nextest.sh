@@ -17,12 +17,12 @@ if [[ "$WORKSPACE" == "true" ]]; then
 fi
 
 if [[ -n "$FEATURES" ]]; then
-	mapfile -t feature_args <<<"$FEATURES"
+	read -r -a feature_args <<<"$FEATURES"
 	nextest_args+=("${feature_args[@]}")
 fi
 
 if [[ -n "$EXTRA_ARGS" ]]; then
-	mapfile -t extra <<<"$EXTRA_ARGS"
+	read -r -a extra <<<"$EXTRA_ARGS"
 	nextest_args+=("${extra[@]}")
 fi
 

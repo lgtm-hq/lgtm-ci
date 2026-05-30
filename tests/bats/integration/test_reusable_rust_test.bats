@@ -29,10 +29,25 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 
 @test "reusable-rust-test: runs nextest and llvm-cov nextest under mutually exclusive if conditions" {
 	run awk '
-		/run-rust-nextest\.sh/ { nextest_step = 1 }
-		/run-rust-nextest-coverage\.sh/ { cov_step = 1 }
-		/if: \$\{\{ !inputs\.coverage \}\}/ { nextest_if = 1 }
-		/if: inputs\.coverage/ { cov_if = 1 }
+		{ line[NR] = $0 }
+		/run-rust-nextest\.sh/ {
+			nextest_step = 1
+			for (i = NR - 1; i >= NR - 8 && i > 0; i--) {
+				if (line[i] ~ /if: \$\{\{ !inputs\.coverage \}\}/) {
+					nextest_if = 1
+					break
+				}
+			}
+		}
+		/run-rust-nextest-coverage\.sh/ {
+			cov_step = 1
+			for (i = NR - 1; i >= NR - 8 && i > 0; i--) {
+				if (line[i] ~ /if: inputs\.coverage$/) {
+					cov_if = 1
+					break
+				}
+			}
+		}
 		END {
 			exit !(nextest_step && cov_step && nextest_if && cov_if)
 		}
