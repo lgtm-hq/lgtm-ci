@@ -110,8 +110,8 @@ jobs:
 
 ## Rust workspace with a frontend package
 
-Use **`reusable-test-node`** for the web app (Vitest/Istanbul or a package
-`test:coverage` script). Do not bundle web jobs into the Rust reusable.
+Use **`reusable-test-node`** (Vitest) or **`reusable-test-node-custom`** (package
+`test:coverage` scripts). Do not bundle web jobs into the Rust reusable.
 
 Pin `uses:` and `tooling-ref` to the same commit SHA. Path filters belong on the
 caller workflow (`on.push.paths` / `on.pull_request.paths`).
@@ -119,8 +119,10 @@ caller workflow (`on.push.paths` / `on.pull_request.paths`).
 ## Example: Rustume
 
 Rustume composes quality (lintro), build, and rust-test reusables (test and
-coverage as separate jobs with `coverage: false` / `true`). Override `job-name`
-inputs to match org ruleset check names (for example emoji-prefixed labels).
+coverage as separate jobs with `coverage: false` / `true`). Pass `job-name` on
+always-run jobs (Rust build/test, split Node workflows) to match org ruleset
+check names. Matrix and internal Docker jobs use static inner names — set caller
+job `name:` for branding; see [workflow-contract.md](workflow-contract.md).
 
 See [reusable-workflows.md](reusable-workflows.md) for quality and release
 callers.

@@ -14,7 +14,7 @@ Where applicable, workflows accept:
 | `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA) |
 | `egress-policy`                    | `audit` or `block` for StepSecurity harden-runner             |
 | `allowed-endpoints`                | Allowlist when `egress-policy: block`                         |
-| `job-name`                         | Visible GitHub check name                                     |
+| `job-name`                         | Check name on always-run jobs; PR comment suite name          |
 | `runner-image`                     | Runner label for long-running jobs                            |
 | `timeout-minutes`                  | Job timeout                                                   |
 | `post-pr-comment`                  | Enable PR summary comments                                    |
@@ -96,11 +96,35 @@ Prefer split workflows to avoid skipped checks in PR UI:
 | Rust build only     | `reusable-rust-build.yml` or `reusable-test-rust-build.yml` |
 | Rust test (fast)    | `reusable-rust-test.yml` with `coverage: false`             |
 | Rust test + cov     | `reusable-rust-test.yml` with `coverage: true`              |
-| Node Vitest tests   | `reusable-test-node.yml` with `test-command` empty          |
-| Node custom command | `reusable-test-node.yml` with `test-command` set            |
+| Node Vitest tests   | `reusable-test-node.yml` (Vitest)                           |
+| Node custom command | `reusable-test-node-custom.yml` (required `test-command`)   |
 
-Use separate caller jobs (different `job-name`) when rulesets require distinct
-required checks; the reusable never runs nextest and llvm-cov in one job.
+Use separate caller jobs (different `name:` and/or `job-name`) when rulesets
+require distinct required checks; the reusable never runs nextest and llvm-cov in
+one job.
+
+## Job display names
+
+GitHub can render unevaluated `job.name` expressions in the checks UI when a job
+is skipped by `if:`. lgtm-ci uses a **hybrid** policy (issue #168 §12):
+
+<!-- markdownlint-disable MD013 -->
+
+| Pattern | When | Check name behavior |
+| ------- | ---- | ------------------- |
+| **Split reusables** | Consumer-facing modes (Vitest vs custom Node) | Matching workflow only; `job-name` drives test check name. |
+| **`job-name` input** | Always-run jobs (quality, publish, Rust test, split Node) | Caller passes the visible check label. |
+| **Static inner names** | Internal matrix legs (Python, Docker, E2E) | Fixed labels; GitHub appends matrix suffix. Brand via caller `name:`. |
+
+<!-- markdownlint-enable MD013 -->
+
+Contract enforcement: `scripts/ci/quality/validate-static-job-names.sh` (also
+covered by BATS). Do not use `matrix.`, `format(`, or ternary `&& … ||`
+expressions in `job.name` on jobs that have `if:`.
+
+**Node migration:** Replace `reusable-test-node.yml` + `test-command: …` with
+`reusable-test-node-custom.yml` and required `test-command`. Vitest callers keep
+`reusable-test-node.yml` and set `job-name` for check labels.
 
 ## Egress block examples
 
@@ -416,7 +440,7 @@ jobs:
         crates.io:443
 
   web-coverage:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node-custom.yml@<sha>
     permissions:
       contents: read
       pull-requests: write

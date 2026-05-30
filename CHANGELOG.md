@@ -12,6 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **rust**: `setup-rust-nextest.sh`, `run-rust-nextest.sh`, `run-rust-nextest-coverage.sh`,
   and `parse-rust-test-results.sh` (JUnit + optional LCOV) for unified Rust CI
 - **examples**: `examples/nextest-ci.toml` profile for consumer `.config/nextest.toml`
+- **workflows**: `reusable-test-node-custom.yml` for package-manager custom test commands
+- **ci**: `validate-static-job-names.sh` and BATS contract tests for job display name policy
 
 ### Changed
 
@@ -19,8 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `coverage: true` runs `cargo llvm-cov nextest` once; `coverage: false` runs
   `cargo nextest` only. PR comments align with Python via `reusable-test-pr-comment`
   (#168 §13)
+- **workflows**: hybrid job display names (#168 §12) — `reusable-test-node.yml` is
+  Vitest-only; custom commands use `reusable-test-node-custom.yml`; static inner
+  names for Python, Docker per-platform, and E2E matrix jobs; `job-name` drives
+  Vitest/custom check labels (supersedes #256 interim static Node names)
 
 ### Deprecated
+
+- **workflows**: `test-command` on `reusable-test-node.yml` — use
+  `reusable-test-node-custom.yml` instead (removed without shim)
 
 ### Removed
 
@@ -30,6 +39,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `run-rust-coverage.sh`
 
 ### Fixed
+
+- **workflows**: skipped matrix jobs no longer show unevaluated `job.name` expressions
+  in the GitHub checks UI (#168 §12)
 
 ### Security
 

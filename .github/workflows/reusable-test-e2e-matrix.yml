@@ -130,7 +130,7 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
 
   test:
-    name: E2E ${{ matrix.suite }} (${{ matrix.browser }})
+    name: E2E tests
     needs: setup
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}

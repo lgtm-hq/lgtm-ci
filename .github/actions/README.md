@@ -1337,13 +1337,16 @@ jobs:
 
 ### reusable-test-node.yml
 
-Complete Node.js testing workflow with vitest and optional coverage.
+Node.js Vitest testing workflow with optional coverage and PR comments. Custom
+package scripts (for example `bun run test:coverage`) use
+`reusable-test-node-custom.yml` instead.
 
 ```yaml
 jobs:
   test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@main
     with:
+      job-name: "Web Unit Tests"
       node-version: "20"
       coverage: true
       coverage-threshold: 80
@@ -1352,19 +1355,51 @@ jobs:
 
 **Inputs:**
 
+- `job-name` - GitHub check name for the Vitest job (default: `Node.js Tests`)
 - `node-version` - Node.js version (default: '20')
 - `test-path` - Path to tests (default: '.')
 - `coverage` - Collect coverage (default: false)
 - `coverage-format` - Format: json, lcov, html (default: 'json')
 - `coverage-threshold` - Minimum coverage % (default: 0)
 - `upload-coverage` - Upload as artifact (default: false)
-- `publish-results` - Publish to GitHub Pages (default: false)
+- `publish-results` - Deprecated; use `reusable-test-node-publish.yml`
 
 **Outputs:**
 
 - `tests-passed`, `tests-failed`, `tests-total`
 - `coverage-percent`
 - `passed` - Whether all tests passed
+
+---
+
+### reusable-test-node-custom.yml
+
+Node.js testing via a caller-provided shell command (after dependency install).
+Use when Vitest is not the test runner or when a package script owns coverage.
+
+```yaml
+jobs:
+  web-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node-custom.yml@main
+    with:
+      job-name: "Web Coverage"
+      test-command: bun run test:coverage
+      package-manager: bun
+      coverage: true
+      coverage-pr-comment: true
+```
+
+**Inputs:**
+
+- `test-command` - **Required.** Shell command run in `working-directory`
+- `job-name` - GitHub check name (default: `Node.js Tests`)
+- `node-version`, `node-versions`, `package-manager`, `pre-test-command`
+- Pages coverage HTML inputs (same as Vitest workflow)
+
+**Outputs:**
+
+- `passed` - Whether the custom command succeeded
+- `pages-coverage-artifact-name`, `pages-coverage-uploaded`
 
 ---
 

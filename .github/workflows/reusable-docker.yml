@@ -460,7 +460,7 @@ jobs:
   # Per-platform native build leg (multi-arch split path).
   # One matrix entry per platform; runner and QEMU config resolved by classify.
   build-per-platform:
-    name: Build ${{ matrix.platform }}
+    name: Docker build per platform
     needs: classify
     if: ${{ needs.classify.outputs.use-split == 'true' }}
     strategy:
@@ -642,7 +642,7 @@ jobs:
   #   - smoke-test (shorthand): `docker run --rm --platform <p> <image> <cmd>`
   #   - smoke-test-script: caller-owned script with env IMAGE/PLATFORM/REGISTRY
   verify-per-platform:
-    name: Verify ${{ matrix.platform }}
+    name: Docker verify per platform
     needs: [classify, build-per-platform]
     if: >-
       needs.classify.outputs.use-split == 'true' &&

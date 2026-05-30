@@ -180,11 +180,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-python-matrix.sh
 
   test:
-    name: >-
-      ${{
-        inputs.python-versions == '' && inputs.job-name ||
-        format('{0} ({1})', inputs.job-name, matrix.python-version)
-      }}
+    name: Python tests
     needs: prepare
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}

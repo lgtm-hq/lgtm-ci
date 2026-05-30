@@ -6,6 +6,13 @@ load "../../helpers/common"
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 
+@test "reusable-docker: per-platform jobs use static display names" {
+	run grep -F 'name: Docker build per platform' "$WORKFLOW"
+	assert_success
+	run grep -F 'name: Docker verify per platform' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-docker: build job passes target input to build-push-action" {
 	run grep -E '^[[:space:]]+target: \$\{\{ inputs\.target \}\}$' "$WORKFLOW"
 	assert_success

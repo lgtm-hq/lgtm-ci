@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+# Purpose: Fail when reusable workflow jobs combine skip conditions with dynamic job.name expressions.
+
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
+WORKFLOWS_DIR="${REPO_ROOT}/.github/workflows"
+
+if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
+	echo "ERROR: workflows directory not found: ${WORKFLOWS_DIR}" >&2
+	exit 1
+fi
+
+violations=0
+
+while IFS= read -r -d '' workflow; do
+	awk -v file="${workflow#"${REPO_ROOT}/"}" '
+		function flush_job() {
+			if (in_job && has_if && name ~ /\$\{\{|format\(/) {
+				if (name ~ /matrix\./ || name ~ /format\(/ || name ~ /&&.*\|\|/) {
+					printf("%s:%d: job %s uses dynamic job.name with if:\n  %s\n", file, name_line, job_id, name)
+					violations++
+				}
+			}
+			in_job = 0
+			has_if = 0
+			name = ""
+			job_id = ""
+			name_line = 0
+		}
+		/^  [a-zA-Z0-9_-]+:$/ {
+			flush_job()
+			job_id = $1
+			sub(/:$/, "", job_id)
+			in_job = 1
+			next
+		}
+		in_job && /^    if:/ {
+			has_if = 1
+			next
+		}
+		in_job && /^    name:/ {
+			name = $0
+			sub(/^    name:[[:space:]]*/, "", name)
+			name_line = NR
+			next
+		}
+		END {
+			flush_job()
+			exit violations
+		}
+	' "${workflow}"
+	awk_exit=$?
+	if [[ ${awk_exit} -gt 0 ]]; then
+		violations=${awk_exit}
+	fi
+done < <(find "${WORKFLOWS_DIR}" -maxdepth 1 -name 'reusable-*.yml' -print0)
+
+if [[ ${violations} -gt 0 ]]; then
+	echo "ERROR: ${violations} reusable workflow job(s) violate static job.name policy" >&2
+	exit 1
+fi
+
+echo "OK: reusable workflow job names satisfy static-name policy"

@@ -175,7 +175,8 @@ steps:
 | `reusable-docker.yml`                  | Docker build and publish               |
 | `reusable-coverage.yml`                | Test coverage collection               |
 | `reusable-test-python.yml`             | Python tests with PR comments          |
-| `reusable-test-node.yml`               | Node.js tests with PR comments         |
+| `reusable-test-node.yml`               | Node.js Vitest tests with PR comments  |
+| `reusable-test-node-custom.yml`        | Node.js custom test command workflow   |
 | `reusable-test-shell.yml`              | BATS shell tests with PR comments      |
 | `reusable-test-pr-comment.yml`         | Shared test PR comment workflow        |
 | `reusable-test-e2e.yml`                | E2E testing with Playwright            |
