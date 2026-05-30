@@ -35,3 +35,24 @@ _test_custom_checkout_order_ok() {
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-test-node: skipped jobs use static names without expressions" {
+	run awk '
+		/^  test-vitest:/ { vitest = 1; custom = 0 }
+		/^  test-custom:/ { custom = 1; vitest = 0 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test-vitest:/ && !/^  test-custom:/ { vitest = 0; custom = 0 }
+		vitest && /^    name:/ { if ($0 ~ /\$\{\{/) bad_vitest = 1 }
+		custom && /^    name:/ { if ($0 ~ /\$\{\{/) bad_custom = 1 }
+		END { exit (bad_vitest || bad_custom) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-node: exposes pages coverage HTML inputs and staging script" {
+	run grep -q 'upload-pages-coverage-html' "$WORKFLOW"
+	assert_success
+	run grep -q 'stage-node-pages-coverage.sh' "$WORKFLOW"
+	assert_success
+	run grep -q 'pages-coverage-node-version' "$WORKFLOW"
+	assert_success
+}
