@@ -18,8 +18,7 @@ teardown() {
 	mkdir -p apps/web/coverage
 	echo '<html>coverage</html>' >apps/web/coverage/index.html
 
-	WORKING_DIRECTORY=apps/web PAGES_COVERAGE_STAGING_DIR=flat-coverage \
-		run bash "$SCRIPT"
+	run env WORKING_DIRECTORY=apps/web PAGES_COVERAGE_STAGING_DIR=flat-coverage bash "$SCRIPT"
 	assert_success
 	assert_file_exists flat-coverage/index.html
 	run grep -q 'coverage' flat-coverage/index.html

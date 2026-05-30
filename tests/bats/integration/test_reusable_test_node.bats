@@ -55,4 +55,8 @@ _test_custom_checkout_order_ok() {
 	assert_success
 	run grep -q 'pages-coverage-node-version' "$WORKFLOW"
 	assert_success
+	run grep -q 'pages-coverage-status:' "$WORKFLOW"
+	assert_success
+	run grep -q 'record-pages-coverage-upload-status.sh' "$WORKFLOW"
+	assert_success
 }

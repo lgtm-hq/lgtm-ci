@@ -203,9 +203,7 @@ on:
         value: ${{ inputs.pages-coverage-artifact-name }}
       pages-coverage-uploaded:
         description: "Whether flat HTML coverage artifact was uploaded this run"
-        value: >-
-          ${{ inputs.test-command == '' && jobs.test-vitest.outputs.pages-coverage-uploaded ||
-          (inputs.test-command != '' && jobs.test-custom.outputs.pages-coverage-uploaded) }}
+        value: ${{ jobs.pages-coverage-status.outputs.pages-coverage-uploaded || 'false' }}
 
 jobs:
   prepare:
@@ -271,7 +269,6 @@ jobs:
       tests-total: ${{ steps.parse.outputs.tests-total }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
       passed: ${{ steps.run.outputs.exit-code == '0' }}
-      pages-coverage-uploaded: ${{ steps.record-pages-upload.outputs.uploaded }}
 
     steps:
       - name: Harden runner
@@ -529,17 +526,6 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Record pages coverage upload result
-        if: always()
-        id: record-pages-upload
-        shell: bash
-        run: |
-          if [[ "${{ steps.pages-upload.outcome }}" == "success" ]]; then
-            echo "uploaded=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "uploaded=false" >>"$GITHUB_OUTPUT"
-          fi
-
       - name: Fail on vitest errors
         if: >-
           steps.run.outputs.exit-code != ''
@@ -568,7 +554,6 @@ jobs:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
     outputs:
       passed: ${{ steps.record.outputs.passed }}
-      pages-coverage-uploaded: ${{ steps.record-pages-upload.outputs.uploaded }}
 
     steps:
       - name: Harden runner
@@ -727,17 +712,6 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Record pages coverage upload result
-        if: always()
-        id: record-pages-upload
-        shell: bash
-        run: |
-          if [[ "${{ steps.pages-upload.outcome }}" == "success" ]]; then
-            echo "uploaded=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "uploaded=false" >>"$GITHUB_OUTPUT"
-          fi
-
       - name: Fail on custom test command errors
         if: steps.custom-run.outcome == 'failure'
         run: exit 1
@@ -752,6 +726,49 @@ jobs:
           else
             echo "passed=false" >>"$GITHUB_OUTPUT"
           fi
+
+  pages-coverage-status:
+    name: Pages coverage upload status
+    needs:
+      - prepare
+      - test-vitest
+      - test-custom
+    if: >-
+      always()
+      && inputs.upload-pages-coverage-html
+      && inputs.coverage
+    runs-on: ubuntu-latest
+    outputs:
+      pages-coverage-uploaded: ${{ steps.record.outputs.uploaded }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Record pages coverage upload status
+        id: record
+        shell: bash
+        env:
+          UPLOAD_PAGES_COVERAGE_HTML: ${{ inputs.upload-pages-coverage-html }}
+          COVERAGE: ${{ inputs.coverage }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+          TEST_VITEST_RESULT: ${{ needs.test-vitest.result }}
+          TEST_CUSTOM_RESULT: ${{ needs.test-custom.result }}
+          PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-coverage-upload-status.sh
 
   aggregate-tests:
     name: Aggregate Node.js Results
