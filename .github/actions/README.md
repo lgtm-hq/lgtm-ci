@@ -1314,7 +1314,6 @@ jobs:
       coverage: true
       coverage-threshold: 80
       upload-coverage: true
-      publish-results: false
 ```
 
 **Inputs:**
@@ -1325,7 +1324,6 @@ jobs:
 - `coverage-format` - Format: xml, json, lcov (default: 'json')
 - `coverage-threshold` - Minimum coverage % (default: 0)
 - `upload-coverage` - Upload as artifact (default: false)
-- `publish-results` - Publish to GitHub Pages (default: false)
 
 **Outputs:**
 
@@ -1362,7 +1360,6 @@ jobs:
 - `coverage-format` - Format: json, lcov, html (default: 'json')
 - `coverage-threshold` - Minimum coverage % (default: 0)
 - `upload-coverage` - Upload as artifact (default: false)
-- `publish-results` - Deprecated; use `reusable-test-node-publish.yml`
 
 **Outputs:**
 

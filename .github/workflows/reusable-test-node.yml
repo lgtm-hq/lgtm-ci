@@ -61,13 +61,6 @@ on:
         required: false
         type: string
         default: "coverage"
-      publish-results:
-        description: >-
-          Deprecated: use reusable-test-node-publish.yml in a separate caller job.
-          Ignored in this workflow so callers are not required to grant pages write.
-        required: false
-        type: boolean
-        default: false
       extra-args:
         description: "Additional arguments to pass to vitest"
         required: false

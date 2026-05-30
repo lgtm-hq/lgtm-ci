@@ -24,17 +24,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: hybrid job display names (#168 §12) — `reusable-test-node.yml` is
   Vitest-only; custom commands use `reusable-test-node-custom.yml`; static inner
   names for Python, Docker per-platform, and E2E matrix jobs; `job-name` drives
-  Vitest/custom check labels (supersedes #256 interim static Node names)
-
-### Deprecated
-
-- **workflows**: `test-command` on `reusable-test-node.yml` — use
-  `reusable-test-node-custom.yml` instead (removed without shim)
+  Vitest/custom check labels
 
 ### Removed
 
+- **workflows**: `test-command` on `reusable-test-node.yml` — use
+  `reusable-test-node-custom.yml`
 - **workflows**: `reusable-test-rust-test.yml`, `reusable-test-rust-coverage.yml`,
-  `reusable-rust-coverage.yml`, `reusable-test-rust.yml` (no compatibility shim)
+  `reusable-rust-coverage.yml`, `reusable-test-rust.yml`
 - **scripts**: `run-cargo-test.sh`, `parse-cargo-test-results.sh`, `setup-rust-coverage.sh`,
   `run-rust-coverage.sh`
 

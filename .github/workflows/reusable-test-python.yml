@@ -39,13 +39,6 @@ on:
         required: false
         type: boolean
         default: false
-      publish-results:
-        description: >-
-          Deprecated: use reusable-test-python-publish.yml in a separate caller
-          job instead. Ignored by this workflow.
-        required: false
-        type: boolean
-        default: false
       markers:
         description: "pytest markers to filter tests"
         required: false

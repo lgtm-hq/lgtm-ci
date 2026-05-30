@@ -63,9 +63,8 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 
 <!-- markdownlint-enable MD013 -->
 
-`reusable-test-node.yml` no longer includes a publish job. Use
-`reusable-test-node-publish.yml` in a separate caller job when publishing is
-required.
+`reusable-test-node.yml` does not include a publish job. Use
+`reusable-test-node-publish.yml` in a separate caller job for Pages publishing.
 
 ### Isolated publish jobs (Pages / coverage badge)
 
@@ -122,9 +121,9 @@ Contract enforcement: `scripts/ci/quality/validate-static-job-names.sh` (also
 covered by BATS). Do not use `matrix.`, `format(`, or ternary `&& … ||`
 expressions in `job.name` on jobs that have `if:`.
 
-**Node migration:** Replace `reusable-test-node.yml` + `test-command: …` with
-`reusable-test-node-custom.yml` and required `test-command`. Vitest callers keep
-`reusable-test-node.yml` and set `job-name` for check labels.
+**Node testing:** Vitest callers use `reusable-test-node.yml` with `job-name`.
+Custom package scripts use `reusable-test-node-custom.yml` with required
+`test-command` and `job-name`.
 
 ## Egress block examples
 
@@ -351,7 +350,7 @@ PR comments are skipped automatically on fork PRs (`head.repo.fork == true`).
 This is enforced in `scripts/ci/actions/post-pr-comment.sh` and workflow `if`
 conditions.
 
-## Rustume migration example
+## Rustume example
 
 Tag/release pipelines should call lint-only reusables (no `pull-requests: write`):
 
