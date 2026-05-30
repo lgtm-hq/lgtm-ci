@@ -1,0 +1,404 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Checks Workflow
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: "Rust toolchain version"
+        required: false
+        type: string
+        default: "stable"
+      features:
+        description: "Feature flags for cargo (e.g., --all-features)"
+        required: false
+        type: string
+        default: "--all-features"
+      workspace:
+        description: "Run cargo commands with --workspace"
+        required: false
+        type: boolean
+        default: true
+      clippy:
+        description: "Run cargo clippy"
+        required: false
+        type: boolean
+        default: true
+      fmt-check:
+        description: "Run cargo fmt --check"
+        required: false
+        type: boolean
+        default: true
+      extra-args:
+        description: "Additional arguments for cargo test"
+        required: false
+        type: string
+        default: ""
+      clippy-args:
+        description: "Additional arguments for cargo clippy"
+        required: false
+        type: string
+        default: "-- -D warnings"
+      test-script:
+        description: "Path to cargo test script"
+        required: false
+        type: string
+        default: ""
+      clippy-script:
+        description: "Path to cargo clippy script"
+        required: false
+        type: string
+        default: ""
+      fmt-script:
+        description: "Path to cargo fmt check script"
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: "Working directory for cargo commands"
+        required: false
+        type: string
+        default: "."
+      post-pr-comment:
+        description: "Post aggregated results as a PR comment"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for the Rust checks PR comment"
+        required: false
+        type: string
+        default: "rust-checks-results"
+      job-name:
+        description: "GitHub check name for the cargo test job"
+        required: false
+        type: string
+        default: "Rust Tests"
+      job-name-clippy:
+        description: "GitHub check name for the clippy job"
+        required: false
+        type: string
+        default: "Rust Clippy"
+      job-name-fmt:
+        description: "GitHub check name for the fmt job"
+        required: false
+        type: string
+        default: "Rust Fmt"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
+
+    outputs:
+      tests-passed:
+        description: "Number of tests passed"
+        value: ${{ jobs.test.outputs.tests-passed }}
+      tests-failed:
+        description: "Number of tests failed"
+        value: ${{ jobs.test.outputs.tests-failed }}
+      tests-total:
+        description: "Total number of tests"
+        value: ${{ jobs.test.outputs.tests-total }}
+      passed:
+        description: "Whether all enabled checks passed"
+        value: >-
+          ${{ jobs.test.outputs.passed == 'true'
+          && (inputs.clippy == false || jobs.clippy.outputs.passed == 'true')
+          && (inputs.fmt-check == false || jobs.fmt.outputs.passed == 'true') }}
+
+jobs:
+  test:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      tests-passed: ${{ steps.parse.outputs.tests-passed }}
+      tests-failed: ${{ steps.parse.outputs.tests-failed }}
+      tests-total: ${{ steps.parse.outputs.tests-total }}
+      passed: ${{ steps.run.outcome == 'success' }}
+    concurrency:
+      group: rust-test-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          toolchain: ${{ inputs.toolchain }}
+
+      - name: Run cargo test
+        id: run
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.test-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-cargo-test.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Parse test results
+        id: parse
+        if: always()
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          TEST_LOG_FILE: rust-test.log
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-cargo-test-results.sh"
+
+      - name: Fail on test errors
+        if: steps.run.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+  clippy:
+    name: ${{ inputs.job-name-clippy }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      inputs.clippy
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.run.outcome == 'success' }}
+    concurrency:
+      group: rust-clippy-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: clippy
+
+      - name: Run cargo clippy
+        id: run
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.clippy-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-clippy.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+          CLIPPY_ARGS: ${{ inputs.clippy-args }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Fail on clippy errors
+        if: steps.run.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+  fmt:
+    name: ${{ inputs.job-name-fmt }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    if: >-
+      inputs.fmt-check
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.run.outcome == 'success' }}
+    concurrency:
+      group: rust-fmt-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          toolchain: ${{ inputs.toolchain }}
+          components: rustfmt
+
+      - name: Run cargo fmt check
+        id: run
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.fmt-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-fmt-check.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Fail on fmt errors
+        if: steps.run.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+  comment-pr:
+    name: ${{ inputs.job-name }} PR Comment
+    needs:
+      - test
+      - clippy
+      - fmt
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && inputs.post-pr-comment
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+      && (
+        needs.test.result == 'success'
+        || needs.test.result == 'failure'
+      )
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
+      - name: Generate PR comment
+        shell: bash
+        env:
+          TESTS_PASSED: ${{ needs.test.outputs.tests-passed }}
+          TESTS_FAILED: ${{ needs.test.outputs.tests-failed }}
+          TESTS_TOTAL: ${{ needs.test.outputs.tests-total }}
+          TEST_RESULT: ${{ needs.test.result }}
+          CLIPPY_RESULT: ${{ inputs.clippy && needs.clippy.result || 'skipped' }}
+          FMT_RESULT: ${{ inputs.fmt-check && needs.fmt.result || 'skipped' }}
+          TEST_SUITE_NAME: ${{ inputs.job-name }}
+          COMMENT_OUTPUT: rust-checks-pr-comment.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-rust-checks-comment.sh
+
+      - name: Post PR comment
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: rust-checks-pr-comment.md
+          marker: ${{ inputs.comment-marker }}

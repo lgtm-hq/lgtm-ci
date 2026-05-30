@@ -1,0 +1,158 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Checks Workflow (Facade)
+
+on:
+  workflow_call:
+    inputs:
+      toolchain:
+        description: "Rust toolchain version"
+        required: false
+        type: string
+        default: "stable"
+      features:
+        description: "Feature flags for cargo (e.g., --all-features)"
+        required: false
+        type: string
+        default: "--all-features"
+      workspace:
+        description: "Run cargo commands with --workspace"
+        required: false
+        type: boolean
+        default: true
+      clippy:
+        description: "Run cargo clippy"
+        required: false
+        type: boolean
+        default: true
+      fmt-check:
+        description: "Run cargo fmt --check"
+        required: false
+        type: boolean
+        default: true
+      extra-args:
+        description: "Additional arguments for cargo test"
+        required: false
+        type: string
+        default: ""
+      clippy-args:
+        description: "Additional arguments for cargo clippy"
+        required: false
+        type: string
+        default: "-- -D warnings"
+      test-script:
+        description: "Path to cargo test script"
+        required: false
+        type: string
+        default: ""
+      clippy-script:
+        description: "Path to cargo clippy script"
+        required: false
+        type: string
+        default: ""
+      fmt-script:
+        description: "Path to cargo fmt check script"
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: "Working directory for cargo commands"
+        required: false
+        type: string
+        default: "."
+      post-pr-comment:
+        description: "Post aggregated results as a PR comment"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for the Rust checks PR comment"
+        required: false
+        type: string
+        default: "rust-checks-results"
+      job-name:
+        description: "GitHub check name for the cargo test job"
+        required: false
+        type: string
+        default: "Rust Tests"
+      job-name-clippy:
+        description: "GitHub check name for the clippy job"
+        required: false
+        type: string
+        default: "Rust Clippy"
+      job-name-fmt:
+        description: "GitHub check name for the fmt job"
+        required: false
+        type: string
+        default: "Rust Fmt"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "audit"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
+
+    outputs:
+      tests-passed:
+        description: "Number of tests passed"
+        value: ${{ jobs.checks.outputs.tests-passed }}
+      tests-failed:
+        description: "Number of tests failed"
+        value: ${{ jobs.checks.outputs.tests-failed }}
+      tests-total:
+        description: "Total number of tests"
+        value: ${{ jobs.checks.outputs.tests-total }}
+      passed:
+        description: "Whether all enabled checks passed"
+        value: ${{ jobs.checks.outputs.passed }}
+
+jobs:
+  checks:
+    uses: ./.github/workflows/reusable-test-rust-checks.yml
+    with:
+      toolchain: ${{ inputs.toolchain }}
+      features: ${{ inputs.features }}
+      workspace: ${{ inputs.workspace }}
+      clippy: ${{ inputs.clippy }}
+      fmt-check: ${{ inputs.fmt-check }}
+      extra-args: ${{ inputs.extra-args }}
+      clippy-args: ${{ inputs.clippy-args }}
+      test-script: ${{ inputs.test-script }}
+      clippy-script: ${{ inputs.clippy-script }}
+      fmt-script: ${{ inputs.fmt-script }}
+      working-directory: ${{ inputs.working-directory }}
+      post-pr-comment: ${{ inputs.post-pr-comment }}
+      comment-marker: ${{ inputs.comment-marker }}
+      job-name: ${{ inputs.job-name }}
+      job-name-clippy: ${{ inputs.job-name-clippy }}
+      job-name-fmt: ${{ inputs.job-name-fmt }}
+      tooling-ref: ${{ inputs.tooling-ref }}
+      draft-pr-skip: ${{ inputs.draft-pr-skip }}
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      runner-image: ${{ inputs.runner-image }}
+      timeout-minutes: ${{ inputs.timeout-minutes }}
