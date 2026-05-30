@@ -17,12 +17,25 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 	assert_success
 }
 
-@test "reusable-rust-test: runs nextest or llvm-cov nextest but not both" {
+@test "reusable-rust-test: defines both nextest paths and excludes legacy coverage comment" {
 	run awk '
 		/run-rust-nextest\.sh/ { nextest = 1 }
 		/run-rust-nextest-coverage\.sh/ { cov = 1 }
 		/generate-coverage-comment/ { bad = 1 }
 		END { exit !(nextest && cov) || bad }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-rust-test: runs nextest and llvm-cov nextest under mutually exclusive if conditions" {
+	run awk '
+		/run-rust-nextest\.sh/ { nextest_step = 1 }
+		/run-rust-nextest-coverage\.sh/ { cov_step = 1 }
+		/if: \$\{\{ !inputs\.coverage \}\}/ { nextest_if = 1 }
+		/if: inputs\.coverage/ { cov_if = 1 }
+		END {
+			exit !(nextest_step && cov_step && nextest_if && cov_if)
+		}
 	' "$WORKFLOW"
 	assert_success
 }

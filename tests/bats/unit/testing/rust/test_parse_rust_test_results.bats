@@ -58,6 +58,44 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "coverage-percent=100"
 }
 
+@test "parse-rust-test-results calculates partial coverage correctly" {
+	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="tests" tests="1" failures="0" errors="0" skipped="0"/>
+EOF
+	cat >"${BATS_TEST_TMPDIR}/rust-coverage.lcov" <<'EOF'
+TN:
+SF:/workspace/src/lib.rs
+LF:4
+LH:3
+end_of_record
+EOF
+
+	cd "$BATS_TEST_TMPDIR"
+	run env \
+		JUNIT_FILE=junit.xml \
+		LCOV_FILE=rust-coverage.lcov \
+		COVERAGE_ENABLED=true \
+		bash "$SCRIPT"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "coverage-percent=75.00"
+}
+
+@test "parse-rust-test-results fails when coverage enabled but lcov file is missing" {
+	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="tests" tests="1" failures="0" errors="0" skipped="0"/>
+EOF
+
+	cd "$BATS_TEST_TMPDIR"
+	run env \
+		JUNIT_FILE=junit.xml \
+		LCOV_FILE=missing.lcov \
+		COVERAGE_ENABLED=true \
+		bash "$SCRIPT"
+	assert_failure
+}
+
 @test "parse-rust-test-results fails when junit file is missing" {
 	cd "$BATS_TEST_TMPDIR"
 	run env \

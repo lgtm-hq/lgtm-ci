@@ -152,9 +152,7 @@ jobs:
       tests-failed: ${{ steps.parse.outputs.tests-failed }}
       tests-total: ${{ steps.parse.outputs.tests-total }}
       coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
-      passed: >-
-        ${{ (inputs.coverage && steps.run-coverage.outcome == 'success')
-        || (!inputs.coverage && steps.run-nextest.outcome == 'success') }}
+      passed: ${{ steps.record-passed.outputs.passed }}
       pages-coverage-artifact-name: ${{ inputs.pages-coverage-artifact-name }}
       pages-coverage-uploaded: ${{ steps.record-pages-upload.outputs.uploaded }}
     concurrency:
@@ -288,17 +286,6 @@ jobs:
         shell: bash
         run: exit 1
 
-      - name: Fail on coverage run errors
-        if: >-
-          inputs.coverage
-          && env.RUST_COVERAGE_EXIT_CODE != ''
-          && env.RUST_COVERAGE_EXIT_CODE != '0'
-        shell: bash
-        env:
-          COVERAGE_NAME: Rust
-        run: >-
-          bash .lgtm-ci-tooling/scripts/ci/testing/rust/fail-on-coverage.sh
-
       - name: Fail on coverage threshold
         if: steps.coverage-gate.outcome == 'failure'
         shell: bash
@@ -315,6 +302,17 @@ jobs:
             echo "uploaded=true" >>"$GITHUB_OUTPUT"
           else
             echo "uploaded=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Record job passed output
+        if: always()
+        id: record-passed
+        shell: bash
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
           fi
 
   comment-pr:

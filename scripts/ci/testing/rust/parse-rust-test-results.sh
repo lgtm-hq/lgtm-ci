@@ -32,24 +32,32 @@ if ! parse_junit_xml "$JUNIT_FILE"; then
 	exit 1
 fi
 
+# Exclude skipped tests from PR comment pass-rate denominator (matches legacy cargo parser).
+tests_total_for_comment=$((TESTS_PASSED + TESTS_FAILED))
+
 set_github_output "tests-passed" "$TESTS_PASSED"
 set_github_output "tests-failed" "$TESTS_FAILED"
 set_github_output "tests-skipped" "$TESTS_SKIPPED"
-set_github_output "tests-total" "$TESTS_TOTAL"
+set_github_output "tests-total" "$tests_total_for_comment"
 
-if [[ "$TESTS_TOTAL" -gt 0 ]] || [[ "$TESTS_SKIPPED" -gt 0 ]]; then
+if [[ "$tests_total_for_comment" -gt 0 ]] || [[ "$TESTS_SKIPPED" -gt 0 ]]; then
 	set_github_output "tests-ran" "true"
 else
 	set_github_output "tests-ran" "false"
 fi
 
-if [[ "$COVERAGE_ENABLED" == "true" && -f "$LCOV_FILE" ]]; then
+if [[ "$COVERAGE_ENABLED" == "true" ]]; then
+	if [[ ! -f "$LCOV_FILE" ]]; then
+		log_error "LCOV file not found: $LCOV_FILE"
+		exit 1
+	fi
 	if coverage_percent="$(extract_coverage_percent "$LCOV_FILE")"; then
 		set_github_output "coverage-percent" "$coverage_percent"
 		log_info "Coverage: ${coverage_percent}%"
 	else
-		log_warning "Failed to extract coverage percent from $LCOV_FILE"
+		log_error "Failed to extract coverage percent from $LCOV_FILE"
+		exit 1
 	fi
 fi
 
-log_info "Parsed tests: passed=$TESTS_PASSED failed=$TESTS_FAILED skipped=$TESTS_SKIPPED total=$TESTS_TOTAL"
+log_info "Parsed tests: passed=$TESTS_PASSED failed=$TESTS_FAILED skipped=$TESTS_SKIPPED total=$tests_total_for_comment"
