@@ -9,38 +9,58 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.27.0] - 2026-05-30
+
+### Features
+
+- **ci**: unify Rust test and coverage behind reusable-rust-test (#168 §13) (#261) (afddf97)
+
+### Bug Fixes
+
+- **ci**: hybrid job display names for skipped matrix jobs (#168 §12) (#263) (d4a5331)
+
+### Previously Unreleased
+
 - **rust**: `setup-rust-nextest.sh`, `run-rust-nextest.sh`, `run-rust-nextest-coverage.sh`,
   and `parse-rust-test-results.sh` (JUnit + optional LCOV) for unified Rust CI
-- **examples**: `examples/nextest-ci.toml` profile for consumer `.config/nextest.toml`
-- **workflows**: `reusable-test-node-custom.yml` for package-manager custom test commands
-- **ci**: `validate-static-job-names.sh` and BATS contract tests for job display name policy
 
-### Changed
+- **examples**: `examples/nextest-ci.toml` profile for consumer `.config/nextest.toml`
+
+- **workflows**: `reusable-test-node-custom.yml` for package-manager custom test commands
+
+- **ci**: `validate-static-job-names.sh` and BATS contract tests for job display name policy
 
 - **workflows**: `reusable-rust-test.yml` is the single entry point for Rust tests;
   `coverage: true` runs `cargo llvm-cov nextest` once; `coverage: false` runs
   `cargo nextest` only. PR comments align with Python via `reusable-test-pr-comment`
   (#168 §13)
+
 - **workflows**: hybrid job display names (#168 §12) — `reusable-test-node.yml` is
   Vitest-only; custom commands use `reusable-test-node-custom.yml`; static inner
   names for Python, Docker per-platform, and E2E matrix jobs; `job-name` drives
   Vitest/custom check labels
 
-### Removed
-
 - **workflows**: `test-command` on `reusable-test-node.yml` — use
   `reusable-test-node-custom.yml`
+
 - **workflows**: `reusable-test-rust-test.yml`, `reusable-test-rust-coverage.yml`,
   `reusable-rust-coverage.yml`, `reusable-test-rust.yml`
+
 - **scripts**: `run-cargo-test.sh`, `parse-cargo-test-results.sh`, `setup-rust-coverage.sh`,
   `run-rust-coverage.sh`
 
-### Fixed
-
 - **workflows**: skipped matrix jobs no longer show unevaluated `job.name` expressions
   in the GitHub checks UI (#168 §12)
-
-### Security
 
 ## [0.26.0] - 2026-05-30
 
@@ -603,7 +623,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.26.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.27.0...HEAD
+[0.27.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.24.1...v0.25.0
 [0.24.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.24.0...v0.24.1
