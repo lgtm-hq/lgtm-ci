@@ -20,6 +20,21 @@ on:
         required: false
         type: string
         default: ""
+      upload-pages-coverage-html:
+        description: "Upload flat HTML coverage artifact for Model B Pages bundling"
+        required: false
+        type: boolean
+        default: false
+      pages-coverage-artifact-name:
+        description: "Artifact name for flat Rust HTML coverage upload"
+        required: false
+        type: string
+        default: "rust-coverage-html"
+      pages-coverage-upload-on:
+        description: "When to upload flat Rust HTML coverage (v1: push-main only)"
+        required: false
+        type: string
+        default: "push-main"
       post-pr-comment:
         description: "Post coverage summary comment on pull requests"
         required: false
@@ -73,6 +88,12 @@ on:
       passed:
         description: "Whether coverage succeeded"
         value: ${{ jobs.coverage.outputs.passed }}
+      pages-coverage-artifact-name:
+        description: "Resolved flat HTML coverage artifact name"
+        value: ${{ jobs.coverage.outputs.pages-coverage-artifact-name }}
+      pages-coverage-uploaded:
+        description: "Whether flat HTML coverage artifact was uploaded this run"
+        value: ${{ jobs.coverage.outputs.pages-coverage-uploaded }}
 
 jobs:
   coverage:
@@ -81,6 +102,9 @@ jobs:
       job-name: ${{ inputs.job-name }}
       setup-script: ${{ inputs.setup-script }}
       coverage-script: ${{ inputs.coverage-script }}
+      upload-pages-coverage-html: ${{ inputs.upload-pages-coverage-html }}
+      pages-coverage-artifact-name: ${{ inputs.pages-coverage-artifact-name }}
+      pages-coverage-upload-on: ${{ inputs.pages-coverage-upload-on }}
       post-pr-comment: ${{ inputs.post-pr-comment }}
       comment-marker: ${{ inputs.comment-marker }}
       comment-title: ${{ inputs.comment-title }}
