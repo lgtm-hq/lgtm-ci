@@ -186,6 +186,7 @@ jobs:
         with:
           name: ${{ inputs.pages-coverage-artifact-name }}
           path: ${{ inputs.pages-coverage-artifact-name }}/
+          retention-days: 7
           if-no-files-found: error
 
       - name: Generate coverage PR comment

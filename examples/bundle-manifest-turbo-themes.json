@@ -10,7 +10,7 @@
     },
     {
       "id": "rust-coverage",
-      "workflow": "Coverage Reports",
+      "workflow": "Quality Check - Rust Coverage",
       "artifact": "rust-coverage-html",
       "dest": "coverage-rust",
       "require_success": true

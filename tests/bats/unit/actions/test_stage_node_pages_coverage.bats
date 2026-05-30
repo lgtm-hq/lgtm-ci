@@ -6,7 +6,7 @@ load "../../../helpers/common"
 
 setup() {
 	setup_temp_dir
-	cd "$BATS_TEST_TMPDIR" || exit 1
+	cd "$BATS_TEST_TMPDIR" || return 1
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/stage-node-pages-coverage.sh"
 }
 
@@ -27,16 +27,16 @@ teardown() {
 }
 
 @test "stage-node-pages-coverage: fails when source directory is missing" {
-	WORKING_DIRECTORY=missing run bash "$SCRIPT"
-	[ "$status" -eq 1 ]
-	[[ "$output" == *"Pages coverage source directory missing"* ]]
+	run env WORKING_DIRECTORY=missing bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Pages coverage source directory missing"
 }
 
 @test "stage-node-pages-coverage: fails when index.html is missing" {
 	mkdir -p coverage
-	WORKING_DIRECTORY=. run bash "$SCRIPT"
-	[ "$status" -eq 1 ]
-	[[ "$output" == *"Pages coverage HTML missing index.html"* ]]
+	run env WORKING_DIRECTORY=. bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Pages coverage HTML missing index.html"
 }
 
 @test "stage-node-pages-coverage: honors pages-coverage-source-subpath" {

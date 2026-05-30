@@ -6,7 +6,7 @@ load "../../../helpers/common"
 
 setup() {
 	setup_temp_dir
-	cd "$BATS_TEST_TMPDIR" || exit 1
+	cd "$BATS_TEST_TMPDIR" || return 1
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/stage-node-coverage.sh"
 }
 
