@@ -6,12 +6,12 @@ scans run through **`reusable-quality-lint`** (lintro); this repo provides
 **`reusable-rust-test.yml`** for workspace tests (cargo-nextest or
 `cargo llvm-cov nextest` when `coverage: true`).
 
-| Language          | Reusable                     |
-| ----------------- | ---------------------------- |
-| Python            | `reusable-test-python.yml`   |
-| Node / TypeScript | `reusable-test-node.yml`     |
-| Rust (build)      | `reusable-rust-build.yml`    |
-| Rust (tests)      | `reusable-rust-test.yml`     |
+| Language          | Reusable                                                    |
+| ----------------- | ----------------------------------------------------------- |
+| Python            | `reusable-test-python.yml`                                  |
+| Node / TypeScript | `reusable-test-node.yml` or `reusable-test-node-custom.yml` |
+| Rust (build)      | `reusable-rust-build.yml`                                   |
+| Rust (tests)      | `reusable-rust-test.yml`                                    |
 
 ## Nextest configuration (required)
 
@@ -110,8 +110,8 @@ jobs:
 
 ## Rust workspace with a frontend package
 
-Use **`reusable-test-node`** for the web app (Vitest/Istanbul or a package
-`test:coverage` script). Do not bundle web jobs into the Rust reusable.
+Use **`reusable-test-node`** (Vitest) or **`reusable-test-node-custom`** (package
+`test:coverage` scripts). Do not bundle web jobs into the Rust reusable.
 
 Pin `uses:` and `tooling-ref` to the same commit SHA. Path filters belong on the
 caller workflow (`on.push.paths` / `on.pull_request.paths`).
@@ -119,20 +119,10 @@ caller workflow (`on.push.paths` / `on.pull_request.paths`).
 ## Example: Rustume
 
 Rustume composes quality (lintro), build, and rust-test reusables (test and
-coverage as separate jobs with `coverage: false` / `true`). Override `job-name`
-inputs to match org ruleset check names (for example emoji-prefixed labels).
+coverage as separate jobs with `coverage: false` / `true`). Pass `job-name` on
+always-run jobs (Rust build/test, split Node workflows) to match org ruleset
+check names. Matrix and internal Docker jobs use static inner names — set caller
+job `name:` for branding; see [workflow-contract.md](workflow-contract.md).
 
 See [reusable-workflows.md](reusable-workflows.md) for quality and release
 callers.
-
-## Migration from split workflows (v0.26 and earlier)
-
-Removed without shim (issue #168 §13):
-
-- `reusable-test-rust-test.yml`, `reusable-test-rust-coverage.yml`,
-  `reusable-rust-coverage.yml`, `reusable-test-rust.yml`
-- `cargo test` scripts (`run-cargo-test.sh`, `parse-cargo-test-results.sh`, etc.)
-
-Replace two jobs that called separate test and coverage reusables with two jobs
-(both `reusable-rust-test.yml`) differing only in `coverage` and `job-name`, or
-collapse to one job if your rulesets allow. Update required check names accordingly.

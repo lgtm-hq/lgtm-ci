@@ -43,7 +43,7 @@ Pass `tooling-ref` when testing an unreleased lgtm-ci branch. Production callers
 should pin the workflow ref to a commit SHA.
 
 See [workflow-contract.md](workflow-contract.md) for the standard input contract,
-permissions by mode, egress allowlists, and Rustume migration examples.
+permissions by mode, egress allowlists, and Rustume examples.
 
 For GitHub Pages (coverage, test reports, and static sites), see
 [pages-publishing.md](pages-publishing.md).
@@ -162,15 +162,12 @@ When `node-versions` is a matrix, only the **first** listed version uploads the
 flat artifact (avoids `upload-artifact` name collisions). Matrix debug artifacts
 (`node-coverage-<version>/…`) are unchanged when `upload-coverage: true`.
 
-**Job display names:** `test-vitest` and `test-custom` use static names
-(`Node.js tests (Vitest)` / `Node.js tests (custom command)`) so skipped matrix
-jobs do not show unevaluated `${{ … }}` in the PR checks UI. This replaces the
-previous dynamic names derived from `inputs.job-name` and matrix versions.
-Update branch protection required-status checks that matched the old names when
-upgrading to this tooling version.
-
-**Skipped jobs:** When `test-command` is set, Vitest is skipped and the
-custom-command job runs; when `test-command` is empty, the opposite applies.
+**Job display names:** Vitest and custom Node tests are **split workflows**
+(`reusable-test-node.yml` and `reusable-test-node-custom.yml`). Each test job uses
+`${{ inputs.job-name }}` for the GitHub check label — there are no mutually
+skipped Vitest/custom siblings. For Python, Docker per-platform, and E2E matrix
+jobs, inner names are static; see [workflow-contract.md](workflow-contract.md)
+(§ Job display names).
 
 **PR comments:** `coverage-pr-comment: true` builds the comment artifact inside
 the test job, but the separate `Node coverage PR comment` job also requires
