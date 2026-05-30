@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: `reusable-required-check.yml` org-ruleset gate for branch-protection check
-  names that differ from the reusable workflow `job-name`
-- **ci**: `assert-required-check.sh` for reusable required-check upstream validation
-
 ### Changed
 
 ### Deprecated
@@ -21,10 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.28.0] - 2026-05-30
+
+### Features
+
+- **workflows**: add reusable-required-check for org ruleset gates (#168 §4) (#264) (8023cce)
+
+### Previously Unreleased
+
+- **workflows**: `reusable-required-check.yml` org-ruleset gate for branch-protection check
+  names that differ from the reusable workflow `job-name`
+
+- **ci**: `assert-required-check.sh` for reusable required-check upstream validation
+
 - **ci**: `validate-static-job-names.sh` detects dynamic expressions in YAML block-scalar
   `job.name` continuations (#168 §12 guardrail)
-
-### Security
 
 ## [0.27.0] - 2026-05-30
 
@@ -630,7 +639,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.27.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.28.0...HEAD
+[0.28.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.25.0...v0.26.0
 [0.25.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.24.1...v0.25.0
