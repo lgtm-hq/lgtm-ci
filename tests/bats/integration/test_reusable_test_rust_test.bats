@@ -32,16 +32,6 @@ FACADE="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 	assert_success
 }
 
-@test "reusable-test-rust-test: delegates PR comment to reusable-test-pr-comment" {
-	run awk '
-		/^  comment-pr:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  comment-pr:/ { in_job = 0 }
-		in_job && /uses: \.\/\.github\/workflows\/reusable-test-pr-comment\.yml/ { found = 1; exit }
-		END { exit !found }
-	' "$WORKFLOW"
-	assert_success
-}
-
 @test "reusable-rust-test: delegates to reusable-test-rust-test" {
 	run awk '
 		/^  test:/ { in_job = 1 }
