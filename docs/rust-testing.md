@@ -9,6 +9,7 @@ stack**, composed in the consumer caller workflow.
 | Node / TypeScript | `reusable-test-node.yml`     |
 | Rust (build)      | `reusable-rust-build.yml`    |
 | Rust (coverage)   | `reusable-rust-coverage.yml` |
+| Rust (checks)     | `reusable-rust-checks.yml`   |
 | Rust (legacy)     | `reusable-test-rust.yml`     |
 
 ## Rust-only repository
@@ -52,6 +53,32 @@ jobs:
 
 `reusable-test-rust.yml` with `run-build` / `run-coverage` remains available but
 may leave skipped jobs in the PR UI when only one mode is enabled.
+
+## Cargo test, clippy, and fmt
+
+Use `reusable-rust-checks.yml` for workspace unit tests and lint gates with an
+aggregated PR comment. Disable individual jobs with `clippy: false` or
+`fmt-check: false` when a repository runs those checks elsewhere.
+
+```yaml
+jobs:
+  rust-checks:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-checks.yml@<sha>
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Tests"
+      egress-policy: block
+    permissions:
+      contents: read
+      pull-requests: write
+```
+
+`reusable-test-rust-checks.yml` is the internal implementation; callers should
+prefer the facade. The legacy name `reusable-test-rust.yml` is reserved for the
+build/coverage orchestrator added in v0.15.0.
+
+Disable `clippy` or `fmt-check` when those gates already run through
+`reusable-quality-lint` (lintro) in the same pipeline.
 
 ## Rust workspace with a frontend package
 

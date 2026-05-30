@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-rust-checks` and `reusable-test-rust-checks` for
+  `cargo test`, optional `cargo clippy` / `cargo fmt --check`, and aggregated PR
+  comments (#68)
+
 ### Changed
 
 ### Deprecated
