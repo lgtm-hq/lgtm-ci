@@ -6,6 +6,9 @@ All `lgtm-ci` reusable workflows share a common consumer contract.
 
 Where applicable, workflows accept:
 
+<!-- Wide table kept for quick input-to-purpose scanning across reusable workflows. -->
+<!-- markdownlint-disable MD013 -->
+
 | Input                              | Purpose                                                       |
 | ---------------------------------- | ------------------------------------------------------------- |
 | `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA) |
@@ -17,6 +20,8 @@ Where applicable, workflows accept:
 | `post-pr-comment`                  | Enable PR summary comments                                    |
 | `comment-marker` / `comment-title` | PR comment identity                                           |
 | `draft-pr-skip`                    | Skip PR jobs on draft pull requests                           |
+
+<!-- markdownlint-enable MD013 -->
 
 ## Permissions by mode
 
@@ -41,6 +46,9 @@ Actions maps matrix values to reusable workflow inputs. `reusable-test-node.yml`
 `coverage-pr-comment` uses inline steps to avoid an extra nesting level (which
 would worsen check-name readability) and to access matrix-specific artifacts.
 
+<!-- Wide table kept to compare permissions, modes, and workflow entry points. -->
+<!-- markdownlint-disable MD013 -->
+
 | Mode                  | Caller permissions                                   | Workflow                                |
 | --------------------- | ---------------------------------------------------- | --------------------------------------- |
 | Quality / lint only   | `contents: read`, `packages: read`                   | `reusable-quality-lint.yml`             |
@@ -52,6 +60,8 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `upload-pypi-oidc`                      |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`        |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`           |
+
+<!-- markdownlint-enable MD013 -->
 
 `reusable-test-node.yml` no longer includes a publish job. Use
 `reusable-test-node-publish.yml` in a separate caller job when publishing is

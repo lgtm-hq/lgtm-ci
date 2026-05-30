@@ -3,13 +3,13 @@
 Rust CI follows the same model as Python and Node: **one language reusable per
 stack**, composed in the consumer caller workflow.
 
-| Language | Reusable |
-| --- | --- |
-| Python | `reusable-test-python.yml` |
-| Node / TypeScript | `reusable-test-node.yml` |
-| Rust (build) | `reusable-rust-build.yml` |
-| Rust (coverage) | `reusable-rust-coverage.yml` |
-| Rust (legacy) | `reusable-test-rust.yml` |
+| Language          | Reusable                     |
+| ----------------- | ---------------------------- |
+| Python            | `reusable-test-python.yml`   |
+| Node / TypeScript | `reusable-test-node.yml`     |
+| Rust (build)      | `reusable-rust-build.yml`    |
+| Rust (coverage)   | `reusable-rust-coverage.yml` |
+| Rust (legacy)     | `reusable-test-rust.yml`     |
 
 ## Rust-only repository
 

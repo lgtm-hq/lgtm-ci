@@ -4,7 +4,6 @@ description: >-
   Resolve the Git ref for lgtm-ci tooling checkout. Returns the caller-provided
   tooling-ref if set, otherwise falls back to github.workflow_sha.
 author: "lgtm-hq"
-
 inputs:
   tooling-ref:
     description: "Caller-provided Git ref override (empty to use workflow SHA)"

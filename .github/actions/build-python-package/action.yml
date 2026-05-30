@@ -4,7 +4,6 @@ description: >-
   Preflight tag checks, validate metadata, build sdist/wheel, and twine-check dist.
   Does not upload to PyPI.
 author: "lgtm-hq"
-
 inputs:
   validate:
     description: "Run twine check on built distributions"

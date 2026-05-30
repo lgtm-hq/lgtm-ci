@@ -389,7 +389,7 @@ jobs:
       )
     runs-on: ubuntu-latest
     permissions:
-      actions: write  # upload-artifact/merge re-uploads merged python-coverage (artifact write)
+      actions: write # upload-artifact/merge re-uploads merged python-coverage (artifact write)
       contents: read
     outputs:
       tests-passed: ${{ steps.aggregate.outputs.tests-passed }}

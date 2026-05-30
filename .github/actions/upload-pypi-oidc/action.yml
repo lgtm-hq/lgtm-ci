@@ -7,7 +7,6 @@ description: >-
   repository workflow (not from a cross-repo reusable workflow) with
   environment and id-token: write set on that job.
 author: "lgtm-hq"
-
 inputs:
   artifact-name:
     description: "Workflow artifact containing dist/"
