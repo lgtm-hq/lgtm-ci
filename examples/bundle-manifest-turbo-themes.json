@@ -9,6 +9,13 @@
       "require_success": true
     },
     {
+      "id": "rust-coverage",
+      "workflow": "Coverage Reports",
+      "artifact": "rust-coverage-html",
+      "dest": "coverage-rust",
+      "require_success": true
+    },
+    {
       "id": "playwright",
       "workflow": "Quality Check - E2E Tests",
       "artifact": "playwright-report",

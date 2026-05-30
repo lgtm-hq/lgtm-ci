@@ -138,6 +138,31 @@ the language-specific test workflows. Coverage and artifact-based comments use
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-quality-pr-comment.yml` (called directly by the caller workflow).
 
+### Pages coverage HTML inputs (`reusable-test-node`)
+
+| Input | Type | Required | Default | Purpose |
+| ----- | ---- | -------- | ------- | ------- |
+| `upload-pages-coverage-html` | boolean | no | `false` | Upload flat HTML for Model B bundling |
+| `pages-coverage-artifact-name` | string | no | `coverage-html` | Flat HTML artifact name |
+| `pages-coverage-upload-on` | string | no | `push-main` | Upload only on push to `main` (v1) |
+| `pages-coverage-source-subpath` | string | no | `coverage` | HTML dir under `working-directory` |
+
+Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
+
+When `node-versions` is a matrix, only the **first** listed version uploads the
+flat artifact (avoids `upload-artifact` name collisions). Matrix debug artifacts
+(`node-coverage-<version>/…`) are unchanged when `upload-coverage: true`.
+
+**Skipped jobs:** `test-vitest` and `test-custom` use static job names so PR
+checks do not show unevaluated `${{ … }}` for the path that is skipped by design.
+When `test-command` is set, Vitest is skipped and the custom-command job runs;
+when `test-command` is empty, the opposite applies.
+
+**PR comments:** `coverage-pr-comment: true` builds the comment artifact inside
+the test job, but the separate `Node coverage PR comment` job also requires
+`post-pr-comment: true`. Setting only `coverage-pr-comment: true` skips the
+poster job by design.
+
 ### Rust
 
 Prefer `reusable-rust-build.yml` and `reusable-rust-coverage.yml` for separate
@@ -164,7 +189,23 @@ jobs:
       tooling-ref: "<sha>"
       job-name: "Rust Coverage"
       egress-policy: block
+      upload-pages-coverage-html: true
+      pages-coverage-artifact-name: rust-coverage-html
 ```
+
+### Pages coverage HTML inputs (`reusable-rust-coverage` / `reusable-test-rust-coverage`)
+
+| Input | Type | Required | Default | Purpose |
+| ----- | ---- | -------- | ------- | ------- |
+| `upload-pages-coverage-html` | boolean | no | `false` | Upload flat HTML for Model B sites |
+| `pages-coverage-artifact-name` | string | no | `rust-coverage-html` | Rust HTML artifact name |
+| `pages-coverage-upload-on` | string | no | `push-main` | Upload only on push to `main` (v1) |
+
+Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
+
+HTML is generated in the same job as the LCOV run via `cargo llvm-cov report --html`
+(no second test run). The script flattens cargo-llvm-cov's `<output-dir>/html/`
+layout so the artifact root is browsable HTML.
 
 ## Release
 
