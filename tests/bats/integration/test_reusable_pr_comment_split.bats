@@ -115,23 +115,20 @@ _orchestrator_delegates_comment() {
 	assert_success
 }
 
-@test "reusable-test-rust-checks: test job has no pull-requests permission" {
+@test "reusable-test-rust-test: test job has no pull-requests permission" {
 	run awk '
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
 		in_job && /pull-requests:/ { found = 1; exit }
 		END { exit found }
-	' "${PROJECT_ROOT}/.github/workflows/reusable-test-rust-checks.yml"
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-rust-test.yml"
 	assert_success
 }
 
-@test "reusable-test-rust-checks: delegates PR comment via post-pr-comment action" {
-	run awk '
-		/^  comment-pr:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  comment-pr:/ { in_job = 0 }
-		in_job && /post-pr-comment/ { found = 1; exit }
-		END { exit !found }
-	' "${PROJECT_ROOT}/.github/workflows/reusable-test-rust-checks.yml"
+@test "reusable-test-rust-test: delegates PR comment to reusable-test-pr-comment" {
+	run _orchestrator_delegates_comment \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-rust-test.yml" \
+		"reusable-test-pr-comment.yml"
 	assert_success
 }
 
