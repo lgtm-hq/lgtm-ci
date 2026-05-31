@@ -9,19 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **actions**: `prepare-pypi-upload` composite for PyPI upload preparation (#269)
-
 ### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.29.1] - 2026-05-31
+
+### Bug Fixes
+
+- **ci**: split upload-pypi-oidc so pypa publish runs at caller level (#270) (c908c40)
+
+### Previously Unreleased
+
+- **actions**: `prepare-pypi-upload` composite for PyPI upload preparation (#269)
 
 - **ci**: PyPI OIDC upload contract split — callers invoke
   `pypa/gh-action-pypi-publish` at workflow step level (#269)
 
-### Removed
-
 - **actions**: `upload-pypi-oidc` — use `prepare-pypi-upload` plus caller-level
   `pypa/gh-action-pypi-publish` (#269)
-
-### Fixed
 
 - **ci**: nested `pypa/gh-action-pypi-publish` no longer resolves to
   `ghcr.io/lgtm-hq/lgtm-ci` (#269)
@@ -662,7 +674,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.1...HEAD
+[0.29.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.26.0...v0.27.0
