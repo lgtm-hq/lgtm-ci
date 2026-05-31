@@ -65,102 +65,15 @@ _tooling_sparse_cone_ok() {
 	assert_failure
 }
 
-@test "upload-pypi-oidc: downloads artifact before upload and attests" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run awk '
-		/actions\/download-artifact@/ { download = NR }
-		/gh-action-pypi-publish@/ { pypi = NR }
-		/attest-build-provenance@/ { attest = NR }
-		/STEP: validate-dist/ { validate = NR }
-		/id: extract-metadata/ { extract = NR }
-		/Generate upload summary/ { summary = NR }
-		/id: set-published/ { published = NR }
-		END {
-			exit !(download > 0 && validate > 0 && pypi > 0 && attest > 0 &&
-				published > 0 && extract > 0 && summary > 0 && download < validate &&
-				validate < pypi && pypi < attest && attest < published &&
-				published < extract && extract < summary)
-		}
-	' "$action"
-	assert_success
-}
-
-@test "upload-pypi-oidc: attestation is best-effort before set-published" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run awk '
-		/Attest build provenance/ { in_attest_step = 1; next }
-		/^      - name:/ { in_attest_step = 0 }
-		in_attest_step && /continue-on-error: true/ { coe = NR }
-		in_attest_step && /attest-build-provenance@/ { attest = NR }
-		/id: set-published/ { published = NR }
-		END {
-			exit !(attest > 0 && coe > 0 && published > 0 &&
-				coe < attest && attest < published)
-		}
-	' "$action"
-	assert_success
-}
-
-@test "upload-pypi-oidc: exposes published output" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run grep -q 'steps.set-published.outputs.published' "$action"
-	assert_success
-}
-
-@test "upload-pypi-oidc: summary wires package metadata from extract-metadata step" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run awk '
-		/Generate upload summary/ { in_summary = 1; next }
-		in_summary && /STEP: summary/ { step = 1 }
-		in_summary && /PACKAGE_NAME: \$\{\{ steps\.extract-metadata\.outputs\.name \}\}/ { name = 1 }
-		in_summary && /PACKAGE_VERSION: \$\{\{ steps\.extract-metadata\.outputs\.version \}\}/ { version = 1 }
-		in_summary && /^    - name:/ { in_summary = 0 }
-		END { exit !(step && name && version) }
-	' "$action"
-	assert_success
-}
-
-@test "upload-pypi-oidc: validate step uses strict distribution validation" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run awk '
-		/Validate distribution/ { in_step = 1; next }
-		in_step && /^    - name:/ { in_step = 0 }
-		in_step && /STEP: validate-dist/ { step = 1 }
-		in_step && /VALIDATE_STRICT: "true"/ { strict = 1 }
-		END { exit !(step && strict) }
-	' "$action"
-	assert_success
-}
-
-@test "upload-pypi-oidc: VALIDATE_STRICT is scoped to validate step only" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run awk '
-		/Validate distribution/ { in_validate = 1; next }
-		in_validate && /^    - name:/ { in_validate = 0 }
-		in_validate && /VALIDATE_STRICT: "true"/ { in_validate_strict = 1 }
-		!in_validate && /VALIDATE_STRICT: "true"/ { outside_strict = 1 }
-		END { exit !(in_validate_strict && !outside_strict) }
-	' "$action"
-	assert_success
-}
-
-@test "upload-pypi-oidc: sparse checkout includes actions and scripts" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run awk '
-		/sparse-checkout: \|/ { in_sparse = 1; next }
-		in_sparse && /^        [^ ]/ { in_sparse = 0 }
-		in_sparse && /\.github\/actions\// { actions = 1 }
-		in_sparse && /scripts\/ci\// { scripts = 1 }
-		END { exit !(actions && scripts) }
-	' "$action"
-	assert_success
-}
-
 @test "examples/publish-python-release: references split PyPI publish contract" {
 	local example="${PROJECT_ROOT}/examples/publish-python-release.yml"
 	run grep -q 'reusable-build-python-dist.yml' "$example"
 	assert_success
-	run grep -q 'upload-pypi-oidc' "$example"
+	run grep -q 'prepare-pypi-upload' "$example"
+	assert_success
+	run grep -q 'gh-action-pypi-publish@' "$example"
+	assert_success
+	run grep -q 'attest-build-provenance@' "$example"
 	assert_success
 	run grep -q 'reusable-github-release.yml' "$example"
 	assert_success
@@ -170,6 +83,8 @@ _tooling_sparse_cone_ok() {
 	assert_success
 	run grep -q 'upload.test.pypi.org:443' "$example"
 	assert_success
+	run grep -q 'upload-pypi-oidc' "$example"
+	assert_failure
 	run grep -q 'reusable-publish-pypi' "$example"
 	assert_failure
 }
