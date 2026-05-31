@@ -124,10 +124,22 @@ _tooling_sparse_cone_ok() {
 	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
 	run awk '
 		/Validate distribution/ { in_step = 1; next }
-		in_step && /^      - name:/ { in_step = 0 }
+		in_step && /^    - name:/ { in_step = 0 }
 		in_step && /STEP: validate-dist/ { step = 1 }
 		in_step && /VALIDATE_STRICT: "true"/ { strict = 1 }
 		END { exit !(step && strict) }
+	' "$action"
+	assert_success
+}
+
+@test "upload-pypi-oidc: VALIDATE_STRICT is scoped to validate step only" {
+	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
+	run awk '
+		/Validate distribution/ { in_validate = 1; next }
+		in_validate && /^    - name:/ { in_validate = 0 }
+		in_validate && /VALIDATE_STRICT: "true"/ { in_validate_strict = 1 }
+		!in_validate && /VALIDATE_STRICT: "true"/ { outside_strict = 1 }
+		END { exit !(in_validate_strict && !outside_strict) }
 	' "$action"
 	assert_success
 }
@@ -153,6 +165,10 @@ _tooling_sparse_cone_ok() {
 	run grep -q 'reusable-github-release.yml' "$example"
 	assert_success
 	run grep -q 'step-security/harden-runner@' "$example"
+	assert_success
+	run grep -q 'test.pypi.org:443' "$example"
+	assert_success
+	run grep -q 'upload.test.pypi.org:443' "$example"
 	assert_success
 	run grep -q 'reusable-publish-pypi' "$example"
 	assert_failure
