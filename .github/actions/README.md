@@ -1092,21 +1092,30 @@ Build Python sdist/wheel and validate with twine. Does not upload to PyPI.
 
 ---
 
-### upload-pypi-oidc
+### prepare-pypi-upload
 
-Download a workflow artifact and upload to PyPI or TestPyPI via OIDC. Use only in
-a job defined in the **caller** repository workflow (see
+Download a workflow artifact, validate distributions, and expose metadata for a
+caller-level `pypa/gh-action-pypi-publish` step. Use only in a job defined in
+the **caller** repository workflow (see
 [python-release-publish.md](../../docs/python-release-publish.md)).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@main
+- name: Prepare PyPI upload
+  id: prepare
+  uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@main
   with:
     artifact-name: python-dist
-    test-pypi: "false"
     tooling-ref: "<sha>"
+    python-version: "3.12"
+
+- name: Upload to PyPI
+  uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+  with:
+    repository-url: https://upload.pypi.org/legacy/
+    packages-dir: ${{ steps.prepare.outputs.dist-path }}
 ```
 
-**Outputs:** `published`
+**Outputs:** `dist-path`, `validated`, `package-name`, `package-version`
 
 **Requirements:** `contents: read`, `id-token: write`, `attestations: write` on the
 job; `environment: pypi`; PyPI trusted publisher matches the caller workflow file.
@@ -1115,8 +1124,15 @@ When `validate: true` (default), distribution validation runs with
 `VALIDATE_STRICT=true` — the step fails if twine check cannot run (via twine or
 `uv run --with twine`).
 
-Provenance attestation uses `continue-on-error: true` so Sigstore failures do not
-block `published` or downstream release jobs after a successful PyPI upload.
+Do **not** nest `pypa/gh-action-pypi-publish` inside lgtm-ci composites.
+
+---
+
+### upload-pypi-oidc
+
+**Deprecated.** Fails fast with a migration message. Use `prepare-pypi-upload` plus
+caller-level `pypa/gh-action-pypi-publish` instead. See
+[python-release-publish.md](../../docs/python-release-publish.md).
 
 ---
 
@@ -1761,7 +1777,7 @@ jobs:
 ### reusable-build-python-dist.yml
 
 Build Python distribution and upload a workflow artifact. Pair with a caller job
-using `upload-pypi-oidc` for OIDC upload. See
+using `prepare-pypi-upload` and caller-level `pypa/gh-action-pypi-publish`. See
 [docs/python-release-publish.md](../../docs/python-release-publish.md).
 
 **Outputs:** `version`, `package-name`

@@ -9,15 +9,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **actions**: `prepare-pypi-upload` composite for PyPI upload preparation (#269)
+
 ### Changed
 
+- **ci**: PyPI OIDC upload contract split — callers invoke
+  `pypa/gh-action-pypi-publish` at workflow step level (#269)
+
 ### Deprecated
+
+- **actions**: `upload-pypi-oidc` — use `prepare-pypi-upload` plus caller-level
+  `pypa/gh-action-pypi-publish` (#269)
 
 ### Removed
 
 ### Fixed
 
-### Security
+- **ci**: nested `pypa/gh-action-pypi-publish` no longer resolves to
+  `ghcr.io/lgtm-hq/lgtm-ci` (#269)
 
 ## [0.29.0] - 2026-05-31
 

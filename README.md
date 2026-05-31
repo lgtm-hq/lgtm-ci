@@ -146,12 +146,13 @@ steps:
 
 #### Publishing & Deployment
 
-| Action                 | Description                   |
-| ---------------------- | ----------------------------- |
-| `publish-npm`          | npm package publishing        |
-| `build-python-package` | Build Python sdist/wheel      |
-| `upload-pypi-oidc`     | PyPI OIDC upload (caller job) |
-| `publish-gem`          | RubyGems publishing           |
+| Action                 | Description                                                    |
+| ---------------------- | -------------------------------------------------------------- |
+| `publish-npm`          | npm package publishing                                         |
+| `build-python-package` | Build Python sdist/wheel                                       |
+| `prepare-pypi-upload`  | Download, validate, and expose dist metadata for PyPI upload   |
+| `upload-pypi-oidc`     | **Deprecated** — use `prepare-pypi-upload` + caller pypa step |
+| `publish-gem`          | RubyGems publishing                                            |
 | `update-homebrew`      | Homebrew formula updates      |
 | `validate-package`     | Package validation            |
 | `wait-for-package`     | Package availability polling  |
