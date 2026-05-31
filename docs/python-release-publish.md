@@ -88,8 +88,6 @@ jobs:
             pkg-containers.githubusercontent.com:443
             pypi.org:443
             upload.pypi.org:443
-            test.pypi.org:443
-            upload.test.pypi.org:443
             files.pythonhosted.org:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
@@ -188,13 +186,18 @@ depend on a published GitHub Release.
 
 ## Migration from v0.23.x
 
-| Removed                                  | Replacement                                                        |
-| ---------------------------------------- | ------------------------------------------------------------------ |
-| `reusable-publish-pypi-release.yml`      | `reusable-build-python-dist.yml` + caller upload steps             |
-| `reusable-publish-pypi.yml`              | Same pattern; TestPyPI via `repository-url` on pypa step           |
-| `publish-pypi` action                    | `build-python-package` + `prepare-pypi-upload` + pypa step         |
-| `upload-pypi-oidc` action                | `prepare-pypi-upload` + caller-level `pypa/gh-action-pypi-publish` |
-| `github-environment` on reusable `with:` | `environment:` on caller upload **job**                            |
+<!-- Wide migration table; MD013 disabled — row content cannot wrap without breaking pipes. -->
+<!-- markdownlint-disable MD013 -->
+
+| Removed                                  | Replacement                                            |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `reusable-publish-pypi-release.yml`      | `reusable-build-python-dist.yml` + caller upload steps |
+| `reusable-publish-pypi.yml`              | Same pattern; TestPyPI via `repository-url` on pypa    |
+| `publish-pypi` action                    | `build-python-package` + `prepare-pypi-upload` + pypa  |
+| `upload-pypi-oidc` action                | `prepare-pypi-upload` + caller-level pypa publish step |
+| `github-environment` on reusable `with:` | `environment:` on caller upload **job**                |
+
+<!-- markdownlint-enable MD013 -->
 
 ## Related docs
 

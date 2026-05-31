@@ -16,12 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ci**: PyPI OIDC upload contract split — callers invoke
   `pypa/gh-action-pypi-publish` at workflow step level (#269)
 
-### Deprecated
+### Removed
 
 - **actions**: `upload-pypi-oidc` — use `prepare-pypi-upload` plus caller-level
   `pypa/gh-action-pypi-publish` (#269)
-
-### Removed
 
 ### Fixed
 

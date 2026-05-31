@@ -32,7 +32,7 @@ inputs:
 outputs:
   dist-path:
     description: "Directory containing distribution files (for packages-dir)"
-    value: ${{ inputs.working-directory }}/dist/
+    value: ${{ inputs.working-directory }}/dist
   validated:
     description: >-
       `true` when twine check passed, `skipped` when validate is disabled;

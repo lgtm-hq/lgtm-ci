@@ -1128,14 +1128,6 @@ Do **not** nest `pypa/gh-action-pypi-publish` inside lgtm-ci composites.
 
 ---
 
-### upload-pypi-oidc
-
-**Deprecated.** Fails fast with a migration message. Use `prepare-pypi-upload` plus
-caller-level `pypa/gh-action-pypi-publish` instead. See
-[python-release-publish.md](../../docs/python-release-publish.md).
-
----
-
 ### publish-npm
 
 Build and publish Node.js packages to npm with provenance attestation.

@@ -21,7 +21,7 @@ _no_nested_pypa_publish_in_composites() {
 @test "composite actions: forbid nested pypa/gh-action-pypi-publish" {
 	run _no_nested_pypa_publish_in_composites "${PROJECT_ROOT}/.github/actions"
 	assert_success
-	refute_output --partial "gh-action-pypi-publish@"
+	refute_output --partial ".github/actions/"
 }
 
 @test "prepare-pypi-upload: downloads artifact before validate and metadata" {
@@ -92,16 +92,4 @@ _no_nested_pypa_publish_in_composites() {
 		END { exit !(actions && scripts) }
 	' "$action"
 	assert_success
-}
-
-@test "upload-pypi-oidc: fails fast with deprecation message" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
-	run grep -q 'DEPRECATED' "$action"
-	assert_success
-	run grep -q 'prepare-pypi-upload' "$action"
-	assert_success
-	run grep -q 'exit 1' "$action"
-	assert_success
-	run grep -q 'gh-action-pypi-publish@' "$action"
-	assert_failure
 }

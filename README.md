@@ -146,17 +146,16 @@ steps:
 
 #### Publishing & Deployment
 
-| Action                 | Description                                                    |
-| ---------------------- | -------------------------------------------------------------- |
-| `publish-npm`          | npm package publishing                                         |
-| `build-python-package` | Build Python sdist/wheel                                       |
-| `prepare-pypi-upload`  | Download, validate, and expose dist metadata for PyPI upload   |
-| `upload-pypi-oidc`     | **Deprecated** — use `prepare-pypi-upload` + caller pypa step |
-| `publish-gem`          | RubyGems publishing                                            |
-| `update-homebrew`      | Homebrew formula updates      |
-| `validate-package`     | Package validation            |
-| `wait-for-package`     | Package availability polling  |
-| `deploy-pages`         | GitHub Pages deployment       |
+| Action                 | Description                                                  |
+| ---------------------- | ------------------------------------------------------------ |
+| `publish-npm`          | npm package publishing                                       |
+| `build-python-package` | Build Python sdist/wheel                                     |
+| `prepare-pypi-upload`  | Download, validate, and expose dist metadata for PyPI upload |
+| `publish-gem`          | RubyGems publishing                                          |
+| `update-homebrew`      | Homebrew formula updates                                     |
+| `validate-package`     | Package validation                                           |
+| `wait-for-package`     | Package availability polling                                 |
+| `deploy-pages`         | GitHub Pages deployment                                      |
 
 ### Reusable Workflows
 
