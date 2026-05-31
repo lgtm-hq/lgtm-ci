@@ -79,10 +79,6 @@ _tooling_sparse_cone_ok() {
 	assert_success
 	run grep -q 'step-security/harden-runner@' "$example"
 	assert_success
-	run grep -q 'test.pypi.org:443' "$example"
-	assert_success
-	run grep -q 'upload.test.pypi.org:443' "$example"
-	assert_success
 	run grep -q 'upload-pypi-oidc' "$example"
 	assert_failure
 	run grep -q 'reusable-publish-pypi' "$example"

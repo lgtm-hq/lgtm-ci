@@ -34,7 +34,9 @@ outputs:
     description: "Directory containing distribution files (for packages-dir)"
     value: ${{ inputs.working-directory }}/dist/
   validated:
-    description: "Whether distribution validation passed (or was skipped)"
+    description: >-
+      `true` when twine check passed, `skipped` when validate is disabled;
+      validation failures abort the action before this output is set
     value: ${{ steps.set-validated.outputs.validated }}
   package-name:
     description: "Package name extracted from dist/ or pyproject.toml"
