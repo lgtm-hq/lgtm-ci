@@ -9,14 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **examples**: `publish-python-release.yml` canonical caller template for PyPI tag
-  releases (#168 §5)
-
 ### Changed
-
-- **ci**: `upload-pypi-oidc` fails upload validation when twine check cannot run
-  (`VALIDATE_STRICT=true`) (#168 §5)
-- **docs**: PyPI upload egress allowlist includes artifact download hosts (#168 §5)
 
 ### Deprecated
 
@@ -25,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.29.0] - 2026-05-31
+
+### Features
+
+- **ci**: finalize PyPI publish contract (#168 §5) (#266) (f9bdede)
+
+### Previously Unreleased
+
+- **examples**: `publish-python-release.yml` canonical caller template for PyPI tag
+  releases (#168 §5)
+
+- **ci**: `upload-pypi-oidc` fails upload validation when twine check cannot run
+  (`VALIDATE_STRICT=true`) (#168 §5)
+
+- **docs**: PyPI upload egress allowlist includes artifact download hosts (#168 §5)
 
 ## [0.28.0] - 2026-05-30
 
@@ -646,7 +655,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.28.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.0...HEAD
+[0.29.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.27.0...v0.28.0
 [0.27.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.26.0...v0.27.0
 [0.26.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.25.0...v0.26.0
