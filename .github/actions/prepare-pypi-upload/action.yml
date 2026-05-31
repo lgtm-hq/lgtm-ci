@@ -89,8 +89,10 @@ runs:
     - name: Set validated output
       id: set-validated
       shell: bash
+      env:
+        VALIDATE_INPUT: ${{ inputs.validate }}
       run: |
-        if [[ "${{ inputs.validate }}" == "true" ]]; then
+        if [[ "$VALIDATE_INPUT" == "true" ]]; then
           echo "validated=true" >> "$GITHUB_OUTPUT"
         else
           echo "validated=skipped" >> "$GITHUB_OUTPUT"
