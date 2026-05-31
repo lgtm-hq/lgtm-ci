@@ -319,22 +319,32 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             actions.githubusercontent.com:443
-            blob.core.windows.net:443
+            *.blob.core.windows.net:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
             upload.pypi.org:443
-            test.pypi.org:443
-            upload.test.pypi.org:443
             files.pythonhosted.org:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             oauth2.sigstore.dev:443
-      - uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@<sha>
+      - name: Prepare PyPI upload
+        id: prepare
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
         with:
           artifact-name: python-dist
           tooling-ref: "<sha>"
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          repository-url: https://upload.pypi.org/legacy/
+          packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      - name: Attest build provenance
+        continue-on-error: true
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
   github-release:
     needs: pypi-upload

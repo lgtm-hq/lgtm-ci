@@ -75,8 +75,8 @@ YAML
 	assert_output --partial "lgtm-hq/lgtm-ci/.github/actions/setup-python@\${{"
 }
 
-@test "upload-pypi-oidc: checks out lgtm-ci tooling before local setup-python" {
-	local action="${PROJECT_ROOT}/.github/actions/upload-pypi-oidc/action.yml"
+@test "prepare-pypi-upload: checks out lgtm-ci tooling before local setup-python" {
+	local action="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
 	run awk '
 		/Checkout lgtm-ci tooling/ { checkout = NR }
 		/path: .lgtm-ci-tooling/ { path = NR }

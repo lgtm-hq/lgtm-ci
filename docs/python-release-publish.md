@@ -9,11 +9,16 @@ workflows (tag push or manual dispatch). Callers keep product-specific steps
 | Component                        | Purpose                                                 |
 | -------------------------------- | ------------------------------------------------------- |
 | `reusable-build-python-dist.yml` | Build sdist/wheel and upload workflow artifact          |
-| `upload-pypi-oidc` action        | OIDC upload + best-effort attestation (caller job only) |
+| `prepare-pypi-upload` action     | Download artifact, validate, expose dist metadata       |
+| `pypa/gh-action-pypi-publish`    | OIDC upload (caller workflow step only)                 |
 | `build-python-package` action    | Build/validate (used inside build reusable)             |
 | `reusable-github-release.yml`    | Attach artifacts to a GitHub Release                    |
 
 There is **no orchestrator** workflow. Compose jobs in the caller repository.
+
+`pypa/gh-action-pypi-publish` **must not** be nested inside lgtm-ci composite
+actions — GitHub resolves `github.action_repository` to the parent composite
+(`lgtm-hq/lgtm-ci`), which breaks the pypa Docker action.
 
 ## Production tag push (recommended layout)
 
@@ -22,7 +27,7 @@ Typical caller jobs:
 1. **Quality** — `reusable-quality-lint.yml`
 2. **SBOM** — `reusable-sbom.yml`
 3. **Build** — `reusable-build-python-dist.yml`
-4. **Upload** — local job with `upload-pypi-oidc` (OIDC)
+4. **Upload** — local job: `prepare-pypi-upload` → `pypa/gh-action-pypi-publish` → optional attestation
 5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`)
 6. **Product-specific** — Homebrew, Docker, etc.
 
@@ -78,23 +83,33 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             actions.githubusercontent.com:443
-            blob.core.windows.net:443
+            *.blob.core.windows.net:443
             ghcr.io:443
             pkg-containers.githubusercontent.com:443
             pypi.org:443
             upload.pypi.org:443
-            test.pypi.org:443
-            upload.test.pypi.org:443
             files.pythonhosted.org:443
             fulcio.sigstore.dev:443
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             oauth2.sigstore.dev:443
-      - uses: lgtm-hq/lgtm-ci/.github/actions/upload-pypi-oidc@<sha>
+      - name: Prepare PyPI upload
+        id: prepare
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
         with:
           artifact-name: python-dist
           tooling-ref: "<sha>"
           python-version: "3.12"
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@<pin> # v1.14.0
+        with:
+          repository-url: https://upload.pypi.org/legacy/
+          packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      - name: Attest build provenance
+        continue-on-error: true
+        uses: actions/attest-build-provenance@<pin> # v4.1.0
+        with:
+          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
   github-release:
     needs: [pypi-upload]
@@ -109,14 +124,15 @@ jobs:
 Use the same `artifact-name` for `reusable-build-python-dist.yml` and
 `reusable-github-release.yml`.
 
-`upload-pypi-oidc` checks out lgtm-ci tooling and calls sibling actions by local
+`prepare-pypi-upload` checks out lgtm-ci tooling and calls sibling actions by local
 path. See [workflow-contract.md](workflow-contract.md) for the composite action
 local-path contract.
 
 ## TestPyPI
 
-Same split: build reusable + caller upload job with `test-pypi: true` on
-`upload-pypi-oidc` and `environment: testpypi` (or your TestPyPI environment).
+Same split: build reusable + caller upload job with
+`repository-url: https://test.pypi.org/legacy/` on the pypa step and
+`environment: testpypi` (or your TestPyPI environment).
 
 ## Caller permissions summary
 
@@ -144,14 +160,14 @@ Cross-repo reusables cannot perform OIDC upload until PyPI supports it
 
 ## Provenance attestation
 
-`upload-pypi-oidc` runs `attest-build-provenance` with `continue-on-error: true`
-after a successful PyPI upload. Sigstore outages must not fail the release job or
-skip `published: true` — the wheel is already on the index and retries would not
-be idempotent.
+Run `attest-build-provenance` as a **caller-level** step with
+`continue-on-error: true` after a successful PyPI upload. Sigstore outages must
+not fail the release job — the wheel is already on the index and retries would
+not be idempotent.
 
 ## Upload validation
 
-When `validate: true` (default), `upload-pypi-oidc` runs twine check with
+When `validate: true` (default), `prepare-pypi-upload` runs twine check with
 `VALIDATE_STRICT=true` after `setup-python`. Validation tries `twine check`
 directly, then `uv run --with twine twine check` when twine is not on PATH. The
 upload job **fails** if neither method can run — distributions are never uploaded
@@ -170,12 +186,18 @@ depend on a published GitHub Release.
 
 ## Migration from v0.23.x
 
-| Removed                                  | Replacement                                           |
-| ---------------------------------------- | ----------------------------------------------------- |
-| `reusable-publish-pypi-release.yml`      | `reusable-build-python-dist.yml` + `upload-pypi-oidc` |
-| `reusable-publish-pypi.yml`              | Same pattern; set `test-pypi: true` on upload action  |
-| `publish-pypi` action                    | `build-python-package` + `upload-pypi-oidc`           |
-| `github-environment` on reusable `with:` | `environment:` on caller upload **job**               |
+<!-- Wide migration table; MD013 disabled — row content cannot wrap without breaking pipes. -->
+<!-- markdownlint-disable MD013 -->
+
+| Removed                                  | Replacement                                            |
+| ---------------------------------------- | ------------------------------------------------------ |
+| `reusable-publish-pypi-release.yml`      | `reusable-build-python-dist.yml` + caller upload steps |
+| `reusable-publish-pypi.yml`              | Same pattern; TestPyPI via `repository-url` on pypa    |
+| `publish-pypi` action                    | `build-python-package` + `prepare-pypi-upload` + pypa  |
+| `upload-pypi-oidc` action                | `prepare-pypi-upload` + caller-level pypa publish step |
+| `github-environment` on reusable `with:` | `environment:` on caller upload **job**                |
+
+<!-- markdownlint-enable MD013 -->
 
 ## Related docs
 

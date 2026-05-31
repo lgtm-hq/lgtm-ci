@@ -1,11 +1,10 @@
 ---
-name: "Upload Python distribution to PyPI (OIDC)"
+name: "Prepare Python distribution for PyPI upload"
 description: >-
-  Download a workflow artifact, optionally validate with twine, upload to PyPI or
-  TestPyPI via OIDC, and optionally attest provenance (best-effort). Run only
-  from a job in the caller
-  repository workflow (not from a cross-repo reusable workflow) with
-  environment and id-token: write set on that job.
+  Download a workflow artifact, optionally validate with twine, and expose dist
+  metadata for a caller-level pypa/gh-action-pypi-publish step. Run only from a
+  job in the caller repository workflow (not from a cross-repo reusable
+  workflow) with environment and id-token: write set on that job.
 author: "lgtm-hq"
 inputs:
   artifact-name:
@@ -20,10 +19,6 @@ inputs:
     description: "Run twine check before uploading"
     required: false
     default: "true"
-  test-pypi:
-    description: "Upload to TestPyPI instead of PyPI"
-    required: false
-    default: "false"
   python-version:
     description: "Python version for twine validation (setup-python)"
     required: false
@@ -35,9 +30,20 @@ inputs:
     default: ""
 
 outputs:
-  published:
-    description: "Whether the package was uploaded"
-    value: ${{ steps.set-published.outputs.published }}
+  dist-path:
+    description: "Directory containing distribution files (for packages-dir)"
+    value: ${{ inputs.working-directory }}/dist
+  validated:
+    description: >-
+      `true` when twine check passed, `skipped` when validate is disabled;
+      validation failures abort the action before this output is set
+    value: ${{ steps.set-validated.outputs.validated }}
+  package-name:
+    description: "Package name extracted from dist/ or pyproject.toml"
+    value: ${{ steps.extract-metadata.outputs.name }}
+  package-version:
+    description: "Package version extracted from dist/ or pyproject.toml"
+    value: ${{ steps.extract-metadata.outputs.version }}
 
 runs:
   using: "composite"
@@ -80,27 +86,17 @@ runs:
         VALIDATE_STRICT: "true"
       run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
-    - name: Upload to PyPI
-      uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
-      with:
-        repository-url: >-
-          ${{ inputs.test-pypi == 'true' && 'https://test.pypi.org/legacy/' ||
-          'https://upload.pypi.org/legacy/' }}
-        packages-dir: ${{ inputs.working-directory }}/dist/
-
-    - name: Attest build provenance
-      continue-on-error: true
-      uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
-      with:
-        subject-path: ${{ inputs.working-directory }}/dist/*
-
-    - name: Set published output
-      id: set-published
+    - name: Set validated output
+      id: set-validated
       shell: bash
       env:
-        STEP: set-published
-        WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+        VALIDATE_INPUT: ${{ inputs.validate }}
+      run: |
+        if [[ "$VALIDATE_INPUT" == "true" ]]; then
+          echo "validated=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "validated=skipped" >> "$GITHUB_OUTPUT"
+        fi
 
     - name: Extract package metadata
       id: extract-metadata
@@ -110,17 +106,6 @@ runs:
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
-    - name: Generate upload summary
-      shell: bash
-      env:
-        STEP: summary
-        WORKING_DIRECTORY: ${{ inputs.working-directory }}
-        PACKAGE_NAME: ${{ steps.extract-metadata.outputs.name }}
-        PACKAGE_VERSION: ${{ steps.extract-metadata.outputs.version }}
-        PUBLISHED: "true"
-        TEST_PYPI: ${{ inputs.test-pypi }}
-      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
-
 branding:
-  icon: "upload-cloud"
+  icon: "package"
   color: "blue"

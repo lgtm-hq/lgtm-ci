@@ -57,7 +57,7 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | PR comments           | `contents: read`, `pull-requests: write`             | `reusable-*-pr-comment.yml`             |
 | Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                    |
 | Release version       | `contents: write`, `pull-requests: write`            | `reusable-release-version-pr.yml`       |
-| PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `upload-pypi-oidc`                      |
+| PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step       |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`        |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`           |
 
@@ -239,11 +239,13 @@ allowed-endpoints: >
 
 ### PyPI upload (OIDC + attestation)
 
-Used on the **caller** upload job (`upload-pypi-oidc` composite). Set
-`environment: pypi` on that job. The composite downloads workflow artifacts and
-checks out lgtm-ci tooling — include artifact and GitHub hosts below.
-`pypa/gh-action-pypi-publish` pulls `ghcr.io/pypa/gh-action-pypi-publish` —
-include `ghcr.io:443` and `pkg-containers.githubusercontent.com:443`.
+Used on the **caller** upload job. Run `prepare-pypi-upload`, then
+`pypa/gh-action-pypi-publish` and optional `attest-build-provenance` as
+**top-level workflow steps** — do not nest pypa inside lgtm-ci composites.
+Set `environment: pypi` on that job. `prepare-pypi-upload` downloads workflow
+artifacts and checks out lgtm-ci tooling — include artifact and GitHub hosts
+below. `pypa/gh-action-pypi-publish` pulls `ghcr.io/pypa/gh-action-pypi-publish`
+— include `ghcr.io:443` and `pkg-containers.githubusercontent.com:443`.
 
 ```yaml
 egress-policy: block
@@ -253,7 +255,7 @@ allowed-endpoints: >
   codeload.github.com:443
   objects.githubusercontent.com:443
   actions.githubusercontent.com:443
-  blob.core.windows.net:443
+  *.blob.core.windows.net:443
   ghcr.io:443
   pkg-containers.githubusercontent.com:443
   pypi.org:443

@@ -1,7 +1,7 @@
 ---
 # Build Python sdist/wheel and upload as a workflow artifact.
-# OIDC upload to PyPI must run in the caller workflow via upload-pypi-oidc composite
-# (see docs/python-release-publish.md).
+# OIDC upload to PyPI must run in the caller workflow via prepare-pypi-upload
+# and caller-level pypa/gh-action-pypi-publish (see docs/python-release-publish.md).
 name: Reusable Python Distribution Build Workflow
 
 on:
