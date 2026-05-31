@@ -49,6 +49,10 @@ validate_pypi_package() {
 		fi
 		log_success "twine check passed"
 	else
+		if [[ "${VALIDATE_STRICT:-false}" == "true" ]]; then
+			log_error "twine and uv unavailable; cannot validate distribution (VALIDATE_STRICT=true)"
+			return 1
+		fi
 		log_warn "twine not available, skipping package validation"
 	fi
 

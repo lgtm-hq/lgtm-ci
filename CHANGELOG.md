@@ -9,7 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **examples**: `publish-python-release.yml` canonical caller template for PyPI tag
+  releases (#168 §5)
+
 ### Changed
+
+- **ci**: `upload-pypi-oidc` fails upload validation when twine check cannot run
+  (`VALIDATE_STRICT=true`) (#168 §5)
+- **docs**: PyPI upload egress allowlist includes artifact download hosts (#168 §5)
 
 ### Deprecated
 

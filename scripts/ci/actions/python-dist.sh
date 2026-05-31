@@ -14,6 +14,7 @@
 #   DRY_RUN: Whether this is a dry run
 #   TEST_PYPI: Whether publishing to TestPyPI
 #   PUBLISHED: Whether the package was published
+#   VALIDATE_STRICT: When true, fail validate-dist if twine/uv cannot run twine check
 set -euo pipefail
 
 : "${STEP:?STEP is required}"
