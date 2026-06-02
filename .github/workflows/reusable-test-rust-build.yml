@@ -104,11 +104,6 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
-      - name: Checkout repository (full)
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
       - name: Setup Rust
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
 
