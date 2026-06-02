@@ -18,8 +18,8 @@ fi
 violations=0
 
 while IFS= read -r -d '' workflow; do
-	set +e
-	awk -v file="${workflow#"${WORKFLOWS_DIR%/}/"}" '
+	awk_output="$(
+		awk -v file="${workflow#"${WORKFLOWS_DIR%/}/"}" '
 		function flush_job() {
 			if (in_job && has_if && name ~ /\$\{\{|format\(/) {
 				if (name ~ /matrix\./ || name ~ /format\(/ || name ~ /&&.*\|\|/) {
@@ -82,14 +82,21 @@ while IFS= read -r -d '' workflow; do
 		}
 		END {
 			flush_job()
-			exit violations
+			printf("VIOLATIONS:%d\n", violations)
 		}
 	' "${workflow}"
-	awk_exit=$?
-	set -e
-	if [[ ${awk_exit} -gt 0 ]]; then
-		violations=$((violations + awk_exit))
+	)"
+	awk_count="${awk_output##*VIOLATIONS:}"
+	awk_count="${awk_count%%$'\n'*}"
+	if [[ -z "${awk_count}" || ! "${awk_count}" =~ ^[0-9]+$ ]]; then
+		echo "ERROR: failed to parse violations from ${workflow}" >&2
+		printf '%s\n' "${awk_output}" >&2
+		exit 1
 	fi
+	if [[ "${awk_count}" -gt 0 ]]; then
+		printf '%s\n' "${awk_output}" | grep -v '^VIOLATIONS:' >&2 || true
+	fi
+	violations=$((violations + awk_count))
 done < <(find "${WORKFLOWS_DIR}" -maxdepth 1 -name 'reusable-*.yml' -print0)
 
 if [[ ${violations} -gt 0 ]]; then
