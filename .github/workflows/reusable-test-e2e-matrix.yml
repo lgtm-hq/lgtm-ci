@@ -64,9 +64,32 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker,
+          playwright, pypi, rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "playwright"
+      publish-egress-preset:
+        description: >-
+          Named allowlist for the publish job when allowed-endpoints is empty and
+          egress-policy is block (use github-pages for GitHub Pages OIDC deploy)
+        required: false
+        type: string
+        default: "github-pages"
+      publish-allowed-endpoints:
+        description: >-
+          Allowed endpoints for the publish job when egress-policy is block
+          (replaces publish-egress-preset when non-empty)
         required: false
         type: string
         default: ""
@@ -96,12 +119,19 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          egress-preset: github-tooling
+          allowed-endpoints: ""
       - name: Checkout for scripts
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -130,6 +160,7 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
 
   test:
+    # Static name per issue #168; GitHub appends matrix (suite/browser) to each leg.
     name: E2E tests
     needs: setup
     runs-on: ${{ inputs.runner-image }}
@@ -142,18 +173,19 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -220,17 +252,19 @@ jobs:
       total-failed: ${{ steps.merge.outputs.total-failed }}
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-tooling
+          allowed-endpoints: ""
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -287,17 +321,19 @@ jobs:
       pages-url: ${{ steps.publish.outputs.pages-url }}
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.publish-egress-preset }}
+          allowed-endpoints: ${{ inputs.publish-allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:

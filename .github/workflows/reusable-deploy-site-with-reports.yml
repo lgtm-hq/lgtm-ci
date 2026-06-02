@@ -78,12 +78,48 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
-        description: "Allowed endpoints when egress-policy is block"
+        description: >-
+          Allowed endpoints for both jobs when egress-policy is block and
+          allowed-endpoints-build / allowed-endpoints-deploy are empty (replaces
+          per-job presets when non-empty)
         required: false
         type: string
         default: ""
+      allowed-endpoints-build:
+        description: >-
+          Allowed endpoints for the build job when egress-policy is block
+          (replaces egress-build-preset when non-empty; falls back to
+          allowed-endpoints when empty)
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-deploy:
+        description: >-
+          Allowed endpoints for the deploy job when egress-policy is block
+          (replaces egress-deploy-preset when non-empty; falls back to
+          allowed-endpoints when empty)
+        required: false
+        type: string
+        default: ""
+
+      egress-build-preset:
+        description: >-
+          Named allowlist for the build job when allowed-endpoints-build and
+          allowed-endpoints are empty and egress-policy is block (playwright for
+          npm builds and artifact download)
+        required: false
+        type: string
+        default: "playwright"
+      egress-deploy-preset:
+        description: >-
+          Named allowlist for the deploy job when allowed-endpoints-deploy and
+          allowed-endpoints are empty and egress-policy is block (use
+          github-pages for GitHub Pages OIDC deploy)
+        required: false
+        type: string
+        default: "github-pages"
       build-job-name:
         description: "GitHub check name for the build job"
         required: false
@@ -124,18 +160,24 @@ jobs:
       actions: read # resolve and download workflow artifacts for bundling
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: >-
             ${{ inputs.commit-sha != '' && inputs.commit-sha || github.sha }}
           persist-credentials: false
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: >-
+            ${{ inputs.egress-build-preset != '' && inputs.egress-build-preset ||
+            'playwright' }}
+          allowed-endpoints: >-
+            ${{ inputs.allowed-endpoints-build != '' && inputs.allowed-endpoints-build ||
+            inputs.allowed-endpoints }}
 
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -211,6 +253,7 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
+      contents: read
       pages: write
       id-token: write
 
@@ -222,11 +265,23 @@ jobs:
       page-url: ${{ steps.deployment.outputs.page_url }}
 
     steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          egress-preset: >-
+            ${{ inputs.egress-deploy-preset != '' && inputs.egress-deploy-preset ||
+            'github-pages' }}
+          allowed-endpoints: >-
+            ${{ inputs.allowed-endpoints-deploy != '' && inputs.allowed-endpoints-deploy ||
+            inputs.allowed-endpoints }}
 
       - name: Deploy to GitHub Pages
         id: deployment

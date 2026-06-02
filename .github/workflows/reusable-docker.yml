@@ -155,12 +155,21 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "docker"
 
     outputs:
       tags:
@@ -194,11 +203,18 @@ jobs:
       tooling-repository: ${{ steps.tooling.outputs.repository }}
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Resolve tooling ref
         id: tooling
@@ -273,18 +289,19 @@ jobs:
       digest: ${{ steps.metadata.outputs.digest }}
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -474,18 +491,19 @@ jobs:
       security-events: write
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -658,19 +676,19 @@ jobs:
       packages: read
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository (for smoke-test-script)
-        if: inputs.smoke-test-script != ''
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -756,11 +774,18 @@ jobs:
       digest: ${{ steps.metadata.outputs.digest }}
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -912,11 +937,18 @@ jobs:
       contents: read
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Checkout lgtm-ci tooling
@@ -960,6 +992,20 @@ jobs:
       security-events: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github/actions/harden-runner
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Harden runner
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+
       - name: Run Trivy vulnerability scanner
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
