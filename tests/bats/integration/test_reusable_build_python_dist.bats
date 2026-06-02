@@ -93,9 +93,10 @@ _tooling_sparse_cone_ok() {
 		/verify-release-assets\.sh/ { verify_script = 1 }
 		/Create GitHub Release/ { in_release_step = 1; release = 1; next }
 		in_release_step && /create-github-release\.sh/ { release_script = 1 }
+		in_release_step && /GH_TOKEN:/ { gh_token = 1 }
 		in_release_step && /^      - name:/ { in_release_step = 0 }
 		in_release_step && /run: \|/ { inline_shell = 1 }
-		END { exit !(download && verify && verify_script && release && release_script && !inline_shell) }
+		END { exit !(download && verify && verify_script && release && release_script && gh_token && !inline_shell) }
 	' "$workflow"
 	assert_success
 	run grep -Eq 'format\(\s*['\''"]\{0\}/\*\s*['\''"],\s*inputs\.artifact-path\s*\)' "$workflow"

@@ -147,5 +147,6 @@ jobs:
             ${{ inputs.files != '' && inputs.files ||
             format('{0}/*', inputs.artifact-path) }}
           REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
