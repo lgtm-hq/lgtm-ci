@@ -12,8 +12,9 @@ Where applicable, workflows accept:
 | Input                              | Purpose                                                       |
 | ---------------------------------- | ------------------------------------------------------------- |
 | `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA) |
-| `egress-policy`                    | `audit` or `block` for StepSecurity harden-runner             |
-| `allowed-endpoints`                | Allowlist when `egress-policy: block`                         |
+| `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner   |
+| `egress-preset`                    | Named allowlist when `allowed-endpoints` is empty under block |
+| `allowed-endpoints`                | Explicit allowlist; **replaces** preset when non-empty        |
 | `job-name`                         | Check name on always-run jobs; PR comment suite name          |
 | `runner-image`                     | Runner label for long-running jobs                            |
 | `timeout-minutes`                  | Job timeout                                                   |
@@ -72,8 +73,9 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 **fresh workspace** (separate reusable-workflow job from the test matrix). The
 caller repository checkout must initialize `.git` before tooling is added:
 
-1. Harden runner (`step-security/harden-runner` — no tooling checkout yet)
-2. Checkout repository (caller repo at workspace root)
+1. Checkout repository (caller repo at workspace root)
+2. Harden runner (`uses: ./.github/actions/harden-runner` — resolved from the
+   ref used to call the reusable workflow)
 3. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` alongside the repo)
 4. Download artifacts, badge generation, GitHub Pages publish (local tooling actions)
 
@@ -161,6 +163,73 @@ test-suite-coverage:
 
 Do not add per-consumer `job-name` aliases inside work reusables.
 
+## Harden-runner distribution
+
+<!-- markdownlint-disable MD013 -->
+
+Reusable workflows in this repo invoke the composite with a **relative path**
+(same-repository pattern per
+[GitHub composite actions](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action#creating-a-composite-action-within-the-same-repository)):
+
+```yaml
+- name: Checkout repository
+  uses: actions/checkout@<pin> # v6.0.2
+  with:
+    persist-credentials: false
+
+- name: Harden runner
+  uses: ./.github/actions/harden-runner
+  with:
+    egress-policy: ${{ inputs.egress-policy }}
+    egress-preset: ${{ inputs.egress-preset }}
+    allowed-endpoints: ${{ inputs.allowed-endpoints }}
+```
+
+GitHub resolves `./.github/actions/harden-runner` from the **git ref used to call**
+the reusable workflow (branch, tag, or SHA). That ref must include the bundle at
+`.github/actions/harden-runner/`. Do **not** pin
+`lgtm-hq/lgtm-ci/.github/actions/harden-runner@<sha>` in `uses:` — that form treats
+the path as a separate action version and fails on PR branches
+(`unable to find version`). Do **not** use `${{ }}` in the `@ref` segment (actionlint
+and platform limitation).
+
+<!-- markdownlint-enable MD013 -->
+
+The action bundle is **self-contained** (resolver + `lib/egress/`). Canonical
+preset definitions live in `scripts/ci/lib/egress/presets.sh`; release maintainers
+run `scripts/ci/actions/sync-harden-runner-bundle.sh` before tagging.
+
+Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
+
+## Egress presets
+
+Reusable workflows default to `egress-policy: block`. When `allowed-endpoints` is
+empty, the `harden-runner` composite expands `egress-preset` via bundled
+`lib/egress/presets.sh` (synced from `scripts/ci/lib/egress/presets.sh`). Explicit
+`allowed-endpoints` **replaces** the preset (no merge).
+
+| Preset           | Use case                                                  |
+| ---------------- | --------------------------------------------------------- |
+| `github-minimal` | PR comments (API, tooling checkout, workflow artifacts)   |
+| `github-pages`   | GitHub Pages deploy/publish (OIDC)                        |
+| `github-tooling` | Validate action pinning + GitHub raw/codeload             |
+| `docker`         | Docker build/pull/push (`reusable-docker.yml`)            |
+| `playwright`     | Playwright E2E + browser CDN downloads                    |
+| `pypi`           | PyPI/TestPyPI publish and availability checks             |
+| `rubygems`       | RubyGems publish                                          |
+| `npm-publish`    | npm publish + Sigstore attestation                        |
+| `quality`        | Docker `lintro chk` (default on quality lint)             |
+| `sbom`           | SBOM, Grype scan, Sigstore attestation                    |
+| `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)             |
+
+```yaml
+egress-policy: block
+egress-preset: quality
+```
+
+`reusable-quality-lint.yml` defaults `egress-preset: quality` and
+`timeout-minutes: 45`.
+
 ## Egress block examples
 
 ### Node / Bun (web)
@@ -190,33 +259,34 @@ allowed-endpoints: >
   index.crates.io:443
 ```
 
-### Quality / Lintro
+### Quality / Lintro (Docker `lintro chk`)
+
+Prefer the preset (canonical list in `scripts/ci/lib/egress/presets.sh`):
 
 ```yaml
 egress-policy: block
-allowed-endpoints: >
-  github.com:443
-  api.github.com:443
-  ghcr.io:443
-  index.crates.io:443
-  registry.npmjs.org:443
-  api.osv.dev:443
-  semgrep.dev:443
-  metrics.semgrep.dev:443
+egress-preset: quality
 ```
+
+Expanded allowlist includes GitHub, GHCR, Docker Hub, PyPI, npm/crates, semgrep,
+OSV, bun/rust/uv hosts, and `api.deps.dev` (py-lintro dogfooding lint).
 
 ### GitHub Pages publish (OIDC)
 
+Prefer the preset (used by `reusable-deploy-pages.yml`,
+`reusable-deploy-site-with-reports.yml` (`egress-deploy-preset`), and the
+`publish` job in `reusable-test-e2e-matrix.yml` via `publish-egress-preset`):
+
 ```yaml
 egress-policy: block
-allowed-endpoints: >
-  github.com:443
-  api.github.com:443
-  actions.githubusercontent.com:443
-  codeload.github.com:443
-  objects.githubusercontent.com:443
-  release-assets.githubusercontent.com:443
+egress-preset: github-pages
 ```
+
+`reusable-deploy-site-with-reports.yml` uses `egress-build-preset` (default
+`playwright`) on the build job and `egress-deploy-preset` (default `github-pages`)
+on deploy. Use `allowed-endpoints-build` or `allowed-endpoints-deploy` for
+per-job overrides; shared `allowed-endpoints` still replaces presets on both jobs
+when the per-job inputs are empty.
 
 ### PyPI build
 
@@ -284,6 +354,16 @@ allowed-endpoints: >
   release-assets.githubusercontent.com:443
   objects.githubusercontent.com:443
 ```
+
+### SBOM + attestation
+
+```yaml
+egress-policy: block
+egress-preset: sbom
+```
+
+Covers GitHub, Anchore (Syft/Grype), Sigstore attestation hosts. Canonical list:
+`scripts/ci/lib/egress/presets.sh` (preset name `sbom`).
 
 ## Action pinning policy
 

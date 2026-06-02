@@ -11,11 +11,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **workflows**: Reusable workflows default `egress-policy` to `block`; add
+  `egress-preset` (`github-minimal`, `github-pages`, `github-tooling`, `docker`,
+  `playwright`, `pypi`, `rubygems`, `npm-publish`, `quality`, `sbom`, `scorecard`)
+  resolved via `harden-runner` composite (#204). **Breaking:**
+  callers that relied on audit defaults must set `egress-policy: audit` or pass
+  `egress-preset` / `allowed-endpoints`.
+- **actions**: Self-contained `harden-runner` bundle; reusables use
+  `uses: ./.github/actions/harden-runner` (same-repo composite; manifest file is
+  release bookkeeping only) (#204).
+- **workflows**: Workflow-specific default presets (`docker`, `playwright`,
+  `quality`, `pypi`, `rubygems`, `npm-publish`); PR comment jobs use
+  `github-minimal` only (#204).
+- **workflows**: `quality` preset covers full Docker-based `lintro chk` egress
+  (GHCR, Docker Hub, PyPI, npm/crates, semgrep/OSV, tooling hosts) (#204).
+- **workflows**: `reusable-quality-lint.yml` adds `timeout-minutes` (default 45) and
+  defaults `egress-preset: quality` (#204).
+- **workflows**: Most reusables default `egress-preset: github-tooling` for GitHub
+  checkout/API under block (#204).
+- **docs**: Egress preset catalog and SBOM example in `workflow-contract.md` (#204)
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **egress**: Add `github-pages` preset (`actions.githubusercontent.com` OIDC) for
+  Pages deploy workflows; `reusable-test-e2e-matrix` publish job uses
+  `publish-egress-preset` (#204).
+- **egress**: Fail `resolve-egress-endpoints` when `egress-policy: block` has no
+  allowlist or preset (#204).
 
 ### Security
 

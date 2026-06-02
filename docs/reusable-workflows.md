@@ -59,7 +59,7 @@ jobs:
       packages: read
     with:
       job-name: "Lintro Quality Checks"
-      egress-policy: audit
+      egress-preset: quality
 
   quality-pr-comment:
     needs: quality
@@ -529,7 +529,7 @@ jobs:
     permissions:
       pull-requests: read
     with:
-      egress-policy: audit
+      egress-preset: github-minimal
       # Optional: override types (newline-delimited; CSV is normalized)
       # types: |
       #   feat
