@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.29.2] - 2026-06-02
+
+### Bug Fixes
+
+- **ci**: set GH_TOKEN in reusable-github-release workflow (#273) (610c158)
+
 ## [0.29.1] - 2026-05-31
 
 ### Bug Fixes
@@ -674,7 +680,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.2...HEAD
+[0.29.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.0...v0.29.1
 [0.29.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.28.0...v0.29.0
 [0.28.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.27.0...v0.28.0
