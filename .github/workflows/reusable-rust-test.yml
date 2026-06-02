@@ -359,4 +359,3 @@ jobs:
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.test.result }}
       tooling-ref: ${{ inputs.tooling-ref }}
-      egress-preset: ${{ inputs.egress-preset }}

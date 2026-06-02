@@ -32,4 +32,23 @@ sed \
 	-e 's|# shellcheck source=\.\./lib/github/output\.sh|# shellcheck source=lib/github/output.sh|' \
 	"$CANONICAL_RESOLVE" >"$BUNDLE_ROOT/resolve-egress-endpoints.sh"
 chmod +x "$BUNDLE_ROOT/resolve-egress-endpoints.sh"
+
+GENERATED="$BUNDLE_ROOT/resolve-egress-endpoints.sh"
+fail=0
+# shellcheck disable=SC2016 # Tokens contain literal $SCRIPT_DIR, not shell expansion
+for token in \
+	'# Purpose: Resolve allowed-endpoints from explicit list or egress preset (action bundle)' \
+	'LIB_DIR="$SCRIPT_DIR/lib"' \
+	'# shellcheck source=lib/egress.sh' \
+	'# shellcheck source=lib/github/output.sh'; do
+	if ! grep -qF "$token" "$GENERATED"; then
+		echo "sync-harden-runner-bundle: missing expected token in resolver: $token" >&2
+		fail=1
+	fi
+done
+if [[ $fail -ne 0 ]]; then
+	echo "sync-harden-runner-bundle: sed substitutions did not produce expected output" >&2
+	exit 1
+fi
+
 echo "Synced harden-runner bundle into $BUNDLE_ROOT"
