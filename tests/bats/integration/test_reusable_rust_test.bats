@@ -32,18 +32,24 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 		{ line[NR] = $0 }
 		/run-rust-nextest\.sh/ {
 			nextest_step = 1
-			for (i = NR - 1; i >= NR - 8 && i > 0; i--) {
+			for (i = NR - 1; i > 0; i--) {
 				if (line[i] ~ /if: \$\{\{ !inputs\.coverage \}\}/) {
 					nextest_if = 1
+					break
+				}
+				if (line[i] ~ /^      - name:/) {
 					break
 				}
 			}
 		}
 		/run-rust-nextest-coverage\.sh/ {
 			cov_step = 1
-			for (i = NR - 1; i >= NR - 8 && i > 0; i--) {
+			for (i = NR - 1; i > 0; i--) {
 				if (line[i] ~ /if: inputs\.coverage$/) {
 					cov_if = 1
+					break
+				}
+				if (line[i] ~ /^      - name:/) {
 					break
 				}
 			}

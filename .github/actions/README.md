@@ -123,11 +123,20 @@ Setup Rust toolchain with cargo caching.
 Security hardening using [StepSecurity](https://stepsecurity.io).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
+- uses: ./.github/actions/harden-runner
   with:
-    egress-policy: "audit" # or 'block' to enforce allowlist
+    egress-policy: block # default; use audit to log only
+    egress-preset: quality # set by the workflow; composite default is empty
     disable-sudo: "false" # optional
 ```
+
+In **lgtm-ci reusables**, checkout the repository before this step so the runner
+can load the composite from the workflow ref. External callers pin the **workflow**
+`@ref`, not a separate action SHA. The composite bundles
+resolver + egress lib; canonical presets are maintained in
+`scripts/ci/lib/egress/presets.sh` and synced via `sync-harden-runner-bundle.sh`.
+Non-empty `allowed-endpoints` replaces the preset. Reusables pass `egress-preset`
+with workflow-appropriate defaults.
 
 **Features:**
 
@@ -1291,7 +1300,8 @@ jobs:
       # Security hardening (should be first)
       - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
         with:
-          egress-policy: audit
+          egress-policy: block
+          egress-preset: github-tooling
 
       # Secure checkout (replaces actions/checkout)
       - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main

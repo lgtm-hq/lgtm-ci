@@ -81,7 +81,7 @@ jobs:
 		bash "$SCRIPT" 2>&1
 	'
 	assert_failure
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing version comment"
 	assert_output --partial "actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29"
 	refute_output --partial "actions/setup-node"
 	assert_github_output "offenders" "1"
@@ -360,7 +360,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "tooling-ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 
@@ -388,7 +388,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "tooling-ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 
@@ -442,7 +442,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 
@@ -471,7 +471,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 
@@ -629,6 +629,53 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "no version specified"
+	assert_github_output "offenders" "1"
+}
+
+@test "validate-action-pinning: harden-runner SHA pin with lgtm-ci comment passes" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@a5ac7e51b41094c92402da3b24376905380afc29 # lgtm-ci harden-runner
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
+	assert_output --partial "All action references follow SHA pinning with Renovate version comments"
+	assert_github_output "offenders" "0"
+}
+
+@test "validate-action-pinning: harden-runner SHA pin without comment suggests both hints" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@a5ac7e51b41094c92402da3b24376905380afc29
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "lgtm-ci harden-runner"
+	assert_output --partial "vX.Y.Z"
 	assert_github_output "offenders" "1"
 }
 

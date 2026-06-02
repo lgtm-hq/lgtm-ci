@@ -43,7 +43,7 @@ Pass `tooling-ref` when testing an unreleased lgtm-ci branch. Production callers
 should pin the workflow ref to a commit SHA.
 
 See [workflow-contract.md](workflow-contract.md) for the standard input contract,
-permissions by mode, egress allowlists, and Rustume examples.
+permissions by mode, egress allowlists, and Rust examples.
 
 For GitHub Pages (coverage, test reports, and static sites), see
 [pages-publishing.md](pages-publishing.md).
@@ -59,7 +59,7 @@ jobs:
       packages: read
     with:
       job-name: "Lintro Quality Checks"
-      egress-policy: audit
+      egress-preset: quality
 
   quality-pr-comment:
     needs: quality
@@ -529,7 +529,7 @@ jobs:
     permissions:
       pull-requests: read
     with:
-      egress-policy: audit
+      egress-preset: github-minimal
       # Optional: override types (newline-delimited; CSV is normalized)
       # types: |
       #   feat

@@ -55,7 +55,7 @@ EOF
 		COVERAGE_ENABLED=true \
 		bash "$SCRIPT"
 	assert_success
-	assert_file_contains "$GITHUB_OUTPUT" "coverage-percent=100"
+	assert_file_contains "$GITHUB_OUTPUT" "coverage-percent=100.00"
 }
 
 @test "parse-rust-test-results calculates partial coverage correctly" {

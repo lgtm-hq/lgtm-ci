@@ -118,7 +118,7 @@ line3"'
 
 	# Check that the file contains the delimiter pattern
 	run cat "$GITHUB_OUTPUT"
-	assert_output --partial "LGTM_CI_EOF_"
+	assert_output --partial "ghadelimiter_"
 }
 
 @test "set_github_output_multiline: does nothing when GITHUB_OUTPUT unset" {

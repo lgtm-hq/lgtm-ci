@@ -13,7 +13,10 @@ _install_cargo_crate() {
 	local version="$2"
 
 	if command -v "$crate" >/dev/null 2>&1; then
-		return 0
+		if "$crate" --version 2>/dev/null | grep -qE "^${crate} ${version}(\$| )"; then
+			return 0
+		fi
+		echo "Found ${crate} but not pinned ${version}; reinstalling..."
 	fi
 
 	echo "Installing ${crate} ${version}..."

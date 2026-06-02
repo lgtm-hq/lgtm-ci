@@ -11,11 +11,11 @@ _test_checkout_order_ok() {
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
 		in_job && /^    steps:/ { in_steps = 1 }
-		in_job && in_steps && /^      - name: Harden runner/ { harden = NR }
 		in_job && in_steps && /^      - name: Checkout repository/ { repo = NR }
+		in_job && in_steps && /^      - name: Harden runner/ { harden = NR }
 		in_job && in_steps && /^      - name: Checkout lgtm-ci tooling/ { tooling = NR }
 		END {
-			ok = (harden > 0 && repo > 0 && tooling > 0 && harden < repo && repo < tooling)
+			ok = (repo > 0 && harden > 0 && tooling > 0 && repo < harden && harden < tooling)
 			exit !ok
 		}
 	' "$WORKFLOW"

@@ -7,9 +7,18 @@ inputs:
   egress-policy:
     description: "Egress policy: audit (log) or block (enforce allowlist)"
     required: false
-    default: "audit"
+    default: "block"
+  egress-preset:
+    description: >-
+      Named allowlist when allowed-endpoints is empty and egress-policy is block
+      (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+      rubygems, npm-publish, quality, sbom, scorecard)
+    required: false
+    default: ""
   allowed-endpoints:
-    description: "Allowed endpoints when egress-policy is block"
+    description: >-
+      Allowed endpoints when egress-policy is block; replaces egress-preset when
+      non-empty
     required: false
     default: ""
   disable-sudo:
@@ -29,13 +38,30 @@ outputs:
 runs:
   using: "composite"
   steps:
+    - name: Resolve egress allowlist
+      id: resolve
+      shell: bash
+      env:
+        EGRESS_POLICY: ${{ inputs['egress-policy'] }}
+        EGRESS_PRESET: ${{ inputs['egress-preset'] }}
+        ALLOWED_ENDPOINTS: ${{ inputs['allowed-endpoints'] }}
+      run: >-
+        bash "${{ github.action_path }}/resolve-egress-endpoints.sh"
+
+    # Create agent state before harden-runner; uses sudo while disable-sudo is still off.
+    - name: Ensure agent state for post cleanup
+      shell: bash
+      run: |
+        sudo mkdir -p /home/agent
+        echo '{"event":"post","status":"skipped"}' | sudo tee /home/agent/post_event.json >/dev/null
+
     - name: Harden Runner
       id: harden
       # Pinned to SHA for supply chain security
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: ${{ inputs['egress-policy'] }}
-        allowed-endpoints: ${{ inputs['allowed-endpoints'] }}
+        allowed-endpoints: ${{ steps.resolve.outputs['allowed-endpoints'] }}
         disable-sudo: ${{ inputs['disable-sudo'] }}
         disable-telemetry: ${{ inputs['disable-telemetry'] }}
 

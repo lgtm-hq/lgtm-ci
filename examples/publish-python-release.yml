@@ -72,6 +72,8 @@ jobs:
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             oauth2.sigstore.dev:443
+            astral.sh:443
+            releases.astral.sh:443
       - name: Prepare PyPI upload
         id: prepare
         uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z

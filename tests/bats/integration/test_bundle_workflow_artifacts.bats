@@ -11,11 +11,11 @@ _checkout_order_ok() {
 		$0 ~ "^  " job ":" { in_job = 1 }
 		in_job && /^  [a-zA-Z0-9_-]+:/ && $0 !~ "^  " job ":" { in_job = 0 }
 		in_job && /^    steps:/ { in_steps = 1 }
-		in_job && in_steps && /^      - name: Harden runner/ { harden = NR }
 		in_job && in_steps && /^      - name: Checkout repository/ { repo = NR }
+		in_job && in_steps && /^      - name: Harden runner/ { harden = NR }
 		in_job && in_steps && /^      - name: Checkout lgtm-ci tooling/ { tooling = NR }
 		END {
-			ok = (harden > 0 && repo > 0 && tooling > 0 && harden < repo && repo < tooling)
+			ok = (repo > 0 && harden > 0 && tooling > 0 && repo < harden && harden < tooling)
 			exit !ok
 		}
 	' "$workflow"
@@ -94,6 +94,18 @@ _checkout_order_ok() {
 @test "reusable-deploy-site-with-reports: exposes page-url output" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
 	run grep -q 'jobs.deploy.outputs.page-url' "$workflow"
+	assert_success
+}
+
+@test "reusable-deploy-site-with-reports: per-job allowed-endpoints inputs" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
+	run grep -q 'allowed-endpoints-build:' "$workflow"
+	assert_success
+	run grep -q 'allowed-endpoints-deploy:' "$workflow"
+	assert_success
+	run grep -q 'inputs.allowed-endpoints-build' "$workflow"
+	assert_success
+	run grep -q 'inputs.allowed-endpoints-deploy' "$workflow"
 	assert_success
 }
 

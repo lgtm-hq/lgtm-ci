@@ -10,6 +10,10 @@ setup() {
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/pages-coverage-upload-gate.sh"
 }
 
+teardown() {
+	teardown_github_env
+}
+
 @test "pages-coverage-upload-gate: push-main allows push to main" {
 	GITHUB_EVENT_NAME=push GITHUB_REF=refs/heads/main PAGES_COVERAGE_UPLOAD_ON=push-main \
 		run bash "$SCRIPT"

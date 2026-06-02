@@ -56,7 +56,7 @@ runs:
         VERIFY_TAG_VERSION: ${{ inputs.verify-tag-version }}
         ENSURE_TAG_ON_DEFAULT_BRANCH: ${{ inputs.ensure-tag-on-default-branch }}
         DEFAULT_BRANCH: ${{ inputs.default-branch }}
-      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Validate package metadata
       id: validate
@@ -65,7 +65,7 @@ runs:
       env:
         STEP: validate
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Build package
       id: build
@@ -73,7 +73,7 @@ runs:
       env:
         STEP: build
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Validate distribution
       if: inputs.validate == 'true'
@@ -81,7 +81,7 @@ runs:
       env:
         STEP: validate-dist
         WORKING_DIRECTORY: ${{ inputs.working-directory }}
-      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Generate summary
       shell: bash
@@ -93,7 +93,7 @@ runs:
         DRY_RUN: "true"
         TEST_PYPI: "false"
         PUBLISHED: "false"
-      run: $SCRIPTS_DIR/ci/actions/python-dist.sh
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
 branding:
   icon: "package"

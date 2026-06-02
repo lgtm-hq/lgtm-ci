@@ -46,9 +46,33 @@ is_valid_sha() {
 	[[ "$ref" =~ ^[0-9a-fA-F]{40}$ ]]
 }
 
+readonly LGTM_CI_HARDEN_RUNNER_ACTION='lgtm-hq/lgtm-ci/.github/actions/harden-runner'
+readonly LGTM_CI_HARDEN_RUNNER_COMMENT_PATTERN='# lgtm-ci harden-runner'
+
 has_renovate_version_comment() {
 	local line="$1"
 	[[ "$line" =~ $VERSION_COMMENT_PATTERN ]]
+}
+
+has_lgtm_ci_harden_runner_pin_comment() {
+	local line="$1"
+	[[ "$line" =~ $LGTM_CI_HARDEN_RUNNER_COMMENT_PATTERN ]]
+}
+
+has_acceptable_pin_comment() {
+	local action_name="$1"
+	local line="$2"
+
+	if has_renovate_version_comment "$line"; then
+		return 0
+	fi
+
+	if [[ "$action_name" == "$LGTM_CI_HARDEN_RUNNER_ACTION" ]] &&
+		has_lgtm_ci_harden_runner_pin_comment "$line"; then
+		return 0
+	fi
+
+	return 1
 }
 
 is_tag_exception() {
@@ -176,9 +200,13 @@ scan_uses_line() {
 	local version_ref="${action_ref##*@}"
 
 	if is_valid_sha "$version_ref"; then
-		if ! has_renovate_version_comment "$line"; then
+		if ! has_acceptable_pin_comment "$action_name" "$line"; then
+			local hint="# vX.Y.Z"
+			if [[ "$action_name" == "$LGTM_CI_HARDEN_RUNNER_ACTION" ]]; then
+				hint="# vX.Y.Z\" or \"# lgtm-ci harden-runner"
+			fi
 			record_offender "$file" "$line_number" \
-				"${action_ref} (SHA pin missing Renovate version comment; add \"# vX.Y.Z\")"
+				"${action_ref} (SHA pin missing version comment; add \"${hint}\")"
 		fi
 		return 0
 	fi
