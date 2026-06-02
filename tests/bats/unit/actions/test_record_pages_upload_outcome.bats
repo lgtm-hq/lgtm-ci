@@ -10,6 +10,10 @@ setup() {
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/record-pages-upload-outcome.sh"
 }
 
+teardown() {
+	teardown_github_env
+}
+
 @test "record-pages-upload-outcome: writes upload step outcome" {
 	PAGES_UPLOAD_OUTCOME=success run bash "$SCRIPT"
 	assert_success

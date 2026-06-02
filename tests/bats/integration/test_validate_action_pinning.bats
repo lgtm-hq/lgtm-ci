@@ -81,7 +81,7 @@ jobs:
 		bash "$SCRIPT" 2>&1
 	'
 	assert_failure
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing version comment"
 	assert_output --partial "actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29"
 	refute_output --partial "actions/setup-node"
 	assert_github_output "offenders" "1"
@@ -360,7 +360,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "tooling-ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 
@@ -388,7 +388,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "tooling-ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 
@@ -442,7 +442,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 
@@ -471,7 +471,7 @@ jobs:
 	'
 	assert_failure
 	assert_output --partial "ref: d3736367191ddaf56c41804d2dd5174732ed2d2b"
-	assert_output --partial "missing Renovate version comment"
+	assert_output --partial "SHA pin missing Renovate version comment"
 	assert_github_output "offenders" "1"
 }
 

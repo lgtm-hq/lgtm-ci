@@ -8,11 +8,11 @@ _publish_checkout_order_ok() {
 	local workflow="$1"
 	awk '
 		/^    steps:/ { in_steps = 1 }
-		in_steps && /^      - name: Harden runner/ { harden = NR }
 		in_steps && /^      - name: Checkout repository/ { repo = NR }
+		in_steps && /^      - name: Harden runner/ { harden = NR }
 		in_steps && /^      - name: Checkout lgtm-ci tooling/ { tooling = NR }
 		END {
-			ok = (harden > 0 && repo > 0 && tooling > 0 && harden < repo && repo < tooling)
+			ok = (repo > 0 && harden > 0 && tooling > 0 && repo < harden && harden < tooling)
 			exit !ok
 		}
 	' "$workflow"

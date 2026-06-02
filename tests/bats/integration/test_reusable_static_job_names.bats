@@ -104,7 +104,7 @@ YAML
 	run awk '
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && /^    name: Python tests$/ { found = 1 }
+		in_job && /^    name: \$\{\{ inputs\.job-name \}\}$/ { found = 1 }
 		END { exit !found }
 	' "$workflow"
 	assert_success

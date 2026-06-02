@@ -10,6 +10,10 @@ setup() {
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/actions/record-pages-coverage-upload-status.sh"
 }
 
+teardown() {
+	teardown_github_env
+}
+
 @test "record-pages-coverage-upload-status: reports false when upload disabled" {
 	UPLOAD_PAGES_COVERAGE_HTML=false COVERAGE=true run bash "$SCRIPT"
 	assert_success
