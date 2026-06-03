@@ -33,10 +33,12 @@ jobs:
           persist-credentials: true
           token: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Harden Runner
-        uses: ./.github/actions/harden-runner
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.github/actions/resolve-egress-allowlist
         with:
           egress-policy: block
+          allowed-endpoints-mode: replace
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -47,6 +49,12 @@ jobs:
             objects.githubusercontent.com:443
             pypi.org:443
             files.pythonhosted.org:443
+
+      - name: Harden Runner
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: block
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Self-hosted Renovate
         # yamllint disable-line rule:line-length
