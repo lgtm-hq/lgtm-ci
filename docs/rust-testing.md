@@ -32,10 +32,10 @@ path = "target/nextest/ci/junit.xml"
 Use the **`coverage`** input on a single `reusable-rust-test.yml` job. The workflow
 never runs both uninstrumented nextest and llvm-cov in the same pipeline.
 
-| `coverage` | What runs                         | PR comment contract        |
-| ---------- | --------------------------------- | -------------------------- |
-| `false`    | `cargo nextest run --profile ci`  | Tests only (Python-style)  |
-| `true`     | `cargo llvm-cov nextest` + LCOV   | Tests + coverage line      |
+| `coverage` | What runs                        | PR comment contract       |
+| ---------- | -------------------------------- | ------------------------- |
+| `false`    | `cargo nextest run --profile ci` | Tests only (Python-style) |
+| `true`     | `cargo llvm-cov nextest` + LCOV  | Tests + coverage line     |
 
 PR comments use **`reusable-test-pr-comment`** and `generate-test-comment.sh`
 (same pattern as Python), not `generate-coverage-comment`.

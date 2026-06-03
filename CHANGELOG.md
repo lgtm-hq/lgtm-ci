@@ -9,13 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **actions**: `resolve-egress-allowlist` composite for preset/explicit egress resolution
+  before `harden-runner` (#276)
+- **egress**: `allowed-endpoints-mode` (`replace` | `append`) with deduped merge when
+  appending project endpoints to presets (#276)
+
 ### Changed
+
+- **workflows**: Reusables resolve egress in a prior workflow step, then pass
+  `steps.egress.outputs['allowed-endpoints']` into `harden-runner` (#276)
+- **workflows**: Reusables accept `allowed-endpoints-mode` (default `replace`) (#276)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **actions**: `harden-runner` passes `inputs['allowed-endpoints']` to step-security
+  so the pre-hook receives the allowlist (fixes v0.30.0 blocking all egress) (#276)
 
 ### Security
 

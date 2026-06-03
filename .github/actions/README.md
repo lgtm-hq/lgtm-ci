@@ -118,25 +118,51 @@ Setup Rust toolchain with cargo caching.
 
 ## Security Actions
 
+### resolve-egress-allowlist
+
+Resolves `allowed-endpoints` from explicit lists or `egress-preset` names. Run as a
+**workflow step before** `harden-runner` so step-security's pre-hook receives the
+allowlist (composite step outputs are not available at pre-hook time).
+
+```yaml
+- name: Resolve egress allowlist
+  id: egress
+  uses: ./.github/actions/resolve-egress-allowlist
+  with:
+    egress-policy: block
+    egress-preset: quality
+    allowed-endpoints: |
+      private.registry.example:443
+    allowed-endpoints-mode: append # default: replace
+
+- uses: ./.github/actions/harden-runner
+  with:
+    egress-policy: block
+    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+```
+
+`allowed-endpoints-mode`: `replace` drops the preset when `allowed-endpoints` is
+non-empty; `append` merges preset + extras with deduplication.
+
+Presets are defined in `scripts/ci/lib/egress/presets.sh` and bundled under
+`.github/actions/harden-runner/lib/`.
+
 ### harden-runner
 
-Security hardening using [StepSecurity](https://stepsecurity.io).
+Security hardening using [StepSecurity](https://stepsecurity.io). Pass
+**resolved** `allowed-endpoints` from a prior `resolve-egress-allowlist` step.
 
 ```yaml
 - uses: ./.github/actions/harden-runner
   with:
     egress-policy: block # default; use audit to log only
-    egress-preset: quality # set by the workflow; composite default is empty
+    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
     disable-sudo: "false" # optional
 ```
 
-In **lgtm-ci reusables**, checkout the repository before this step so the runner
-can load the composite from the workflow ref. External callers pin the **workflow**
-`@ref`, not a separate action SHA. The composite bundles
-resolver + egress lib; canonical presets are maintained in
-`scripts/ci/lib/egress/presets.sh` and synced via `sync-harden-runner-bundle.sh`.
-Non-empty `allowed-endpoints` replaces the preset. Reusables pass `egress-preset`
-with workflow-appropriate defaults.
+In **lgtm-ci reusables**, checkout the repository before these steps so the runner
+can load composites from the workflow ref. External callers pin the **workflow**
+`@ref`, not a separate action SHA.
 
 **Features:**
 
