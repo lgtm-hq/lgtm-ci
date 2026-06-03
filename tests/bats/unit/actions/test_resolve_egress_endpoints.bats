@@ -93,6 +93,92 @@ teardown() {
 	assert_equal 0 "$output"
 }
 
+@test "resolve-egress: append merges preset with extra endpoints" {
+	output_file="$(mktemp)"
+	run env \
+		EGRESS_POLICY=block \
+		EGRESS_PRESET=quality \
+		ALLOWED_ENDPOINTS=$'registry.example.com:443\n' \
+		ALLOWED_ENDPOINTS_MODE=append \
+		GITHUB_OUTPUT="$output_file" \
+		bash "$RESOLVE"
+	assert_success
+	run grep -E '^docker\.io:443$' "$output_file"
+	assert_success
+	run grep -E '^registry\.example\.com:443$' "$output_file"
+	assert_success
+}
+
+@test "resolve-egress: append dedupes duplicate host:port lines" {
+	output_file="$(mktemp)"
+	run env \
+		EGRESS_POLICY=block \
+		EGRESS_PRESET=quality \
+		ALLOWED_ENDPOINTS=$'docker.io:443\nregistry.example.com:443\n' \
+		ALLOWED_ENDPOINTS_MODE=append \
+		GITHUB_OUTPUT="$output_file" \
+		bash "$RESOLVE"
+	assert_success
+	run grep -cE '^docker\.io:443$' "$output_file"
+	assert_equal 1 "$output"
+	run grep -cE '^registry\.example\.com:443$' "$output_file"
+	assert_equal 1 "$output"
+}
+
+@test "resolve-egress: append with empty allowed-endpoints uses preset only" {
+	output_file="$(mktemp)"
+	run env \
+		EGRESS_POLICY=block \
+		EGRESS_PRESET=github-minimal \
+		ALLOWED_ENDPOINTS="" \
+		ALLOWED_ENDPOINTS_MODE=append \
+		GITHUB_OUTPUT="$output_file" \
+		bash "$RESOLVE"
+	assert_success
+	run grep -E '^api\.github\.com:443$' "$output_file"
+	assert_success
+}
+
+@test "resolve-egress: append without preset uses explicit list only" {
+	output_file="$(mktemp)"
+	run env \
+		EGRESS_POLICY=block \
+		EGRESS_PRESET="" \
+		ALLOWED_ENDPOINTS=$'cdn.example.com:443\n' \
+		ALLOWED_ENDPOINTS_MODE=append \
+		GITHUB_OUTPUT="$output_file" \
+		bash "$RESOLVE"
+	assert_success
+	run grep -E '^cdn\.example\.com:443$' "$output_file"
+	assert_success
+}
+
+@test "resolve-egress: replace mode is default when ALLOWED_ENDPOINTS_MODE unset" {
+	output_file="$(mktemp)"
+	run env \
+		EGRESS_POLICY=block \
+		EGRESS_PRESET=quality \
+		ALLOWED_ENDPOINTS=$'github.com:443\n' \
+		GITHUB_OUTPUT="$output_file" \
+		bash "$RESOLVE"
+	assert_success
+	run grep -c 'docker\.io:443' "$output_file"
+	assert_equal 0 "$output"
+}
+
+@test "resolve-egress: rejects invalid allowed-endpoints-mode" {
+	output_file="$(mktemp)"
+	run env \
+		EGRESS_POLICY=block \
+		EGRESS_PRESET=github-minimal \
+		ALLOWED_ENDPOINTS="" \
+		ALLOWED_ENDPOINTS_MODE=merge \
+		GITHUB_OUTPUT="$output_file" \
+		bash "$RESOLVE"
+	assert_failure
+	assert_output --partial "invalid ALLOWED_ENDPOINTS_MODE"
+}
+
 @test "resolve-egress: rejects invalid egress-policy" {
 	output_file="$(mktemp)"
 	run env \

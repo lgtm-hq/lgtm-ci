@@ -24,3 +24,21 @@ EGRESS_LIB="${PROJECT_ROOT}/scripts/ci/lib/egress.sh"
 	assert_output --partial 'archive.ubuntu.com:80'
 	assert_output --partial 'security.ubuntu.com:80'
 }
+
+@test "egress_dedupe_endpoint_lines: keeps first occurrence order" {
+	run bash -c "
+		source '$EGRESS_LIB'
+		egress_dedupe_endpoint_lines \$'b:2\na:1\nb:2\na:1\n'
+	"
+	assert_success
+	assert_output $'b:2\na:1'
+}
+
+@test "egress_merge_endpoint_lines: merges and dedupes lists" {
+	run bash -c "
+		source '$EGRESS_LIB'
+		egress_merge_endpoint_lines \$'x:1\ny:2\n' \$'y:2\nz:3\n'
+	"
+	assert_success
+	assert_output $'x:1\ny:2\nz:3'
+}
