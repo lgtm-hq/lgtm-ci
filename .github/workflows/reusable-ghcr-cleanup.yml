@@ -78,7 +78,9 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          sparse-checkout: .github/actions/harden-runner
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
 

@@ -44,7 +44,6 @@ replace | append) ;;
 	;;
 esac
 
-explicit=""
 explicit="$(egress_normalize_endpoint_lines "$ALLOWED_ENDPOINTS")"
 
 preset_trimmed="${EGRESS_PRESET#"${EGRESS_PRESET%%[![:space:]]*}"}"

@@ -183,8 +183,8 @@ jobs:
           egress-preset: >-
             ${{ inputs.egress-build-preset != '' && inputs.egress-build-preset ||
             'playwright' }}
-          allowed-endpoints: >-
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          allowed-endpoints: >-
             ${{ inputs.allowed-endpoints-build != '' && inputs.allowed-endpoints-build ||
             inputs.allowed-endpoints }}
 
@@ -294,8 +294,8 @@ jobs:
           egress-preset: >-
             ${{ inputs.egress-deploy-preset != '' && inputs.egress-deploy-preset ||
             'github-pages' }}
-          allowed-endpoints: >-
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          allowed-endpoints: >-
             ${{ inputs.allowed-endpoints-deploy != '' && inputs.allowed-endpoints-deploy ||
             inputs.allowed-endpoints }}
 
