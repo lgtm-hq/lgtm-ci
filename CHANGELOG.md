@@ -22,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   with `reusable-publish-test-summary.yml`.
 - Rust/Python/coverage workflows use `generate-coverage-comment` for test summaries when
   coverage artifacts are available.
-- Renamed `generate-pr-test-summary.sh` → `generate-test-summary.sh` and
+- Renamed `generate-test-comment.sh` → `generate-test-summary.sh` and
   `prepare-coverage-comment.sh` → `prepare-coverage-test-summary.sh`.
 - **Breaking:** Renamed `prebuilt-comment-file` → `prebuilt-test-summary-file` on
   `reusable-publish-test-summary.yml`.

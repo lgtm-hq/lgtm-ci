@@ -542,6 +542,8 @@ jobs:
       rich-coverage-comment: ${{ inputs.coverage }}
       coverage-artifact-name: >-
         ${{ inputs.coverage && inputs.upload-coverage && 'python-coverage' || '' }}
-      coverage-file: coverage.json
+      coverage-file: >-
+        ${{ inputs.coverage-format == 'xml' && 'coverage.xml' ||
+        (inputs.coverage-format == 'lcov' && 'coverage.lcov' || 'coverage.json') }}
       coverage-format: ${{ inputs.coverage-format }}
       tooling-ref: ${{ inputs.tooling-ref }}
