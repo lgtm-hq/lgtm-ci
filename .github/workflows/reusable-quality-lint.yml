@@ -124,6 +124,7 @@ jobs:
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
+            scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
