@@ -59,7 +59,7 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/assert-required-check.sh"
 		bash "${SCRIPT}"
 
 	assert_success
-	assert [ -f "${output_file}" ]
+	[[ -f "${output_file}" ]] || fail "expected GITHUB_OUTPUT file"
 	run grep -F 'exit-code=0' "${output_file}"
 	assert_success
 	run grep -F 'status=passed' "${output_file}"
