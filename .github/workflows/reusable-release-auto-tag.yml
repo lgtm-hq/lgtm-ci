@@ -166,7 +166,10 @@ jobs:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ steps.tooling.outputs.ref }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            scripts/ci/
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
