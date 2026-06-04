@@ -4,20 +4,6 @@
 
 load "../../helpers/common"
 
-_publish_checkout_order_ok() {
-	local workflow="$1"
-	awk '
-		/^    steps:/ { in_steps = 1 }
-		in_steps && /^      - name: Checkout repository/ { repo = NR }
-		in_steps && /^      - name: Harden runner/ { harden = NR }
-		in_steps && /^      - name: Checkout lgtm-ci tooling/ { tooling = NR }
-		END {
-			ok = (repo > 0 && harden > 0 && tooling > 0 && repo < harden && harden < tooling)
-			exit !ok
-		}
-	' "$workflow"
-}
-
 _publish_tooling_actions_ok() {
 	local workflow="$1"
 	awk '
@@ -52,7 +38,7 @@ _publish_no_contents_write_ok() {
 
 @test "reusable-test-python-publish: checkout order preserves tooling in isolated jobs" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-python-publish.yml"
-	run _publish_checkout_order_ok "$workflow"
+	run egress_tooling_checkout_order_ok "$workflow" "publish"
 	assert_success
 }
 
@@ -70,7 +56,7 @@ _publish_no_contents_write_ok() {
 
 @test "reusable-test-node-publish: checkout order preserves tooling in isolated jobs" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-test-node-publish.yml"
-	run _publish_checkout_order_ok "$workflow"
+	run egress_tooling_checkout_order_ok "$workflow" "publish"
 	assert_success
 }
 

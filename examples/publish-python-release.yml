@@ -2,6 +2,8 @@
 # Canonical caller layout for Python tag releases using lgtm-ci reusables.
 # Copy into your repository as .github/workflows/publish-pypi-on-tag.yml (or similar).
 # PyPI trusted publishing must reference THIS workflow filename and the upload job.
+# Do not vendor .github/actions/harden-runner or resolve-egress-allowlist — reusables
+# load them from lgtm-ci. See examples/README.md and docs/reusable-workflows.md.
 # See docs/python-release-publish.md and docs/workflow-contract.md.
 ---
 name: Publish - PyPI Production

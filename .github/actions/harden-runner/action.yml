@@ -11,7 +11,8 @@ inputs:
   allowed-endpoints:
     description: >-
       Allowed endpoints when egress-policy is block. Use
-      ./.github/actions/resolve-egress-allowlist in a prior workflow step when
+      ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist in a prior workflow
+      step when
       applying egress-preset or merging presets with caller overrides.
     required: false
     default: ""

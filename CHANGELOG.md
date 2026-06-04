@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **workflows**: load `harden-runner` and `resolve-egress-allowlist` from an early
+  `.lgtm-ci-tooling` sparse checkout instead of caller-local `./.github/actions/...`
+  so cross-repo reusables work without vendoring (#279)
+
+- **docs**: align README, actions catalog, workflow-contract, and examples with the
+  `.lgtm-ci-tooling` egress pattern (#279)
+
 ### Deprecated
 
 ### Removed

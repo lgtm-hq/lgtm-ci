@@ -2,7 +2,7 @@
 name: "Resolve egress allowlist"
 description: >-
   Resolve allowed-endpoints for step-security/harden-runner. Run as a workflow
-  step before ./.github/actions/harden-runner so the inner pre-hook receives
+  step before lgtm-hq/lgtm-ci harden-runner so the inner pre-hook receives
   endpoints (composite step outputs are not available at pre-hook time).
 author: "lgtm-hq"
 inputs:
