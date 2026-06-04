@@ -14,10 +14,8 @@ WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 
 TOOLING_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 TOOLING_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/harden-runner[[:space:]]*$'
-RENOVATE_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/resolve-egress-allowlist[[:space:]]*$'
-RENOVATE_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/harden-runner[[:space:]]*$'
-LOCAL_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/resolve-egress-allowlist[[:space:]]*$'
-LOCAL_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/harden-runner[[:space:]]*$'
+IN_REPO_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/resolve-egress-allowlist[[:space:]]*$'
+IN_REPO_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/harden-runner[[:space:]]*$'
 REMOTE_EGRESS_RE='lgtm-hq/lgtm-ci/\.github/actions/(harden-runner|resolve-egress-allowlist)@'
 
 violations=0
@@ -163,7 +161,7 @@ while IFS= read -r -d '' workflow; do
 		echo "${wf_name}: missing Checkout lgtm-ci tooling step before egress composites" >&2
 		violations=$((violations + 1))
 	fi
-	if grep -qE "$LOCAL_RESOLVE_RE" "$workflow" || grep -qE "$LOCAL_HARDEN_RE" "$workflow"; then
+	if grep -qE "$IN_REPO_RESOLVE_RE" "$workflow" || grep -qE "$IN_REPO_HARDEN_RE" "$workflow"; then
 		echo "${wf_name}: caller-local ./.github/actions egress paths are forbidden in reusables" >&2
 		violations=$((violations + 1))
 	fi
@@ -173,7 +171,11 @@ done < <(discover_reusable_workflows)
 
 renovate="$WORKFLOWS_DIR/renovate.yml"
 if [[ -f "$renovate" ]]; then
-	if ! grep -qE "$RENOVATE_HARDEN_RE" "$renovate"; then
+	if ! grep -qE "$IN_REPO_RESOLVE_RE" "$renovate"; then
+		echo "renovate.yml: missing ./.github/actions/resolve-egress-allowlist step" >&2
+		violations=$((violations + 1))
+	fi
+	if ! grep -qE "$IN_REPO_HARDEN_RE" "$renovate"; then
 		echo "renovate.yml: missing ./.github/actions/harden-runner step" >&2
 		violations=$((violations + 1))
 	fi

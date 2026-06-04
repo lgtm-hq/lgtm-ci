@@ -286,11 +286,9 @@ def main() -> int:
     for path in sorted(WORKFLOWS.glob("*.yml")):
         if not (path.name.startswith("reusable-") or path.name == "renovate.yml"):
             continue
-        if not RESOLVE_USES_RE.search(path.read_text()) and not HARDEN_USES_RE.search(
-            path.read_text()
-        ):
-            continue
         text = path.read_text()
+        if not RESOLVE_USES_RE.search(text) and not HARDEN_USES_RE.search(text):
+            continue
         new_text = migrate_workflow(text, path)
         if new_text != text:
             path.write_text(new_text)

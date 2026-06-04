@@ -57,7 +57,8 @@ def fix_job(job_body: str) -> str:
             out.append(line)
             i += 1
             block_lines: list[str] = []
-            while i < len(lines) and lines[i].startswith("            "):
+            block_indent = line[: len(line) - len(line.lstrip())] + "  "
+            while i < len(lines) and lines[i].startswith(block_indent):
                 block_lines.append(lines[i])
                 i += 1
             block = "".join(block_lines)

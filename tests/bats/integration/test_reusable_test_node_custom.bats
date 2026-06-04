@@ -6,23 +6,8 @@ load "../../helpers/common"
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 
-_test_checkout_order_ok() {
-	awk '
-		/^  test:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && /^    steps:/ { in_steps = 1 }
-		in_job && in_steps && /^      - name: Checkout repository/ { repo = NR }
-		in_job && in_steps && /^      - name: Harden runner/ { harden = NR }
-		in_job && in_steps && /^      - name: Checkout lgtm-ci tooling/ { tooling = NR }
-		END {
-			ok = (repo > 0 && harden > 0 && tooling > 0 && repo < harden && harden < tooling)
-			exit !ok
-		}
-	' "$WORKFLOW"
-}
-
 @test "reusable-test-node-custom: test job checkout order preserves tooling" {
-	run _test_checkout_order_ok
+	run egress_tooling_checkout_order_ok "$WORKFLOW" "test"
 	assert_success
 }
 
