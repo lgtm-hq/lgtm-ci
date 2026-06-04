@@ -85,6 +85,8 @@ if [[ "$TESTS_FAILED" -gt 0 ]]; then
 	TEST_STATUS_TEXT="❌ Tests failed"
 elif [[ "$TESTS_TOTAL" -gt 0 ]]; then
 	TEST_STATUS_TEXT="✅ Tests passed"
+elif [[ "$JOB_RESULT" == "success" ]]; then
+	TEST_STATUS_TEXT="✅ Tests passed"
 else
 	TEST_STATUS_TEXT="⚠️ Tests unknown"
 fi
@@ -143,6 +145,9 @@ elif [[ "$JOB_RESULT" == "failure" ]] || [[ "$TESTS_FAILED" -gt 0 ]]; then
 	STATUS_EMOJI="❌"
 	STATUS_TEXT="FAILED"
 elif [[ "$TESTS_TOTAL" -gt 0 ]] && [[ "$TESTS_FAILED" -eq 0 ]]; then
+	STATUS_EMOJI="✅"
+	STATUS_TEXT="PASSED"
+elif [[ "$JOB_RESULT" == "success" ]] && [[ "$TESTS_FAILED" -eq 0 ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
 else

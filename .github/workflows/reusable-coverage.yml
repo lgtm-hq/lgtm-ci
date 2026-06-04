@@ -274,7 +274,6 @@ jobs:
       && inputs.publish-test-summary
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-      && needs.coverage.outputs.coverage-percent != ''
     uses: ./.github/workflows/reusable-publish-test-summary.yml
     permissions:
       contents: read
