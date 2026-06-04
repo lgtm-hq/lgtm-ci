@@ -6,13 +6,13 @@ workflows (tag push or manual dispatch). Callers keep product-specific steps
 
 ## Components
 
-| Component                        | Purpose                                                 |
-| -------------------------------- | ------------------------------------------------------- |
-| `reusable-build-python-dist.yml` | Build sdist/wheel and upload workflow artifact          |
-| `prepare-pypi-upload` action     | Download artifact, validate, expose dist metadata       |
-| `pypa/gh-action-pypi-publish`    | OIDC upload (caller workflow step only)                 |
-| `build-python-package` action    | Build/validate (used inside build reusable)             |
-| `reusable-github-release.yml`    | Attach artifacts to a GitHub Release                    |
+| Component                        | Purpose                                           |
+| -------------------------------- | ------------------------------------------------- |
+| `reusable-build-python-dist.yml` | Build sdist/wheel and upload workflow artifact    |
+| `prepare-pypi-upload` action     | Download artifact, validate, expose dist metadata |
+| `pypa/gh-action-pypi-publish`    | OIDC upload (caller workflow step only)           |
+| `build-python-package` action    | Build/validate (used inside build reusable)       |
+| `reusable-github-release.yml`    | Attach artifacts to a GitHub Release              |
 
 There is **no orchestrator** workflow. Compose jobs in the caller repository.
 

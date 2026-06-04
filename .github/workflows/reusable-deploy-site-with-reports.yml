@@ -87,6 +87,14 @@ on:
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
       allowed-endpoints-build:
         description: >-
           Allowed endpoints for the build job when egress-policy is block
@@ -167,18 +175,25 @@ jobs:
             ${{ inputs.commit-sha != '' && inputs.commit-sha || github.sha }}
           persist-credentials: false
 
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: >-
             ${{ inputs.egress-build-preset != '' && inputs.egress-build-preset ||
             'playwright' }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           allowed-endpoints: >-
             ${{ inputs.allowed-endpoints-build != '' && inputs.allowed-endpoints-build ||
             inputs.allowed-endpoints }}
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -271,18 +286,25 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: >-
             ${{ inputs.egress-deploy-preset != '' && inputs.egress-deploy-preset ||
             'github-pages' }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           allowed-endpoints: >-
             ${{ inputs.allowed-endpoints-deploy != '' && inputs.allowed-endpoints-deploy ||
             inputs.allowed-endpoints }}
 
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0

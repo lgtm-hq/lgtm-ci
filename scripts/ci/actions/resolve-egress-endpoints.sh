@@ -5,8 +5,9 @@
 # Required environment variables:
 #   GITHUB_OUTPUT - GitHub Actions output file
 #   EGRESS_POLICY - audit or block
-#   ALLOWED_ENDPOINTS - Caller override (multiline host:port)
-#   EGRESS_PRESET     - Preset name when allowed-endpoints is empty (optional)
+#   ALLOWED_ENDPOINTS - Caller host:port list (multiline)
+#   EGRESS_PRESET     - Preset name when using preset baseline (optional)
+#   ALLOWED_ENDPOINTS_MODE - replace (default) or append
 #
 # Outputs (GITHUB_OUTPUT):
 #   allowed-endpoints - Resolved allowlist for step-security/harden-runner
@@ -25,6 +26,7 @@ source "$LIB_DIR/github/output.sh"
 : "${EGRESS_POLICY:=block}"
 : "${ALLOWED_ENDPOINTS:=}"
 : "${EGRESS_PRESET:=}"
+: "${ALLOWED_ENDPOINTS_MODE:=replace}"
 
 case "$EGRESS_POLICY" in
 audit | block) ;;
@@ -34,41 +36,38 @@ audit | block) ;;
 	;;
 esac
 
-normalize_allowed_endpoints() {
-	local raw="$1"
-	local -a lines=()
-	local line trimmed
+case "$ALLOWED_ENDPOINTS_MODE" in
+replace | append) ;;
+*)
+	echo "resolve-egress-endpoints.sh: invalid ALLOWED_ENDPOINTS_MODE '$ALLOWED_ENDPOINTS_MODE' (expected 'replace' or 'append')" >&2
+	exit 1
+	;;
+esac
 
-	if [[ -z "${raw//[[:space:]]/}" ]]; then
-		printf ''
-		return
-	fi
-
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		trimmed="${line#"${line%%[![:space:]]*}"}"
-		trimmed="${trimmed%"${trimmed##*[![:space:]]}"}"
-		if [[ -n "$trimmed" ]]; then
-			lines+=("$trimmed")
-		fi
-	done <<<"$raw"
-
-	if ((${#lines[@]} == 0)); then
-		printf ''
-		return
-	fi
-
-	local IFS=$'\n'
-	printf '%s' "${lines[*]}"
-}
-
-resolved=""
-resolved="$(normalize_allowed_endpoints "$ALLOWED_ENDPOINTS")"
+explicit="$(egress_normalize_endpoint_lines "$ALLOWED_ENDPOINTS")"
 
 preset_trimmed="${EGRESS_PRESET#"${EGRESS_PRESET%%[![:space:]]*}"}"
 preset_trimmed="${preset_trimmed%"${preset_trimmed##*[![:space:]]}"}"
 
-if [[ -z "$resolved" && "$EGRESS_POLICY" == "block" && -n "$preset_trimmed" ]]; then
-	resolved="$(egress_preset_endpoints "$preset_trimmed")" || exit 1
+preset_lines=""
+if [[ "$EGRESS_POLICY" == "block" && -n "$preset_trimmed" ]]; then
+	preset_lines="$(egress_preset_endpoints "$preset_trimmed")" || exit 1
+fi
+
+resolved=""
+
+if [[ "$EGRESS_POLICY" == "audit" ]]; then
+	resolved="$explicit"
+elif [[ "$ALLOWED_ENDPOINTS_MODE" == "replace" ]]; then
+	if [[ -n "$explicit" ]]; then
+		resolved="$explicit"
+	elif [[ -n "$preset_lines" ]]; then
+		resolved="$preset_lines"
+	fi
+else
+	if [[ -n "$preset_lines" || -n "$explicit" ]]; then
+		resolved="$(egress_merge_endpoint_lines "$preset_lines" "$explicit")"
+	fi
 fi
 
 if [[ "$EGRESS_POLICY" == "block" && -z "${resolved//[[:space:]]/}" ]]; then

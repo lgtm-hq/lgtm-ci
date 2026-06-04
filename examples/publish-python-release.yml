@@ -6,10 +6,10 @@
 ---
 name: Publish - PyPI Production
 
-'on':
+"on":
   push:
     tags:
-      - '*.*.*'
+      - "*.*.*"
   workflow_dispatch:
 
 permissions: {}

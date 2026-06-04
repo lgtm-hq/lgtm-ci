@@ -160,12 +160,16 @@ Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 
 ### Pages coverage HTML inputs (`reusable-test-node`)
 
-| Input | Type | Required | Default | Purpose |
-| ----- | ---- | -------- | ------- | ------- |
-| `upload-pages-coverage-html` | boolean | no | `false` | Upload flat HTML for Model B bundling |
-| `pages-coverage-artifact-name` | string | no | `coverage-html` | Flat HTML artifact name |
-| `pages-coverage-upload-on` | string | no | `push-main` | Upload gate selector (v1) |
-| `pages-coverage-source-subpath` | string | no | `coverage` | HTML dir under `working-directory` |
+<!-- markdownlint-disable MD013 -- prettier table column alignment -->
+
+| Input                           | Type    | Required | Default         | Purpose                               |
+| ------------------------------- | ------- | -------- | --------------- | ------------------------------------- |
+| `upload-pages-coverage-html`    | boolean | no       | `false`         | Upload flat HTML for Model B bundling |
+| `pages-coverage-artifact-name`  | string  | no       | `coverage-html` | Flat HTML artifact name               |
+| `pages-coverage-upload-on`      | string  | no       | `push-main`     | Upload gate selector (v1)             |
+| `pages-coverage-source-subpath` | string  | no       | `coverage`      | HTML dir under `working-directory`    |
+
+<!-- markdownlint-enable MD013 -->
 
 Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
 
@@ -174,8 +178,8 @@ upload-gating behavior. Additional values may be added in later releases without
 breaking existing callers. Use the literal string values below — they are not
 Git ref aliases.
 
-| Value | Meaning |
-| ----- | ------- |
+| Value       | Meaning                                                                          |
+| ----------- | -------------------------------------------------------------------------------- |
 | `push-main` | Upload only when `github.event_name == push` and `github.ref == refs/heads/main` |
 
 When `node-versions` is a matrix, only the **first** listed version uploads the
@@ -239,11 +243,15 @@ jobs:
 
 ### Pages coverage HTML inputs (`reusable-rust-test` with `coverage: true`)
 
-| Input | Type | Required | Default | Purpose |
-| ----- | ---- | -------- | ------- | ------- |
-| `upload-pages-coverage-html` | boolean | no | `false` | Upload flat HTML for Model B sites |
-| `pages-coverage-artifact-name` | string | no | `rust-coverage-html` | Rust HTML artifact name |
-| `pages-coverage-upload-on` | string | no | `push-main` | Upload gate selector (v1) |
+<!-- markdownlint-disable MD013 -- prettier table column alignment -->
+
+| Input                          | Type    | Required | Default              | Purpose                            |
+| ------------------------------ | ------- | -------- | -------------------- | ---------------------------------- |
+| `upload-pages-coverage-html`   | boolean | no       | `false`              | Upload flat HTML for Model B sites |
+| `pages-coverage-artifact-name` | string  | no       | `rust-coverage-html` | Rust HTML artifact name            |
+| `pages-coverage-upload-on`     | string  | no       | `push-main`          | Upload gate selector (v1)          |
+
+<!-- markdownlint-enable MD013 -->
 
 Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
 

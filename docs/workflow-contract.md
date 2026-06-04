@@ -13,8 +13,9 @@ Where applicable, workflows accept:
 | ---------------------------------- | ------------------------------------------------------------- |
 | `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA) |
 | `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner   |
-| `egress-preset`                    | Named allowlist when `allowed-endpoints` is empty under block |
-| `allowed-endpoints`                | Explicit allowlist; **replaces** preset when non-empty        |
+| `egress-preset`                    | Named baseline allowlist under block                          |
+| `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)     |
+| `allowed-endpoints-mode`           | `replace` (default) or `append` (merge with preset, deduped)  |
 | `job-name`                         | Check name on always-run jobs; PR comment suite name          |
 | `runner-image`                     | Runner label for long-running jobs                            |
 | `timeout-minutes`                  | Job timeout                                                   |
@@ -74,10 +75,11 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 caller repository checkout must initialize `.git` before tooling is added:
 
 1. Checkout repository (caller repo at workspace root)
-2. Harden runner (`uses: ./.github/actions/harden-runner` — resolved from the
+2. Resolve egress allowlist (`uses: ./.github/actions/resolve-egress-allowlist`)
+3. Harden runner (`uses: ./.github/actions/harden-runner` — resolved from the
    ref used to call the reusable workflow)
-3. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` alongside the repo)
-4. Download artifacts, badge generation, GitHub Pages publish (local tooling actions)
+4. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` alongside the repo)
+5. Download artifacts, badge generation, GitHub Pages publish (local tooling actions)
 
 Deploy uses official `actions/deploy-pages` (not gh-pages branch push). See
 [pages-publishing.md](pages-publishing.md) for permissions, egress, and
@@ -111,11 +113,11 @@ is skipped by `if:`. lgtm-ci uses a **hybrid** policy (issue #168 §12):
 
 <!-- markdownlint-disable MD013 -->
 
-| Pattern | When | Check name behavior |
-| ------- | ---- | ------------------- |
-| **Split reusables** | Consumer-facing modes (Vitest vs custom Node) | Matching workflow only; `job-name` drives test check name. |
-| **`job-name` input** | Always-run jobs (quality, publish, Rust test, split Node) | Caller passes the visible check label. |
-| **Static inner names** | Internal matrix legs (Python, Docker, E2E) | Fixed labels; GitHub appends matrix suffix. Brand via caller `name:`. |
+| Pattern                | When                                                      | Check name behavior                                                   |
+| ---------------------- | --------------------------------------------------------- | --------------------------------------------------------------------- |
+| **Split reusables**    | Consumer-facing modes (Vitest vs custom Node)             | Matching workflow only; `job-name` drives test check name.            |
+| **`job-name` input**   | Always-run jobs (quality, publish, Rust test, split Node) | Caller passes the visible check label.                                |
+| **Static inner names** | Internal matrix legs (Python, Docker, E2E)                | Fixed labels; GitHub appends matrix suffix. Brand via caller `name:`. |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -177,12 +179,20 @@ Reusable workflows in this repo invoke the composite with a **relative path**
   with:
     persist-credentials: false
 
-- name: Harden runner
-  uses: ./.github/actions/harden-runner
+- name: Resolve egress allowlist
+  id: egress
+  uses: ./.github/actions/resolve-egress-allowlist
   with:
     egress-policy: ${{ inputs.egress-policy }}
     egress-preset: ${{ inputs.egress-preset }}
     allowed-endpoints: ${{ inputs.allowed-endpoints }}
+    allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+- name: Harden runner
+  uses: ./.github/actions/harden-runner
+  with:
+    egress-policy: ${{ inputs.egress-policy }}
+    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 ```
 
 GitHub resolves `./.github/actions/harden-runner` from the **git ref used to call**
@@ -195,32 +205,43 @@ and platform limitation).
 
 <!-- markdownlint-enable MD013 -->
 
-The action bundle is **self-contained** (resolver + `lib/egress/`). Canonical
-preset definitions live in `scripts/ci/lib/egress/presets.sh`; release maintainers
-run `scripts/ci/actions/sync-harden-runner-bundle.sh` before tagging.
+The `harden-runner` bundle is **self-contained** (`lib/egress/`). Canonical preset
+definitions live in `scripts/ci/lib/egress/presets.sh`; release maintainers run
+`scripts/ci/actions/sync-harden-runner-bundle.sh` before tagging.
+`resolve-egress-allowlist` invokes the bundled resolver script in a **prior workflow
+step** because step-security's pre-hook runs before composite steps and cannot read
+`steps.resolve.outputs` from inside `harden-runner`.
 
 Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
 
 ## Egress presets
 
-Reusable workflows default to `egress-policy: block`. When `allowed-endpoints` is
-empty, the `harden-runner` composite expands `egress-preset` via bundled
-`lib/egress/presets.sh` (synced from `scripts/ci/lib/egress/presets.sh`). Explicit
-`allowed-endpoints` **replaces** the preset (no merge).
+Reusable workflows default to `egress-policy: block` and
+`allowed-endpoints-mode: replace`. `resolve-egress-allowlist` expands presets via
+bundled `lib/egress/presets.sh` (synced from `scripts/ci/lib/egress/presets.sh`).
 
-| Preset           | Use case                                                  |
-| ---------------- | --------------------------------------------------------- |
-| `github-minimal` | PR comments (API, tooling checkout, workflow artifacts)   |
-| `github-pages`   | GitHub Pages deploy/publish (OIDC)                        |
-| `github-tooling` | Validate action pinning + GitHub raw/codeload             |
-| `docker`         | Docker build/pull/push (`reusable-docker.yml`)            |
-| `playwright`     | Playwright E2E + browser CDN downloads                    |
-| `pypi`           | PyPI/TestPyPI publish and availability checks             |
-| `rubygems`       | RubyGems publish                                          |
-| `npm-publish`    | npm publish + Sigstore attestation                        |
-| `quality`        | Docker `lintro chk` (default on quality lint)             |
-| `sbom`           | SBOM, Grype scan, Sigstore attestation                    |
-| `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)             |
+| Mode      | Behavior                                                                        |
+| --------- | ------------------------------------------------------------------------------- |
+| `replace` | Non-empty `allowed-endpoints` overrides `egress-preset`; empty uses preset only |
+| `append`  | Merges preset + `allowed-endpoints` (deduped, first-seen wins)                  |
+
+Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
+`allowed-endpoints` under `append` still means preset-only (same as omitting extras).
+`audit` mode is unchanged (no enforced allowlist).
+
+| Preset           | Use case                                                |
+| ---------------- | ------------------------------------------------------- |
+| `github-minimal` | PR comments (API, tooling checkout, workflow artifacts) |
+| `github-pages`   | GitHub Pages deploy/publish (OIDC)                      |
+| `github-tooling` | Validate action pinning + GitHub raw/codeload           |
+| `docker`         | Docker build/pull/push (`reusable-docker.yml`)          |
+| `playwright`     | Playwright E2E + browser CDN downloads                  |
+| `pypi`           | PyPI/TestPyPI publish and availability checks           |
+| `rubygems`       | RubyGems publish                                        |
+| `npm-publish`    | npm publish + Sigstore attestation                      |
+| `quality`        | Docker `lintro chk` (default on quality lint)           |
+| `sbom`           | SBOM, Grype scan, Sigstore attestation                  |
+| `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)           |
 
 ```yaml
 egress-policy: block
@@ -285,7 +306,7 @@ egress-preset: github-pages
 `reusable-deploy-site-with-reports.yml` uses `egress-build-preset` (default
 `playwright`) on the build job and `egress-deploy-preset` (default `github-pages`)
 on deploy. Use `allowed-endpoints-build` or `allowed-endpoints-deploy` for
-per-job overrides; shared `allowed-endpoints` still replaces presets on both jobs
+per-job overrides; shared `allowed-endpoints` / `allowed-endpoints-mode` apply to both jobs
 when the per-job inputs are empty.
 
 ### PyPI build
