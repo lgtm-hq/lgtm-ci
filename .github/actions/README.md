@@ -125,9 +125,20 @@ Resolves `allowed-endpoints` from explicit lists or `egress-preset` names. Run a
 allowlist (composite step outputs are not available at pre-hook time).
 
 ```yaml
+- name: Checkout lgtm-ci tooling
+  uses: actions/checkout@<pin>
+  with:
+    repository: lgtm-hq/lgtm-ci
+    path: .lgtm-ci-tooling
+    ref: <sha>
+    sparse-checkout: |
+      .github/actions/harden-runner
+      .github/actions/resolve-egress-allowlist
+    sparse-checkout-cone-mode: true
+
 - name: Resolve egress allowlist
   id: egress
-  uses: ./.github/actions/resolve-egress-allowlist
+  uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
   with:
     egress-policy: block
     egress-preset: quality
@@ -135,7 +146,7 @@ allowlist (composite step outputs are not available at pre-hook time).
       private.registry.example:443
     allowed-endpoints-mode: append # default: replace
 
-- uses: ./.github/actions/harden-runner
+- uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
   with:
     egress-policy: block
     allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
@@ -153,16 +164,17 @@ Security hardening using [StepSecurity](https://stepsecurity.io). Pass
 **resolved** `allowed-endpoints` from a prior `resolve-egress-allowlist` step.
 
 ```yaml
-- uses: ./.github/actions/harden-runner
+- uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
   with:
     egress-policy: block # default; use audit to log only
     allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
     disable-sudo: "false" # optional
 ```
 
-In **lgtm-ci reusables**, checkout the repository before these steps so the runner
-can load composites from the workflow ref. External callers pin the **workflow**
-`@ref`, not a separate action SHA.
+**Reusable workflows** checkout lgtm-ci into `.lgtm-ci-tooling` before egress steps.
+Consumers do **not** copy `harden-runner` or `resolve-egress-allowlist` into their
+repo. Do not use caller-local `./.github/actions/...` in cross-repo reusables, and
+do not use `${{ }}` in remote action `@ref` segments inside `uses:`.
 
 **Features:**
 
@@ -1311,6 +1323,14 @@ Wait for a package to be available on a registry.
 
 ## Usage Example
 
+Caller-owned workflow: pin each action to a **commit SHA** (not a branch). Check out
+lgtm-ci into `.lgtm-ci-tooling`, resolve egress in a step **before** `harden-runner`,
+then pass `steps.egress.outputs['allowed-endpoints']` into harden-runner (see
+[resolve-egress-allowlist](#resolve-egress-allowlist) above).
+
+Prefer [reusable workflows](#reusable-workflows) when you want drop-in jobs without
+copying `.github/actions/harden-runner` or `resolve-egress-allowlist` into your repo.
+
 ```yaml
 name: CI
 
@@ -1323,19 +1343,36 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # Security hardening (should be first)
-      - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: <sha> # vX.Y.Z
+          sparse-checkout: |
+            .github/actions/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: block
           egress-preset: github-tooling
 
-      # Secure checkout (replaces actions/checkout)
-      - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
+      - uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: block
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
-      # Environment setup
-      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main
+      - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@<sha> # vX.Y.Z
 
-      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
+      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@<sha> # vX.Y.Z
+
+      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@<sha> # vX.Y.Z
         with:
           python-version: "3.12"
 
@@ -1346,7 +1383,9 @@ jobs:
 ## Reusable Workflows
 
 Reusable workflows provide complete CI/CD pipelines that can be called from other
-workflows.
+workflows. They load egress composites from an internal `.lgtm-ci-tooling` checkout —
+callers only pin the workflow `@sha` and optional `tooling-ref`; see
+[docs/reusable-workflows.md](../../docs/reusable-workflows.md).
 
 ### reusable-test-python.yml
 

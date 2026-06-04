@@ -64,6 +64,11 @@ jobs:
 Reusable workflows share a standard contract (`tooling-ref`, `egress-policy`,
 `job-name`, permissions by mode). See [docs/workflow-contract.md](docs/workflow-contract.md).
 
+You do **not** need to copy `.github/actions/harden-runner` or
+`resolve-egress-allowlist` into your repository — reusables fetch them from lgtm-ci
+via `.lgtm-ci-tooling` (see [docs/reusable-workflows.md](docs/reusable-workflows.md) and
+[examples/README.md](examples/README.md)).
+
 ### Using Shell Libraries
 
 ```yaml
@@ -96,12 +101,13 @@ steps:
 
 #### Security & Hardening
 
-| Action                 | Description                             |
-| ---------------------- | --------------------------------------- |
-| `harden-runner`        | Security hardening with egress presets  |
-| `secure-checkout`      | Hardened git checkout                   |
-| `scan-vulnerabilities` | Vulnerability scanning                  |
-| `egress-audit`         | Network egress monitoring and reporting |
+| Action                     | Description                                        |
+| -------------------------- | -------------------------------------------------- |
+| `resolve-egress-allowlist` | Resolve egress presets/endpoints before hardening  |
+| `harden-runner`            | StepSecurity hardening with resolved allowlist     |
+| `secure-checkout`          | Hardened git checkout                              |
+| `scan-vulnerabilities`     | Vulnerability scanning                             |
+| `egress-audit`             | Network egress monitoring and reporting            |
 
 #### Quality & Testing
 

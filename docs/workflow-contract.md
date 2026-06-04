@@ -75,10 +75,10 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 caller repository checkout must initialize `.git` before tooling is added:
 
 1. Checkout repository (caller repo at workspace root)
-2. Resolve egress allowlist (`uses: ./.github/actions/resolve-egress-allowlist`)
-3. Harden runner (`uses: ./.github/actions/harden-runner` — resolved from the
-   ref used to call the reusable workflow)
-4. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` alongside the repo)
+2. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` — sparse-checkout must include egress
+   composites and any scripts/actions the job needs)
+3. Resolve egress allowlist (`uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist`)
+4. Harden runner (`uses: ./.lgtm-ci-tooling/.github/actions/harden-runner`)
 5. Download artifacts, badge generation, GitHub Pages publish (local tooling actions)
 
 Deploy uses official `actions/deploy-pages` (not gh-pages branch push). See
@@ -169,9 +169,15 @@ Do not add per-consumer `job-name` aliases inside work reusables.
 
 <!-- markdownlint-disable MD013 -->
 
-Reusable workflows in this repo invoke the composite with a **relative path**
-(same-repository pattern per
-[GitHub composite actions](https://docs.github.com/en/actions/creating-actions/creating-a-composite-action#creating-a-composite-action-within-the-same-repository)):
+Reusable workflows load egress composites from a **sparse checkout of lgtm-ci** into
+`.lgtm-ci-tooling/`, then reference them by workspace path. Cross-repo callers must
+not vendor `.github/actions/harden-runner` or `resolve-egress-allowlist`.
+
+Caller-local `./.github/actions/harden-runner` resolves in the **consumer** workspace
+and fails when those directories are absent. Do **not** use
+`lgtm-hq/lgtm-ci/.github/actions/...@\${{ }}` in `steps[*].uses` — GitHub does not
+allow expressions in action `@ref` segments ([runner#895](https://github.com/actions/runner/issues/895));
+actionlint reports errors and workflows may fail validation.
 
 ```yaml
 - name: Checkout repository
@@ -179,9 +185,22 @@ Reusable workflows in this repo invoke the composite with a **relative path**
   with:
     persist-credentials: false
 
+- name: Checkout lgtm-ci tooling
+  uses: actions/checkout@<pin> # v6.0.2
+  with:
+    repository: lgtm-hq/lgtm-ci
+    path: .lgtm-ci-tooling
+    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+    sparse-checkout: |
+      .github/actions/harden-runner
+      .github/actions/resolve-egress-allowlist
+      scripts/ci/
+    sparse-checkout-cone-mode: true
+    persist-credentials: false
+
 - name: Resolve egress allowlist
   id: egress
-  uses: ./.github/actions/resolve-egress-allowlist
+  uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
   with:
     egress-policy: ${{ inputs.egress-policy }}
     egress-preset: ${{ inputs.egress-preset }}
@@ -189,19 +208,32 @@ Reusable workflows in this repo invoke the composite with a **relative path**
     allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
 
 - name: Harden runner
-  uses: ./.github/actions/harden-runner
+  uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
   with:
     egress-policy: ${{ inputs.egress-policy }}
     allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 ```
 
-GitHub resolves `./.github/actions/harden-runner` from the **git ref used to call**
-the reusable workflow (branch, tag, or SHA). That ref must include the bundle at
-`.github/actions/harden-runner/`. Do **not** pin
-`lgtm-hq/lgtm-ci/.github/actions/harden-runner@<sha>` in `uses:` — that form treats
-the path as a separate action version and fails on PR branches
-(`unable to find version`). Do **not** use `${{ }}` in the `@ref` segment (actionlint
-and platform limitation).
+Pin the reusable workflow `uses:` line to a commit SHA in production and pass the
+same ref as `tooling-ref` when testing branches. When `tooling-ref` is empty,
+reusables fall back to `github.workflow_sha`. First-party `renovate.yml` may keep
+in-repo `./.github/actions/...` because the job runs in lgtm-ci.
+
+Callers may still pin **other** lgtm-ci composites with
+`lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;
+that pattern does not apply inside reusable workflow steps that need dynamic refs.
+
+### Release workflows (`reusable-release-auto-tag`, `reusable-release-version-pr`)
+
+These jobs use **two** lgtm-ci checkouts:
+
+1. **Egress tooling** (before the GitHub App token) — sparse-checkout only
+   `harden-runner` and `resolve-egress-allowlist`, then resolve → harden.
+2. **Scripts tooling** (after `create-github-app-token` and the full repository
+   checkout) — sparse-checkout `scripts/ci/` with the app installation token.
+
+Keep `Create GitHub App installation token` before any step that uses
+`steps.app-token.outputs` (actionlint enforces step order).
 
 <!-- markdownlint-enable MD013 -->
 

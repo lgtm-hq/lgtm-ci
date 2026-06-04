@@ -42,8 +42,15 @@ jobs:
 Pass `tooling-ref` when testing an unreleased lgtm-ci branch. Production callers
 should pin the workflow ref to a commit SHA.
 
+Consumers do **not** need to vendor `.github/actions/harden-runner` or
+`resolve-egress-allowlist` — reusables sparse-checkout lgtm-ci into
+`.lgtm-ci-tooling/` and invoke `./.lgtm-ci-tooling/.github/actions/...` (same
+`tooling-ref` / `github.workflow_sha` as other tooling steps).
+
 See [workflow-contract.md](workflow-contract.md) for the standard input contract,
 permissions by mode, egress allowlists, and Rust examples.
+
+Caller examples live under [examples/](../examples/) (see [examples/README.md](../examples/README.md)).
 
 For GitHub Pages (coverage, test reports, and static sites), see
 [pages-publishing.md](pages-publishing.md).
