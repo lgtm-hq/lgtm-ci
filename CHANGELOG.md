@@ -9,16 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **actions**: `resolve-egress-allowlist` composite for preset/explicit egress resolution
-  before `harden-runner` (#276)
-- **egress**: `allowed-endpoints-mode` (`replace` | `append`) with deduped merge when
-  appending project endpoints to presets (#276)
-
 ### Changed
-
-- **workflows**: Reusables resolve egress in a prior workflow step, then pass
-  `steps.egress.outputs['allowed-endpoints']` into `harden-runner` (#276)
-- **workflows**: Reusables accept `allowed-endpoints-mode` (default `replace`) (#276)
 
 ### Deprecated
 
@@ -26,10 +17,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.30.1] - 2026-06-04
+
+### Bug Fixes
+
+- **harden-runner**: resolve egress before step-security pre-hook (#277) (7af7421)
+
+### Previously Unreleased
+
+- **actions**: `resolve-egress-allowlist` composite for preset/explicit egress resolution
+  before `harden-runner` (#276)
+
+- **egress**: `allowed-endpoints-mode` (`replace` | `append`) with deduped merge when
+  appending project endpoints to presets (#276)
+
+- **workflows**: Reusables resolve egress in a prior workflow step, then pass
+  `steps.egress.outputs['allowed-endpoints']` into `harden-runner` (#276)
+
+- **workflows**: Reusables accept `allowed-endpoints-mode` (default `replace`) (#276)
+
 - **actions**: `harden-runner` passes `inputs['allowed-endpoints']` to step-security
   so the pre-hook receives the allowlist (fixes v0.30.0 blocking all egress) (#276)
-
-### Security
 
 ## [0.30.0] - 2026-06-02
 
@@ -733,7 +743,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.1...HEAD
+[0.30.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.1...v0.29.2
 [0.29.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.0...v0.29.1
