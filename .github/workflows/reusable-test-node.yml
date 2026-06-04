@@ -223,21 +223,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve egress allowlist
-        id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -245,9 +230,26 @@ jobs:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Generate Node.js matrix
         id: matrix
@@ -287,20 +289,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve egress allowlist
-        id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -310,9 +298,23 @@ jobs:
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/
-            scripts/ci/
+          sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Setup Node.js
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
@@ -586,9 +588,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -596,20 +611,10 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
 
       - name: Record pages coverage upload status
         id: record
@@ -650,21 +655,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve egress allowlist
-        id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -672,9 +662,26 @@ jobs:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Download matrix test summaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -722,20 +729,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Resolve egress allowlist
-        id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
-        with:
-          # PR comment job: GitHub API only (#204); do not inherit parent presets
-          egress-policy: block
-          egress-preset: github-minimal
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
-        with:
-          egress-policy: block
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -745,10 +738,23 @@ jobs:
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/
-            scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          # PR comment job: GitHub API only (#204); do not inherit parent presets
+          egress-policy: block
+          egress-preset: github-minimal
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: block
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Download coverage PR comment artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:

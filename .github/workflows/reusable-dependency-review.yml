@@ -20,6 +20,12 @@ on:
         type: string
         default: ""
 
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
@@ -68,9 +74,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -78,7 +97,7 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}

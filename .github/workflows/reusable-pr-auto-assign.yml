@@ -59,9 +59,20 @@ jobs:
       contents: read
       pull-requests: write
     steps:
-      - name: Checkout repository (harden-runner action)
+      - name: Checkout repository CODEOWNERS
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          sparse-checkout: |
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
@@ -70,7 +81,7 @@ jobs:
 
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -79,28 +90,10 @@ jobs:
 
       - name: Harden Runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-
-      - name: Checkout repository CODEOWNERS
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          sparse-checkout: |
-            ${{ inputs.codeowners-path }}
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
-
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/actions/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
 
       - name: Assign random CODEOWNER
         env:

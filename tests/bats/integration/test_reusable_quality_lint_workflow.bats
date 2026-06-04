@@ -38,9 +38,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 }
 
 @test "reusable-quality-lint: resolve egress before harden-runner composite" {
-	run grep -E '^\s*uses:\s*\./\.github/actions/resolve-egress-allowlist\s*$' "$WORKFLOW"
+	run grep -E '^\s*uses:\s*\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist\s*$' "$WORKFLOW"
 	assert_success
-	run grep -E '^\s*uses:\s*\./\.github/actions/harden-runner\s*$' "$WORKFLOW"
+	run grep -E '^\s*uses:\s*\./\.lgtm-ci-tooling/\.github/actions/harden-runner\s*$' "$WORKFLOW"
 	assert_success
 	run grep -F 'egress-preset: ${{ inputs.egress-preset }}' "$WORKFLOW"
 	assert_success
@@ -48,9 +48,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	assert_success
 	run awk '
 		/- name: Checkout repository/ { checkout = 1 }
-		checkout && /- name: Resolve egress allowlist/ { resolve = 1 }
+		/- name: Checkout lgtm-ci tooling/ { tooling = 1 }
+		tooling && /- name: Resolve egress allowlist/ { resolve = 1 }
 		resolve && /- name: Harden runner/ { found = 1 }
-		END { exit !found }
+		END { exit !(checkout && tooling && found) }
 	' "$WORKFLOW"
 	assert_success
 }

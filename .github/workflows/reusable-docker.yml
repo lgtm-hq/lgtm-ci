@@ -217,9 +217,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -227,7 +240,7 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
@@ -262,16 +275,6 @@ jobs:
               output.write(f"ref={ref}\n")
               output.write(f"repository={workflow_repository}\n")
           PY
-
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ${{ steps.tooling.outputs.repository }}
-          path: .lgtm-ci-tooling
-          ref: ${{ steps.tooling.outputs.ref }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
 
       - name: Classify platforms
         id: classify
@@ -310,9 +313,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -320,20 +336,10 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
-          path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
       - name: Setup QEMU
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -519,9 +525,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -529,20 +548,10 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
-          path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -711,9 +720,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -721,20 +743,10 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
-          path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -816,9 +828,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -826,20 +851,10 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
-          path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -986,9 +1001,22 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -996,20 +1024,10 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
         # yamllint disable-line rule:line-length
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
-          path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
 
       - name: Build summary
         if: always()
@@ -1042,9 +1060,13 @@ jobs:
       security-events: write
 
     steps:
-      - name: Checkout repository
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
@@ -1053,14 +1075,14 @@ jobs:
 
       - name: Resolve egress allowlist
         id: egress
-        uses: ./.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner
-        uses: ./.github/actions/harden-runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
