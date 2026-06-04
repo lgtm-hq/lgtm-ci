@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Formatting helpers for GitHub PR summaries and reports and summaries
+# Purpose: Formatting helpers for GitHub PR summaries and reports
 #
 # Usage:
 #   source "$(dirname "${BASH_SOURCE:-$0}")/format.sh"
