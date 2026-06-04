@@ -134,15 +134,17 @@ _check_release_two_phase_sparse() {
 			}
 			block && /^[[:space:]]+sparse-checkout: \|/ {
 				in_sparse = 1
+				has_scripts = 0
 				has_harden = 0
 				has_resolve = 0
 				next
 			}
+			in_sparse && /scripts\/ci\// { has_scripts = 1 }
 			in_sparse && /\.github\/actions\/harden-runner/ { has_harden = 1 }
 			in_sparse && /\.github\/actions\/resolve-egress-allowlist/ { has_resolve = 1 }
 			in_sparse && /^[[:space:]]+[a-zA-Z]/ && !/^[[:space:]]+\./ && !/^[[:space:]]+scripts/ {
-				if (!has_harden || !has_resolve) {
-					print wf ": multiline sparse-checkout after egress tooling must include harden-runner and resolve-egress-allowlist"
+				if (!has_scripts || !has_harden || !has_resolve) {
+					print wf ": multiline sparse-checkout after egress tooling must include scripts/ci/, harden-runner, and resolve-egress-allowlist"
 				}
 				in_sparse = 0
 				block = 0
