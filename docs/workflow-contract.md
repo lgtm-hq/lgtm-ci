@@ -6,28 +6,25 @@ All `lgtm-ci` reusable workflows share a common consumer contract.
 
 Where applicable, workflows accept:
 
-<!-- Wide table kept for quick input-to-purpose scanning across reusable workflows. -->
-<!-- markdownlint-disable MD013 MD060 -->
+<!-- markdownlint-disable MD013 -- wide input reference table; row text exceeds default line length -->
 
-| Input                              | Purpose                                                       |
-| ---------------------------------- | ------------------------------------------------------------- |
-| `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA) |
-| `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner   |
-| `egress-preset`                    | Named baseline allowlist under block                          |
-| `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)     |
-| `allowed-endpoints-mode`           | `replace` (default) or `append` (merge with preset, deduped)  |
-| `job-name`                         | Check name on always-run jobs; test summary suite title       |
-| `runner-image`                     | Runner label for long-running jobs                            |
-| `timeout-minutes`                  | Job timeout                                                   |
-| `publish-test-summary`             | Publish test/coverage summary comment on the pull request     |
-| `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)       |
+| Input                              | Purpose                                                                |
+| ---------------------------------- | ---------------------------------------------------------------------- |
+| `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA)          |
+| `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner            |
+| `egress-preset`                    | Named baseline allowlist under block                                   |
+| `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)              |
+| `allowed-endpoints-mode`           | `replace` (default) or `append` (merge with preset, deduped)           |
+| `job-name`                         | Check name on always-run jobs; test summary suite title                |
+| `runner-image`                     | Runner label for long-running jobs                                     |
+| `timeout-minutes`                  | Job timeout                                                            |
+| `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
+| `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)                |
 | `draft-pr-skip`                    | Skip PR jobs on draft pull requests (default `true` on test reusables) |
 
-<!-- markdownlint-enable MD013 MD060 -->
+<!-- markdownlint-enable MD013 -->
 
 ## Migration: test summary publishing (#281)
-
-<!-- markdownlint-disable MD013 MD060 -->
 
 Breaking renames unify test/coverage PR comments behind **`publish-test-summary`**
 and dedicated publish reusables. Transport (marker upsert) stays on
@@ -35,38 +32,37 @@ and dedicated publish reusables. Transport (marker upsert) stays on
 
 ### Caller inputs and jobs
 
-| Before | After |
-| ------ | ----- |
-| `post-pr-comment: true` | `publish-test-summary: true` |
-| `post-pr-comment: false` | `publish-test-summary: false` |
-| `coverage-pr-comment: true` (with or without `post-pr-comment`) | `publish-test-summary: true` only |
-| `coverage-pr-comment: false`, `post-pr-comment: true` | `publish-test-summary: true` |
-| Caller job `quality-pr-comment` | `publish-quality-summary` |
-| `comment-on-failure` (`reusable-validate`) | `publish-validation-report` |
-| `comment-on-pr` (`reusable-link-check`) | `publish-link-check-report` |
+- `post-pr-comment: true` → `publish-test-summary: true`
+- `post-pr-comment: false` → `publish-test-summary: false`
+- `coverage-pr-comment: true` (with or without `post-pr-comment`) →
+  `publish-test-summary: true` only
+- `coverage-pr-comment: false` and `post-pr-comment: true` →
+  `publish-test-summary: true`
+- Caller job `quality-pr-comment` → `publish-quality-summary`
+- `comment-on-failure` on `reusable-validate` → `publish-validation-report`
+- `comment-on-pr` on `reusable-link-check` → `publish-link-check-report`
 
 ### Reusable workflows and scripts
 
-| Removed / deprecated | Replacement |
-| -------------------- | ----------- |
-| `reusable-test-pr-comment.yml` | `reusable-publish-test-summary.yml` |
-| `reusable-coverage-pr-comment.yml` | `reusable-publish-test-summary.yml` |
-| `reusable-quality-pr-comment.yml` | `reusable-publish-quality-summary.yml` |
-| `reusable-artifact-pr-comment.yml` | `reusable-publish-artifact-report.yml` |
-| `generate-coverage-pr-comment.sh`, `generate-test-comment.sh` | `generate-test-summary.sh` + `generate-coverage-comment` |
-| Input `prebuilt-comment-file` | `prebuilt-test-summary-file` |
-| Input `comment-file` (artifact report reusable) | `report-file` |
-| Validation artifact `validation-comment` | `validation-report` |
+- `reusable-test-pr-comment.yml` → `reusable-publish-test-summary.yml`
+- `reusable-coverage-pr-comment.yml` → `reusable-publish-test-summary.yml`
+- `reusable-quality-pr-comment.yml` → `reusable-publish-quality-summary.yml`
+- `reusable-artifact-pr-comment.yml` → `reusable-publish-artifact-report.yml`
+- `generate-coverage-pr-comment.sh` and `generate-test-comment.sh` →
+  `generate-test-summary.sh` with `generate-coverage-comment` for rich tables
+- Input `prebuilt-comment-file` → `prebuilt-test-summary-file`
+- Input `comment-file` on artifact report reusable → `report-file`
+- Validation artifact `validation-comment` → `validation-report`
 
 ### Comment body selection
 
-When `publish-test-summary: true` on a language test reusable or `reusable-coverage`:
+When `publish-test-summary: true` on a language test reusable or
+`reusable-coverage`:
 
-| Condition | Markdown source |
-| --------- | ----------------- |
-| Coverage not collected | `generate-test-summary.sh` (pass/fail totals) |
-| Coverage collected (Rust LCOV, Python JSON, Node Istanbul) | `generate-coverage-comment` (rich table) |
-| Shell/kcov | Totals only (rich table not yet supported) |
+- Coverage not collected: `generate-test-summary.sh` (pass/fail totals)
+- Coverage collected (Rust LCOV, Python JSON, Node Istanbul):
+  `generate-coverage-comment` (rich table)
+- Shell/kcov: totals only (rich table not yet supported)
 
 Node matrix coverage uses job `publish-test-summary-coverage` (inline post from
 `node-coverage-test-summary` artifacts).
@@ -77,8 +73,6 @@ All language test reusables (`reusable-rust-test`, `reusable-test-python`,
 `reusable-test-node`, `reusable-test-node-custom`, `reusable-test-shell`) default
 `draft-pr-skip: true` so draft PRs skip test and summary jobs unless callers set
 `draft-pr-skip: false`.
-
-<!-- markdownlint-enable MD013 MD060 -->
 
 ## Permissions by mode
 
@@ -103,20 +97,21 @@ Actions maps matrix values to reusable workflow inputs. `reusable-test-node.yml`
 `publish-test-summary-coverage` uses inline steps to avoid an extra nesting level (which
 would worsen check-name readability) and to access matrix-specific artifacts.
 
-<!-- Wide table kept to compare permissions, modes, and workflow entry points. -->
-<!-- markdownlint-disable MD013 MD060 -->
+<!-- markdownlint-disable MD013 -- permissions matrix; workflow column lists exceed default line length -->
 
-| Mode                  | Caller permissions                                   | Workflow                                |
-| --------------------- | ---------------------------------------------------- | --------------------------------------- |
-| Quality / lint only   | `contents: read`, `packages: read`                   | `reusable-quality-lint.yml`             |
-| Quality summary       | `contents: read`, `pull-requests: write`             | `reusable-publish-quality-summary.yml` |
+| Mode                  | Caller permissions                                   | Workflow                                     |
+| --------------------- | ---------------------------------------------------- | -------------------------------------------- |
+| Quality / lint only   | `contents: read`, `packages: read`                   | `reusable-quality-lint.yml`                  |
+| Quality summary       | `contents: read`, `pull-requests: write`             | `reusable-publish-quality-summary.yml`       |
 | Test / coverage only  | `contents: read`                                     | Reusables with `publish-test-summary: false` |
-| Test / report publish | `contents: read`, `pull-requests: write`             | `reusable-publish-test-summary.yml`, `reusable-publish-artifact-report.yml` |
-| Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                    |
-| Release version       | `contents: write`, `pull-requests: write`            | `reusable-release-version-pr.yml`       |
-| PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step       |
-| PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`        |
-| GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`           |
+| Test / report publish | `contents: read`, `pull-requests: write`             | `reusable-publish-test-summary.yml`,         |
+|                       |                                                      | `reusable-publish-artifact-report.yml`       |
+| Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                         |
+| Release version       | `contents: write`, `pull-requests: write`            | `reusable-release-version-pr.yml`            |
+| PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
+| PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
+| GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
+| GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -316,21 +311,19 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 `allowed-endpoints` under `append` still means preset-only (same as omitting extras).
 `audit` mode is unchanged (no enforced allowlist).
 
-<!-- markdownlint-disable MD060 -->
-| Preset           | Use case                                                |
-| ---------------- | ------------------------------------------------------- |
+| Preset           | Use case                                                             |
+| ---------------- | -------------------------------------------------------------------- |
 | `github-minimal` | PR summaries and reports (API, tooling checkout, workflow artifacts) |
-<!-- markdownlint-enable MD060 -->
-| `github-pages`   | GitHub Pages deploy/publish (OIDC)                      |
-| `github-tooling` | Validate action pinning + GitHub raw/codeload           |
-| `docker`         | Docker build/pull/push (`reusable-docker.yml`)          |
-| `playwright`     | Playwright E2E + browser CDN downloads                  |
-| `pypi`           | PyPI/TestPyPI publish and availability checks           |
-| `rubygems`       | RubyGems publish                                        |
-| `npm-publish`    | npm publish + Sigstore attestation                      |
-| `quality`        | Docker `lintro chk` (default on quality lint)           |
-| `sbom`           | SBOM, Grype scan, Sigstore attestation                  |
-| `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)           |
+| `github-pages`   | GitHub Pages deploy/publish (OIDC)                                   |
+| `github-tooling` | Validate action pinning + GitHub raw/codeload                        |
+| `docker`         | Docker build/pull/push (`reusable-docker.yml`)                       |
+| `playwright`     | Playwright E2E + browser CDN downloads                               |
+| `pypi`           | PyPI/TestPyPI publish and availability checks                        |
+| `rubygems`       | RubyGems publish                                                     |
+| `npm-publish`    | npm publish + Sigstore attestation                                   |
+| `quality`        | Docker `lintro chk` (default on quality lint)                        |
+| `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
+| `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
 
 ```yaml
 egress-policy: block
