@@ -11,13 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **workflows**: load `harden-runner` and `resolve-egress-allowlist` from an early
-  `.lgtm-ci-tooling` sparse checkout instead of caller-local `./.github/actions/...`
-  so cross-repo reusables work without vendoring (#279)
-
-- **docs**: align README, actions catalog, workflow-contract, and examples with the
-  `.lgtm-ci-tooling` egress pattern (#279)
-
 ### Deprecated
 
 ### Removed
@@ -25,6 +18,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.31.0] - 2026-06-04
+
+### Features
+
+- **ci**: load egress composites via .lgtm-ci-tooling checkout (#280) (34293bb)
+
+### Bug Fixes
+
+- **ci**: retain egress composites in release tooling sparse checkout (#288) (13bcaaf)
+
+### Previously Unreleased
+
+- **workflows**: load `harden-runner` and `resolve-egress-allowlist` from an early
+  `.lgtm-ci-tooling` sparse checkout instead of caller-local `./.github/actions/...`
+  so cross-repo reusables work without vendoring (#279)
+
+- **docs**: align README, actions catalog, workflow-contract, and examples with the
+  `.lgtm-ci-tooling` egress pattern (#279)
 
 ## [0.30.1] - 2026-06-04
 
@@ -750,7 +762,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.31.0...HEAD
+[0.31.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.1...v0.31.0
 [0.30.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.2...v0.30.0
 [0.29.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.1...v0.29.2
