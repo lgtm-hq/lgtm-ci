@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Rewrite the coverage comment title for PR posting.
+# Purpose: Apply custom heading to coverage test summary markdown.
 #
 # Required environment variables:
 #   COMMENT_BODY   - Markdown body from generate-coverage-comment

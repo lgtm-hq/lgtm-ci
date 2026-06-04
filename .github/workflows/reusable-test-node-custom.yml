@@ -62,35 +62,26 @@ on:
         required: false
         type: string
         default: ""
-      post-pr-comment:
-        description: "Post or update a coverage PR comment when coverage-pr-comment is true"
+      publish-test-summary:
+        description: >-
+          Publish or update the test summary comment on the pull request for this workflow run (rich
+          coverage table per matrix cell when coverage is enabled)
         required: false
         type: boolean
         default: true
+      comment-marker:
+        description: "Unique marker for upserting this workflow's test summary comment"
+        required: false
+        type: string
+        default: "node-coverage-report"
       job-name:
         description: "GitHub check name for the test job"
         required: false
         type: string
         default: "Node.js Tests"
-      coverage-pr-comment:
-        description: >-
-          Post a generate-coverage-comment PR summary when coverage output exists
-        required: false
-        type: boolean
-        default: false
-      coverage-comment-marker:
-        description: "PR comment marker when coverage-pr-comment is true"
-        required: false
-        type: string
-        default: "node-coverage-report"
-      coverage-comment-title:
-        description: "Heading title for the coverage PR comment"
-        required: false
-        type: string
-        default: "Coverage Report"
       coverage-summary-file:
         description: >-
-          Coverage summary path relative to working-directory for coverage PR
+          Coverage summary path relative to working-directory for the coverage test summary
           comments (Istanbul JSON)
         required: false
         type: string
@@ -99,7 +90,7 @@ on:
         description: "Skip jobs on draft pull requests"
         required: false
         type: boolean
-        default: false
+        default: true
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -325,11 +316,11 @@ jobs:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
 
-      - name: Generate coverage PR comment
+      - name: Generate coverage test summary
         id: generate-coverage-comment
         if: >-
           always()
-          && inputs.coverage-pr-comment
+          && inputs.publish-test-summary
           && inputs.coverage
           && github.event_name == 'pull_request'
         uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-comment
@@ -341,24 +332,24 @@ jobs:
           threshold-branches: "0"
           threshold-functions: "0"
 
-      - name: Write coverage PR comment artifact
+      - name: Write coverage test summary artifact
         if: steps.generate-coverage-comment.outcome == 'success'
         shell: bash
         env:
           COMMENT_BODY: ${{ steps.generate-coverage-comment.outputs.comment-body }}
-          COMMENT_TITLE: ${{ inputs.coverage-comment-title }}
-          COMMENT_OUTPUT: node-coverage-pr-comment.txt
+          COMMENT_TITLE: Coverage Report
+          COMMENT_OUTPUT: node-coverage-test-summary.txt
         run: >-
-          bash .lgtm-ci-tooling/scripts/ci/actions/prepare-coverage-comment.sh
+          bash .lgtm-ci-tooling/scripts/ci/actions/prepare-coverage-test-summary.sh
 
-      - name: Upload coverage PR comment artifact
+      - name: Upload coverage test summary artifact
         if: >-
           steps.generate-coverage-comment.outcome == 'success' &&
           github.event.pull_request.head.repo.fork == false
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: node-coverage-pr-comment-${{ matrix.node-version }}
-          path: node-coverage-pr-comment.txt
+          name: node-coverage-test-summary-${{ matrix.node-version }}
+          path: node-coverage-test-summary.txt
 
       - name: Evaluate pages coverage upload gate
         id: pages-upload-gate
@@ -546,19 +537,17 @@ jobs:
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-coverage-upload-status.sh
 
-  coverage-pr-comment:
-    name: Node coverage PR comment
+  publish-test-summary-coverage:
+    name: Publish test summary
     needs:
       - prepare
       - test
     if: >-
       always()
-      && inputs.coverage-pr-comment
+      && inputs.publish-test-summary
       && inputs.coverage
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-      && inputs.post-pr-comment
-      && needs.test.result == 'success'
       && (
         !inputs.draft-pr-skip ||
         github.event.pull_request.draft == false
@@ -566,7 +555,7 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
-      # Post/update coverage PR comment via post-pr-comment action
+      # Publish coverage test summary via post-pr-comment action
       pull-requests: write
     strategy:
       matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
@@ -603,16 +592,37 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Download coverage PR comment artifact
+      - name: Download coverage test summary artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: node-coverage-pr-comment-${{ matrix.node-version }}
+          name: node-coverage-test-summary-${{ matrix.node-version }}
 
-      - name: Comment PR with Node coverage
+      - name: Publish test summary comment
         uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
         with:
-          file: node-coverage-pr-comment.txt
+          file: node-coverage-test-summary.txt
           marker: >-
             ${{ inputs.node-versions != '' && format('{0}-{1}',
-            inputs.coverage-comment-marker, matrix.node-version) ||
-            inputs.coverage-comment-marker }}
+            inputs.comment-marker, matrix.node-version) || inputs.comment-marker }}
+
+  publish-test-summary:
+    needs: test
+    if: >-
+      always()
+      && inputs.publish-test-summary
+      && !inputs.coverage
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      test-suite-name: ${{ inputs.job-name }}
+      comment-marker: ${{ inputs.comment-marker }}
+      job-result: ${{ needs.test.result }}
+      tooling-ref: ${{ inputs.tooling-ref }}

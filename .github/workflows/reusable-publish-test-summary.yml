@@ -1,5 +1,5 @@
 ---
-name: Reusable Test PR Comment Workflow
+name: Reusable Publish Test Summary Workflow
 
 on:
   workflow_call:
@@ -9,7 +9,7 @@ on:
         required: true
         type: string
       comment-marker:
-        description: "Unique marker for the test PR comment"
+        description: "Unique marker for upserting this workflow's test summary comment"
         required: true
         type: string
       tests-passed:
@@ -28,7 +28,7 @@ on:
         type: string
         default: "0"
       coverage-percent:
-        description: "Coverage percentage"
+        description: "Coverage percentage (test-summary fallback)"
         required: false
         type: string
         default: ""
@@ -38,10 +38,41 @@ on:
         type: string
         default: "0"
       job-result:
-        description: "Result of the test job (success, failure, etc.)"
+        description: "Result of the upstream test job (success, failure, etc.)"
         required: false
         type: string
         default: "unknown"
+      rich-coverage-comment:
+        description: >-
+          Generate a rich coverage table (istanbul, coverage-py, or lcov) instead
+          of the pass/fail test summary
+        required: false
+        type: boolean
+        default: false
+      coverage-file:
+        description: "Path to coverage summary file for rich-coverage-comment"
+        required: false
+        type: string
+        default: ""
+      coverage-format:
+        description: "Coverage format: istanbul, coverage-py, lcov, or auto"
+        required: false
+        type: string
+        default: "auto"
+      coverage-artifact-name:
+        description: >-
+          Download this workflow artifact before generating a rich coverage
+          summary (file path is coverage-file relative to the download directory)
+        required: false
+        type: string
+        default: ""
+      prebuilt-test-summary-file:
+        description: >-
+          Post this file as the test summary body (skips generation; used for matrix
+          coverage artifacts)
+        required: false
+        type: string
+        default: ""
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -87,8 +118,8 @@ on:
         default: 10
 
 jobs:
-  comment:
-    name: ${{ inputs.test-suite-name }} PR Comment
+  publish-test-summary:
+    name: Publish test summary
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -112,6 +143,7 @@ jobs:
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
+            .github/actions/generate-coverage-comment
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -131,7 +163,34 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
-      - name: Generate PR comment
+      - name: Download coverage artifact
+        if: >-
+          inputs.coverage-artifact-name != '' && inputs.prebuilt-test-summary-file == ''
+          && inputs.rich-coverage-comment
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.coverage-artifact-name }}
+          path: coverage-test-summary
+
+      - name: Generate rich coverage summary
+        id: rich-coverage
+        if: >-
+          inputs.prebuilt-test-summary-file == '' && inputs.rich-coverage-comment &&
+          inputs.coverage-file != ''
+        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-comment
+        with:
+          coverage-file: >-
+            ${{ inputs.coverage-artifact-name != '' &&
+            format('coverage-test-summary/{0}', inputs.coverage-file) ||
+            inputs.coverage-file }}
+          format: ${{ inputs.coverage-format }}
+          threshold-lines: "0"
+          threshold-branches: "0"
+          threshold-functions: "0"
+
+      - name: Generate test run summary
+        if: >-
+          inputs.prebuilt-test-summary-file == '' && !inputs.rich-coverage-comment
         shell: bash
         env:
           TEST_SUITE_NAME: ${{ inputs.test-suite-name }}
@@ -144,8 +203,8 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
-          COMMENT_OUTPUT: pr-comment.md
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-test-comment.sh
+          COMMENT_OUTPUT: test-summary.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-test-summary.sh
 
       - name: Detect PR number
         id: pr
@@ -159,16 +218,23 @@ jobs:
           EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
 
-      - name: Read comment from file
+      - name: Load test summary body
         id: read
+        if: >-
+          inputs.prebuilt-test-summary-file != '' ||
+          (inputs.prebuilt-test-summary-file == '' && !inputs.rich-coverage-comment)
         shell: bash
         env:
           STEP: read-file
-          COMMENT_FILE: pr-comment.md
+          COMMENT_FILE: >-
+            ${{ inputs.prebuilt-test-summary-file != '' && inputs.prebuilt-test-summary-file
+            || 'test-summary.md' }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
 
-      - name: Post PR comment
-        id: post
+      - name: Publish test summary from file
+        if: >-
+          inputs.prebuilt-test-summary-file != '' ||
+          (inputs.prebuilt-test-summary-file == '' && !inputs.rich-coverage-comment)
         shell: bash
         env:
           STEP: post
@@ -183,4 +249,22 @@ jobs:
           FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
           BODY_FROM_FILE: ${{ steps.read.outputs.body }}
           BODY_FROM_INPUT: ""
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+
+      - name: Publish test summary from coverage table
+        if: steps.rich-coverage.outcome == 'success'
+        shell: bash
+        env:
+          STEP: post
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          MARKER: ${{ inputs.comment-marker }}
+          MODE: upsert
+          DELETE_ON_EMPTY: "false"
+          FILE_PROVIDED: "false"
+          BODY_FROM_FILE: ""
+          BODY_FROM_INPUT: ${{ steps.rich-coverage.outputs.comment-body }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
