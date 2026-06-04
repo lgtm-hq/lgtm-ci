@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Generate formatted PR comment from Playwright test results
+# Purpose: Generate Playwright test summary markdown from test results
 #
 # Required environment variables:
 #   RESULTS_PATH - Path to Playwright JSON results file

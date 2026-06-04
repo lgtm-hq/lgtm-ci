@@ -1,6 +1,6 @@
 ---
 name: "Generate Coverage Comment"
-description: "Generate a formatted PR comment from code coverage results"
+description: "Generate coverage test summary markdown from coverage results"
 author: "lgtm-hq"
 
 inputs:

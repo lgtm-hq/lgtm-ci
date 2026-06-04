@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Formatting helpers for GitHub PR comments and summaries
+# Purpose: Formatting helpers for GitHub PR summaries and reports and summaries
 #
 # Usage:
 #   source "$(dirname "${BASH_SOURCE:-$0}")/format.sh"
@@ -87,7 +87,7 @@ get_github_pages_wget_cut_dirs() {
 }
 
 # =============================================================================
-# Score formatting helpers for PR comments
+# Score formatting helpers for PR summaries and reports
 # =============================================================================
 
 # Get score emoji based on threshold
@@ -217,7 +217,7 @@ get_github_actions_run_url() {
 	echo "${server_url}/${repo}/actions/runs/${run_id}"
 }
 
-# Format a commit metadata line for PR comments.
+# Format a commit metadata line for PR summaries and reports.
 # Usage: format_github_commit_line
 format_github_commit_line() {
 	local sha="${GITHUB_SHA:-}"

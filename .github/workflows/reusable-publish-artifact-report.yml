@@ -1,5 +1,5 @@
 ---
-name: Reusable Artifact PR Comment Workflow
+name: Reusable Publish Artifact Report Workflow
 
 on:
   workflow_call:
@@ -8,12 +8,12 @@ on:
         description: "Artifact name to download"
         required: true
         type: string
-      comment-file:
-        description: "Path to comment file relative to artifact download path"
+      report-file:
+        description: "Path to report markdown file inside the downloaded artifact"
         required: true
         type: string
       marker:
-        description: "PR comment marker"
+        description: "Upsert marker for the report comment"
         required: true
         type: string
       artifact-path:
@@ -22,15 +22,15 @@ on:
         type: string
         default: "."
       job-name:
-        description: "Display name for the PR comment job"
+        description: "Display name for the report comment job"
         required: false
         type: string
-        default: "PR Comment"
+        default: "Publish artifact report"
       missing-artifact-warning:
         description: "Warning message when artifact download fails"
         required: false
         type: string
-        default: "Comment artifact not found — upstream may have failed"
+        default: "Report artifact not found — upstream may have failed"
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -75,7 +75,7 @@ on:
         default: 10
 
 jobs:
-  comment:
+  publish-artifact-report:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -117,7 +117,7 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
-      - name: Download comment artifact
+      - name: Download report artifact
         id: download
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         continue-on-error: true
@@ -132,9 +132,9 @@ jobs:
           MISSING_ARTIFACT_WARNING: ${{ inputs.missing-artifact-warning }}
         run: echo "::warning::${MISSING_ARTIFACT_WARNING}"
 
-      - name: Post PR comment
+      - name: Publish report comment
         if: steps.download.outcome == 'success'
         uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
         with:
-          file: ${{ inputs.artifact-path }}/${{ inputs.comment-file }}
+          file: ${{ inputs.artifact-path }}/${{ inputs.report-file }}
           marker: ${{ inputs.marker }}

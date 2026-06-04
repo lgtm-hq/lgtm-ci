@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Generate PR comment for lintro analysis results
+# Purpose: Generate quality summary markdown for lintro analysis results
 #
 # Environment variables expected:
 #   LINTRO_OUTPUT - Path to lintro check output file

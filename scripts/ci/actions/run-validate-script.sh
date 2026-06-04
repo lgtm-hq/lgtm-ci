@@ -7,7 +7,7 @@ set -euo pipefail
 : "${SCRIPT_PATH:?SCRIPT_PATH is required}"
 : "${VALIDATION_NAME:=Validation}"
 : "${WORKING_DIRECTORY:=.}"
-: "${COMMENT_OUTPUT:=validation-comment.md}"
+: "${COMMENT_OUTPUT:=validation-report.md}"
 : "${OUTPUT_FILE:=validation-output.txt}"
 
 if [[ -z "${GITHUB_OUTPUT:-}" || ! -w "$GITHUB_OUTPUT" ]]; then

@@ -20,13 +20,13 @@ jobs:
       contents: read
       packages: read
 
-  quality-pr-comment:
+  publish-quality-summary:
     needs: quality
     if: >-
       !cancelled()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-    uses: ./.github/workflows/reusable-quality-pr-comment.yml
+    uses: ./.github/workflows/reusable-publish-quality-summary.yml
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
       tooling-ref: ${{ github.sha }}

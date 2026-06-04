@@ -1,5 +1,5 @@
 ---
-name: Reusable Quality PR Comment Workflow
+name: Reusable Publish Quality Summary Workflow
 
 on:
   workflow_call:
@@ -46,10 +46,10 @@ on:
         type: string
         default: "github-minimal"
       job-name:
-        description: "Display name for the PR comment job"
+        description: "Display name for the quality summary job"
         required: false
         type: string
-        default: "PR Lint Comment"
+        default: "Publish quality summary"
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
@@ -62,7 +62,7 @@ on:
         default: 10
 
 jobs:
-  comment:
+  publish-quality-summary:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -120,7 +120,7 @@ jobs:
         shell: bash
         run: echo "::warning::Linting report artifact not found — quality job may have failed before producing output"
 
-      - name: Generate PR comment
+      - name: Generate quality summary
         if: steps.download.outcome == 'success'
         shell: bash
         env:
@@ -129,7 +129,7 @@ jobs:
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
-          COMMENT_OUTPUT: pr-comment.md
+          COMMENT_OUTPUT: quality-summary.md
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-lintro-comment.sh
 
       - name: Detect PR number
@@ -145,16 +145,16 @@ jobs:
           EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
 
-      - name: Read comment from file
+      - name: Load quality summary body
         if: steps.download.outcome == 'success'
         id: read
         shell: bash
         env:
           STEP: read-file
-          COMMENT_FILE: pr-comment.md
+          COMMENT_FILE: quality-summary.md
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
 
-      - name: Post PR comment
+      - name: Publish quality summary
         if: >-
           steps.download.outcome == 'success'
           && steps.pr.outputs.number != ''

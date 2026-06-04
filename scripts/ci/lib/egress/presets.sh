@@ -17,7 +17,7 @@ egress_preset_endpoints() {
 
 	case "$preset" in
 	github-minimal)
-		# PR comment jobs: GitHub API, tooling checkout, and workflow artifacts.
+		# summary/report publish jobs: GitHub API, tooling checkout, and workflow artifacts.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \

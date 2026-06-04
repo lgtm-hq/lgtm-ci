@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Exit 0 with skipped outputs when PR comments cannot be posted (fork PRs).
+# Purpose: Exit 0 with skipped outputs when PR summaries and reports cannot be posted (fork PRs).
 
 set -euo pipefail
 
