@@ -45,7 +45,7 @@ _check_job_egress_order() {
 			!in_jobs {
 				next
 			}
-			/^  [a-zA-Z][a-zA-Z0-9_-]*: *$/ {
+			/^  [a-zA-Z_][a-zA-Z0-9_-]*: *$/ {
 				resolve_line = 0
 				next
 			}
@@ -69,7 +69,7 @@ _check_harden_with_blocks() {
 	local wf_name="${workflow##*/}"
 	local line_num
 	local block
-	local next_step_re='^[[:space:]]{6}- name:'
+	local next_step_re='^[[:space:]]{6}- (name|uses|run):'
 
 	while IFS= read -r line_num; do
 		[[ -z "$line_num" ]] && continue
@@ -109,6 +109,11 @@ done < <(discover_workflow_files)
 
 if grep -qE "steps\.resolve\.outputs\['allowed-endpoints'\]" "$HARDEN_ACTION"; then
 	echo "harden-runner/action.yml: must pass inputs['allowed-endpoints'] (pre-hook cannot read composite step outputs)" >&2
+	violations=$((violations + 1))
+fi
+
+if ! grep -qE 'allowed-endpoints:[[:space:]]+\$\{\{[[:space:]]+inputs\[.allowed-endpoints.\]' "$HARDEN_ACTION"; then
+	echo "harden-runner/action.yml: must forward allowed-endpoints from inputs['allowed-endpoints']" >&2
 	violations=$((violations + 1))
 fi
 
