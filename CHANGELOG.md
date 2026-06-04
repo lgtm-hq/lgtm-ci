@@ -9,52 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **`reusable-publish-test-summary.yml`**: single workflow to publish test summaries for
-  language test reusables and `reusable-coverage` (rich coverage table or test totals).
-
 ### Changed
-
-- **Breaking:** Renamed workflow input `post-pr-comment` → `publish-test-summary`; removed
-  `coverage-pr-comment` and related marker/title inputs on Node reusables.
-- **Breaking:** Renamed poster jobs to `publish-test-summary` / `publish-test-summary-coverage`
-  (display name: Publish test summary).
-- **Breaking:** Replaced `reusable-test-pr-comment.yml` and `reusable-coverage-pr-comment.yml`
-  with `reusable-publish-test-summary.yml`.
-- Rust/Python/coverage workflows use `generate-coverage-comment` for test summaries when
-  coverage artifacts are available.
-- Renamed `generate-test-comment.sh` → `generate-test-summary.sh` and
-  `prepare-coverage-comment.sh` → `prepare-coverage-test-summary.sh`.
-- **Breaking:** Renamed `prebuilt-comment-file` → `prebuilt-test-summary-file` on
-  `reusable-publish-test-summary.yml`.
-- Node matrix coverage artifacts use `node-coverage-test-summary` (was
-  `node-coverage-pr-comment`).
-- **Breaking:** Renamed `reusable-quality-pr-comment.yml` →
-  `reusable-publish-quality-summary.yml`; caller job `quality-pr-comment` →
-  `publish-quality-summary`.
-- **Breaking:** Renamed `reusable-artifact-pr-comment.yml` →
-  `reusable-publish-artifact-report.yml`; input `comment-file` → `report-file`.
-- **Breaking:** Renamed `comment-on-failure` → `publish-validation-report` on
-  `reusable-validate.yml`; validation artifact `validation-comment` →
-  `validation-report`.
-- **Breaking:** Renamed `comment-on-pr` → `publish-link-check-report` on
-  `reusable-link-check.yml`.
-- **Breaking:** `draft-pr-skip` default is now `true` on Python, Node, and Shell test
-  reusables (aligned with Rust).
 
 ### Deprecated
 
 ### Removed
 
+### Fixed
+
+### Security
+
+## [0.32.0] - 2026-06-04
+
+### Features
+
+- **ci**: unify PR test/coverage summary publishing (#281) (#282) (f2b6c9c)
+
+### Previously Unreleased
+
+- **`reusable-publish-test-summary.yml`**: single workflow to publish test summaries for
+  language test reusables and `reusable-coverage` (rich coverage table or test totals).
+
+- **Breaking:** Renamed workflow input `post-pr-comment` → `publish-test-summary`; removed
+  `coverage-pr-comment` and related marker/title inputs on Node reusables.
+
+- **Breaking:** Renamed poster jobs to `publish-test-summary` / `publish-test-summary-coverage`
+  (display name: Publish test summary).
+
+- **Breaking:** Replaced `reusable-test-pr-comment.yml` and `reusable-coverage-pr-comment.yml`
+  with `reusable-publish-test-summary.yml`.
+
+- Rust/Python/coverage workflows use `generate-coverage-comment` for test summaries when
+  coverage artifacts are available.
+
+- Renamed `generate-test-comment.sh` → `generate-test-summary.sh` and
+  `prepare-coverage-comment.sh` → `prepare-coverage-test-summary.sh`.
+
+- **Breaking:** Renamed `prebuilt-comment-file` → `prebuilt-test-summary-file` on
+  `reusable-publish-test-summary.yml`.
+
+- Node matrix coverage artifacts use `node-coverage-test-summary` (was
+  `node-coverage-pr-comment`).
+
+- **Breaking:** Renamed `reusable-quality-pr-comment.yml` →
+  `reusable-publish-quality-summary.yml`; caller job `quality-pr-comment` →
+  `publish-quality-summary`.
+
+- **Breaking:** Renamed `reusable-artifact-pr-comment.yml` →
+  `reusable-publish-artifact-report.yml`; input `comment-file` → `report-file`.
+
+- **Breaking:** Renamed `comment-on-failure` → `publish-validation-report` on
+  `reusable-validate.yml`; validation artifact `validation-comment` →
+  `validation-report`.
+
+- **Breaking:** Renamed `comment-on-pr` → `publish-link-check-report` on
+  `reusable-link-check.yml`.
+
+- **Breaking:** `draft-pr-skip` default is now `true` on Python, Node, and Shell test
+  reusables (aligned with Rust).
+
 - `reusable-test-pr-comment.yml`, `reusable-coverage-pr-comment.yml`,
   `reusable-quality-pr-comment.yml`, `reusable-artifact-pr-comment.yml`,
   `generate-coverage-pr-comment.sh`, `generate-test-comment.sh`.
 
-### Fixed
-
 - Node reusables no longer require `post-pr-comment: true` when posting coverage-only
   summaries (`coverage-pr-comment: true` + `post-pr-comment: false` previously posted nothing).
-
-### Security
 
 ## [0.31.0] - 2026-06-04
 
@@ -799,7 +818,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.31.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.0...HEAD
+[0.32.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.1...v0.31.0
 [0.30.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.0...v0.30.1
 [0.30.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.29.2...v0.30.0
