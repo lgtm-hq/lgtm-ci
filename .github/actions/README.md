@@ -393,7 +393,7 @@ Verify Sigstore/Cosign signatures on artifacts.
 
 ### post-pr-comment
 
-Create or update PR comments with upsert behavior using unique markers.
+Create or update PR summaries and reports with upsert behavior using unique markers.
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@main
@@ -1422,7 +1422,7 @@ jobs:
 
 ### reusable-test-node.yml
 
-Node.js Vitest testing workflow with optional coverage and PR comments. Custom
+Node.js Vitest testing workflow with optional coverage and PR summaries and reports. Custom
 package scripts (for example `bun run test:coverage`) use
 `reusable-test-node-custom.yml` instead.
 
@@ -1470,7 +1470,7 @@ jobs:
       test-command: bun run test:coverage
       package-manager: bun
       coverage: true
-      coverage-pr-comment: true
+      publish-test-summary: true
 ```
 
 **Inputs:**

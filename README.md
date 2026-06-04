@@ -47,7 +47,7 @@ jobs:
       packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality-lint
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
 
-  quality-pr-comment:
+  publish-quality-summary:
     needs: quality
     if: >-
       !cancelled()
@@ -56,7 +56,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@v1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@v1
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
@@ -123,17 +123,21 @@ steps:
 
 #### Reporting & Comments
 
+<!-- markdownlint-disable MD060 -->
+
 | Action                        | Description                   |
 | ----------------------------- | ----------------------------- |
-| `post-pr-comment`             | Marker-based PR commenting    |
+| `post-pr-comment`             | Marker-based PR comment transport (any summary/report)    |
 | `generate-coverage-badge`     | Coverage badge generation     |
-| `generate-coverage-comment`   | Coverage report PR comments   |
+| `generate-coverage-comment`   | Coverage report PR summaries and reports   |
 | `generate-playwright-comment` | E2E test result comments      |
 | `generate-lighthouse-comment` | Performance metric comments   |
 | `publish-test-results`        | Test result publishing        |
 | `check-coverage-threshold`    | Coverage threshold validation |
 | `collect-coverage`            | Coverage data collection      |
 | `merge-playwright-reports`    | Playwright report merging     |
+
+<!-- markdownlint-enable MD060 -->
 
 #### Build & Release
 
@@ -165,10 +169,12 @@ steps:
 
 ### Reusable Workflows
 
+<!-- markdownlint-disable MD060 -->
+
 | Workflow                               | Description                            |
 | -------------------------------------- | -------------------------------------- |
 | `reusable-quality-lint.yml`            | Lintro via full py-lintro Docker image |
-| `reusable-quality-pr-comment.yml`      | Lintro PR summary comment              |
+| `reusable-publish-quality-summary.yml`      | Publish lintro quality summary              |
 | `reusable-sbom.yml`                    | SBOM generation with Cosign signing    |
 | `reusable-release-version-pr.yml`      | Release version PR with changelog      |
 | `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge          |
@@ -180,11 +186,12 @@ steps:
 | `reusable-deploy-pages.yml`            | GitHub Pages deployment                |
 | `reusable-docker.yml`                  | Docker build and publish               |
 | `reusable-coverage.yml`                | Test coverage collection               |
-| `reusable-test-python.yml`             | Python tests with PR comments          |
-| `reusable-test-node.yml`               | Node.js Vitest tests with PR comments  |
+| `reusable-test-python.yml`             | Python tests with PR summaries and reports          |
+| `reusable-test-node.yml`               | Node.js Vitest tests with PR summaries and reports  |
 | `reusable-test-node-custom.yml`        | Node.js custom test command workflow   |
-| `reusable-test-shell.yml`              | BATS shell tests with PR comments      |
-| `reusable-test-pr-comment.yml`         | Shared test PR comment workflow        |
+| `reusable-test-shell.yml`              | BATS shell tests with PR summaries and reports      |
+| `reusable-publish-test-summary.yml`      | Publish test summary for test/coverage runs |
+| `reusable-publish-artifact-report.yml`   | Publish markdown report from workflow artifact |
 | `reusable-test-e2e.yml`                | E2E testing with Playwright            |
 | `reusable-test-e2e-matrix.yml`         | Matrix E2E testing                     |
 | `reusable-pr-auto-assign.yml`          | PR auto-assignment                     |
@@ -197,9 +204,11 @@ steps:
 | `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation   |
 | `reusable-link-check.yml`              | Markdown and HTML link checking        |
 
+<!-- markdownlint-enable MD060 -->
+
 Test workflows are self-contained for consumers: they check out lgtm-ci
 tooling internally, run the configured test suite, and post/update the
-standard PR comment when callers grant `pull-requests: write`.
+standard summary comment when callers grant `pull-requests: write`.
 
 ### Shell Libraries
 

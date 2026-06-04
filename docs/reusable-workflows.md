@@ -4,7 +4,7 @@ Use reusable workflows from consumer repositories with a thin caller job.
 
 **Tag/release and non-PR pipelines** should call lint/test/coverage reusables
 directly (for example `reusable-quality-lint.yml`) with `contents: read` only.
-Grant `pull-requests: write` only when invoking workflows that post PR comments.
+Grant `pull-requests: write` only when invoking workflows that post PR summaries and reports.
 
 ```yaml
 jobs:
@@ -15,7 +15,7 @@ jobs:
       packages: read
 ```
 
-Pull-request pipelines with PR comments call both reusables directly:
+Pull-request pipelines with PR summaries and reports call both reusables directly:
 
 ```yaml
 jobs:
@@ -25,13 +25,13 @@ jobs:
       contents: read
       packages: read
 
-  quality-pr-comment:
+  publish-quality-summary:
     needs: quality
     if: >-
       !cancelled()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
@@ -68,13 +68,13 @@ jobs:
       job-name: "Lintro Quality Checks"
       egress-preset: quality
 
-  quality-pr-comment:
+  publish-quality-summary:
     needs: quality
     if: >-
       !cancelled()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
@@ -159,11 +159,12 @@ jobs:
       browsers: chromium,firefox
 ```
 
-`reusable-test-pr-comment.yml` is the shared internal comment workflow used by
-the language-specific test workflows. Coverage and artifact-based comments use
-`reusable-coverage-pr-comment.yml` and `reusable-artifact-pr-comment.yml`.
+`reusable-publish-test-summary.yml` is the shared internal workflow used by
+language test reusables to publish test summaries (rich coverage table when
+coverage was collected, otherwise test pass/fail totals). Artifact-based comments
+use `reusable-publish-artifact-report.yml`.
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
-`reusable-quality-pr-comment.yml` (called directly by the caller workflow).
+`reusable-publish-quality-summary.yml` (called directly by the caller workflow).
 
 ### Pages coverage HTML inputs (`reusable-test-node`)
 
@@ -200,10 +201,11 @@ skipped Vitest/custom siblings. For Python, Docker per-platform, and E2E matrix
 jobs, inner names are static; see [workflow-contract.md](workflow-contract.md)
 (§ Job display names).
 
-**PR comments:** `coverage-pr-comment: true` builds the comment artifact inside
-the test job, but the separate `Node coverage PR comment` job also requires
-`post-pr-comment: true`. Setting only `coverage-pr-comment: true` skips the
-poster job by design.
+**test summaries:** Set `publish-test-summary: true` (default) to post or update one
+comment per workflow run. When `coverage: true`, the test job builds a rich
+coverage artifact and the `publish-test-summary-coverage` matrix job posts it.
+When `coverage: false`, `publish-test-summary` delegates to
+`reusable-publish-test-summary.yml` with test totals.
 
 ### Rust
 

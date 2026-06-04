@@ -7,7 +7,7 @@ All `lgtm-ci` reusable workflows share a common consumer contract.
 Where applicable, workflows accept:
 
 <!-- Wide table kept for quick input-to-purpose scanning across reusable workflows. -->
-<!-- markdownlint-disable MD013 -->
+<!-- markdownlint-disable MD013 MD060 -->
 
 | Input                              | Purpose                                                       |
 | ---------------------------------- | ------------------------------------------------------------- |
@@ -16,47 +16,102 @@ Where applicable, workflows accept:
 | `egress-preset`                    | Named baseline allowlist under block                          |
 | `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)     |
 | `allowed-endpoints-mode`           | `replace` (default) or `append` (merge with preset, deduped)  |
-| `job-name`                         | Check name on always-run jobs; PR comment suite name          |
+| `job-name`                         | Check name on always-run jobs; test summary suite title       |
 | `runner-image`                     | Runner label for long-running jobs                            |
 | `timeout-minutes`                  | Job timeout                                                   |
-| `post-pr-comment`                  | Enable PR summary comments                                    |
-| `comment-marker` / `comment-title` | PR comment identity                                           |
-| `draft-pr-skip`                    | Skip PR jobs on draft pull requests                           |
+| `publish-test-summary`             | Publish test/coverage summary comment on the pull request     |
+| `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)       |
+| `draft-pr-skip`                    | Skip PR jobs on draft pull requests (default `true` on test reusables) |
 
-<!-- markdownlint-enable MD013 -->
+<!-- markdownlint-enable MD013 MD060 -->
+
+## Migration: test summary publishing (#281)
+
+<!-- markdownlint-disable MD013 MD060 -->
+
+Breaking renames unify test/coverage PR comments behind **`publish-test-summary`**
+and dedicated publish reusables. Transport (marker upsert) stays on
+`post-pr-comment` action/script.
+
+### Caller inputs and jobs
+
+| Before | After |
+| ------ | ----- |
+| `post-pr-comment: true` | `publish-test-summary: true` |
+| `post-pr-comment: false` | `publish-test-summary: false` |
+| `coverage-pr-comment: true` (with or without `post-pr-comment`) | `publish-test-summary: true` only |
+| `coverage-pr-comment: false`, `post-pr-comment: true` | `publish-test-summary: true` |
+| Caller job `quality-pr-comment` | `publish-quality-summary` |
+| `comment-on-failure` (`reusable-validate`) | `publish-validation-report` |
+| `comment-on-pr` (`reusable-link-check`) | `publish-link-check-report` |
+
+### Reusable workflows and scripts
+
+| Removed / deprecated | Replacement |
+| -------------------- | ----------- |
+| `reusable-test-pr-comment.yml` | `reusable-publish-test-summary.yml` |
+| `reusable-coverage-pr-comment.yml` | `reusable-publish-test-summary.yml` |
+| `reusable-quality-pr-comment.yml` | `reusable-publish-quality-summary.yml` |
+| `reusable-artifact-pr-comment.yml` | `reusable-publish-artifact-report.yml` |
+| `generate-coverage-pr-comment.sh`, `generate-test-comment.sh` | `generate-test-summary.sh` + `generate-coverage-comment` |
+| Input `prebuilt-comment-file` | `prebuilt-test-summary-file` |
+| Input `comment-file` (artifact report reusable) | `report-file` |
+| Validation artifact `validation-comment` | `validation-report` |
+
+### Comment body selection
+
+When `publish-test-summary: true` on a language test reusable or `reusable-coverage`:
+
+| Condition | Markdown source |
+| --------- | ----------------- |
+| Coverage not collected | `generate-test-summary.sh` (pass/fail totals) |
+| Coverage collected (Rust LCOV, Python JSON, Node Istanbul) | `generate-coverage-comment` (rich table) |
+| Shell/kcov | Totals only (rich table not yet supported) |
+
+Node matrix coverage uses job `publish-test-summary-coverage` (inline post from
+`node-coverage-test-summary` artifacts).
+
+### `draft-pr-skip`
+
+All language test reusables (`reusable-rust-test`, `reusable-test-python`,
+`reusable-test-node`, `reusable-test-node-custom`, `reusable-test-shell`) default
+`draft-pr-skip: true` so draft PRs skip test and summary jobs unless callers set
+`draft-pr-skip: false`.
+
+<!-- markdownlint-enable MD013 MD060 -->
 
 ## Permissions by mode
 
 GitHub validates **all** jobs in a called reusable workflow at parse time,
 regardless of job `if:` conditions. Workflows that bundle lint/test/coverage with
-optional PR comments therefore split comment posting into dedicated reusables
-(for example `reusable-quality-lint.yml` + `reusable-quality-pr-comment.yml`).
+optional PR summaries and reports therefore split comment posting into dedicated reusables
+(for example `reusable-quality-lint.yml` + `reusable-publish-quality-summary.yml`).
 Callers that disable comments or run on tag/release events should invoke the
-lint/test/coverage reusable only and omit the comment reusable entirely.
+lint/test/coverage reusable only and omit the publish reusable entirely.
 
 ### Direct caller pattern (no orchestrator)
 
-Callers invoke `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml`
+Callers invoke `reusable-quality-lint.yml` and `reusable-publish-quality-summary.yml`
 directly — there is no intermediate orchestrator workflow. This produces a single
 nesting hop (`ci.yml` → `reusable-quality-lint.yml`) so check names read
 `quality / Lintro Quality Checks` instead of `quality / quality / Lintro Quality
 Checks`. The pattern matches `reusable-test-python.yml` +
-`reusable-test-pr-comment.yml`.
+`reusable-publish-test-summary.yml`.
 
 A `strategy: matrix` job **can** call a reusable workflow via `uses:` — GitHub
 Actions maps matrix values to reusable workflow inputs. `reusable-test-node.yml`
-`coverage-pr-comment` uses inline steps to avoid an extra nesting level (which
+`publish-test-summary-coverage` uses inline steps to avoid an extra nesting level (which
 would worsen check-name readability) and to access matrix-specific artifacts.
 
 <!-- Wide table kept to compare permissions, modes, and workflow entry points. -->
-<!-- markdownlint-disable MD013 -->
+<!-- markdownlint-disable MD013 MD060 -->
 
 | Mode                  | Caller permissions                                   | Workflow                                |
 | --------------------- | ---------------------------------------------------- | --------------------------------------- |
 | Quality / lint only   | `contents: read`, `packages: read`                   | `reusable-quality-lint.yml`             |
-| Quality comment       | `contents: read`, `pull-requests: write`             | `reusable-quality-pr-comment.yml`       |
-| Test / coverage only  | `contents: read`                                     | Reusables with `post-pr-comment: false` |
-| PR comments           | `contents: read`, `pull-requests: write`             | `reusable-*-pr-comment.yml`             |
+| Quality summary       | `contents: read`, `pull-requests: write`             | `reusable-publish-quality-summary.yml` |
+| Test / coverage only  | `contents: read`                                     | Reusables with `publish-test-summary: false` |
+| Test / report publish | `contents: read`, `pull-requests: write`             | `reusable-publish-test-summary.yml`, `reusable-publish-artifact-report.yml` |
 | Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                    |
 | Release version       | `contents: write`, `pull-requests: write`            | `reusable-release-version-pr.yml`       |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step       |
@@ -261,9 +316,11 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 `allowed-endpoints` under `append` still means preset-only (same as omitting extras).
 `audit` mode is unchanged (no enforced allowlist).
 
+<!-- markdownlint-disable MD060 -->
 | Preset           | Use case                                                |
 | ---------------- | ------------------------------------------------------- |
-| `github-minimal` | PR comments (API, tooling checkout, workflow artifacts) |
+| `github-minimal` | PR summaries and reports (API, tooling checkout, workflow artifacts) |
+<!-- markdownlint-enable MD060 -->
 | `github-pages`   | GitHub Pages deploy/publish (OIDC)                      |
 | `github-tooling` | Validate action pinning + GitHub raw/codeload           |
 | `docker`         | Docker build/pull/push (`reusable-docker.yml`)          |
@@ -520,9 +577,9 @@ Callers need `pull-requests: read`. Tooling is loaded from `lgtm-ci` via
 The workflow passes newline-delimited `types`/`scopes` to the action (empty
 `types` uses the built-in default; comma-separated overrides are normalized).
 
-## Fork PR comments
+## Fork PR summaries and reports
 
-PR comments are skipped automatically on fork PRs (`head.repo.fork == true`).
+PR summaries and reports are skipped automatically on fork PRs (`head.repo.fork == true`).
 This is enforced in `scripts/ci/actions/post-pr-comment.sh` and workflow `if`
 conditions.
 
@@ -571,13 +628,13 @@ jobs:
         semgrep.dev:443
         metrics.semgrep.dev:443
 
-  quality-pr-comment:
+  publish-quality-summary:
     needs: quality
     if: >-
       !cancelled()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
@@ -626,7 +683,7 @@ jobs:
       package-manager: bun
       test-command: bun run test:coverage
       coverage: true
-      coverage-pr-comment: true
+      publish-test-summary: true
       egress-policy: block
       allowed-endpoints: >
         github.com:443
