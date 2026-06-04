@@ -29,7 +29,7 @@ fi
 echo "Running: cargo nextest ${nextest_args[*]}"
 set +e
 cargo nextest "${nextest_args[@]}" 2>&1 | tee "$NEXTEST_LOG_FILE"
-exit_code=$?
+exit_code=${PIPESTATUS[0]}
 set -e
 
 exit "$exit_code"

@@ -13,7 +13,7 @@ setup() {
 		COMMENT_TITLE="Rust Coverage Report" \
 		COMMENT_OUTPUT="$COMMENT_OUTPUT" \
 		run bash "$SCRIPT"
-	[ "$status" -eq 0 ]
+	assert_success
 	grep -q "## Rust Coverage Report" "$COMMENT_OUTPUT"
 }
 
@@ -22,6 +22,6 @@ setup() {
 		COMMENT_TITLE="A/B & C" \
 		COMMENT_OUTPUT="$COMMENT_OUTPUT" \
 		run bash "$SCRIPT"
-	[ "$status" -eq 0 ]
+	assert_success
 	grep -q "## A/B & C" "$COMMENT_OUTPUT"
 }

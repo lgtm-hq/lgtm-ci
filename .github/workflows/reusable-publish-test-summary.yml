@@ -163,6 +163,16 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
+      - name: Validate rich coverage inputs
+        if: >-
+          inputs.rich-coverage-comment && inputs.prebuilt-test-summary-file == ''
+        shell: bash
+        run: |
+          if [[ -z "${{ inputs.coverage-file }}" ]]; then
+            echo "::error::rich-coverage-comment requires coverage-file (path to summary file)"
+            exit 1
+          fi
+
       - name: Download coverage artifact
         if: >-
           inputs.coverage-artifact-name != '' && inputs.prebuilt-test-summary-file == ''
