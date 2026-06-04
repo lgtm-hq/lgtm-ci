@@ -11,6 +11,14 @@ if [[ "${UPLOAD_PAGES_COVERAGE_HTML:-false}" != "true" || "${COVERAGE:-false}" !
 	exit 0
 fi
 
+# Prefer artifact presence: matrix job outputs are not reliable for pages upload.
+if [[ -n "${PAGES_COVERAGE_ARTIFACT_DIR:-}" && -d "${PAGES_COVERAGE_ARTIFACT_DIR}" ]]; then
+	if [[ -n "$(find "${PAGES_COVERAGE_ARTIFACT_DIR}" -type f -print -quit 2>/dev/null)" ]]; then
+		echo "uploaded=true" >>"$output"
+		exit 0
+	fi
+fi
+
 if [[ "${PAGES_UPLOAD_OUTCOME:-}" == "success" ]]; then
 	echo "uploaded=true" >>"$output"
 else

@@ -61,18 +61,18 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 	assert_success
 }
 
-@test "reusable-rust-test: defines test and comment-pr jobs" {
+@test "reusable-rust-test: defines test and publish-test-summary jobs" {
 	run grep -q '^  test:' "$WORKFLOW"
 	assert_success
-	run grep -q '^  comment-pr:' "$WORKFLOW"
+	run grep -q '^  publish-test-summary:' "$WORKFLOW"
 	assert_success
 }
 
-@test "reusable-rust-test: delegates PR comment to reusable-test-pr-comment" {
+@test "reusable-rust-test: delegates test summary to reusable-publish-test-summary" {
 	run awk '
-		/^  comment-pr:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  comment-pr:/ { in_job = 0 }
-		in_job && /reusable-test-pr-comment\.yml/ { found = 1; exit }
+		/^  publish-test-summary:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ { in_job = 0 }
+		in_job && /reusable-publish-test-summary\.yml/ { found = 1; exit }
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success

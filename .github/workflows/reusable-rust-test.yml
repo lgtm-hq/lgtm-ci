@@ -67,13 +67,15 @@ on:
         required: false
         type: string
         default: "push-main"
-      post-pr-comment:
-        description: "Post test/coverage summary as a PR comment"
+      publish-test-summary:
+        description: >-
+          Publish or update the test summary comment on the pull request for this workflow run (rich
+          coverage table when coverage is enabled, otherwise test pass/fail totals)
         required: false
         type: boolean
         default: true
       comment-marker:
-        description: "Unique marker for the Rust test PR comment"
+        description: "Upsert marker for the Rust test summary comment"
         required: false
         type: string
         default: "rust-test-results"
@@ -265,6 +267,19 @@ jobs:
         run: >-
           bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-rust-test-results.sh"
 
+      - name: Upload LCOV for test summary
+        if: >-
+          always()
+          && inputs.coverage
+          && inputs.publish-test-summary
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-coverage-lcov
+          path: ${{ inputs.working-directory }}/rust-coverage.lcov
+          if-no-files-found: ignore
+
       - name: Check coverage threshold
         id: coverage-gate
         if: inputs.coverage && inputs.coverage-threshold > 0
@@ -346,21 +361,20 @@ jobs:
             echo "passed=false" >>"$GITHUB_OUTPUT"
           fi
 
-  comment-pr:
+  publish-test-summary:
     needs: test
     if: >-
       always()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-      && inputs.post-pr-comment
+      && inputs.publish-test-summary
       && (
         !inputs.draft-pr-skip ||
         github.event.pull_request.draft == false
       )
-    uses: ./.github/workflows/reusable-test-pr-comment.yml
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
     permissions:
       contents: read
-      # Post/update the Rust test results PR comment via reusable-test-pr-comment
       pull-requests: write
     with:
       test-suite-name: ${{ inputs.job-name }}
@@ -371,4 +385,8 @@ jobs:
       coverage-percent: ${{ needs.test.outputs.coverage-percent }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.test.result }}
+      rich-coverage-comment: ${{ inputs.coverage }}
+      coverage-artifact-name: ${{ inputs.coverage && 'rust-coverage-lcov' || '' }}
+      coverage-file: rust-coverage.lcov
+      coverage-format: lcov
       tooling-ref: ${{ inputs.tooling-ref }}

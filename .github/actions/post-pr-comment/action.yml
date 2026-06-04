@@ -65,7 +65,7 @@ runs:
         EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
       run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
-    - name: Read comment from file
+    - name: Load test summary body
       id: read
       if: inputs.file != ''
       shell: bash

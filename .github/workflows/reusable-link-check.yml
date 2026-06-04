@@ -37,8 +37,8 @@ on:
         required: false
         type: boolean
         default: true
-      comment-on-pr:
-        description: "Post a PR comment with broken link report"
+      publish-link-check-report:
+        description: "Publish broken-link report on the pull request"
         required: false
         type: boolean
         default: false
@@ -86,7 +86,7 @@ on:
         type: string
         default: "Link Check"
       comment-marker:
-        description: "PR comment marker for link check reports"
+        description: "Upsert marker for the link-check report comment"
         required: false
         type: string
         default: "lychee-report"
@@ -155,7 +155,7 @@ jobs:
       - name: Upload link report
         if: >-
           always()
-          && inputs.comment-on-pr
+          && inputs.publish-link-check-report
           && hashFiles('lychee-report.md') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -164,23 +164,23 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  comment-pr:
-    name: ${{ inputs.job-name }} Comment
+  publish-link-check-report:
+    name: Publish link-check report
     needs: link-check
     if: >-
       always()
-      && inputs.comment-on-pr
+      && inputs.publish-link-check-report
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-    uses: ./.github/workflows/reusable-artifact-pr-comment.yml
+    uses: ./.github/workflows/reusable-publish-artifact-report.yml
     permissions:
       contents: read
       pull-requests: write
     with:
       artifact-name: lychee-report
-      comment-file: lychee-report.md
+      report-file: lychee-report.md
       marker: ${{ inputs.comment-marker }}
-      job-name: ${{ inputs.job-name }} Comment
+      job-name: Publish link-check report
       missing-artifact-warning: >-
         lychee-report artifact not found — link check may not have produced output
       tooling-ref: ${{ inputs.tooling-ref }}

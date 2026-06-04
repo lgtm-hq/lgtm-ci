@@ -44,13 +44,15 @@ on:
         required: false
         type: string
         default: "."
-      post-pr-comment:
-        description: "Post or update a shell test summary comment on pull requests"
+      publish-test-summary:
+        description: >-
+          Publish or update the test summary comment on the pull request for this workflow run (test
+          pass/fail totals; rich coverage not yet supported for kcov)
         required: false
         type: boolean
         default: true
       comment-marker:
-        description: "Unique marker for the shell test PR comment"
+        description: "Upsert marker for the shell test summary comment"
         required: false
         type: string
         default: "shell-test-results"
@@ -73,7 +75,7 @@ on:
         description: "Skip jobs on draft pull requests"
         required: false
         type: boolean
-        default: false
+        default: true
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -270,18 +272,18 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  comment-pr:
+  publish-test-summary:
     needs: test
     if: >-
       always()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-      && inputs.post-pr-comment
+      && inputs.publish-test-summary
       && (
         !inputs.draft-pr-skip ||
         github.event.pull_request.draft == false
       )
-    uses: ./.github/workflows/reusable-test-pr-comment.yml
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
     permissions:
       contents: read
       pull-requests: write

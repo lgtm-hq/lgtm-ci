@@ -72,18 +72,20 @@ on:
         required: false
         type: string
         default: "Coverage"
-      post-pr-comment:
-        description: "Post a PR comment with coverage summary"
+      publish-test-summary:
+        description: >-
+          Publish or update the coverage test summary comment for this
+          workflow run
         required: false
         type: boolean
-        default: false
+        default: true
       comment-marker:
-        description: "PR comment marker for coverage reports"
+        description: "Upsert marker for the coverage test summary comment"
         required: false
         type: string
         default: "coverage-report"
       comment-title:
-        description: "PR comment title for coverage reports"
+        description: "Heading for the coverage test summary comment"
         required: false
         type: string
         default: "Coverage Report"
@@ -111,6 +113,7 @@ jobs:
 
     outputs:
       coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
+      merged-coverage-file: ${{ steps.collect.outputs.merged-coverage-file }}
       badge-url: ${{ steps.badge.outputs.badge-url }}
       passed: ${{ steps.threshold.outputs.passed }}
 
@@ -263,23 +266,26 @@ jobs:
             format('coverage-report/{0}/coverage', inputs.working-directory) }}
           target-dir: coverage
 
-  comment-pr:
-    name: Coverage PR Comment
+  publish-test-summary:
+    name: Publish test summary
     needs: coverage
     if: >-
       always()
-      && inputs.post-pr-comment
+      && inputs.publish-test-summary
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-      && needs.coverage.outputs.coverage-percent != ''
-    uses: ./.github/workflows/reusable-coverage-pr-comment.yml
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
     permissions:
       contents: read
       pull-requests: write
     with:
-      coverage-percent: ${{ needs.coverage.outputs.coverage-percent }}
-      threshold: ${{ inputs.threshold }}
-      comment-title: ${{ inputs.comment-title }}
+      test-suite-name: ${{ inputs.comment-title }}
       comment-marker: ${{ inputs.comment-marker }}
-      passed: ${{ needs.coverage.outputs.passed }}
+      coverage-percent: ${{ needs.coverage.outputs.coverage-percent }}
+      coverage-threshold: ${{ inputs.threshold }}
+      job-result: ${{ needs.coverage.outputs.passed == 'true' && 'success' || 'failure' }}
+      rich-coverage-comment: true
+      coverage-artifact-name: coverage-report
+      coverage-file: ${{ needs.coverage.outputs.merged-coverage-file }}
+      coverage-format: ${{ inputs.format }}
       tooling-ref: ${{ inputs.tooling-ref }}

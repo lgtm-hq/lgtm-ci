@@ -16,7 +16,7 @@ scans run through **`reusable-quality-lint`** (lintro); this repo provides
 ## Nextest configuration (required)
 
 The reusable expects **`.config/nextest.toml`** with a `ci` profile that writes
-JUnit for result parsing and PR comments. Copy or merge from
+JUnit for result parsing and PR summaries and reports. Copy or merge from
 `examples/nextest-ci.toml` in lgtm-ci:
 
 ```toml
@@ -37,8 +37,10 @@ never runs both uninstrumented nextest and llvm-cov in the same pipeline.
 | `false`    | `cargo nextest run --profile ci` | Tests only (Python-style) |
 | `true`     | `cargo llvm-cov nextest` + LCOV  | Tests + coverage line     |
 
-PR comments use **`reusable-test-pr-comment`** and `generate-test-comment.sh`
-(same pattern as Python), not `generate-coverage-comment`.
+test summaries use **`reusable-publish-test-summary`**: rich coverage tables via
+`generate-coverage-comment` when the LCOV artifact is available; otherwise
+`generate-test-summary.sh` (same fallback pattern as Python when
+`upload-coverage: false`).
 
 ```yaml
 jobs:
@@ -92,7 +94,7 @@ as separate jobs for ruleset granularity.
 Run clippy, rustfmt, and `cargo audit` / `cargo deny` through
 `reusable-quality-lint` — do not duplicate those tools in the test reusable.
 
-When `egress-policy: block`, include `api.github.com:443` if PR comments are enabled.
+When `egress-policy: block`, include `api.github.com:443` if PR summaries and reports are enabled.
 
 ## Rust-only repository
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Generate formatted PR comment from code coverage results
+# Purpose: Generate coverage test summary markdown from coverage results
 #
 # Required environment variables:
 #   COVERAGE_FILE - Path to coverage summary JSON file

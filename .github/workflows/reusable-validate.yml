@@ -28,13 +28,13 @@ on:
         required: false
         type: string
         default: ""
-      comment-on-failure:
-        description: "Post or update a PR comment when validation fails"
+      publish-validation-report:
+        description: "Publish validation failure report on the pull request"
         required: false
         type: boolean
         default: false
       comment-marker:
-        description: "Unique marker for the validation PR comment"
+        description: "Upsert marker for the validation report comment"
         required: false
         type: string
         default: "validation-report"
@@ -143,16 +143,16 @@ jobs:
           # yamllint disable-line rule:line-length
           VALIDATION_NAME: ${{ inputs.job-name != '' && inputs.job-name || (inputs.name != '' && inputs.name || 'Validation') }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
-          COMMENT_OUTPUT: validation-comment.md
+          COMMENT_OUTPUT: validation-report.md
           OUTPUT_FILE: validation-output.txt
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-validate-script.sh
 
-      - name: Upload validation comment
+      - name: Upload validation report
         if: steps.validate.outputs.exit-code != '0'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: validation-comment
-          path: validation-comment.md
+          name: validation-report
+          path: validation-report.md
           retention-days: 1
           if-no-files-found: ignore
 
@@ -163,24 +163,24 @@ jobs:
           EXIT_CODE: ${{ steps.validate.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
 
-  comment:
-    name: PR Validation Comment
+  publish-validation-report:
+    name: Publish validation report
     needs: validate
     if: >-
       always()
-      && inputs.comment-on-failure
+      && inputs.publish-validation-report
       && needs.validate.outputs.status == 'failed'
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-    uses: ./.github/workflows/reusable-artifact-pr-comment.yml
+    uses: ./.github/workflows/reusable-publish-artifact-report.yml
     permissions:
       contents: read
       pull-requests: write
     with:
-      artifact-name: validation-comment
-      comment-file: validation-comment.md
+      artifact-name: validation-report
+      report-file: validation-report.md
       marker: ${{ inputs.comment-marker }}
-      job-name: PR Validation Comment
+      job-name: Publish validation report
       missing-artifact-warning: >-
-        Validation comment artifact not found — upstream may have failed
+        Validation report artifact not found — upstream may have failed
       tooling-ref: ${{ inputs.tooling-ref }}

@@ -52,3 +52,15 @@ teardown() {
 	run grep -q '^uploaded=false$' "$GITHUB_OUTPUT"
 	assert_success
 }
+
+@test "record-pages-coverage-upload-status: reports true when artifact directory has files" {
+	local artifact_dir="$BATS_TEST_TMPDIR/pages-coverage-html"
+	mkdir -p "$artifact_dir"
+	echo "<html></html>" >"$artifact_dir/index.html"
+	UPLOAD_PAGES_COVERAGE_HTML=true COVERAGE=true \
+		PAGES_COVERAGE_ARTIFACT_DIR="$artifact_dir" PAGES_UPLOAD_OUTCOME="" \
+		run bash "$SCRIPT"
+	assert_success
+	run grep -q '^uploaded=true$' "$GITHUB_OUTPUT"
+	assert_success
+}

@@ -4,6 +4,8 @@ description: "Security hardening for GitHub Actions runners using StepSecurity"
 author: "lgtm-hq"
 
 inputs:
+  # Default block is intentional (see CHANGELOG: reusable workflows #268). Callers
+  # that need audit-only must set egress-policy: audit explicitly.
   egress-policy:
     description: "Egress policy: audit (log) or block (enforce allowlist)"
     required: false

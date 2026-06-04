@@ -9,13 +9,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **`reusable-publish-test-summary.yml`**: single workflow to publish test summaries for
+  language test reusables and `reusable-coverage` (rich coverage table or test totals).
+
 ### Changed
+
+- **Breaking:** Renamed workflow input `post-pr-comment` → `publish-test-summary`; removed
+  `coverage-pr-comment` and related marker/title inputs on Node reusables.
+- **Breaking:** Renamed poster jobs to `publish-test-summary` / `publish-test-summary-coverage`
+  (display name: Publish test summary).
+- **Breaking:** Replaced `reusable-test-pr-comment.yml` and `reusable-coverage-pr-comment.yml`
+  with `reusable-publish-test-summary.yml`.
+- Rust/Python/coverage workflows use `generate-coverage-comment` for test summaries when
+  coverage artifacts are available.
+- Renamed `generate-test-comment.sh` → `generate-test-summary.sh` and
+  `prepare-coverage-comment.sh` → `prepare-coverage-test-summary.sh`.
+- **Breaking:** Renamed `prebuilt-comment-file` → `prebuilt-test-summary-file` on
+  `reusable-publish-test-summary.yml`.
+- Node matrix coverage artifacts use `node-coverage-test-summary` (was
+  `node-coverage-pr-comment`).
+- **Breaking:** Renamed `reusable-quality-pr-comment.yml` →
+  `reusable-publish-quality-summary.yml`; caller job `quality-pr-comment` →
+  `publish-quality-summary`.
+- **Breaking:** Renamed `reusable-artifact-pr-comment.yml` →
+  `reusable-publish-artifact-report.yml`; input `comment-file` → `report-file`.
+- **Breaking:** Renamed `comment-on-failure` → `publish-validation-report` on
+  `reusable-validate.yml`; validation artifact `validation-comment` →
+  `validation-report`.
+- **Breaking:** Renamed `comment-on-pr` → `publish-link-check-report` on
+  `reusable-link-check.yml`.
+- **Breaking:** `draft-pr-skip` default is now `true` on Python, Node, and Shell test
+  reusables (aligned with Rust).
 
 ### Deprecated
 
 ### Removed
 
+- `reusable-test-pr-comment.yml`, `reusable-coverage-pr-comment.yml`,
+  `reusable-quality-pr-comment.yml`, `reusable-artifact-pr-comment.yml`,
+  `generate-coverage-pr-comment.sh`, `generate-test-comment.sh`.
+
 ### Fixed
+
+- Node reusables no longer require `post-pr-comment: true` when posting coverage-only
+  summaries (`coverage-pr-comment: true` + `post-pr-comment: false` previously posted nothing).
 
 ### Security
 
@@ -80,7 +117,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   release bookkeeping only) (#204).
 
 - **workflows**: Workflow-specific default presets (`docker`, `playwright`,
-  `quality`, `pypi`, `rubygems`, `npm-publish`); PR comment jobs use
+  `quality`, `pypi`, `rubygems`, `npm-publish`); summary/report publish jobs use
   `github-minimal` only (#204).
 
 - **workflows**: `quality` preset covers full Docker-based `lintro chk` egress
@@ -181,7 +218,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **workflows**: `reusable-rust-test.yml` is the single entry point for Rust tests;
   `coverage: true` runs `cargo llvm-cov nextest` once; `coverage: false` runs
-  `cargo nextest` only. PR comments align with Python via `reusable-test-pr-comment`
+  `cargo nextest` only. PR summaries and reports align with Python via `reusable-test-pr-comment`
   (#168 §13)
 
 - **workflows**: hybrid job display names (#168 §12) — `reusable-test-node.yml` is
@@ -210,7 +247,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Previously Unreleased
 
 - **workflows**: `reusable-rust-test` and `reusable-test-rust-test` for workspace
-  `cargo test` with PR comments (#68). Clippy, rustfmt, and security scans remain
+  `cargo test` with PR summaries and reports (#68). Clippy, rustfmt, and security scans remain
   in `reusable-quality-lint` (lintro).
 
 ## [0.25.0] - 2026-05-30
@@ -333,12 +370,12 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 
 ### Previously Unreleased
 
-- **workflows**: `reusable-quality-lint.yml`, `reusable-quality-pr-comment.yml`,
-  `reusable-coverage-pr-comment.yml`, and `reusable-artifact-pr-comment.yml` (#231)
+- **workflows**: `reusable-quality-lint.yml`, `reusable-publish-quality-summary.yml`,
+  `reusable-coverage-pr-comment.yml`, and `reusable-publish-artifact-report.yml` (#231)
 - **workflows**: split PR-comment jobs into dedicated reusables for least-privilege
   callers (#231)
 - **workflows**: `reusable-quality.yml` orchestrator — invoke
-  `reusable-quality-lint.yml` and `reusable-quality-pr-comment.yml` directly (#231)
+  `reusable-quality-lint.yml` and `reusable-publish-quality-summary.yml` directly (#231)
 
 ## [0.19.3] - 2026-05-27
 
@@ -476,7 +513,7 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 ### Previously Unreleased
 
 - **workflows**: `reusable-test-rust` for Cargo workspace build and `llvm-cov`
-  coverage with PR comments (compose with `reusable-test-node` for frontends)
+  coverage with PR summaries and reports (compose with `reusable-test-node` for frontends)
 - **workflows**: extend `reusable-test-node` with `job-name`, `test-command`,
   and `coverage-pr-comment` for Vitest/Istanbul coverage reports
 - **docs**: Rust testing guide (`docs/rust-testing.md`)
@@ -510,7 +547,7 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 ### Other Changes
 
 - extract reusable release workflow helpers (#162) (7944462)
-- centralize reusable test PR comments (#161) (984ebff)
+- centralize reusable test PR summaries and reports (#161) (984ebff)
 - standardize Lintro Quality Checks reusable workflow (#160) (88ffb0f)
 - run lintro via full py-lintro docker image (#147) (a64d972)
 

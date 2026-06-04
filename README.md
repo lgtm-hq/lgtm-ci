@@ -47,7 +47,7 @@ jobs:
       packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality-lint
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
 
-  quality-pr-comment:
+  publish-quality-summary:
     needs: quality
     if: >-
       !cancelled()
@@ -56,7 +56,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-pr-comment.yml@v1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@v1
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
@@ -123,17 +123,21 @@ steps:
 
 #### Reporting & Comments
 
-| Action                        | Description                   |
-| ----------------------------- | ----------------------------- |
-| `post-pr-comment`             | Marker-based PR commenting    |
-| `generate-coverage-badge`     | Coverage badge generation     |
-| `generate-coverage-comment`   | Coverage report PR comments   |
-| `generate-playwright-comment` | E2E test result comments      |
-| `generate-lighthouse-comment` | Performance metric comments   |
-| `publish-test-results`        | Test result publishing        |
-| `check-coverage-threshold`    | Coverage threshold validation |
-| `collect-coverage`            | Coverage data collection      |
-| `merge-playwright-reports`    | Playwright report merging     |
+<!-- markdownlint-disable MD013 -- action catalog table; descriptions exceed default line length -->
+
+| Action                        | Description                                              |
+| ----------------------------- | -------------------------------------------------------- |
+| `post-pr-comment`             | Marker-based PR comment transport (any summary/report)   |
+| `generate-coverage-badge`     | Coverage badge generation                                |
+| `generate-coverage-comment`   | Coverage test summary markdown                           |
+| `generate-playwright-comment` | E2E test result comments                                 |
+| `generate-lighthouse-comment` | Performance metric comments                              |
+| `publish-test-results`        | Test result publishing                                   |
+| `check-coverage-threshold`    | Coverage threshold validation                            |
+| `collect-coverage`            | Coverage data collection                                 |
+| `merge-playwright-reports`    | Playwright report merging                                |
+
+<!-- markdownlint-enable MD013 -->
 
 #### Build & Release
 
@@ -165,41 +169,46 @@ steps:
 
 ### Reusable Workflows
 
-| Workflow                               | Description                            |
-| -------------------------------------- | -------------------------------------- |
-| `reusable-quality-lint.yml`            | Lintro via full py-lintro Docker image |
-| `reusable-quality-pr-comment.yml`      | Lintro PR summary comment              |
-| `reusable-sbom.yml`                    | SBOM generation with Cosign signing    |
-| `reusable-release-version-pr.yml`      | Release version PR with changelog      |
-| `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge          |
-| `reusable-build-python-dist.yml`       | Build Python dist artifact             |
-| `reusable-github-release.yml`          | GitHub Release with artifact assets    |
-| `reusable-publish-npm.yml`             | npm publishing                         |
-| `reusable-publish-gem.yml`             | RubyGems publishing                    |
-| `reusable-publish-homebrew.yml`        | Homebrew formula publishing            |
-| `reusable-deploy-pages.yml`            | GitHub Pages deployment                |
-| `reusable-docker.yml`                  | Docker build and publish               |
-| `reusable-coverage.yml`                | Test coverage collection               |
-| `reusable-test-python.yml`             | Python tests with PR comments          |
-| `reusable-test-node.yml`               | Node.js Vitest tests with PR comments  |
-| `reusable-test-node-custom.yml`        | Node.js custom test command workflow   |
-| `reusable-test-shell.yml`              | BATS shell tests with PR comments      |
-| `reusable-test-pr-comment.yml`         | Shared test PR comment workflow        |
-| `reusable-test-e2e.yml`                | E2E testing with Playwright            |
-| `reusable-test-e2e-matrix.yml`         | Matrix E2E testing                     |
-| `reusable-pr-auto-assign.yml`          | PR auto-assignment                     |
-| `reusable-pr-labeler.yml`              | PR auto-labeling                       |
-| `reusable-validate.yml`                | Generic repo validation script runner  |
-| `reusable-codeql.yml`                  | CodeQL security analysis               |
-| `reusable-dependency-review.yml`       | Dependency review gate                 |
-| `reusable-scorecards.yml`              | OpenSSF Scorecard analysis             |
-| `reusable-semantic-pr-title.yml`       | Conventional PR title validation       |
-| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation   |
-| `reusable-link-check.yml`              | Markdown and HTML link checking        |
+<!-- markdownlint-disable MD013 -- workflow catalog table; descriptions exceed default line length -->
+
+| Workflow                               | Description                                  |
+| -------------------------------------- | -------------------------------------------- |
+| `reusable-quality-lint.yml`            | Lintro via full py-lintro Docker image       |
+| `reusable-publish-quality-summary.yml` | Publish lintro quality summary               |
+| `reusable-sbom.yml`                    | SBOM generation with Cosign signing          |
+| `reusable-release-version-pr.yml`      | Release version PR with changelog            |
+| `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge                |
+| `reusable-build-python-dist.yml`       | Build Python dist artifact                   |
+| `reusable-github-release.yml`          | GitHub Release with artifact assets          |
+| `reusable-publish-npm.yml`             | npm publishing                               |
+| `reusable-publish-gem.yml`             | RubyGems publishing                          |
+| `reusable-publish-homebrew.yml`        | Homebrew formula publishing                  |
+| `reusable-deploy-pages.yml`            | GitHub Pages deployment                      |
+| `reusable-docker.yml`                  | Docker build and publish                     |
+| `reusable-coverage.yml`                | Test coverage collection                     |
+| `reusable-test-python.yml`             | Python tests with optional test summaries    |
+| `reusable-test-node.yml`               | Node.js Vitest tests with optional summaries |
+| `reusable-test-node-custom.yml`        | Node.js custom test command workflow         |
+| `reusable-test-shell.yml`              | BATS shell tests with optional summaries     |
+| `reusable-publish-test-summary.yml`    | Publish test summary for test/coverage runs  |
+| `reusable-publish-artifact-report.yml` | Publish markdown report from artifact        |
+| `reusable-test-e2e.yml`                | E2E testing with Playwright                  |
+| `reusable-test-e2e-matrix.yml`         | Matrix E2E testing                           |
+| `reusable-pr-auto-assign.yml`          | PR auto-assignment                           |
+| `reusable-pr-labeler.yml`              | PR auto-labeling                             |
+| `reusable-validate.yml`                | Generic repo validation script runner        |
+| `reusable-codeql.yml`                  | CodeQL security analysis                     |
+| `reusable-dependency-review.yml`       | Dependency review gate                       |
+| `reusable-scorecards.yml`              | OpenSSF Scorecard analysis                   |
+| `reusable-semantic-pr-title.yml`       | Conventional PR title validation             |
+| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation         |
+| `reusable-link-check.yml`              | Markdown and HTML link checking              |
+
+<!-- markdownlint-enable MD013 -->
 
 Test workflows are self-contained for consumers: they check out lgtm-ci
 tooling internally, run the configured test suite, and post/update the
-standard PR comment when callers grant `pull-requests: write`.
+standard summary comment when callers grant `pull-requests: write`.
 
 ### Shell Libraries
 

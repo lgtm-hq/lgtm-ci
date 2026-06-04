@@ -17,7 +17,7 @@ egress_preset_endpoints() {
 
 	case "$preset" in
 	github-minimal)
-		# PR comment jobs: GitHub API, tooling checkout, and workflow artifacts.
+		# summary/report publish jobs: GitHub API, tooling checkout, and workflow artifacts.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -81,6 +81,7 @@ egress_preset_endpoints() {
 			playwright-akamai.azureedge.net:443 \
 			archive.ubuntu.com:80 \
 			security.ubuntu.com:80
+		# archive.ubuntu.com/security.ubuntu.com use :80 for apt HTTP mirrors in CI images.
 		;;
 	pypi)
 		# PyPI / TestPyPI (reusable-publish-homebrew wait-for-package, python dist).

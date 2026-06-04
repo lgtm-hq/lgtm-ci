@@ -1,33 +1,18 @@
 ---
-name: Reusable Coverage PR Comment Workflow
+name: Reusable Publish Quality Summary Workflow
 
 on:
   workflow_call:
     inputs:
-      coverage-percent:
-        description: "Overall coverage percentage"
+      working-directory:
+        description: "Working directory where lint artifacts were produced"
+        required: false
+        type: string
+        default: "."
+      exit-code:
+        description: "Exit code from the quality lint job"
         required: true
         type: string
-      threshold:
-        description: "Minimum coverage percentage threshold"
-        required: false
-        type: number
-        default: 0
-      comment-title:
-        description: "PR comment title for coverage reports"
-        required: false
-        type: string
-        default: "Coverage Report"
-      comment-marker:
-        description: "PR comment marker for coverage reports"
-        required: false
-        type: string
-        default: "coverage-report"
-      passed:
-        description: "Whether coverage meets threshold"
-        required: false
-        type: string
-        default: "true"
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -61,10 +46,10 @@ on:
         type: string
         default: "github-minimal"
       job-name:
-        description: "Display name for the PR comment job"
+        description: "Display name for the quality summary job"
         required: false
         type: string
-        default: "Coverage PR Comment"
+        default: "Publish quality summary"
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
@@ -77,7 +62,7 @@ on:
         default: 10
 
 jobs:
-  comment:
+  publish-quality-summary:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
@@ -100,7 +85,8 @@ jobs:
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
-            .github/actions/
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -120,17 +106,34 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
-      - name: Generate coverage comment body
-        id: body
+      - name: Download linting report
+        id: download
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: linting-report
+          path: ${{ inputs.working-directory }}
+
+      - name: Warn on missing artifact
+        if: steps.download.outcome != 'success'
+        shell: bash
+        run: echo "::warning::Linting report artifact not found — quality job may have failed before producing output"
+
+      - name: Generate quality summary
+        if: steps.download.outcome == 'success'
         shell: bash
         env:
-          COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
-          THRESHOLD: ${{ inputs.threshold }}
-          COMMENT_TITLE: ${{ inputs.comment-title }}
-          PASSED: ${{ inputs.passed }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-coverage-pr-comment.sh
+          LINTRO_OUTPUT: ${{ inputs.working-directory }}/chk-output.txt
+          LINTRO_EXIT_CODE: ${{ inputs.exit-code }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_SERVER_URL: ${{ github.server_url }}
+          COMMENT_OUTPUT: quality-summary.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-lintro-comment.sh
 
       - name: Detect PR number
+        if: steps.download.outcome == 'success'
         id: pr
         shell: bash
         env:
@@ -142,19 +145,32 @@ jobs:
           EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
 
-      - name: Post PR comment
-        if: steps.pr.outputs.number != ''
+      - name: Load quality summary body
+        if: steps.download.outcome == 'success'
+        id: read
+        shell: bash
+        env:
+          STEP: read-file
+          COMMENT_FILE: quality-summary.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+
+      - name: Publish quality summary
+        if: >-
+          steps.download.outcome == 'success'
+          && steps.pr.outputs.number != ''
+        id: post
         shell: bash
         env:
           STEP: post
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
-          MARKER: ${{ inputs.comment-marker }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          MARKER: lintro-report
           MODE: upsert
           DELETE_ON_EMPTY: "false"
-          FILE_PROVIDED: "false"
-          BODY_FROM_INPUT: ${{ steps.body.outputs.comment-body }}
+          FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
+          BODY_FROM_FILE: ${{ steps.read.outputs.body }}
+          BODY_FROM_INPUT: ""
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
