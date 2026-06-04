@@ -112,6 +112,43 @@ _check_harden_with_blocks() {
 	done < <(grep -nE "$TOOLING_HARDEN_RE" "$workflow" | cut -d: -f1)
 }
 
+_check_release_two_phase_sparse() {
+	local workflow="$1"
+	local wf_name="${workflow##*/}"
+
+	[[ -f "$workflow" ]] || return 0
+	grep -q 'Checkout lgtm-ci egress tooling' "$workflow" || return 0
+
+	while IFS= read -r msg; do
+		[[ -z "$msg" ]] && continue
+		echo "$msg" >&2
+		violations=$((violations + 1))
+	done < <(
+		awk -v wf="$wf_name" '
+			/Checkout lgtm-ci egress tooling/ { saw_egress = 1 }
+			saw_egress && /- name: Checkout lgtm-ci tooling/ { block = 1 }
+			saw_egress && /- name: Restore tooling for post-PR steps/ { block = 1 }
+			block && /^[[:space:]]+sparse-checkout: scripts\/ci\/$/ {
+				print wf ": sparse-checkout after egress tooling must include egress composites (not scripts/ci/ only)"
+				block = 0
+			}
+			block && /^[[:space:]]+sparse-checkout: \|/ {
+				in_sparse = 1
+				has_harden = 0
+				next
+			}
+			in_sparse && /\.github\/actions\/harden-runner/ { has_harden = 1 }
+			in_sparse && /^[[:space:]]+[a-zA-Z]/ && !/^[[:space:]]+\./ && !/^[[:space:]]+scripts/ {
+				if (!has_harden) {
+					print wf ": multiline sparse-checkout after egress tooling must include harden-runner"
+				}
+				in_sparse = 0
+				block = 0
+			}
+		' "$workflow"
+	)
+}
+
 while IFS= read -r -d '' file; do
 	line_num=0
 	while IFS= read -r line || [[ -n "$line" ]]; do
@@ -168,6 +205,9 @@ while IFS= read -r -d '' workflow; do
 	_check_job_egress_order "$workflow"
 	_check_harden_with_blocks "$workflow"
 done < <(discover_reusable_workflows)
+
+_check_release_two_phase_sparse "$WORKFLOWS_DIR/reusable-release-auto-tag.yml"
+_check_release_two_phase_sparse "$WORKFLOWS_DIR/reusable-release-version-pr.yml"
 
 renovate="$WORKFLOWS_DIR/renovate.yml"
 if [[ -f "$renovate" ]]; then
