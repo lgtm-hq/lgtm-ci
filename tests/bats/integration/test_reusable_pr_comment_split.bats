@@ -179,3 +179,15 @@ _orchestrator_delegates_publish() {
 		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
 	assert_success
 }
+
+@test "reusable-publish-test-summary: tolerates missing coverage artifact" {
+	run grep -q 'id: download-coverage' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
+	assert_success
+	run grep -q 'continue-on-error: true' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
+	assert_success
+	run grep -q 'steps.download-coverage.conclusion' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
+	assert_success
+}

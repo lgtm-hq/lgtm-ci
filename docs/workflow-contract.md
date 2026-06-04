@@ -60,8 +60,10 @@ When `publish-test-summary: true` on a language test reusable or
 `reusable-coverage`:
 
 - Coverage not collected: `generate-test-summary.sh` (pass/fail totals)
-- Coverage collected (Rust LCOV, Python JSON, Node Istanbul):
-  `generate-coverage-comment` (rich table)
+- Coverage collected with a downloadable artifact (Rust LCOV, Python JSON when
+  `upload-coverage: true`): `generate-coverage-comment` (rich table)
+- Coverage collected without an artifact (e.g. Python with `upload-coverage: false`):
+  `generate-test-summary.sh` (pass/fail totals with coverage percent)
 - Shell/kcov: totals only (rich table not yet supported)
 
 Node matrix coverage uses job `publish-test-summary-coverage` (inline post from
@@ -110,7 +112,6 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | Release version       | `contents: write`, `pull-requests: write`            | `reusable-release-version-pr.yml`            |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
-| GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
 
 <!-- markdownlint-enable MD013 -->

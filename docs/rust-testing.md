@@ -37,10 +37,10 @@ never runs both uninstrumented nextest and llvm-cov in the same pipeline.
 | `false`    | `cargo nextest run --profile ci` | Tests only (Python-style) |
 | `true`     | `cargo llvm-cov nextest` + LCOV  | Tests + coverage line     |
 
-test summaries use **`reusable-publish-test-summary`** and
-`generate-test-summary.sh` (rich coverage via `generate-coverage-comment`
-when `coverage: true`)
-(same pattern as Python), not `generate-coverage-comment`.
+test summaries use **`reusable-publish-test-summary`**: rich coverage tables via
+`generate-coverage-comment` when the LCOV artifact is available; otherwise
+`generate-test-summary.sh` (same fallback pattern as Python when
+`upload-coverage: false`).
 
 ```yaml
 jobs:

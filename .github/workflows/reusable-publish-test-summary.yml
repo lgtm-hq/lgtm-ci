@@ -166,17 +166,22 @@ jobs:
       - name: Validate rich coverage inputs
         if: >-
           inputs.rich-coverage-comment && inputs.prebuilt-test-summary-file == ''
+          && inputs.coverage-artifact-name != ''
         shell: bash
+        env:
+          COVERAGE_FILE: ${{ inputs.coverage-file }}
         run: |
-          if [[ -z "${{ inputs.coverage-file }}" ]]; then
+          if [[ -z "${COVERAGE_FILE}" ]]; then
             echo "::error::rich-coverage-comment requires coverage-file (path to summary file)"
             exit 1
           fi
 
       - name: Download coverage artifact
+        id: download-coverage
         if: >-
           inputs.coverage-artifact-name != '' && inputs.prebuilt-test-summary-file == ''
           && inputs.rich-coverage-comment
+        continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs.coverage-artifact-name }}
@@ -186,21 +191,23 @@ jobs:
         id: rich-coverage
         if: >-
           inputs.prebuilt-test-summary-file == '' && inputs.rich-coverage-comment &&
-          inputs.coverage-file != ''
+          inputs.coverage-file != '' && inputs.coverage-artifact-name != '' &&
+          steps.download-coverage.conclusion == 'success'
         uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-comment
         with:
           coverage-file: >-
-            ${{ inputs.coverage-artifact-name != '' &&
-            format('coverage-test-summary/{0}', inputs.coverage-file) ||
-            inputs.coverage-file }}
+            ${{ format('coverage-test-summary/{0}', inputs.coverage-file) }}
           format: ${{ inputs.coverage-format }}
           threshold-lines: "0"
           threshold-branches: "0"
           threshold-functions: "0"
 
       - name: Generate test run summary
+        id: generate-test-summary
         if: >-
-          inputs.prebuilt-test-summary-file == '' && !inputs.rich-coverage-comment
+          inputs.prebuilt-test-summary-file == '' && (
+          !inputs.rich-coverage-comment || inputs.coverage-artifact-name == '' ||
+          steps.download-coverage.conclusion != 'success')
         shell: bash
         env:
           TEST_SUITE_NAME: ${{ inputs.test-suite-name }}
@@ -232,7 +239,7 @@ jobs:
         id: read
         if: >-
           inputs.prebuilt-test-summary-file != '' ||
-          (inputs.prebuilt-test-summary-file == '' && !inputs.rich-coverage-comment)
+          steps.generate-test-summary.outcome == 'success'
         shell: bash
         env:
           STEP: read-file
@@ -244,7 +251,7 @@ jobs:
       - name: Publish test summary from file
         if: >-
           inputs.prebuilt-test-summary-file != '' ||
-          (inputs.prebuilt-test-summary-file == '' && !inputs.rich-coverage-comment)
+          steps.generate-test-summary.outcome == 'success'
         shell: bash
         env:
           STEP: post
