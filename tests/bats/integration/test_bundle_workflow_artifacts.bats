@@ -31,6 +31,7 @@ load "../../helpers/common"
 	local action="${PROJECT_ROOT}/.github/actions/bundle-workflow-artifacts/action.yml"
 	run awk '
 		/^    - name: Bundle workflow artifacts/ { in_bundle = 1 }
+		in_bundle && /^    - name:/ && $0 !~ /Bundle workflow artifacts/ { in_bundle = 0 }
 		in_bundle && /GH_TOKEN: \$\{\{ github\.token \}\}/ { gh_token = 1 }
 		in_bundle && /GITHUB_TOKEN:/ { github_token = 1 }
 		END { exit !(gh_token && !github_token) }
