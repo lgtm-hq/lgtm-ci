@@ -124,8 +124,9 @@ bundle_get_artifact_id() {
 		return 0
 	fi
 
+	# Degrade silently when the run has no matching artifact (warn handled by caller).
 	# shellcheck disable=SC2016
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" |
+	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" 2>/dev/null |
 		jq -r --arg name "$artifact_name" \
 			'first(.artifacts[] | select(.name == $name) | .id) // empty' \
 			2>/dev/null || true
