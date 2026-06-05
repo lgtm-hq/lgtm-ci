@@ -133,6 +133,7 @@ jobs:
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/
+            scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
@@ -230,6 +231,7 @@ jobs:
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/
+            scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
