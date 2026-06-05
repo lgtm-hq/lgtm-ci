@@ -58,7 +58,6 @@ runs:
       env:
         STEP: pr-number
         GH_TOKEN: ${{ github.token }}
-        GITHUB_TOKEN: ${{ github.token }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
@@ -80,7 +79,6 @@ runs:
       env:
         STEP: post
         GH_TOKEN: ${{ github.token }}
-        GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ steps.pr.outputs.number }}
         MARKER: ${{ inputs.marker }}
