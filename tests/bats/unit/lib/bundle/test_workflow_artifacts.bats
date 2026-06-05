@@ -115,39 +115,42 @@ _setup_bundle_gh_mock() {
 	cat >"${mock_bin}/gh" <<EOF
 #!/usr/bin/env bash
 url=""
-workflow=""
 for ((i = 1; i <= \$#; i++)); do
 	case "\${!i}" in
 	repos/*) url="\${!i}" ;;
-	--arg)
-		next=\$((i + 1))
-		if [[ "\${!next}" == "wf" ]]; then
-			wf_index=\$((i + 2))
-			workflow="\${!wf_index}"
-		fi
-		;;
 	esac
 done
 
 case "\$url" in
 *actions/runs?head_sha=abc123*)
-	if [[ "\$workflow" == "missing-workflow" ]]; then
-		echo ""
-	else
-		echo "${run_id}"
-	fi
+	cat <<'JSON'
+{"workflow_runs":[
+  {"id":${run_id},"name":"quality-ci-main","path":".github/workflows/quality-ci-main.yml","conclusion":"success","head_branch":"main"},
+  {"id":${run_id},"name":"coverage-reports","path":".github/workflows/coverage-reports.yml","conclusion":"success","head_branch":"main"}
+]}
+JSON
 	;;
 *actions/runs?branch=main*)
-	echo "${run_id}"
+	cat <<'JSON'
+{"workflow_runs":[
+  {"id":${run_id},"name":"quality-ci-main","path":".github/workflows/quality-ci-main.yml","conclusion":"success","head_branch":"main"},
+  {"id":${run_id},"name":"coverage-reports","path":".github/workflows/coverage-reports.yml","conclusion":"success","head_branch":"main"}
+]}
+JSON
 	;;
 *actions/runs/${run_id}/artifacts*)
-	echo "${artifact_id}"
+	cat <<'JSON'
+{"artifacts":[
+  {"id":${artifact_id},"name":"coverage-html"},
+  {"id":${artifact_id},"name":"rust-coverage-html"}
+]}
+JSON
 	;;
 *actions/artifacts/${artifact_id}/zip*)
 	cat "${zip_path}"
 	;;
 *)
-	echo ""
+	echo '{"workflow_runs":[],"artifacts":[]}'
 	;;
 esac
 exit 0
@@ -226,7 +229,7 @@ PY
 	mkdir -p "$mock_bin"
 	cat >"${mock_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
-echo ""
+echo '{"workflow_runs":[],"artifacts":[]}'
 exit 0
 EOF
 	chmod +x "${mock_bin}/gh"
@@ -321,6 +324,15 @@ EOF
 	assert_success
 	assert_output --partial "must not contain .. segments"
 	run test ! -e "${BATS_TEST_TMPDIR}/outside"
+	assert_success
+}
+
+@test "workflow_artifacts.sh: does not pass jq --arg to gh api" {
+	local script="${PROJECT_ROOT}/scripts/ci/lib/bundle/workflow_artifacts.sh"
+
+	run bash -c 'grep "gh api" "$1" | grep -q -- "--arg"' _ "$script"
+	assert_failure
+	run grep -q 'jq -r --arg' "$script"
 	assert_success
 }
 
