@@ -176,6 +176,17 @@ Contract enforcement: `scripts/ci/quality/validate-static-job-names.sh` (also
 covered by BATS). Do not use `matrix.`, `format(`, or ternary `&& … ||`
 expressions in `job.name` on jobs that have `if:`.
 
+### Tooling sparse-checkout
+
+When a reusable workflow job invokes a script-backed composite from
+`.lgtm-ci-tooling/.github/actions/`, the job's `Checkout lgtm-ci tooling` step
+must sparse-checkout `scripts/ci/` alongside `.github/actions/` (cone mode).
+Egress-only jobs that load only `harden-runner` and `resolve-egress-allowlist`
+are exempt.
+
+Contract enforcement: `scripts/ci/quality/validate-tooling-sparse-checkout.sh`
+(covered by BATS).
+
 **Node testing:** Vitest callers use `reusable-test-node.yml` with `job-name`.
 Custom package scripts use `reusable-test-node-custom.yml` with required
 `test-command` and `job-name`.
