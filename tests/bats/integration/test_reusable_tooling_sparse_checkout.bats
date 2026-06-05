@@ -185,15 +185,14 @@ jobs:
         with:
           sparse-checkout: |
             .github/actions/
-      - name: Validate action pinning
-        uses: ./.lgtm-ci-tooling/.github/actions/validate-action-pinning
+            scripts/ci/
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@v4
         with:
           sparse-checkout: |
             .github/actions/
             scripts/cicd/
-      - name: Post PR comment
+      - name: Validate action pinning
         uses: ./.lgtm-ci-tooling/.github/actions/validate-action-pinning
 YAML
 
