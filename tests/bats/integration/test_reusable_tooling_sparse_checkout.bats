@@ -201,3 +201,41 @@ YAML
 	assert_failure
 	assert_output --partial "validate-action-pinning"
 }
+
+@test "validate-tooling-sparse-checkout: rejects scripts/ci/ subdirectory (cone-mode insufficient)" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local actions_dir="${BATS_TEST_TMPDIR}/.github/actions/validate-action-pinning"
+	mkdir -p "${workflows_dir}" "${actions_dir}"
+	cat >"${actions_dir}/action.yml" <<'YAML'
+---
+name: Validate action pinning
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh
+YAML
+	cat >"${workflows_dir}/reusable-subdir-sparse.yml" <<'YAML'
+---
+name: Subdirectory sparse example
+on:
+  workflow_call:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/quality/
+      - name: Validate action pinning
+        uses: ./.lgtm-ci-tooling/.github/actions/validate-action-pinning
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" ACTIONS_DIR="${BATS_TEST_TMPDIR}/.github/actions" \
+		run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "validate-action-pinning"
+}

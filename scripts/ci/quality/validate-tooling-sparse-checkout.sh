@@ -52,8 +52,6 @@ def has_scripts_ci(paths: list[str]) -> bool:
     for path in paths:
         if path.removesuffix("/") == "scripts/ci":
             return True
-        if path.startswith("scripts/ci/"):
-            return True
     return False
 
 
