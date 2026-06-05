@@ -48,13 +48,22 @@ def parse_sparse(block: str) -> list[str]:
     return [single.group(1).strip()] if single else []
 
 
+def has_scripts_ci(paths: list[str]) -> bool:
+    for path in paths:
+        if path.removesuffix("/") == "scripts/ci":
+            return True
+        if path.startswith("scripts/ci/"):
+            return True
+    return False
+
+
 violations: list[str] = []
 for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     content = workflow.read_text()
     if ".lgtm-ci-tooling/.github/actions/" not in content:
         continue
 
-    for job_chunk in re.split(r"(?=^  [a-zA-Z][\w-]*:\n)", content, flags=re.M):
+    for job_chunk in re.split(r"(?=^  [_a-zA-Z][\w-]*:\n)", content, flags=re.M):
         if "Checkout lgtm-ci tooling" not in job_chunk:
             continue
 
@@ -73,7 +82,7 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
                 )
             ) & script_composites
 
-            has_scripts = any(path.startswith("scripts/ci") for path in paths)
+            has_scripts = has_scripts_ci(paths)
             has_actions = any(path.startswith(".github/actions") for path in paths)
             if block_composites and has_actions and not has_scripts:
                 composites = ", ".join(sorted(block_composites))
