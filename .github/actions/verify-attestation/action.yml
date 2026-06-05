@@ -41,6 +41,7 @@ runs:
       id: verify
       shell: bash
       env:
+        GH_TOKEN: ${{ github.token }}
         STEP: verify
         TARGET: ${{ inputs.target }}
         TARGET_TYPE: ${{ inputs.target-type }}
