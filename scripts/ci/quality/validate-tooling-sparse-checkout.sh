@@ -16,6 +16,11 @@ if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 	exit 1
 fi
 
+if [[ ! -d "${ACTIONS_DIR}" ]]; then
+	echo "ERROR: actions directory not found: ${ACTIONS_DIR}" >&2
+	exit 1
+fi
+
 python3 - "${WORKFLOWS_DIR}" "${ACTIONS_DIR}" <<'PY'
 """Validate lgtm-ci tooling sparse-checkout includes scripts/ci/ when needed."""
 from __future__ import annotations
@@ -56,28 +61,27 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
         job_match = re.match(r"  ([\w-]+):", job_chunk)
         job_id = job_match.group(1) if job_match else "?"
 
-        last_paths: list[str] = []
-        job_composites: set[str] = set()
         for block in re.split(r"(?=      - name: Checkout lgtm-ci tooling)", job_chunk):
             if "Checkout lgtm-ci tooling" not in block:
                 continue
-            last_paths = parse_sparse(block)
-            job_composites |= set(
+
+            paths = parse_sparse(block)
+            block_composites = set(
                 re.findall(
                     r"uses:\s+\./\.lgtm-ci-tooling/\.github/actions/([^\s#]+)",
                     block,
                 )
             ) & script_composites
 
-        has_scripts = any(path.startswith("scripts/ci") for path in last_paths)
-        has_actions = any(path.startswith(".github/actions") for path in last_paths)
-        if job_composites and has_actions and not has_scripts:
-            composites = ", ".join(sorted(job_composites))
-            paths = ", ".join(last_paths)
-            violations.append(
-                f"{workflow.name}:{job_id}: sparse-checkout missing scripts/ci/ "
-                f"(paths: {paths}; composites: {composites})"
-            )
+            has_scripts = any(path.startswith("scripts/ci") for path in paths)
+            has_actions = any(path.startswith(".github/actions") for path in paths)
+            if block_composites and has_actions and not has_scripts:
+                composites = ", ".join(sorted(block_composites))
+                path_list = ", ".join(paths)
+                violations.append(
+                    f"{workflow.name}:{job_id}: sparse-checkout missing scripts/ci/ "
+                    f"(paths: {path_list}; composites: {composites})"
+                )
 
 if violations:
     print("ERROR: tooling sparse-checkout contract violations:", file=sys.stderr)
