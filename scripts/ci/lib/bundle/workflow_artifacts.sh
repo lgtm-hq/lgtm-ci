@@ -89,8 +89,8 @@ bundle_find_workflow_run() {
 		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .conclusion == \"success\") | .id) // empty"
 	fi
 
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${commit_sha}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" \
-		--jq "$jq_filter" --arg wf "$workflow_key"
+	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${commit_sha}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" |
+		jq -r --arg wf "$workflow_key" "$jq_filter"
 }
 
 # Find the latest workflow run on a fallback branch (e.g. main).
@@ -110,8 +110,8 @@ bundle_find_workflow_run_on_ref() {
 		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and .conclusion == \"success\") | .id) // empty"
 	fi
 
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${fallback_ref}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" \
-		--jq "$jq_filter" --arg wf "$workflow_key" --arg branch "$fallback_ref"
+	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${fallback_ref}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" |
+		jq -r --arg wf "$workflow_key" --arg branch "$fallback_ref" "$jq_filter"
 }
 
 # Resolve artifact ID from a workflow run.
@@ -125,9 +125,10 @@ bundle_get_artifact_id() {
 	fi
 
 	# shellcheck disable=SC2016
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" \
-		--jq 'first(.artifacts[] | select(.name == $name) | .id) // empty' \
-		--arg name "$artifact_name" 2>/dev/null || true
+	gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/artifacts" |
+		jq -r --arg name "$artifact_name" \
+			'first(.artifacts[] | select(.name == $name) | .id) // empty' \
+			2>/dev/null || true
 }
 
 # Validate zip member paths and types before extraction (zip-slip / symlink defense).
