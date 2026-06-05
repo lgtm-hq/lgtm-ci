@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.32.4] - 2026-06-05
+
+### Bug Fixes
+
+- **ci**: pass github.token to composite actions that call gh (#300) (1199f97)
+
 ## [0.32.3] - 2026-06-05
 
 ### Bug Fixes
@@ -836,7 +842,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.4...HEAD
+[0.32.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.3...v0.32.4
 [0.32.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.2...v0.32.3
 [0.32.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.0...v0.32.1
