@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.32.2] - 2026-06-05
+
+### Bug Fixes
+
+- **ci**: pipe bundle workflow lookups through jq instead of gh api --arg (#297) (577b556)
+
 ## [0.32.1] - 2026-06-04
 
 ### Bug Fixes
@@ -824,7 +830,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.2...HEAD
+[0.32.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.1...v0.32.2
 [0.32.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.0...v0.32.1
 [0.32.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.31.0...v0.32.0
 [0.31.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.30.1...v0.31.0
