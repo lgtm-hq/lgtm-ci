@@ -9,6 +9,7 @@
 #   GITHUB_REPOSITORY - owner/repo for GitHub API calls
 #
 # Optional environment variables:
+#   GH_TOKEN - GitHub token for gh CLI (required in CI; set by composite action)
 #   FALLBACK_REF - Branch ref for fallback workflow lookup (e.g. main)
 #   STRICT - Fail when any bundle entry is missing (default: false)
 
@@ -28,8 +29,8 @@ source "$SCRIPT_DIR/../lib/bundle/workflow_artifacts.sh"
 : "${FALLBACK_REF:=}"
 : "${STRICT:=false}"
 
-if [[ -n "${GITHUB_TOKEN:-}" ]]; then
-	gh auth status >/dev/null 2>&1 || echo "${GITHUB_TOKEN}" | gh auth login --with-token 2>/dev/null || true
+if [[ -n "${GH_TOKEN:-}" ]]; then
+	gh auth status >/dev/null 2>&1 || echo "${GH_TOKEN}" | gh auth login --with-token 2>/dev/null || true
 fi
 
 bundle_load_manifest "$BUNDLE_MANIFEST"
