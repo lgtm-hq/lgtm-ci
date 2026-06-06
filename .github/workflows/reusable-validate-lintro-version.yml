@@ -1,0 +1,160 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Reusable Validate Lintro Version
+
+on:
+  workflow_call:
+    inputs:
+      lintro-image:
+        description: >-
+          Pinned ghcr.io/lgtm-hq/py-lintro image. When empty, resolves the digest
+          from reusable-quality-lint.yml and run-quality/action.yml in the repo.
+        required: false
+        type: string
+        default: ""
+      pyproject:
+        description: "Path to pyproject.toml"
+        required: false
+        type: string
+        default: "pyproject.toml"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling checkout"
+        required: false
+        type: string
+        default: ""
+      tooling-ref-fallback:
+        description: >-
+          Fallback lgtm-ci tooling ref when required scripts are missing at
+          tooling-ref (for example PR head SHA during bootstrap)
+        required: false
+        type: string
+        default: ""
+      tooling-bootstrap-script:
+        description: >-
+          Path to check-lintro-tooling-bootstrap.sh (repo or tooling checkout)
+        required: false
+        type: string
+        default: ".lgtm-ci-tooling/scripts/ci/quality/check-lintro-tooling-bootstrap.sh"
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "quality"
+      job-name:
+        description: "GitHub check name"
+        required: false
+        type: string
+        default: "Validate Lintro Version"
+
+jobs:
+  validate-lintro-version:
+    name: ${{ inputs.job-name }}
+    runs-on: ubuntu-latest
+    permissions:
+      # Checkout repository and lgtm-ci tooling
+      contents: read
+      # Authenticate to ghcr.io for lintro image access
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Bootstrap lgtm-ci tooling when required scripts are missing
+        id: tooling-bootstrap
+        if: inputs.tooling-ref-fallback != ''
+        shell: bash
+        env:
+          BOOTSTRAP_SCRIPT: ${{ inputs.tooling-bootstrap-script }}
+        run: bash "$BOOTSTRAP_SCRIPT"
+
+      - name: Checkout lgtm-ci tooling (fallback)
+        if: >-
+          inputs.tooling-ref-fallback != '' &&
+          steps.tooling-bootstrap.outputs.needs-fallback == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref-fallback }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Resolve lintro image reference
+        id: lintro-image
+        shell: bash
+        env:
+          INPUT_LINTRO_IMAGE: ${{ inputs.lintro-image }}
+        run: .lgtm-ci-tooling/scripts/ci/quality/resolve-lintro-image.sh
+
+      - name: Validate lintro version consistency
+        shell: bash
+        env:
+          LINTRO_IMAGE: ${{ steps.lintro-image.outputs.image }}
+          PYPROJECT: ${{ inputs.pyproject }}
+        run: .lgtm-ci-tooling/scripts/ci/quality/validate-lintro-version.sh
