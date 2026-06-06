@@ -1,0 +1,49 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Quality Check - Lintro Version Sync
+
+'on':
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    paths:
+      - 'pyproject.toml'
+      - '.github/workflows/reusable-quality-lint.yml'
+      - '.github/workflows/reusable-validate-lintro-version.yml'
+      - '.github/workflows/validate-lintro-version.yml'
+      - '.github/actions/run-quality/action.yml'
+      - 'scripts/ci/quality/check-lintro-tooling-bootstrap.sh'
+      - 'scripts/ci/quality/resolve-lintro-image.sh'
+      - 'scripts/ci/quality/validate-lintro-version.sh'
+  merge_group:
+  push:
+    branches: [main]
+    paths:
+      - 'pyproject.toml'
+      - '.github/workflows/reusable-quality-lint.yml'
+      - '.github/workflows/reusable-validate-lintro-version.yml'
+      - '.github/workflows/validate-lintro-version.yml'
+      - '.github/actions/run-quality/action.yml'
+      - 'scripts/ci/quality/check-lintro-tooling-bootstrap.sh'
+      - 'scripts/ci/quality/resolve-lintro-image.sh'
+      - 'scripts/ci/quality/validate-lintro-version.sh'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: validate-lintro-version-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    uses: ./.github/workflows/reusable-validate-lintro-version.yml
+    with:
+      tooling-ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
+      tooling-ref-fallback: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
+      tooling-bootstrap-script: scripts/ci/quality/check-lintro-tooling-bootstrap.sh
+    permissions:
+      # Checkout repository and lgtm-ci tooling
+      contents: read
+      # Authenticate to ghcr.io for lintro image validation
+      packages: read

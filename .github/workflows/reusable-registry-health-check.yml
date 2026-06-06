@@ -1,0 +1,170 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Reusable Registry Health Check
+
+on:
+  workflow_call:
+    inputs:
+      scan-paths:
+        description: "Space-separated paths to scan for digest-pinned images"
+        required: false
+        type: string
+        default: ".github"
+      open-issue-on-failure:
+        description: "Open a GitHub issue when unreachable digests are found"
+        required: false
+        type: boolean
+        default: false
+      issue-labels:
+        description: "Comma-separated labels for auto-opened issues"
+        required: false
+        type: string
+        default: "ci,maintenance"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling checkout"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "docker"
+      job-name:
+        description: "GitHub check name"
+        required: false
+        type: string
+        default: "Registry Health Check"
+
+jobs:
+  registry-health:
+    name: ${{ inputs.job-name }}
+    runs-on: ubuntu-latest
+    outputs:
+      digest-failure: ${{ steps.health.outputs.digest-failure }}
+    permissions:
+      # Read repository to scan for digest-pinned images
+      contents: read
+      # Read packages to verify container image manifests
+      packages: read
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Verify pinned container image digests
+        id: health
+        shell: bash
+        env:
+          INPUT_SCAN_PATHS: ${{ inputs.scan-paths }}
+        run: .lgtm-ci-tooling/scripts/ci/maintenance/registry-health-check.sh
+
+  open-registry-health-issue:
+    name: Open Registry Health Issue
+    needs: registry-health
+    if: >-
+      needs.registry-health.outputs.digest-failure == 'true' &&
+      inputs.open-issue-on-failure
+    runs-on: ubuntu-latest
+    permissions:
+      # Read lgtm-ci tooling repository
+      contents: read
+      # Create issue for unreachable digest failures
+      issues: write
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress-issue
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          # Issue job: GitHub API only; do not inherit docker preset
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress-issue.outputs['allowed-endpoints'] }}
+
+      - name: Open issue for unreachable digests
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_LABELS: ${{ inputs.issue-labels }}
+        run: .lgtm-ci-tooling/scripts/ci/maintenance/open-registry-health-issue.sh
