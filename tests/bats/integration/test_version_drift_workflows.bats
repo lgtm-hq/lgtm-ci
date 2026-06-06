@@ -31,6 +31,14 @@ load "../../helpers/common"
 	assert_success
 	run grep -F "reusable-validate-lintro-version.yml" "$workflow"
 	assert_success
+	run grep -F ".github/workflows/validate-lintro-version.yml" "$workflow"
+	assert_success
+	run grep -F "scripts/ci/quality/check-lintro-tooling-bootstrap.sh" "$workflow"
+	assert_success
+	run grep -F "scripts/ci/quality/resolve-lintro-image.sh" "$workflow"
+	assert_success
+	run grep -F "scripts/ci/quality/validate-lintro-version.sh" "$workflow"
+	assert_success
 }
 
 @test "validate-lintro-version workflow: runs on merge_group" {
@@ -84,7 +92,9 @@ load "../../helpers/common"
 
 	run grep -F "open-registry-health-issue:" "$workflow"
 	assert_success
-	run grep -E "if: failure\(\) && inputs\.open-issue-on-failure" "$workflow"
+	run grep -F "needs.registry-health.outputs.digest-failure == 'true'" "$workflow"
+	assert_success
+	run grep -F "digest-failure: \${{ steps.health.outputs.digest-failure }}" "$workflow"
 	assert_success
 }
 

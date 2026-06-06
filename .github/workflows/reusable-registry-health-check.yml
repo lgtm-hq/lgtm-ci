@@ -61,6 +61,8 @@ jobs:
   registry-health:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
+    outputs:
+      digest-failure: ${{ steps.health.outputs.digest-failure }}
     permissions:
       # Read repository to scan for digest-pinned images
       contents: read
@@ -120,7 +122,9 @@ jobs:
   open-registry-health-issue:
     name: Open Registry Health Issue
     needs: registry-health
-    if: failure() && inputs.open-issue-on-failure
+    if: >-
+      needs.registry-health.outputs.digest-failure == 'true' &&
+      inputs.open-issue-on-failure
     runs-on: ubuntu-latest
     permissions:
       # Read lgtm-ci tooling repository

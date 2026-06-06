@@ -73,7 +73,8 @@ extract_images_from_file() {
 		[[ -z "$image" ]] && continue
 		queue_image_check "$image"
 	done < <(
-		grep -oE "[A-Za-z0-9._:/-]+${DIGEST_PATTERN}" "$file" 2>/dev/null || true
+		grep -vE '^[[:space:]]*#' "$file" 2>/dev/null |
+			grep -oE "[A-Za-z0-9._:/-]+${DIGEST_PATTERN}" 2>/dev/null || true
 	)
 }
 
@@ -146,6 +147,9 @@ if [[ $failure_count -gt 0 ]]; then
 	for detail in "${failure_details[@]}"; do
 		echo "$detail" >&2
 	done
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		printf 'digest-failure=true\n' >>"$GITHUB_OUTPUT"
+	fi
 	exit 1
 fi
 

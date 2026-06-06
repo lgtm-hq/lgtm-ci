@@ -114,6 +114,56 @@ YAML
 	assert_output --partial "All digest-pinned container images resolve"
 }
 
+@test "registry-health-check: ignores digest pins in YAML comment lines" {
+	local scan_dir="${BATS_TEST_TMPDIR}/scan"
+	mkdir -p "$scan_dir"
+	cat >"${scan_dir}/workflow.yml" <<'YAML'
+jobs:
+  quality:
+    env:
+      # LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578
+YAML
+
+	mock_command_record "docker" "" 0
+
+	run bash -c '
+		export PATH="'"$PATH"'"
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
+	run bash -c 'wc -l < "'"${BATS_TEST_TMPDIR}"'/mock_calls_docker" | tr -d " "'
+	assert_output "1"
+}
+
+@test "registry-health-check: sets digest-failure output when pins are unreachable" {
+	local scan_dir="${BATS_TEST_TMPDIR}/scan"
+	mkdir -p "$scan_dir"
+	cat >"${scan_dir}/workflow.yml" <<'YAML'
+jobs:
+  quality:
+    env:
+      LINTRO_IMAGE: ghcr.io/lgtm-hq/py-lintro@sha256:deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef
+YAML
+
+	mock_command_multi "docker" '
+		*manifest*inspect*) exit 1;;
+		*) exit 1;;
+	'
+
+	run bash -c '
+		export PATH="'"$PATH"'"
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		export GITHUB_OUTPUT="'"${BATS_TEST_TMPDIR}"'/github_output"
+		: >"$GITHUB_OUTPUT"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	run grep -F "digest-failure=true" "${BATS_TEST_TMPDIR}/github_output"
+	assert_success
+}
+
 @test "registry-health-check: deduplicates repeated digest pins" {
 	local scan_dir="${BATS_TEST_TMPDIR}/scan"
 	mkdir -p "$scan_dir"
