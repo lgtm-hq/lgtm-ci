@@ -114,6 +114,20 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 	assert_success
 }
 
+@test "reusable-semantic-pr-title: post step gates on formatted comment body" {
+	run grep -F 'steps.failure-comment.outcome == '"'"'success'"'"'' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-semantic-pr-title: fail step uses always when validation fails" {
+	run awk '
+		/Fail on invalid PR title/ { show = 1 }
+		show && /always\(\)/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-semantic-pr-title: clears failure comment on success" {
 	run grep -F 'Clear semantic PR title failure comment' "$WORKFLOW"
 	assert_success
