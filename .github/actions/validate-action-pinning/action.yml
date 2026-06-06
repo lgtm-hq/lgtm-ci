@@ -25,11 +25,24 @@ inputs:
       (default: .github/workflows .github/actions)
     required: false
     default: ".github/workflows .github/actions"
+  verify-tags:
+    description: >-
+      Verify Renovate version comments resolve to the pinned SHA via GitHub API
+    required: false
+    default: "false"
+  audit-transitive:
+    description: >-
+      Warn when pinned composite actions reference nested actions by mutable tag
+    required: false
+    default: "false"
 
 outputs:
   offenders:
     description: "Count of pinning policy violations found"
     value: ${{ steps.validate.outputs.offenders }}
+  warnings:
+    description: "Count of transitive audit and tag-resolution warnings"
+    value: ${{ steps.validate.outputs.warnings }}
 
 runs:
   using: "composite"
@@ -48,6 +61,8 @@ runs:
         INPUT_ALLOW_TAG_EXCEPTIONS: ${{ inputs['allow-tag-exceptions'] }}
         INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}
         INPUT_SCAN_PATHS: ${{ inputs['scan-paths'] }}
+        INPUT_VERIFY_TAGS: ${{ inputs['verify-tags'] }}
+        INPUT_AUDIT_TRANSITIVE: ${{ inputs['audit-transitive'] }}
       run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh
 
 branding:

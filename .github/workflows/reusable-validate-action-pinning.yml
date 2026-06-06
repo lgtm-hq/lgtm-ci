@@ -22,6 +22,18 @@ on:
         required: false
         type: string
         default: ".github/workflows .github/actions"
+      verify-tags:
+        description: >-
+          Verify Renovate version comments resolve to the pinned SHA via GitHub API
+        required: false
+        type: boolean
+        default: false
+      audit-transitive:
+        description: >-
+          Warn when pinned composite actions reference nested actions by mutable tag
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -103,3 +115,5 @@ jobs:
           enforce: ${{ inputs.fail-on-error }}
           allow-tag-exceptions: ${{ inputs.allow-tag-exceptions }}
           scan-paths: ${{ inputs.scan-paths }}
+          verify-tags: ${{ inputs.verify-tags }}
+          audit-transitive: ${{ inputs.audit-transitive }}
