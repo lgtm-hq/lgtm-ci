@@ -119,7 +119,6 @@ steps:
 | `run-pytest`        | Pytest test execution                    |
 | `run-playwright`    | Playwright E2E test execution            |
 | `run-lighthouse`    | Lighthouse performance audits            |
-| `semantic-pr-title` | Conventional commits PR title validation |
 
 #### Reporting & Comments
 
@@ -200,7 +199,7 @@ steps:
 | `reusable-codeql.yml`                  | CodeQL security analysis                     |
 | `reusable-dependency-review.yml`       | Dependency review gate                       |
 | `reusable-scorecards.yml`              | OpenSSF Scorecard analysis                   |
-| `reusable-semantic-pr-title.yml`       | Conventional PR title validation             |
+| `reusable-semantic-pr-title.yml`       | Conventional PR title validation + comments  |
 | `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation         |
 | `reusable-link-check.yml`              | Markdown and HTML link checking              |
 

@@ -577,10 +577,14 @@ caller workflows alongside `pull_request:`.
 Semantic title validation is intentionally skipped in the merge queue because
 `amannn/action-semantic-pull-request` requires pull request context.
 
-Callers need `pull-requests: read`. Tooling is loaded from `lgtm-ci` via
-`prepare-semantic-pr-lists.sh` (supports `tooling-ref` for unreleased fixes).
-The workflow passes newline-delimited `types`/`scopes` to the action (empty
-`types` uses the built-in default; comma-separated overrides are normalized).
+Callers need `pull-requests: write` when `post-failure-comment` is enabled
+(default). With `post-failure-comment: false`, `pull-requests: read` suffices.
+Tooling is loaded from `lgtm-ci` via `prepare-semantic-pr-lists.sh` (supports
+`tooling-ref` for unreleased fixes). The workflow passes newline-delimited
+`types`/`scopes` to amannn (empty `types` uses the built-in default;
+comma-separated overrides are normalized). On failure, `error_message` from
+amannn (or the optional `max-length` check) is posted via `post-pr-comment`;
+stale failure comments are cleared on success.
 
 ## Fork PR summaries and reports
 

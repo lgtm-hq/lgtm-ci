@@ -9,11 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ci**: `reusable-semantic-pr-title` posts marker-based failure comments by default
+  via `post-pr-comment`, with `post-failure-comment`, `comment-marker`, and
+  `max-length` inputs (#304).
+
 ### Changed
 
-### Deprecated
+- **ci**: `reusable-semantic-pr-title` requests `pull-requests: write` for PR comment
+  upserts; callers using `post-failure-comment: false` may grant `read` only (#304).
 
 ### Removed
+
+- **Breaking:** Removed composite `semantic-pr-title` action and
+  `scripts/ci/actions/semantic-pr-title.sh`. Migrate callers to
+  `reusable-semantic-pr-title.yml` (#304).
 
 ### Fixed
 
