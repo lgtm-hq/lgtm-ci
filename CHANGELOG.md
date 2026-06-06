@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.34.0] - 2026-06-06
+
+### Features
+
+- **ci**: implement comprehensive version-drift prevention (#303) (a08c1c8)
+
 ## [0.33.0] - 2026-06-06
 
 ### Features
@@ -863,7 +869,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.33.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.0...HEAD
+[0.34.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.4...v0.33.0
 [0.32.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.3...v0.32.4
 [0.32.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.2...v0.32.3
