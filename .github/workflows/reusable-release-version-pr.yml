@@ -35,6 +35,11 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: "release-bump"
+      codeowners-path:
+        description: "Path to CODEOWNERS file"
+        required: false
+        type: string
+        default: ".github/CODEOWNERS"
       auto-merge:
         description: "Enable auto-merge (squash) on the created PR"
         required: false
@@ -405,7 +410,7 @@ jobs:
           PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
           PR_AUTHOR: lgtm-release-bot[bot]
           PR_AUTHOR_TYPE: Bot
-          CODEOWNERS_PATH: .github/CODEOWNERS
+          CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
           REQUEST_CODEOWNER_REVIEW: "true"
         run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh
 
