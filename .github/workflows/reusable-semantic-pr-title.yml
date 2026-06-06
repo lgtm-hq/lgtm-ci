@@ -202,10 +202,7 @@ jobs:
           && github.event.pull_request.head.repo.fork == false
           && steps.length.outputs.error == ''
           && steps.semantic.outputs.error_message == ''
-          && (
-            steps.semantic.outcome == 'success'
-            || steps.semantic.outcome == 'failure'
-          )
+          && steps.semantic.outcome == 'success'
           && (
             steps.length.outcome == 'success'
             || steps.length.outcome == 'skipped'
