@@ -41,9 +41,10 @@ else
 	types_block="  - (none configured)"
 fi
 
-safe_error="${combined_error//\`\`\`/\\\`\\\`\\\`}"
+safe_error="${combined_error//\`\`\`\`/\\\`\\\`\\\`\\\`}"
+safe_error="${safe_error//\`\`\`/\\\`\\\`\\\`}"
 
-cat >"$COMMENT_FILE" <<EOF
+cat >"$COMMENT_FILE" <<LGTM_COMMENT_BODY
 ### Semantic PR title check failed
 
 Your PR title must follow the [Conventional Commits](https://www.conventionalcommits.org/) specification.
@@ -58,4 +59,4 @@ ${types_block}
 \`\`\`
 ${safe_error}
 \`\`\`
-EOF
+LGTM_COMMENT_BODY

@@ -3,7 +3,8 @@
 # Caller permissions:
 #   post-failure-comment: true (default) → grant pull-requests: write
 #   post-failure-comment: false → pull-requests: read is sufficient
-# The reusable job requests pull-requests: write when comments are enabled.
+# The reusable job always requests pull-requests: write; comment steps are
+# gated by post-failure-comment and callers may cap the grant to read.
 ---
 name: Reusable Semantic PR Title
 

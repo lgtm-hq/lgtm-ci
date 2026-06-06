@@ -21,4 +21,5 @@ jobs:
       egress-preset: github-minimal
     permissions:
       contents: read
+      # reusable posts/clears marker-based failure comments on the pull request
       pull-requests: write

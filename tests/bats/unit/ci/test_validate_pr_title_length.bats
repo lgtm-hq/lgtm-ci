@@ -19,7 +19,7 @@ setup() {
 		bash "$SCRIPT"
 
 	assert_success
-	run grep -F 'error=' "$OUTPUT_FILE"
+	run grep -x 'error=' "$OUTPUT_FILE"
 	assert_success
 }
 
@@ -43,7 +43,7 @@ setup() {
 		bash "$SCRIPT"
 
 	assert_success
-	run grep -F 'error=' "$OUTPUT_FILE"
+	run grep -x 'error=' "$OUTPUT_FILE"
 	assert_success
 }
 
@@ -55,6 +55,6 @@ setup() {
 		bash "$SCRIPT"
 
 	assert_success
-	run grep -F 'error=' "$OUTPUT_FILE"
+	run grep -x 'error=' "$OUTPUT_FILE"
 	assert_success
 }
