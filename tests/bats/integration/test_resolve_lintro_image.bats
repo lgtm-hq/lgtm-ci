@@ -53,6 +53,19 @@ write_source() {
 	assert_output --partial "Lintro image definitions disagree"
 }
 
+@test "resolve-lintro-image: rejects mutable INPUT_LINTRO_IMAGE override" {
+	run bash -c '
+		export INPUT_LINTRO_IMAGE="ghcr.io/lgtm-hq/py-lintro:latest"
+		export GITHUB_OUTPUT="'"${BATS_TEST_TMPDIR}"'/github_output"
+		: >"$GITHUB_OUTPUT"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial "must be a digest-pinned"
+	run test ! -s "${BATS_TEST_TMPDIR}/github_output"
+	assert_success
+}
+
 @test "resolve-lintro-image: uses INPUT_LINTRO_IMAGE override when provided" {
 	run bash -c '
 		export INPUT_LINTRO_IMAGE="'"$IMAGE"'"

@@ -16,7 +16,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=../lib/log.sh
 source "$SCRIPT_DIR/../lib/log.sh"
 
+readonly DIGEST_PATTERN='ghcr\.io/lgtm-hq/py-lintro@sha256:[0-9a-fA-F]{64}'
+
 if [[ -n "${INPUT_LINTRO_IMAGE:-}" ]]; then
+	if [[ ! "$INPUT_LINTRO_IMAGE" =~ ^${DIGEST_PATTERN}$ ]]; then
+		log_error "INPUT_LINTRO_IMAGE must be a digest-pinned ghcr.io/lgtm-hq/py-lintro reference"
+		exit 1
+	fi
 	log_info "Using provided lintro image override"
 	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 		printf 'image=%s\n' "$INPUT_LINTRO_IMAGE" >>"$GITHUB_OUTPUT"
@@ -25,8 +31,6 @@ if [[ -n "${INPUT_LINTRO_IMAGE:-}" ]]; then
 	fi
 	exit 0
 fi
-
-readonly DIGEST_PATTERN='ghcr\.io/lgtm-hq/py-lintro@sha256:[0-9a-fA-F]{64}'
 readonly DEFAULT_SOURCES=(
 	".github/workflows/reusable-quality-lint.yml"
 	".github/actions/run-quality/action.yml"
