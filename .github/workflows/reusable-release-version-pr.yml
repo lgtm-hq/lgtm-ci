@@ -400,6 +400,19 @@ jobs:
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
 
+      - name: Get PR author
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+        id: pr-author
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
+          echo "author=${author}" >> "${GITHUB_OUTPUT}"
+
       - name: Request CODEOWNER review
         # yamllint disable-line rule:line-length
         if: >-
@@ -408,7 +421,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
-          PR_AUTHOR: lgtm-release-bot[bot]
+          PR_AUTHOR: ${{ steps.pr-author.outputs.author }}
           PR_AUTHOR_TYPE: Bot
           CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
           REQUEST_CODEOWNER_REVIEW: "true"
