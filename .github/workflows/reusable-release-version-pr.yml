@@ -35,6 +35,11 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: "release-bump"
+      codeowners-path:
+        description: "Path to CODEOWNERS file"
+        required: false
+        type: string
+        default: ".github/CODEOWNERS"
       auto-merge:
         description: "Enable auto-merge (squash) on the created PR"
         required: false
@@ -339,6 +344,7 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           token: ${{ steps.app-token.outputs.token }}
+          sign-commits: true
           branch: >-
             ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{
             steps.version.outputs.next-version }}
@@ -393,6 +399,35 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Get PR author
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        id: pr-author
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
+          echo "author=${author}" >> "${GITHUB_OUTPUT}"
+
+      - name: Request CODEOWNER review
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+          PR_AUTHOR: ${{ steps.pr-author.outputs.author }}
+          PR_AUTHOR_TYPE: Bot
+          CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
+          REQUEST_CODEOWNER_REVIEW: "true"
+        run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh
 
       - name: Enable auto-merge
         # yamllint disable-line rule:line-length
