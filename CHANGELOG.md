@@ -11,6 +11,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ci**: `reusable-semantic-pr-title` posts marker-based failure comments by default,
   with new `post-failure-comment`, `comment-marker`, and `max-length` inputs (#304).
+- **ci**: dogfood semantic PR title validation via `.github/workflows/semantic-pr-title.yml`
+  (#304).
 
 ### Changed
 
