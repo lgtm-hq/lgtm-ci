@@ -536,15 +536,30 @@ All inputs are opt-in; existing callers keep current behavior without changes.
 `scopes`. The reusable workflow normalizes legacy comma-separated overrides and
 ships a correct default when `types` is omitted.
 
-Callers must grant `pull-requests: read` (workflow root `permissions: {}`
-otherwise strips PR access from the reusable job).
+By default the workflow posts a marker-based PR comment on validation failure
+and clears it when the title is fixed. Set `post-failure-comment: false` for
+check-only adopters.
+
+| Input                  | Default              | Notes                                      |
+| ---------------------- | -------------------- | ------------------------------------------ |
+| `post-failure-comment` | `true`               | Opt out for check-only workflows           |
+| `comment-marker`       | `semantic-pr-title`  | Upsert marker for failure comments         |
+| `max-length`           | `0` (no limit)       | Optional title length cap                  |
+| `require-scope`        | `false`              | Passed through to amannn                   |
+| `types` / `scopes`     | built-in defaults    | Override only when needed                  |
+
+Callers must grant `pull-requests: write` when `post-failure-comment` is enabled
+(the default). With `post-failure-comment: false`, `pull-requests: read` is
+sufficient. Workflow root `permissions: {}` otherwise strips PR access from the
+reusable job.
 
 ```yaml
 jobs:
   semantic-title:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@<sha>
     permissions:
-      pull-requests: read
+      contents: read
+      pull-requests: write
     with:
       egress-preset: github-minimal
       # Optional: override types (newline-delimited; CSV is normalized)
@@ -552,6 +567,10 @@ jobs:
       #   feat
       #   fix
       #   ci
+      # Optional: enforce a title length cap
+      # max-length: "72"
+      # Optional: check-only (no PR comments)
+      # post-failure-comment: false
 ```
 
 ```yaml

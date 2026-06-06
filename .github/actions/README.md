@@ -420,34 +420,6 @@ Create or update PR summaries and reports with upsert behavior using unique mark
 
 ---
 
-### semantic-pr-title
-
-Validate PR title follows conventional commit format.
-
-```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/semantic-pr-title@main
-  with:
-    types: "feat,fix,docs,chore" # optional, allowed types
-    require-scope: "false" # optional
-    max-length: "72" # optional
-```
-
-**Features:**
-
-- Validates conventional commit format (`type(scope): description`)
-- Configurable allowed types and scopes
-- Length validation
-- Extracts type, scope, and description
-
-**Outputs:**
-
-- `valid` - Whether the title is valid
-- `type` - Extracted commit type
-- `scope` - Extracted scope
-- `description` - Extracted description
-
----
-
 ### run-lighthouse
 
 Run Lighthouse CI audits with configurable score thresholds.
