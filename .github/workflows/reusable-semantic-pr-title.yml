@@ -141,7 +141,10 @@ jobs:
 
       - name: Validate PR title length
         id: length
-        if: inputs.max-length != '' && inputs.max-length != '0'
+        if: >-
+          github.event_name == 'pull_request'
+          && inputs.max-length != ''
+          && inputs.max-length != '0'
         continue-on-error: true
         env:
           TITLE: ${{ github.event.pull_request.title }}

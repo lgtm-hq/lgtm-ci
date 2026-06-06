@@ -98,6 +98,12 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 	assert_output --partial 'default: "0"'
 }
 
+@test "reusable-semantic-pr-title: length step requires pull_request context" {
+	run grep -A8 'Validate PR title length' "$WORKFLOW"
+	assert_success
+	assert_output --partial "github.event_name == 'pull_request'"
+}
+
 @test "reusable-semantic-pr-title: validate step uses semantic id for error_message" {
 	run grep -F 'id: semantic' "$WORKFLOW"
 	assert_success
