@@ -45,3 +45,17 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/format-semantic-pr-title-failure-comm
 	run grep -F 'No release type found' "$comment_file"
 	assert_success
 }
+
+@test "format-semantic-pr-title-failure-comment: omits blank allowed-type lines" {
+	local comment_file="${BATS_TEST_TMPDIR}/comment.md"
+
+	run env \
+		SEMANTIC_ERROR="No release type found" \
+		ALLOWED_TYPES=$'feat\nfix\n' \
+		COMMENT_FILE="$comment_file" \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -E '^[[:space:]]*-[[:space:]]*$' "$comment_file"
+	assert_failure
+}

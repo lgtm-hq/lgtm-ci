@@ -153,6 +153,20 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
+
+	run awk '
+		/Clear semantic PR title failure comment/ { show = 1 }
+		show && /steps\.length\.outputs\.error == '"'"''"'"'/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+
+	run awk '
+		/Clear semantic PR title failure comment/ { show = 1 }
+		show && /steps\.semantic\.outputs\.error_message == '"'"''"'"'/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
 }
 
 @test "reusable-semantic-pr-title: job grants pull-requests write" {

@@ -34,7 +34,9 @@ fi
 
 types_block="$ALLOWED_TYPES"
 if [[ -n "${types_block//[[:space:]]/}" ]]; then
-	types_block=$(printf '%s' "$ALLOWED_TYPES" | sed 's/^/  - /')
+	types_block=$(
+		printf '%s' "$ALLOWED_TYPES" | sed '/^[[:space:]]*$/d' | sed 's/^/  - /'
+	)
 else
 	types_block="  - (none configured)"
 fi

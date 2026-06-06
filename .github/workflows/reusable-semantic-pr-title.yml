@@ -199,7 +199,12 @@ jobs:
           && inputs.post-failure-comment
           && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.fork == false
-          && steps.semantic.outcome == 'success'
+          && steps.length.outputs.error == ''
+          && steps.semantic.outputs.error_message == ''
+          && (
+            steps.semantic.outcome == 'success'
+            || steps.semantic.outcome == 'failure'
+          )
           && (
             steps.length.outcome == 'success'
             || steps.length.outcome == 'skipped'

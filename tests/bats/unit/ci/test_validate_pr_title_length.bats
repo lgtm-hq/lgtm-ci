@@ -43,6 +43,8 @@ setup() {
 		bash "$SCRIPT"
 
 	assert_success
+	run grep -F 'error=' "$OUTPUT_FILE"
+	assert_success
 }
 
 @test "validate-pr-title-length: skips invalid max-length values" {
@@ -52,5 +54,7 @@ setup() {
 		GITHUB_OUTPUT="$OUTPUT_FILE" \
 		bash "$SCRIPT"
 
+	assert_success
+	run grep -F 'error=' "$OUTPUT_FILE"
 	assert_success
 }
