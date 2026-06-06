@@ -537,8 +537,8 @@ All inputs are opt-in; existing callers keep current behavior without changes.
 ships a correct default when `types` is omitted.
 
 By default the workflow posts a marker-based PR comment on validation failure
-(via `post-pr-comment`) and clears it when the title is fixed. Set
-`post-failure-comment: false` for check-only adopters.
+and clears it when the title is fixed. Set `post-failure-comment: false` for
+check-only adopters.
 
 | Input                  | Default              | Notes                                      |
 | ---------------------- | -------------------- | ------------------------------------------ |

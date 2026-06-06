@@ -2,16 +2,35 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Format PR comment body for semantic PR title validation failures
 #
-# Required environment variables:
-#   SEMANTIC_ERROR - Validation error message
+# Environment variables:
+#   LENGTH_ERROR - Optional length validation error message
+#   SEMANTIC_ERROR - Optional semantic validation error message
 #   ALLOWED_TYPES - Newline-delimited allowed commit types
 #   COMMENT_FILE - Output path for the comment body
 
 set -euo pipefail
 
-: "${SEMANTIC_ERROR:?SEMANTIC_ERROR is required}"
+: "${LENGTH_ERROR:=}"
+: "${SEMANTIC_ERROR:=}"
 : "${ALLOWED_TYPES:?ALLOWED_TYPES is required}"
 : "${COMMENT_FILE:?COMMENT_FILE is required}"
+
+combined_error=""
+if [[ -n "${LENGTH_ERROR//[[:space:]]/}" ]]; then
+	combined_error="$LENGTH_ERROR"
+fi
+if [[ -n "${SEMANTIC_ERROR//[[:space:]]/}" ]]; then
+	if [[ -n "$combined_error" ]]; then
+		combined_error="${combined_error}"$'\n\n'"${SEMANTIC_ERROR}"
+	else
+		combined_error="$SEMANTIC_ERROR"
+	fi
+fi
+
+if [[ -z "${combined_error//[[:space:]]/}" ]]; then
+	echo "::error::At least one of LENGTH_ERROR or SEMANTIC_ERROR is required"
+	exit 1
+fi
 
 types_block="$ALLOWED_TYPES"
 if [[ -n "${types_block//[[:space:]]/}" ]]; then
@@ -19,6 +38,8 @@ if [[ -n "${types_block//[[:space:]]/}" ]]; then
 else
 	types_block="  - (none configured)"
 fi
+
+safe_error="${combined_error//\`\`\`/\\\`\\\`\\\`}"
 
 cat >"$COMMENT_FILE" <<EOF
 ### Semantic PR title check failed
@@ -33,6 +54,6 @@ ${types_block}
 **Details:**
 
 \`\`\`
-${SEMANTIC_ERROR}
+${safe_error}
 \`\`\`
 EOF

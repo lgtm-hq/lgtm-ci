@@ -91,6 +91,7 @@ jobs:
     if: github.event_name != 'merge_group'
     permissions:
       contents: read
+      # post-pr-comment upserts failure comments on the pull request
       pull-requests: write
 
     steps:
@@ -169,8 +170,8 @@ jobs:
             || steps.semantic.outputs.error_message != ''
           )
         env:
-          SEMANTIC_ERROR: >-
-            ${{ steps.length.outputs.error || steps.semantic.outputs.error_message }}
+          LENGTH_ERROR: ${{ steps.length.outputs.error }}
+          SEMANTIC_ERROR: ${{ steps.semantic.outputs.error_message }}
           ALLOWED_TYPES: ${{ steps.prepare.outputs.types }}
           COMMENT_FILE: semantic-pr-title-failure.md
         run: >-
@@ -194,7 +195,8 @@ jobs:
 
       - name: Clear semantic PR title failure comment
         if: >-
-          inputs.post-failure-comment
+          always()
+          && inputs.post-failure-comment
           && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.fork == false
           && steps.semantic.outcome == 'success'

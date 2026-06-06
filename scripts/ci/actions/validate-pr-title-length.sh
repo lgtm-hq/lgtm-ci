@@ -2,10 +2,10 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Validate PR title length when max-length is configured
 #
-# Required environment variables:
-#   TITLE - PR title to validate
-#   MAX_LENGTH - Maximum title length (0 for no limit)
-#   GITHUB_OUTPUT - GitHub Actions output file
+# Environment variables:
+#   TITLE - PR title to validate (required)
+#   MAX_LENGTH - Maximum title length; defaults to 0 (no limit)
+#   GITHUB_OUTPUT - GitHub Actions output file (required)
 
 set -euo pipefail
 

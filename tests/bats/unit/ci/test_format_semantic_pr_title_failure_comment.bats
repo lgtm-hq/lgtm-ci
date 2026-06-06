@@ -28,3 +28,20 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/format-semantic-pr-title-failure-comm
 	run grep -F '**Expected format:** `type(scope): description`' "$comment_file"
 	assert_success
 }
+
+@test "format-semantic-pr-title-failure-comment: combines length and semantic errors" {
+	local comment_file="${BATS_TEST_TMPDIR}/comment.md"
+
+	run env \
+		LENGTH_ERROR="PR title exceeds maximum length of 72 characters (80)" \
+		SEMANTIC_ERROR="No release type found" \
+		ALLOWED_TYPES=$'feat\nfix' \
+		COMMENT_FILE="$comment_file" \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -F 'PR title exceeds maximum length of 72 characters (80)' "$comment_file"
+	assert_success
+	run grep -F 'No release type found' "$comment_file"
+	assert_success
+}

@@ -128,8 +128,23 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 	assert_success
 }
 
+@test "reusable-semantic-pr-title: passes length and semantic errors to format script" {
+	run grep -F 'LENGTH_ERROR: ${{ steps.length.outputs.error }}' "$WORKFLOW"
+	assert_success
+
+	run grep -F 'SEMANTIC_ERROR: ${{ steps.semantic.outputs.error_message }}' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-semantic-pr-title: clears failure comment on success" {
 	run grep -F 'Clear semantic PR title failure comment' "$WORKFLOW"
+	assert_success
+
+	run awk '
+		/Clear semantic PR title failure comment/ { show = 1 }
+		show && /always\(\)/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
 	assert_success
 
 	run awk '

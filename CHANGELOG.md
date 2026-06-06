@@ -9,9 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **ci**: `reusable-semantic-pr-title` posts marker-based failure comments by default
-  via `post-pr-comment`, with `post-failure-comment`, `comment-marker`, and
-  `max-length` inputs (#304).
+- **ci**: `reusable-semantic-pr-title` posts marker-based failure comments by default,
+  with new `post-failure-comment`, `comment-marker`, and `max-length` inputs (#304).
 
 ### Changed
 
