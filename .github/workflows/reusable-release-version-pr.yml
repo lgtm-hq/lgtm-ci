@@ -339,6 +339,7 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           token: ${{ steps.app-token.outputs.token }}
+          sign-commits: true
           branch: >-
             ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{
             steps.version.outputs.next-version }}
@@ -393,6 +394,20 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Request CODEOWNER review
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+          PR_AUTHOR: lgtm-release-bot[bot]
+          PR_AUTHOR_TYPE: Bot
+          CODEOWNERS_PATH: .github/CODEOWNERS
+          REQUEST_CODEOWNER_REVIEW: "true"
+        run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh
 
       - name: Enable auto-merge
         # yamllint disable-line rule:line-length
