@@ -9,25 +9,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **ci**: `reusable-semantic-pr-title` posts marker-based failure comments by default,
-  with new `post-failure-comment`, `comment-marker`, and `max-length` inputs (#304).
-- **ci**: dogfood semantic PR title validation via `.github/workflows/semantic-pr-title.yml`
-  (#304).
-
 ### Changed
 
-- **ci**: `reusable-semantic-pr-title` requests `pull-requests: write` for PR comment
-  upserts; callers using `post-failure-comment: false` may grant `read` only (#304).
+### Deprecated
 
 ### Removed
-
-- **Breaking:** Removed composite `semantic-pr-title` action and
-  `scripts/ci/actions/semantic-pr-title.sh`. Migrate callers to
-  `reusable-semantic-pr-title.yml` (#304).
 
 ### Fixed
 
 ### Security
+
+## [0.33.0] - 2026-06-06
+
+### Features
+
+- **workflows**: unify semantic PR title on amannn reusable with PR comments (#305) (1c24827)
+
+### Previously Unreleased
+
+- **ci**: `reusable-semantic-pr-title` posts marker-based failure comments by default,
+  with new `post-failure-comment`, `comment-marker`, and `max-length` inputs (#304).
+
+- **ci**: dogfood semantic PR title validation via `.github/workflows/semantic-pr-title.yml`
+  (#304).
+
+- **ci**: `reusable-semantic-pr-title` requests `pull-requests: write` for PR comment
+  upserts; callers using `post-failure-comment: false` may grant `read` only (#304).
+
+- **Breaking:** Removed composite `semantic-pr-title` action and
+  `scripts/ci/actions/semantic-pr-title.sh`. Migrate callers to
+  `reusable-semantic-pr-title.yml` (#304).
 
 ## [0.32.4] - 2026-06-05
 
@@ -852,7 +863,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.4...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.33.0...HEAD
+[0.33.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.4...v0.33.0
 [0.32.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.3...v0.32.4
 [0.32.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.2...v0.32.3
 [0.32.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.1...v0.32.2
