@@ -9,6 +9,7 @@ load "../../helpers/github_env"
 setup() {
 	setup_temp_dir
 	setup_github_env
+	setup_mock_git_repo
 	export PROJECT_ROOT
 }
 
@@ -21,9 +22,11 @@ run_check() {
 	local current="$1"
 	local previous="${2:-}"
 	run bash -c "
+		cd '$MOCK_GIT_REPO'
 		export GITHUB_OUTPUT='$GITHUB_OUTPUT'
 		export CURRENT_VERSION='$current'
 		export PREVIOUS_VERSION='$previous'
+		export TAG_PREFIX='v'
 		'$PROJECT_ROOT/scripts/ci/release/check-version-unchanged.sh' 2>&1
 	"
 }
@@ -50,20 +53,12 @@ run_check() {
 }
 
 @test "check-version-unchanged: skips when target tag already exists" {
-	setup_mock_git_repo
 	(
 		cd "$MOCK_GIT_REPO"
 		git tag "v1.2.0"
 	)
 
-	run bash -c "
-		cd '$MOCK_GIT_REPO'
-		export GITHUB_OUTPUT='$GITHUB_OUTPUT'
-		export CURRENT_VERSION='1.2.0'
-		export PREVIOUS_VERSION='1.0.0'
-		export TAG_PREFIX='v'
-		'$PROJECT_ROOT/scripts/ci/release/check-version-unchanged.sh' 2>&1
-	"
+	run_check "1.2.0" "1.0.0"
 	assert_success
 	assert_line --partial "should-tag=false"
 	assert_line --partial "unchanged=true"

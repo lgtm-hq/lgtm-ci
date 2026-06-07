@@ -36,16 +36,6 @@ if [[ -z "$tag" ]]; then
 	exit 0
 fi
 
-if [[ "$tag" != "${TAG_PREFIX}"* ]]; then
-	log_error "Tag $tag does not start with prefix $TAG_PREFIX"
-	set_github_output "version" ""
-	set_github_output "found" "false"
-	# Also echo to stdout for BATS test assertions
-	echo "version="
-	echo "found=false"
-	exit 0
-fi
-
 version="${tag#"${TAG_PREFIX}"}"
 if [[ -z "$version" ]]; then
 	log_error "Tag $tag has empty version after removing prefix $TAG_PREFIX"
@@ -54,7 +44,7 @@ if [[ -z "$version" ]]; then
 	# Also echo to stdout for BATS test assertions
 	echo "version="
 	echo "found=false"
-	exit 0
+	exit 1
 fi
 
 log_info "Previous tag: $tag (version: $version)"

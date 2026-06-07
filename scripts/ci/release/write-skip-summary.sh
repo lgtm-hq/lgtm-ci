@@ -33,5 +33,5 @@ elif [[ "$VERSION_FOUND" != "true" ]]; then
 		add_github_summary "Skipped: version not found"
 	fi
 else
-	add_github_summary "Skipped: unexpected auto-tag skip state"
+	add_github_summary "Skipped: unexpected auto-tag skip state (IS_RELEASE=$IS_RELEASE, VERSION_FOUND=$VERSION_FOUND, VERSION_UNCHANGED=$VERSION_UNCHANGED)"
 fi
