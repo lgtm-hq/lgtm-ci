@@ -76,6 +76,12 @@ issue_marker() {
 	echo "<!-- $(marker_key) -->"
 }
 
+failure_issue_title() {
+	local target_branch="${1:?target_branch is required}"
+	printf 'fix(release): release automation failed on %s (%s)' \
+		"$target_branch" "$(workflow_key)"
+}
+
 resolve_target_branch() {
 	if [[ -n "${FAILURE_TARGET_BRANCH:-}" ]]; then
 		echo "$FAILURE_TARGET_BRANCH"
@@ -162,18 +168,19 @@ failed_step_summary() {
 }
 
 render_failure_body() {
+	local target_branch="${1:?target_branch is required}"
 	local branch
 	local sha
 	local current_run_url
 	local upstream_url
 	local marker
-	local target_branch
+	local tracking_key
 	branch="$(release_branch)"
 	sha="$(release_sha)"
 	current_run_url="$(run_url)"
 	upstream_url="$(upstream_run_url)"
 	marker="$(issue_marker)"
-	target_branch="$(resolve_target_branch)"
+	tracking_key="$(marker_key)"
 
 	cat <<EOF
 $marker
@@ -220,21 +227,24 @@ $(failed_step_summary)
 ## Suggested Next Action
 
 Open the failed run, inspect the failed step logs, and either fix the release automation failure or close this issue with the run URL if the failure was transient.
+
+---
+**Tracking key:** \`${tracking_key}\`
 EOF
 }
 
-find_existing_issue() {
-	local search_key
+lookup_open_issue() {
+	local search_query="$1"
 	local issue_number
 	local search_output
 	local gh_stderr
-	search_key="$(marker_key)"
+
 	gh_stderr="$(mktemp)"
 	if ! search_output="$(gh issue list \
 		--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
 		--state open \
 		--limit 1 \
-		--search "\"${search_key}\"" \
+		--search "$search_query" \
 		--json number \
 		--jq '.[0].number // empty' 2>"$gh_stderr")"; then
 		log_error "Could not search for existing release failure issues: $(cat "$gh_stderr")"
@@ -245,6 +255,27 @@ find_existing_issue() {
 
 	issue_number="$search_output"
 	if [[ "$issue_number" =~ ^[0-9]+$ ]]; then
+		echo "$issue_number"
+	fi
+}
+
+find_existing_issue() {
+	local target_branch="${1:?target_branch is required}"
+	local title
+	local search_key
+	local issue_number
+
+	title="$(failure_issue_title "$target_branch")"
+	issue_number="$(lookup_open_issue "\"${title}\" in:title")"
+	if [[ -n "$issue_number" ]]; then
+		echo "$issue_number"
+		return
+	fi
+
+	# Visible tracking keys are indexed; HTML comment markers may not be.
+	search_key="$(marker_key)"
+	issue_number="$(lookup_open_issue "\"${search_key}\"")"
+	if [[ -n "$issue_number" ]]; then
 		echo "$issue_number"
 	fi
 }
@@ -282,20 +313,28 @@ comment_on_failure_issue() {
 create_failure_issue() {
 	local body_file="$1"
 	local target_branch="$2"
+	local title
+	local issue_url
 	local label_args=()
+	title="$(failure_issue_title "$target_branch")"
 	collect_existing_issue_label_args label_args
 	if ((${#label_args[@]} > 0)); then
-		gh issue create \
+		if ! issue_url="$(gh issue create \
 			--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
-			--title "fix(release): release automation failed on ${target_branch}" \
+			--title "$title" \
 			--body-file "$body_file" \
-			"${label_args[@]}" >/dev/null
+			"${label_args[@]}")"; then
+			return 1
+		fi
 	else
-		gh issue create \
+		if ! issue_url="$(gh issue create \
 			--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
-			--title "fix(release): release automation failed on ${target_branch}" \
-			--body-file "$body_file" >/dev/null
+			--title "$title" \
+			--body-file "$body_file")"; then
+			return 1
+		fi
 	fi
+	log_success "Created release failure issue: ${issue_url}"
 }
 
 notify_failure() {
@@ -329,21 +368,21 @@ notify_failure() {
 
 	body_file="$(mktemp)"
 	trap 'rm -f "$body_file"' EXIT
-	render_failure_body >"$body_file"
+	render_failure_body "$target_branch" >"$body_file"
 
-	existing_issue="$(find_existing_issue)"
+	existing_issue="$(find_existing_issue "$target_branch")"
 	if [[ -n "$existing_issue" ]]; then
 		comment_on_failure_issue "$existing_issue" "$body_file"
 	else
 		# Brief pause reduces duplicate issues when concurrent runs fail together.
 		sleep 2
-		existing_issue="$(find_existing_issue)"
+		existing_issue="$(find_existing_issue "$target_branch")"
 		if [[ -n "$existing_issue" ]]; then
 			comment_on_failure_issue "$existing_issue" "$body_file"
 		elif create_failure_issue "$body_file" "$target_branch"; then
-			log_success "Created release failure issue"
+			:
 		else
-			existing_issue="$(find_existing_issue)"
+			existing_issue="$(find_existing_issue "$target_branch")"
 			if [[ -n "$existing_issue" ]]; then
 				comment_on_failure_issue "$existing_issue" "$body_file"
 			else
