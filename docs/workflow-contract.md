@@ -110,6 +110,8 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 |                       |                                                      | `reusable-publish-artifact-report.yml`       |
 | Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                         |
 | Release version       | `contents: write`, `pull-requests: write`            | `reusable-release-version-pr.yml`            |
+| Release auto-tag      | `contents: write`                                    | `reusable-release-auto-tag.yml`              |
+| Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
@@ -307,6 +309,27 @@ step** because step-security's pre-hook runs before composite steps and cannot r
 `steps.resolve.outputs` from inside `harden-runner`.
 
 Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
+
+### Release failure reporting
+
+Both release reusables include an optional `report-release-failure` follow-up job
+that runs when the primary job fails (`needs.<job>.result == 'failure'`). The
+job uses `egress-preset: github-minimal` (GitHub API only) and declares its own
+`issues: write` permission — callers do not need extra permissions.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                   | Default                                    | Purpose                                       |
+| ----------------------- | ------------------------------------------ | --------------------------------------------- |
+| `report-failures`       | `true`                                     | Opt out when the repo handles alerting itself |
+| `failure-issue-labels`  | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues          |
+| `failure-target-branch` | *(empty → repository default branch)*      | Branch filter for issue notifications         |
+
+<!-- markdownlint-enable MD013 -->
+
+Failure issues deduplicate via a hidden HTML comment marker
+(`release-automation-failure:<workflow-key>:<branch>`). Recurring failures add
+comments to the same open issue.
 
 ## Egress presets
 

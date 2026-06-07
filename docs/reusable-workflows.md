@@ -275,6 +275,26 @@ layout so the artifact root is browsable HTML.
 
 ## Release
 
+When release automation fails on the default branch, the follow-up
+`report-release-failure` job runs two steps in order: it first writes release
+trigger context to the job step summary, then creates or updates a deduplicated
+GitHub issue with failed step details. Set `report-failures: false` to disable
+both actions. See [workflow-contract.md](workflow-contract.md) for inputs.
+
+Recommended caller `run-name` (reusable workflows cannot set this for you):
+
+```yaml
+name: Release Version PR
+run-name: >-
+  Release version PR via ${{ github.event_name }} on ${{ github.ref_name }}
+  @ ${{ github.sha }}
+```
+
+Including `${{ github.event_name }}`, `${{ github.ref_name }}`, and
+`${{ github.sha }}` in the `run-name` makes it easier to triage failures: the
+workflow run list shows the triggering event, branch, and commit so you can
+quickly correlate a failed run with the code and event that started it.
+
 ```yaml
 jobs:
   version-pr:
