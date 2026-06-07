@@ -109,8 +109,67 @@ EOF
 
 	run bash "$SCRIPT" notify_failure
 	assert_success
-	assert_output --partial "Created release failure issue"
+	assert_output --partial "Created release failure issue: https://github.com/lgtm-hq/lgtm-ci/issues/42"
+	run grep -F 'in:title' "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_success
 	run grep -F 'release-automation-failure:release-version-pr:main' "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_success
+}
+
+@test "report-release-failure: notify_failure deduplicates by issue title" {
+	mock_command_multi "gh" '
+		*repo*view*) echo "main";;
+		*in:title*) echo "77";;
+		*issue*comment*) echo "commented";;
+		*run*view*) exit 0;;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Updated release failure issue #77"
+}
+
+@test "report-release-failure: notify_failure includes visible tracking key in issue body" {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*repo*view*)
+		echo "main"
+		;;
+	*issue*list*)
+		echo ""
+		;;
+	*label*view*)
+		exit 0
+		;;
+	*issue*create*)
+		while [[ \$# -gt 0 ]]; do
+			if [[ "\$1" == "--body-file" && -n "\${2:-}" ]]; then
+				cp "\$2" '${BATS_TEST_TMPDIR}/issue-body.md'
+			fi
+			shift
+		done
+		echo "https://github.com/lgtm-hq/lgtm-ci/issues/42"
+		exit 0
+		;;
+	*run*view*)
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	[[ -f "${BATS_TEST_TMPDIR}/issue-body.md" ]]
+	run grep -F "**Tracking key:** \`release-automation-failure:release-version-pr:main\`" \
+		"${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
 }
 
@@ -185,7 +244,7 @@ EOF
 
 	run bash "$SCRIPT" notify_failure
 	assert_success
-	assert_output --partial "Created release failure issue"
+	assert_output --partial "Created release failure issue: https://github.com/lgtm-hq/lgtm-ci/issues/55"
 }
 
 @test "report-release-failure: notify_failure skips missing labels" {
@@ -201,7 +260,44 @@ EOF
 	run bash "$SCRIPT" notify_failure
 	assert_success
 	assert_output --partial "Skipping missing issue label"
-	assert_output --partial "Created release failure issue"
+	assert_output --partial "Created release failure issue: https://github.com/lgtm-hq/lgtm-ci/issues/88"
+}
+
+@test "report-release-failure: notify_failure falls back when title search fails" {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*repo*view*)
+		echo "main"
+		;;
+	*in:title*)
+		echo "title search rejected" >&2
+		exit 1
+		;;
+	*issue*list*)
+		echo "88"
+		exit 0
+		;;
+	*issue*comment*)
+		echo "commented"
+		exit 0
+		;;
+	*run*view*)
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Title search unavailable; falling back to tracking key"
+	assert_output --partial "Updated release failure issue #88"
 }
 
 @test "report-release-failure: notify_failure fails when issue search fails" {

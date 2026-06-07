@@ -302,6 +302,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: read
+      issues: write
     with:
       ecosystems: node,ruby,python
       skip-patterns: "^chore(release):"
@@ -312,6 +314,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@<sha>
     permissions:
       contents: write
+      actions: read
+      issues: write
     with:
       create-release: false
     secrets: inherit
