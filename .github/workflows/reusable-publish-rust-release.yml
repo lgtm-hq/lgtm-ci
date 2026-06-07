@@ -253,6 +253,16 @@ jobs:
           merge-multiple: true
           path: dist
 
+      - name: Aggregate checksum manifests
+        shell: bash
+        run: |
+          shopt -s nullglob
+          manifests=(dist/SHA256SUMS-*)
+          if [[ ${#manifests[@]} -gt 0 ]]; then
+            cat "${manifests[@]}" >dist/SHA256SUMS
+            rm -f "${manifests[@]}"
+          fi
+
       - name: Verify release assets exist
         shell: bash
         env:

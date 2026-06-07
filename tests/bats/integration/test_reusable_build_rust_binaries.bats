@@ -40,7 +40,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
 @test "reusable-build-rust-binaries: uploads artifact with target suffix" {
 	run grep -F '${{ matrix.target }}' "$WORKFLOW"
 	assert_success
-	run grep -F 'SHA256SUMS' "$WORKFLOW"
+	run grep -F 'SHA256SUMS-${{ matrix.target }}' "$WORKFLOW"
 	assert_success
 }
 

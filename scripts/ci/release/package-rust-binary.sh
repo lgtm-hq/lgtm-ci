@@ -78,7 +78,7 @@ for package in "${package_list[@]}"; do
 	if [[ "$ARCHIVE_FORMAT" == "zip" ]]; then
 		cp "$bin_path" "$staging/${bin_name}.exe"
 		(
-			cd "$staging" && zip -q "../${archive_base}.zip" .
+			cd "$staging" && zip -q "../${archive_base}.zip" "${bin_name}.exe"
 		)
 		archive="${archive_base}.zip"
 	else
@@ -99,5 +99,6 @@ if [[ ${#checksums[@]} -eq 0 ]]; then
 	exit 1
 fi
 
-printf '%s\n' "${checksums[@]}" >SHA256SUMS
-echo "Wrote SHA256SUMS"
+checksums_file="SHA256SUMS-${TARGET}"
+printf '%s\n' "${checksums[@]}" >"$checksums_file"
+echo "Wrote $checksums_file"

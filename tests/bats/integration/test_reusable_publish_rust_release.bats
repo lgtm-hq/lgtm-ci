@@ -38,6 +38,13 @@ BUILD_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.y
 	assert_success
 }
 
+@test "reusable-publish-rust-release: aggregates per-target checksum manifests" {
+	run grep -F 'Aggregate checksum manifests' "$WORKFLOW"
+	assert_success
+	run grep -F 'SHA256SUMS-*' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-build-rust-binaries workflow file exists for nested call" {
 	[[ -f "$BUILD_WORKFLOW" ]]
 }
