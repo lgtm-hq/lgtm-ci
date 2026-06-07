@@ -234,13 +234,12 @@ line2"'
 	refute_output --partial "/nonexistent/path"
 }
 
-@test "add_github_path: rejects relative paths" {
+@test "add_github_path: silently ignores relative paths" {
 	local test_dir="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$test_dir"
 
 	run bash -c "source \"\$LIB_DIR/github/output.sh\" && add_github_path \"bin\""
-	assert_failure
-	assert_output --partial "path must be absolute"
+	assert_success
 
 	run cat "$GITHUB_PATH"
 	refute_output --partial "bin"

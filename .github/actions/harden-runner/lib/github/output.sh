@@ -45,10 +45,6 @@ _validate_github_path_entry() {
 		echo "add_github_path: path contains invalid characters" >&2
 		return 1
 	fi
-	if [[ "$path" != /* ]]; then
-		echo "add_github_path: path must be absolute" >&2
-		return 1
-	fi
 }
 
 # Random multiline delimiter for GITHUB_OUTPUT / GITHUB_ENV (openssl with od fallback).
@@ -134,6 +130,9 @@ add_github_path() {
 	if [[ -n "${GITHUB_PATH:-}" ]]; then
 		if ! _validate_github_path_entry "$path"; then
 			return 1
+		fi
+		if [[ "$path" != /* ]]; then
+			return 0
 		fi
 		if [[ -d "$path" ]]; then
 			echo "$path" >>"$GITHUB_PATH"
