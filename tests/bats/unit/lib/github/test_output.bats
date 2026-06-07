@@ -151,6 +151,19 @@ line3"'
 	assert_output --partial "invalid key"
 }
 
+@test "set_github_output_multiline: preserves value starting with -n" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output_multiline "payload" "-n
+second line
+third line"'
+	assert_success
+
+	run get_github_output "payload"
+	assert_success
+	assert_output $'-n
+second line
+third line'
+}
+
 # =============================================================================
 # set_github_env tests
 # =============================================================================
@@ -209,6 +222,19 @@ line2"'
 	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_env "bad key" "value"'
 	assert_failure
 	assert_output --partial "invalid key"
+}
+
+@test "set_github_env: preserves value starting with -n" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_env "PAYLOAD" "-n
+second line
+third line"'
+	assert_success
+
+	run get_github_env "PAYLOAD"
+	assert_success
+	assert_output $'-n
+second line
+third line'
 }
 
 # =============================================================================

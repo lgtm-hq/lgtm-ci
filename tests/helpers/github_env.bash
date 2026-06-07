@@ -127,7 +127,39 @@ get_github_env() {
 		return 1
 	fi
 
-	grep "^${key}=" "$GITHUB_ENV" | head -1 | cut -d= -f2-
+	# Handle simple key=value format
+	local value
+	value=$(grep "^${key}=" "$GITHUB_ENV" | head -1 | cut -d= -f2-)
+
+	if [[ -n "$value" ]]; then
+		echo "$value"
+		return 0
+	fi
+
+	# Handle multiline format: key<<DELIMITER ... DELIMITER
+	local in_multiline=0
+	local delimiter=""
+	local result=""
+
+	while IFS= read -r line; do
+		if [[ $in_multiline -eq 1 ]]; then
+			if [[ "$line" == "$delimiter" ]]; then
+				echo "$result"
+				return 0
+			else
+				if [[ -n "$result" ]]; then
+					result="${result}"$'\n'"${line}"
+				else
+					result="$line"
+				fi
+			fi
+		elif [[ "$line" =~ ^${key}\<\<(.+)$ ]]; then
+			in_multiline=1
+			delimiter="${BASH_REMATCH[1]}"
+		fi
+	done <"$GITHUB_ENV"
+
+	return 1
 }
 
 # Get paths added to GITHUB_PATH

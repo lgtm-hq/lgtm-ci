@@ -31,6 +31,7 @@ _validate_github_output_key() {
 		echo "${context}: invalid key '$key' (use alphanumerics, hyphens, underscores)" >&2
 		return 1
 	fi
+	return 0
 }
 
 # Validate a PATH entry before appending to GITHUB_PATH.
@@ -45,6 +46,7 @@ _validate_github_path_entry() {
 		echo "add_github_path: path contains invalid characters" >&2
 		return 1
 	fi
+	return 0
 }
 
 # Random multiline delimiter for GITHUB_OUTPUT / GITHUB_ENV (openssl with od fallback).
@@ -66,9 +68,9 @@ _github_write_multiline_entry() {
 
 	delimiter="$(_github_actions_multiline_delimiter)"
 	{
-		echo "$key<<$delimiter"
-		echo "$value"
-		echo "$delimiter"
+		printf '%s\n' "$key<<$delimiter"
+		printf '%s\n' "$value"
+		printf '%s\n' "$delimiter"
 	} >>"$file"
 }
 
