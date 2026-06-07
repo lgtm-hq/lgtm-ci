@@ -263,6 +263,43 @@ EOF
 	assert_output --partial "Created release failure issue: https://github.com/lgtm-hq/lgtm-ci/issues/88"
 }
 
+@test "report-release-failure: notify_failure falls back when title search fails" {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*repo*view*)
+		echo "main"
+		;;
+	*in:title*)
+		echo "title search rejected" >&2
+		exit 1
+		;;
+	*issue*list*)
+		echo "88"
+		exit 0
+		;;
+	*issue*comment*)
+		echo "commented"
+		exit 0
+		;;
+	*run*view*)
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Title search unavailable; falling back to tracking key"
+	assert_output --partial "Updated release failure issue #88"
+}
+
 @test "report-release-failure: notify_failure fails when issue search fails" {
 	mock_command_multi "gh" '
 		*issue*list*) echo "API rate limit exceeded" >&2; exit 1;;

@@ -67,13 +67,13 @@ workflow_key() {
 }
 
 marker_key() {
-	local branch
-	branch="$(release_branch)"
+	local branch="${1:-$(release_branch)}"
 	echo "release-automation-failure:$(workflow_key):${branch}"
 }
 
 issue_marker() {
-	echo "<!-- $(marker_key) -->"
+	local branch="${1:?branch is required}"
+	echo "<!-- $(marker_key "$branch") -->"
 }
 
 failure_issue_title() {
@@ -169,18 +169,16 @@ failed_step_summary() {
 
 render_failure_body() {
 	local target_branch="${1:?target_branch is required}"
-	local branch
 	local sha
 	local current_run_url
 	local upstream_url
 	local marker
 	local tracking_key
-	branch="$(release_branch)"
 	sha="$(release_sha)"
 	current_run_url="$(run_url)"
 	upstream_url="$(upstream_run_url)"
-	marker="$(issue_marker)"
-	tracking_key="$(marker_key)"
+	marker="$(issue_marker "$target_branch")"
+	tracking_key="$(marker_key "$target_branch")"
 
 	cat <<EOF
 $marker
@@ -194,7 +192,7 @@ Release automation failed on \`${target_branch}\`. This issue keeps post-merge r
 - **Workflow:** ${GITHUB_WORKFLOW:-unknown}
 - **Workflow key:** $(workflow_key)
 - **Event:** ${GITHUB_EVENT_NAME:-unknown}
-- **Branch:** ${branch}
+- **Branch:** ${target_branch}
 - **SHA:** ${sha}
 - **Actor:** ${GITHUB_ACTOR:-unknown}
 - **Run:** ${current_run_url}
@@ -247,9 +245,9 @@ lookup_open_issue() {
 		--search "$search_query" \
 		--json number \
 		--jq '.[0].number // empty' 2>"$gh_stderr")"; then
-		log_error "Could not search for existing release failure issues: $(cat "$gh_stderr")"
+		log_info "Release failure issue search failed: $(cat "$gh_stderr")"
 		rm -f "$gh_stderr"
-		exit 1
+		return 1
 	fi
 	rm -f "$gh_stderr"
 
@@ -257,6 +255,7 @@ lookup_open_issue() {
 	if [[ "$issue_number" =~ ^[0-9]+$ ]]; then
 		echo "$issue_number"
 	fi
+	return 0
 }
 
 find_existing_issue() {
@@ -266,17 +265,24 @@ find_existing_issue() {
 	local issue_number
 
 	title="$(failure_issue_title "$target_branch")"
-	issue_number="$(lookup_open_issue "\"${title}\" in:title")"
-	if [[ -n "$issue_number" ]]; then
-		echo "$issue_number"
-		return
+	if issue_number="$(lookup_open_issue "\"${title}\" in:title")"; then
+		if [[ -n "$issue_number" ]]; then
+			echo "$issue_number"
+			return
+		fi
+	else
+		log_info "Title search unavailable; falling back to tracking key"
 	fi
 
 	# Visible tracking keys are indexed; HTML comment markers may not be.
-	search_key="$(marker_key)"
-	issue_number="$(lookup_open_issue "\"${search_key}\"")"
-	if [[ -n "$issue_number" ]]; then
-		echo "$issue_number"
+	search_key="$(marker_key "$target_branch")"
+	if issue_number="$(lookup_open_issue "\"${search_key}\"")"; then
+		if [[ -n "$issue_number" ]]; then
+			echo "$issue_number"
+		fi
+	else
+		log_error "Could not search for existing release failure issues"
+		exit 1
 	fi
 }
 
