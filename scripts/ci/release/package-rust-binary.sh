@@ -41,8 +41,17 @@ _resolve_binary_name() {
 
 	cargo metadata --format-version=1 --no-deps |
 		jq -r --arg pkg "$package" \
-			'.packages[] | select(.name == $pkg) | .targets[] | select(.kind[] == "bin") | .name' |
-		head -1
+			'.packages[]
+			| select(.name == $pkg)
+			| [.targets[] | select(.kind[] == "bin") | .name][0] // empty'
+}
+
+_exe_suffix() {
+	if [[ "$TARGET" == *windows* ]]; then
+		echo ".exe"
+	else
+		echo ""
+	fi
 }
 
 IFS=',' read -r -a package_list <<<"$PACKAGES"
@@ -62,11 +71,9 @@ for package in "${package_list[@]}"; do
 		exit 1
 	fi
 
-	if [[ "$ARCHIVE_FORMAT" == "zip" ]]; then
-		bin_path="target/${TARGET}/release/${bin_name}.exe"
-	else
-		bin_path="target/${TARGET}/release/${bin_name}"
-	fi
+	exe_suffix="$(_exe_suffix)"
+	bin_file="${bin_name}${exe_suffix}"
+	bin_path="target/${TARGET}/release/${bin_file}"
 
 	if [[ ! -f "$bin_path" ]]; then
 		echo "Required binary not found: $bin_path" >&2
@@ -79,15 +86,15 @@ for package in "${package_list[@]}"; do
 	mkdir -p "$staging"
 
 	if [[ "$ARCHIVE_FORMAT" == "zip" ]]; then
-		cp "$bin_path" "$staging/${bin_name}.exe"
+		cp "$bin_path" "$staging/${bin_file}"
 		(
-			cd "$staging" && zip -q "../${archive_base}.zip" "${bin_name}.exe"
+			cd "$staging" && zip -q "../${archive_base}.zip" "${bin_file}"
 		)
 		archive="${archive_base}.zip"
 	else
-		cp "$bin_path" "$staging/${bin_name}"
+		cp "$bin_path" "$staging/${bin_file}"
 		(
-			cd "$staging" && tar czf "../${archive_base}.tar.gz" "${bin_name}"
+			cd "$staging" && tar czf "../${archive_base}.tar.gz" "${bin_file}"
 		)
 		archive="${archive_base}.tar.gz"
 	fi

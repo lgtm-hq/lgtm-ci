@@ -18,9 +18,18 @@ parse_cargo_version() {
 		return 1
 	fi
 
-	awk -F'"' '
+	local version
+	version="$(
+		awk -F'"' '
 /^\[package\]/ || /^\[workspace\.package\]/ { in_pkg = 1 }
 /^\[/ && !/^\[package\]/ && !/^\[workspace\.package\]/ { in_pkg = 0 }
-in_pkg && /^version[[:space:]]*=/ { print $2; exit }
+in_pkg && /^[[:space:]]*version[[:space:]]*=/ { print $2; exit }
 ' "$file"
+	)"
+
+	if [[ -z "$version" ]]; then
+		return 1
+	fi
+
+	printf '%s\n' "$version"
 }

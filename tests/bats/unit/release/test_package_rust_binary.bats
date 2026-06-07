@@ -80,6 +80,25 @@ teardown() {
 	[[ ! -f wrong-name-3.0.0-${target}.tar.gz ]]
 }
 
+@test "package-rust-binary: uses TARGET not ARCHIVE_FORMAT for Windows exe suffix" {
+	local target="x86_64-pc-windows-msvc"
+	mkdir -p "target/${target}/release"
+	printf 'MZ' >"target/${target}/release/myapp.exe"
+
+	run env \
+		VERSION=4.0.0 \
+		TARGET="$target" \
+		PACKAGES=myapp \
+		BINARY_NAMES=myapp \
+		ARCHIVE_FORMAT=tar.gz \
+		bash "$SCRIPT"
+	assert_success
+
+	run tar -tzf "myapp-4.0.0-${target}.tar.gz"
+	assert_success
+	assert_output --partial 'myapp.exe'
+}
+
 @test "package-rust-binary: passes bash syntax check" {
 	run bash -n "$SCRIPT"
 	assert_success

@@ -24,7 +24,7 @@ if [[ ! -f "$VERSION_FILE" ]]; then
 	exit 1
 fi
 
-cargo_version="$(parse_cargo_version "$VERSION_FILE")"
+cargo_version="$(parse_cargo_version "$VERSION_FILE" || true)"
 
 if [[ -z "$cargo_version" ]]; then
 	echo "version not found in $VERSION_FILE" >&2
