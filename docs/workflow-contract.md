@@ -431,11 +431,13 @@ from the commit subject.
 
 Flow when `version-source: cargo`:
 
-1. `guard-release-commit` — proceed only on `chore(release):` commits
-2. `read-cargo-version.sh` — read semver from `version-file`
-3. `detect-previous-tag-version.sh` — latest tag version when `skip-if-unchanged`
-4. `check-version-unchanged.sh` — skip tagging when versions match
-5. `create-tag.sh` — create and push the annotated tag
+1. `guard-release-commit` — common; proceed only on `chore(release):` commits
+2. `read-cargo-version.sh` — cargo-specific; read semver from `version-file`
+3. `detect-previous-tag-version.sh` — conditional (`skip-if-unchanged: true`);
+   read latest `tag-prefix` version
+4. `check-version-unchanged.sh` — conditional (`skip-if-unchanged: true`);
+   skip tagging when versions match
+5. `create-tag.sh` — common; create and push the annotated tag
 
 Callers should filter `on.push.paths` to the manifest (for example `Cargo.toml`)
 and set `create-release: false` when release assets are published separately.
