@@ -30,6 +30,20 @@ _fail() {
 	exit 1
 }
 
+case "$RUNNER_ENVIRONMENT" in
+github-hosted | self-hosted) ;;
+*)
+	_fail "validate-runner-policy: invalid RUNNER_ENVIRONMENT '$RUNNER_ENVIRONMENT' (expected github-hosted or self-hosted)"
+	;;
+esac
+
+case "$RUNNER_OS" in
+Linux | Windows | macOS) ;;
+*)
+	_fail "validate-runner-policy: invalid RUNNER_OS '$RUNNER_OS' (expected Linux, Windows, or macOS)"
+	;;
+esac
+
 _can_enforce_block() {
 	if [[ "$RUNNER_OS" == "Linux" ]]; then
 		return 0

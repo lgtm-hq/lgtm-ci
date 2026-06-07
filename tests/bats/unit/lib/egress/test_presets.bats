@@ -113,6 +113,14 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'tuf-repo-cdn.sigstore.dev:443'
 }
 
+@test "egress preset rust-release includes Ubuntu apt mirrors for musl-tools" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
+	assert_success
+	assert_output --partial 'archive.ubuntu.com:80'
+	assert_output --partial 'azure.archive.ubuntu.com:80'
+	assert_output --partial 'security.ubuntu.com:80'
+}
+
 @test "egress preset pypi includes artifact pipeline host" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints pypi"
 	assert_success

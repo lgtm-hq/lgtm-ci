@@ -29,7 +29,12 @@ BUILD_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.y
 @test "reusable-publish-rust-release: downloads artifacts by prefix pattern" {
 	run grep -F 'merge-multiple: true' "$WORKFLOW"
 	assert_success
-	run grep -F 'pattern:' "$WORKFLOW"
+	run grep -F 'needs.verify-tag.outputs.artifact_prefix' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-publish-rust-release: verify-tag exposes artifact_prefix output" {
+	run grep -F 'artifact_prefix:' "$WORKFLOW"
 	assert_success
 }
 

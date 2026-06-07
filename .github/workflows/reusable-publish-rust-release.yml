@@ -105,6 +105,9 @@ jobs:
       contents: read
     outputs:
       version: ${{ steps.version.outputs.version }}
+      artifact_prefix: >-
+        ${{ inputs.artifact-prefix != '' && inputs.artifact-prefix ||
+        github.event.repository.name }}
     concurrency:
       group: release-${{ github.ref_name }}
       cancel-in-progress: false
@@ -173,7 +176,9 @@ jobs:
     needs: verify-tag
     permissions:
       contents: read
+      # OIDC token issuance for Sigstore authentication during attestation
       id-token: write
+      # SLSA provenance attestations via nested reusable-build-rust-binaries.yml
       attestations: write
     uses: ./.github/workflows/reusable-build-rust-binaries.yml
     with:
@@ -181,9 +186,7 @@ jobs:
       packages: ${{ inputs.packages }}
       binary-names: ${{ inputs.binary-names }}
       targets: ${{ inputs.targets }}
-      artifact-prefix: >-
-        ${{ inputs.artifact-prefix != '' && inputs.artifact-prefix ||
-        github.event.repository.name }}
+      artifact-prefix: ${{ needs.verify-tag.outputs.artifact_prefix }}
       build-script: ${{ inputs.build-script }}
       package-script: ${{ inputs.package-script }}
       allowed-endpoints: ${{ inputs.allowed-endpoints }}
@@ -252,9 +255,7 @@ jobs:
       - name: Download binary artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: >-
-            ${{ inputs.artifact-prefix != '' && inputs.artifact-prefix ||
-            github.event.repository.name }}-*
+          pattern: ${{ needs.verify-tag.outputs.artifact_prefix }}-*
           merge-multiple: true
           path: dist
 

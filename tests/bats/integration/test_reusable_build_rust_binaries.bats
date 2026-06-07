@@ -45,6 +45,19 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
 }
 
 @test "reusable-build-rust-binaries: workflow-level concurrency uses ref name" {
-	run awk '/^concurrency:$/,/^jobs:/ { print }' "$WORKFLOW" | grep -F 'rust-binaries-${{ github.ref_name }}'
+	run bash -c "awk '/^concurrency:\$/,/^jobs:/ { print }' '$WORKFLOW' | grep -F 'rust-binaries-\${{ github.ref_name }}'"
+	assert_success
+}
+
+@test "reusable-build-rust-binaries: attests release archives not checksum manifests" {
+	run awk '/subject-path:/{show=1;next} show&&/^        [a-z]/{exit} show{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial '*.tar.gz'
+	assert_output --partial '*.zip'
+	refute_output --partial 'SHA256SUMS'
+}
+
+@test "reusable-build-rust-binaries: pins cross install version" {
+	run grep -F 'cargo install cross --locked --version 0.2.5' "$WORKFLOW"
 	assert_success
 }

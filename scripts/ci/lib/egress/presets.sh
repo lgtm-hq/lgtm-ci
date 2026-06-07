@@ -196,9 +196,12 @@ egress_preset_endpoints() {
 		;;
 	rust-release)
 		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
-		# Extends quality with Sigstore attestation endpoints for SLSA provenance.
+		# Extends quality with Ubuntu apt mirrors (musl-tools) and Sigstore attestation.
 		egress_preset_endpoints quality
 		printf '%s\n' \
+			archive.ubuntu.com:80 \
+			azure.archive.ubuntu.com:80 \
+			security.ubuntu.com:80 \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \

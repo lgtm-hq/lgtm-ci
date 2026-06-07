@@ -51,7 +51,10 @@ index=0
 
 for package in "${package_list[@]}"; do
 	package="${package// /}"
-	[[ -z "$package" ]] && continue
+	if [[ -z "$package" ]]; then
+		index=$((index + 1))
+		continue
+	fi
 
 	bin_name="$(_resolve_binary_name "$package" "$index")"
 	if [[ -z "$bin_name" ]]; then

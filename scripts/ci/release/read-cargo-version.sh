@@ -12,6 +12,8 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 LIB_DIR="$SCRIPT_DIR/../lib"
 
+# shellcheck source=../lib/cargo/version.sh
+source "$LIB_DIR/cargo/version.sh"
 # shellcheck source=../lib/github/output.sh
 source "$LIB_DIR/github/output.sh"
 
@@ -22,13 +24,7 @@ if [[ ! -f "$VERSION_FILE" ]]; then
 	exit 1
 fi
 
-version="$(
-	awk -F'"' '
-/^\[package\]/ || /^\[workspace\.package\]/ { in_pkg = 1 }
-/^\[/ && !/^\[package\]/ && !/^\[workspace\.package\]/ { in_pkg = 0 }
-in_pkg && /^version[[:space:]]*=/ { print $2; exit }
-' "$VERSION_FILE"
-)"
+version="$(parse_cargo_version "$VERSION_FILE")"
 
 if [[ -z "$version" ]]; then
 	echo "version not found in $VERSION_FILE ([package] or [workspace.package])" >&2

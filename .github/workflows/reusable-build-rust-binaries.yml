@@ -102,8 +102,9 @@ jobs:
     permissions:
       # Read repository contents for checkout and build
       contents: read
-      # OIDC + attestations for build provenance (Attest build provenance step)
+      # OIDC token issuance for Sigstore authentication during attestation
       id-token: write
+      # Publish build provenance attestations (Attest build provenance step)
       attestations: write
     strategy:
       fail-fast: false
@@ -179,7 +180,7 @@ jobs:
       - name: Install cross
         if: matrix.cross
         shell: bash
-        run: cargo install cross --locked
+        run: cargo install cross --locked --version 0.2.5
 
       - name: Build release binaries
         shell: bash
@@ -214,7 +215,9 @@ jobs:
       - name: Attest build provenance
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
-          subject-path: SHA256SUMS-${{ matrix.target }}
+          subject-path: |
+            *.tar.gz
+            *.zip
 
       - name: Upload binaries
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

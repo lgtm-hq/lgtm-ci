@@ -128,3 +128,31 @@ _run_policy() {
 	assert_failure
 	assert_output --partial "unknown tier"
 }
+
+@test "validate-runner-policy: rejects unknown egress-policy" {
+	_run_policy strict invalid github-hosted Linux
+	assert_failure
+	assert_output --partial "unknown egress-policy"
+}
+
+@test "validate-runner-policy: rejects invalid RUNNER_ENVIRONMENT" {
+	run env \
+		TIER=strict \
+		EGRESS_POLICY=block \
+		RUNNER_ENVIRONMENT=invalid \
+		RUNNER_OS=Linux \
+		bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "invalid RUNNER_ENVIRONMENT"
+}
+
+@test "validate-runner-policy: rejects invalid RUNNER_OS" {
+	run env \
+		TIER=strict \
+		EGRESS_POLICY=block \
+		RUNNER_ENVIRONMENT=github-hosted \
+		RUNNER_OS=FreeBSD \
+		bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "invalid RUNNER_OS"
+}
