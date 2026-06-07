@@ -56,6 +56,9 @@ _exe_suffix() {
 
 IFS=',' read -r -a package_list <<<"$PACKAGES"
 checksums=()
+# Index tracks position in package_list so BINARY_NAMES lookups use the same
+# comma-separated index N in both PACKAGES and BINARY_NAMES; empty entries still
+# advance index to preserve that parallel alignment.
 index=0
 
 for package in "${package_list[@]}"; do

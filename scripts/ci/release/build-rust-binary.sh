@@ -16,15 +16,15 @@ if [[ -z "$TARGET" || -z "$PACKAGES" ]]; then
 	exit 1
 fi
 
-BUILD_CMD="cargo"
+BUILD_CMD=(cargo)
 if [[ "${USE_CROSS:-}" == "true" ]]; then
-	BUILD_CMD="cross"
+	BUILD_CMD=(cross)
 fi
 
 IFS=',' read -r -a package_list <<<"$PACKAGES"
 for package in "${package_list[@]}"; do
 	package="${package// /}"
 	[[ -z "$package" ]] && continue
-	echo "Building $package with $BUILD_CMD for target $TARGET"
-	$BUILD_CMD build --release --target "$TARGET" -p "$package"
+	echo "Building $package with ${BUILD_CMD[*]} for target $TARGET"
+	"${BUILD_CMD[@]}" build --release --target "$TARGET" -p "$package"
 done
