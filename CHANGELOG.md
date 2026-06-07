@@ -9,29 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **ci**: `validate-runner-policy` composite with `strict`, `hardened`, and
-  `permissive` tiers (#313)
-- **ci**: `rust-release` egress preset for cross-compile release builds (#313)
-- **ci**: `reusable-build-rust-binaries` and `reusable-publish-rust-release`
-  workflows with Linux-only strict tier (#313)
-- **release**: `build-rust-binary.sh`, `package-rust-binary.sh`, and Cargo tag
-  verification scripts (#313)
-
 ### Changed
-
-- **ci**: `harden-runner` Linux pre-step guarded with `runner.os == 'Linux'` (#313)
-- **ci**: release reusables use `validate-runner-policy` before conditional
-  harden-runner (#313)
-
-- **ci**: replace O(n²) egress endpoint dedupe with an O(n) awk pass while
-  preserving first-seen order
-- **ci**: centralize `GITHUB_OUTPUT` / `GITHUB_ENV` multiline delimiter helpers
-  and validate output keys before writing
-- **ci**: reject newline injection in `add_github_path`; relative paths remain
-  silently ignored (legacy behavior)
-- **release**: external callers upgrading reusable release workflows must grant
-  `actions: read` and `issues: write` on the caller job when using the default
-  `report-failures: true`, or set `report-failures: false` to opt out
 
 ### Deprecated
 
@@ -39,12 +17,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.36.0] - 2026-06-07
+
+### Features
+
+- **ci**: block-only Rust release builds with OS-aware harden-runner (#317) (1fb3824)
+
+### Other Changes
+
+- **ci**: egress resolver and GITHUB_OUTPUT hygiene (#316) (063c7e4)
+
+### Previously Unreleased
+
+- **ci**: `validate-runner-policy` composite with `strict`, `hardened`, and
+  `permissive` tiers (#313)
+
+- **ci**: `rust-release` egress preset for cross-compile release builds (#313)
+
+- **ci**: `reusable-build-rust-binaries` and `reusable-publish-rust-release`
+  workflows with Linux-only strict tier (#313)
+
+- **release**: `build-rust-binary.sh`, `package-rust-binary.sh`, and Cargo tag
+  verification scripts (#313)
+
+- **ci**: `harden-runner` Linux pre-step guarded with `runner.os == 'Linux'` (#313)
+
+- **ci**: release reusables use `validate-runner-policy` before conditional
+  harden-runner (#313)
+
+- **ci**: replace O(n²) egress endpoint dedupe with an O(n) awk pass while
+  preserving first-seen order
+
+- **ci**: centralize `GITHUB_OUTPUT` / `GITHUB_ENV` multiline delimiter helpers
+  and validate output keys before writing
+
+- **ci**: reject newline injection in `add_github_path`; relative paths remain
+  silently ignored (legacy behavior)
+
+- **release**: external callers upgrading reusable release workflows must grant
+  `actions: read` and `issues: write` on the caller job when using the default
+  `report-failures: true`, or set `report-failures: false` to opt out
+
 - **ci**: `setup-rust-nextest.sh` passes `--force` when reinstalling mismatched
   crate versions (#307, #313)
+
 - **release**: declare `local -a labels` in `collect_existing_issue_label_args`
   to avoid leaking into global scope
-
-### Security
 
 - **ci**: `validate-runner-policy` rejects `egress-policy: audit` on `strict` and
   `hardened` tiers; release reusables default to block-only (#313)
@@ -932,7 +952,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.35.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.36.0...HEAD
+[0.36.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.1...v0.35.0
 [0.34.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.33.0...v0.34.0
