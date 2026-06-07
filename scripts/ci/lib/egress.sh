@@ -48,42 +48,25 @@ egress_normalize_endpoint_lines() {
 	printf '%s' "${lines[*]}"
 }
 
-# Deduplicate host:port lines; preserve first-seen order (bash 3.2 compatible).
+# Deduplicate normalized host:port lines; preserve first-seen order (O(n) via awk).
+_egress_dedupe_normalized_endpoint_lines() {
+	local normalized="$1"
+
+	if [[ -z "$normalized" ]]; then
+		printf ''
+		return
+	fi
+
+	printf '%s' "$(awk '!seen[$0]++' <<<"$normalized")"
+}
+
+# Deduplicate host:port lines; preserve first-seen order (O(n) via awk).
 egress_dedupe_endpoint_lines() {
 	local raw="$1"
-	local -a unique=()
-	local line existing found
+	local normalized
 
-	if [[ -z "${raw//[[:space:]]/}" ]]; then
-		printf ''
-		return
-	fi
-
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		line="${line#"${line%%[![:space:]]*}"}"
-		line="${line%"${line##*[![:space:]]}"}"
-		[[ -z "$line" ]] && continue
-		found=0
-		if ((${#unique[@]} > 0)); then
-			for existing in "${unique[@]}"; do
-				if [[ "$existing" == "$line" ]]; then
-					found=1
-					break
-				fi
-			done
-		fi
-		if [[ "$found" -eq 0 ]]; then
-			unique+=("$line")
-		fi
-	done <<<"$raw"
-
-	if ((${#unique[@]} == 0)); then
-		printf ''
-		return
-	fi
-
-	local IFS=$'\n'
-	printf '%s' "${unique[*]}"
+	normalized="$(egress_normalize_endpoint_lines "$raw")"
+	_egress_dedupe_normalized_endpoint_lines "$normalized"
 }
 
 # Merge multiple multiline endpoint lists (empty parts skipped), then dedupe.
@@ -98,7 +81,8 @@ egress_merge_endpoint_lines() {
 			combined="${combined}"$'\n'"${normalized}"
 		fi
 	done
-	egress_dedupe_endpoint_lines "$combined"
+	_egress_dedupe_normalized_endpoint_lines "$combined"
 }
 
+export -f _egress_dedupe_normalized_endpoint_lines
 export -f egress_normalize_endpoint_lines egress_dedupe_endpoint_lines egress_merge_endpoint_lines

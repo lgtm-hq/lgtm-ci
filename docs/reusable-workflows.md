@@ -281,6 +281,12 @@ trigger context to the job step summary, then creates or updates a deduplicated
 GitHub issue with failed step details. Set `report-failures: false` to disable
 both actions. See [workflow-contract.md](workflow-contract.md) for inputs.
 
+`report-failures` defaults to `true`. GitHub rejects a reusable-workflow call at
+startup when the caller job does not grant every permission the reusable
+workflow declares. Grant at least `actions: read` and `issues: write` on the
+caller job, or pass `report-failures: false` when upgrading from a release that
+did not include failure reporting.
+
 Recommended caller `run-name` (reusable workflows cannot set this for you):
 
 ```yaml
