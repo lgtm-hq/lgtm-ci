@@ -52,6 +52,12 @@ teardown() {
 	[[ -f "SHA256SUMS-${target}" ]]
 	run grep -F 'myapp-2.0.0-'"${target}"'.tar.gz' "SHA256SUMS-${target}"
 	assert_success
+	run tar -tzf "myapp-2.0.0-${target}.tar.gz"
+	assert_success
+	assert_output --partial 'myapp'
+	run bash -c 'tar -tzf "myapp-2.0.0-'"${target}"'.tar.gz" | grep -c / || true'
+	assert_success
+	assert_equal 0 "$output"
 }
 
 @test "package-rust-binary: passes bash syntax check" {

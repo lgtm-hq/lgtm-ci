@@ -48,3 +48,8 @@ BUILD_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.y
 @test "reusable-build-rust-binaries workflow file exists for nested call" {
 	[[ -f "$BUILD_WORKFLOW" ]]
 }
+
+@test "reusable-publish-rust-release: build-binaries grants attestation permissions" {
+	run grep -F 'attestations: write' "$WORKFLOW"
+	assert_success
+}

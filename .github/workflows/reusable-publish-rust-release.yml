@@ -171,6 +171,10 @@ jobs:
   build-binaries:
     name: Build release binaries
     needs: verify-tag
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     uses: ./.github/workflows/reusable-build-rust-binaries.yml
     with:
       tooling-ref: ${{ inputs.tooling-ref }}
@@ -192,6 +196,7 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
+      # Create GitHub Release and upload release assets
       contents: write
     concurrency:
       group: release-${{ github.ref_name }}

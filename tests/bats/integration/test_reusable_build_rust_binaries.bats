@@ -44,7 +44,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
 	assert_success
 }
 
-@test "reusable-build-rust-binaries: concurrency group uses ref name" {
-	run grep -F 'rust-binaries-${{ github.ref_name }}' "$WORKFLOW"
+@test "reusable-build-rust-binaries: workflow-level concurrency uses ref name" {
+	run awk '/^concurrency:$/,/^jobs:/ { print }' "$WORKFLOW" | grep -F 'rust-binaries-${{ github.ref_name }}'
 	assert_success
 }

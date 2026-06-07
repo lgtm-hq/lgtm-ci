@@ -90,18 +90,21 @@ on:
         description: "Cargo workspace version"
         value: ${{ jobs.build.outputs.version }}
 
+concurrency:
+  group: rust-binaries-${{ github.ref_name }}
+  cancel-in-progress: false
+
 jobs:
   build:
     name: "Rust binaries (${{ matrix.target }})"
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
+      # Read repository contents for checkout and build
       contents: read
+      # OIDC + attestations for build provenance (Attest build provenance step)
       id-token: write
       attestations: write
-    concurrency:
-      group: rust-binaries-${{ github.ref_name }}
-      cancel-in-progress: false
     strategy:
       fail-fast: false
       matrix:

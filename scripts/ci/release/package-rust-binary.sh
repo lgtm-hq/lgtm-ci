@@ -83,7 +83,9 @@ for package in "${package_list[@]}"; do
 		archive="${archive_base}.zip"
 	else
 		cp "$bin_path" "$staging/${bin_name}"
-		tar czf "${archive_base}.tar.gz" "$staging"
+		(
+			cd "$staging" && tar czf "../${archive_base}.tar.gz" "${bin_name}"
+		)
 		archive="${archive_base}.tar.gz"
 	fi
 
