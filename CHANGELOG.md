@@ -9,9 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **ci**: Cargo auto-tag support in `reusable-release-auto-tag` with
-  `version-source`, `version-file`, and `skip-if-unchanged` inputs (#307)
-
 ### Changed
 
 ### Deprecated
@@ -21,6 +18,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.37.0] - 2026-06-07
+
+### Features
+
+- **ci**: add Cargo auto-tag support for reusable-release-auto-tag (#319) (2888798)
+
+### Previously Unreleased
+
+- **ci**: Cargo auto-tag support in `reusable-release-auto-tag` with
+  `version-source`, `version-file`, and `skip-if-unchanged` inputs (#307)
 
 ## [0.36.0] - 2026-06-07
 
@@ -955,7 +963,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.36.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.37.0...HEAD
+[0.37.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.1...v0.35.0
 [0.34.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.0...v0.34.1
