@@ -103,7 +103,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
-@test "egress preset rust-release extends quality with Sigstore hosts" {
+@test "egress preset rust-release includes Rust Docker and Sigstore hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
 	assert_success
 	assert_output --partial 'crates.io:443'
@@ -111,6 +111,13 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'fulcio.sigstore.dev:443'
 	assert_output --partial 'rekor.sigstore.dev:443'
 	assert_output --partial 'tuf-repo-cdn.sigstore.dev:443'
+}
+
+@test "egress preset rust-release excludes unrelated quality-only hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
+	assert_success
+	refute_output --partial 'pypi.org:443'
+	refute_output --partial 'semgrep.dev:443'
 }
 
 @test "egress preset rust-release includes Ubuntu apt mirrors for musl-tools" {

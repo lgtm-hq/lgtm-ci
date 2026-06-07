@@ -196,9 +196,22 @@ egress_preset_endpoints() {
 		;;
 	rust-release)
 		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
-		# Extends quality with Ubuntu apt mirrors (musl-tools) and Sigstore attestation.
-		egress_preset_endpoints quality
+		# Minimal base: GitHub checkout/tooling, Rust/crates, cross Docker, apt, Sigstore.
+		egress_preset_endpoints github-minimal
 		printf '%s\n' \
+			raw.githubusercontent.com:443 \
+			static.rust-lang.org:443 \
+			sh.rustup.rs:443 \
+			crates.io:443 \
+			static.crates.io:443 \
+			index.crates.io:443 \
+			ghcr.io:443 \
+			pkg-containers.githubusercontent.com:443 \
+			docker.io:443 \
+			registry-1.docker.io:443 \
+			auth.docker.io:443 \
+			production.cloudflare.docker.com:443 \
+			production.cloudfront.docker.com:443 \
 			archive.ubuntu.com:80 \
 			azure.archive.ubuntu.com:80 \
 			security.ubuntu.com:80 \
