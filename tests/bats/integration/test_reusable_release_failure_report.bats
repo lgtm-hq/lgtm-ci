@@ -169,3 +169,40 @@ load "../../helpers/common"
 	run grep -F "notify_failure" "$auto_tag"
 	assert_success
 }
+
+@test "release-version-pr caller: grants permissions for report-release-failure job" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/release-version-pr.yml"
+
+	run awk '
+		/^  version-pr:/ { in_job = 1; in_perms = 0 }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /version-pr:/ {
+			in_job = 0
+			in_perms = 0
+		}
+		in_job && /permissions:/ { in_perms = 1 }
+		in_perms && /contents: write/ { found_contents = 1 }
+		in_perms && /pull-requests: write/ { found_prs = 1 }
+		in_perms && /actions: read/ { found_actions = 1 }
+		in_perms && /issues: write/ { found_issues = 1 }
+		END { exit !(found_contents && found_prs && found_actions && found_issues) }
+	' "$workflow"
+	assert_success
+}
+
+@test "release-auto-tag caller: grants permissions for report-release-failure job" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/release-auto-tag.yml"
+
+	run awk '
+		/^  auto-tag:/ { in_job = 1; in_perms = 0 }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /auto-tag:/ {
+			in_job = 0
+			in_perms = 0
+		}
+		in_job && /permissions:/ { in_perms = 1 }
+		in_perms && /contents: write/ { found_contents = 1 }
+		in_perms && /actions: read/ { found_actions = 1 }
+		in_perms && /issues: write/ { found_issues = 1 }
+		END { exit !(found_contents && found_actions && found_issues) }
+	' "$workflow"
+	assert_success
+}
