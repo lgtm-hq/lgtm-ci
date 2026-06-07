@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **release**: grant caller permissions for `report-release-failure` follow-up
   jobs so release workflows validate at startup (#312)
+- **release**: deduplicate failure issues by title and visible tracking key
+  instead of HTML comment search alone
 
 ### Security
 

@@ -331,9 +331,12 @@ the workflow at startup.
 
 <!-- markdownlint-enable MD013 -->
 
-Failure issues deduplicate via a hidden HTML comment marker
-(`release-automation-failure:<workflow-key>:<branch>`). Recurring failures add
-comments to the same open issue.
+Failure issues deduplicate by deterministic issue title
+(`fix(release): release automation failed on <branch> (<workflow-key>)`), then
+fall back to a visible tracking key footer
+(`release-automation-failure:<workflow-key>:<branch>`). A hidden HTML comment
+marker is retained for backward compatibility. Recurring failures add comments
+to the same open issue.
 
 ## Egress presets
 
