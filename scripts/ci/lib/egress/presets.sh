@@ -194,6 +194,17 @@ egress_preset_endpoints() {
 			api.scorecard.dev:443 \
 			api.securityscorecards.dev:443
 		;;
+	rust-release)
+		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
+		# Extends quality with Sigstore attestation endpoints for SLSA provenance.
+		egress_preset_endpoints quality
+		printf '%s\n' \
+			fulcio.sigstore.dev:443 \
+			rekor.sigstore.dev:443 \
+			timestamp.sigstore.dev:443 \
+			tuf-repo-cdn.sigstore.dev:443 \
+			sigstore-tuf-root.storage.googleapis.com:443
+		;;
 	*)
 		echo "unknown egress preset: $preset" >&2
 		return 1
