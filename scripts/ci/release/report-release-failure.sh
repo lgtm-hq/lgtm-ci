@@ -293,6 +293,7 @@ collect_existing_issue_label_args() {
 	local repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
 	_label_args=()
+	local -a labels
 	IFS=',' read -ra labels <<<"$default_labels"
 	for label in "${labels[@]}"; do
 		label="$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
