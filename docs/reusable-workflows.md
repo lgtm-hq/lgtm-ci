@@ -380,8 +380,10 @@ jobs:
     secrets: inherit
 ```
 
-`guard-release-commit` skips non-`chore(release):` commits. `skip-if-unchanged`
-compares the Cargo version to the latest `tag-prefix` tag before creating a new tag.
+`guard-release-commit` skips non-`chore(release):` commits — version bumps must
+use a `chore(release):` subject or the job writes a skip summary without tagging.
+`skip-if-unchanged` compares the Cargo version to the latest `tag-prefix` tag
+before creating a new tag.
 
 ## Publishing And Deployment
 

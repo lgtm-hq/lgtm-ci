@@ -32,6 +32,4 @@ elif [[ "$VERSION_FOUND" != "true" ]]; then
 	else
 		add_github_summary "Skipped: version not found"
 	fi
-else
-	add_github_summary "Skipped: auto-tag conditions not met"
 fi
