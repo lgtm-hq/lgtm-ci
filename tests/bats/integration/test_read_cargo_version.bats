@@ -39,6 +39,19 @@ EOF
 	assert_line --partial "found=true"
 }
 
+@test "read-cargo-version: succeeds when package version is semver" {
+	cat >Cargo.toml <<'EOF'
+[package]
+name = "demo"
+version = "1.2.3"
+EOF
+
+	run_read
+	assert_success
+	assert_line --partial "version=1.2.3"
+	assert_line --partial "found=true"
+}
+
 @test "read-cargo-version: fails when manifest is missing" {
 	run_read "missing.toml"
 	assert_failure

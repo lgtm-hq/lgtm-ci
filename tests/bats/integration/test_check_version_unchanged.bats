@@ -3,6 +3,7 @@
 # Purpose: Integration tests for scripts/ci/release/check-version-unchanged.sh
 
 load "../../helpers/common"
+load "../../helpers/mocks"
 load "../../helpers/github_env"
 
 setup() {
@@ -46,4 +47,24 @@ run_check() {
 	assert_success
 	assert_line --partial "should-tag=true"
 	assert_line --partial "unchanged=false"
+}
+
+@test "check-version-unchanged: skips when target tag already exists" {
+	setup_mock_git_repo
+	(
+		cd "$MOCK_GIT_REPO"
+		git tag "v1.2.0"
+	)
+
+	run bash -c "
+		cd '$MOCK_GIT_REPO'
+		export GITHUB_OUTPUT='$GITHUB_OUTPUT'
+		export CURRENT_VERSION='1.2.0'
+		export PREVIOUS_VERSION='1.0.0'
+		export TAG_PREFIX='v'
+		'$PROJECT_ROOT/scripts/ci/release/check-version-unchanged.sh' 2>&1
+	"
+	assert_success
+	assert_line --partial "should-tag=false"
+	assert_line --partial "unchanged=true"
 }
