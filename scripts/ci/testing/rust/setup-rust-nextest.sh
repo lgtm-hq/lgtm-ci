@@ -23,13 +23,16 @@ _install_cargo_crate() {
 	if command -v cargo-binstall >/dev/null 2>&1; then
 		cargo binstall "$crate" \
 			--version "$version" \
+			--force \
 			--no-confirm ||
 			cargo install "$crate" \
 				--locked \
+				--force \
 				--version "$version"
 	else
 		cargo install "$crate" \
 			--locked \
+			--force \
 			--version "$version"
 	fi
 }
