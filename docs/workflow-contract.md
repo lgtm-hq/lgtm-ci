@@ -24,6 +24,52 @@ Where applicable, workflows accept:
 
 <!-- markdownlint-enable MD013 -->
 
+`tooling-ref` is listed above for workflows that accept it. See
+[Action-only reusables](#action-only-reusables) for workflows where the input
+pins egress composites only (not `scripts/ci/`).
+
+## Action-only reusables
+
+Some reusables wrap a third-party GitHub Action for a single check. They do
+**not** run the full lgtm-ci script suite — only optional egress hardening
+composites from a sparse lgtm-ci checkout (`harden-runner`,
+`resolve-egress-allowlist`).
+
+<!-- markdownlint-disable MD013 -->
+
+| Reusable                             | Third-party action                         |
+| ------------------------------------ | ------------------------------------------ |
+| `reusable-pr-labeler.yml`            | `actions/labeler`                          |
+| `reusable-dependency-review.yml`     | `actions/dependency-review`                |
+| `reusable-semantic-pr-title.yml`     | `amannn/action-semantic-pull-request`      |
+| `reusable-codeql.yml`                | `github/codeql-action/*`                   |
+| `reusable-scorecards.yml`            | OpenSSF Scorecard action                   |
+
+<!-- markdownlint-enable MD013 -->
+
+For these workflows:
+
+- Pin the reusable `uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-*.yml@<sha>`
+  ref in production.
+- `tooling-ref` is **optional** and pins egress composites only — not CI
+  scripts. When omitted, reusables default to `github.workflow_sha` (the pinned
+  workflow SHA). Pass a matching `tooling-ref` only when testing unreleased
+  egress composite changes on a branch.
+- Do **not** assume `tooling-ref` pins the third-party action inside the
+  reusable; those actions are pinned by SHA inside the workflow YAML.
+
+`reusable-semantic-pr-title.yml` also sparse-checkouts `scripts/ci/` for small
+helper scripts (`prepare-semantic-pr-lists.sh`, `validate-pr-title-length.sh`).
+Pass `tooling-ref` when testing unreleased fixes to those helpers.
+
+Contrast with **script-backed reusables** (quality, test-*, validate-*,
+pr-auto-assign, release-*, publish-*, etc.) where callers **should** pass
+`tooling-ref` matching the workflow pin so `scripts/ci/` and composites stay
+aligned.
+
+See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
+interpreted-language scanning guidance.
+
 ## Migration: test summary publishing (#281)
 
 Breaking renames unify test/coverage PR comments behind **`publish-test-summary`**
