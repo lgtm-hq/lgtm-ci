@@ -14,6 +14,7 @@ _install_cargo_crate() {
 
 	if command -v "$crate" >/dev/null 2>&1; then
 		if "$crate" --version 2>/dev/null | grep -qE "^${crate} ${version}(\$| )"; then
+			echo "${crate} ${version} already installed, skipping"
 			return 0
 		fi
 		echo "Found ${crate} but not pinned ${version}; reinstalling..."
@@ -23,13 +24,16 @@ _install_cargo_crate() {
 	if command -v cargo-binstall >/dev/null 2>&1; then
 		cargo binstall "$crate" \
 			--version "$version" \
+			--force \
 			--no-confirm ||
 			cargo install "$crate" \
 				--locked \
+				--force \
 				--version "$version"
 	else
 		cargo install "$crate" \
 			--locked \
+			--force \
 			--version "$version"
 	fi
 }

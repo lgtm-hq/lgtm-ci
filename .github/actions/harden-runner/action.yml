@@ -36,7 +36,10 @@ runs:
   using: "composite"
   steps:
     # Create agent state before harden-runner; uses sudo while disable-sudo is still off.
+    # Linux-only: StepSecurity agent requires /home/agent (unavailable on Windows/macOS).
+    # Call validate-runner-policy first and skip this action when enforce-egress is false.
     - name: Ensure agent state for post cleanup
+      if: runner.os == 'Linux'
       shell: bash
       run: |
         sudo mkdir -p /home/agent

@@ -194,6 +194,33 @@ egress_preset_endpoints() {
 			api.scorecard.dev:443 \
 			api.securityscorecards.dev:443
 		;;
+	rust-release)
+		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
+		# Minimal base: GitHub checkout/tooling, Rust/crates, cross Docker, apt, Sigstore.
+		egress_preset_endpoints github-minimal
+		printf '%s\n' \
+			raw.githubusercontent.com:443 \
+			static.rust-lang.org:443 \
+			sh.rustup.rs:443 \
+			crates.io:443 \
+			static.crates.io:443 \
+			index.crates.io:443 \
+			ghcr.io:443 \
+			pkg-containers.githubusercontent.com:443 \
+			docker.io:443 \
+			registry-1.docker.io:443 \
+			auth.docker.io:443 \
+			production.cloudflare.docker.com:443 \
+			production.cloudfront.docker.com:443 \
+			archive.ubuntu.com:80 \
+			azure.archive.ubuntu.com:80 \
+			security.ubuntu.com:80 \
+			fulcio.sigstore.dev:443 \
+			rekor.sigstore.dev:443 \
+			timestamp.sigstore.dev:443 \
+			tuf-repo-cdn.sigstore.dev:443 \
+			sigstore-tuf-root.storage.googleapis.com:443
+		;;
 	*)
 		echo "unknown egress preset: $preset" >&2
 		return 1

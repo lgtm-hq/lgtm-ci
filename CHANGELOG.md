@@ -9,7 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ci**: `validate-runner-policy` composite with `strict`, `hardened`, and
+  `permissive` tiers (#313)
+- **ci**: `rust-release` egress preset for cross-compile release builds (#313)
+- **ci**: `reusable-build-rust-binaries` and `reusable-publish-rust-release`
+  workflows with Linux-only strict tier (#313)
+- **release**: `build-rust-binary.sh`, `package-rust-binary.sh`, and Cargo tag
+  verification scripts (#313)
+
 ### Changed
+
+- **ci**: `harden-runner` Linux pre-step guarded with `runner.os == 'Linux'` (#313)
+- **ci**: release reusables use `validate-runner-policy` before conditional
+  harden-runner (#313)
 
 - **ci**: replace O(n²) egress endpoint dedupe with an O(n) awk pass while
   preserving first-seen order
@@ -27,10 +39,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ci**: `setup-rust-nextest.sh` passes `--force` when reinstalling mismatched
+  crate versions (#307, #313)
 - **release**: declare `local -a labels` in `collect_existing_issue_label_args`
   to avoid leaking into global scope
 
 ### Security
+
+- **ci**: `validate-runner-policy` rejects `egress-policy: audit` on `strict` and
+  `hardened` tiers; release reusables default to block-only (#313)
 
 ## [0.35.0] - 2026-06-07
 

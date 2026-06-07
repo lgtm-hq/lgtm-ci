@@ -44,3 +44,20 @@ teardown() {
 	run grep -E '^docker\.io:443$' "$output_file"
 	assert_success
 }
+
+@test "sync-harden-runner-bundle: bundle resolver resolves rust-release preset" {
+	run bash "$SYNC"
+	assert_success
+	output_file="$(mktemp)"
+	run env \
+		EGRESS_POLICY=block \
+		EGRESS_PRESET=rust-release \
+		ALLOWED_ENDPOINTS="" \
+		GITHUB_OUTPUT="$output_file" \
+		bash "$BUNDLE_RESOLVE"
+	assert_success
+	run grep -E '^fulcio\.sigstore\.dev:443$' "$output_file"
+	assert_success
+	run grep -E '^crates\.io:443$' "$output_file"
+	assert_success
+}

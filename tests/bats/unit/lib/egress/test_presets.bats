@@ -103,6 +103,31 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "egress preset rust-release includes Rust Docker and Sigstore hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
+	assert_success
+	assert_output --partial 'crates.io:443'
+	assert_output --partial 'docker.io:443'
+	assert_output --partial 'fulcio.sigstore.dev:443'
+	assert_output --partial 'rekor.sigstore.dev:443'
+	assert_output --partial 'tuf-repo-cdn.sigstore.dev:443'
+}
+
+@test "egress preset rust-release excludes unrelated quality-only hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
+	assert_success
+	refute_output --partial 'pypi.org:443'
+	refute_output --partial 'semgrep.dev:443'
+}
+
+@test "egress preset rust-release includes Ubuntu apt mirrors for musl-tools" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
+	assert_success
+	assert_output --partial 'archive.ubuntu.com:80'
+	assert_output --partial 'azure.archive.ubuntu.com:80'
+	assert_output --partial 'security.ubuntu.com:80'
+}
+
 @test "egress preset pypi includes artifact pipeline host" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints pypi"
 	assert_success
@@ -126,6 +151,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 		rubygems
 		npm-publish
 		quality
+		rust-release
 		sbom
 		scorecard
 	)

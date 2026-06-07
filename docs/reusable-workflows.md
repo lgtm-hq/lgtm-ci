@@ -264,6 +264,33 @@ jobs:
 
 Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
 
+### Rust release (cross-compile from Linux)
+
+Use `reusable-publish-rust-release.yml` on tag pushes for block-only binary
+builds and GitHub release creation. The orchestrator verifies the tag against
+`Cargo.toml`, calls `reusable-build-rust-binaries.yml` (strict tier,
+`rust-release` egress preset), and uploads all matrix artifacts to a release.
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-rust-release.yml@<sha>
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      tooling-ref: "<sha>"
+      packages: "my-cli,my-server"
+```
+
+See [workflow-contract.md](workflow-contract.md#rust-release-contract) for artifact
+naming, default target matrix, and runner policy tiers.
+
 **`pages-coverage-upload-on` (v1):** Same gating semantics as the Node reusable
 (see table above). `push-main` is a literal selector meaning push events to
 `refs/heads/main`; it is not a Git ref alias. The `(v1)` suffix denotes the

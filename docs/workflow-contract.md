@@ -311,6 +311,81 @@ step** because step-security's pre-hook runs before composite steps and cannot r
 
 Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
 
+### Runner policy tiers {#runner-policy-tiers}
+
+Reusable workflows that support multi-platform or release builds declare a **tier**
+via `validate-runner-policy` before `resolve-egress-allowlist` and `harden-runner`.
+Consumers cannot override the tier — it is baked into the reusable contract.
+
+<!-- markdownlint-disable MD013 MD060 -->
+
+| Tier         | `block` on GH Linux | `block` on GH Win/macOS | `block` on self-hosted | `audit` (any) |
+| ------------ | ------------------- | ----------------------- | ---------------------- | ------------- |
+| `strict`     | Enforce             | Hard fail               | Enforce                | Hard fail     |
+| `hardened`   | Enforce             | Skip + warn             | Enforce                | Hard fail     |
+| `permissive` | Enforce (advisory)  | Skip + log              | Skip + log             | Skip          |
+
+**Egress capabilities** ([StepSecurity harden-runner](https://github.com/step-security/harden-runner)):
+
+| Runner type                  | `egress-policy: block` |
+| ---------------------------- | ---------------------- |
+| GitHub-hosted Linux          | Supported              |
+| GitHub-hosted Windows/macOS  | Audit only today       |
+| Self-hosted (agent in image) | Supported on any OS    |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+New reusables call `validate-runner-policy` first, then conditionally run
+`resolve-egress-allowlist` and `harden-runner` when `enforce-egress` is `true`.
+The `harden-runner` composite Linux pre-step is guarded with
+`if: runner.os == 'Linux'`.
+
+**Usage guidance:**
+
+- `strict` — Rust CLI releases, Node/Python CI, Docker builds (Linux-only matrices)
+- `hardened` — Native desktop verification (Tauri, Electron), weekly native test legs
+- `permissive` — Exotic builds (iOS/Xcode, Android signing); document justification
+  in the workflow YAML
+
+```yaml
+- name: Validate runner policy
+  id: policy
+  uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
+  with:
+    tier: hardened
+    egress-policy: block
+    runner-environment: ${{ runner.environment }}
+    runner-os: ${{ runner.os }}
+
+- name: Harden runner
+  if: steps.policy.outputs['enforce-egress'] == 'true'
+  uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+  # ...
+```
+
+### Rust release contract
+
+`reusable-build-rust-binaries.yml` (tier `strict`) cross-compiles from Linux
+runners under block mode. `reusable-publish-rust-release.yml` orchestrates
+tag verification → binary build → GitHub release.
+
+**Default target matrix (v1):** `x86_64-unknown-linux-musl`,
+`aarch64-unknown-linux-gnu` (via `cross`), `x86_64-pc-windows-msvc` (via `cross`).
+Darwin targets are excluded from the default matrix; pass a JSON `targets` override
+for unsigned macOS binaries.
+
+**Artifact naming:** `{artifact-prefix}-{target}` per matrix leg. Each artifact
+contains `{package}-{version}-{target}.tar.gz` or `.zip` with the binary at the
+archive root (`cargo-binstall` compatible) plus a `SHA256SUMS` manifest.
+
+```yaml
+release:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-rust-release.yml@<sha>
+  with:
+    tooling-ref: "<sha>"
+    packages: "my-cli,my-server"
+```
+
 ### Release failure reporting
 
 Both release reusables include an optional `report-release-failure` follow-up job
@@ -364,6 +439,7 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 | `rubygems`       | RubyGems publish                                                     |
 | `npm-publish`    | npm publish + Sigstore attestation                                   |
 | `quality`        | Docker `lintro chk` (default on quality lint)                        |
+| `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
 | `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
 | `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
 
@@ -390,6 +466,15 @@ allowed-endpoints: >
 ```
 
 ### Rust
+
+For release builds, prefer the preset:
+
+```yaml
+egress-policy: block
+egress-preset: rust-release
+```
+
+For workspace build/test only:
 
 ```yaml
 egress-policy: block
