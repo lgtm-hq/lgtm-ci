@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ci**: Cargo auto-tag support in `reusable-release-auto-tag` with
+  `version-source`, `version-file`, and `skip-if-unchanged` inputs (#307)
+
 ### Changed
 
 ### Deprecated

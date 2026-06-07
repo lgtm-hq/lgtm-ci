@@ -354,6 +354,35 @@ jobs:
     secrets: inherit
 ```
 
+**Cargo workspace auto-tag** (Rust monorepos that bump `Cargo.toml` on `main`):
+
+```yaml
+name: Release - Auto Tag
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+
+jobs:
+  auto-tag:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@<sha>
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+    with:
+      version-source: cargo
+      version-file: Cargo.toml
+      skip-if-unchanged: true
+      create-release: false
+    secrets: inherit
+```
+
+`guard-release-commit` skips non-`chore(release):` commits. `skip-if-unchanged`
+compares the Cargo version to the latest `tag-prefix` tag before creating a new tag.
+
 ## Publishing And Deployment
 
 ```yaml
