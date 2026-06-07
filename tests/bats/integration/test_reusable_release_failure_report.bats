@@ -11,7 +11,7 @@ load "../../helpers/common"
 	assert_success
 	run grep -F "needs.version-pr.result == 'failure'" "$workflow"
 	assert_success
-	run grep -F "report-failures:" "$workflow"
+	run grep -F "inputs.report-failures" "$workflow"
 	assert_success
 	run grep -F "failure-issue-labels:" "$workflow"
 	assert_success

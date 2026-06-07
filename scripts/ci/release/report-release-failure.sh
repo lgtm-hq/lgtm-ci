@@ -227,17 +227,21 @@ find_existing_issue() {
 	local search_key
 	local issue_number
 	local search_output
+	local gh_stderr
 	search_key="$(marker_key)"
+	gh_stderr="$(mktemp)"
 	if ! search_output="$(gh issue list \
 		--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
 		--state open \
 		--limit 1 \
 		--search "\"${search_key}\"" \
 		--json number \
-		--jq '.[0].number // empty' 2>&1)"; then
-		log_error "Could not search for existing release failure issues: ${search_output}"
+		--jq '.[0].number // empty' 2>"$gh_stderr")"; then
+		log_error "Could not search for existing release failure issues: $(cat "$gh_stderr")"
+		rm -f "$gh_stderr"
 		exit 1
 	fi
+	rm -f "$gh_stderr"
 
 	issue_number="$search_output"
 	if [[ "$issue_number" =~ ^[0-9]+$ ]]; then

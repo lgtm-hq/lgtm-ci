@@ -128,6 +128,39 @@ EOF
 	assert_output --partial "Updated release failure issue #77"
 }
 
+@test "report-release-failure: notify_failure ignores gh stderr warnings on issue search" {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*repo*view*)
+		echo "main"
+		;;
+	*issue*list*)
+		echo "Warning: rate limit approaching" >&2
+		echo "77"
+		exit 0
+		;;
+	*issue*comment*)
+		echo "commented"
+		exit 0
+		;;
+	*run*view*)
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Updated release failure issue #77"
+}
+
 @test "report-release-failure: notify_failure skips non-target branch" {
 	export GITHUB_REF_NAME=feature/test
 	export FAILURE_TARGET_BRANCH=main
