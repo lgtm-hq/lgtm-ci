@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **release**: grant caller permissions for `report-release-failure` follow-up
+  jobs so release workflows validate at startup (#312)
+
 ### Security
 
 ## [0.34.1] - 2026-06-06

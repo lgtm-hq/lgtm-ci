@@ -109,8 +109,9 @@ would worsen check-name readability) and to access matrix-specific artifacts.
 | Test / report publish | `contents: read`, `pull-requests: write`             | `reusable-publish-test-summary.yml`,         |
 |                       |                                                      | `reusable-publish-artifact-report.yml`       |
 | Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                         |
-| Release version       | `contents: write`, `pull-requests: write`            | `reusable-release-version-pr.yml`            |
-| Release auto-tag      | `contents: write`                                    | `reusable-release-auto-tag.yml`              |
+| Release version       | `contents: write`, `pull-requests: write`,           | `reusable-release-version-pr.yml`            |
+|                       | `actions: read`, `issues: write`                     |                                              |
+| Release auto-tag      | `contents: write`, `actions: read`, `issues: write`  | `reusable-release-auto-tag.yml`              |
 | Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
@@ -315,7 +316,10 @@ Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
 Both release reusables include an optional `report-release-failure` follow-up job
 that runs when the primary job fails (`needs.<job>.result == 'failure'`). The
 job uses `egress-preset: github-minimal` (GitHub API only) and declares its own
-`issues: write` permission — callers do not need extra permissions.
+`actions: read`, `contents: read`, and `issues: write` permissions. Callers
+must grant at least `actions: read` and `issues: write` on the reusable-workflow
+call job (in addition to the primary release permissions above) or GitHub rejects
+the workflow at startup.
 
 <!-- markdownlint-disable MD013 -->
 
