@@ -21,7 +21,9 @@ on:
         default: true
 
       tooling-ref:
-        description: "Git ref for lgtm-ci tooling and composite actions"
+        description: >-
+          Optional — pins egress composites only (no scripts/ci checkout).
+          Defaults to caller workflow SHA.
         required: false
         type: string
         default: ""
