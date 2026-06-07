@@ -75,3 +75,19 @@ EGRESS_LIB="${PROJECT_ROOT}/scripts/ci/lib/egress.sh"
 	assert_success
 	assert_output $'a:1\nb:2'
 }
+
+@test "egress.sh: exported dedupe functions work in subprocess" {
+	run bash -c "
+		source '$EGRESS_LIB'
+		bash -c \"egress_dedupe_endpoint_lines \\\$'b:2\\\\na:1\\\\nb:2'\"
+	"
+	assert_success
+	assert_output $'b:2\na:1'
+
+	run bash -c "
+		source '$EGRESS_LIB'
+		bash -c \"egress_merge_endpoint_lines \\\$'x:1\\\\ny:2\\\\n' \\\$'y:2\\\\nz:3\\\\n'\"
+	"
+	assert_success
+	assert_output $'x:1\ny:2\nz:3'
+}

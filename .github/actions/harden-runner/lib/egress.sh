@@ -84,4 +84,5 @@ egress_merge_endpoint_lines() {
 	_egress_dedupe_normalized_endpoint_lines "$combined"
 }
 
+export -f _egress_dedupe_normalized_endpoint_lines
 export -f egress_normalize_endpoint_lines egress_dedupe_endpoint_lines egress_merge_endpoint_lines
