@@ -255,13 +255,10 @@ jobs:
 
       - name: Aggregate checksum manifests
         shell: bash
-        run: |
-          shopt -s nullglob
-          manifests=(dist/SHA256SUMS-*)
-          if [[ ${#manifests[@]} -gt 0 ]]; then
-            cat "${manifests[@]}" >dist/SHA256SUMS
-            rm -f "${manifests[@]}"
-          fi
+        env:
+          ARTIFACT_PATH: dist
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/aggregate-rust-release-checksums.sh
 
       - name: Verify release assets exist
         shell: bash
