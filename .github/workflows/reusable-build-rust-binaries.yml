@@ -1,0 +1,227 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Binary Build Workflow
+
+on:
+  workflow_call:
+    inputs:
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions (SHA pin)"
+        required: true
+        type: string
+      packages:
+        description: "Comma-separated Cargo package names to build"
+        required: true
+        type: string
+      binary-names:
+        description: >-
+          Optional comma-separated binary names parallel to packages (defaults
+          via cargo metadata)
+        required: false
+        type: string
+        default: ""
+      targets:
+        description: >-
+          JSON matrix override (array of {target, cross, archive} objects).
+          Defaults to Linux musl + aarch64 gnu + Windows MSVC cross-compile.
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (block only; audit rejected)"
+        required: false
+        type: string
+        default: "block"
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (rust-release recommended)
+        required: false
+        type: string
+        default: "rust-release"
+      allowed-endpoints:
+        description: "Additional allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: "append merges preset with allowed-endpoints (deduped)"
+        required: false
+        type: string
+        default: "append"
+      build-script:
+        description: "Override path to build script"
+        required: false
+        type: string
+        default: ""
+      package-script:
+        description: "Override path to packaging script"
+        required: false
+        type: string
+        default: ""
+      artifact-prefix:
+        description: "Artifact name prefix (defaults to repository name)"
+        required: false
+        type: string
+        default: ""
+      retention-days:
+        description: "Days to retain build artifacts"
+        required: false
+        type: number
+        default: 7
+      runner-image:
+        description: "GitHub-hosted runner image (Linux only for strict tier)"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
+      version-file:
+        description: "Cargo.toml path for version reads"
+        required: false
+        type: string
+        default: "Cargo.toml"
+
+    outputs:
+      version:
+        description: "Cargo workspace version"
+        value: ${{ jobs.build.outputs.version }}
+
+jobs:
+  build:
+    name: "Rust binaries (${{ matrix.target }})"
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    concurrency:
+      group: rust-binaries-${{ github.ref_name }}
+      cancel-in-progress: false
+    strategy:
+      fail-fast: false
+      matrix:
+        include: >-
+          ${{
+            fromJson(
+              inputs.targets != '' && inputs.targets ||
+              '[
+                {"target":"x86_64-unknown-linux-musl","cross":false,"archive":"tar.gz"},
+                {"target":"aarch64-unknown-linux-gnu","cross":true,"archive":"tar.gz"},
+                {"target":"x86_64-pc-windows-msvc","cross":true,"archive":"zip"}
+              ]'
+            )
+          }}
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Validate runner policy
+        id: policy
+        uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
+        with:
+          tier: strict
+          egress-policy: ${{ inputs.egress-policy }}
+          runner-environment: ${{ runner.environment }}
+          runner-os: ${{ runner.os }}
+
+      - name: Resolve egress allowlist
+        id: egress
+        if: steps.policy.outputs['enforce-egress'] == 'true'
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        if: steps.policy.outputs['enforce-egress'] == 'true'
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install musl toolchain
+        if: contains(matrix.target, 'musl')
+        shell: bash
+        run: sudo apt-get update && sudo apt-get install -y musl-tools
+
+      - name: Install cross
+        if: matrix.cross
+        shell: bash
+        run: cargo install cross --locked
+
+      - name: Build release binaries
+        shell: bash
+        env:
+          TARGET: ${{ matrix.target }}
+          PACKAGES: ${{ inputs.packages }}
+          USE_CROSS: ${{ matrix.cross }}
+          RAW_SCRIPT_PATH: ${{ inputs.build-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/release/build-rust-binary.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
+
+      - name: Read Cargo version
+        id: version
+        shell: bash
+        env:
+          VERSION_FILE: ${{ inputs.version-file }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/read-cargo-version.sh
+
+      - name: Package release binaries
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          TARGET: ${{ matrix.target }}
+          PACKAGES: ${{ inputs.packages }}
+          BINARY_NAMES: ${{ inputs.binary-names }}
+          ARCHIVE_FORMAT: ${{ matrix.archive }}
+          RAW_SCRIPT_PATH: ${{ inputs.package-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/release/package-rust-binary.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: SHA256SUMS
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: >-
+            ${{ inputs.artifact-prefix != '' && inputs.artifact-prefix ||
+            github.event.repository.name }}-${{ matrix.target }}
+          path: |
+            *.tar.gz
+            *.zip
+            SHA256SUMS
+          if-no-files-found: error
+          retention-days: ${{ inputs.retention-days }}
