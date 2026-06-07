@@ -1,0 +1,49 @@
+---
+name: "Validate runner policy"
+description: >-
+  Enforce tiered egress policy (strict, hardened, permissive) before
+  harden-runner. Outputs whether egress enforcement should run on this leg.
+author: "lgtm-hq"
+
+inputs:
+  tier:
+    description: "Policy tier: strict, hardened, or permissive"
+    required: true
+  egress-policy:
+    description: "Requested egress policy (block or audit; audit rejected except permissive advisory)"
+    required: true
+  runner-environment:
+    description: "Pass ${{ runner.environment }}"
+    required: true
+  runner-os:
+    description: "Pass ${{ runner.os }}"
+    required: true
+
+outputs:
+  enforce-egress:
+    description: "Whether harden-runner should be called on this leg (true or false)"
+    value: ${{ steps.policy.outputs['enforce-egress'] }}
+  effective-policy:
+    description: "Applied policy: block, audit, or none"
+    value: ${{ steps.policy.outputs['effective-policy'] }}
+  tier-warning:
+    description: "Non-empty when a leg runs without egress enforcement"
+    value: ${{ steps.policy.outputs['tier-warning'] }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Validate runner policy
+      id: policy
+      shell: bash
+      env:
+        TIER: ${{ inputs.tier }}
+        EGRESS_POLICY: ${{ inputs['egress-policy'] }}
+        RUNNER_ENVIRONMENT: ${{ inputs['runner-environment'] }}
+        RUNNER_OS: ${{ inputs['runner-os'] }}
+      run: >-
+        bash "${{ github.action_path }}/../../../scripts/ci/actions/validate-runner-policy.sh"
+
+branding:
+  icon: "shield"
+  color: "yellow"
