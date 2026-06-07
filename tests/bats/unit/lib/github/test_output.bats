@@ -64,6 +64,24 @@ teardown() {
 	assert_success
 }
 
+@test "set_github_output: rejects empty key" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output "" "value"'
+	assert_failure
+	assert_output --partial "key must not be empty"
+}
+
+@test "set_github_output: rejects invalid key characters" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output "bad key" "value"'
+	assert_failure
+	assert_output --partial "invalid key"
+}
+
+@test "set_github_output: accepts hyphenated keys" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output "tests-passed" "1"'
+	assert_success
+	assert_github_output "tests-passed" "1"
+}
+
 @test "set_github_output: multiple outputs append to file" {
 	run bash -c '
 		source "$LIB_DIR/github/output.sh"
@@ -127,6 +145,12 @@ line3"'
 	assert_success
 }
 
+@test "set_github_output_multiline: rejects invalid key" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_output_multiline "bad key" "value"'
+	assert_failure
+	assert_output --partial "invalid key"
+}
+
 # =============================================================================
 # set_github_env tests
 # =============================================================================
@@ -170,6 +194,23 @@ line3"'
 	assert_output "value2"
 }
 
+@test "set_github_env: multiline values use shared delimiter" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_env "MULTI" "line1
+line2"'
+	assert_success
+
+	run cat "$GITHUB_ENV"
+	assert_output --partial "ghadelimiter_"
+	assert_output --partial "line1"
+	assert_output --partial "line2"
+}
+
+@test "set_github_env: rejects invalid key" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && set_github_env "bad key" "value"'
+	assert_failure
+	assert_output --partial "invalid key"
+}
+
 # =============================================================================
 # add_github_path tests
 # =============================================================================
@@ -191,6 +232,24 @@ line3"'
 
 	run cat "$GITHUB_PATH"
 	refute_output --partial "/nonexistent/path"
+}
+
+@test "add_github_path: rejects relative paths" {
+	local test_dir="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$test_dir"
+
+	run bash -c "source \"\$LIB_DIR/github/output.sh\" && add_github_path \"bin\""
+	assert_failure
+	assert_output --partial "path must be absolute"
+
+	run cat "$GITHUB_PATH"
+	refute_output --partial "bin"
+}
+
+@test "add_github_path: rejects paths with newlines" {
+	run bash -c 'source "$LIB_DIR/github/output.sh" && add_github_path "$(printf %b "/tmp/evil\ninjection")"'
+	assert_failure
+	assert_output --partial "invalid characters"
 }
 
 @test "add_github_path: does nothing when GITHUB_PATH unset" {
