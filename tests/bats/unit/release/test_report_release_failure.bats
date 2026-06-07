@@ -154,6 +154,34 @@ EOF
 	assert_output --partial "Created release failure issue"
 }
 
+@test "report-release-failure: notify_failure skips missing labels" {
+	mock_command_multi "gh" '
+		*issue*list*) echo "";;
+		*label*view*bug*) exit 0;;
+		*label*view*) exit 1;;
+		*issue*create*) echo "https://github.com/lgtm-hq/lgtm-ci/issues/88";;
+		*run*view*) exit 0;;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Skipping missing issue label"
+	assert_output --partial "Created release failure issue"
+}
+
+@test "report-release-failure: notify_failure fails when issue search fails" {
+	mock_command_multi "gh" '
+		*issue*list*) echo "API rate limit exceeded" >&2; exit 1;;
+		*run*view*) exit 0;;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_failure
+	assert_output --partial "Could not search for existing release failure issues"
+}
+
 @test "report-release-failure: notify_failure fails when GH_TOKEN is unset" {
 	unset GH_TOKEN
 

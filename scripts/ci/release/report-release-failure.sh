@@ -91,35 +91,6 @@ resolve_target_branch() {
 	echo "$default_branch"
 }
 
-ensure_issue_label() {
-	local label="$1"
-	local color="$2"
-	local description="${3:-}"
-	local repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
-
-	if gh label view "$label" --repo "$repo" >/dev/null 2>&1; then
-		return 0
-	fi
-
-	if [[ -n "$description" ]]; then
-		gh label create "$label" \
-			--repo "$repo" \
-			--color "$color" \
-			--description "$description" 2>/dev/null || true
-	else
-		gh label create "$label" \
-			--repo "$repo" \
-			--color "$color" 2>/dev/null || true
-	fi
-
-	if gh label view "$label" --repo "$repo" >/dev/null 2>&1; then
-		return 0
-	fi
-
-	log_error "Failed to ensure issue label exists: $label"
-	exit 1
-}
-
 write_trigger_summary() {
 	local branch
 	local sha
@@ -255,30 +226,69 @@ EOF
 find_existing_issue() {
 	local search_key
 	local issue_number
+	local search_output
 	search_key="$(marker_key)"
-	issue_number="$(gh issue list \
+	if ! search_output="$(gh issue list \
 		--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
 		--state open \
+		--limit 1 \
 		--search "\"${search_key}\"" \
 		--json number \
-		--jq '.[0].number // empty' 2>/dev/null || true)"
+		--jq '.[0].number // empty' 2>&1)"; then
+		log_error "Could not search for existing release failure issues: ${search_output}"
+		exit 1
+	fi
+
+	issue_number="$search_output"
 	if [[ "$issue_number" =~ ^[0-9]+$ ]]; then
 		echo "$issue_number"
 	fi
 }
 
-ensure_failure_issue_labels() {
+collect_existing_issue_label_args() {
+	local -n _label_args=$1
 	local default_labels="${FAILURE_ISSUE_LABELS:-bug,ci,release,automation,infrastructure}"
 	local label
+	local repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
+	_label_args=()
 	IFS=',' read -ra labels <<<"$default_labels"
 	for label in "${labels[@]}"; do
 		label="$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 		if [[ -z "$label" ]]; then
 			continue
 		fi
-		ensure_issue_label "$label" "ededed" ""
+		if gh label view "$label" --repo "$repo" >/dev/null 2>&1; then
+			_label_args+=(--label "$label")
+		else
+			log_info "Skipping missing issue label '$label'"
+		fi
 	done
+}
+
+comment_on_failure_issue() {
+	local issue_number="$1"
+	gh issue comment "$issue_number" \
+		--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
+		--body-file "$body_file" >/dev/null
+	log_success "Updated release failure issue #${issue_number}"
+}
+
+create_failure_issue() {
+	local label_args=()
+	collect_existing_issue_label_args label_args
+	if ((${#label_args[@]} > 0)); then
+		gh issue create \
+			--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
+			--title "fix(release): release automation failed on ${target_branch}" \
+			--body-file "$body_file" \
+			"${label_args[@]}" >/dev/null
+	else
+		gh issue create \
+			--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
+			--title "fix(release): release automation failed on ${target_branch}" \
+			--body-file "$body_file" >/dev/null
+	fi
 }
 
 notify_failure() {
@@ -286,9 +296,6 @@ notify_failure() {
 	local target_branch
 	local body_file
 	local existing_issue
-	local label_args
-	local label
-	local default_labels
 
 	if [[ -z "${GH_TOKEN:-}" ]]; then
 		log_error "GH_TOKEN is required"
@@ -319,28 +326,24 @@ notify_failure() {
 
 	existing_issue="$(find_existing_issue)"
 	if [[ -n "$existing_issue" ]]; then
-		gh issue comment "$existing_issue" \
-			--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
-			--body-file "$body_file" >/dev/null
-		log_success "Updated release failure issue #${existing_issue}"
+		comment_on_failure_issue "$existing_issue"
 	else
-		ensure_failure_issue_labels
-		label_args=()
-		default_labels="${FAILURE_ISSUE_LABELS:-bug,ci,release,automation,infrastructure}"
-		IFS=',' read -ra labels <<<"$default_labels"
-		for label in "${labels[@]}"; do
-			label="$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
-			if [[ -z "$label" ]]; then
-				continue
+		# Brief pause reduces duplicate issues when concurrent runs fail together.
+		sleep 2
+		existing_issue="$(find_existing_issue)"
+		if [[ -n "$existing_issue" ]]; then
+			comment_on_failure_issue "$existing_issue"
+		elif create_failure_issue; then
+			log_success "Created release failure issue"
+		else
+			existing_issue="$(find_existing_issue)"
+			if [[ -n "$existing_issue" ]]; then
+				comment_on_failure_issue "$existing_issue"
+			else
+				log_error "Failed to create release failure issue"
+				exit 1
 			fi
-			label_args+=(--label "$label")
-		done
-		gh issue create \
-			--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
-			--title "fix(release): release automation failed on ${target_branch}" \
-			--body-file "$body_file" \
-			"${label_args[@]}" >/dev/null
-		log_success "Created release failure issue"
+		fi
 	fi
 
 	rm -f "$body_file"

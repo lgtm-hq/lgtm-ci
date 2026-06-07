@@ -106,6 +106,10 @@ load "../../helpers/common"
 	assert_success
 	run grep -F "write_trigger_summary" "$version_pr"
 	assert_success
+	run grep -F "notify_failure" "$version_pr"
+	assert_success
+	run grep -F "write_trigger_summary" "$auto_tag"
+	assert_success
 	run grep -F "notify_failure" "$auto_tag"
 	assert_success
 }
