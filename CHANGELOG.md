@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **release**: optional failure reporting for `reusable-release-version-pr` and
+  `reusable-release-auto-tag` — step summary context plus deduplicated GitHub
+  issues when release jobs fail on the default branch (#207)
+
 ### Changed
 
 ### Deprecated

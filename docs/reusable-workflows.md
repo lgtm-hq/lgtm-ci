@@ -275,6 +275,20 @@ layout so the artifact root is browsable HTML.
 
 ## Release
 
+When release automation fails on the default branch, the reusable workflows open
+or update a deduplicated GitHub issue with failed step details and write a step
+summary in the follow-up `report-release-failure` job. Set `report-failures:
+false` to disable. See [workflow-contract.md](workflow-contract.md) for inputs.
+
+Recommended caller `run-name` (reusable workflows cannot set this for you):
+
+```yaml
+name: Release Version PR
+run-name: >-
+  Release version PR via ${{ github.event_name }} on ${{ github.ref_name }}
+  @ ${{ github.sha }}
+```
+
 ```yaml
 jobs:
   version-pr:
