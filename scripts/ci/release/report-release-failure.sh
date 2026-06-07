@@ -268,6 +268,7 @@ collect_existing_issue_label_args() {
 
 comment_on_failure_issue() {
 	local issue_number="$1"
+	local body_file="$2"
 	gh issue comment "$issue_number" \
 		--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
 		--body-file "$body_file" >/dev/null
@@ -275,6 +276,8 @@ comment_on_failure_issue() {
 }
 
 create_failure_issue() {
+	local body_file="$1"
+	local target_branch="$2"
 	local label_args=()
 	collect_existing_issue_label_args label_args
 	if ((${#label_args[@]} > 0)); then
@@ -326,19 +329,19 @@ notify_failure() {
 
 	existing_issue="$(find_existing_issue)"
 	if [[ -n "$existing_issue" ]]; then
-		comment_on_failure_issue "$existing_issue"
+		comment_on_failure_issue "$existing_issue" "$body_file"
 	else
 		# Brief pause reduces duplicate issues when concurrent runs fail together.
 		sleep 2
 		existing_issue="$(find_existing_issue)"
 		if [[ -n "$existing_issue" ]]; then
-			comment_on_failure_issue "$existing_issue"
-		elif create_failure_issue; then
+			comment_on_failure_issue "$existing_issue" "$body_file"
+		elif create_failure_issue "$body_file" "$target_branch"; then
 			log_success "Created release failure issue"
 		else
 			existing_issue="$(find_existing_issue)"
 			if [[ -n "$existing_issue" ]]; then
-				comment_on_failure_issue "$existing_issue"
+				comment_on_failure_issue "$existing_issue" "$body_file"
 			else
 				log_error "Failed to create release failure issue"
 				exit 1

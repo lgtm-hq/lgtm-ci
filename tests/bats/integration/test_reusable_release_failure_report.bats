@@ -28,6 +28,10 @@ load "../../helpers/common"
 	assert_success
 	run grep -F "inputs.report-failures" "$workflow"
 	assert_success
+	run grep -F "failure-issue-labels:" "$workflow"
+	assert_success
+	run grep -F "failure-target-branch:" "$workflow"
+	assert_success
 }
 
 @test "reusable-release-version-pr: hardens egress on failure follow-up job" {
@@ -48,6 +52,56 @@ load "../../helpers/common"
 			in_job = 0
 		}
 		in_job && /egress-preset: github-minimal/ { found = 1; exit }
+		END { exit !found }
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-release-auto-tag: hardens egress on failure follow-up job" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-auto-tag.yml"
+
+	run awk '
+		/report-release-failure:/ { in_job = 1 }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /report-release-failure:/ {
+			in_job = 0
+		}
+		in_job && /harden-runner/ { found = 1; exit }
+		END { exit !found }
+	' "$workflow"
+	assert_success
+	run awk '
+		/report-release-failure:/ { in_job = 1 }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /report-release-failure:/ {
+			in_job = 0
+		}
+		in_job && /egress-preset: github-minimal/ { found = 1; exit }
+		END { exit !found }
+	' "$workflow"
+	assert_success
+}
+
+@test "reusable-release-version-pr: grants issues write to failure follow-up job" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
+
+	run awk '
+		/report-release-failure:/ { in_job = 1; in_perms = 0 }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /report-release-failure:/ {
+			in_job = 0
+			in_perms = 0
+		}
+		in_job && /permissions:/ { in_perms = 1 }
+		in_perms && /issues: write/ { found = 1; exit }
+		END { exit !found }
+	' "$workflow"
+	assert_success
+	run awk '
+		/report-release-failure:/ { in_job = 1; in_perms = 0 }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /report-release-failure:/ {
+			in_job = 0
+			in_perms = 0
+		}
+		in_job && /permissions:/ { in_perms = 1 }
+		in_perms && /actions: read/ { found = 1; exit }
 		END { exit !found }
 	' "$workflow"
 	assert_success
@@ -107,6 +161,8 @@ load "../../helpers/common"
 	run grep -F "write_trigger_summary" "$version_pr"
 	assert_success
 	run grep -F "notify_failure" "$version_pr"
+	assert_success
+	run grep -F "report-release-failure.sh" "$auto_tag"
 	assert_success
 	run grep -F "write_trigger_summary" "$auto_tag"
 	assert_success

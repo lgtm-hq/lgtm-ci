@@ -273,9 +273,13 @@ jobs:
       inputs.report-failures &&
       needs.auto-tag.result == 'failure'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
+      # Read workflow/job metadata to generate failure context
       actions: read
+      # Read repository context for issue body
       contents: read
+      # Create or update failure notification issues
       issues: write
 
     steps:
