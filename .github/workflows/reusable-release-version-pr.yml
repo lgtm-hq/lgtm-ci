@@ -106,6 +106,25 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: "github-tooling"
+      report-failures:
+        description: >-
+          When true, open or update a deduplicated GitHub issue when the release
+          job fails on the target branch
+        required: false
+        type: boolean
+        default: true
+      failure-issue-labels:
+        description: Comma-separated labels for auto-opened release failure issues
+        required: false
+        type: string
+        default: "bug,ci,release,automation,infrastructure"
+      failure-target-branch:
+        description: >-
+          Branch name for failure notifications. Empty uses the repository default
+          branch.
+        required: false
+        type: string
+        default: ""
 
     secrets:
       RELEASE_APP_ID:
@@ -461,3 +480,65 @@ jobs:
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
+
+  report-release-failure:
+    name: Report release automation failure
+    needs: [version-pr]
+    if: >-
+      always() &&
+      inputs.report-failures &&
+      needs.version-pr.result == 'failure'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress-failure
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress-failure.outputs['allowed-endpoints'] }}
+
+      - name: Write failure trigger summary
+        shell: bash
+        env:
+          RELEASE_WORKFLOW_KEY: release-version-pr
+          PRIMARY_JOB_FAILED: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          write_trigger_summary
+
+      - name: Notify release failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_WORKFLOW_KEY: release-version-pr
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+          FAILURE_TARGET_BRANCH: ${{ inputs.failure-target-branch }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          notify_failure
