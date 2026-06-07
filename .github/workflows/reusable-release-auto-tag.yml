@@ -5,10 +5,30 @@ name: "Reusable: Release Auto Tag"
   workflow_call:
     inputs:
       version:
-        description: "Version override (e.g., 1.2.3). Leave empty for commit-based detection."
+        description: >-
+          Version override (e.g., 1.2.3). Leave empty to detect from the
+          configured version-source (commit or cargo).
         required: false
         type: string
         default: ""
+      version-source:
+        description: >-
+          Version detection source: commit (default) reads chore(release): from
+          HEAD; cargo reads [package] or [workspace.package] from version-file
+        required: false
+        type: string
+        default: "commit"
+      version-file:
+        description: "Cargo.toml path when version-source is cargo"
+        required: false
+        type: string
+        default: "Cargo.toml"
+      skip-if-unchanged:
+        description: >-
+          Skip tagging when the resolved version matches the latest tag version
+        required: false
+        type: boolean
+        default: false
       tag-prefix:
         description: "Prefix for the release tag"
         required: false
@@ -198,21 +218,49 @@ jobs:
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
 
-      - name: Extract version from commit
+      - name: Resolve version
         # yamllint disable-line rule:line-length
         if: steps.guard.outputs.is-release-commit == 'true' || inputs.version != ''
         id: version
         shell: bash
         env:
+          VERSION_SOURCE: >-
+            ${{ inputs.version != '' && 'commit' || inputs.version-source }}
+          VERSION_FILE: ${{ inputs.version-file }}
           COMMIT_MESSAGE: >-
             ${{ inputs.version != ''
                 && format('chore(release): version {0}', inputs.version)
                 || '' }}
-        run: .lgtm-ci-tooling/scripts/ci/release/extract-version-from-commit.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/resolve-auto-tag-version.sh
+
+      - name: Detect previous tag version
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          inputs.skip-if-unchanged
+        id: previous-version
+        shell: bash
+        env:
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: .lgtm-ci-tooling/scripts/ci/release/detect-previous-tag-version.sh
+
+      - name: Check version unchanged
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          inputs.skip-if-unchanged
+        id: unchanged
+        shell: bash
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS_VERSION: ${{ steps.previous-version.outputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: .lgtm-ci-tooling/scripts/ci/release/check-version-unchanged.sh
 
       - name: Configure git with app token
         # yamllint disable-line rule:line-length
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         shell: bash
         env:
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -220,7 +268,10 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/configure-git-remote.sh
 
       - name: Create release tag
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         id: tag
         shell: bash
         env:
@@ -230,7 +281,11 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/create-tag.sh
 
       - name: Create GitHub release
-        if: steps.version.outputs.found == 'true' && inputs.create-release
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true') &&
+          inputs.create-release
         id: github-release
         shell: bash
         env:
@@ -239,7 +294,10 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
 
       - name: Update floating tag
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         shell: bash
         env:
           TAG: ${{ steps.tag.outputs.tag-name }}
@@ -248,7 +306,10 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/update-floating-tag.sh
 
       - name: Release summary
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         shell: bash
         env:
           SUMMARY_TYPE: release
@@ -259,10 +320,18 @@ jobs:
 
       - name: Skip summary
         # yamllint disable-line rule:line-length
-        if: always() && steps.version.outputs.found != 'true'
+        if: >-
+          always() &&
+          (
+            steps.version.outputs.found != 'true' ||
+            (inputs.skip-if-unchanged &&
+            steps.unchanged.outputs.should-tag == 'false')
+          )
         shell: bash
         env:
           IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
+          VERSION_FOUND: ${{ steps.version.outputs.found }}
+          VERSION_UNCHANGED: ${{ steps.unchanged.outputs.unchanged }}
         run: .lgtm-ci-tooling/scripts/ci/release/write-skip-summary.sh
 
   report-release-failure:

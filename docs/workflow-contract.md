@@ -413,6 +413,35 @@ fall back to a visible tracking key footer
 marker is retained for backward compatibility. Recurring failures add comments
 to the same open issue.
 
+### Cargo auto-tag contract
+
+`reusable-release-auto-tag.yml` supports Rust monorepos that tag from
+`Cargo.toml` workspace versions instead of parsing `chore(release): version`
+from the commit subject.
+
+<!-- markdownlint-disable MD013 MD060 -->
+
+| Input               | Default      | Purpose                                              |
+| ------------------- | ------------ | ---------------------------------------------------- |
+| `version-source`    | `commit`     | `commit` (default) or `cargo`                        |
+| `version-file`      | `Cargo.toml` | Manifest path for workspace/package version          |
+| `skip-if-unchanged` | `false`      | Skip when version matches the latest `tag-prefix` tag |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Flow when `version-source: cargo`:
+
+1. `guard-release-commit` — common; proceed only on `chore(release):` commits
+2. `read-cargo-version.sh` — cargo-specific; read semver from `version-file`
+3. `detect-previous-tag-version.sh` — conditional (`skip-if-unchanged: true`);
+   read latest `tag-prefix` version
+4. `check-version-unchanged.sh` — conditional (`skip-if-unchanged: true`);
+   skip tagging when versions match
+5. `create-tag.sh` — common; create and push the annotated tag
+
+Callers should filter `on.push.paths` to the manifest (for example `Cargo.toml`)
+and set `create-release: false` when release assets are published separately.
+
 ## Egress presets
 
 Reusable workflows default to `egress-policy: block` and
