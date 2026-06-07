@@ -11,11 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **ci**: replace O(n²) egress endpoint dedupe with an O(n) awk pass while
+  preserving first-seen order
+- **ci**: centralize `GITHUB_OUTPUT` / `GITHUB_ENV` multiline delimiter helpers
+  and validate output keys before writing
+- **ci**: reject newline injection in `add_github_path`; relative paths remain
+  silently ignored (legacy behavior)
+- **release**: external callers upgrading reusable release workflows must grant
+  `actions: read` and `issues: write` on the caller job when using the default
+  `report-failures: true`, or set `report-failures: false` to opt out
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **release**: declare `local -a labels` in `collect_existing_issue_label_args`
+  to avoid leaking into global scope
 
 ### Security
 
@@ -41,6 +54,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **release**: deduplicate failure issues by title and visible tracking key
   instead of HTML comment search alone; fall back to tracking-key search when
   title search fails
+
+- **release**: `report-failures` defaults to `true`; external callers must grant
+  `actions: read` and `issues: write` on the caller job or pass
+  `report-failures: false`
 
 ## [0.34.1] - 2026-06-06
 
