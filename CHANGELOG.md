@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **release**: optional failure reporting for `reusable-release-version-pr` and
-  `reusable-release-auto-tag` — step summary context plus deduplicated GitHub
-  issues when release jobs fail on the default branch (#207)
-
 ### Changed
 
 ### Deprecated
@@ -21,13 +17,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.35.0] - 2026-06-07
+
+### Features
+
+- **release**: surface reusable release workflow failures (#311) (dbbe6fc)
+
+### Bug Fixes
+
+- **release**: grant caller permissions for report-release-failure job (#314) (103e0b1)
+
+### Previously Unreleased
+
+- **release**: optional failure reporting for `reusable-release-version-pr` and
+  `reusable-release-auto-tag` — step summary context plus deduplicated GitHub
+  issues when release jobs fail on the default branch (#207)
+
 - **release**: grant caller permissions for `report-release-failure` follow-up
   jobs so release workflows validate at startup (#312)
+
 - **release**: deduplicate failure issues by title and visible tracking key
   instead of HTML comment search alone; fall back to tracking-key search when
   title search fails
-
-### Security
 
 ## [0.34.1] - 2026-06-06
 
@@ -885,7 +898,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.35.0...HEAD
+[0.35.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.1...v0.35.0
 [0.34.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.0...v0.34.1
 [0.34.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.33.0...v0.34.0
 [0.33.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.32.4...v0.33.0
