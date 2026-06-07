@@ -159,6 +159,8 @@ EOF
 	run bash "$SCRIPT" notify_failure
 	assert_success
 	assert_output --partial "Updated release failure issue #77"
+	refute_output --partial "warning"
+	refute_output --partial "WARNING"
 }
 
 @test "report-release-failure: notify_failure skips non-target branch" {
