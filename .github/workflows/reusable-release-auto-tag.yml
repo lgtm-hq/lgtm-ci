@@ -5,7 +5,9 @@ name: "Reusable: Release Auto Tag"
   workflow_call:
     inputs:
       version:
-        description: "Version override (e.g., 1.2.3). Leave empty for commit-based detection."
+        description: >-
+          Version override (e.g., 1.2.3). Leave empty to detect from the
+          configured version-source (commit or cargo).
         required: false
         type: string
         default: ""
@@ -250,6 +252,7 @@ jobs:
         env:
           CURRENT_VERSION: ${{ steps.version.outputs.version }}
           PREVIOUS_VERSION: ${{ steps.previous-version.outputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: .lgtm-ci-tooling/scripts/ci/release/check-version-unchanged.sh
 
       - name: Configure git with app token

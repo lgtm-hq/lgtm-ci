@@ -47,5 +47,6 @@ fi
 log_success "Cargo version: $version"
 set_github_output "version" "$version"
 set_github_output "found" "true"
+# Also echo to stdout for BATS test assertions
 echo "version=$version"
 echo "found=true"
