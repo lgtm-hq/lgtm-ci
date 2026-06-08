@@ -18,6 +18,9 @@ if [[ -n "$(trim "$SITE_ARTIFACT_PATH")" ]]; then
 	resolved="$(trim "$SITE_ARTIFACT_PATH")"
 else
 	resolved="$(trim "${LYCHEE_PATHS%%,*}")"
+	if [[ -z "$resolved" ]]; then
+		resolved="."
+	fi
 fi
 
 echo "path=$resolved" >>"$GITHUB_OUTPUT"

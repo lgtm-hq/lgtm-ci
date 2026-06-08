@@ -298,6 +298,9 @@ jobs:
       - name: Setup pnpm
         if: inputs.package-manager == 'pnpm'
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: >-
+            ${{ format('{0}/package.json', inputs.site-working-directory) }}
 
       - name: Get bun cache directory
         if: inputs.package-manager == 'bun'
@@ -499,6 +502,9 @@ jobs:
       - name: Setup pnpm
         if: inputs.package-manager == 'pnpm'
         uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: >-
+            ${{ format('{0}/package.json', inputs.site-working-directory) }}
 
       - name: Get bun cache directory
         if: inputs.package-manager == 'bun'

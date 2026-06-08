@@ -103,6 +103,33 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-site-quality.yml"
 	assert_success
 }
 
+@test "reusable-site-quality: scopes pnpm setup to site-working-directory" {
+	run awk '
+		/^  site-build-link:/ { in_build = 1; in_test = 0 }
+		/^  site-test:/ { in_build = 0; in_test = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  site-build-link:/ && !/^  site-test:/ {
+			in_build = 0
+			in_test = 0
+		}
+		(in_build || in_test) && /- name: Setup pnpm/ { in_pnpm = 1 }
+		(in_build || in_test) && in_pnpm && /package_json_file:/ { has_key = 1 }
+		(in_build || in_test) && in_pnpm && /inputs\.site-working-directory/ {
+			has_site_dir = 1
+		}
+		(in_build || in_test) && in_pnpm && /^      - name:/ && !/- name: Setup pnpm/ {
+			if (has_key && has_site_dir) { count += 1 }
+			in_pnpm = 0
+			has_key = 0
+			has_site_dir = 0
+		}
+		END {
+			if (in_pnpm && has_key && has_site_dir) { count += 1 }
+			exit count < 2
+		}
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-site-quality: forwards package-manager to install step" {
 	run awk '
 		/^  site-build-link:/ { in_build = 1; in_test = 0 }
