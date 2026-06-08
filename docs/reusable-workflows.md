@@ -733,8 +733,11 @@ consumer and are passed as command inputs.
 | `site-working-directory` | `.`                        | Node/Bun install path                      |
 | `lychee-paths`           | `.`                        | Built dist path for link check             |
 | `lychee-root-dir`        | first `lychee-paths` entry | `--root-dir` for relative href resolution  |
+| `upload-site-artifact`   | `false`                    | Set `true` with explicit artifact path     |
 | `python-version`         | empty                      | Enables Python setup when set              |
+| `python-test-command`    | empty                      | Hook before `test-command` when Python set |
 | `vitest-json-path`       | empty                      | Non-default Vitest JSON for PR summaries   |
+| `test-egress-preset`     | falls back to `egress-preset` | Override egress for site-test job       |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -759,6 +762,8 @@ jobs:
       lychee-file-extensions: html
       check-external: false
       lychee-root-dir: apps/site/dist
+      upload-site-artifact: true
+      site-artifact-path: apps/site/dist
       check-command: ./scripts/ci/site/check.sh
       test-command: ./scripts/ci/site/test-all.sh
       python-version: "3.12"

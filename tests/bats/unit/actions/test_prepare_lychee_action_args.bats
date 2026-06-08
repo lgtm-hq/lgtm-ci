@@ -39,3 +39,12 @@ teardown() {
 	[ "$status" -eq 1 ]
 	[[ "$output" == *"RAW_ARGS is required"* ]]
 }
+
+@test "prepare-lychee-action-args uses first comma-separated root dir" {
+	export RAW_ARGS="--offline 'apps/site/dist/**/*.html'"
+	export LYCHEE_ROOT_DIR="apps/site/dist,apps/other/dist"
+	run bash "$SCRIPT"
+	[ "$status" -eq 0 ]
+	grep -q -- '--root-dir apps/site/dist' "$GITHUB_OUTPUT"
+	! grep -q -- 'apps/other/dist' "$GITHUB_OUTPUT" || false
+}

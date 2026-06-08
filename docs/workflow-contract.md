@@ -804,11 +804,14 @@ The reusable runs two parallel jobs (`site-build-link`, `site-test`). Lychee use
 | ------------------------ | ------------------------------- | ----------------------------------------------- |
 | `build-command`          | required                        | e.g. `./scripts/ci/site/build.sh`               |
 | `test-command`           | required                        | e.g. `./scripts/ci/site/test-all.sh`            |
+| `check-command`          | empty                           | Optional type-check before tests                |
 | `build-env`              | empty                           | Multiline `KEY=VALUE` exported before build     |
 | `site-working-directory` | `.`                             | Node/Bun install path (e.g. `apps/site`)        |
+| `lychee-paths`           | `.`                             | Built dist path for link check                  |
+| `lychee-root-dir`        | first `lychee-paths` entry      | `--root-dir` for built HTML link resolution     |
+| `upload-site-artifact`   | `false`                         | Set `true` with explicit artifact path          |
 | `python-version`         | empty                           | When set, enables optional Python setup         |
 | `python-test-command`    | empty                           | Hook before `test-command` when Python enabled  |
-| `lychee-root-dir`        | first `lychee-paths` entry      | `--root-dir` for built HTML link resolution     |
 | `vitest-json-path`       | empty                           | Optional non-default Vitest JSON for summaries  |
 | `test-egress-preset`     | falls back to `egress-preset`   | Override egress for Python+Node test job        |
 
