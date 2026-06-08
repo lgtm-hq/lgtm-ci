@@ -191,3 +191,23 @@ _orchestrator_delegates_publish() {
 		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
 	assert_success
 }
+
+@test "reusable-security-audit: security-audit job has no pull-requests permission" {
+	run awk '
+		/^  security-audit:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  security-audit:/ { in_job = 0 }
+		in_job && /pull-requests:/ { found = 1; exit }
+		END { exit found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-security-audit.yml"
+	assert_success
+}
+
+@test "reusable-publish-security-audit-comment: declares pull-requests write" {
+	run awk '
+		/^  publish-security-audit-comment:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-security-audit-comment:/ { in_job = 0 }
+		in_job && /pull-requests: write/ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-publish-security-audit-comment.yml"
+	assert_success
+}

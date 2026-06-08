@@ -1,0 +1,196 @@
+---
+name: Reusable Security Audit Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check run name for the audit job"
+        required: false
+        type: string
+        default: "Security Audit"
+      lintro-image:
+        description: "Pinned ghcr.io/lgtm-hq/py-lintro image (digest strongly recommended)"
+        required: false
+        type: string
+        # yamllint disable-line rule:line-length
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:1ff3db35939283734b859c7c5d95be87fd8fd62734b3434e0437769d50d53578"
+      audit-script:
+        description: >-
+          Path to security audit script (repo checkout or tooling checkout).
+          Defaults to tooling run-lintro-audit.sh.
+        required: false
+        type: string
+        default: ".lgtm-ci-tooling/scripts/ci/security/run-lintro-audit.sh"
+      fail-script:
+        description: "Path to explicit fail step script after continue-on-error audit"
+        required: false
+        type: string
+        default: ".lgtm-ci-tooling/scripts/ci/security/fail-audit.sh"
+      working-directory:
+        description: "Working directory for the audit scan"
+        required: false
+        type: string
+        default: "."
+      comment-file:
+        description: "PR comment artifact path relative to working-directory"
+        required: false
+        type: string
+        default: "security-audit-comment.txt"
+      artifact-name:
+        description: "Uploaded artifact name for the PR comment file"
+        required: false
+        type: string
+        default: "security-audit-comment"
+      upload-comment-artifact:
+        description: "Upload comment artifact on pull_request for downstream publish job"
+        required: false
+        type: boolean
+        default: true
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "quality"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes for the audit job"
+        required: false
+        type: number
+        default: 15
+
+    outputs:
+      exit-code:
+        description: "Exit code from the security audit script"
+        value: ${{ jobs.security-audit.outputs.exit-code }}
+      has-vulns:
+        description: "Whether vulnerabilities were found"
+        value: ${{ jobs.security-audit.outputs.has-vulns }}
+      audit-failed:
+        description: "Whether the audit tool/scan failed"
+        value: ${{ jobs.security-audit.outputs.audit-failed }}
+      status:
+        description: "passed or failed"
+        value: ${{ jobs.security-audit.outputs.status }}
+
+jobs:
+  security-audit:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      packages: read
+    outputs:
+      exit-code: ${{ steps.audit.outputs.exit-code }}
+      has-vulns: ${{ steps.audit.outputs.has-vulns }}
+      audit-failed: ${{ steps.audit.outputs.audit-failed }}
+      status: ${{ steps.audit.outputs.status }}
+
+    env:
+      LINTRO_IMAGE: ${{ inputs.lintro-image }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Run security audit
+        id: audit
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          WORKSPACE: ${{ github.workspace }}/${{ inputs.working-directory }}
+          COMMENT_FILE: ${{ inputs.comment-file }}
+          AUDIT_SCRIPT: ${{ inputs.audit-script }}
+        run: bash "$GITHUB_WORKSPACE/$AUDIT_SCRIPT"
+
+      - name: Upload comment artifact
+        if: >-
+          always()
+          && inputs.upload-comment-artifact
+          && github.event_name == 'pull_request'
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.working-directory }}/${{ inputs.comment-file }}
+          if-no-files-found: warn
+
+      - name: Fail on vulnerabilities
+        if: steps.audit.outcome == 'failure'
+        shell: bash
+        env:
+          FAIL_SCRIPT: ${{ inputs.fail-script }}
+        run: bash "$GITHUB_WORKSPACE/$FAIL_SCRIPT"

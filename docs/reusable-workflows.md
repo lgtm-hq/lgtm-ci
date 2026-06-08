@@ -654,6 +654,67 @@ Callers must grant `pull-requests: write` when `post-failure-comment` is enabled
 sufficient. Workflow root `permissions: {}` otherwise strips PR access from the
 reusable job.
 
+### Security audit (lintro + osv-scanner)
+
+`reusable-security-audit.yml` runs osv-scanner via the pinned py-lintro Docker
+image and uploads a comment artifact on pull requests. The audit step uses
+`continue-on-error` with an explicit fail step so comment generation still runs
+when vulnerabilities are found.
+
+Post the marker-based PR comment from a separate caller job using
+`reusable-publish-security-audit-comment.yml` (same split pattern as quality
+lint + publish-quality-summary). The audit reusable requires only
+`contents: read` and `packages: read`.
+
+Add `merge_group:` to the caller workflow when using merge queue (audit runs;
+artifact upload and PR comment publish remain `pull_request`-only).
+
+| Input                    | Default                 | Notes                                      |
+| ------------------------ | ----------------------- | ------------------------------------------ |
+| `lintro-image`           | pinned py-lintro        | Override when adopting a newer lintro pin  |
+| `audit-script`           | tooling default         | Rarely needed — override for custom scans  |
+| `upload-comment-artifact`| `true`                  | Set `false` for push/schedule check-only   |
+| `comment-marker`         | `security-audit-report` | Used by publish reusable                   |
+
+```yaml
+'on':
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '30 5 * * 1'
+
+jobs:
+  security-audit:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-security-audit.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🔐 Security Audit"
+      lintro-image: ghcr.io/lgtm-hq/py-lintro@sha256:...
+      upload-comment-artifact: ${{ github.event_name == 'pull_request' }}
+
+  publish-security-audit-comment:
+    needs: security-audit
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-security-audit-comment.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+```
+
+For push/schedule workflows, omit the publish job and pass
+`upload-comment-artifact: false`.
+
 ```yaml
 jobs:
   semantic-title:

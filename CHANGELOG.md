@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: add `reusable-security-audit` and
+  `reusable-publish-security-audit-comment` for lintro/osv-scanner Docker audits
+  with PR comment publish (#307)
+
 ### Changed
 
 ### Deprecated

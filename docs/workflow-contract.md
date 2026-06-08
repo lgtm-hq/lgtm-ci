@@ -752,6 +752,39 @@ tooling checkout need egress for `codeload.github.com`, `astral.sh`, and
 events. Do not invoke it from plain `push` workflows unless you accept the job
 being skipped.
 
+## Security audit (osv-scanner)
+
+`reusable-security-audit.yml` centralizes the lintro Docker + osv-scanner audit
+pattern used by Rust monorepos. The audit job runs
+`scripts/ci/security/run-lintro-audit.sh` (override with `audit-script`), uploads
+a PR comment artifact on `pull_request`, and uses `continue-on-error` plus an
+explicit fail step so comment generation still runs when vulnerabilities are
+found.
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input                 | Default                                              | Notes                                           |
+| --------------------- | ---------------------------------------------------- | ----------------------------------------------- |
+| `lintro-image`        | pinned `ghcr.io/lgtm-hq/py-lintro` digest            | Same contract as `reusable-quality-lint`        |
+| `audit-script`        | `.lgtm-ci-tooling/scripts/ci/security/run-lintro-audit.sh` | Repo-local override supported             |
+| `upload-comment-artifact` | `true`                                           | Set `false` for push/schedule check-only          |
+| `comment-marker`      | `security-audit-report`                              | Input on publish reusable                         |
+| `egress-preset`       | `quality`                                            | Includes `api.osv.dev` and `api.deps.dev`       |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Caller `on:` triggers are consumer-owned. Add `merge_group:` alongside
+`pull_request:` when using merge queue — the audit job runs on both; PR comments
+upload/post only on `pull_request`. Scheduled or push callers should set
+`upload-comment-artifact: false` and omit the publish reusable caller job.
+
+Grant `packages: read` on the audit job (Docker pull from ghcr.io). Call
+`reusable-publish-security-audit-comment.yml` from the caller when PR comments
+are required; that publish reusable declares `pull-requests: write`. The audit
+reusable itself requires only `contents: read` and `packages: read`.
+
+Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
+
 ## Merge queue (`merge_group`)
 
 Callers using GitHub merge queue can add `merge_group:` triggers to thin
@@ -762,6 +795,7 @@ caller workflows alongside `pull_request:`.
 | `reusable-codeql.yml`                  | Safe to run — no PR context required           |
 | `reusable-validate-action-pinning.yml` | Safe to run — no PR context required           |
 | `reusable-dependency-review.yml`       | Runs on `merge_group` (same as PR)             |
+| `reusable-security-audit.yml`          | Audit on `merge_group`; PR comment on PR only  |
 | `reusable-semantic-pr-title.yml`       | Skips on `merge_group` — title validated on PR |
 
 Semantic title validation is intentionally skipped in the merge queue because
