@@ -47,7 +47,9 @@ on:
         type: string
         default: "semantic-pr-title"
       tooling-ref:
-        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        description: >-
+          Optional — pins egress composites and helper scripts under
+          scripts/ci/. Defaults to caller workflow SHA.
         required: false
         type: string
         default: ""

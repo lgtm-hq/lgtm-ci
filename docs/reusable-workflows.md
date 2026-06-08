@@ -39,8 +39,15 @@ jobs:
       exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
 
-Pass `tooling-ref` when testing an unreleased lgtm-ci branch. Production callers
-should pin the workflow ref to a commit SHA.
+Pass `tooling-ref` when testing an unreleased lgtm-ci branch on **script-backed**
+reusables (quality, test-*, validate-*, release-*, etc.). Production callers
+should pin the workflow ref to a commit SHA and pass the same ref as
+`tooling-ref` on script-backed workflows.
+
+**Action-only reusables** (labeler, dependency review, semantic PR title,
+CodeQL, Scorecard) do not run `scripts/ci/`; `tooling-ref` is optional and
+only pins egress composites. See
+[workflow-contract.md](workflow-contract.md#action-only-reusables).
 
 Consumers do **not** need to vendor `.github/actions/harden-runner` or
 `resolve-egress-allowlist` — reusables sparse-checkout lgtm-ci into
@@ -703,3 +710,52 @@ jobs:
       security-events: write
       id-token: write
 ```
+
+### CodeQL build-mode
+
+`reusable-codeql.yml` defaults `build-mode` to `none`. Choose the mode from the
+language class — do **not** pass `build-mode: autobuild` for interpreted
+languages (legacy inline workflows often had a separate `codeql-action/autobuild`
+step; that maps to `autobuild` only for compiled languages).
+
+<!-- markdownlint-disable MD013 -->
+
+| Language class                          | `build-mode`              | Notes                                      |
+| --------------------------------------- | ------------------------- | ------------------------------------------ |
+| Python, JavaScript/TypeScript, Ruby, Go | `none` (default)          | Database built directly from source        |
+| C/C++, C#, Java, Kotlin, Swift, …       | `autobuild` or `manual`   | Requires build observation or custom steps |
+
+<!-- markdownlint-enable MD013 -->
+
+**Python-only caller** — omit `build-mode` or set `none` explicitly:
+
+```yaml
+jobs:
+  codeql:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: python
+      # build-mode defaults to none — do not use autobuild for Python
+```
+
+**Compiled-language caller** — use `autobuild` (or `manual` with your own build
+steps before `Analyze`):
+
+```yaml
+jobs:
+  codeql:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: java
+      build-mode: autobuild
+```
+
+See [CodeQL workflow configuration — build modes](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options)
+and [workflow-contract.md](workflow-contract.md#action-only-reusables) for the
+action-only contract (`tooling-ref` optional).

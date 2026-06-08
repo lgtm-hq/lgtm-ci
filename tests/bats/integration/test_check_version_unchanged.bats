@@ -61,5 +61,6 @@ run_check() {
 	run_check "1.2.0" "1.0.0"
 	assert_success
 	assert_line --partial "should-tag=false"
-	assert_line --partial "unchanged=true"
+	assert_line --partial "unchanged=false"
+	assert_line --partial "tag-exists=true"
 }

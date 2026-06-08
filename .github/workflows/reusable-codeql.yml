@@ -10,7 +10,12 @@ on:
         type: string
         default: ""
       build-mode:
-        description: "CodeQL build mode: none or autobuild"
+        description: >-
+          CodeQL build mode. Use none (default) for languages with
+          direct-source extraction (python, javascript-typescript, ruby, go,
+          etc.). Use autobuild for languages that require build observation
+          (c-cpp, csharp, java, etc.) or manual with explicit build steps.
+          Python does not support autobuild.
         required: false
         type: string
         default: "none"
@@ -26,7 +31,9 @@ on:
         default: ""
 
       tooling-ref:
-        description: "Git ref for lgtm-ci tooling and composite actions"
+        description: >-
+          Optional — pins egress composites only (no scripts/ci checkout).
+          Defaults to caller workflow SHA.
         required: false
         type: string
         default: ""

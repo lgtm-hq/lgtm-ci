@@ -24,7 +24,7 @@ source "$LIB_DIR/git.sh"
 : "${TAG_PREFIX:=v}"
 
 pattern="${TAG_PREFIX}*"
-tag="$(get_latest_tag "$pattern" || true)"
+tag="$(get_latest_reachable_tag "$pattern" || true)"
 
 if [[ -z "$tag" ]]; then
 	log_info "No tag found matching pattern: $pattern"

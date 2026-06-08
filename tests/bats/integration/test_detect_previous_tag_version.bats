@@ -64,3 +64,37 @@ run_detect() {
 	assert_line --partial "version=2.0.0"
 	assert_line --partial "found=true"
 }
+
+@test "detect-previous-tag-version: selects highest semver, not git describe order" {
+	setup_mock_git_repo
+	(
+		cd "$MOCK_GIT_REPO"
+		git tag "v1.0.0"
+		git tag "v1.2.0"
+		git tag "v1.2.1"
+	)
+
+	run_detect
+	assert_success
+	assert_line --partial "version=1.2.1"
+	assert_line --partial "found=true"
+}
+
+@test "detect-previous-tag-version: ignores unreachable higher semver tags" {
+	setup_mock_git_repo
+	(
+		cd "$MOCK_GIT_REPO"
+		git tag "v1.2.1"
+		git checkout -q -b release/2.0
+		echo "release" >>README.md
+		git add README.md
+		git commit -q -m "Release prep"
+		git tag "v2.0.0-rc.1"
+		git checkout -q -
+	)
+
+	run_detect
+	assert_success
+	assert_line --partial "version=1.2.1"
+	assert_line --partial "found=true"
+}

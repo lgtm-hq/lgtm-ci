@@ -303,6 +303,34 @@ teardown() {
 }
 
 # =============================================================================
+# get_latest_reachable_tag tests
+# =============================================================================
+
+@test "get_latest_reachable_tag: returns highest semver among reachable tags" {
+	cd "$MOCK_GIT_REPO"
+	git tag v1.0.0
+	git tag v1.2.0
+	git tag v1.2.1
+	run bash -c 'source "$LIB_DIR/git.sh" && get_latest_reachable_tag "v*"'
+	assert_success
+	assert_output "v1.2.1"
+}
+
+@test "get_latest_reachable_tag: ignores unreachable higher semver tags" {
+	cd "$MOCK_GIT_REPO"
+	git tag v1.2.1
+	git checkout -q -b release/2.0
+	echo "release" >>README.md
+	git add README.md
+	git commit -q -m "Release prep"
+	git tag v2.0.0-rc.1
+	git checkout -q -
+	run bash -c 'source "$LIB_DIR/git.sh" && get_latest_reachable_tag "v*"'
+	assert_success
+	assert_output "v1.2.1"
+}
+
+# =============================================================================
 # tag_exists tests
 # =============================================================================
 

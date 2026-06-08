@@ -10,8 +10,9 @@
 #   TAG_PREFIX       - Tag prefix for direct existence check (default: v)
 #
 # Outputs:
-#   unchanged  - true when versions match
+#   unchanged  - true when versions match (not when the target tag already exists)
 #   should-tag - false when tagging should be skipped
+#   tag-exists - true when the target tag is already present
 
 set -euo pipefail
 
@@ -32,11 +33,13 @@ source "$LIB_DIR/git.sh"
 target_tag="${TAG_PREFIX}${CURRENT_VERSION}"
 if tag_exists "$target_tag"; then
 	log_info "Tag $target_tag already exists; skipping"
-	set_github_output "unchanged" "true"
+	set_github_output "unchanged" "false"
 	set_github_output "should-tag" "false"
+	set_github_output "tag-exists" "true"
 	# Also echo to stdout for BATS test assertions
-	echo "unchanged=true"
+	echo "unchanged=false"
 	echo "should-tag=false"
+	echo "tag-exists=true"
 	exit 0
 fi
 
@@ -44,9 +47,11 @@ if [[ -z "$PREVIOUS_VERSION" ]]; then
 	log_info "No previous tag version; tagging $CURRENT_VERSION"
 	set_github_output "unchanged" "false"
 	set_github_output "should-tag" "true"
+	set_github_output "tag-exists" "false"
 	# Also echo to stdout for BATS test assertions
 	echo "unchanged=false"
 	echo "should-tag=true"
+	echo "tag-exists=false"
 	exit 0
 fi
 
@@ -54,15 +59,19 @@ if [[ "$CURRENT_VERSION" == "$PREVIOUS_VERSION" ]]; then
 	log_info "Version unchanged: $CURRENT_VERSION"
 	set_github_output "unchanged" "true"
 	set_github_output "should-tag" "false"
+	set_github_output "tag-exists" "false"
 	# Also echo to stdout for BATS test assertions
 	echo "unchanged=true"
 	echo "should-tag=false"
+	echo "tag-exists=false"
 	exit 0
 fi
 
 log_info "Version changed: $PREVIOUS_VERSION -> $CURRENT_VERSION"
 set_github_output "unchanged" "false"
 set_github_output "should-tag" "true"
+set_github_output "tag-exists" "false"
 # Also echo to stdout for BATS test assertions
 echo "unchanged=false"
 echo "should-tag=true"
+echo "tag-exists=false"
