@@ -97,7 +97,7 @@ jobs:
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
-            scripts/ci/actions/generate-codeql-matrix.sh
+            scripts/ci/actions/
           sparse-checkout-cone-mode: true
           persist-credentials: false
 

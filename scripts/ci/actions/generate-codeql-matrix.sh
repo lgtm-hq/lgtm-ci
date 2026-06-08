@@ -22,8 +22,14 @@ raw_languages = os.environ.get("LANGUAGES", "").strip()
 default_build_mode = os.environ.get("BUILD_MODE", "none").strip() or "none"
 raw_build_modes = os.environ.get("LANGUAGE_BUILD_MODES", "").strip()
 
-per_language_modes: dict[str, str] = {}
-if raw_build_modes:
+valid_modes = {"none", "autobuild", "manual"}
+
+
+def parse_build_modes(allowed_languages: set[str] | None) -> dict[str, str]:
+    per_language_modes: dict[str, str] = {}
+    if not raw_build_modes:
+        return per_language_modes
+
     try:
         parsed = json.loads(raw_build_modes)
     except json.JSONDecodeError as exc:
@@ -32,6 +38,7 @@ if raw_build_modes:
     if not isinstance(parsed, dict):
         print("LANGUAGE_BUILD_MODES must be a JSON object", file=sys.stderr)
         sys.exit(1)
+
     for language, mode in parsed.items():
         if not isinstance(language, str) or not language.strip():
             print("LANGUAGE_BUILD_MODES keys must be non-empty strings", file=sys.stderr)
@@ -42,9 +49,19 @@ if raw_build_modes:
                 file=sys.stderr,
             )
             sys.exit(1)
-        per_language_modes[language.strip()] = mode.strip()
 
-valid_modes = {"none", "autobuild", "manual"}
+        language_key = language.strip()
+        if allowed_languages is not None and language_key not in allowed_languages:
+            print(
+                f"LANGUAGE_BUILD_MODES contains unknown language {language_key!r}; "
+                f"expected one of {sorted(allowed_languages)}",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+
+        per_language_modes[language_key] = mode.strip()
+
+    return per_language_modes
 
 def resolve_mode(language: str) -> str:
     mode = per_language_modes.get(language, default_build_mode)
@@ -68,6 +85,9 @@ if raw_languages:
     if not languages:
         print("LANGUAGES must list at least one language when non-empty", file=sys.stderr)
         sys.exit(1)
+
+    per_language_modes = parse_build_modes(set(languages))
+
     matrix = {
         "include": [
             {"language": language, "build-mode": resolve_mode(language)}

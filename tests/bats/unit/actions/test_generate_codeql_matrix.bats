@@ -131,3 +131,14 @@ teardown() {
 	assert_failure
 	assert_output --partial "LANGUAGE_BUILD_MODES requires LANGUAGES"
 }
+
+@test "generate-codeql-matrix: rejects override keys outside LANGUAGES" {
+	run env \
+		LANGUAGES=rust \
+		BUILD_MODE=none \
+		LANGUAGE_BUILD_MODES='{"ruts":"autobuild"}' \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "LANGUAGE_BUILD_MODES contains unknown language 'ruts'"
+}
