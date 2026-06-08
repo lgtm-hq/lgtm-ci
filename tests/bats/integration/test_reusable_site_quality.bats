@@ -90,9 +90,37 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-site-quality.yml"
 }
 
 @test "reusable-site-quality: aggregate passed output combines both jobs" {
-	run grep -F 'jobs.site-build-link.outputs.passed' "$WORKFLOW"
+	run awk '
+		/^on:/ { in_on = 1 }
+		/^jobs:/ { in_on = 0 }
+		in_on && /^    outputs:/ { in_outputs = 1 }
+		in_on && /^    [a-zA-Z0-9_-]+:/ && !/^    outputs:/ { in_outputs = 0 }
+		in_outputs && /^      passed:/ { has_passed_key = 1 }
+		in_outputs && /jobs\.site-build-link\.outputs\.passed/ { has_build = 1 }
+		in_outputs && /jobs\.site-test\.outputs\.passed/ { has_test = 1 }
+		END { exit !(has_passed_key && has_build && has_test) }
+	' "$WORKFLOW"
 	assert_success
-	run grep -F 'jobs.site-test.outputs.passed' "$WORKFLOW"
+}
+
+@test "reusable-site-quality: forwards package-manager to install step" {
+	run awk '
+		/^  site-build-link:/ { in_build = 1; in_test = 0 }
+		/^  site-test:/ { in_build = 0; in_test = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  site-build-link:/ && !/^  site-test:/ {
+			in_build = 0
+			in_test = 0
+		}
+		(in_build || in_test) && /PACKAGE_MANAGER: \$\{\{ inputs\.package-manager \}\}/ {
+			count += 1
+		}
+		END { exit count < 2 }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-site-quality: resolves site artifact path via tooling script" {
+	run grep -F 'scripts/ci/actions/resolve-site-artifact-path.sh' "$WORKFLOW"
 	assert_success
 }
 

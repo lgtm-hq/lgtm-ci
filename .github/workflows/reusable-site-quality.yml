@@ -264,7 +264,6 @@ jobs:
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
-            .github/actions/setup-node
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -286,13 +285,50 @@ jobs:
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Setup Node.js
-        uses: ./.lgtm-ci-tooling/.github/actions/setup-node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: ${{ inputs.node-version }}
-          working-directory: ${{ inputs.site-working-directory }}
-          cache-dependency-path: >-
-            ${{ inputs.cache-dependency-path != '' && inputs.cache-dependency-path
-            || format('{0}/bun.lock', inputs.site-working-directory) }}
+
+      - name: Setup Bun
+        if: inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Get bun cache directory
+        if: inputs.package-manager == 'bun'
+        id: bun-cache
+        shell: bash
+        env:
+          STEP: bun-cache
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-node.sh
+
+      - name: Cache bun dependencies
+        if: inputs.package-manager == 'bun'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ steps.bun-cache.outputs.dir }}
+            ${{ inputs.site-working-directory }}/node_modules
+          key: >-
+            bun-${{ runner.os }}-${{ inputs.node-version }}-${{
+            hashFiles(inputs.cache-dependency-path != '' && inputs.cache-dependency-path
+            || format('{0}/bun.lock', inputs.site-working-directory)) }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ inputs.node-version }}-
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.site-working-directory }}
+          FROZEN_LOCKFILE: "true"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
 
       - name: Apply build environment
         if: inputs.build-env != ''
@@ -355,24 +391,26 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
+      - name: Resolve site artifact path
+        if: inputs.upload-site-artifact
+        id: site-artifact
+        shell: bash
+        env:
+          SITE_ARTIFACT_PATH: ${{ inputs.site-artifact-path }}
+          LYCHEE_PATHS: ${{ inputs.lychee-paths }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/resolve-site-artifact-path.sh
+
       - name: Upload site artifact
         if: >-
           always()
           && inputs.upload-site-artifact
           && steps.build.outcome == 'success'
-          && (
-            inputs.site-artifact-path != ''
-            || (
-              inputs.lychee-paths != ''
-              && inputs.lychee-paths != '.'
-            )
-          )
+          && steps.site-artifact.outputs.path != ''
+          && steps.site-artifact.outputs.path != '.'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: ${{ inputs.site-artifact-name }}
-          path: >-
-            ${{ inputs.site-artifact-path != '' && inputs.site-artifact-path
-            || inputs.lychee-paths }}
+          path: ${{ steps.site-artifact.outputs.path }}
           retention-days: 1
 
       - name: Record build and link result
@@ -415,7 +453,6 @@ jobs:
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
-            .github/actions/setup-node
             .github/actions/setup-python
             scripts/ci/
           sparse-checkout-cone-mode: true
@@ -449,13 +486,50 @@ jobs:
           install-dependencies: ${{ inputs.install-python-dependencies }}
 
       - name: Setup Node.js
-        uses: ./.lgtm-ci-tooling/.github/actions/setup-node
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
           node-version: ${{ inputs.node-version }}
-          working-directory: ${{ inputs.site-working-directory }}
-          cache-dependency-path: >-
-            ${{ inputs.cache-dependency-path != '' && inputs.cache-dependency-path
-            || format('{0}/bun.lock', inputs.site-working-directory) }}
+
+      - name: Setup Bun
+        if: inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Get bun cache directory
+        if: inputs.package-manager == 'bun'
+        id: bun-cache
+        shell: bash
+        env:
+          STEP: bun-cache
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-node.sh
+
+      - name: Cache bun dependencies
+        if: inputs.package-manager == 'bun'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ steps.bun-cache.outputs.dir }}
+            ${{ inputs.site-working-directory }}/node_modules
+          key: >-
+            bun-${{ runner.os }}-${{ inputs.node-version }}-${{
+            hashFiles(inputs.cache-dependency-path != '' && inputs.cache-dependency-path
+            || format('{0}/bun.lock', inputs.site-working-directory)) }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ inputs.node-version }}-
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.site-working-directory }}
+          FROZEN_LOCKFILE: "true"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
 
       - name: Run check command
         if: inputs.check-command != ''

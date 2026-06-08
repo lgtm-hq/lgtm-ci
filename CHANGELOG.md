@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **workflows**: forward `package-manager` to site-quality Node install steps
+- **workflows**: resolve first `lychee-path` for site artifact uploads
 - **workflows**: upload `lychee-report` artifact on link-check failure in
   `reusable-site-quality`
 
