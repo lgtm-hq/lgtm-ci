@@ -87,6 +87,11 @@ PUBLISH_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-security-au
 	assert_success
 }
 
+@test "reusable-security-audit: upload uses warn when comment file is missing" {
+	run grep -F 'if-no-files-found: warn' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-security-audit: resolve egress before harden-runner composite" {
 	run awk '
 		/^  security-audit:/ { in_job = 1 }
