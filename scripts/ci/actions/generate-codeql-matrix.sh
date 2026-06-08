@@ -75,6 +75,13 @@ if raw_languages:
         ]
     }
 else:
+    if raw_build_modes:
+        print(
+            "LANGUAGE_BUILD_MODES requires LANGUAGES; "
+            "per-language build modes cannot be applied during auto-detect",
+            file=sys.stderr,
+        )
+        sys.exit(1)
     if default_build_mode not in valid_modes:
         print(
             f"Invalid BUILD_MODE {default_build_mode!r}; "

@@ -81,6 +81,8 @@ jobs:
   setup:
     name: Setup CodeQL matrix
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 

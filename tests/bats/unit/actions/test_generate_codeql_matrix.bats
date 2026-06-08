@@ -109,3 +109,25 @@ teardown() {
 	assert_failure
 	assert_output --partial "Invalid build-mode"
 }
+
+@test "generate-codeql-matrix: rejects invalid mode in language-build-modes" {
+	run env \
+		LANGUAGES=rust \
+		BUILD_MODE=none \
+		LANGUAGE_BUILD_MODES='{"rust":"invalid"}' \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "Invalid build-mode 'invalid' for language 'rust'"
+}
+
+@test "generate-codeql-matrix: rejects language-build-modes without languages" {
+	run env \
+		LANGUAGES="" \
+		BUILD_MODE=none \
+		LANGUAGE_BUILD_MODES='{"rust":"autobuild"}' \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "LANGUAGE_BUILD_MODES requires LANGUAGES"
+}
