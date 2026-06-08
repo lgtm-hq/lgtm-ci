@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date
 from pathlib import Path
 
 
@@ -40,7 +41,6 @@ def _read_suppressions_from_toml() -> list[dict[str, object]]:
     try:
         with toml_path.open("rb") as f:
             data = tomllib.load(f)
-        from datetime import date
 
         def _valid_ignore_until(entry: dict[str, object]) -> bool:
             ignore_until = entry.get("ignoreUntil")

@@ -79,6 +79,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      # Post/update security audit PR comments via post-pr-comment
       pull-requests: write
 
     steps:
