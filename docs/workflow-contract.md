@@ -785,6 +785,33 @@ reusable itself requires only `contents: read` and `packages: read`.
 
 Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
 
+## Vulnerability suppression check (osv-scanner)
+
+`reusable-vuln-suppression-check.yml` centralizes the weekly stale/expired OSV
+suppression cleanup pattern used by Rustume, py-lintro, and turbo-themes. The job
+installs `osv-scanner` directly (no Docker), runs
+`scripts/ci/security/check-vuln-suppressions.sh`, and may open a cleanup PR
+removing stale entries. Expired suppressions fail the job for manual review.
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input                    | Default                                              | Notes                                           |
+| ------------------------ | ---------------------------------------------------- | ----------------------------------------------- |
+| `osv-version`            | `2.3.5`                                              | osv-scanner release to install                  |
+| `config-path`            | `.osv-scanner.toml`                                  | Suppression TOML relative to repo root          |
+| `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported |
+| `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
+| `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
+| `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Caller `on:` triggers are consumer-owned (`schedule`, `workflow_dispatch`).
+Grant `contents: write` and `pull-requests: write` on the caller job. Forward
+`secrets.GH_TOKEN` (typically `secrets.GITHUB_TOKEN`).
+
+Required secrets: `GH_TOKEN`.
+
 ## Documentation site quality
 
 `reusable-site-quality.yml` centralizes the docs-site pattern used by Rust

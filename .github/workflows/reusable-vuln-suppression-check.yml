@@ -1,0 +1,151 @@
+---
+name: Reusable Vulnerability Suppression Check Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check run name for the suppression check job"
+        required: false
+        type: string
+        default: "Check Vulnerability Suppressions"
+      osv-version:
+        description: "osv-scanner release version to install"
+        required: false
+        type: string
+        default: "2.3.5"
+      config-path:
+        description: "Path to suppression TOML relative to repository root"
+        required: false
+        type: string
+        default: ".osv-scanner.toml"
+      check-script:
+        description: >-
+          Path to suppression check script (repo checkout or tooling checkout).
+          Defaults to tooling check-vuln-suppressions.sh.
+        required: false
+        type: string
+        default: ".lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh"
+      install-script:
+        description: >-
+          Path to osv-scanner install script (repo checkout or tooling checkout).
+          Defaults to tooling install-osv-scanner.sh.
+        required: false
+        type: string
+        default: ".lgtm-ci-tooling/scripts/ci/security/install-osv-scanner.sh"
+      workflow-file:
+        description: >-
+          Caller workflow filename for auto-PR footer link (e.g.
+          vuln-suppression-check.yml)
+        required: false
+        type: string
+        default: ""
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "append"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright,
+          pypi, rubygems, npm-publish, quality, osv-scanner, sbom, scorecard)
+        required: false
+        type: string
+        default: "osv-scanner"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes for the suppression check job"
+        required: false
+        type: number
+        default: 10
+
+    secrets:
+      GH_TOKEN:
+        description: "GitHub token for PR creation (typically secrets.GITHUB_TOKEN)"
+        required: true
+
+jobs:
+  vuln-suppression-check:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          token: ${{ secrets.GH_TOKEN }}
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Install osv-scanner
+        shell: bash
+        env:
+          OSV_VERSION: ${{ inputs.osv-version }}
+          INSTALL_SCRIPT: ${{ inputs.install-script }}
+        run: bash "$GITHUB_WORKSPACE/$INSTALL_SCRIPT" "${{ inputs.osv-version }}"
+
+      - name: Check suppression staleness
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          CONFIG_PATH: ${{ inputs.config-path }}
+          WORKFLOW_FILE: ${{ inputs.workflow-file }}
+          CHECK_SCRIPT: ${{ inputs.check-script }}
+        run: bash "$GITHUB_WORKSPACE/$CHECK_SCRIPT"

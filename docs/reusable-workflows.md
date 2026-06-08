@@ -715,6 +715,42 @@ jobs:
 For push/schedule workflows, omit the publish job and pass
 `upload-comment-artifact: false`.
 
+### Vulnerability suppression check (osv-scanner)
+
+`reusable-vuln-suppression-check.yml` installs `osv-scanner` directly (no Docker),
+probes the repository without suppressions, and opens a cleanup PR when entries are
+stale (vulnerability resolved upstream). Expired suppressions fail the job.
+
+| Input                    | Default                 | Notes                                      |
+| ------------------------ | ----------------------- | ------------------------------------------ |
+| `osv-version`            | `2.3.5`                 | osv-scanner release version                |
+| `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
+| `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
+| `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
+| `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
+
+```yaml
+'on':
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  check-suppressions:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@<sha>
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      tooling-ref: '<sha>'
+      job-name: '🔍 Check Vulnerability Suppressions'
+      workflow-file: vuln-suppression-check.yml
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ### Documentation site quality
 
 `reusable-site-quality.yml` runs Astro (or similar) docs build, lychee link
