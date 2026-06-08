@@ -7,6 +7,9 @@ set -euo pipefail
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 : "${LYCHEE_ROOT_DIR:?LYCHEE_ROOT_DIR is required}"
 
+LYCHEE_ROOT_DIR="${LYCHEE_ROOT_DIR#"${LYCHEE_ROOT_DIR%%[![:space:]]*}"}"
+LYCHEE_ROOT_DIR="${LYCHEE_ROOT_DIR%"${LYCHEE_ROOT_DIR##*[![:space:]]}"}"
+
 # When callers pass comma-separated lychee-paths, use the first entry only.
 if [[ "$LYCHEE_ROOT_DIR" == *","* ]]; then
 	LYCHEE_ROOT_DIR="${LYCHEE_ROOT_DIR%%,*}"

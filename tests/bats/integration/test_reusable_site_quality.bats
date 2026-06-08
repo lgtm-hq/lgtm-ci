@@ -112,3 +112,32 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-site-quality.yml"
 	run grep -F 'inputs.vitest-json-path' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-site-quality: apply-build-env uses tooling script" {
+	run grep -F 'scripts/ci/actions/apply-build-env.sh' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-site-quality: uploads lychee report when markdown exists" {
+	run awk '
+		/^  site-build-link:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  site-build-link:/ { in_job = 0 }
+		in_job && /- name: Upload lychee report/ { upload = 1 }
+		upload && /hashFiles\('\''lychee-report\.md'\''\)/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-site-quality: fail step follows always vitest parse" {
+	run awk '
+		/^  site-test:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  site-test:/ { in_job = 0 }
+		in_job && /- name: Parse Vitest JSON results/ { parse = 1 }
+		in_job && parse && /if: always\(\)/ { parse_always = 1 }
+		in_job && /- name: Fail on site test errors/ { fail = 1 }
+		in_job && fail && /steps\.test-run\.outcome == '\''failure'\''/ { found = 1 }
+		END { exit !(parse_always && found) }
+	' "$WORKFLOW"
+	assert_success
+}

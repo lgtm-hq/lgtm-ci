@@ -805,7 +805,7 @@ The reusable runs two parallel jobs (`site-build-link`, `site-test`). Lychee use
 | `build-command`          | required                        | e.g. `./scripts/ci/site/build.sh`               |
 | `test-command`           | required                        | e.g. `./scripts/ci/site/test-all.sh`            |
 | `check-command`          | empty                           | Optional type-check before tests                |
-| `build-env`              | empty                           | Multiline `KEY=VALUE` exported before build     |
+| `build-env`              | empty                           | Multiline `KEY=VALUE` (`apply-build-env.sh`)    |
 | `site-working-directory` | `.`                             | Node/Bun install path (e.g. `apps/site`)        |
 | `lychee-paths`           | `.`                             | Built dist path for link check                  |
 | `lychee-root-dir`        | first `lychee-paths` entry      | `--root-dir` for built HTML link resolution     |

@@ -20,7 +20,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **workflows**: upload `lychee-report` artifact on link-check failure in
+  `reusable-site-quality`
+
 ### Security
+
+- **workflows**: reject unsafe `build-env` lines in `reusable-site-quality`
+  (`apply-build-env.sh` blocks `GITHUB_ENV` heredoc injection)
 
 ## [0.39.0] - 2026-06-08
 
