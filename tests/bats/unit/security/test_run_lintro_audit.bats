@@ -90,3 +90,34 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "status=passed"
 	assert_file_contains "$GITHUB_OUTPUT" "has-vulns=0"
 }
+
+@test "run-lintro-audit: writes github outputs when docker pull fails" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+
+	cat >"${mock_bin}/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "pull" ]]; then
+	echo "mock pull failed" >&2
+	exit 1
+fi
+echo "unexpected docker invocation: $*" >&2
+exit 1
+EOF
+	chmod +x "${mock_bin}/docker"
+
+	run env \
+		PATH="${mock_bin}:${PATH}" \
+		LINTRO_IMAGE="ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef" \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		WORKSPACE="${BATS_TEST_TMPDIR}/workspace" \
+		MAP_HOST_USER=false \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
+
+	assert_failure
+	assert_file_contains "$GITHUB_OUTPUT" "audit-failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "exit-code=1"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
+	assert_file_contains "$GITHUB_OUTPUT" "has-vulns=0"
+}

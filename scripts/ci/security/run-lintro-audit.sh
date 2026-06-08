@@ -54,6 +54,27 @@ if [[ -z "${MAP_HOST_USER}" ]] && [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
 	MAP_HOST_USER=true
 fi
 
+write_audit_github_output() {
+	local has_vulns="${1:-0}"
+	local audit_failed="${2:-0}"
+	local format_failed="${3:-0}"
+	local exit_code="${4:-0}"
+
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		{
+			echo "has-vulns=${has_vulns}"
+			echo "audit-failed=${audit_failed}"
+			echo "format-failed=${format_failed}"
+			echo "exit-code=${exit_code}"
+			if [[ "${exit_code}" -eq 0 ]]; then
+				echo "status=passed"
+			else
+				echo "status=failed"
+			fi
+		} >>"${GITHUB_OUTPUT}"
+	fi
+}
+
 log_info "Pulling Lintro image: ${LINTRO_IMAGE}"
 set +e
 PULL_OUTPUT="$(docker pull "${LINTRO_IMAGE}" 2>&1)"
@@ -61,6 +82,7 @@ PULL_EC=$?
 set -e
 if [[ "${PULL_EC}" -ne 0 ]]; then
 	log_error "Failed to pull Lintro image ${LINTRO_IMAGE}: ${PULL_OUTPUT}"
+	write_audit_github_output 0 1 0 1
 	exit "${PULL_EC}"
 fi
 printf '%s\n' "${PULL_OUTPUT}"
@@ -187,19 +209,7 @@ if [[ "${AUDIT_FAILED}" -eq 1 ]] || [[ "${FORMAT_FAILED}" -eq 1 ]] || [[ "${HAS_
 	EXIT_CODE=1
 fi
 
-if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
-	{
-		echo "has-vulns=${HAS_VULNS}"
-		echo "audit-failed=${AUDIT_FAILED}"
-		echo "format-failed=${FORMAT_FAILED}"
-		echo "exit-code=${EXIT_CODE}"
-		if [[ "${EXIT_CODE}" -eq 0 ]]; then
-			echo "status=passed"
-		else
-			echo "status=failed"
-		fi
-	} >>"${GITHUB_OUTPUT}"
-fi
+write_audit_github_output "${HAS_VULNS}" "${AUDIT_FAILED}" "${FORMAT_FAILED}" "${EXIT_CODE}"
 
 if [[ "${AUDIT_FAILED}" -eq 1 ]]; then
 	log_error "Security audit failed (tool/scan error)"
