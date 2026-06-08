@@ -88,7 +88,13 @@ PUBLISH_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-security-au
 }
 
 @test "reusable-security-audit: upload uses warn when comment file is missing" {
-	run grep -F 'if-no-files-found: warn' "$WORKFLOW"
+	run awk '
+		/^  security-audit:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  security-audit:/ { in_job = 0 }
+		in_job && /- name: Upload comment artifact/ { upload = 1 }
+		upload && /if-no-files-found: warn/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
 	assert_success
 }
 
