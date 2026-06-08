@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.38.0] - 2026-06-08
+
+### Features
+
+- **ci**: add per-language CodeQL build modes to reusable-codeql (#323) (5dd24bf)
+
+### Documentation
+
+- **ci**: document CodeQL build-mode and action-only reusable contracts (#321) (affec75)
+
+### Other Changes
+
+- **deps**: update digest (#322) (a493ad6)
+
 ## [0.37.0] - 2026-06-07
 
 ### Features
@@ -963,7 +977,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.37.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.38.0...HEAD
+[0.38.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.35.0...v0.36.0
 [0.35.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.34.1...v0.35.0
