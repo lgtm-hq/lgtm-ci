@@ -756,6 +756,36 @@ jobs:
       build-mode: autobuild
 ```
 
+**Multi-language caller** — when languages need different build modes (for example
+Rust plus GitHub Actions), pass `language-build-modes` as a JSON object. The
+reusable runs one matrix leg per language so `init` receives the correct
+`build-mode` for each extractor (do **not** rely on a single global
+`build-mode` across mixed language classes):
+
+```yaml
+jobs:
+  codeql:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: rust,actions
+      language-build-modes: '{"rust":"autobuild","actions":"none"}'
+      egress-policy: block
+      allowed-endpoints-mode: append
+      allowed-endpoints: |
+        static.rust-lang.org:443
+        sh.rustup.rs:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+```
+
+When `category` is omitted, each matrix leg uploads SARIF under
+`/language:<language>`. Pass `category` explicitly to override all legs (for
+example `/language:all` on a single-language scan).
+
 See [CodeQL workflow configuration — build modes](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options)
 and [workflow-contract.md](workflow-contract.md#action-only-reusables) for the
 action-only contract (`tooling-ref` optional).
