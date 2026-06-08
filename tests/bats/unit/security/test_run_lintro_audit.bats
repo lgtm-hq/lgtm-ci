@@ -28,9 +28,30 @@ teardown() {
 
 @test "run-lintro-audit: writes comment file when scan results exist" {
 	local workspace="${BATS_TEST_TMPDIR}/workspace"
-	mkdir -p "$workspace"
-	local json_file="${workspace}/osv-results.json"
-	cat >"$json_file" <<'EOF'
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace" "$mock_bin"
+
+	cat >"${mock_bin}/docker" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "${1:-}" == "pull" ]]; then
+	printf 'mock pull %s\n' "${2:-}"
+	exit 0
+fi
+if [[ "${1:-}" == "run" ]]; then
+	workspace=""
+	for ((i = 1; i <= $#; i++)); do
+		if [[ "${!i}" == "-v" ]] && [[ $((i + 1)) -le $# ]]; then
+			next=$((i + 1))
+			mount="${!next}"
+			workspace="${mount%%:/code}"
+		fi
+	done
+	if [[ -z "$workspace" ]]; then
+		echo "mock docker: missing workspace mount" >&2
+		exit 1
+	fi
+	cat >"${workspace}/osv-results.json" <<'JSON'
 {
   "results": [
     {
@@ -43,38 +64,29 @@ teardown() {
     }
   ]
 }
+JSON
+	printf 'mock scan\n' >"${workspace}/osv-output.txt"
+	exit 0
+fi
+echo "unexpected docker invocation: $*" >&2
+exit 1
 EOF
+	chmod +x "${mock_bin}/docker"
 
 	run env \
-		PROJECT_ROOT="$PROJECT_ROOT" \
+		PATH="${mock_bin}:${PATH}" \
+		LINTRO_IMAGE="ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef" \
 		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
 		WORKSPACE="$workspace" \
 		COMMENT_FILE="security-audit-comment.txt" \
 		OSV_RESULTS="osv-results.json" \
-		FORMAT_SCRIPT="${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py" \
-		bash -c '
-set -euo pipefail
-source "${PROJECT_ROOT}/scripts/ci/lib/log.sh"
-source "${PROJECT_ROOT}/scripts/ci/lib/github/format.sh"
-
-COMMENT_BODY="$(python3 "${FORMAT_SCRIPT}" "${WORKSPACE}/${OSV_RESULTS}")"
-{
-	printf "%s\n\n" "## 🔐 Security Audit Report"
-	printf "%s\n\n" "### 📊 Status: ✅ PASSED"
-	printf "%s\n" "${COMMENT_BODY}"
-} >"${WORKSPACE}/${COMMENT_FILE}"
-
-{
-	echo "has-vulns=0"
-	echo "audit-failed=0"
-	echo "format-failed=0"
-	echo "exit-code=0"
-	echo "status=passed"
-} >>"${GITHUB_OUTPUT}"
-'
+		OSV_OUTPUT="osv-output.txt" \
+		MAP_HOST_USER=false \
+		bash "${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh"
 
 	assert_success
 	assert_file_exists "${workspace}/security-audit-comment.txt"
 	assert_file_contains "${workspace}/security-audit-comment.txt" "Security Audit Report"
 	assert_file_contains "$GITHUB_OUTPUT" "status=passed"
+	assert_file_contains "$GITHUB_OUTPUT" "has-vulns=0"
 }
