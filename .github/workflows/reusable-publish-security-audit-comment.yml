@@ -1,0 +1,140 @@
+---
+name: Reusable Publish Security Audit Comment Workflow
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: "Artifact name uploaded by reusable-security-audit"
+        required: false
+        type: string
+        default: "security-audit-comment"
+      comment-file:
+        description: "PR comment file path inside the downloaded artifact"
+        required: false
+        type: string
+        default: "security-audit-comment.txt"
+      comment-marker:
+        description: "Upsert marker for the security audit PR comment"
+        required: false
+        type: string
+        default: "security-audit-report"
+      job-name:
+        description: "Display name for the PR comment publish job"
+        required: false
+        type: string
+        default: "Publish security audit comment"
+      missing-artifact-warning:
+        description: "Warning message when artifact download fails"
+        required: false
+        type: string
+        default: "Security audit comment artifact not found — upstream may have failed"
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-minimal"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
+jobs:
+  publish-security-audit-comment:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            .github/actions/post-pr-comment
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Download comment artifact
+        id: download
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        continue-on-error: true
+        with:
+          name: ${{ inputs.artifact-name }}
+
+      - name: Warn on missing artifact
+        if: steps.download.outcome != 'success'
+        shell: bash
+        env:
+          MISSING_ARTIFACT_WARNING: ${{ inputs.missing-artifact-warning }}
+        run: echo "::warning::${MISSING_ARTIFACT_WARNING}"
+
+      - name: Publish security audit comment
+        if: steps.download.outcome == 'success'
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: ${{ inputs.comment-file }}
+          marker: ${{ inputs.comment-marker }}
