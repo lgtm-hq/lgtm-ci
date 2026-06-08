@@ -715,6 +715,85 @@ jobs:
 For push/schedule workflows, omit the publish job and pass
 `upload-comment-artifact: false`.
 
+### Documentation site quality
+
+`reusable-site-quality.yml` runs Astro (or similar) docs build, lychee link
+check on built HTML, and caller-provided check/test commands in two parallel
+jobs. Consumer repo scripts (e.g. `scripts/ci/site/build.sh`) stay in the
+consumer and are passed as command inputs.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                    | Default                    | Notes                                      |
+| ------------------------ | -------------------------- | ------------------------------------------ |
+| `build-command`          | required                   | Site build script or inline command        |
+| `test-command`           | required                   | Site test orchestrator                     |
+| `check-command`          | empty                      | Optional type-check step before tests      |
+| `build-env`              | empty                      | Multiline `KEY=VALUE` for build (ASTRO_BASE) |
+| `site-working-directory` | `.`                        | Node/Bun install path                      |
+| `lychee-paths`           | `.`                        | Built dist path for link check             |
+| `lychee-root-dir`        | first `lychee-paths` entry | `--root-dir` for relative href resolution  |
+| `upload-site-artifact`   | `false`                    | Set `true` with explicit artifact path     |
+| `python-version`         | empty                      | Enables Python setup when set              |
+| `python-test-command`    | empty                      | Hook before `test-command` when Python set |
+| `vitest-json-path`       | empty                      | Non-default Vitest JSON for PR summaries   |
+| `test-egress-preset`     | falls back to `egress-preset` | Override egress for site-test job       |
+
+<!-- markdownlint-enable MD013 -->
+
+```yaml
+jobs:
+  site-quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-site-quality.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Build and check documentation site"
+      test-job-name: "Test documentation site"
+      node-version: "22"
+      package-manager: bun
+      site-working-directory: apps/site
+      cache-dependency-path: apps/site/bun.lock
+      build-command: ./scripts/ci/site/build.sh
+      build-env: |
+        ASTRO_BASE=/
+      lychee-paths: apps/site/dist
+      lychee-file-extensions: html
+      check-external: false
+      lychee-root-dir: apps/site/dist
+      upload-site-artifact: true
+      site-artifact-path: apps/site/dist
+      check-command: ./scripts/ci/site/check.sh
+      test-command: ./scripts/ci/site/test-all.sh
+      python-version: "3.12"
+      install-python-dependencies: false
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        registry.npmjs.org:443
+        bun.sh:443
+      test-allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        registry.npmjs.org:443
+        bun.sh:443
+        pypi.org:443
+        files.pythonhosted.org:443
+```
+
+Path filters and concurrency remain on the caller workflow. Set
+`publish-test-summary: true` and `vitest-json-path` when adopting lgtm-ci
+Vitest JSON output for PR summaries.
+
 ```yaml
 jobs:
   semantic-title:

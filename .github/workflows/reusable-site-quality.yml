@@ -1,0 +1,609 @@
+---
+name: Reusable Documentation Site Quality Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check name for the build and link-check job"
+        required: false
+        type: string
+        default: "Build and check documentation site"
+      test-job-name:
+        description: "GitHub check name for the site test job"
+        required: false
+        type: string
+        default: "Test documentation site"
+      build-command:
+        description: >-
+          Shell command to build the documentation site (e.g.
+          ./scripts/ci/site/build.sh). Runs in working-directory.
+        required: true
+        type: string
+      build-env:
+        description: >-
+          Multiline KEY=VALUE lines exported before build-command (e.g.
+          ASTRO_BASE=/)
+        required: false
+        type: string
+        default: ""
+      check-command:
+        description: >-
+          Optional shell command before tests (e.g. ./scripts/ci/site/check.sh).
+          Runs in working-directory.
+        required: false
+        type: string
+        default: ""
+      test-command:
+        description: >-
+          Shell command to run site tests (e.g. ./scripts/ci/site/test-all.sh).
+          Runs in working-directory.
+        required: true
+        type: string
+      python-test-command:
+        description: >-
+          Optional Python test hook run after check-command and before
+          test-command when python-version is set
+        required: false
+        type: string
+        default: ""
+      site-working-directory:
+        description: "Working directory for Node/Bun dependency install"
+        required: false
+        type: string
+        default: "."
+      working-directory:
+        description: "Working directory for caller build/check/test commands"
+        required: false
+        type: string
+        default: "."
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "22"
+      package-manager:
+        description: "Package manager for dependency install: npm, bun, pnpm"
+        required: false
+        type: string
+        default: "bun"
+      cache-dependency-path:
+        description: "Lockfile path for Node/Bun cache key (relative to repo root)"
+        required: false
+        type: string
+        default: ""
+      python-version:
+        description: >-
+          Python version for optional site Python tests. Empty skips Python setup.
+        required: false
+        type: string
+        default: ""
+      install-python-dependencies:
+        description: "Run uv sync when Python setup is enabled"
+        required: false
+        type: boolean
+        default: false
+      enable-lychee:
+        description: "Run lychee link check after build-command"
+        required: false
+        type: boolean
+        default: true
+      lychee-paths:
+        description: "Comma-separated files or directories to scan with lychee"
+        required: false
+        type: string
+        default: "."
+      lychee-file-extensions:
+        description: "File extensions to scan with lychee, comma-separated"
+        required: false
+        type: string
+        default: "md,html"
+      lychee-exclude-patterns:
+        description: "Comma-separated path or URL patterns to exclude from lychee"
+        required: false
+        type: string
+        default: ""
+      check-external:
+        description: "Check external HTTP(S) links with lychee"
+        required: false
+        type: boolean
+        default: false
+      lychee-timeout:
+        description: "HTTP timeout in seconds for lychee"
+        required: false
+        type: string
+        default: "10"
+      lychee-root-dir:
+        description: >-
+          Root directory passed to lychee --root-dir for built HTML (e.g.
+          apps/site/dist)
+        required: false
+        type: string
+        default: ""
+      upload-site-artifact:
+        description: >-
+          Upload built site dist as a workflow artifact. Requires
+          site-artifact-path or a non-default lychee-paths value.
+        required: false
+        type: boolean
+        default: false
+      site-artifact-name:
+        description: "Artifact name for the built site upload"
+        required: false
+        type: string
+        default: "site-dist"
+      site-artifact-path:
+        description: >-
+          Path to built site output for artifact upload. Defaults to the first
+          lychee-path when empty.
+        required: false
+        type: string
+        default: ""
+      vitest-json-path:
+        description: >-
+          Optional Vitest JSON results path relative to working-directory for
+          non-default summary layouts
+        required: false
+        type: string
+        default: ""
+      publish-test-summary:
+        description: >-
+          Publish pass/fail test summary on pull requests when vitest-json-path
+          is set
+        required: false
+        type: boolean
+        default: false
+      comment-marker:
+        description: "Upsert marker for site test summary comments"
+        required: false
+        type: string
+        default: "site-test-results"
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block (build job)"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
+      test-egress-preset:
+        description: >-
+          Egress preset override for the site-test job. Falls back to egress-preset
+          when empty.
+        required: false
+        type: string
+        default: ""
+      test-allowed-endpoints:
+        description: >-
+          Allowed endpoints override for the site-test job. Falls back to
+          allowed-endpoints when empty.
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-latest"
+      timeout-minutes:
+        description: "Timeout for site quality jobs in minutes"
+        required: false
+        type: number
+        default: 15
+
+    outputs:
+      passed:
+        description: "Whether both site build/link and test jobs succeeded"
+        value: >-
+          ${{ jobs.site-build-link.outputs.passed == 'true'
+          && jobs.site-test.outputs.passed == 'true' }}
+      build-passed:
+        description: "Whether the build and link-check job succeeded"
+        value: ${{ jobs.site-build-link.outputs.passed }}
+      test-passed:
+        description: "Whether the site test job succeeded"
+        value: ${{ jobs.site-test.outputs.passed }}
+
+jobs:
+  site-build-link:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.record.outputs.passed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup Bun
+        if: inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: >-
+            ${{ format('{0}/package.json', inputs.site-working-directory) }}
+
+      - name: Get bun cache directory
+        if: inputs.package-manager == 'bun'
+        id: bun-cache
+        shell: bash
+        env:
+          STEP: bun-cache
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-node.sh
+
+      - name: Cache bun dependencies
+        if: inputs.package-manager == 'bun'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ steps.bun-cache.outputs.dir }}
+            ${{ inputs.site-working-directory }}/node_modules
+          key: >-
+            bun-${{ runner.os }}-${{ inputs.node-version }}-${{
+            hashFiles(inputs.cache-dependency-path != '' && inputs.cache-dependency-path
+            || format('{0}/bun.lock', inputs.site-working-directory)) }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ inputs.node-version }}-
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.site-working-directory }}
+          FROZEN_LOCKFILE: "true"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
+
+      - name: Apply build environment
+        if: inputs.build-env != ''
+        shell: bash
+        env:
+          BUILD_ENV: ${{ inputs.build-env }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/apply-build-env.sh
+
+      - name: Build site
+        id: build
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.build-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Build Lychee arguments
+        if: inputs.enable-lychee
+        id: lychee-args
+        shell: bash
+        env:
+          PATHS: ${{ inputs.lychee-paths }}
+          FILE_EXTENSIONS: ${{ inputs.lychee-file-extensions }}
+          EXCLUDE_PATTERNS: ${{ inputs.lychee-exclude-patterns }}
+          CHECK_EXTERNAL: ${{ inputs.check-external }}
+          TIMEOUT: ${{ inputs.lychee-timeout }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/build-lychee-args.sh
+
+      - name: Prepare Lychee action inputs
+        if: inputs.enable-lychee
+        id: lychee-action
+        shell: bash
+        env:
+          RAW_ARGS: ${{ steps.lychee-args.outputs.args }}
+          LYCHEE_ROOT_DIR: >-
+            ${{ inputs.lychee-root-dir != '' && inputs.lychee-root-dir
+            || inputs.lychee-paths }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/prepare-lychee-action-args.sh
+
+      - name: Check links
+        if: inputs.enable-lychee
+        uses: lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0
+        with:
+          args: ${{ steps.lychee-action.outputs.args }}
+          format: markdown
+          output: lychee-report.md
+          token: ${{ github.token }}
+          fail: true
+
+      - name: Upload lychee report
+        if: >-
+          always()
+          && inputs.enable-lychee
+          && hashFiles('lychee-report.md') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: lychee-report
+          path: lychee-report.md
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Resolve site artifact path
+        if: inputs.upload-site-artifact
+        id: site-artifact
+        shell: bash
+        env:
+          SITE_ARTIFACT_PATH: ${{ inputs.site-artifact-path }}
+          LYCHEE_PATHS: ${{ inputs.lychee-paths }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/resolve-site-artifact-path.sh
+
+      - name: Upload site artifact
+        if: >-
+          always()
+          && inputs.upload-site-artifact
+          && steps.build.outcome == 'success'
+          && steps.site-artifact.outputs.path != ''
+          && steps.site-artifact.outputs.path != '.'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.site-artifact-name }}
+          path: ${{ steps.site-artifact.outputs.path }}
+          retention-days: 1
+
+      - name: Record build and link result
+        if: always()
+        id: record
+        shell: bash
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  site-test:
+    name: ${{ inputs.test-job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.record.outputs.passed }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            .github/actions/setup-python
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: >-
+            ${{ inputs.test-egress-preset != '' && inputs.test-egress-preset
+            || inputs.egress-preset }}
+          allowed-endpoints: >-
+            ${{ inputs.test-allowed-endpoints != '' && inputs.test-allowed-endpoints
+            || inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Setup Python and uv
+        if: inputs.python-version != ''
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+        with:
+          python-version: ${{ inputs.python-version }}
+          install-dependencies: ${{ inputs.install-python-dependencies }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ inputs.node-version }}
+
+      - name: Setup Bun
+        if: inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        with:
+          package_json_file: >-
+            ${{ format('{0}/package.json', inputs.site-working-directory) }}
+
+      - name: Get bun cache directory
+        if: inputs.package-manager == 'bun'
+        id: bun-cache
+        shell: bash
+        env:
+          STEP: bun-cache
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-node.sh
+
+      - name: Cache bun dependencies
+        if: inputs.package-manager == 'bun'
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ steps.bun-cache.outputs.dir }}
+            ${{ inputs.site-working-directory }}/node_modules
+          key: >-
+            bun-${{ runner.os }}-${{ inputs.node-version }}-${{
+            hashFiles(inputs.cache-dependency-path != '' && inputs.cache-dependency-path
+            || format('{0}/bun.lock', inputs.site-working-directory)) }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ inputs.node-version }}-
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.site-working-directory }}
+          FROZEN_LOCKFILE: "true"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
+
+      - name: Run check command
+        if: inputs.check-command != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.check-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Run Python test hook
+        if: inputs.python-version != '' && inputs.python-test-command != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.python-test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Run site tests
+        id: test-run
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Parse Vitest JSON results
+        if: always() && inputs.vitest-json-path != ''
+        shell: bash
+        env:
+          STEP: parse
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          RESULTS_FILE: ${{ inputs.working-directory }}/${{ inputs.vitest-json-path }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
+
+      # Re-fail after always() Vitest parse so test-run failures are not masked.
+      - name: Fail on site test errors
+        if: steps.test-run.outcome == 'failure'
+        run: exit 1
+
+      - name: Record site test result
+        if: always()
+        id: record
+        shell: bash
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  publish-test-summary:
+    needs: site-test
+    if: >-
+      always()
+      && inputs.publish-test-summary
+      && inputs.vitest-json-path != ''
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      test-suite-name: ${{ inputs.test-job-name }}
+      comment-marker: ${{ inputs.comment-marker }}
+      job-result: ${{ needs.site-test.result }}
+      tooling-ref: ${{ inputs.tooling-ref }}

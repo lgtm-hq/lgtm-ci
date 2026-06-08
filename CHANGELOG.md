@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: add `reusable-site-quality` for Astro docs build, lychee link
+  check, and mixed Node/Python site tests (#307)
+
 ### Changed
 
 ### Deprecated
@@ -17,7 +20,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **workflows**: forward `package-manager` to site-quality Node install steps
+- **workflows**: resolve first `lychee-path` for site artifact uploads
+- **workflows**: upload `lychee-report` artifact on link-check failure in
+  `reusable-site-quality`
+
 ### Security
+
+- **workflows**: reject unsafe `build-env` lines in `reusable-site-quality`
+  (`apply-build-env.sh` blocks `GITHUB_ENV` heredoc injection)
 
 ## [0.39.0] - 2026-06-08
 
