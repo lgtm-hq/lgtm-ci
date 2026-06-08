@@ -44,3 +44,31 @@ run_skip_summary() {
 	run cat "$GITHUB_STEP_SUMMARY"
 	assert_output --partial "Skipped: version unchanged since last tag"
 }
+
+@test "write-skip-summary: reports non-release commit when version not found" {
+	run_skip_summary "false" "false" "false" "false"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "Skipped: last commit is not a release commit"
+}
+
+@test "write-skip-summary: reports version not found on release commit" {
+	run_skip_summary "false" "false" "false" "true"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "Skipped: version not found"
+}
+
+@test "write-skip-summary: reports unexpected skip state" {
+	run_skip_summary "false" "false" "true" "true"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "Skipped: unexpected auto-tag skip state"
+}
+
+@test "write-skip-summary: tag already exists takes precedence over version unchanged" {
+	run_skip_summary "true" "true" "true" "true"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "Skipped: tag already exists"
+}

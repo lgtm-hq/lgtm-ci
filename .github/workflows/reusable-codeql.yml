@@ -11,10 +11,11 @@ on:
         default: ""
       build-mode:
         description: >-
-          CodeQL build mode. Use none (default) for interpreted languages
-          (python, javascript-typescript, etc.). Use autobuild for compiled
-          languages (c-cpp, csharp, java, etc.) or manual with explicit build
-          steps. Python does not support autobuild.
+          CodeQL build mode. Use none (default) for languages with
+          direct-source extraction (python, javascript-typescript, ruby, go,
+          etc.). Use autobuild for languages that require build observation
+          (c-cpp, csharp, java, etc.) or manual with explicit build steps.
+          Python does not support autobuild.
         required: false
         type: string
         default: "none"
