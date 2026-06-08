@@ -767,8 +767,8 @@ found.
 | --------------------- | ---------------------------------------------------- | ----------------------------------------------- |
 | `lintro-image`        | pinned `ghcr.io/lgtm-hq/py-lintro` digest            | Same contract as `reusable-quality-lint`        |
 | `audit-script`        | `.lgtm-ci-tooling/scripts/ci/security/run-lintro-audit.sh` | Repo-local override supported             |
-| `publish-pr-comment`  | `true`                                               | Built-in publish job; set `false` for check-only |
-| `comment-marker`      | `security-audit-report`                              | Upsert marker for `post-pr-comment`             |
+| `upload-comment-artifact` | `true`                                           | Set `false` for push/schedule check-only          |
+| `comment-marker`      | `security-audit-report`                              | Input on publish reusable                         |
 | `egress-preset`       | `quality`                                            | Includes `api.osv.dev` and `api.deps.dev`       |
 
 <!-- markdownlint-enable MD013 MD060 -->
@@ -776,11 +776,12 @@ found.
 Caller `on:` triggers are consumer-owned. Add `merge_group:` alongside
 `pull_request:` when using merge queue — the audit job runs on both; PR comments
 upload/post only on `pull_request`. Scheduled or push callers should set
-`publish-pr-comment: false` (or accept skipped publish jobs).
+`upload-comment-artifact: false` and omit the publish reusable caller job.
 
-Grant `packages: read` on the audit job (Docker pull from ghcr.io). Grant
-`pull-requests: write` on the reusable root when `publish-pr-comment: true`
-(the built-in publish job inherits reusable permissions).
+Grant `packages: read` on the audit job (Docker pull from ghcr.io). Call
+`reusable-publish-security-audit-comment.yml` from the caller when PR comments
+are required; that publish reusable declares `pull-requests: write`. The audit
+reusable itself requires only `contents: read` and `packages: read`.
 
 Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
 

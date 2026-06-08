@@ -168,7 +168,7 @@ steps:
 
 ### Reusable Workflows
 
-<!-- markdownlint-disable MD013 -- workflow catalog table; descriptions exceed default line length -->
+<!-- markdownlint-disable MD013 MD060 -- workflow catalog table; long workflow names exceed column width -->
 
 | Workflow                               | Description                                  |
 | -------------------------------------- | -------------------------------------------- |
@@ -198,7 +198,8 @@ steps:
 | `reusable-validate.yml`                | Generic repo validation script runner        |
 | `reusable-codeql.yml`                  | CodeQL security analysis                     |
 | `reusable-dependency-review.yml`       | Dependency review gate                       |
-| `reusable-security-audit.yml`          | lintro/osv-scanner audit + PR comment        |
+| `reusable-security-audit.yml`          | lintro/osv-scanner audit + comment artifact    |
+| `reusable-publish-security-audit-comment.yml` | Publish security audit PR comment     |
 | `reusable-scorecards.yml`              | OpenSSF Scorecard analysis                   |
 | `reusable-semantic-pr-title.yml`       | Conventional PR title validation + comments  |
 | `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation         |
