@@ -200,6 +200,7 @@ steps:
 | `reusable-dependency-review.yml`       | Dependency review gate                       |
 | `reusable-security-audit.yml`          | lintro/osv-scanner audit + comment artifact    |
 | `reusable-publish-security-audit-comment.yml` | Publish security audit PR comment     |
+| `reusable-site-quality.yml`            | Docs site build, lychee, and site tests        |
 | `reusable-scorecards.yml`              | OpenSSF Scorecard analysis                   |
 | `reusable-semantic-pr-title.yml`       | Conventional PR title validation + comments  |
 | `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation         |

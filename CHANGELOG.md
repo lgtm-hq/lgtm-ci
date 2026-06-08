@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: add `reusable-site-quality` for Astro docs build, lychee link
+  check, and mixed Node/Python site tests (#307)
+
 ### Changed
 
 ### Deprecated

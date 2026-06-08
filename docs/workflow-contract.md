@@ -785,6 +785,39 @@ reusable itself requires only `contents: read` and `packages: read`.
 
 Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
 
+## Documentation site quality
+
+`reusable-site-quality.yml` centralizes the docs-site pattern used by Rust
+monorepos: Astro (or similar) build, lychee link check on built HTML, and
+caller-provided check/test commands. Repo scripts such as `scripts/ci/site/build.sh`
+remain consumer-owned and are passed as `build-command`, `check-command`, and
+`test-command` inputs.
+
+The reusable runs two parallel jobs (`site-build-link`, `site-test`). Lychee uses
+`build-lychee-args.sh` plus `prepare-lychee-action-args.sh` to strip duplicate
+`--format`/`--output` flags and add `--root-dir` for built dist output. Set
+`lychee-root-dir` when the default (first `lychee-paths` value) is insufficient.
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input                    | Default                         | Notes                                           |
+| ------------------------ | ------------------------------- | ----------------------------------------------- |
+| `build-command`          | required                        | e.g. `./scripts/ci/site/build.sh`               |
+| `test-command`           | required                        | e.g. `./scripts/ci/site/test-all.sh`            |
+| `build-env`              | empty                           | Multiline `KEY=VALUE` exported before build     |
+| `site-working-directory` | `.`                             | Node/Bun install path (e.g. `apps/site`)        |
+| `python-version`         | empty                           | When set, enables optional Python setup         |
+| `python-test-command`    | empty                           | Hook before `test-command` when Python enabled  |
+| `lychee-root-dir`        | first `lychee-paths` entry      | `--root-dir` for built HTML link resolution     |
+| `vitest-json-path`       | empty                           | Optional non-default Vitest JSON for summaries  |
+| `test-egress-preset`     | falls back to `egress-preset`   | Override egress for Python+Node test job        |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Work jobs require only `contents: read`. Optional `publish-test-summary` delegates
+to `reusable-publish-test-summary.yml` (requires `pull-requests: write` on the
+caller publish job path). Outputs: `passed`, `build-passed`, `test-passed`.
+
 ## Merge queue (`merge_group`)
 
 Callers using GitHub merge queue can add `merge_group:` triggers to thin
@@ -796,6 +829,7 @@ caller workflows alongside `pull_request:`.
 | `reusable-validate-action-pinning.yml` | Safe to run — no PR context required           |
 | `reusable-dependency-review.yml`       | Runs on `merge_group` (same as PR)             |
 | `reusable-security-audit.yml`          | Audit on `merge_group`; PR comment on PR only  |
+| `reusable-site-quality.yml`            | Safe to run — no PR context required           |
 | `reusable-semantic-pr-title.yml`       | Skips on `merge_group` — title validated on PR |
 
 Semantic title validation is intentionally skipped in the merge queue because
