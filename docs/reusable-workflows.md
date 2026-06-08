@@ -45,8 +45,14 @@ should pin the workflow ref to a commit SHA and pass the same ref as
 `tooling-ref` on script-backed workflows.
 
 **Action-only reusables** (labeler, dependency review, semantic PR title,
-CodeQL, Scorecard) do not run `scripts/ci/`; `tooling-ref` is optional and
-only pins egress composites. See
+CodeQL, Scorecard) do not run the full `scripts/ci/` suite in their analysis
+jobs; `tooling-ref` is optional and primarily pins egress composites.
+**`reusable-codeql.yml`** is an exception when callers pass `languages` or
+`language-build-modes`: its setup job sparse-checkouts
+`scripts/ci/actions/generate-codeql-matrix.sh` to build per-language matrix
+legs. Each leg still uses `github/codeql-action/*` with the resolved
+`build-mode` — not caller repo scripts. Pass `tooling-ref` when testing
+unreleased matrix-generator changes. See
 [workflow-contract.md](workflow-contract.md#action-only-reusables).
 
 Consumers do **not** need to vendor `.github/actions/harden-runner` or
@@ -756,6 +762,41 @@ jobs:
       build-mode: autobuild
 ```
 
+**Multi-language caller** — when languages need different build modes (for example
+Rust plus GitHub Actions), pass `language-build-modes` as a JSON object. The
+reusable runs one matrix leg per language so `init` receives the correct
+`build-mode` for each extractor (do **not** rely on a single global
+`build-mode` across mixed language classes):
+
+```yaml
+jobs:
+  codeql:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: rust,actions
+      language-build-modes: '{"rust":"autobuild","actions":"none"}'
+      egress-policy: block
+      allowed-endpoints-mode: append
+      allowed-endpoints: |
+        static.rust-lang.org:443
+        sh.rustup.rs:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+```
+
+When `category` is omitted, each matrix leg uploads SARIF under
+`/language:<language>`. Pass `category` explicitly to override all legs (for
+example `/language:all` on a single-language scan).
+
+Pin the workflow `uses:` ref to a commit SHA in production. `tooling-ref` is
+optional for egress composites only on single-language scans; for multi-language
+callers, pass a matching `tooling-ref` when testing unreleased
+`generate-codeql-matrix.sh` changes so the setup job and analysis legs stay
+aligned.
+
 See [CodeQL workflow configuration — build modes](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options)
-and [workflow-contract.md](workflow-contract.md#action-only-reusables) for the
-action-only contract (`tooling-ref` optional).
+and [workflow-contract.md](workflow-contract.md#action-only-reusables).
