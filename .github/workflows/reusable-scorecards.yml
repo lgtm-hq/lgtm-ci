@@ -19,6 +19,14 @@ on:
         required: false
         type: boolean
         default: true
+      results-file:
+        description: >-
+          Scorecard results output path. Defaults to "results.sarif"; callers
+          using a non-sarif results-format should override this to match their
+          chosen format (e.g. "results.json").
+        required: false
+        type: string
+        default: "results.sarif"
 
       tooling-ref:
         description: >-
@@ -107,11 +115,13 @@ jobs:
       - name: Run OpenSSF Scorecard
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
+          repo_token: ${{ github.token }}
           results_format: ${{ inputs.results-format }}
+          results_file: ${{ inputs.results-file }}
           publish_results: ${{ inputs.publish-results }}
 
       - name: Upload SARIF
         if: inputs.upload-sarif && inputs.results-format == 'sarif'
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
-          sarif_file: results.sarif
+          sarif_file: ${{ inputs.results-file }}
