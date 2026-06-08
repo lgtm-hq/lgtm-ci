@@ -11,29 +11,35 @@ on:
         default: ""
       build-mode:
         description: >-
-          CodeQL build mode. Use none (default) for languages with
-          direct-source extraction (python, javascript-typescript, ruby, go,
-          etc.). Use autobuild for languages that require build observation
-          (c-cpp, csharp, java, etc.) or manual with explicit build steps.
-          Python does not support autobuild.
+          Default CodeQL build mode when language-build-modes omits a language:
+          none, autobuild, or manual
         required: false
         type: string
         default: "none"
+      language-build-modes:
+        description: >-
+          JSON object mapping language to build-mode (e.g.
+          {"rust":"autobuild","actions":"none"}). Each language runs in its own
+          matrix leg so mixed compiled/interpreted repos can scan without a
+          single global build-mode.
+        required: false
+        type: string
+        default: ""
       config-file:
         description: "Optional CodeQL config file path"
         required: false
         type: string
         default: ""
       category:
-        description: "SARIF category for results"
+        description: >-
+          SARIF category for results. When empty, each matrix leg uses
+          /language:<language>
         required: false
         type: string
         default: ""
 
       tooling-ref:
-        description: >-
-          Optional — pins egress composites only (no scripts/ci checkout).
-          Defaults to caller workflow SHA.
+        description: "Git ref for lgtm-ci tooling and composite actions"
         required: false
         type: string
         default: ""
@@ -72,12 +78,62 @@ on:
         default: "CodeQL"
 
 jobs:
+  setup:
+    name: Setup CodeQL matrix
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/actions/generate-codeql-matrix.sh
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Generate CodeQL matrix
+        id: matrix
+        shell: bash
+        env:
+          LANGUAGES: ${{ inputs.languages }}
+          BUILD_MODE: ${{ inputs.build-mode }}
+          LANGUAGE_BUILD_MODES: ${{ inputs.language-build-modes }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-codeql-matrix.sh
+
   codeql:
     name: ${{ inputs.job-name }}
+    needs: setup
     runs-on: ubuntu-latest
     permissions:
       contents: read
       security-events: write
+
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
       - name: Checkout repository
@@ -114,31 +170,34 @@ jobs:
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Initialize CodeQL
-        if: inputs.config-file == '' && inputs.languages != ''
+        if: inputs.config-file == '' && matrix.language != ''
         uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
-          languages: ${{ inputs.languages }}
-          build-mode: ${{ inputs.build-mode }}
+          languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
 
       - name: Initialize CodeQL with auto-detected languages
-        if: inputs.config-file == '' && inputs.languages == ''
+        if: inputs.config-file == '' && matrix.language == ''
         uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
-          build-mode: ${{ inputs.build-mode }}
+          build-mode: ${{ matrix.build-mode }}
 
       - name: Initialize CodeQL with config
         if: inputs.config-file != ''
         uses: github/codeql-action/init@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
-          languages: ${{ inputs.languages }}
-          build-mode: ${{ inputs.build-mode }}
+          languages: ${{ matrix.language != '' && matrix.language || inputs.languages }}
+          build-mode: ${{ matrix.build-mode }}
           config-file: ${{ inputs.config-file }}
 
       - name: Autobuild
-        if: inputs.build-mode == 'autobuild'
+        if: matrix.build-mode == 'autobuild'
         uses: github/codeql-action/autobuild@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
 
       - name: Analyze
         uses: github/codeql-action/analyze@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
-          category: ${{ inputs.category }}
+          category: >-
+            ${{ inputs.category != '' && inputs.category
+            || (matrix.language != '' && format('/language:{0}', matrix.language)
+            || '') }}
