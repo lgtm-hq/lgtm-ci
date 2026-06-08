@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: add `reusable-security-audit` and
-  `reusable-publish-security-audit-comment` for lintro/osv-scanner Docker audits
-  with PR comment publish (#307)
-
 ### Changed
 
 ### Deprecated
@@ -22,6 +18,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.39.0] - 2026-06-08
+
+### Features
+
+- **ci**: add reusable-security-audit for lintro osv-scanner audits (#325) (c8ca808)
+
+### Previously Unreleased
+
+- **workflows**: add `reusable-security-audit` and
+  `reusable-publish-security-audit-comment` for lintro/osv-scanner Docker audits
+  with PR comment publish (#307)
 
 ## [0.38.0] - 2026-06-08
 
@@ -981,7 +989,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.38.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.39.0...HEAD
+[0.39.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.36.0...v0.37.0
 [0.36.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.35.0...v0.36.0
