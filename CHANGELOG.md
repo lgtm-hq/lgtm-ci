@@ -9,9 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: add `reusable-site-quality` for Astro docs build, lychee link
-  check, and mixed Node/Python site tests (#307)
-
 ### Changed
 
 ### Deprecated
@@ -20,12 +17,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.40.0] - 2026-06-08
+
+### Features
+
+- **workflows**: add reusable-site-quality for docs site CI (#307 §2) (#327) (9a72ee4)
+
+### Previously Unreleased
+
+- **workflows**: add `reusable-site-quality` for Astro docs build, lychee link
+  check, and mixed Node/Python site tests (#307)
+
 - **workflows**: forward `package-manager` to site-quality Node install steps
+
 - **workflows**: resolve first `lychee-path` for site artifact uploads
+
 - **workflows**: upload `lychee-report` artifact on link-check failure in
   `reusable-site-quality`
-
-### Security
 
 - **workflows**: reject unsafe `build-env` lines in `reusable-site-quality`
   (`apply-build-env.sh` blocks `GITHUB_ENV` heredoc injection)
@@ -1000,7 +1010,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.39.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.0...HEAD
+[0.40.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.37.0...v0.38.0
 [0.37.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.36.0...v0.37.0
