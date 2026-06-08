@@ -5,7 +5,9 @@ on:
   workflow_call:
     inputs:
       results-format:
-        description: "Scorecard output format"
+        description: >-
+          Scorecard output format (default sarif). When overriding to a non-sarif
+          format, also set results-file to a matching path (e.g. results.json).
         required: false
         type: string
         default: "sarif"

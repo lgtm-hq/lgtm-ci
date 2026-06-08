@@ -35,6 +35,22 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-scorecards.yml"
 	assert_success
 }
 
+@test "reusable-scorecards: upload-sarif conditional checks upload-sarif and results-format" {
+	run awk '
+		/^  scorecards:/ { in_job = 1; upload = 0 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  scorecards:/ { in_job = 0; upload = 0 }
+		in_job && /- name: Upload SARIF/ { upload = 1 }
+		in_job && upload && /^        if:/ {
+			if ($0 ~ /inputs\.upload-sarif/ && $0 ~ /inputs\.results-format == '\''sarif'\''/) {
+				found = 1
+				exit
+			}
+		}
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-scorecards: upload-sarif uses results-file input" {
 	run awk '
 		/^  scorecards:/ { in_job = 1; upload = 0 }
