@@ -29,7 +29,10 @@ def _escape_md_cell(value: str) -> str:
 
 def _read_suppressions_from_toml() -> list[dict[str, object]]:
     """Read suppression entries from .osv-scanner.toml as a fallback."""
-    import tomllib
+    try:
+        import tomllib
+    except ImportError:
+        return []
 
     toml_path = Path(".osv-scanner.toml")
     if not toml_path.exists():
@@ -71,7 +74,7 @@ def format_comment(json_path: str) -> str | None:
         return None
 
     try:
-        content = path.read_text()
+        content = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError) as e:
         print(f"Failed to read {path}: {e}", file=sys.stderr)
         return None

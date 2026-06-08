@@ -184,7 +184,8 @@ jobs:
         env:
           WORKSPACE: ${{ github.workspace }}/${{ inputs.working-directory }}
           COMMENT_FILE: ${{ inputs.comment-file }}
-        run: bash "${{ github.workspace }}/${{ inputs.audit-script }}"
+          AUDIT_SCRIPT: ${{ inputs.audit-script }}
+        run: bash "$GITHUB_WORKSPACE/$AUDIT_SCRIPT"
 
       - name: Upload comment artifact
         if: >-
@@ -192,7 +193,7 @@ jobs:
           && inputs.publish-pr-comment
           && github.event_name == 'pull_request'
         # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.working-directory }}/${{ inputs.comment-file }}
@@ -201,7 +202,9 @@ jobs:
       - name: Fail on vulnerabilities
         if: steps.audit.outcome == 'failure'
         shell: bash
-        run: bash "${{ github.workspace }}/${{ inputs.fail-script }}"
+        env:
+          FAIL_SCRIPT: ${{ inputs.fail-script }}
+        run: bash "$GITHUB_WORKSPACE/$FAIL_SCRIPT"
 
   publish-pr-comment:
     name: ${{ inputs.publish-job-name }}
