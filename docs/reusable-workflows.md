@@ -654,6 +654,50 @@ Callers must grant `pull-requests: write` when `post-failure-comment` is enabled
 sufficient. Workflow root `permissions: {}` otherwise strips PR access from the
 reusable job.
 
+### Security audit (lintro + osv-scanner)
+
+`reusable-security-audit.yml` runs osv-scanner via the pinned py-lintro Docker
+image, uploads a comment artifact on pull requests, and optionally posts a
+marker-based PR comment. The audit step uses `continue-on-error` with an explicit
+fail step so comment generation still runs when vulnerabilities are found.
+
+Add `merge_group:` to the caller workflow when using merge queue (audit runs;
+PR comment upload/post remains `pull_request`-only).
+
+| Input                | Default           | Notes                                      |
+| -------------------- | ----------------- | ------------------------------------------ |
+| `lintro-image`       | pinned py-lintro  | Override when adopting a newer lintro pin  |
+| `audit-script`       | tooling default   | Rarely needed — override for custom scans  |
+| `publish-pr-comment` | `true`            | Set `false` for push/schedule check-only   |
+| `comment-marker`     | `security-audit-report` | Upsert identity for PR comments      |
+
+```yaml
+'on':
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '30 5 * * 1'
+
+jobs:
+  security-audit:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-security-audit.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🔐 Security Audit"
+      lintro-image: ghcr.io/lgtm-hq/py-lintro@sha256:...
+      publish-pr-comment: ${{ github.event_name == 'pull_request' }}
+```
+
+For push/schedule workflows, pass `publish-pr-comment: false` and omit
+`pull-requests: write`.
+
 ```yaml
 jobs:
   semantic-title:

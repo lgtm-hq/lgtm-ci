@@ -198,6 +198,7 @@ steps:
 | `reusable-validate.yml`                | Generic repo validation script runner        |
 | `reusable-codeql.yml`                  | CodeQL security analysis                     |
 | `reusable-dependency-review.yml`       | Dependency review gate                       |
+| `reusable-security-audit.yml`          | lintro/osv-scanner audit + PR comment        |
 | `reusable-scorecards.yml`              | OpenSSF Scorecard analysis                   |
 | `reusable-semantic-pr-title.yml`       | Conventional PR title validation + comments  |
 | `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation         |
