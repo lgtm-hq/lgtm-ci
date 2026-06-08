@@ -121,13 +121,16 @@ if [[ -n "$PR_LIST_OUTPUT" ]]; then
 	exit 0
 fi
 
-export REMOVE_IDS_JSON
-REMOVE_IDS_JSON=$(printf '%s\n' "${REMOVE_IDS[@]}" | python3 -c "
+if [[ ${#REMOVE_IDS[@]} -eq 0 ]]; then
+	log_info "No stale suppressions to remove."
+else
+	export REMOVE_IDS_JSON
+	REMOVE_IDS_JSON=$(printf '%s\n' "${REMOVE_IDS[@]}" | python3 -c "
 import json, sys
 print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
 ")
 
-python3 - "$OSV_TOML" <<'PYEOF'
+	python3 - "$OSV_TOML" <<'PYEOF'
 import json, os, sys, tomllib
 from pathlib import Path
 
@@ -168,51 +171,51 @@ for vid in sorted(removed):
     print(f"Removed: {vid}", file=sys.stderr)
 PYEOF
 
-if [[ -f "$OSV_TOML" ]]; then
-	if ! grep -qE '^\[' "$OSV_TOML"; then
-		log_info "No entries left in $OSV_TOML, removing file"
-		rm -f "$OSV_TOML"
+	if [[ -f "$OSV_TOML" ]]; then
+		if ! grep -qE '^\[' "$OSV_TOML"; then
+			log_info "No entries left in $OSV_TOML, removing file"
+			rm -f "$OSV_TOML"
+		fi
 	fi
-fi
 
-if ! git diff --quiet; then
-	REMOVED_LIST=""
-	for id in "${REMOVE_IDS[@]+"${REMOVE_IDS[@]}"}"; do
-		REMOVED_LIST="${REMOVED_LIST}- \`${id}\`
+	if ! git diff --quiet; then
+		REMOVED_LIST=""
+		for id in "${REMOVE_IDS[@]+"${REMOVE_IDS[@]}"}"; do
+			REMOVED_LIST="${REMOVED_LIST}- \`${id}\`
 "
-	done
+		done
 
-	EXPIRED_LIST=""
-	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
-		EXPIRED_LIST="${EXPIRED_LIST}- \`${id}\`
+		EXPIRED_LIST=""
+		for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
+			EXPIRED_LIST="${EXPIRED_LIST}- \`${id}\`
 "
-	done
+		done
 
-	BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
-	configure_git_ci_user
-	git checkout -b "$BRANCH"
-	git add -A -- "$OSV_TOML"
-	git commit -m "$(
-		cat <<EOF
+		BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
+		configure_git_ci_user
+		git checkout -b "$BRANCH"
+		git add -A -- "$OSV_TOML"
+		git commit -m "$(
+			cat <<EOF
 chore(security): remove stale vulnerability suppressions
 
 The following suppressions are no longer needed:
 ${REMOVED_LIST}
 Detected by the weekly vuln-suppression-check workflow.
 EOF
-	)"
+		)"
 
-	git push -u origin "$BRANCH"
+		git push -u origin "$BRANCH"
 
-	WF_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions"
-	if [[ -n "${WORKFLOW_FILE:-}" ]]; then
-		WF_URL="${WF_URL}/workflows/${WORKFLOW_FILE}"
-	fi
+		WF_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions"
+		if [[ -n "${WORKFLOW_FILE:-}" ]]; then
+			WF_URL="${WF_URL}/workflows/${WORKFLOW_FILE}"
+		fi
 
-	gh pr create \
-		--title "chore(security): remove stale vulnerability suppressions" \
-		--body "$(
-			cat <<EOF
+		gh pr create \
+			--title "chore(security): remove stale vulnerability suppressions" \
+			--body "$(
+				cat <<EOF
 ## Summary
 - Remove stale vulnerability suppressions (vuln resolved upstream)
 ${REMOVED_LIST:+
@@ -229,11 +232,12 @@ ${EXPIRED_LIST}}
 ---
 *Auto-created by [vuln-suppression-check](${WF_URL}).*
 EOF
-		)"
+			)"
 
-	log_success "Cleanup PR created on branch $BRANCH"
-else
-	log_info "No file changes needed."
+		log_success "Cleanup PR created on branch $BRANCH"
+	else
+		log_info "No file changes needed."
+	fi
 fi
 
 if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then

@@ -725,6 +725,7 @@ stale (vulnerability resolved upstream). Expired suppressions fail the job.
 | ------------------------ | ----------------------- | ------------------------------------------ |
 | `osv-version`            | `2.3.5`                 | osv-scanner release version                |
 | `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
+| `check-script`           | tooling default         | Repo-local override supported              |
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
