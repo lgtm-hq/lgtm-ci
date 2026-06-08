@@ -42,13 +42,17 @@ def _read_suppressions_from_toml() -> list[dict[str, object]]:
             data = tomllib.load(f)
         from datetime import date
 
+        def _valid_ignore_until(entry: dict[str, object]) -> bool:
+            ignore_until = entry.get("ignoreUntil")
+            return ignore_until is None or isinstance(ignore_until, date)
+
         return [
             entry
             for entry in data.get("IgnoredVulns", [])
             if isinstance(entry, dict)
             and isinstance(entry.get("id"), str)
             and entry["id"].strip()
-            and isinstance(entry.get("ignoreUntil"), date)
+            and _valid_ignore_until(entry)
         ]
     except (tomllib.TOMLDecodeError, OSError) as e:
         print(f"Warning: failed to parse {toml_path}: {e}", file=sys.stderr)

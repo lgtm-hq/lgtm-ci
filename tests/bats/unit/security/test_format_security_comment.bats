@@ -69,3 +69,30 @@ EOF
 		"${BATS_TEST_TMPDIR}/missing.json"
 	assert_failure
 }
+
+@test "format-security-comment: reads TOML suppressions without ignoreUntil" {
+	local json_file="${BATS_TEST_TMPDIR}/osv-results.json"
+	cat >"$json_file" <<'EOF'
+{
+  "results": [
+    {
+      "tool": "osv_scanner",
+      "issues_count": 0,
+      "success": true
+    }
+  ]
+}
+EOF
+
+	cat >"${BATS_TEST_TMPDIR}/.osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-xxxx-yyyy-zzzz"
+reason = "No fix available"
+EOF
+
+	run bash -c "cd '${BATS_TEST_TMPDIR}' && python3 '${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py' osv-results.json"
+	assert_success
+	assert_output --partial "GHSA-xxxx-yyyy-zzzz"
+	assert_output --partial "No fix available"
+	refute_output --partial "No suppressions configured."
+}
