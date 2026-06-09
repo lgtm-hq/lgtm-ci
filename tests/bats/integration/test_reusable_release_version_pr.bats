@@ -38,9 +38,35 @@ load "../../helpers/common"
 	assert_success
 	run grep -F "ecosystem-config:" "$workflow"
 	assert_success
-	run grep -F "RELEASE_APP_ID:" "$workflow"
+	run awk '
+		/^      RELEASE_APP_ID:/ {
+			while ((getline line) > 0) {
+				if (line ~ /^      [A-Za-z_][A-Za-z0-9_-]+:/) {
+					break
+				}
+				if (line ~ /^        required: true$/) {
+					found_app_id = 1
+					break
+				}
+			}
+		}
+		END { exit !found_app_id }
+	' "$workflow"
 	assert_success
-	run grep -F "RELEASE_APP_PRIVATE_KEY:" "$workflow"
+	run awk '
+		/^      RELEASE_APP_PRIVATE_KEY:/ {
+			while ((getline line) > 0) {
+				if (line ~ /^      [A-Za-z_][A-Za-z0-9_-]+:/) {
+					break
+				}
+				if (line ~ /^        required: true$/) {
+					found_private_key = 1
+					break
+				}
+			}
+		}
+		END { exit !found_private_key }
+	' "$workflow"
 	assert_success
 }
 
