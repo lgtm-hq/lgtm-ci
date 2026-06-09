@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.43.0] - 2026-06-09
+
+### Added
+
+- **workflows**: standardize runner-image and runner-map contract (#339) (6712308)
 - **ci**: `validate-runner-contract.sh` and BATS contract tests for runner-image
   and runner-map policy (#338)
 
@@ -18,14 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `ubuntu-24.04` default; add missing inputs and complete multi-job wiring (#338)
 - **docs**: document `runner-map`, runner pinning exceptions, and consumer
   guidance in workflow contract (#338)
-
-### Deprecated
-
-### Removed
-
-### Fixed
-
-### Security
 
 ## [0.42.0] - 2026-06-09
 
@@ -1046,7 +1053,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.42.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.0...HEAD
+[0.43.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.1...v0.41.0
 [0.40.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.0...v0.40.1
