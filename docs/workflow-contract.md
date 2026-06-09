@@ -16,7 +16,8 @@ Where applicable, workflows accept:
 | `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)              |
 | `allowed-endpoints-mode`           | `replace` (default) or `append` (merge with preset, deduped)           |
 | `job-name`                         | Check name on always-run jobs; test summary suite title                |
-| `runner-image`                     | Runner label for long-running jobs                                     |
+| `runner-image`                     | GitHub-hosted runner OS label (default `ubuntu-24.04`)                 |
+| `runner-map`                       | JSON platform→runner map for multi-arch Docker (default `{}`)          |
 | `timeout-minutes`                  | Job timeout                                                            |
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
 | `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)                |
@@ -66,6 +67,41 @@ Contrast with **script-backed reusables** (quality, test-*, validate-*,
 pr-auto-assign, release-*, publish-*, etc.) where callers **should** pass
 `tooling-ref` matching the workflow pin so `scripts/ci/` and composites stay
 aligned.
+
+### Runner pinning
+
+Script-backed reusables expose `runner-image` on **every** job so callers can
+pin OS reproducibility (for example `ubuntu-24.04`). Defaults are
+`ubuntu-24.04`; production callers **should** pass an explicit pin.
+
+Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
+object mapping platform to runner label (for example
+`{"linux/arm64":"ubuntu-24.04-arm"}`). Platforms not in the map default to
+`ubuntu-24.04` with QEMU. Orchestration jobs inside `reusable-docker.yml`
+(`classify`, `merge`, summaries) stay on fixed `ubuntu-24.04` coordinators and
+are not caller-pinnable.
+
+#### Runner pinning exceptions
+
+These reusables intentionally omit `runner-image`:
+
+<!-- markdownlint-disable MD013 -->
+
+| Reusable                             | Rationale                                              |
+| ------------------------------------ | ------------------------------------------------------ |
+| `reusable-codeql.yml`                | Action-only wrapper (`github/codeql-action/*`)         |
+| `reusable-dependency-review.yml`     | Action-only wrapper                                    |
+| `reusable-scorecards.yml`            | Action-only wrapper                                    |
+| `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
+| `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
+| `reusable-publish-npm.yml`           | Hardcoded for npm provenance attestation               |
+| `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
+
+<!-- markdownlint-enable MD013 -->
+
+Contract enforcement: `scripts/ci/quality/validate-runner-contract.sh` (covered
+by BATS). See [reusable-workflows.md](reusable-workflows.md#runner-pinning) for
+caller examples including `runner-map`.
 
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
@@ -804,7 +840,7 @@ removing stale entries. Expired suppressions fail the job for manual review.
 | `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
 | `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
 | `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
-| `runner-image`           | `ubuntu-latest`                                      | Linux runners only (`install-osv-scanner.sh`)   |
+| `runner-image`           | `ubuntu-24.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
