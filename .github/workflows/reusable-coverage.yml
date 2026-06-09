@@ -90,6 +90,12 @@ on:
         type: string
         default: "Coverage Report"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
     outputs:
       coverage-percent:
         description: "Overall coverage percentage"
@@ -107,7 +113,7 @@ on:
 jobs:
   coverage:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
 
@@ -200,7 +206,7 @@ jobs:
     name: Publish Coverage
     needs: coverage
     if: inputs.publish-pages
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     concurrency:
       group: pages-${{ github.repository }}-${{ github.ref }}
       cancel-in-progress: false

@@ -44,6 +44,25 @@ reusables (quality, test-*, validate-*, release-*, etc.). Production callers
 should pin the workflow ref to a commit SHA and pass the same ref as
 `tooling-ref` on script-backed workflows.
 
+## Runner pinning
+
+Script-backed reusables accept `runner-image` on every job. Pin explicitly in
+production so runner OS does not drift with GitHub's `ubuntu-latest` alias:
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    with:
+      runner-image: ubuntu-24.04
+      tooling-ref: <sha>
+```
+
+Multi-arch Docker builds use `runner-map` instead — see
+[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables and
+npm/gem publish workflows do not expose `runner-image`; see
+[workflow-contract.md](workflow-contract.md#runner-pinning).
+
 **Action-only reusables** (labeler, dependency review, semantic PR title,
 CodeQL, Scorecard) do not run the full `scripts/ci/` suite in their analysis
 jobs; `tooling-ref` is optional and primarily pins egress composites.
@@ -753,7 +772,7 @@ stale (vulnerability resolved upstream). Expired suppressions fail the job.
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
-| `runner-image`           | `ubuntu-latest`         | Linux runners only (install script)        |
+| `runner-image`           | `ubuntu-24.04`          | Linux runners only (install script)        |
 
 Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.

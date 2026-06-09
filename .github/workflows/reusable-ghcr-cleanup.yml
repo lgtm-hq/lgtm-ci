@@ -56,6 +56,12 @@ on:
         type: string
         default: "github-tooling"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
     secrets:
       token:
         description: "GitHub token with packages:write scope"
@@ -64,7 +70,7 @@ on:
 jobs:
   cleanup:
     name: Clean Untagged Images
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 10
     permissions:
       contents: read

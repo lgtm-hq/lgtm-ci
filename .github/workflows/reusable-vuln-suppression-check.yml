@@ -76,7 +76,7 @@ on:
         description: "GitHub-hosted Linux runner image label (install script downloads linux_* binaries)"
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: "ubuntu-24.04"
       timeout-minutes:
         description: "Job timeout in minutes for the suppression check job"
         required: false

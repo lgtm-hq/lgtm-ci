@@ -57,10 +57,16 @@ on:
         type: string
         default: "Registry Health Check"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
 jobs:
   registry-health:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     outputs:
       digest-failure: ${{ steps.health.outputs.digest-failure }}
     permissions:
@@ -125,7 +131,7 @@ jobs:
     if: >-
       needs.registry-health.outputs.digest-failure == 'true' &&
       inputs.open-issue-on-failure
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       # Read lgtm-ci tooling repository
       contents: read

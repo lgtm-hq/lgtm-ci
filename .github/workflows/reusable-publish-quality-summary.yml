@@ -54,7 +54,7 @@ on:
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: "ubuntu-24.04"
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false

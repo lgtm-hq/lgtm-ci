@@ -68,10 +68,16 @@ on:
         type: string
         default: "github-tooling"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
 jobs:
   action-pinning:
     name: Validate Action Pinning
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
 

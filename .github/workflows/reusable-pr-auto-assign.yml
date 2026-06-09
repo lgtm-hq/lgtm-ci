@@ -50,10 +50,16 @@ name: Reusable PR Auto Assign
         type: string
         default: "github-tooling"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
 jobs:
   assign:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 5
     permissions:
       contents: read
