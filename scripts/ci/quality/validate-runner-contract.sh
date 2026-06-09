@@ -82,14 +82,15 @@ def is_script_backed(content: str) -> bool:
 
 def runner_image_default(content: str) -> str | None:
     match = re.search(
-        r"runner-image:\n(?:.*\n)*?        default: \"([^\"]+)\"",
+        r"runner-image:\n(?:.*\n)*?        default: (?:\"([^\"]+)\"|'([^']+)')",
         content,
     )
-    return match.group(1) if match else None
+    if not match:
+        return None
+    return match.group(1) or match.group(2)
 
 
 violations: list[str] = []
-warnings: list[str] = []
 
 for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     content = workflow.read_text()
@@ -122,8 +123,8 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     if has_runner:
         default = runner_image_default(content)
         if default == "ubuntu-latest":
-            warnings.append(
-                f"{rel}: runner-image default should be ubuntu-24.04 (found ubuntu-latest)",
+            violations.append(
+                f"{rel}: runner-image default must be ubuntu-24.04 (found ubuntu-latest)",
             )
         for job_id, runs_on in jobs.items():
             if runs_on != RUNNER_IMAGE_RUNS_ON:
@@ -146,9 +147,6 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
                     f"{rel}: script-backed reusable hardcodes runs-on {runs_on!r} "
                     f"on job {job_id} without runner-image input",
                 )
-
-for warning in warnings:
-    print(f"WARNING: {warning}", file=sys.stderr)
 
 if violations:
     for violation in violations:

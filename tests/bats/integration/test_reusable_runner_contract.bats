@@ -90,6 +90,54 @@ YAML
 	assert_success
 }
 
+@test "validate-runner-contract: flags ubuntu-latest runner-image default (double quotes)" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-latest-default-bad.yml" <<'YAML'
+---
+name: Latest default bad example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-latest"
+jobs:
+  work:
+    runs-on: ${{ inputs.runner-image }}
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "runner-image default must be ubuntu-24.04"
+}
+
+@test "validate-runner-contract: flags ubuntu-latest runner-image default (single quotes)" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-latest-default-single-quote-bad.yml" <<'YAML'
+---
+name: Latest default single quote bad example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: 'ubuntu-latest'
+jobs:
+  work:
+    runs-on: ${{ inputs.runner-image }}
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "runner-image default must be ubuntu-24.04"
+}
+
 @test "reusable-release-version-pr: exposes runner-image on all jobs" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
 	run grep -F 'runner-image:' "$workflow"
