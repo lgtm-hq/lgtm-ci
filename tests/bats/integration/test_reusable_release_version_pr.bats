@@ -23,9 +23,9 @@ load "../../helpers/common"
 @test "release-version-pr caller: passes release app secrets" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/release-version-pr.yml"
 
-	run grep -F "RELEASE_APP_ID:" "$workflow"
+	run grep -F "RELEASE_APP_ID: \${{ secrets.RELEASE_APP_ID }}" "$workflow"
 	assert_success
-	run grep -F "RELEASE_APP_PRIVATE_KEY:" "$workflow"
+	run grep -F "RELEASE_APP_PRIVATE_KEY: \${{ secrets.RELEASE_APP_PRIVATE_KEY }}" "$workflow"
 	assert_success
 }
 
@@ -48,8 +48,14 @@ load "../../helpers/common"
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
 
 	run awk '
-		/- name: Create GitHub App installation token/ { token_line = NR }
-		/fetch-depth: 0/ { checkout_line = NR }
+		/- name: Create GitHub App installation token/ { token_line = NR; after_token = 1 }
+		after_token && !checkout_line && /^      - name: Checkout repository/ {
+			in_auth_checkout = 1
+		}
+		in_auth_checkout && /fetch-depth: 0/ { checkout_line = NR }
+		in_auth_checkout && /^      - name:/ && $0 !~ /Checkout repository/ {
+			in_auth_checkout = 0
+		}
 		END { exit !(token_line && checkout_line && token_line < checkout_line) }
 	' "$workflow"
 	assert_success
