@@ -1,5 +1,8 @@
----
-name: "Release: Create Version PR"
+# SPDX-License-Identifier: MIT
+# Thin caller for CHANGELOG-only repos (no package version files to bump).
+# lgtm-ci itself uses this pattern — see .github/workflows/release-version-pr.yml.
+
+name: Release Version PR
 
 on:
   push:
@@ -12,10 +15,10 @@ concurrency:
 
 jobs:
   version-pr:
-    # yamllint disable-line rule:line-length
-    uses: ./.github/workflows/reusable-release-version-pr.yml
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@<sha>
     with:
       max-bump: minor
+      tooling-ref: <sha>
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
