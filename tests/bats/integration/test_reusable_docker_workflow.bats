@@ -79,3 +79,20 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	run grep -F 'Push image after health check' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-docker: health-check-per-platform waits for verify-per-platform" {
+	run grep -F 'needs: [classify, build-per-platform, verify-per-platform]' "$WORKFLOW" | grep -c 'health-check-per-platform' || true
+	run awk '
+		/name: Docker health check per platform/ { in_job = 1 }
+		in_job && /needs: \[classify, build-per-platform, verify-per-platform\]/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: deferred push path generates SBOM attestation" {
+	run grep -F 'Generate SBOM attestation' "$WORKFLOW"
+	assert_success
+	run grep -F 'uses: actions/attest@' "$WORKFLOW"
+	assert_success
+}

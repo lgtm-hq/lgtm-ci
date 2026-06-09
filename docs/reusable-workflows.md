@@ -579,14 +579,14 @@ jobs:
     with:
       push: true
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
-      health-check-cmd: curl -f http://localhost:8080/health
+      health-check-cmd: curl -f http://127.0.0.1:8080/health
       health-check-port: "8080"
       health-check-timeout: "30s"
 ```
 
 When `health-check-cmd` is set, the workflow loads or pulls the built image,
-starts a detached container, optionally waits for `health-check-port`, runs the
-command, and only then publishes the final manifest/tags.
+starts a detached container, waits for `health-check-port` on `127.0.0.1`, runs
+the command on the runner, and only then publishes the final manifest/tags.
 
 ### Combined push and PR validation
 

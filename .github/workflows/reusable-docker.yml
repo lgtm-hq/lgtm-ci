@@ -106,19 +106,20 @@ on:
         default: ""
       health-check-cmd:
         description: >-
-          Optional command run inside a detached container before publish, e.g.
-          `curl -f http://localhost:8080/health`. Starts the built image,
-          optionally waits for `health-check-port`, runs the command, then
-          tears down. When set with `push: true`, publish is gated on success.
-          Skipped when empty (preserves current behavior).
+          Optional command run on the runner against the published localhost
+          port before publish, e.g. `curl -f http://127.0.0.1:8080/health`.
+          Starts a detached container, waits for `health-check-port`, runs the
+          command on the runner (not inside the image), then tears down. Requires
+          `health-check-port`. When set with `push: true`, publish is gated on
+          success. Skipped when empty (preserves current behavior).
         required: false
         type: string
         default: ""
       health-check-port:
         description: >-
           Container port to publish on 127.0.0.1 and wait for before running
-          `health-check-cmd`. Omit when the command does not depend on a
-          listening port.
+          `health-check-cmd` on the runner. Required when `health-check-cmd`
+          is set.
         required: false
         type: string
         default: ""
@@ -443,8 +444,8 @@ jobs:
           platforms: ${{ inputs.platforms }}
           push: ${{ inputs.push && inputs.health-check-cmd == '' }}
           load: >-
-            ${{ (inputs.health-check-cmd != '' && (inputs.push || inputs.validate-on-pr || inputs.scan))
-              || (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
+            ${{ inputs.health-check-cmd != '' ||
+              (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
@@ -479,6 +480,24 @@ jobs:
           HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
           HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Install Syft
+        if: inputs.push && inputs.sbom && inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: install
+        run: .lgtm-ci-tooling/scripts/ci/actions/generate-sbom.sh
+
+      - name: Generate SBOM for attestation
+        if: inputs.push && inputs.sbom && inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: generate
+          TARGET: ${{ steps.local-health-check-image.outputs.image }}
+          TARGET_TYPE: image
+          FORMAT: spdx-json
+          OUTPUT_FILE: sbom.spdx.json
+        run: .lgtm-ci-tooling/scripts/ci/actions/generate-sbom.sh
 
       - name: Push image after health check
         if: inputs.push && inputs.health-check-cmd != ''
@@ -534,6 +553,16 @@ jobs:
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.metadata.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate SBOM attestation
+        if: inputs.push && inputs.sbom && inputs.health-check-cmd != ''
+        # Pinned to SHA for supply chain security
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          subject-digest: ${{ steps.metadata.outputs.digest }}
+          sbom-path: sbom.spdx.json
           push-to-registry: true
 
       - name: Install Cosign
@@ -681,8 +710,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: ${{ inputs.push }}
           load: >-
-            ${{ (inputs.health-check-cmd != '' && inputs.validate-on-pr && inputs.push == false)
-              || (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
+            ${{ inputs.health-check-cmd != '' ||
+              (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
           # yamllint disable rule:line-length
           tags: >-
             ${{ inputs.push
@@ -887,11 +916,15 @@ jobs:
   # Gates manifest merge on runtime validation of each staging image.
   health-check-per-platform:
     name: Docker health check per platform
-    needs: [classify, build-per-platform]
+    needs: [classify, build-per-platform, verify-per-platform]
     if: >-
+      always() &&
       needs.classify.outputs.use-split == 'true' &&
       inputs.push &&
-      inputs.health-check-cmd != ''
+      inputs.health-check-cmd != '' &&
+      needs.build-per-platform.result == 'success' &&
+      (needs.verify-per-platform.result == 'success' ||
+       needs.verify-per-platform.result == 'skipped')
     strategy:
       fail-fast: false
       matrix:

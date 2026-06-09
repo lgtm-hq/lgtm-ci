@@ -115,13 +115,21 @@ _run_script_any_bash() {
 }
 
 @test "build-docker classify: succeeds with health-check inputs set" {
-	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_CMD="curl -f http://127.0.0.1:8080/health"
 	export HEALTH_CHECK_PORT="8080"
 	export HEALTH_CHECK_TIMEOUT="45s"
 
 	_run_script
 	assert_success
 	assert_github_output "use-split" "true"
+}
+
+@test "build-docker classify: fails when health-check-cmd is set without port" {
+	export HEALTH_CHECK_CMD="curl -f http://127.0.0.1:8080/health"
+
+	_run_script
+	assert_failure
+	assert_output --partial "health-check-port is required"
 }
 
 @test "build-docker classify: disables split when push is false and validate-on-pr is false" {

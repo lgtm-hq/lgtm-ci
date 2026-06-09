@@ -94,10 +94,11 @@ run_health_check() {
 		echo "::endgroup::"
 	fi
 
-	echo "::group::Health check command: ${HEALTH_CHECK_CMD}"
-	# Intentionally word-split HEALTH_CHECK_CMD so callers can pass flags+args
+	echo "::group::Health check command (runner): ${HEALTH_CHECK_CMD}"
+	# Run on the runner against the published localhost port so distroless images
+	# do not need curl/wget inside the container.
 	# shellcheck disable=SC2086
-	docker exec "${container_id}" ${HEALTH_CHECK_CMD}
+	${HEALTH_CHECK_CMD}
 	echo "::endgroup::"
 
 	trap - EXIT
@@ -412,6 +413,9 @@ classify)
 		die "health-check-port must be a positive integer (1-65535): ${HEALTH_CHECK_PORT}"
 	fi
 	if [[ -n "$HEALTH_CHECK_CMD" ]]; then
+		if [[ -z "$HEALTH_CHECK_PORT" ]]; then
+			die "health-check-port is required when health-check-cmd is set (command runs on the runner against 127.0.0.1:PORT)"
+		fi
 		parse_duration_seconds "$HEALTH_CHECK_TIMEOUT" >/dev/null
 	fi
 
@@ -638,17 +642,18 @@ health-check)
 	#   IMAGE_NAME         - Registry-relative image name
 	#   PLATFORM           - Target platform (e.g. linux/arm64)
 	#   DIGEST_FILE        - Path to sha256 digest for the staging image
-	#   HEALTH_CHECK_CMD   - Command executed inside the running container
+	#   HEALTH_CHECK_CMD   - Command executed on the runner (requires port)
+	#   HEALTH_CHECK_PORT  - Port published on 127.0.0.1 for the command
 	#
 	# Optional environment variables:
-	#   HEALTH_CHECK_PORT     - Port to publish and wait for before the command
+	#   HEALTH_CHECK_TIMEOUT  - Max wait time (default: 30s)
 	#   HEALTH_CHECK_TIMEOUT  - Max wait time (default: 30s)
 	: "${REGISTRY:?REGISTRY is required}"
 	: "${IMAGE_NAME:?IMAGE_NAME is required}"
 	: "${PLATFORM:?PLATFORM is required}"
 	: "${DIGEST_FILE:?DIGEST_FILE is required}"
 	: "${HEALTH_CHECK_CMD:?HEALTH_CHECK_CMD is required}"
-	: "${HEALTH_CHECK_PORT:=}"
+	: "${HEALTH_CHECK_PORT:?HEALTH_CHECK_PORT is required}"
 	: "${HEALTH_CHECK_TIMEOUT:=30s}"
 
 	if [[ ! -s "$DIGEST_FILE" ]]; then
@@ -675,16 +680,16 @@ health-check-local)
 	#
 	# Required environment variables:
 	#   IMAGE              - Full local image reference (registry/name:tag)
-	#   HEALTH_CHECK_CMD   - Command executed inside the running container
+	#   HEALTH_CHECK_CMD   - Command executed on the runner (requires port)
+	#   HEALTH_CHECK_PORT  - Port published on 127.0.0.1 for the command
 	#
 	# Optional environment variables:
 	#   PLATFORM              - Target platform (e.g. linux/arm64)
-	#   HEALTH_CHECK_PORT     - Port to publish and wait for before the command
 	#   HEALTH_CHECK_TIMEOUT  - Max wait time (default: 30s)
 	: "${IMAGE:?IMAGE is required}"
 	: "${HEALTH_CHECK_CMD:?HEALTH_CHECK_CMD is required}"
+	: "${HEALTH_CHECK_PORT:?HEALTH_CHECK_PORT is required}"
 	: "${PLATFORM:=}"
-	: "${HEALTH_CHECK_PORT:=}"
 	: "${HEALTH_CHECK_TIMEOUT:=30s}"
 
 	export IMAGE PLATFORM HEALTH_CHECK_CMD HEALTH_CHECK_PORT HEALTH_CHECK_TIMEOUT

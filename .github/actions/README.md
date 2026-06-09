@@ -1724,11 +1724,12 @@ jobs:
   script run on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. Script
   owns the `docker run` invocation — full control over flags, env, network,
   tmpfs, etc. Mutually exclusive with `smoke-test` (default: '')
-- `health-check-cmd` - Optional command run inside a detached container before
-  publish (e.g. `curl -f http://localhost:8080/health`). Gates push/merge on
-  success. Skipped when empty (default: '')
-- `health-check-port` - Container port to publish on `127.0.0.1` and wait for
-  before running `health-check-cmd` (default: '')
+- `health-check-cmd` - Optional command run on the runner against the published
+  localhost port before publish (e.g. `curl -f http://127.0.0.1:8080/health`).
+  Gates push/merge on success. Requires `health-check-port`. Skipped when empty
+  (default: '')
+- `health-check-port` - Container port published on `127.0.0.1`; required when
+  `health-check-cmd` is set (default: '')
 - `health-check-timeout` - Max wait for the port to accept connections (default:
   `30s`)
 - `tooling-ref` - Git ref for the lgtm-ci tooling checkout. Defaults to the
@@ -1765,9 +1766,10 @@ job, so setting both fails fast before any build runs.
 **Detached-container health checks:**
 
 Set `health-check-cmd` to validate a running service before publish. The
-workflow starts a detached container from the built image, optionally waits
-for `health-check-port` on `127.0.0.1`, runs the command via `docker exec`,
-and tears down with logs on failure. On the split push path, a per-platform
+workflow starts a detached container from the built image, waits for
+`health-check-port` on `127.0.0.1`, runs the command on the runner (so
+distroless images work without curl/wget inside the container), and tears
+down with logs on failure. On the split push path, a per-platform
 `health-check-per-platform` job gates manifest merge; on the single build
 path, publish runs only after the local health check passes.
 

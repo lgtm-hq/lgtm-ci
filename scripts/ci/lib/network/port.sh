@@ -67,12 +67,16 @@ port_listening() {
 
 	if command_exists nc; then
 		nc -z 127.0.0.1 "$port" 2>/dev/null
-	elif command_exists bash; then
-		bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" 2>/dev/null
-	else
-		log_warn "No port-listening probe available (nc or bash /dev/tcp), assuming port $port is ready"
+		return $?
+	fi
+
+	# Bash /dev/tcp probe (this library is sourced from bash scripts).
+	if (exec 3<>/dev/tcp/127.0.0.1/"$port") 2>/dev/null; then
+		exec 3<&-
+		exec 3>&-
 		return 0
 	fi
+	return 1
 }
 
 # Wait for a TCP port to start accepting connections on localhost.
