@@ -62,3 +62,23 @@ EOF
 	run grep -F 'GHSA-active-4444' .osv-scanner.toml
 	assert_success
 }
+
+@test "remove-stale-suppressions: handles single-quoted id" {
+	cat >".osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = 'GHSA-stale-XXXX'
+reason = "resolved upstream"
+
+[[IgnoredVulns]]
+id = "GHSA-active-5555"
+reason = "still present"
+EOF
+
+	run bash -c "export REMOVE_IDS_JSON='[\"GHSA-stale-XXXX\"]'; python3 '$REMOVE_SCRIPT' .osv-scanner.toml"
+	assert_success
+	assert_output --partial "Removed: GHSA-stale-XXXX"
+	run grep -q 'GHSA-stale-XXXX' .osv-scanner.toml
+	assert_failure
+	run grep -F 'GHSA-active-5555' .osv-scanner.toml
+	assert_success
+}

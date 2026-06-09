@@ -139,7 +139,7 @@ jobs:
         env:
           OSV_VERSION: ${{ inputs.osv-version }}
           INSTALL_SCRIPT: ${{ inputs.install-script }}
-        run: bash "$GITHUB_WORKSPACE/$INSTALL_SCRIPT" "${{ inputs.osv-version }}"
+        run: bash "$GITHUB_WORKSPACE/$INSTALL_SCRIPT" "$OSV_VERSION"
 
       - name: Check suppression staleness
         shell: bash

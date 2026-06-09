@@ -517,6 +517,7 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 | `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
 | `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
 | `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
+| `osv-scanner`    | GitHub tooling + release assets + OSV APIs                           |
 
 ```yaml
 egress-policy: block

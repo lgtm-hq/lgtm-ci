@@ -20,7 +20,7 @@ import re
 import sys
 from pathlib import Path
 
-_ID_PATTERN = re.compile(r'^id\s*=\s*"([^"]+)"')
+_ID_PATTERN = re.compile(r"""^id\s*=\s*['"]([^'"]+)['"]""")
 
 
 def remove_stale_ignored_vulns(
