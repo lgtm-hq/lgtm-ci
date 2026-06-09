@@ -130,46 +130,7 @@ import json, sys
 print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
 ")
 
-	python3 - "$OSV_TOML" <<'PYEOF'
-import json, os, sys, tomllib
-from pathlib import Path
-
-toml_path = Path(sys.argv[1])
-remove_ids = set(json.loads(os.environ["REMOVE_IDS_JSON"]))
-
-with toml_path.open("rb") as f:
-    data = tomllib.load(f)
-
-ignored = data.get("IgnoredVulns", [])
-kept = [e for e in ignored if e.get("id") not in remove_ids]
-
-lines = toml_path.read_text().splitlines(keepends=True)
-header = []
-for line in lines:
-    if line.strip().startswith("#") or not line.strip():
-        header.append(line)
-    else:
-        break
-
-with toml_path.open("w") as f:
-    for line in header:
-        f.write(line)
-    for entry in kept:
-        f.write("[[IgnoredVulns]]\n")
-        f.write(f'id = "{entry["id"]}"\n')
-        if "ignoreUntil" in entry:
-            val = entry["ignoreUntil"]
-            iu = val.isoformat() if hasattr(val, "isoformat") else str(val)
-            f.write(f"ignoreUntil = {iu}\n")
-        if entry.get("reason"):
-            escaped = entry["reason"].replace("\\", "\\\\").replace('"', '\\"')
-            f.write(f'reason = "{escaped}"\n')
-        f.write("\n")
-
-removed = remove_ids - {e.get("id") for e in kept}
-for vid in sorted(removed):
-    print(f"Removed: {vid}", file=sys.stderr)
-PYEOF
+	python3 "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
 
 	if [[ -f "$OSV_TOML" ]]; then
 		if ! grep -qE '^\[' "$OSV_TOML"; then

@@ -75,6 +75,26 @@ EOF
 	assert_output --partial '"active": ["CVE-2024-00001"]'
 }
 
+@test "classify-suppressions: treats missing ignoreUntil as permanent suppression" {
+	cat >".osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-permanent-stale"
+reason = "no expiry date"
+
+[[IgnoredVulns]]
+id = "GHSA-permanent-active"
+reason = "no expiry date"
+EOF
+
+	local probe_json='{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-permanent-active"}]}]}]}'
+
+	run bash -c "printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
+	assert_success
+	assert_output --partial '"active": ["GHSA-permanent-active"]'
+	assert_output --partial '"stale": ["GHSA-permanent-stale"]'
+	assert_output --partial '"expired": []'
+}
+
 @test "classify-suppressions: fails on empty probe output" {
 	cat >".osv-scanner.toml" <<'EOF'
 [[IgnoredVulns]]

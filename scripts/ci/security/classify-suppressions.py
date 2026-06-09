@@ -36,7 +36,7 @@ class SuppressionEntry:
     """A single [[IgnoredVulns]] entry from .osv-scanner.toml."""
 
     id: str
-    ignore_until: date
+    ignore_until: date | None
     reason: str
 
 
@@ -56,11 +56,19 @@ def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
         if not isinstance(vuln_id, str) or not vuln_id:
             continue
         ignore_until = item.get("ignoreUntil")
-        if isinstance(ignore_until, datetime) or not isinstance(ignore_until, date):
+        if ignore_until is None:
+            pass
+        elif isinstance(ignore_until, datetime):
             print(
-                f"WARNING: skipping '{vuln_id}': ignoreUntil is "
-                f"{type(ignore_until).__name__} ({ignore_until!r}), "
-                f"expected date (not datetime)",
+                f"WARNING: skipping '{vuln_id}': ignoreUntil must be a date, "
+                f"not datetime ({ignore_until!r})",
+                file=sys.stderr,
+            )
+            continue
+        elif not isinstance(ignore_until, date):
+            print(
+                f"WARNING: skipping '{vuln_id}': ignoreUntil has unsupported "
+                f"type {type(ignore_until).__name__} ({ignore_until!r})",
                 file=sys.stderr,
             )
             continue
@@ -106,7 +114,7 @@ def classify(
 
     result: dict[str, list[str]] = {"active": [], "stale": [], "expired": []}
     for entry in entries:
-        if today > entry.ignore_until:
+        if entry.ignore_until is not None and today > entry.ignore_until:
             result["expired"].append(entry.id)
         elif entry.id in probe_ids:
             result["active"].append(entry.id)

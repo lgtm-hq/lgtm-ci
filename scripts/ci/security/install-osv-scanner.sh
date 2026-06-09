@@ -56,17 +56,36 @@ log_info "Installing osv-scanner v${OSV_VERSION}..."
 curl -fsSL "$BINARY_URL" -o "${TMPDIR}/osv-scanner"
 curl -fsSL "$CHECKSUMS_URL" -o "${TMPDIR}/SHA256SUMS"
 
-EXPECTED=$(grep "osv-scanner_${PLATFORM}" "${TMPDIR}/SHA256SUMS" | awk '{print $1}')
-ACTUAL=$(sha256sum "${TMPDIR}/osv-scanner" | awk '{print $1}')
+CHECKSUMS_SIG_URL="${BASE_URL}/osv-scanner_SHA256SUMS.sig"
+CHECKSUMS_CERT_URL="${BASE_URL}/osv-scanner_SHA256SUMS.pem"
+if curl -fsSL "$CHECKSUMS_SIG_URL" -o "${TMPDIR}/SHA256SUMS.sig" 2>/dev/null &&
+	curl -fsSL "$CHECKSUMS_CERT_URL" -o "${TMPDIR}/SHA256SUMS.pem" 2>/dev/null; then
+	if ! command -v cosign >/dev/null 2>&1; then
+		log_error "cosign is required to verify osv-scanner_SHA256SUMS signature"
+		exit 1
+	fi
+	log_info "Verifying SHA256SUMS sigstore signature..."
+	cosign verify-blob \
+		--signature "${TMPDIR}/SHA256SUMS.sig" \
+		--certificate "${TMPDIR}/SHA256SUMS.pem" \
+		--certificate-identity-regexp='https://github\.com/google/osv-scanner/.*' \
+		--certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
+		"${TMPDIR}/SHA256SUMS"
+	log_success "SHA256SUMS signature verified"
+else
+	log_info "Release does not publish SHA256SUMS sigstore assets; verifying binary checksum only"
+fi
 
-if [[ "$EXPECTED" != "$ACTUAL" ]]; then
-	log_error "SHA256 mismatch for osv-scanner v${OSV_VERSION}"
-	log_error "Expected: ${EXPECTED}"
-	log_error "Actual:   ${ACTUAL}"
+EXPECTED=$(grep "osv-scanner_${PLATFORM}" "${TMPDIR}/SHA256SUMS" | awk '{print $1}')
+if [[ -z "$EXPECTED" ]]; then
+	log_error "No checksum entry for osv-scanner_${PLATFORM} in SHA256SUMS"
 	exit 1
 fi
 
-log_success "SHA256 verified: ${ACTUAL}"
+printf '%s  osv-scanner\n' "$EXPECTED" | (
+	cd "${TMPDIR}" && sha256sum -c -
+)
+log_success "SHA256 verified: ${EXPECTED}"
 
 chmod +x "${TMPDIR}/osv-scanner"
 mv "${TMPDIR}/osv-scanner" "${INSTALL_DIR}/osv-scanner"
