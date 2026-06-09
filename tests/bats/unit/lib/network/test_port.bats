@@ -94,6 +94,33 @@ teardown() {
 }
 
 # =============================================================================
+# wait_for_port_listen tests
+# =============================================================================
+
+@test "wait_for_port_listen: succeeds when a listener is already bound" {
+	run bash -c '
+		source "$LIB_DIR/network/port.sh"
+		nc -l 127.0.0.1 49995 >/dev/null 2>&1 &
+		listener_pid=$!
+		trap "kill ${listener_pid} 2>/dev/null || true" EXIT
+		sleep 0.2
+		wait_for_port_listen 49995 2 0.1
+	'
+	assert_success
+}
+
+@test "wait_for_port_listen: fails when no listener is bound" {
+	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49994 1 0.1'
+	assert_failure
+}
+
+@test "wait_for_port_listen: logs waiting message" {
+	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49993 1 0.1 2>&1'
+	assert_failure
+	assert_output --partial "Waiting for port 49993 to accept connections"
+}
+
+# =============================================================================
 # Function export tests
 # =============================================================================
 

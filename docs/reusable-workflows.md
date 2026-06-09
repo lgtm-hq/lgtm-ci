@@ -564,6 +564,30 @@ jobs:
       smoke-test: --version
 ```
 
+### Push with runtime health check
+
+```yaml
+jobs:
+  docker:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      push: true
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      health-check-cmd: curl -f http://127.0.0.1:8080/health
+      health-check-port: "8080"
+      health-check-timeout: "30s"
+```
+
+When `health-check-cmd` is set, the workflow loads or pulls the built image,
+starts a detached container, waits for `health-check-port` on `127.0.0.1`, runs
+the command on the runner, and only then publishes the final manifest/tags.
+
 ### Combined push and PR validation
 
 ```yaml

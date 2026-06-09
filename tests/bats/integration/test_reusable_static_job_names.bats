@@ -116,6 +116,8 @@ YAML
 	assert_success
 	run grep -F 'name: Docker verify per platform' "$workflow"
 	assert_success
+	run grep -F 'name: Docker health check per platform' "$workflow"
+	assert_success
 }
 
 @test "reusable-test-e2e-matrix: test job uses static name" {
