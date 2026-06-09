@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.41.0] - 2026-06-09
+
+### Features
+
+- **ci**: add reusable-vuln-suppression-check for stale OSV suppression cleanup (#332) (f9aeaff)
+
 ## [0.40.1] - 2026-06-08
 
 ### Bug Fixes
@@ -1016,7 +1022,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.41.0...HEAD
+[0.41.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.1...v0.41.0
 [0.40.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.0...v0.40.1
 [0.40.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.38.0...v0.39.0
