@@ -82,12 +82,13 @@ def is_script_backed(content: str) -> bool:
 
 def runner_image_default(content: str) -> str | None:
     match = re.search(
-        r"runner-image:\n(?:.*\n)*?        default: (?:\"([^\"]+)\"|'([^']+)')",
+        r"runner-image:\n(?:.*\n)*?"
+        r"        default: (?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
         content,
     )
     if not match:
         return None
-    return match.group(1) or match.group(2)
+    return match.group(1) or match.group(2) or match.group(3)
 
 
 violations: list[str] = []
