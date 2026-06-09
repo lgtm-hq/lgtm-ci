@@ -94,10 +94,16 @@ run_health_check() {
 		echo "::endgroup::"
 	fi
 
-	echo "::group::Health check command (runner): ${HEALTH_CHECK_CMD}"
+	echo "::group::Health check command (runner): <redacted>"
 	# Run on the runner against the published localhost port so distroless images
 	# do not need curl/wget inside the container.
-	bash -c "$HEALTH_CHECK_CMD"
+	if ! timeout "${timeout_secs}s" bash -c "$HEALTH_CHECK_CMD"; then
+		local cmd_exit=$?
+		if [[ "$cmd_exit" -eq 124 ]]; then
+			die "Health check command timed out after ${HEALTH_CHECK_TIMEOUT}"
+		fi
+		die "Health check command failed (exit ${cmd_exit})"
+	fi
 	echo "::endgroup::"
 
 	trap - EXIT

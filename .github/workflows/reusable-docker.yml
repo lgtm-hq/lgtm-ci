@@ -930,6 +930,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    # contents: read — sparse-checkout lgtm-ci tooling scripts for build-docker.sh.
     # packages: read — pull per-platform staging images by digest before merge.
     permissions:
       contents: read

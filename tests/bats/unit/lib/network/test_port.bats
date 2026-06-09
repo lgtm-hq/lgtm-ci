@@ -116,6 +116,7 @@ teardown() {
 
 @test "wait_for_port_listen: logs waiting message" {
 	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49993 1 0.1 2>&1'
+	assert_failure
 	assert_output --partial "Waiting for port 49993 to accept connections"
 }
 
