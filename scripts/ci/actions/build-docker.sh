@@ -5,7 +5,9 @@
 # Required environment variables:
 #   STEP - Which step to run: setup, build, push, metadata, parse-tags, summary,
 #          set-output-digest, classify, record-digest, smoke-test, smoke-test-local,
-#          resolve-local-scan-image, sign-image, merge-manifests, cleanup-staging
+#          health-check, health-check-local, resolve-local-health-check-image,
+#          resolve-local-scan-image, sign-image,
+#          merge-manifests, cleanup-staging
 #
 # Optional environment variables:
 #   CONTEXT - Build context path (default: .)
@@ -34,6 +36,74 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/docker.sh
 source "$SCRIPT_DIR/../lib/docker.sh"
+# shellcheck source=../lib/network/port.sh
+source "$SCRIPT_DIR/../lib/network/port.sh"
+
+# Parse a duration string (e.g. 30s) into whole seconds.
+parse_duration_seconds() {
+	local raw="${1:-30s}"
+
+	if [[ "$raw" =~ ^([0-9]+)s$ ]]; then
+		echo "${BASH_REMATCH[1]}"
+	elif [[ "$raw" =~ ^[0-9]+$ ]]; then
+		echo "$raw"
+	else
+		die "Invalid HEALTH_CHECK_TIMEOUT: ${raw} (use e.g. 30s)"
+	fi
+}
+
+# Run a detached-container health check against IMAGE.
+run_health_check() {
+	: "${IMAGE:?IMAGE is required}"
+	: "${HEALTH_CHECK_CMD:?HEALTH_CHECK_CMD is required}"
+	: "${HEALTH_CHECK_TIMEOUT:=30s}"
+	: "${HEALTH_CHECK_PORT:=}"
+	: "${PLATFORM:=}"
+
+	local timeout_secs container_id=""
+	timeout_secs=$(parse_duration_seconds "$HEALTH_CHECK_TIMEOUT")
+
+	cleanup_health_check_container() {
+		if [[ -n "$container_id" ]]; then
+			echo "::group::Container logs (${container_id})"
+			docker logs "$container_id" 2>&1 || true
+			echo "::endgroup::"
+			docker rm -f "$container_id" >/dev/null 2>&1 || true
+			container_id=""
+		fi
+	}
+	trap cleanup_health_check_container EXIT
+
+	local -a run_opts=(-d)
+	if [[ -n "$HEALTH_CHECK_PORT" ]]; then
+		run_opts+=(-p "127.0.0.1:${HEALTH_CHECK_PORT}:${HEALTH_CHECK_PORT}")
+	fi
+	if [[ -n "$PLATFORM" ]]; then
+		run_opts+=(--platform "${PLATFORM}")
+	fi
+
+	echo "::group::Starting container from ${IMAGE}"
+	container_id=$(docker run "${run_opts[@]}" "${IMAGE}")
+	echo "::endgroup::"
+
+	if [[ -n "$HEALTH_CHECK_PORT" ]]; then
+		echo "::group::Waiting for port ${HEALTH_CHECK_PORT}"
+		if ! wait_for_port_listen "$HEALTH_CHECK_PORT" "$timeout_secs" 1; then
+			die "Port ${HEALTH_CHECK_PORT} not ready within ${HEALTH_CHECK_TIMEOUT}"
+		fi
+		echo "::endgroup::"
+	fi
+
+	echo "::group::Health check command: ${HEALTH_CHECK_CMD}"
+	# Intentionally word-split HEALTH_CHECK_CMD so callers can pass flags+args
+	# shellcheck disable=SC2086
+	docker exec "${container_id}" ${HEALTH_CHECK_CMD}
+	echo "::endgroup::"
+
+	trap - EXIT
+	cleanup_health_check_container
+	log_success "Health check passed for ${IMAGE}"
+}
 
 case "$STEP" in
 setup)
@@ -312,6 +382,9 @@ classify)
 	#   SMOKE_TEST        - Smoke-test shorthand command (validated only; not used here).
 	#   SMOKE_TEST_SCRIPT - Smoke-test script path (validated only; not used here).
 	#                       SMOKE_TEST and SMOKE_TEST_SCRIPT are mutually exclusive.
+	#   HEALTH_CHECK_CMD  - Optional detached-container health check command.
+	#   HEALTH_CHECK_PORT - Optional container port to expose and wait for.
+	#   HEALTH_CHECK_TIMEOUT - Optional wait timeout (default: 30s).
 	#
 	# Outputs:
 	#   use-split - "true" when split per-platform build should be used
@@ -322,10 +395,20 @@ classify)
 	: "${RUNNER_MAP:={}}"
 	: "${SMOKE_TEST:=}"
 	: "${SMOKE_TEST_SCRIPT:=}"
+	: "${HEALTH_CHECK_CMD:=}"
+	: "${HEALTH_CHECK_PORT:=}"
+	: "${HEALTH_CHECK_TIMEOUT:=30s}"
 
 	# Mutex: smoke-test and smoke-test-script cannot both be set
 	if [[ -n "$SMOKE_TEST" && -n "$SMOKE_TEST_SCRIPT" ]]; then
 		die "smoke-test and smoke-test-script are mutually exclusive (set at most one)"
+	fi
+
+	if [[ -n "$HEALTH_CHECK_PORT" && ! "$HEALTH_CHECK_PORT" =~ ^[0-9]+$ ]]; then
+		die "health-check-port must be a positive integer: ${HEALTH_CHECK_PORT}"
+	fi
+	if [[ -n "$HEALTH_CHECK_CMD" ]]; then
+		parse_duration_seconds "$HEALTH_CHECK_TIMEOUT" >/dev/null
 	fi
 
 	# Validate RUNNER_MAP is parseable JSON
@@ -505,6 +588,25 @@ smoke-test)
 	fi
 	;;
 
+resolve-local-health-check-image)
+	# Resolve the first metadata tag for a locally loaded health-check image.
+	#
+	# Required environment variables:
+	#   TAGS - Newline-separated image tags from docker/metadata-action
+	#
+	# Outputs:
+	#   image - First tag suitable for detached-container health checks
+	: "${TAGS:?TAGS is required}"
+
+	first_tag=$(echo "$TAGS" | head -1 | tr -d '[:space:]')
+	if [[ -z "$first_tag" ]]; then
+		die "No image tag available for local health check"
+	fi
+
+	set_github_output "image" "$first_tag"
+	log_info "Local health-check image: ${first_tag}"
+	;;
+
 resolve-local-scan-image)
 	# Resolve the first metadata tag for scanning a locally loaded image.
 	#
@@ -522,6 +624,67 @@ resolve-local-scan-image)
 
 	set_github_output "ref" "$first_tag"
 	log_info "Local scan image: ${first_tag}"
+	;;
+
+health-check)
+	# Run a detached-container health check against a staging image by digest.
+	#
+	# Required environment variables:
+	#   REGISTRY           - Container registry URL
+	#   IMAGE_NAME         - Registry-relative image name
+	#   PLATFORM           - Target platform (e.g. linux/arm64)
+	#   DIGEST_FILE        - Path to sha256 digest for the staging image
+	#   HEALTH_CHECK_CMD   - Command executed inside the running container
+	#
+	# Optional environment variables:
+	#   HEALTH_CHECK_PORT     - Port to publish and wait for before the command
+	#   HEALTH_CHECK_TIMEOUT  - Max wait time (default: 30s)
+	: "${REGISTRY:?REGISTRY is required}"
+	: "${IMAGE_NAME:?IMAGE_NAME is required}"
+	: "${PLATFORM:?PLATFORM is required}"
+	: "${DIGEST_FILE:?DIGEST_FILE is required}"
+	: "${HEALTH_CHECK_CMD:?HEALTH_CHECK_CMD is required}"
+	: "${HEALTH_CHECK_PORT:=}"
+	: "${HEALTH_CHECK_TIMEOUT:=30s}"
+
+	if [[ ! -s "$DIGEST_FILE" ]]; then
+		die "DIGEST_FILE missing or empty: ${DIGEST_FILE}"
+	fi
+
+	digest=$(<"$DIGEST_FILE")
+	if ! [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
+		die "Invalid digest in ${DIGEST_FILE}: ${digest}"
+	fi
+
+	IMAGE="${REGISTRY}/${IMAGE_NAME}@${digest}"
+	export IMAGE PLATFORM HEALTH_CHECK_CMD HEALTH_CHECK_PORT HEALTH_CHECK_TIMEOUT
+
+	echo "::group::Pulling ${IMAGE} (${PLATFORM})"
+	docker pull --platform "${PLATFORM}" "${IMAGE}"
+	echo "::endgroup::"
+
+	run_health_check
+	;;
+
+health-check-local)
+	# Run a detached-container health check against a locally loaded image.
+	#
+	# Required environment variables:
+	#   IMAGE              - Full local image reference (registry/name:tag)
+	#   HEALTH_CHECK_CMD   - Command executed inside the running container
+	#
+	# Optional environment variables:
+	#   PLATFORM              - Target platform (e.g. linux/arm64)
+	#   HEALTH_CHECK_PORT     - Port to publish and wait for before the command
+	#   HEALTH_CHECK_TIMEOUT  - Max wait time (default: 30s)
+	: "${IMAGE:?IMAGE is required}"
+	: "${HEALTH_CHECK_CMD:?HEALTH_CHECK_CMD is required}"
+	: "${PLATFORM:=}"
+	: "${HEALTH_CHECK_PORT:=}"
+	: "${HEALTH_CHECK_TIMEOUT:=30s}"
+
+	export IMAGE PLATFORM HEALTH_CHECK_CMD HEALTH_CHECK_PORT HEALTH_CHECK_TIMEOUT
+	run_health_check
 	;;
 
 smoke-test-local)
@@ -703,6 +866,7 @@ summary)
 	: "${SCAN_ENABLED:=false}"
 	: "${VALIDATE_ON_PR:=false}"
 	: "${MATRIX:=}"
+	: "${HEALTH_CHECK_ENABLED:=false}"
 
 	full_image="${REGISTRY}/${IMAGE_NAME}"
 
@@ -769,6 +933,13 @@ summary)
 		add_github_summary "### Vulnerability scan"
 		add_github_summary ""
 		add_github_summary "Trivy scanned CRITICAL/HIGH findings. Review the Security tab for SARIF results."
+		add_github_summary ""
+	fi
+
+	if [[ "$HEALTH_CHECK_ENABLED" == "true" ]]; then
+		add_github_summary "### Health check"
+		add_github_summary ""
+		add_github_summary "Detached-container health check passed before publish."
 		add_github_summary ""
 	fi
 

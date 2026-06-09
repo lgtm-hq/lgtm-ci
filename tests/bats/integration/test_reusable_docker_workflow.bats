@@ -21,7 +21,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 @test "reusable-docker: build-per-platform job passes target input to build-push-action" {
 	run grep -cE '^[[:space:]]+target: \$\{\{ inputs\.target \}\}$' "$WORKFLOW"
 	assert_success
-	assert_output "2"
+	assert_output "3"
 }
 
 @test "reusable-docker: exposes target workflow input" {
@@ -49,4 +49,33 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 @test "reusable-docker: build job does not pass raw sbom or provenance inputs" {
 	run grep -E '^[[:space:]]+(provenance|sbom): \$\{\{ inputs\.(provenance|sbom) \}\}$' "$WORKFLOW"
 	assert_failure
+}
+
+@test "reusable-docker: exposes health-check workflow inputs" {
+	run grep -E '^[[:space:]]+health-check-cmd:$' "$WORKFLOW"
+	assert_success
+	run grep -E '^[[:space:]]+health-check-port:$' "$WORKFLOW"
+	assert_success
+	run grep -E '^[[:space:]]+health-check-timeout:$' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: per-platform jobs use static health-check display name" {
+	run grep -F 'name: Docker health check per platform' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: merge job gates on health-check-per-platform success" {
+	run grep -F 'needs.health-check-per-platform.result ==' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: build job defers push when health-check-cmd is set" {
+	run grep -E 'push: \$\{\{ inputs\.push && inputs\.health-check-cmd ==' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: build job publishes only after health check when enabled" {
+	run grep -F 'Build and push after health check' "$WORKFLOW"
+	assert_success
 }

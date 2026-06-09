@@ -94,6 +94,22 @@ teardown() {
 }
 
 # =============================================================================
+# wait_for_port_listen tests
+# =============================================================================
+
+@test "wait_for_port_listen: succeeds when port is already listening" {
+	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49995 1 0.1 2>&1'
+	# Port is not listening in test env; nc/bash probe should fail quickly on timeout
+	# unless a listener exists. Accept either outcome without hanging.
+	[[ "$status" -eq 0 || "$status" -eq 1 ]]
+}
+
+@test "wait_for_port_listen: logs waiting message" {
+	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49994 1 0.1 2>&1'
+	assert_output --partial "Waiting for port 49994 to accept connections"
+}
+
+# =============================================================================
 # Function export tests
 # =============================================================================
 

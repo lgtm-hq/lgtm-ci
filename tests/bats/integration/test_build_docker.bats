@@ -22,7 +22,7 @@ setup() {
 	export PLATFORMS="linux/amd64,linux/arm64"
 	export PUSH="true"
 	export RUNNER_MAP='{"linux/arm64":"ubuntu-24.04-arm"}'
-	unset SMOKE_TEST SMOKE_TEST_SCRIPT || true
+	unset SMOKE_TEST SMOKE_TEST_SCRIPT HEALTH_CHECK_CMD HEALTH_CHECK_PORT HEALTH_CHECK_TIMEOUT || true
 }
 
 teardown() {
@@ -82,6 +82,34 @@ _run_script_any_bash() {
 }
 
 @test "build-docker classify: succeeds with neither smoke input set" {
+	_run_script
+	assert_success
+	assert_github_output "use-split" "true"
+}
+
+@test "build-docker classify: fails when health-check-port is not numeric" {
+	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_PORT="not-a-port"
+
+	_run_script
+	assert_failure
+	assert_output --partial "health-check-port must be a positive integer"
+}
+
+@test "build-docker classify: fails when health-check-timeout is invalid" {
+	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_TIMEOUT="30x"
+
+	_run_script
+	assert_failure
+	assert_output --partial "Invalid HEALTH_CHECK_TIMEOUT"
+}
+
+@test "build-docker classify: succeeds with health-check inputs set" {
+	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_PORT="8080"
+	export HEALTH_CHECK_TIMEOUT="45s"
+
 	_run_script
 	assert_success
 	assert_github_output "use-split" "true"
@@ -337,6 +365,28 @@ _run_script_any_bash() {
 	_run_script_any_bash
 	assert_failure
 	assert_output --partial "No image tag available"
+}
+
+# =============================================================================
+# resolve-local-health-check-image step
+# =============================================================================
+
+@test "build-docker resolve-local-health-check-image: writes first tag to GITHUB_OUTPUT" {
+	export STEP="resolve-local-health-check-image"
+	export TAGS=$'ghcr.io/org/repo:sha-abc123\nghcr.io/org/repo:main'
+
+	_run_script_any_bash
+	assert_success
+	assert_github_output "image" "ghcr.io/org/repo:sha-abc123"
+}
+
+@test "build-docker resolve-local-health-check-image: fails when TAGS is unset" {
+	export STEP="resolve-local-health-check-image"
+	unset TAGS
+
+	_run_script_any_bash
+	assert_failure
+	assert_output --partial "TAGS"
 }
 
 # =============================================================================

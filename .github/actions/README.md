@@ -1724,6 +1724,13 @@ jobs:
   script run on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. Script
   owns the `docker run` invocation — full control over flags, env, network,
   tmpfs, etc. Mutually exclusive with `smoke-test` (default: '')
+- `health-check-cmd` - Optional command run inside a detached container before
+  publish (e.g. `curl -f http://localhost:8080/health`). Gates push/merge on
+  success. Skipped when empty (default: '')
+- `health-check-port` - Container port to publish on `127.0.0.1` and wait for
+  before running `health-check-cmd` (default: '')
+- `health-check-timeout` - Max wait for the port to accept connections (default:
+  `30s`)
 - `tooling-ref` - Git ref for the lgtm-ci tooling checkout. Defaults to the
   reusable workflow commit (the workflow's own pinned commit). Override to pin
   a specific tag or SHA (default: '')
@@ -1754,6 +1761,15 @@ image. `smoke-test` is a convenience for trivial checks like `--version`;
 reach for `smoke-test-script` when you need `-e`, `--network`, `--read-only`,
 or any other `docker run` flag. Validation is performed in the `classify`
 job, so setting both fails fast before any build runs.
+
+**Detached-container health checks:**
+
+Set `health-check-cmd` to validate a running service before publish. The
+workflow starts a detached container from the built image, optionally waits
+for `health-check-port` on `127.0.0.1`, runs the command via `docker exec`,
+and tears down with logs on failure. On the split push path, a per-platform
+`health-check-per-platform` job gates manifest merge; on the single build
+path, publish runs only after the local health check passes.
 
 **Migration from vendored scripts:**
 

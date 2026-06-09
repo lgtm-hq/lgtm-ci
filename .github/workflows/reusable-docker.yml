@@ -104,6 +104,31 @@ on:
         required: false
         type: string
         default: ""
+      health-check-cmd:
+        description: >-
+          Optional command run inside a detached container before publish, e.g.
+          `curl -f http://localhost:8080/health`. Starts the built image,
+          optionally waits for `health-check-port`, runs the command, then
+          tears down. When set with `push: true`, publish is gated on success.
+          Skipped when empty (preserves current behavior).
+        required: false
+        type: string
+        default: ""
+      health-check-port:
+        description: >-
+          Container port to publish on 127.0.0.1 and wait for before running
+          `health-check-cmd`. Omit when the command does not depend on a
+          listening port.
+        required: false
+        type: string
+        default: ""
+      health-check-timeout:
+        description: >-
+          Max wait time for `health-check-port` to accept connections before
+          running `health-check-cmd` (e.g. 30s).
+        required: false
+        type: string
+        default: "30s"
       validate-on-pr:
         description: >-
           When true AND push is false, use the split per-platform path (native
@@ -288,6 +313,9 @@ jobs:
           RUNNER_MAP: ${{ inputs.runner-map }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Single-platform builds, or multi-platform when push is disabled (QEMU fallback)
@@ -413,8 +441,10 @@ jobs:
           context: ${{ inputs.context }}
           file: ${{ inputs.file }}
           platforms: ${{ inputs.platforms }}
-          push: ${{ inputs.push }}
-          load: ${{ inputs.push == false && (inputs.validate-on-pr || inputs.scan) }}
+          push: ${{ inputs.push && inputs.health-check-cmd == '' }}
+          load: >-
+            ${{ (inputs.health-check-cmd != '' && (inputs.push || inputs.validate-on-pr || inputs.scan))
+              || (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
@@ -427,6 +457,51 @@ jobs:
             ${{ inputs.no-cache == false && 'type=gha,mode=max' || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0},mode=max', inputs.cache-registry-ref) || '' }}
           # yamllint enable rule:line-length
+          provenance: ${{ inputs.provenance && inputs.push && inputs.health-check-cmd == '' }}
+          sbom: ${{ inputs.sbom && inputs.push && inputs.health-check-cmd == '' }}
+
+      - name: Resolve local image for health check
+        if: inputs.health-check-cmd != ''
+        id: local-health-check-image
+        shell: bash
+        env:
+          STEP: resolve-local-health-check-image
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Health check
+        if: inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: health-check-local
+          IMAGE: ${{ steps.local-health-check-image.outputs.image }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Build and push after health check
+        id: build-push
+        if: inputs.push && inputs.health-check-cmd != ''
+        # Pinned to SHA for supply chain security
+        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: ${{ inputs.platforms }}
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
+          # yamllint disable rule:line-length
+          cache-from: |
+            ${{ inputs.no-cache == false && 'type=gha' || '' }}
+            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}', inputs.cache-registry-ref) || '' }}
+          cache-to: |
+            ${{ inputs.no-cache == false && 'type=gha,mode=max' || '' }}
+            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0},mode=max', inputs.cache-registry-ref) || '' }}
+          # yamllint enable rule:line-length
           provenance: ${{ inputs.provenance && inputs.push }}
           sbom: ${{ inputs.sbom && inputs.push }}
 
@@ -436,7 +511,7 @@ jobs:
         shell: bash
         env:
           STEP: set-output-digest
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build-push.outputs.digest || steps.build.outputs.digest }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Resolve local image for scan
@@ -472,7 +547,7 @@ jobs:
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.build-push.outputs.digest || steps.build.outputs.digest }}
           push-to-registry: true
 
       - name: Install Cosign
@@ -484,7 +559,7 @@ jobs:
         shell: bash
         env:
           STEP: sign-image
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.build-push.outputs.digest || steps.build.outputs.digest }}
           REGISTRY: ${{ inputs.registry }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
@@ -502,6 +577,7 @@ jobs:
           DIGEST: ${{ steps.metadata.outputs.digest || '' }}
           COSIGN_SIGNED: ${{ inputs.cosign-sign && inputs.push }}
           SCAN_ENABLED: ${{ inputs.scan }}
+          HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Per-platform native build leg (multi-arch split path).
@@ -618,7 +694,9 @@ jobs:
           file: ${{ inputs.file }}
           platforms: ${{ matrix.platform }}
           push: ${{ inputs.push }}
-          load: ${{ inputs.push == false && (inputs.validate-on-pr || inputs.scan) }}
+          load: >-
+            ${{ (inputs.health-check-cmd != '' && inputs.validate-on-pr && inputs.push == false)
+              || (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
           # yamllint disable rule:line-length
           tags: >-
             ${{ inputs.push
@@ -659,6 +737,22 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Health check (${{ matrix.platform }})
+        if: >-
+          inputs.validate-on-pr && inputs.push == false &&
+          inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: health-check-local
+          IMAGE: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          PLATFORM: ${{ matrix.platform }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
@@ -803,17 +897,119 @@ jobs:
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
+  # Optional per-platform detached-container health check (push path only).
+  # Gates manifest merge on runtime validation of each staging image.
+  health-check-per-platform:
+    name: Docker health check per platform
+    needs: [classify, build-per-platform]
+    if: >-
+      needs.classify.outputs.use-split == 'true' &&
+      inputs.push &&
+      inputs.health-check-cmd != ''
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.classify.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+      - name: Setup QEMU
+        if: ${{ matrix.qemu }}
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Validate registry
+        if: inputs.push
+        shell: bash
+        env:
+          STEP: validate
+          REGISTRY: ${{ inputs.registry }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
+
+      - name: Login to GHCR
+        if: inputs.push && inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Login to Docker Hub
+        if: inputs.push && inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Download staging digest
+        if: inputs.push
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: staging-digest-${{ matrix.slug }}
+          path: ${{ runner.temp }}/staging-digest
+
+      - name: Health check (${{ matrix.platform }})
+        shell: bash
+        env:
+          STEP: health-check
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
+          PLATFORM: ${{ matrix.platform }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
   # Assemble multi-arch manifest from per-platform staging images
   merge:
     name: Merge Manifests
-    needs: [classify, build-per-platform, verify-per-platform]
+    needs: [classify, build-per-platform, verify-per-platform, health-check-per-platform]
     if: >-
       always() &&
       inputs.push &&
       needs.classify.outputs.use-split == 'true' &&
       needs.build-per-platform.result == 'success' &&
       (needs.verify-per-platform.result == 'success' ||
-       needs.verify-per-platform.result == 'skipped')
+       needs.verify-per-platform.result == 'skipped') &&
+      (needs.health-check-per-platform.result == 'success' ||
+       needs.health-check-per-platform.result == 'skipped')
     runs-on: ubuntu-24.04
     permissions:
       contents: read
@@ -984,12 +1180,13 @@ jobs:
           DIGEST: ${{ steps.metadata.outputs.digest || '' }}
           COSIGN_SIGNED: ${{ inputs.cosign-sign && inputs.push }}
           SCAN_ENABLED: ${{ inputs.scan }}
+          HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
           MATRIX: ${{ needs.classify.outputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   summary-validate:
     name: Validation Summary
-    needs: [classify, build-per-platform, verify-per-platform]
+    needs: [classify, build-per-platform, verify-per-platform, health-check-per-platform]
     if: >-
       always() &&
       needs.classify.outputs.use-split == 'true' &&
@@ -1046,6 +1243,7 @@ jobs:
           PUSH: ${{ inputs.push }}
           SCAN_ENABLED: ${{ inputs.scan }}
           VALIDATE_ON_PR: true
+          HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
           MATRIX: ${{ needs.classify.outputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 

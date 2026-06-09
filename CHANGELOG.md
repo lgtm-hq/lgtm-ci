@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: optional detached-container health check in `reusable-docker.yml`
+  gates publish on runtime validation (`health-check-cmd`, `health-check-port`,
+  `health-check-timeout`) (#65)
+
 ### Changed
 
 ### Deprecated

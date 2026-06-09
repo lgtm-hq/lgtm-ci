@@ -54,6 +54,50 @@ port_available() {
 	fi
 }
 
+# Check if a TCP port is accepting connections on localhost.
+# Returns: 0 when the port is listening, 1 otherwise.
+port_listening() {
+	local port="$1"
+
+	if [[ -z "$port" || ! "$port" =~ ^[0-9]+$ ]] || ((port < 1 || port > 65535)); then
+		log_warn "Invalid port: $port"
+		return 1
+	fi
+
+	if command_exists nc; then
+		nc -z 127.0.0.1 "$port" 2>/dev/null
+	elif command_exists bash; then
+		bash -c "exec 3<>/dev/tcp/127.0.0.1/${port}" 2>/dev/null
+	else
+		log_warn "No port-listening probe available (nc or bash /dev/tcp), assuming port $port is ready"
+		return 0
+	fi
+}
+
+# Wait for a TCP port to start accepting connections on localhost.
+# Usage: wait_for_port_listen 8080 30 1
+# Returns: 0 when the port is listening, 1 on timeout.
+wait_for_port_listen() {
+	local port="${1:?port is required}"
+	local timeout="${2:-30}"
+	local interval="${3:-1}"
+	local elapsed=0
+
+	log_info "Waiting for port ${port} to accept connections (timeout: ${timeout}s)..."
+
+	while ! port_listening "$port"; do
+		if awk "BEGIN {exit !($elapsed >= $timeout)}"; then
+			log_error "Port ${port} not ready after ${timeout}s"
+			return 1
+		fi
+		sleep "$interval"
+		elapsed=$(awk "BEGIN {print $elapsed + $interval}")
+	done
+
+	log_success "Port ${port} is accepting connections"
+	return 0
+}
+
 # Wait for port to become available
 # Usage: wait_for_port 4000 10 0.5
 # Note: Returns 0 even on timeout (logs warning, continues anyway) for CI resilience.
@@ -82,4 +126,4 @@ wait_for_port() {
 # =============================================================================
 # Export functions
 # =============================================================================
-export -f port_available wait_for_port
+export -f port_available port_listening wait_for_port_listen wait_for_port
