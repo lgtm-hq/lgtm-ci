@@ -31,6 +31,12 @@ source "$LIB_DIR/fs.sh"
 
 OSV_VERSION="${1:-${OSV_VERSION:-2.3.5}}"
 
+OS=$(uname -s)
+if [[ "$OS" != "Linux" ]]; then
+	log_error "osv-scanner install supports Linux runners only (detected: $OS)"
+	exit 1
+fi
+
 ARCH=$(uname -m)
 case "$ARCH" in
 x86_64) PLATFORM="linux_amd64" ;;
@@ -76,7 +82,9 @@ else
 	log_info "Release does not publish SHA256SUMS sigstore assets; verifying binary checksum only"
 fi
 
-EXPECTED=$(grep "osv-scanner_${PLATFORM}" "${TMPDIR}/SHA256SUMS" | awk '{print $1}')
+EXPECTED=$(
+	awk -v fn="osv-scanner_${PLATFORM}" '$2 == fn { print $1; exit }' "${TMPDIR}/SHA256SUMS"
+)
 if [[ -z "$EXPECTED" ]]; then
 	log_error "No checksum entry for osv-scanner_${PLATFORM} in SHA256SUMS"
 	exit 1

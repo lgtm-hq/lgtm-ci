@@ -73,7 +73,7 @@ on:
         type: string
         default: "osv-scanner"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: "GitHub-hosted Linux runner image label (install script downloads linux_* binaries)"
         required: false
         type: string
         default: "ubuntu-latest"

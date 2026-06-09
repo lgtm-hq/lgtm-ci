@@ -729,6 +729,10 @@ stale (vulnerability resolved upstream). Expired suppressions fail the job.
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
+| `runner-image`           | `ubuntu-latest`         | Linux runners only (install script)        |
+
+Use a Linux `runner-image`; the install script downloads `linux_*` release
+binaries only.
 
 ```yaml
 'on':

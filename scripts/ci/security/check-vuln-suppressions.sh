@@ -30,7 +30,7 @@ EOF
 fi
 
 SCRIPTS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-REPO_ROOT="${GITHUB_WORKSPACE:-$(cd "$SCRIPTS_DIR/../../../.." && pwd)}"
+REPO_ROOT="${GITHUB_WORKSPACE:-$(cd "$SCRIPTS_DIR/../../.." && pwd)}"
 LIB_DIR="$SCRIPTS_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
@@ -135,8 +135,8 @@ print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
 		python3 "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
 
 		if [[ -f "$OSV_TOML" ]]; then
-			if ! grep -qE '^\[' "$OSV_TOML"; then
-				log_info "No entries left in $OSV_TOML, removing file"
+			if ! grep -qEv '^[[:space:]]*(#.*)?$' "$OSV_TOML"; then
+				log_info "No substantive content left in $OSV_TOML, removing file"
 				rm -f "$OSV_TOML"
 			fi
 		fi

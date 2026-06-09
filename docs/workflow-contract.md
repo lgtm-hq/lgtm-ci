@@ -804,12 +804,14 @@ removing stale entries. Expired suppressions fail the job for manual review.
 | `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
 | `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
 | `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
+| `runner-image`           | `ubuntu-latest`                                      | Linux runners only (`install-osv-scanner.sh`)   |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
 Caller `on:` triggers are consumer-owned (`schedule`, `workflow_dispatch`).
 Grant `contents: write` and `pull-requests: write` on the caller job. Forward
-`secrets.GH_TOKEN` (typically `secrets.GITHUB_TOKEN`).
+`secrets.GH_TOKEN` (typically `secrets.GITHUB_TOKEN`). Use a Linux
+`runner-image`; the install script downloads `linux_*` release binaries only.
 
 Required secrets: `GH_TOKEN`.
 
