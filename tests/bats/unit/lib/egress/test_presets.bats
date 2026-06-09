@@ -97,6 +97,15 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "egress preset osv-scanner includes release assets and OSV API hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints osv-scanner"
+	assert_success
+	assert_output --partial 'release-assets.githubusercontent.com:443'
+	assert_output --partial 'api.osv.dev:443'
+	assert_output --partial 'api.deps.dev:443'
+	assert_output --partial 'codeload.github.com:443'
+}
+
 @test "egress preset quality includes artifact pipeline host" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints quality"
 	assert_success
@@ -151,6 +160,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 		rubygems
 		npm-publish
 		quality
+		osv-scanner
 		rust-release
 		sbom
 		scorecard

@@ -517,6 +517,7 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 | `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
 | `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
 | `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
+| `osv-scanner`    | GitHub tooling + release assets + OSV APIs                           |
 
 ```yaml
 egress-policy: block
@@ -784,6 +785,35 @@ are required; that publish reusable declares `pull-requests: write`. The audit
 reusable itself requires only `contents: read` and `packages: read`.
 
 Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
+
+## Vulnerability suppression check (osv-scanner)
+
+`reusable-vuln-suppression-check.yml` centralizes the weekly stale/expired OSV
+suppression cleanup pattern used by Rustume, py-lintro, and turbo-themes. The job
+installs `osv-scanner` directly (no Docker), runs
+`scripts/ci/security/check-vuln-suppressions.sh`, and may open a cleanup PR
+removing stale entries. Expired suppressions fail the job for manual review.
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input                    | Default                                              | Notes                                           |
+| ------------------------ | ---------------------------------------------------- | ----------------------------------------------- |
+| `osv-version`            | `2.3.5`                                              | osv-scanner release to install                  |
+| `config-path`            | `.osv-scanner.toml`                                  | Suppression TOML relative to repo root          |
+| `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported |
+| `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
+| `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
+| `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
+| `runner-image`           | `ubuntu-latest`                                      | Linux runners only (`install-osv-scanner.sh`)   |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Caller `on:` triggers are consumer-owned (`schedule`, `workflow_dispatch`).
+Grant `contents: write` and `pull-requests: write` on the caller job. Forward
+`secrets.GH_TOKEN` (typically `secrets.GITHUB_TOKEN`). Use a Linux
+`runner-image`; the install script downloads `linux_*` release binaries only.
+
+Required secrets: `GH_TOKEN`.
 
 ## Documentation site quality
 

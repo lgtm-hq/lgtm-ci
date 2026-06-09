@@ -194,6 +194,14 @@ egress_preset_endpoints() {
 			api.scorecard.dev:443 \
 			api.securityscorecards.dev:443
 		;;
+	osv-scanner)
+		# Direct osv-scanner binary install + scan (reusable-vuln-suppression-check).
+		egress_preset_endpoints github-tooling
+		printf '%s\n' \
+			release-assets.githubusercontent.com:443 \
+			api.osv.dev:443 \
+			api.deps.dev:443
+		;;
 	rust-release)
 		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
 		# Minimal base: GitHub checkout/tooling, Rust/crates, cross Docker, apt, Sigstore.
