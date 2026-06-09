@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: optional detached-container health check in `reusable-docker.yml`
-  gates publish on runtime validation (`health-check-cmd`, `health-check-port`,
-  `health-check-timeout`) (#65)
-
 ### Changed
 
 ### Deprecated
@@ -22,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.42.0] - 2026-06-09
+
+### Features
+
+- **workflows**: add reusable Docker health check testing between build and publish (#336) (1e6e8c9)
+
+### Other Changes
+
+- **release**: validate CHANGELOG-only caller for phase 6.1 (#55) (#335) (e2bd11f)
+
+### Previously Unreleased
+
+- **workflows**: optional detached-container health check in `reusable-docker.yml`
+  gates publish on runtime validation (`health-check-cmd`, `health-check-port`,
+  `health-check-timeout`) (#65)
 
 ## [0.41.0] - 2026-06-09
 
@@ -1026,7 +1038,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.41.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.42.0...HEAD
+[0.42.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.41.0...v0.42.0
 [0.41.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.1...v0.41.0
 [0.40.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.0...v0.40.1
 [0.40.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.39.0...v0.40.0
