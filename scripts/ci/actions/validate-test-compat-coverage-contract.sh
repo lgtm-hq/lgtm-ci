@@ -42,8 +42,8 @@ if ((${#invalid[@]} == 0)); then
 fi
 
 joined_invalid=$(
-	IFS=", "
-	echo "${invalid[*]}"
+	IFS=","
+	echo "${invalid[*]//,/, }"
 )
 echo "::error::${PLATFORM}: multi-runtime matrix (${versions}) cannot be combined with ${joined_invalid}. Use compat mode (matrix, coverage: false, publish-test-summary: false) and a separate single-runtime job for coverage and PR comments."
 exit 1

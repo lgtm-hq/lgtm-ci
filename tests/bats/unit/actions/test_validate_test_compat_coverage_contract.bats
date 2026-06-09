@@ -50,3 +50,16 @@ load "../../../helpers/common"
 	assert_failure
 	assert_output --partial "publish-test-summary: true"
 }
+
+@test "validate-test-compat-coverage-contract: rejects matrix with both coverage and publish" {
+	run env \
+		MULTI_VERSIONS="20,22" \
+		COVERAGE="true" \
+		PUBLISH_TEST_SUMMARY="true" \
+		PLATFORM="Node.js" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/validate-test-compat-coverage-contract.sh"
+
+	assert_failure
+	assert_output --partial "coverage: true"
+	assert_output --partial "publish-test-summary: true"
+}

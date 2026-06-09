@@ -9,7 +9,7 @@ on:
         description: "Rust toolchain for single-version runs"
         required: false
         type: string
-        default: "stable"
+        default: ""
       rust-toolchains:
         description: "Comma-separated Rust toolchains for a compat test matrix"
         required: false
@@ -238,7 +238,7 @@ jobs:
         shell: bash
         env:
           RUST_TOOLCHAIN: >-
-            ${{ inputs.rust-toolchain != 'stable' && inputs.rust-toolchain ||
+            ${{ inputs.rust-toolchain != '' && inputs.rust-toolchain ||
             inputs.toolchain }}
           RUST_TOOLCHAINS: ${{ inputs.rust-toolchains }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-rust-toolchain-matrix.sh
@@ -266,7 +266,8 @@ jobs:
       pages-coverage-artifact-name: ${{ inputs.pages-coverage-artifact-name }}
       pages-coverage-uploaded: ${{ steps.record-pages-upload.outputs.uploaded }}
     concurrency:
-      group: rust-test-${{ inputs.job-name }}-${{ github.ref }}
+      group: >-
+        rust-test-${{ inputs.job-name }}-${{ matrix.rust-toolchain }}-${{ github.ref }}
       cancel-in-progress: true
 
     steps:
