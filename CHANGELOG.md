@@ -21,18 +21,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.43.0] - 2026-06-09
 
-### Features
+### Added
 
 - **workflows**: standardize runner-image and runner-map contract (#339) (6712308)
-
-### Previously Unreleased
-
 - **ci**: `validate-runner-contract.sh` and BATS contract tests for runner-image
   and runner-map policy (#338)
 
+### Changed
+
 - **workflows**: standardize `runner-image` across script-backed reusables with
   `ubuntu-24.04` default; add missing inputs and complete multi-job wiring (#338)
-
 - **docs**: document `runner-map`, runner pinning exceptions, and consumer
   guidance in workflow contract (#338)
 
