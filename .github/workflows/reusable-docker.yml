@@ -710,8 +710,8 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: ${{ inputs.push }}
           load: >-
-            ${{ inputs.health-check-cmd != '' ||
-              (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
+            ${{ inputs.push == false && (inputs.health-check-cmd != '' ||
+              inputs.validate-on-pr || inputs.scan) }}
           # yamllint disable rule:line-length
           tags: >-
             ${{ inputs.push

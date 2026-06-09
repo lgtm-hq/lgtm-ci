@@ -97,8 +97,7 @@ run_health_check() {
 	echo "::group::Health check command (runner): ${HEALTH_CHECK_CMD}"
 	# Run on the runner against the published localhost port so distroless images
 	# do not need curl/wget inside the container.
-	# shellcheck disable=SC2086
-	${HEALTH_CHECK_CMD}
+	bash -c "$HEALTH_CHECK_CMD"
 	echo "::endgroup::"
 
 	trap - EXIT
@@ -646,7 +645,6 @@ health-check)
 	#   HEALTH_CHECK_PORT  - Port published on 127.0.0.1 for the command
 	#
 	# Optional environment variables:
-	#   HEALTH_CHECK_TIMEOUT  - Max wait time (default: 30s)
 	#   HEALTH_CHECK_TIMEOUT  - Max wait time (default: 30s)
 	: "${REGISTRY:?REGISTRY is required}"
 	: "${IMAGE_NAME:?IMAGE_NAME is required}"

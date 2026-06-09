@@ -75,6 +75,23 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	assert_success
 }
 
+@test "reusable-docker: per-platform build avoids push and load together" {
+	run awk '
+		/name: Build and push \(\$\{\{ matrix\.platform \}\}\)/ { in_step = 1 }
+		in_step && /push: \$\{\{ inputs\.push \}\}/ { saw_push = 1 }
+		in_step && /load:/ { saw_load = 1 }
+		in_step && saw_push && saw_load {
+			if ($0 ~ /inputs\.push == false && \(inputs\.health-check-cmd/) {
+				found = 1
+				exit
+			}
+		}
+		in_step && /^[[:space:]]+- name:/ && !/Build and push/ { in_step = 0 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-docker: build job publishes only after health check when enabled" {
 	run grep -F 'Push image after health check' "$WORKFLOW"
 	assert_success
