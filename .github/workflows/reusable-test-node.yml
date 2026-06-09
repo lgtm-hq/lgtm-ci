@@ -157,7 +157,7 @@ on:
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: "ubuntu-24.04"
       timeout-minutes:
         description: "Timeout for test jobs in minutes"
         required: false
@@ -563,7 +563,7 @@ jobs:
       always()
       && inputs.upload-pages-coverage-html
       && inputs.coverage
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
     outputs:
@@ -635,7 +635,7 @@ jobs:
         github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
     outputs:

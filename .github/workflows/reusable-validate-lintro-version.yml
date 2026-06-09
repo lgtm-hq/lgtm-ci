@@ -67,10 +67,16 @@ on:
         type: string
         default: "Validate Lintro Version"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
 jobs:
   validate-lintro-version:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       # Checkout repository and lgtm-ci tooling
       contents: read

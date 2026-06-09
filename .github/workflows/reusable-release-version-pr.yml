@@ -126,6 +126,12 @@ name: "Reusable: Release Version PR"
         type: string
         default: ""
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
     secrets:
       RELEASE_APP_ID:
         description: "GitHub App ID for creating release tokens"
@@ -137,7 +143,7 @@ name: "Reusable: Release Version PR"
 jobs:
   version-pr:
     name: Create Version PR
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 20
     concurrency:
       # Distinct from the caller's workflow-level group to avoid
@@ -488,7 +494,7 @@ jobs:
       always() &&
       inputs.report-failures &&
       needs.version-pr.result == 'failure'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 10
     permissions:
       # Read workflow/job metadata to generate failure context

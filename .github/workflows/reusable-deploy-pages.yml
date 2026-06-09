@@ -79,6 +79,12 @@ on:
         type: string
         default: "playwright"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
     outputs:
       page-url:
         description: "URL of the deployed GitHub Pages site"
@@ -92,7 +98,7 @@ concurrency:
 jobs:
   build:
     name: Build
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       contents: read
 
@@ -169,7 +175,7 @@ jobs:
   deploy:
     name: Deploy
     needs: build
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     permissions:
       pages: write
       id-token: write

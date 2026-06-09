@@ -83,7 +83,7 @@ name: "Reusable: Release Auto Tag"
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: "ubuntu-24.04"
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -342,7 +342,7 @@ jobs:
       always() &&
       inputs.report-failures &&
       needs.auto-tag.result == 'failure'
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 10
     permissions:
       # Read workflow/job metadata to generate failure context
