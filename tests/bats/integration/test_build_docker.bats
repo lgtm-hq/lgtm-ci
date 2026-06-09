@@ -88,7 +88,7 @@ _run_script_any_bash() {
 }
 
 @test "build-docker classify: fails when health-check-port is not numeric" {
-	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_CMD="curl -f http://127.0.0.1:8080/health"
 	export HEALTH_CHECK_PORT="not-a-port"
 
 	_run_script
@@ -97,7 +97,7 @@ _run_script_any_bash() {
 }
 
 @test "build-docker classify: fails when health-check-port is zero" {
-	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_CMD="curl -f http://127.0.0.1:8080/health"
 	export HEALTH_CHECK_PORT="0"
 
 	_run_script
@@ -106,7 +106,8 @@ _run_script_any_bash() {
 }
 
 @test "build-docker classify: fails when health-check-timeout is invalid" {
-	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_CMD="curl -f http://127.0.0.1:8080/health"
+	export HEALTH_CHECK_PORT="8080"
 	export HEALTH_CHECK_TIMEOUT="30x"
 
 	_run_script
