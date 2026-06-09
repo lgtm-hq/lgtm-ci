@@ -5,7 +5,8 @@ Sample caller layouts for lgtm-hq repositories. Copy and adapt into your
 
 ## Reusable workflows (recommended)
 
-Examples such as `publish-python-release.yml` call `lgtm-hq/lgtm-ci` **reusable
+Examples such as `publish-python-release.yml` and
+`release-version-pr-changelog-only.yml` call `lgtm-hq/lgtm-ci` **reusable
 workflows** at a pinned commit SHA and pass `tooling-ref` with the same SHA.
 
 You do **not** need to vendor copies of:
