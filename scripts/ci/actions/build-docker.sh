@@ -404,8 +404,12 @@ classify)
 		die "smoke-test and smoke-test-script are mutually exclusive (set at most one)"
 	fi
 
-	if [[ -n "$HEALTH_CHECK_PORT" && ! "$HEALTH_CHECK_PORT" =~ ^[0-9]+$ ]]; then
-		die "health-check-port must be a positive integer: ${HEALTH_CHECK_PORT}"
+	if [[ -n "$HEALTH_CHECK_PORT" && (
+		! "$HEALTH_CHECK_PORT" =~ ^[0-9]+$ ||
+		"$HEALTH_CHECK_PORT" -eq 0 ||
+		"$HEALTH_CHECK_PORT" -gt 65535) ]] \
+		; then
+		die "health-check-port must be a positive integer (1-65535): ${HEALTH_CHECK_PORT}"
 	fi
 	if [[ -n "$HEALTH_CHECK_CMD" ]]; then
 		parse_duration_seconds "$HEALTH_CHECK_TIMEOUT" >/dev/null

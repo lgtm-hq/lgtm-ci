@@ -21,7 +21,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 @test "reusable-docker: build-per-platform job passes target input to build-push-action" {
 	run grep -cE '^[[:space:]]+target: \$\{\{ inputs\.target \}\}$' "$WORKFLOW"
 	assert_success
-	assert_output "3"
+	assert_output "2"
 }
 
 @test "reusable-docker: exposes target workflow input" {
@@ -30,10 +30,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 }
 
 @test "reusable-docker: build job gates sbom and provenance on push" {
-	run grep -E '^[[:space:]]+provenance: \$\{\{ inputs\.provenance && inputs\.push \}\}$' "$WORKFLOW"
+	run grep -E '^[[:space:]]+provenance: \$\{\{ inputs\.provenance && inputs\.push' "$WORKFLOW"
 	assert_success
 
-	run grep -E '^[[:space:]]+sbom: \$\{\{ inputs\.sbom && inputs\.push \}\}$' "$WORKFLOW"
+	run grep -E '^[[:space:]]+sbom: \$\{\{ inputs\.sbom && inputs\.push' "$WORKFLOW"
 	assert_success
 }
 
@@ -76,6 +76,6 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 }
 
 @test "reusable-docker: build job publishes only after health check when enabled" {
-	run grep -F 'Build and push after health check' "$WORKFLOW"
+	run grep -F 'Push image after health check' "$WORKFLOW"
 	assert_success
 }

@@ -93,7 +93,16 @@ _run_script_any_bash() {
 
 	_run_script
 	assert_failure
-	assert_output --partial "health-check-port must be a positive integer"
+	assert_output --partial "health-check-port must be a positive integer (1-65535)"
+}
+
+@test "build-docker classify: fails when health-check-port is zero" {
+	export HEALTH_CHECK_CMD="curl -f http://localhost:8080/health"
+	export HEALTH_CHECK_PORT="0"
+
+	_run_script
+	assert_failure
+	assert_output --partial "health-check-port must be a positive integer (1-65535)"
 }
 
 @test "build-docker classify: fails when health-check-timeout is invalid" {

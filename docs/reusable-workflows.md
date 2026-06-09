@@ -581,7 +581,7 @@ jobs:
       runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
       health-check-cmd: curl -f http://localhost:8080/health
       health-check-port: "8080"
-      health-check-timeout: 30s
+      health-check-timeout: "30s"
 ```
 
 When `health-check-cmd` is set, the workflow loads or pulls the built image,

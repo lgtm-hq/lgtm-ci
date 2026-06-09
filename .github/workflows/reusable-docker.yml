@@ -480,38 +480,24 @@ jobs:
           HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
-      - name: Build and push after health check
-        id: build-push
+      - name: Push image after health check
         if: inputs.push && inputs.health-check-cmd != ''
-        # Pinned to SHA for supply chain security
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
-        with:
-          context: ${{ inputs.context }}
-          file: ${{ inputs.file }}
-          platforms: ${{ inputs.platforms }}
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          build-args: ${{ inputs.build-args }}
-          target: ${{ inputs.target }}
-          # yamllint disable rule:line-length
-          cache-from: |
-            ${{ inputs.no-cache == false && 'type=gha' || '' }}
-            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}', inputs.cache-registry-ref) || '' }}
-          cache-to: |
-            ${{ inputs.no-cache == false && 'type=gha,mode=max' || '' }}
-            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0},mode=max', inputs.cache-registry-ref) || '' }}
-          # yamllint enable rule:line-length
-          provenance: ${{ inputs.provenance && inputs.push }}
-          sbom: ${{ inputs.sbom && inputs.push }}
+        shell: bash
+        env:
+          STEP: push
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Extract digest
         id: metadata
         if: inputs.push || inputs.validate-on-pr
         shell: bash
         env:
-          STEP: set-output-digest
-          DIGEST: ${{ steps.build-push.outputs.digest || steps.build.outputs.digest }}
+          STEP: ${{ inputs.push && inputs.health-check-cmd != '' && 'metadata' || 'set-output-digest' }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+          BUILT_TAGS: ${{ steps.meta.outputs.tags }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Resolve local image for scan
@@ -547,7 +533,7 @@ jobs:
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
-          subject-digest: ${{ steps.build-push.outputs.digest || steps.build.outputs.digest }}
+          subject-digest: ${{ steps.metadata.outputs.digest }}
           push-to-registry: true
 
       - name: Install Cosign
@@ -559,7 +545,7 @@ jobs:
         shell: bash
         env:
           STEP: sign-image
-          DIGEST: ${{ steps.build-push.outputs.digest || steps.build.outputs.digest }}
+          DIGEST: ${{ steps.metadata.outputs.digest }}
           REGISTRY: ${{ inputs.registry }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
@@ -911,6 +897,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    # packages: read — pull per-platform staging images by digest before merge.
     permissions:
       contents: read
       packages: read
