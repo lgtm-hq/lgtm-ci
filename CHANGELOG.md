@@ -9,15 +9,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: compat/coverage contract validation for Rust, Node, and Python
+  test reusables (#340)
+- **workflows**: Rust runtime matrix via `rust-toolchain` / `rust-toolchains`
+  with prepare/aggregate jobs (#340)
+- **actions**: `test-suite-name` on `generate-coverage-comment` for distinct PR
+  coverage headings (#340)
+
 ### Changed
+
+- **workflows**: unify Node publish onto `publish-test-summary` →
+  `reusable-publish-test-summary.yml`; closes #292 (#340)
+- **workflows**: rich coverage headings append `test-suite-name` when set
+  (`## 📊 Code Coverage Report — {name}`) (#340)
 
 ### Deprecated
 
+- **workflows**: Rust `toolchain` input — use `rust-toolchain` instead (#340)
+
 ### Removed
+
+- **workflows**: Node `publish-test-summary-coverage` inline matrix publish jobs
+  (#340)
+- **scripts**: `prepare-coverage-test-summary.sh` (superseded by
+  `test-suite-name` on `generate-coverage-comment`) (#340)
 
 ### Fixed
 
 ### Security
+
+### Breaking changes
+
+- Callers combining multi-runtime matrices (`python-versions`, `node-versions`,
+  `rust-toolchains`) with `coverage: true` or `publish-test-summary: true` will
+  fail validation until split into separate compat and coverage jobs (#340).
+- Node per-version coverage comment markers (`{marker}-{version}`) are removed
+  with matrix publish (#340).
+- Rich coverage PR comment headings now include the suite name when
+  `test-suite-name` / `job-name` is wired through; upsert `comment-marker`
+  values are unchanged (#340).
 
 ## [0.43.1] - 2026-06-10
 

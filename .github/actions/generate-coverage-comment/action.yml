@@ -36,6 +36,12 @@ inputs:
     description: "Maximum number of files to show in breakdown"
     required: false
     default: "10"
+  test-suite-name:
+    description: >-
+      Visible suite name appended to the coverage heading (comment-marker stays
+      the upsert identity)
+    required: false
+    default: ""
 
 outputs:
   comment-body:
@@ -78,6 +84,7 @@ runs:
         THRESHOLD_FUNCTIONS: ${{ inputs['threshold-functions'] }}
         SHOW_FILE_COVERAGE: ${{ inputs['show-file-coverage'] }}
         MAX_FILES: ${{ inputs['max-files'] }}
+        TEST_SUITE_NAME: ${{ inputs['test-suite-name'] }}
       run: $SCRIPTS_DIR/ci/actions/generate-coverage-comment.sh
 
 branding:

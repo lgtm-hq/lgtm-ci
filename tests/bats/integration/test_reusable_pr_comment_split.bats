@@ -126,23 +126,44 @@ _orchestrator_delegates_publish() {
 	assert_success
 }
 
-@test "reusable-test-node: coverage summary uses inline matrix job not nested reusable" {
+@test "reusable-test-node: delegates coverage publish to reusable-publish-test-summary" {
+	run _orchestrator_delegates_publish \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml" \
+		"reusable-publish-test-summary.yml"
+	assert_success
+}
+
+@test "reusable-test-node: has single publish-test-summary job when coverage enabled" {
 	run awk '
-		/^  publish-test-summary-coverage:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary-coverage:/ { in_job = 0 }
-		in_job && /^    uses: \.\/\.github\/workflows\// { found = 1; exit }
+		/^  publish-test-summary:/ { count++ }
+		/^  publish-test-summary-coverage:/ { legacy = 1 }
+		END {
+			if (legacy) exit 1
+			if (count != 1) exit 1
+		}
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
+	assert_success
+}
+
+@test "reusable-test-node: publish-test-summary is not gated on !coverage" {
+	run awk '
+		/^  publish-test-summary:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ { in_job = 0 }
+		in_job && /!inputs\.coverage/ { found = 1; exit }
 		END { exit found }
 	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
 	assert_success
 }
 
-@test "reusable-test-node: coverage summary job has strategy matrix" {
+@test "reusable-test-node-custom: has single publish-test-summary job" {
 	run awk '
-		/^  publish-test-summary-coverage:/ { in_job = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary-coverage:/ { in_job = 0 }
-		in_job && /^    strategy:/ { found = 1; exit }
-		END { exit !found }
-	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
+		/^  publish-test-summary:/ { count++ }
+		/^  publish-test-summary-coverage:/ { legacy = 1 }
+		END {
+			if (legacy) exit 1
+			if (count != 1) exit 1
+		}
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 	assert_success
 }
 

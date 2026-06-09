@@ -201,6 +201,16 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
+      - name: Validate compat/coverage contract
+        shell: bash
+        env:
+          MULTI_VERSIONS: ${{ inputs.python-versions }}
+          COVERAGE: ${{ inputs.coverage }}
+          PUBLISH_TEST_SUMMARY: ${{ inputs.publish-test-summary }}
+          PLATFORM: Python
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
+
       - name: Generate Python matrix
         id: matrix
         shell: bash

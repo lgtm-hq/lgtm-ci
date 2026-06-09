@@ -201,6 +201,7 @@ jobs:
           threshold-lines: "0"
           threshold-branches: "0"
           threshold-functions: "0"
+          test-suite-name: ${{ inputs.test-suite-name }}
 
       - name: Generate test run summary
         id: generate-test-summary

@@ -237,6 +237,16 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
+      - name: Validate compat/coverage contract
+        shell: bash
+        env:
+          MULTI_VERSIONS: ${{ inputs.node-versions }}
+          COVERAGE: ${{ inputs.coverage }}
+          PUBLISH_TEST_SUMMARY: ${{ inputs.publish-test-summary }}
+          PLATFORM: Node.js
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
+
       - name: Generate Node.js matrix
         id: matrix
         shell: bash
@@ -444,40 +454,20 @@ jobs:
           retention-days: 7
           if-no-files-found: error
 
-      - name: Generate coverage test summary
-        id: generate-coverage-comment
+      - name: Upload coverage for test summary
         if: >-
           always()
-          && inputs.publish-test-summary
           && inputs.coverage
+          && inputs.publish-test-summary
+          && inputs.node-versions == ''
           && github.event_name == 'pull_request'
-        uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-comment
-        with:
-          coverage-file: >-
-            ${{ inputs.working-directory }}/${{ inputs.coverage-summary-file }}
-          format: istanbul
-          threshold-lines: "0"
-          threshold-branches: "0"
-          threshold-functions: "0"
-
-      - name: Write coverage test summary artifact
-        if: steps.generate-coverage-comment.outcome == 'success'
-        shell: bash
-        env:
-          COMMENT_BODY: ${{ steps.generate-coverage-comment.outputs.comment-body }}
-          COMMENT_TITLE: Coverage Report
-          COMMENT_OUTPUT: node-coverage-test-summary.txt
-        run: >-
-          bash .lgtm-ci-tooling/scripts/ci/actions/prepare-coverage-test-summary.sh
-
-      - name: Upload coverage test summary artifact
-        if: >-
-          steps.generate-coverage-comment.outcome == 'success' &&
-          github.event.pull_request.head.repo.fork == false
+          && github.event.pull_request.head.repo.fork == false
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: node-coverage-test-summary-${{ matrix.node-version }}
-          path: node-coverage-test-summary.txt
+          name: node-coverage
+          path: ${{ inputs.working-directory }}/${{ inputs.coverage-summary-file }}
+          retention-days: 7
+          if-no-files-found: ignore
 
       - name: Stage coverage report
         if: always() && inputs.upload-coverage && inputs.coverage
@@ -696,79 +686,6 @@ jobs:
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-node-results.sh
 
-  publish-test-summary-coverage:
-    name: Publish test summary
-    needs:
-      - prepare
-      - test-vitest
-    if: >-
-      always()
-      && inputs.publish-test-summary
-      && inputs.coverage
-      && github.event_name == 'pull_request'
-      && github.event.pull_request.head.repo.fork == false
-      && (
-        !inputs.draft-pr-skip ||
-        github.event_name != 'pull_request' ||
-        github.event.pull_request.draft == false
-      )
-    runs-on: ${{ inputs.runner-image }}
-    permissions:
-      contents: read
-      # post-pr-comment upserts matrix coverage test summaries on the pull request
-      pull-requests: write
-    strategy:
-      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
-    steps:
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Resolve egress allowlist
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-        with:
-          # Test summary job: GitHub API only (#204); do not inherit parent presets
-          egress-policy: block
-          egress-preset: github-minimal
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: block
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Download coverage test summary artifact
-        id: download-coverage
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: node-coverage-test-summary-${{ matrix.node-version }}
-
-      - name: Publish test summary comment
-        if: steps.download-coverage.outcome == 'success'
-        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
-        with:
-          file: node-coverage-test-summary.txt
-          marker: >-
-            ${{ inputs.node-versions != '' && format('{0}-{1}',
-            inputs.comment-marker, matrix.node-version) || inputs.comment-marker }}
-
   publish-test-summary:
     needs: aggregate-tests
     if: >-
@@ -776,7 +693,6 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
       && inputs.publish-test-summary
-      && !inputs.coverage
       && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
@@ -795,4 +711,8 @@ jobs:
       coverage-percent: ${{ needs.aggregate-tests.outputs.coverage-percent }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
+      rich-coverage-comment: ${{ inputs.coverage }}
+      coverage-artifact-name: ${{ inputs.coverage && 'node-coverage' || '' }}
+      coverage-file: ${{ inputs.coverage-summary-file }}
+      coverage-format: istanbul
       tooling-ref: ${{ inputs.tooling-ref }}
