@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.40.1] - 2026-06-08
+
+### Bug Fixes
+
+- **ci**: reusable-scorecards missing results_file breaks SARIF output (#331) (40f6e87)
+
 ## [0.40.0] - 2026-06-08
 
 ### Features
@@ -1010,7 +1016,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.1...HEAD
+[0.40.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.40.0...v0.40.1
 [0.40.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.39.0...v0.40.0
 [0.39.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.38.0...v0.39.0
 [0.38.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.37.0...v0.38.0
