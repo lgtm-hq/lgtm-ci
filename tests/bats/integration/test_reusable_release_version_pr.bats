@@ -96,8 +96,9 @@ load "../../helpers/common"
 	run awk '
 		/^  version-pr:/ { in_job = 1 }
 		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /version-pr:/ { in_job = 0 }
-		in_job && /cancel-in-progress: false/ { found = 1; exit }
-		END { exit !found }
+		in_job && /cancel-in-progress: false/ { found_cancel = 1 }
+		in_job && /group: reusable-release-version-pr-/ { found_group = 1 }
+		END { exit !(found_cancel && found_group) }
 	' "$workflow"
 	assert_success
 }
