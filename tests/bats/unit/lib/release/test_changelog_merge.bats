@@ -348,3 +348,43 @@ existing-table"
 	assert_output --partial "### Changed"
 	assert_output --partial "faster runner selection"
 }
+
+@test "merge_changelog_sections: no double blank lines between standard sections" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- generated entry (abc1234)" "### Added
+
+- existing entry ([#1])
+
+### Changed
+
+- existing change ([#2])
+
+### Deprecated
+
+- deprecated input ([#3])
+
+### Removed
+
+- removed script ([#4])"
+	'
+	assert_success
+
+	local merged_output="$output"
+	run bash -c "
+		awk '
+			/^$/ { blank++; next }
+			{
+				if (blank >= 2) {
+					print \"found \" blank \" consecutive blank lines before: \" \$0 > \"/dev/stderr\"
+					exit 1
+				}
+				blank = 0
+			}
+			END { exit blank >= 2 ? 1 : 0 }
+		' <<<\"$merged_output\"
+	"
+	assert_success
+}
