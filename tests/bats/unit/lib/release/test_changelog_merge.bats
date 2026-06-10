@@ -139,6 +139,21 @@ teardown() {
 	assert_output --partial "+ plus entry"
 }
 
+@test "parse_changelog_body: preserves markdown links while skipping reference definitions" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		parse_changelog_body "### Breaking changes
+
+See [migration guide](docs/migration.md).
+
+[Unreleased]: https://example.com/compare/v0.9.0...HEAD"
+		echo "breaking=${_MERGE_BREAKING}"
+	'
+	assert_success
+	assert_output --partial "breaking=See [migration guide](docs/migration.md)."
+	refute_output --partial "[Unreleased]:"
+}
+
 @test "parse_changelog_body: skips link definitions inside breaking block" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"

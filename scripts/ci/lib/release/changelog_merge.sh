@@ -73,15 +73,14 @@ parse_changelog_body() {
 	_reset_merge_state
 
 	while IFS= read -r line || [[ -n "$line" ]]; do
-		if [[ "$line" =~ ^###\ [Bb]reaking\ [Cc]hanges$ ]]; then
-			in_breaking=true
-			current_section=""
-			continue
-		fi
-
 		if [[ "$line" =~ ^###\ (.+)$ ]]; then
 			in_breaking=false
 			heading="${BASH_REMATCH[1]}"
+			if [[ "$heading" =~ ^[Bb]reaking\ [Cc]hanges$ ]]; then
+				in_breaking=true
+				current_section=""
+				continue
+			fi
 			if [[ "$heading" == "Previously Unreleased" ]]; then
 				current_section="$_KAC_DEFAULT_SECTION"
 				continue
@@ -95,7 +94,7 @@ parse_changelog_body() {
 			continue
 		fi
 
-		if [[ "$line" =~ ^\[ ]]; then
+		if [[ "$line" =~ ^\[[^]]+\]: ]]; then
 			continue
 		fi
 
