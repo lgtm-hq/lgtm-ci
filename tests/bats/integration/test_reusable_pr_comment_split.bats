@@ -40,7 +40,7 @@ _aggregate_requires_prepare_success() {
 		in_aggregate && /needs\.prepare\.result == .success./ { prepare_gate = 1 }
 		END {
 			if (!prepare_gate) exit 1
-			if (always_found) exit 1
+			if (!always_found) exit 1
 		}
 	' "$workflow"
 }
