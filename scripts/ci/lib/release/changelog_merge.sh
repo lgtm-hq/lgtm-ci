@@ -68,7 +68,7 @@ parse_changelog_body() {
 	local body="${1:-}"
 	local current_section=""
 	local in_breaking=false
-	local line heading normalized
+	local line heading trimmed_heading normalized
 
 	_reset_merge_state
 
@@ -76,16 +76,18 @@ parse_changelog_body() {
 		if [[ "$line" =~ ^###\ (.+)$ ]]; then
 			in_breaking=false
 			heading="${BASH_REMATCH[1]}"
-			if [[ "$heading" =~ ^[Bb]reaking\ [Cc]hanges$ ]]; then
+			trimmed_heading="${heading#"${heading%%[![:space:]]*}"}"
+			trimmed_heading="${trimmed_heading%"${trimmed_heading##*[![:space:]]}"}"
+			if [[ "$trimmed_heading" =~ ^[Bb]reaking\ [Cc]hanges$ ]]; then
 				in_breaking=true
 				current_section=""
 				continue
 			fi
-			if [[ "$heading" == "Previously Unreleased" ]]; then
+			if [[ "$trimmed_heading" == "Previously Unreleased" ]]; then
 				current_section="$_KAC_DEFAULT_SECTION"
 				continue
 			fi
-			normalized=$(normalize_kac_section "$heading")
+			normalized=$(normalize_kac_section "$trimmed_heading")
 			if [[ -n "$normalized" ]]; then
 				current_section="$normalized"
 			else
@@ -106,7 +108,7 @@ parse_changelog_body() {
 			continue
 		fi
 
-		if [[ -z "$current_section" && -z "$line" ]]; then
+		if [[ -z "$current_section" && -z "$line" && -z "$_MERGE_PROSE" ]]; then
 			continue
 		fi
 

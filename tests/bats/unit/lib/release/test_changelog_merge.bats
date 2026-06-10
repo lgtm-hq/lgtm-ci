@@ -204,6 +204,32 @@ See [migration guide](docs/migration.md).
 	assert_output --partial "Security=- security"
 }
 
+@test "parse_changelog_body: trims whitespace from section headings" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		parse_changelog_body "### Added  
+
+- trimmed heading entry"
+		echo "added=${_MERGE_SECTION_Added}"
+	'
+	assert_success
+	assert_output --partial "added=- trimmed heading entry"
+}
+
+@test "parse_changelog_body: preserves blank lines between prose paragraphs" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		parse_changelog_body "First paragraph
+
+Second paragraph"
+		echo "prose=${_MERGE_PROSE}"
+	'
+	assert_success
+	assert_output --partial $'prose=First paragraph
+
+Second paragraph'
+}
+
 @test "parse_changelog_body: treats non-list lines before sections as prose" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"
