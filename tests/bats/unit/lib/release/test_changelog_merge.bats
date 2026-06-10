@@ -127,6 +127,16 @@ teardown() {
 	assert_output --partial "changed=- flat unreleased entry"
 }
 
+@test "parse_changelog_body: treats indented bullets as list entries" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		parse_changelog_body "  - indented entry"
+		echo "changed=${_MERGE_SECTION_Changed}"
+	'
+	assert_success
+	assert_output --partial "changed=  - indented entry"
+}
+
 @test "parse_changelog_body: treats asterisk and plus list markers as bullets" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"

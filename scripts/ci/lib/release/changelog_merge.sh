@@ -112,7 +112,7 @@ parse_changelog_body() {
 			continue
 		fi
 
-		if [[ -z "$current_section" && ! "$line" =~ ^[-*+] ]]; then
+		if [[ -z "$current_section" && ! "$line" =~ ^[[:space:]]*[-*+] ]]; then
 			if [[ -n "$_MERGE_PROSE" ]]; then
 				_MERGE_PROSE+=$'\n'
 			fi
