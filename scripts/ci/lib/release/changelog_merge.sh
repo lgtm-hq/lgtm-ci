@@ -95,18 +95,15 @@ parse_changelog_body() {
 			continue
 		fi
 
+		if [[ "$line" =~ ^\[ ]]; then
+			continue
+		fi
+
 		if $in_breaking; then
-			if [[ "$line" =~ ^\[ ]]; then
-				continue
-			fi
 			if [[ -n "$_MERGE_BREAKING" ]]; then
 				_MERGE_BREAKING+=$'\n'
 			fi
 			_MERGE_BREAKING+="$line"
-			continue
-		fi
-
-		if [[ "$line" =~ ^\[ ]]; then
 			continue
 		fi
 
