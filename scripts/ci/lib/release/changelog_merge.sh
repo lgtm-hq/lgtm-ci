@@ -96,6 +96,9 @@ parse_changelog_body() {
 		fi
 
 		if $in_breaking; then
+			if [[ "$line" =~ ^\[ ]]; then
+				continue
+			fi
 			if [[ -n "$_MERGE_BREAKING" ]]; then
 				_MERGE_BREAKING+=$'\n'
 			fi
@@ -111,7 +114,7 @@ parse_changelog_body() {
 			continue
 		fi
 
-		if [[ -z "$current_section" && ! "$line" =~ ^- ]]; then
+		if [[ -z "$current_section" && ! "$line" =~ ^[-*+] ]]; then
 			if [[ -n "$_MERGE_PROSE" ]]; then
 				_MERGE_PROSE+=$'\n'
 			fi
