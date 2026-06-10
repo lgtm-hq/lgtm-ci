@@ -37,6 +37,13 @@ fi
 : "${THRESHOLD_LINES:=80}"
 : "${THRESHOLD_BRANCHES:=70}"
 : "${THRESHOLD_FUNCTIONS:=80}"
+: "${TEST_SUITE_NAME:=}"
+
+if [[ -n "$TEST_SUITE_NAME" ]]; then
+	COVERAGE_HEADING="## 📊 Code Coverage Report — ${TEST_SUITE_NAME}"
+else
+	COVERAGE_HEADING="## 📊 Code Coverage Report"
+fi
 
 GENERATED_DATE=$(date -u +%Y-%m-%d)
 COMMIT_LINE="- **Commit:** unknown"
@@ -51,7 +58,7 @@ fi
 # Check if coverage file exists
 if [[ ! -f "$COVERAGE_FILE" ]]; then
 	echo "::warning::Coverage file not found at $COVERAGE_FILE"
-	BODY="## 📊 Code Coverage Report
+	BODY="${COVERAGE_HEADING}
 
 This PR has been analyzed using **lgtm-ci** - our unified code coverage workflow.
 
@@ -210,7 +217,7 @@ else
 	COVERAGE_STATUS="Coverage is below one or more thresholds."
 fi
 
-BODY="## 📊 Code Coverage Report
+BODY="${COVERAGE_HEADING}
 
 This PR has been analyzed using **lgtm-ci** - our unified code coverage workflow.
 

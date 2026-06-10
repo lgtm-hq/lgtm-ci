@@ -234,10 +234,12 @@ jobs, inner names are static; see [workflow-contract.md](workflow-contract.md)
 (§ Job display names).
 
 **test summaries:** Set `publish-test-summary: true` (default) to post or update one
-comment per workflow run. When `coverage: true`, the test job builds a rich
-coverage artifact and the `publish-test-summary-coverage` matrix job posts it.
-When `coverage: false`, `publish-test-summary` delegates to
-`reusable-publish-test-summary.yml` with test totals.
+comment per workflow run. All publish paths delegate to
+`reusable-publish-test-summary.yml` — rich coverage when `coverage: true`
+(single runtime only), pass/fail totals otherwise. Multi-runtime matrices
+(`node-versions`, `python-versions`, `rust-toolchains`) are **compat mode**
+only: `coverage: false` and `publish-test-summary: false`. See
+[workflow-contract.md](workflow-contract.md) (§ Compat vs coverage contract).
 
 ### Rust
 
@@ -257,6 +259,18 @@ jobs:
       job-name: "Rust Build"
       egress-policy: block
 
+  rust-compat:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Compat"
+      rust-toolchains: "stable,beta"
+      coverage: false
+      publish-test-summary: false
+      egress-policy: block
+
   rust-test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
@@ -265,6 +279,7 @@ jobs:
     with:
       tooling-ref: "<sha>"
       job-name: "Rust Tests"
+      rust-toolchain: stable
       coverage: false
       egress-policy: block
 

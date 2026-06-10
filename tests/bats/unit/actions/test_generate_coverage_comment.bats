@@ -188,6 +188,33 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "Code Coverage Report"
 }
 
+@test "generate-coverage-comment: appends test-suite-name to heading when provided" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage-summary.json"
+	cat >"$coverage_file" <<'EOF'
+{
+  "total": {
+    "lines": {"pct": 91},
+    "branches": {"pct": 82},
+    "functions": {"pct": 93},
+    "statements": {"pct": 94}
+  }
+}
+EOF
+
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="$coverage_file" \
+		FORMAT="istanbul" \
+		TEST_SUITE_NAME="🦀 Rust Coverage" \
+		THRESHOLD_LINES="80" \
+		THRESHOLD_BRANCHES="70" \
+		THRESHOLD_FUNCTIONS="80" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "Code Coverage Report — 🦀 Rust Coverage"
+}
+
 @test "generate-coverage-comment: preserves coverage-py coverage extraction" {
 	local coverage_file="${BATS_TEST_TMPDIR}/coverage.json"
 	cat >"$coverage_file" <<'EOF'

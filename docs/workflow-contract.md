@@ -148,8 +148,41 @@ When `publish-test-summary: true` on a language test reusable or
   `generate-test-summary.sh` (pass/fail totals with coverage percent)
 - Shell/kcov: totals only (rich table not yet supported)
 
-Node matrix coverage uses job `publish-test-summary-coverage` (inline post from
-`node-coverage-test-summary` artifacts).
+Rich coverage comments use `generate-coverage-comment` with an optional
+`test-suite-name` input. When set, the visible heading becomes
+`## 📊 Code Coverage Report — {test-suite-name}`; `comment-marker` remains the
+upsert identity.
+
+### Compat vs coverage contract (#340)
+
+Rust, Node, and Python test reusables share a **two-mode contract**:
+
+<!-- markdownlint-disable MD013 -- compat/coverage table; column text exceeds default line length -->
+
+| Mode         | Multi-runtime input                   | `coverage` | `publish-test-summary` | PR comment |
+| ------------ | ------------------------------------- | ---------- | ---------------------- | ---------- |
+| **Compat**   | `*-versions` / `rust-toolchains`      | `false`    | `false`                | none       |
+| **Coverage** | single `*-version` / `rust-toolchain` | `true`     | `true` (optional)      | one        |
+
+<!-- markdownlint-enable MD013 -->
+
+Multi-runtime matrix inputs:
+
+- Python: `python-versions` (comma-separated)
+- Node: `node-versions` (comma-separated)
+- Rust: `rust-toolchains` (comma-separated)
+
+Single-runtime inputs (`python-version`, `node-version`, `rust-toolchain`, or
+deprecated Rust `toolchain`) allow `coverage: true` and `publish-test-summary:
+true`.
+
+**Enforcement:** `validate-test-compat-coverage-contract.sh` runs in each
+reusable `prepare` job and fails when a non-empty multi-version matrix is
+combined with `coverage: true` or `publish-test-summary: true`.
+
+**Permissions split:** test/matrix jobs use `contents: read` only; PR comments
+run in a separate `publish-test-summary` job (`pull-requests: write`) that
+delegates to `reusable-publish-test-summary.yml`.
 
 ### `draft-pr-skip`
 
@@ -176,10 +209,10 @@ nesting hop (`ci.yml` → `reusable-quality-lint.yml`) so check names read
 Checks`. The pattern matches `reusable-test-python.yml` +
 `reusable-publish-test-summary.yml`.
 
-A `strategy: matrix` job **can** call a reusable workflow via `uses:` — GitHub
-Actions maps matrix values to reusable workflow inputs. `reusable-test-node.yml`
-`publish-test-summary-coverage` uses inline steps to avoid an extra nesting level (which
-would worsen check-name readability) and to access matrix-specific artifacts.
+All language test reusables route PR summaries through a single
+`publish-test-summary` job → `reusable-publish-test-summary.yml` (no skipped
+sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
+(#292).
 
 <!-- markdownlint-disable MD013 -- permissions matrix; workflow column lists exceed default line length -->
 

@@ -37,6 +37,22 @@ never runs both uninstrumented nextest and llvm-cov in the same pipeline.
 | `false`    | `cargo nextest run --profile ci` | Tests only (Python-style) |
 | `true`     | `cargo llvm-cov nextest` + LCOV  | Tests + coverage line     |
 
+### Runtime compat matrix
+
+Use `rust-toolchains` (comma-separated) for multi-toolchain compat checks
+(MSRV, stable, beta). Compat matrix runs require `coverage: false` and
+`publish-test-summary: false`. Use `rust-toolchain` (or deprecated `toolchain`)
+for single-toolchain coverage and PR comments.
+
+```yaml
+rust-compat:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+  with:
+    rust-toolchains: "1.85.0,stable,beta"
+    coverage: false
+    publish-test-summary: false
+```
+
 test summaries use **`reusable-publish-test-summary`**: rich coverage tables via
 `generate-coverage-comment` when the LCOV artifact is available; otherwise
 `generate-test-summary.sh` (same fallback pattern as Python when
