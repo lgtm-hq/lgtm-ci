@@ -9,12 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.44.0] - 2026-06-10
+
+### Added
+
+- **workflows**: unify test reusables — compat/coverage contract (#345) (743656b)
 - **workflows**: compat/coverage contract validation for Rust, Node, and Python
   test reusables (#340)
 - **workflows**: Rust runtime matrix via `rust-toolchain` / `rust-toolchains`
   with prepare/aggregate jobs (#340)
 - **actions**: `test-suite-name` on `generate-coverage-comment` for distinct PR
   coverage headings (#340)
+
 
 ### Changed
 
@@ -23,9 +39,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: rich coverage headings append `test-suite-name` when set
   (`## 📊 Code Coverage Report — {name}`) (#340)
 
+
 ### Deprecated
 
 - **workflows**: Rust `toolchain` input — use `rust-toolchain` instead (#340)
+
 
 ### Removed
 
@@ -34,9 +52,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **scripts**: `prepare-coverage-test-summary.sh` (superseded by
   `test-suite-name` on `generate-coverage-comment`) (#340)
 
-### Fixed
-
-### Security
 
 ### Breaking changes
 
@@ -1089,7 +1104,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.0...HEAD
+[0.44.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.1...v0.44.0
 [0.43.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.0...v0.43.1
 [0.43.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.41.0...v0.42.0
