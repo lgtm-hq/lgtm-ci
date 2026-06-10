@@ -491,7 +491,7 @@ jobs:
       - prepare
       - test
     if: >-
-      always()
+      needs.prepare.result == 'success'
       && inputs.rust-toolchains != ''
       && (
         !inputs.draft-pr-skip ||

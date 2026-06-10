@@ -410,7 +410,7 @@ jobs:
       - prepare
       - test
     if: >-
-      always()
+      needs.prepare.result == 'success'
       && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||

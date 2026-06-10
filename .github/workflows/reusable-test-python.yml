@@ -425,7 +425,7 @@ jobs:
       - prepare
       - test
     if: >-
-      always()
+      needs.prepare.result == 'success'
       && inputs.python-versions != ''
       && (
         !inputs.draft-pr-skip ||

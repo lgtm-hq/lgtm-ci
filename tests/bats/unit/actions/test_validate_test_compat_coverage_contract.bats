@@ -60,6 +60,5 @@ load "../../../helpers/common"
 		bash "${PROJECT_ROOT}/scripts/ci/actions/validate-test-compat-coverage-contract.sh"
 
 	assert_failure
-	assert_output --partial "coverage: true"
-	assert_output --partial "publish-test-summary: true"
+	assert_output --partial "coverage: true, publish-test-summary: true"
 }

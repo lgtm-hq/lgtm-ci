@@ -30,6 +30,21 @@ _orchestrator_delegates_publish() {
 	' "$workflow"
 }
 
+_aggregate_requires_prepare_success() {
+	local workflow="$1"
+	local aggregate_job="$2"
+	run awk -v aggregate_job="$aggregate_job" '
+		$0 ~ "^  " aggregate_job ":" { in_aggregate = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && $0 !~ "^  " aggregate_job ":" { in_aggregate = 0 }
+		in_aggregate && /always\(\)/ { always_found = 1 }
+		in_aggregate && /needs\.prepare\.result == .success./ { prepare_gate = 1 }
+		END {
+			if (!prepare_gate) exit 1
+			if (always_found) exit 1
+		}
+	' "$workflow"
+}
+
 
 @test "reusable-quality-lint: no pull-requests permission" {
 	run _lint_only_has_no_pr_permissions \
@@ -230,5 +245,33 @@ _orchestrator_delegates_publish() {
 		in_job && /pull-requests: write/ { found = 1; exit }
 		END { exit !found }
 	' "${PROJECT_ROOT}/.github/workflows/reusable-publish-security-audit-comment.yml"
+	assert_success
+}
+
+@test "reusable-rust-test: aggregate requires prepare success" {
+	run _aggregate_requires_prepare_success \
+		"${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml" \
+		"aggregate"
+	assert_success
+}
+
+@test "reusable-test-python: aggregate requires prepare success" {
+	run _aggregate_requires_prepare_success \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml" \
+		"aggregate"
+	assert_success
+}
+
+@test "reusable-test-node: aggregate-tests requires prepare success" {
+	run _aggregate_requires_prepare_success \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml" \
+		"aggregate-tests"
+	assert_success
+}
+
+@test "reusable-test-node-custom: aggregate-tests requires prepare success" {
+	run _aggregate_requires_prepare_success \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml" \
+		"aggregate-tests"
 	assert_success
 }
