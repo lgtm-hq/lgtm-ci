@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.44.0] - 2026-06-10
+
+### Added
+
+- **workflows**: unify test reusables — compat/coverage contract (#345) (743656b)
 - **workflows**: compat/coverage contract validation for Rust, Node, and Python
   test reusables (#340)
 - **workflows**: Rust runtime matrix via `rust-toolchain` / `rust-toolchains`
@@ -22,6 +37,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reusable-publish-test-summary.yml`; closes #292 (#340)
 - **workflows**: rich coverage headings append `test-suite-name` when set
   (`## 📊 Code Coverage Report — {name}`) (#340)
+- Callers combining multi-runtime matrices (`python-versions`, `node-versions`,
+  `rust-toolchains`) with `coverage: true` or `publish-test-summary: true` will
+  fail validation until split into separate compat and coverage jobs (#340)
+- Node per-version coverage comment markers (`{marker}-{version}`) are removed
+  with matrix publish (#340)
+- Rich coverage PR comment headings now include the suite name when
+  `test-suite-name` / `job-name` is wired through; upsert `comment-marker`
+  values are unchanged (#340)
 
 ### Deprecated
 
@@ -33,21 +56,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (#340)
 - **scripts**: `prepare-coverage-test-summary.sh` (superseded by
   `test-suite-name` on `generate-coverage-comment`) (#340)
-
-### Fixed
-
-### Security
-
-### Breaking changes
-
-- Callers combining multi-runtime matrices (`python-versions`, `node-versions`,
-  `rust-toolchains`) with `coverage: true` or `publish-test-summary: true` will
-  fail validation until split into separate compat and coverage jobs (#340).
-- Node per-version coverage comment markers (`{marker}-{version}`) are removed
-  with matrix publish (#340).
-- Rich coverage PR comment headings now include the suite name when
-  `test-suite-name` / `job-name` is wired through; upsert `comment-marker`
-  values are unchanged (#340).
 
 ## [0.43.1] - 2026-06-10
 
@@ -1089,7 +1097,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.0...HEAD
+[0.44.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.1...v0.44.0
 [0.43.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.0...v0.43.1
 [0.43.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.42.0...v0.43.0
 [0.42.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.41.0...v0.42.0

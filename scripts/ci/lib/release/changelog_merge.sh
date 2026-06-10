@@ -46,6 +46,31 @@ _reset_merge_state() {
 	done
 }
 
+# Trim leading and trailing blank lines from a section body.
+# Usage: _trim_section_body "$body"
+_trim_section_body() {
+	local body="${1:-}"
+
+	[[ -z "$body" ]] && return 0
+
+	printf '%s\n' "$body" | awk '
+		{ lines[NR] = $0 }
+		END {
+			start = 1
+			end = NR
+			while (start <= end && lines[start] ~ /^[[:space:]]*$/) {
+				start++
+			}
+			while (end >= start && lines[end] ~ /^[[:space:]]*$/) {
+				end--
+			}
+			for (i = start; i <= end; i++) {
+				print lines[i]
+			}
+		}
+	'
+}
+
 # Append a line to a named KaC section accumulator.
 _append_to_section() {
 	local section="${1:-}"
@@ -157,6 +182,7 @@ merge_changelog_sections() {
 	else
 		_MERGE_PROSE="$existing_prose"
 	fi
+	_MERGE_PROSE=$(_trim_section_body "$_MERGE_PROSE")
 
 	if [[ -n "$_MERGE_GENERATED_BREAKING" && -n "$existing_breaking" ]]; then
 		_MERGE_BREAKING="${_MERGE_GENERATED_BREAKING}"$'\n'"${existing_breaking}"
@@ -165,6 +191,7 @@ merge_changelog_sections() {
 	else
 		_MERGE_BREAKING="$existing_breaking"
 	fi
+	_MERGE_BREAKING=$(_trim_section_body "$_MERGE_BREAKING")
 
 	for section in "${_KAC_SECTION_ORDER[@]}"; do
 		eval "left=\"\${_MERGE_GENERATED_${section}:-}\""
@@ -177,6 +204,7 @@ merge_changelog_sections() {
 		else
 			merged="$right"
 		fi
+		merged=$(_trim_section_body "$merged")
 		eval "_MERGE_FINAL_${section}=\$merged"
 	done
 
