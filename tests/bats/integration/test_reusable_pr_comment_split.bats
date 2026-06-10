@@ -275,3 +275,23 @@ _aggregate_requires_prepare_success() {
 		"aggregate-tests"
 	assert_success
 }
+
+@test "reusable-test-node: publish-test-summary skips when aggregate-tests skipped" {
+	run awk '
+		/^  publish-test-summary:/ { in_publish = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ { in_publish = 0 }
+		in_publish && /needs\.aggregate-tests\.result != .skipped./ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
+	assert_success
+}
+
+@test "reusable-test-node-custom: publish-test-summary skips when aggregate-tests skipped" {
+	run awk '
+		/^  publish-test-summary:/ { in_publish = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ { in_publish = 0 }
+		in_publish && /needs\.aggregate-tests\.result != .skipped./ { found = 1; exit }
+		END { exit !found }
+	' "${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
+	assert_success
+}

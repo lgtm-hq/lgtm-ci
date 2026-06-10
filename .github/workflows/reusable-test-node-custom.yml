@@ -541,6 +541,7 @@ jobs:
     needs: aggregate-tests
     if: >-
       always()
+      && needs.aggregate-tests.result != 'skipped'
       && inputs.publish-test-summary
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
