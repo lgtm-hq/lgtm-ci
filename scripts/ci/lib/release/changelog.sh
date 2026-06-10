@@ -137,16 +137,17 @@ generate_changelog() {
 		esac
 	done <<<"$commits_output"
 
-	# Generate sections (breaking changes first)
-	generate_changelog_section "Breaking Changes" "$breaking_commits" "$format"
-	generate_changelog_section "Features" "$feat_commits" "$format"
-	generate_changelog_section "Bug Fixes" "$fix_commits" "$format"
-	generate_changelog_section "Documentation" "$docs_commits" "$format"
-
-	# Only include "Other" if explicitly requested
-	if [[ "$format" == "full" ]] && [[ -n "$other_commits" ]]; then
-		generate_changelog_section "Other Changes" "$other_commits" "$format"
+	local changed_commits=""
+	changed_commits+="$breaking_commits"
+	changed_commits+="$docs_commits"
+	if [[ "$format" == "full" ]]; then
+		changed_commits+="$other_commits"
 	fi
+
+	# Keep a Changelog standard section headings
+	generate_changelog_section "Added" "$feat_commits" "$format"
+	generate_changelog_section "Changed" "$changed_commits" "$format"
+	generate_changelog_section "Fixed" "$fix_commits" "$format"
 }
 
 # Generate release notes (more concise than changelog)
