@@ -559,6 +559,8 @@ jobs:
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       rich-coverage-comment: ${{ inputs.coverage }}
       coverage-artifact-name: ${{ inputs.coverage && 'node-coverage' || '' }}
-      coverage-file: ${{ inputs.coverage-summary-file }}
+      coverage-file: >-
+        ${{ inputs.working-directory == '.' && inputs.coverage-summary-file ||
+        format('{0}/{1}', inputs.working-directory, inputs.coverage-summary-file) }}
       coverage-format: istanbul
       tooling-ref: ${{ inputs.tooling-ref }}

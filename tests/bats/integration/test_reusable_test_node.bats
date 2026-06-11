@@ -47,8 +47,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
 
 @test "reusable-test-node: node-coverage artifact upload uses working-directory prefix" {
 	run awk '
-		/Upload coverage for test summary/ { in_step = 1 }
-		in_step && /path: \$\{\{ inputs\.working-directory \}\}\/\$\{\{ inputs\.coverage-summary-file \}\}/ {
+		/^  test-vitest:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test-vitest:/ { in_job = 0 }
+		in_job && /Upload coverage for test summary/ { in_step = 1 }
+		in_job && in_step && /path: \$\{\{ inputs\.working-directory \}\}\/\$\{\{ inputs\.coverage-summary-file \}\}/ {
 			found = 1
 			exit
 		}
@@ -59,8 +61,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
 
 @test "reusable-test-node: publish-test-summary coverage-file matches node-coverage upload layout" {
 	run awk '
-		/Upload coverage for test summary/ { in_upload = 1 }
-		in_upload && /path: \$\{\{ inputs\.working-directory \}\}\/\$\{\{ inputs\.coverage-summary-file \}\}/ {
+		/^  test-vitest:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test-vitest:/ { in_job = 0 }
+		in_job && /Upload coverage for test summary/ { in_upload = 1 }
+		in_job && in_upload && /path: \$\{\{ inputs\.working-directory \}\}\/\$\{\{ inputs\.coverage-summary-file \}\}/ {
 			upload = 1
 		}
 		/^  publish-test-summary:/ { in_publish = 1 }

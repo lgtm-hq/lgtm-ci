@@ -153,6 +153,13 @@ Rich coverage comments use `generate-coverage-comment` with an optional
 `## 📊 Code Coverage Report — {test-suite-name}`; `comment-marker` remains the
 upsert identity.
 
+Node test reusables (`reusable-test-node`, `reusable-test-node-custom`) upload the
+`node-coverage` artifact from `{working-directory}/{coverage-summary-file}`.
+`publish-test-summary` must pass the same path (including the `working-directory`
+prefix when it is not `.`) as `coverage-file` to
+`reusable-publish-test-summary.yml` so `download-artifact` resolves the summary
+inside `coverage-test-summary/`.
+
 ### Compat vs coverage contract (#340)
 
 Rust, Node, and Python test reusables share a **two-mode contract**:
