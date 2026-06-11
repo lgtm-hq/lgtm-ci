@@ -68,9 +68,12 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
 			upload = 1
 		}
 		/^  publish-test-summary:/ { in_publish = 1 }
-		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ { in_publish = 0 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ {
+			in_publish = 0
+			in_cov = 0
+		}
 		in_publish && /coverage-file:/ { in_cov = 1 }
-		in_cov && /inputs\.working-directory/ && /inputs\.coverage-summary-file/ {
+		in_publish && in_cov && /inputs\.working-directory/ && /inputs\.coverage-summary-file/ {
 			publish = 1
 		}
 		END { exit !(upload && publish) }
