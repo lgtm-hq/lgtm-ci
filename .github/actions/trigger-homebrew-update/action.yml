@@ -14,8 +14,11 @@ inputs:
     required: true
   token:
     description: >-
-      GitHub token with `repo` scope on the tap repository (for example
-      HOMEBREW_TAP_DISPATCH_TOKEN)
+      Token used for the repository_dispatch API on the tap repository.
+      Classic personal access tokens need the `repo` scope (or `public_repo`
+      for public repositories). Fine-grained tokens need `contents: write`
+      and `metadata: read` on the tap repository (for example
+      HOMEBREW_TAP_DISPATCH_TOKEN).
     required: true
   tap-repository:
     description: "Tap repository to receive the dispatch (owner/repo)"
@@ -36,8 +39,8 @@ inputs:
 
 outputs:
   dispatched:
-    description: "Whether the repository_dispatch event was sent"
-    value: ${{ steps.dispatch.outputs.dispatched }}
+    description: "Whether the repository_dispatch event was sent (`true`/`false`)"
+    value: ${{ steps.dispatch.outputs.dispatched || 'false' }}
   tap-repository:
     description: "Tap repository that received the dispatch"
     value: ${{ steps.dispatch.outputs.tap-repository }}
@@ -63,7 +66,7 @@ runs:
         PYPI_PACKAGE: ${{ inputs.pypi-package }}
         BINARY_ARM64_SHA: ${{ inputs.binary-arm64-sha }}
         BINARY_X86_SHA: ${{ inputs.binary-x86-sha }}
-      run: $SCRIPTS_DIR/ci/actions/trigger-homebrew-update.sh
+      run: "$SCRIPTS_DIR/ci/actions/trigger-homebrew-update.sh"
 
 branding:
   icon: "upload"
