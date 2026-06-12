@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.45.0] - 2026-06-12
+
+### Added
+
+- **actions**: add trigger-homebrew-update dispatch action (#351) (f02bfc5)
+
 ## [0.44.1] - 2026-06-11
 
 ### Fixed
@@ -1103,7 +1109,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.0...HEAD
+[0.45.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.1...v0.45.0
 [0.44.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.0...v0.44.1
 [0.44.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.1...v0.44.0
 [0.43.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.0...v0.43.1
