@@ -1203,41 +1203,52 @@ Build and publish Ruby gems to RubyGems using OIDC trusted publishing.
 
 ---
 
-### update-homebrew
+### trigger-homebrew-update
 
-Update a Homebrew formula with a new version from PyPI.
+Dispatch a Homebrew formula update to a tap repository via
+`repository_dispatch`. Use this for org products publishing to
+[lgtm-hq/homebrew-tap](https://github.com/lgtm-hq/homebrew-tap) after PyPI and
+GitHub Release jobs complete.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/update-homebrew@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@main
   with:
-    tap-repository: "owner/homebrew-tap" # required
-    formula: "mypackage" # required
-    package-name: "my-pypi-package" # required
-    version: "1.2.3" # required
-    wait-for-availability: "true" # optional
-    max-wait-minutes: "10" # optional
-    test-pypi: "false" # optional
-    push: "true" # optional
-    create-pr: "false" # optional
+    formula: winnow
+    version: "1.2.3"
+    token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+    tap-repository: lgtm-hq/homebrew-tap # optional, this is the default
+    pypi-package: winnow # optional, defaults to formula
+    binary-arm64-sha: "" # optional
+    binary-x86-sha: "" # optional
 ```
+
+**Inputs:**
+
+- `formula` — Homebrew formula name (required)
+- `version` — Release version (required)
+- `token` — Token for `repository_dispatch` on the tap repository (required).
+  Classic PAT: `repo` scope (or `public_repo` for public repos). Fine-grained
+  token: `contents: write` and `metadata: read` on the tap repository.
+- `tap-repository` — Tap repository `owner/repo` (default: `lgtm-hq/homebrew-tap`)
+- `pypi-package` — PyPI package name (default: same as `formula`)
+- `binary-arm64-sha` — SHA256 of the macOS arm64 release asset (optional)
+- `binary-x86-sha` — SHA256 of the macOS x86_64 release asset (optional)
 
 **Outputs:**
 
-- `updated` - Whether the formula was updated
-- `commit-sha` - Commit SHA of the update
-- `pr-url` - Pull request URL (if create-pr is true)
+- `dispatched` — Whether the dispatch event was sent (`true`/`false`)
+- `tap-repository` — Tap repository that received the dispatch
 
 **Requirements:**
 
-- Repository write access for pushing to tap (via `GITHUB_TOKEN` or PAT)
-- `contents: write` permission when used in workflows
+- Caller job should `needs: [pypi-upload, github-release]` (and any binary build
+  job when using `binary-*-sha` inputs)
+- `HOMEBREW_TAP_DISPATCH_TOKEN` (or equivalent) with `repository_dispatch`
+  access to the tap repository (Classic PAT: `repo` or `public_repo`; fine-grained:
+  `contents: write` and `metadata: read`)
 
-**Features:**
-
-- Waits for package availability on PyPI
-- Downloads and calculates SHA256 automatically
-- Creates or updates existing formulas
-- Supports direct push or PR workflow
+See [python-release-publish.md](../../docs/python-release-publish.md) for payload
+schema and PyPI-only vs binary+PyPI examples.
 
 ---
 
@@ -1941,46 +1952,6 @@ jobs:
 
 - `contents: read` - For checkout
 - `id-token: write` - For OIDC authentication
-
----
-
-### reusable-publish-homebrew.yml
-
-Update Homebrew formula with new version from PyPI.
-
-```yaml
-jobs:
-  homebrew:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-homebrew.yml@main
-    with:
-      tap-repository: "owner/homebrew-tap"
-      formula: "mypackage"
-      package-name: "my-pypi-package"
-      version: "1.2.3"
-      wait-for-availability: true
-      create-pr: false
-```
-
-**Inputs:**
-
-- `tap-repository` - Homebrew tap repository (owner/repo) - required
-- `formula` - Formula name - required
-- `package-name` - PyPI package name - required
-- `version` - Version to update to - required
-- `wait-for-availability` - Wait for package on PyPI (default: true)
-- `max-wait-minutes` - Maximum wait time in minutes (default: 10)
-- `test-pypi` - Use TestPyPI instead of PyPI (default: false)
-- `create-pr` - Create PR instead of direct push (default: false)
-
-**Outputs:**
-
-- `updated` - Whether the formula was updated
-- `commit-sha` - Commit SHA of the update
-- `pr-url` - Pull request URL (if create-pr is true)
-
-**Permissions Required:**
-
-- `contents: write` - For pushing to tap repository
 
 ---
 

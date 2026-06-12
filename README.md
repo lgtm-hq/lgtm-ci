@@ -155,16 +155,16 @@ steps:
 
 #### Publishing & Deployment
 
-| Action                 | Description                                                  |
-| ---------------------- | ------------------------------------------------------------ |
-| `publish-npm`          | npm package publishing                                       |
-| `build-python-package` | Build Python sdist/wheel                                     |
-| `prepare-pypi-upload`  | Download, validate, and expose dist metadata for PyPI upload |
-| `publish-gem`          | RubyGems publishing                                          |
-| `update-homebrew`      | Homebrew formula updates                                     |
-| `validate-package`     | Package validation                                           |
-| `wait-for-package`     | Package availability polling                                 |
-| `deploy-pages`         | GitHub Pages deployment                                      |
+| Action                    | Description                                                  |
+| ------------------------- | ------------------------------------------------------------ |
+| `publish-npm`             | npm package publishing                                       |
+| `build-python-package`    | Build Python sdist/wheel                                     |
+| `prepare-pypi-upload`     | Download, validate, and expose dist metadata for PyPI upload |
+| `publish-gem`             | RubyGems publishing                                          |
+| `trigger-homebrew-update` | Dispatch Homebrew formula updates to homebrew-tap            |
+| `validate-package`        | Package validation                                           |
+| `wait-for-package`        | Package availability polling                                 |
+| `deploy-pages`            | GitHub Pages deployment                                      |
 
 ### Reusable Workflows
 
@@ -181,7 +181,6 @@ steps:
 | `reusable-github-release.yml`          | GitHub Release with artifact assets          |
 | `reusable-publish-npm.yml`             | npm publishing                               |
 | `reusable-publish-gem.yml`             | RubyGems publishing                          |
-| `reusable-publish-homebrew.yml`        | Homebrew formula publishing                  |
 | `reusable-deploy-pages.yml`            | GitHub Pages deployment                      |
 | `reusable-docker.yml`                  | Docker build and publish                     |
 | `reusable-coverage.yml`                | Test coverage collection                     |

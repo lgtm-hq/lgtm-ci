@@ -29,7 +29,7 @@ Typical caller jobs:
 3. **Build** — `reusable-build-python-dist.yml`
 4. **Upload** — local job: `prepare-pypi-upload` → `pypa/gh-action-pypi-publish` → optional attestation
 5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`)
-6. **Product-specific** — Homebrew, Docker, etc.
+6. **Product-specific** — Homebrew dispatch, Docker, etc.
 
 Copy-paste starter: [`examples/publish-python-release.yml`](../examples/publish-python-release.yml).
 
@@ -179,10 +179,103 @@ Split allowlists between **build** (reusable `with:`) and **upload** (caller job
 harden-runner). See [workflow-contract.md](workflow-contract.md) (§ PyPI build, §
 PyPI upload).
 
-## Product-specific jobs
+## Homebrew tap dispatch (lgtm-hq/homebrew-tap)
 
-Run Homebrew or Docker with `needs: [pypi-upload, github-release]` when they
-depend on a published GitHub Release.
+Org products publish Homebrew formulas through a central tap. After PyPI upload
+and GitHub Release succeed, dispatch an `update-formula` event to
+[lgtm-hq/homebrew-tap](https://github.com/lgtm-hq/homebrew-tap). The tap
+repository owns formula configuration, generation, and commit/PR logic (see
+[homebrew-tap#44](https://github.com/lgtm-hq/homebrew-tap/issues/44)).
+
+### Job ordering
+
+Run the Homebrew dispatch job after both publish steps complete:
+
+```yaml
+homebrew-dispatch:
+  needs: [pypi-upload, github-release]
+```
+
+### Required secret
+
+Store a GitHub PAT or fine-grained token on `lgtm-hq/homebrew-tap` as
+`HOMEBREW_TAP_DISPATCH_TOKEN` in the caller repository. The token is used for
+the `repository_dispatch` API:
+
+- **Classic PAT** — `repo` scope (or `public_repo` for public repositories)
+- **Fine-grained token** — `contents: write` and `metadata: read` on the tap
+  repository
+
+### Dispatch payload
+
+The `trigger-homebrew-update` action sends `repository_dispatch` with
+`event-type: update-formula`. Action inputs are mapped into `client_payload` as
+follows:
+
+| Action input        | `client_payload` field / location              |
+| ------------------- | ---------------------------------------------- |
+| `formula`           | `formula`                                      |
+| `version`           | `version`                                      |
+| `pypi-package`      | `pypi-package` (defaults to `formula`)         |
+| `binary-arm64-sha`  | `binary-assets.arm64-sha` (both SHAs required) |
+| `binary-x86-sha`    | `binary-assets.x86-sha` (both SHAs required)   |
+
+Omit `binary-arm64-sha` and `binary-x86-sha` for PyPI-only products — the action
+then omits `binary-assets` from the payload entirely. When both SHA inputs are
+non-empty, `binary-assets` is included with `arm64-sha` and `x86-sha`. Providing
+only one SHA fails the step.
+
+Resulting `client_payload` schema:
+
+| Field            | Required | Description                                      |
+| ---------------- | -------- | ------------------------------------------------ |
+| `formula`        | yes      | Homebrew formula name                            |
+| `version`        | yes      | Release version                                  |
+| `pypi-package`   | no       | PyPI project name (defaults to `formula`)        |
+| `binary-assets`  | no       | Object with `arm64-sha` and `x86-sha` (optional) |
+
+Version typically comes from `reusable-build-python-dist.yml` (`version` output),
+not from `reusable-github-release.yml`.
+
+### Example: PyPI-only (winnow)
+
+```yaml
+homebrew-dispatch:
+  name: Update Homebrew formula
+  needs: [pypi-upload, github-release, pypi-build]
+  runs-on: ubuntu-latest
+  steps:
+    - uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@<sha> # vX.Y.Z
+      with:
+        formula: winnow
+        version: ${{ needs.pypi-build.outputs.version }}
+        token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+```
+
+### Example: PyPI + macOS binaries (lintro)
+
+Wire SHA256 outputs from the caller's macOS release build job (names vary by
+repository):
+
+```yaml
+homebrew-dispatch:
+  name: Update Homebrew formula
+  needs: [pypi-upload, github-release, pypi-build, macos-release]
+  runs-on: ubuntu-latest
+  steps:
+    - uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@<sha> # vX.Y.Z
+      with:
+        formula: lintro
+        version: ${{ needs.pypi-build.outputs.version }}
+        pypi-package: lintro
+        binary-arm64-sha: ${{ needs.macos-release.outputs.arm64-sha256 }}
+        binary-x86-sha: ${{ needs.macos-release.outputs.x86-sha256 }}
+        token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+```
+
+To add a new product, configure the formula in
+[homebrew-tap](https://github.com/lgtm-hq/homebrew-tap) and wire a dispatch job
+in the product repository release workflow.
 
 ## Migration from v0.23.x
 
@@ -203,3 +296,4 @@ depend on a published GitHub Release.
 
 - [workflow-contract.md](workflow-contract.md)
 - [reusable-workflows.md](reusable-workflows.md)
+- [homebrew-tap](https://github.com/lgtm-hq/homebrew-tap) — formula config and dispatch handler
