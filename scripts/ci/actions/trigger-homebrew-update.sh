@@ -6,7 +6,7 @@
 #   STEP: dispatch
 #   FORMULA: Homebrew formula name (required)
 #   VERSION: Release version (required)
-#   GH_TOKEN: GitHub token with repo scope on the tap (required)
+#   GH_TOKEN: Token for repository_dispatch on the tap repository (required)
 #   TAP_REPOSITORY: Tap owner/repo (default: lgtm-hq/homebrew-tap)
 #   PYPI_PACKAGE: PyPI package name (default: FORMULA)
 #   BINARY_ARM64_SHA: macOS arm64 release asset SHA256 (optional)
@@ -41,6 +41,12 @@ dispatch)
 
 	log_info "Dispatching update-formula for $FORMULA@$VERSION to $tap_repository..."
 
+	_set_dispatch_failure_outputs() {
+		set_github_output "dispatched" "false"
+		set_github_output "tap-repository" "$tap_repository"
+	}
+	trap '_set_dispatch_failure_outputs' ERR
+
 	payload_args=(
 		--arg formula "$FORMULA"
 		--arg version "$VERSION"
@@ -48,6 +54,10 @@ dispatch)
 	)
 
 	if [[ -n "${binary_arm64_sha// /}" || -n "${binary_x86_sha// /}" ]]; then
+		if [[ -z "${binary_arm64_sha// /}" || -z "${binary_x86_sha// /}" ]]; then
+			_set_dispatch_failure_outputs
+			die "binary-arm64-sha and binary-x86-sha must both be set or both omitted"
+		fi
 		payload_args+=(
 			--arg arm64_sha "$binary_arm64_sha"
 			--arg x86_sha "$binary_x86_sha"
@@ -90,6 +100,7 @@ dispatch)
 		--input - <<<"$request_body"
 
 	log_success "Dispatched update-formula to $tap_repository"
+	trap - ERR
 	set_github_output "dispatched" "true"
 	set_github_output "tap-repository" "$tap_repository"
 	;;
