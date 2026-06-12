@@ -601,6 +601,61 @@ EOF
 }
 
 # =============================================================================
+# update-homebrew.sh generate step (arg order regression)
+# =============================================================================
+
+@test "update-homebrew.sh generate: updates formula url and sha256 from PyPI" {
+	load "../../../../helpers/github_env"
+	setup_github_env
+
+	local fixture_formula="${BATS_TEST_TMPDIR}/fixture-winnow.rb"
+	cat >"$fixture_formula" <<'EOF'
+class Winnow < Formula
+  desc "Test formula"
+  homepage "https://example.com"
+  url "https://files.pythonhosted.org/packages/old/winnow-1.0.0.tar.gz"
+  sha256 "0000000000000000000000000000000000000000000000000000000000000000"
+end
+EOF
+
+	local pypi_response='{"urls":[{"packagetype":"sdist","url":"https://files.pythonhosted.org/packages/new/winnow-2.0.0.tar.gz","digests":{"sha256":"deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"}}]}'
+	mock_curl "$pypi_response"
+
+	local tap_dir="${BATS_TEST_TMPDIR}/runner_temp/homebrew-tap"
+	export RUNNER_TEMP="${BATS_TEST_TMPDIR}/runner_temp"
+	mkdir -p "$RUNNER_TEMP"
+
+	mock_command_multi "git" "
+		clone*)
+			target=\"\${@: -1}\"
+			mkdir -p \"\$target/Formula\"
+			cp '$fixture_formula' \"\$target/Formula/winnow.rb\"
+			mkdir \"\$target/.git\"
+			exit 0;;
+		*) exit 0;;
+	"
+
+	run env \
+		STEP=generate \
+		TAP_REPOSITORY=lgtm-hq/homebrew-tap \
+		FORMULA=winnow \
+		PACKAGE=winnow \
+		VERSION=2.0.0 \
+		TEST_PYPI=false \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/update-homebrew.sh"
+
+	assert_success
+
+	local updated_formula="${tap_dir}/Formula/winnow.rb"
+	run grep 'url "https://files.pythonhosted.org/packages/new/winnow-2.0.0.tar.gz"' "$updated_formula"
+	assert_success
+	run grep 'sha256 "deadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeefdeadbeef"' "$updated_formula"
+	assert_success
+
+	teardown_github_env
+}
+
+# =============================================================================
 # Function export tests
 # =============================================================================
 

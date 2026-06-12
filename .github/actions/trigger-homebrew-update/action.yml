@@ -1,0 +1,129 @@
+---
+name: "Trigger Homebrew Update"
+description: >-
+  Dispatch an update-formula event to lgtm-hq/homebrew-tap (or another tap
+  repository) after a release publishes to PyPI and GitHub Releases.
+author: "lgtm-hq"
+
+inputs:
+  formula:
+    description: "Homebrew formula name"
+    required: true
+  version:
+    description: "Release version to publish to Homebrew"
+    required: true
+  token:
+    description: >-
+      GitHub token with `repo` scope on the tap repository (for example
+      HOMEBREW_TAP_DISPATCH_TOKEN)
+    required: true
+  tap-repository:
+    description: "Tap repository to receive the dispatch (owner/repo)"
+    required: false
+    default: "lgtm-hq/homebrew-tap"
+  pypi-package:
+    description: "PyPI package name (defaults to formula when omitted)"
+    required: false
+    default: ""
+  binary-arm64-sha:
+    description: "SHA256 of the macOS arm64 release asset (optional)"
+    required: false
+    default: ""
+  binary-x86-sha:
+    description: "SHA256 of the macOS x86_64 release asset (optional)"
+    required: false
+    default: ""
+
+outputs:
+  dispatched:
+    description: "Whether the repository_dispatch event was sent"
+    value: ${{ steps.dispatch.outputs.dispatched }}
+  tap-repository:
+    description: "Tap repository that received the dispatch"
+    value: ${{ steps.dispatch.outputs.tap-repository }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Dispatch formula update
+      id: dispatch
+      shell: bash
+      env:
+        INPUT_FORMULA: ${{ inputs.formula }}
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_TOKEN: ${{ inputs.token }}
+        INPUT_TAP_REPOSITORY: ${{ inputs.tap-repository }}
+        INPUT_PYPI_PACKAGE: ${{ inputs.pypi-package }}
+        INPUT_BINARY_ARM64_SHA: ${{ inputs.binary-arm64-sha }}
+        INPUT_BINARY_X86_SHA: ${{ inputs.binary-x86-sha }}
+      run: |
+        set -euo pipefail
+
+        missing=()
+        [[ -z "${INPUT_FORMULA// }" ]] && missing+=("formula")
+        [[ -z "${INPUT_VERSION// }" ]] && missing+=("version")
+        [[ -z "${INPUT_TOKEN// }" ]] && missing+=("token")
+        if ((${#missing[@]} > 0)); then
+          echo "::error::Missing required inputs: ${missing[*]}" >&2
+          exit 1
+        fi
+
+        pypi_package="${INPUT_PYPI_PACKAGE:-$INPUT_FORMULA}"
+        tap_repository="${INPUT_TAP_REPOSITORY:-lgtm-hq/homebrew-tap}"
+
+        payload_args=(
+          --arg formula "$INPUT_FORMULA"
+          --arg version "$INPUT_VERSION"
+          --arg pypi_package "$pypi_package"
+        )
+
+        if [[ -n "${INPUT_BINARY_ARM64_SHA// }" || -n "${INPUT_BINARY_X86_SHA// }" ]]; then
+          payload_args+=(
+            --arg arm64_sha "${INPUT_BINARY_ARM64_SHA}"
+            --arg x86_sha "${INPUT_BINARY_X86_SHA}"
+          )
+          client_payload=$(
+            jq -n \
+              "${payload_args[@]}" \
+              '{
+                formula: $formula,
+                version: $version,
+                "pypi-package": $pypi_package,
+                "binary-assets": {
+                  "arm64-sha": $arm64_sha,
+                  "x86-sha": $x86_sha
+                }
+              }'
+          )
+        else
+          client_payload=$(
+            jq -n \
+              "${payload_args[@]}" \
+              '{
+                formula: $formula,
+                version: $version,
+                "pypi-package": $pypi_package
+              }'
+          )
+        fi
+
+        request_body=$(
+          jq -n \
+            --arg event_type "update-formula" \
+            --argjson client_payload "$client_payload" \
+            '{event_type: $event_type, client_payload: $client_payload}'
+        )
+
+        GH_TOKEN="$INPUT_TOKEN" gh api \
+          "repos/${tap_repository}/dispatches" \
+          --method POST \
+          --input - <<<"$request_body"
+
+        {
+          echo "dispatched=true"
+          echo "tap-repository=$tap_repository"
+        } >>"$GITHUB_OUTPUT"
+
+branding:
+  icon: "upload"
+  color: "yellow"

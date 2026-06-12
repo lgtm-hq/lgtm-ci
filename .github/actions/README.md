@@ -1203,7 +1203,56 @@ Build and publish Ruby gems to RubyGems using OIDC trusted publishing.
 
 ---
 
+### trigger-homebrew-update
+
+Dispatch a Homebrew formula update to a tap repository via
+`repository_dispatch`. Use this for org products publishing to
+[lgtm-hq/homebrew-tap](https://github.com/lgtm-hq/homebrew-tap) after PyPI and
+GitHub Release jobs complete.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@main
+  with:
+    formula: winnow
+    version: "1.2.3"
+    token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+    tap-repository: lgtm-hq/homebrew-tap # optional, this is the default
+    pypi-package: winnow # optional, defaults to formula
+    binary-arm64-sha: "" # optional
+    binary-x86-sha: "" # optional
+```
+
+**Inputs:**
+
+- `formula` — Homebrew formula name (required)
+- `version` — Release version (required)
+- `token` — GitHub token with `repo` scope on the tap repository (required)
+- `tap-repository` — Tap repository `owner/repo` (default: `lgtm-hq/homebrew-tap`)
+- `pypi-package` — PyPI package name (default: same as `formula`)
+- `binary-arm64-sha` — SHA256 of the macOS arm64 release asset (optional)
+- `binary-x86-sha` — SHA256 of the macOS x86_64 release asset (optional)
+
+**Outputs:**
+
+- `dispatched` — Whether the dispatch event was sent (`true`/`false`)
+- `tap-repository` — Tap repository that received the dispatch
+
+**Requirements:**
+
+- Caller job should `needs: [pypi-upload, github-release]` (and any binary build
+  job when using `binary-*-sha` inputs)
+- `HOMEBREW_TAP_DISPATCH_TOKEN` (or equivalent) secret with write access to the
+  tap repository
+
+See [python-release-publish.md](../../docs/python-release-publish.md) for payload
+schema and PyPI-only vs binary+PyPI examples.
+
+---
+
 ### update-homebrew
+
+> **Note:** For `lgtm-hq/homebrew-tap`, prefer `trigger-homebrew-update`
+> (dispatch model). This action remains for same-repo tap workflows.
 
 Update a Homebrew formula with a new version from PyPI.
 
@@ -1945,6 +1994,9 @@ jobs:
 ---
 
 ### reusable-publish-homebrew.yml
+
+> **Note:** For `lgtm-hq/homebrew-tap`, prefer `trigger-homebrew-update`
+> (dispatch model). This reusable remains for same-repo tap workflows.
 
 Update Homebrew formula with new version from PyPI.
 

@@ -1,4 +1,8 @@
 ---
+# Deprecation note: org repos publishing to lgtm-hq/homebrew-tap should use
+# trigger-homebrew-update (repository_dispatch model) instead of this action.
+# This action remains for simple same-repo tap workflows that clone and commit
+# formula changes directly.
 name: "Update Homebrew Formula"
 description: "Update a Homebrew formula with new version from PyPI"
 author: "lgtm-hq"

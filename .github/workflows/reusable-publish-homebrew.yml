@@ -1,4 +1,8 @@
 ---
+# Deprecation note: org repos publishing to lgtm-hq/homebrew-tap should use
+# trigger-homebrew-update (repository_dispatch model) instead of this reusable.
+# This reusable remains for simple same-repo tap workflows that clone and commit
+# formula changes directly.
 name: Reusable Homebrew Formula Update Workflow
 
 on:

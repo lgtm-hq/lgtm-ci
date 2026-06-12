@@ -77,7 +77,7 @@ generate)
 
 	if [[ -n "$formula_file" ]]; then
 		log_info "Updating existing formula: $formula_file"
-		update_formula_version "$formula_file" "$VERSION" "$download_url" "$sha256"
+		update_formula_version "$formula_file" "$download_url" "$sha256" "$VERSION"
 	else
 		log_info "Creating new formula..."
 		mkdir -p "$TAP_DIR/Formula"
