@@ -17,13 +17,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.45.1] - 2026-06-12
+
+### Fixed
+
+- preserve monorepo paths in node-coverage test-summary artifacts (#354) (3ef9b40)
 - **workflows**: stage `node-coverage` test-summary artifacts under
   `node-coverage-staged/` so monorepo `working-directory` paths are preserved
   when downloaded by `reusable-publish-test-summary.yml`
 - **scripts**: add `stage-node-coverage-test-summary.sh` with missing-file skip
   so failed test runs do not error when coverage was never written
-
-### Security
 
 ## [0.45.0] - 2026-06-12
 
@@ -1115,7 +1120,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.1...HEAD
+[0.45.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.0...v0.45.1
 [0.45.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.1...v0.45.0
 [0.44.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.0...v0.44.1
 [0.44.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.43.1...v0.44.0
