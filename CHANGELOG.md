@@ -20,6 +20,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: stage `node-coverage` test-summary artifacts under
   `node-coverage-staged/` so monorepo `working-directory` paths are preserved
   when downloaded by `reusable-publish-test-summary.yml`
+- **scripts**: add `stage-node-coverage-test-summary.sh` with missing-file skip
+  so failed test runs do not error when coverage was never written
 
 ### Security
 

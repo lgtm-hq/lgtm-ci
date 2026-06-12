@@ -466,10 +466,8 @@ jobs:
         env:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           COVERAGE_SUMMARY_FILE: ${{ inputs.coverage-summary-file }}
-        run: |
-          dest="node-coverage-staged/${WORKING_DIRECTORY}/${COVERAGE_SUMMARY_FILE}"
-          mkdir -p "$(dirname "$dest")"
-          cp "${WORKING_DIRECTORY}/${COVERAGE_SUMMARY_FILE}" "$dest"
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-coverage-test-summary.sh
 
       - name: Upload coverage for test summary
         if: >-

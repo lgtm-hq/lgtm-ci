@@ -52,11 +52,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 	run awk '
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && /Stage coverage for test summary/ { in_step = 1 }
-		in_job && in_step && /node-coverage-staged/ && /WORKING_DIRECTORY/ && /COVERAGE_SUMMARY_FILE/ {
-			found = 1
+		in_job && /Stage coverage for test summary/ {
+			in_step = 1
+			script = 0
+			env_wd = 0
+			env_cov = 0
 		}
-		END { exit !found }
+		in_job && in_step && /stage-node-coverage-test-summary\.sh/ { script = 1 }
+		in_job && in_step && /WORKING_DIRECTORY:/ { env_wd = 1 }
+		in_job && in_step && /COVERAGE_SUMMARY_FILE:/ { env_cov = 1 }
+		END { exit !(script && env_wd && env_cov) }
 	' "$WORKFLOW"
 	assert_success
 }
@@ -79,10 +84,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 	run awk '
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && /Stage coverage for test summary/ { in_stage = 1 }
-		in_job && in_stage && /node-coverage-staged/ && /WORKING_DIRECTORY/ && /COVERAGE_SUMMARY_FILE/ {
-			stage = 1
+		in_job && /Stage coverage for test summary/ {
+			in_stage = 1
+			script = 0
+			env_wd = 0
+			env_cov = 0
 		}
+		in_job && in_stage && /stage-node-coverage-test-summary\.sh/ { script = 1 }
+		in_job && in_stage && /WORKING_DIRECTORY:/ { env_wd = 1 }
+		in_job && in_stage && /COVERAGE_SUMMARY_FILE:/ { env_cov = 1 }
 		/^  publish-test-summary:/ { in_publish = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ {
 			in_publish = 0
@@ -92,7 +102,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 		in_publish && in_cov && /inputs\.working-directory/ && /inputs\.coverage-summary-file/ {
 			publish = 1
 		}
-		END { exit !(stage && publish) }
+		END { exit !(script && env_wd && env_cov && publish) }
 	' "$WORKFLOW"
 	assert_success
 }
