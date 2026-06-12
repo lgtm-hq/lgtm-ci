@@ -9,6 +9,7 @@
 #   - publish/version.sh (version extraction)
 #   - publish/validate.sh (package validation)
 #   - publish/registry.sh (registry availability)
+#   - publish/homebrew.sh (Homebrew formula generation)
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_PUBLISH_LOADED:-}" ]] && return 0
@@ -32,3 +33,6 @@ fi
 
 # shellcheck source=publish/registry.sh
 [[ -f "$_LGTM_CI_PUBLISH_LIB_DIR/publish/registry.sh" ]] && source "$_LGTM_CI_PUBLISH_LIB_DIR/publish/registry.sh"
+
+# shellcheck source=publish/homebrew.sh
+[[ -f "$_LGTM_CI_PUBLISH_LIB_DIR/publish/homebrew.sh" ]] && source "$_LGTM_CI_PUBLISH_LIB_DIR/publish/homebrew.sh"
