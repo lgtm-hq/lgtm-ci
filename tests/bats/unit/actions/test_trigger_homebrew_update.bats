@@ -49,6 +49,25 @@ EOF
 	export MOCK_GH_INPUT="$input_file"
 }
 
+_mock_gh_dispatch_fail() {
+	_mock_gh_dispatch
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${MOCK_GH_CALLS}'
+if [[ "\$1" == "api" ]]; then
+	while [[ \$# -gt 0 ]]; do
+		case "\$1" in
+			--input) cat >'${MOCK_GH_INPUT}'; shift 2;;
+			*) shift;;
+		esac
+	done
+fi
+exit 1
+EOF
+	chmod +x "${mock_bin}/gh"
+}
+
 _run_dispatch() {
 	run env \
 		STEP=dispatch \
@@ -101,6 +120,10 @@ _run_dispatch() {
 
 	run grep -F "repos/lgtm-hq/homebrew-tap/dispatches" "$MOCK_GH_CALLS"
 	assert_success
+
+	run jq -r '.event_type' "$MOCK_GH_INPUT"
+	assert_success
+	assert_output "update-formula"
 }
 
 @test "trigger-homebrew-update: dispatches payload with binary assets" {
@@ -124,4 +147,24 @@ _run_dispatch() {
 
 	run jq -e '.client_payload | has("binary-assets") | not' "$MOCK_GH_INPUT"
 	assert_success
+}
+
+@test "trigger-homebrew-update: fails when only one binary SHA is set" {
+	_mock_gh_dispatch
+
+	_run_dispatch lintro 3.0.0 lgtm-hq/homebrew-tap lintro arm64sha
+
+	assert_failure
+	assert_output --partial "binary-arm64-sha and binary-x86-sha must both be set or both omitted"
+	assert_github_output "dispatched" "false"
+}
+
+@test "trigger-homebrew-update: sets dispatched false when gh api fails" {
+	_mock_gh_dispatch_fail
+
+	_run_dispatch winnow 2.0.0
+
+	assert_failure
+	assert_github_output "dispatched" "false"
+	assert_github_output "tap-repository" "lgtm-hq/homebrew-tap"
 }
