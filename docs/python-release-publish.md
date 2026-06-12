@@ -272,12 +272,6 @@ To add a new product, configure the formula in
 [homebrew-tap](https://github.com/lgtm-hq/homebrew-tap) and wire a dispatch job
 in the product repository release workflow.
 
-### Same-repo tap (legacy)
-
-For taps colocated with the product repository, `update-homebrew` and
-`reusable-publish-homebrew.yml` still clone the tap and commit formula updates
-directly. Prefer the dispatch model for `lgtm-hq/homebrew-tap`.
-
 ## Migration from v0.23.x
 
 <!-- Wide migration table; MD013 disabled — row content cannot wrap without breaking pipes. -->

@@ -513,11 +513,6 @@ jobs:
       contents: read
       id-token: write
 
-  homebrew:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-homebrew.yml@<sha>
-    permissions:
-      contents: write
-
   pages:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-pages.yml@<sha>
     permissions:

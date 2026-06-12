@@ -1249,47 +1249,6 @@ schema and PyPI-only vs binary+PyPI examples.
 
 ---
 
-### update-homebrew
-
-> **Note:** For `lgtm-hq/homebrew-tap`, prefer `trigger-homebrew-update`
-> (dispatch model). This action remains for same-repo tap workflows.
-
-Update a Homebrew formula with a new version from PyPI.
-
-```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/update-homebrew@main
-  with:
-    tap-repository: "owner/homebrew-tap" # required
-    formula: "mypackage" # required
-    package-name: "my-pypi-package" # required
-    version: "1.2.3" # required
-    wait-for-availability: "true" # optional
-    max-wait-minutes: "10" # optional
-    test-pypi: "false" # optional
-    push: "true" # optional
-    create-pr: "false" # optional
-```
-
-**Outputs:**
-
-- `updated` - Whether the formula was updated
-- `commit-sha` - Commit SHA of the update
-- `pr-url` - Pull request URL (if create-pr is true)
-
-**Requirements:**
-
-- Repository write access for pushing to tap (via `GITHUB_TOKEN` or PAT)
-- `contents: write` permission when used in workflows
-
-**Features:**
-
-- Waits for package availability on PyPI
-- Downloads and calculates SHA256 automatically
-- Creates or updates existing formulas
-- Supports direct push or PR workflow
-
----
-
 ### validate-package
 
 Validate package metadata before publishing.
@@ -1990,49 +1949,6 @@ jobs:
 
 - `contents: read` - For checkout
 - `id-token: write` - For OIDC authentication
-
----
-
-### reusable-publish-homebrew.yml
-
-> **Note:** For `lgtm-hq/homebrew-tap`, prefer `trigger-homebrew-update`
-> (dispatch model). This reusable remains for same-repo tap workflows.
-
-Update Homebrew formula with new version from PyPI.
-
-```yaml
-jobs:
-  homebrew:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-homebrew.yml@main
-    with:
-      tap-repository: "owner/homebrew-tap"
-      formula: "mypackage"
-      package-name: "my-pypi-package"
-      version: "1.2.3"
-      wait-for-availability: true
-      create-pr: false
-```
-
-**Inputs:**
-
-- `tap-repository` - Homebrew tap repository (owner/repo) - required
-- `formula` - Formula name - required
-- `package-name` - PyPI package name - required
-- `version` - Version to update to - required
-- `wait-for-availability` - Wait for package on PyPI (default: true)
-- `max-wait-minutes` - Maximum wait time in minutes (default: 10)
-- `test-pypi` - Use TestPyPI instead of PyPI (default: false)
-- `create-pr` - Create PR instead of direct push (default: false)
-
-**Outputs:**
-
-- `updated` - Whether the formula was updated
-- `commit-sha` - Commit SHA of the update
-- `pr-url` - Pull request URL (if create-pr is true)
-
-**Permissions Required:**
-
-- `contents: write` - For pushing to tap repository
 
 ---
 

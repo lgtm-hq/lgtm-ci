@@ -84,7 +84,7 @@ egress_preset_endpoints() {
 		# archive.ubuntu.com/security.ubuntu.com use :80 for apt HTTP mirrors in CI images.
 		;;
 	pypi)
-		# PyPI / TestPyPI (reusable-publish-homebrew wait-for-package, python dist).
+		# PyPI / TestPyPI (python dist, wait-for-package).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
