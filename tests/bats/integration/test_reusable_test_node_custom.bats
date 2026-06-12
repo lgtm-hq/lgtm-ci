@@ -48,27 +48,40 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 	assert_success
 }
 
-@test "reusable-test-node-custom: node-coverage artifact upload uses working-directory prefix" {
+@test "reusable-test-node-custom: stages node-coverage artifact preserving working-directory prefix" {
 	run awk '
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && /Upload coverage for test summary/ { in_step = 1 }
-		in_job && in_step && /path: \$\{\{ inputs\.working-directory \}\}\/\$\{\{ inputs\.coverage-summary-file \}\}/ {
+		in_job && /Stage coverage for test summary/ { in_step = 1 }
+		in_job && in_step && /node-coverage-staged/ && /WORKING_DIRECTORY/ && /COVERAGE_SUMMARY_FILE/ {
 			found = 1
-			exit
 		}
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
 }
 
-@test "reusable-test-node-custom: publish-test-summary coverage-file matches node-coverage upload layout" {
+@test "reusable-test-node-custom: node-coverage artifact upload uses staged directory" {
 	run awk '
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
 		in_job && /Upload coverage for test summary/ { in_upload = 1 }
+		in_job && in_upload && /path: node-coverage-staged\// { dir = 1 }
 		in_job && in_upload && /path: \$\{\{ inputs\.working-directory \}\}\/\$\{\{ inputs\.coverage-summary-file \}\}/ {
-			upload = 1
+			single = 1
+		}
+		END { exit !(dir && !single) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-node-custom: publish-test-summary coverage-file matches node-coverage staged layout" {
+	run awk '
+		/^  test:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
+		in_job && /Stage coverage for test summary/ { in_stage = 1 }
+		in_job && in_stage && /node-coverage-staged/ && /WORKING_DIRECTORY/ && /COVERAGE_SUMMARY_FILE/ {
+			stage = 1
 		}
 		/^  publish-test-summary:/ { in_publish = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ {
@@ -79,7 +92,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node-custom.yml"
 		in_publish && in_cov && /inputs\.working-directory/ && /inputs\.coverage-summary-file/ {
 			publish = 1
 		}
-		END { exit !(upload && publish) }
+		END { exit !(stage && publish) }
 	' "$WORKFLOW"
 	assert_success
 }
