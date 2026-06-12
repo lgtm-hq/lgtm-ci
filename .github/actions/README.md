@@ -1226,7 +1226,9 @@ GitHub Release jobs complete.
 
 - `formula` — Homebrew formula name (required)
 - `version` — Release version (required)
-- `token` — GitHub token with `repo` scope on the tap repository (required)
+- `token` — Token for `repository_dispatch` on the tap repository (required).
+  Classic PAT: `repo` scope (or `public_repo` for public repos). Fine-grained
+  token: `contents: write` and `metadata: read` on the tap repository.
 - `tap-repository` — Tap repository `owner/repo` (default: `lgtm-hq/homebrew-tap`)
 - `pypi-package` — PyPI package name (default: same as `formula`)
 - `binary-arm64-sha` — SHA256 of the macOS arm64 release asset (optional)
@@ -1241,8 +1243,9 @@ GitHub Release jobs complete.
 
 - Caller job should `needs: [pypi-upload, github-release]` (and any binary build
   job when using `binary-*-sha` inputs)
-- `HOMEBREW_TAP_DISPATCH_TOKEN` (or equivalent) secret with write access to the
-  tap repository
+- `HOMEBREW_TAP_DISPATCH_TOKEN` (or equivalent) with `repository_dispatch`
+  access to the tap repository (Classic PAT: `repo` or `public_repo`; fine-grained:
+  `contents: write` and `metadata: read`)
 
 See [python-release-publish.md](../../docs/python-release-publish.md) for payload
 schema and PyPI-only vs binary+PyPI examples.

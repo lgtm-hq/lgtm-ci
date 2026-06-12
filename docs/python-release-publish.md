@@ -198,9 +198,13 @@ homebrew-dispatch:
 
 ### Required secret
 
-Store a GitHub PAT or fine-grained token with `contents: write` on
-`lgtm-hq/homebrew-tap` as `HOMEBREW_TAP_DISPATCH_TOKEN` in the caller
-repository.
+Store a GitHub PAT or fine-grained token on `lgtm-hq/homebrew-tap` as
+`HOMEBREW_TAP_DISPATCH_TOKEN` in the caller repository. The token is used for
+the `repository_dispatch` API:
+
+- **Classic PAT** — `repo` scope (or `public_repo` for public repositories)
+- **Fine-grained token** — `contents: write` and `metadata: read` on the tap
+  repository
 
 ### Dispatch payload
 
@@ -213,12 +217,13 @@ follows:
 | `formula`           | `formula`                                      |
 | `version`           | `version`                                      |
 | `pypi-package`      | `pypi-package` (defaults to `formula`)         |
-| `binary-arm64-sha`  | `binary-assets.arm64-sha` (when assets sent)   |
-| `binary-x86-sha`    | `binary-assets.x86-sha` (when assets sent)     |
+| `binary-arm64-sha`  | `binary-assets.arm64-sha` (both SHAs required) |
+| `binary-x86-sha`    | `binary-assets.x86-sha` (both SHAs required)   |
 
 Omit `binary-arm64-sha` and `binary-x86-sha` for PyPI-only products — the action
-then omits `binary-assets` from the payload entirely. When either SHA input is
-non-empty, `binary-assets` is included with both keys.
+then omits `binary-assets` from the payload entirely. When both SHA inputs are
+non-empty, `binary-assets` is included with `arm64-sha` and `x86-sha`. Providing
+only one SHA fails the step.
 
 Resulting `client_payload` schema:
 
