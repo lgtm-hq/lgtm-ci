@@ -125,6 +125,7 @@ if [[ "$FORMAT" == "auto" ]]; then
 		case "$(detect_coverage_format "$COVERAGE_FILE")" in
 		lcov) FORMAT="lcov" ;;
 		cobertura) FORMAT="cobertura" ;;
+		coverage-py) FORMAT="coverage-py" ;;
 		*) FORMAT="istanbul" ;;
 		esac
 	else
