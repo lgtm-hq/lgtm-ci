@@ -82,13 +82,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 			passthrough = 0
 			has_coverage_py = 0
 			has_cobertura = 0
+			has_lcov = 0
 		}
 		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ { in_publish = 0 }
 		in_publish && /coverage-format:/ { in_cov = 1 }
 		in_publish && in_cov && /coverage-py/ { has_coverage_py = 1 }
 		in_publish && in_cov && /cobertura/ { has_cobertura = 1 }
+		in_publish && in_cov && /'\''lcov'\'' && '\''lcov'\''/ { has_lcov = 1 }
 		in_publish && in_cov && /coverage-format: \$\{\{ inputs\.coverage-format \}\}/ { passthrough = 1 }
-		END { exit !(has_coverage_py && has_cobertura && !passthrough) }
+		END { exit !(has_coverage_py && has_cobertura && has_lcov && !passthrough) }
 	' "$WORKFLOW"
 	assert_success
 }

@@ -126,6 +126,7 @@ if [[ "$FORMAT" == "auto" ]]; then
 		lcov) FORMAT="lcov" ;;
 		cobertura) FORMAT="cobertura" ;;
 		coverage-py) FORMAT="coverage-py" ;;
+		istanbul) FORMAT="istanbul" ;;
 		*) FORMAT="istanbul" ;;
 		esac
 	else
