@@ -264,6 +264,7 @@ EOF
 	assert_success
 	assert_file_contains "$GITHUB_OUTPUT" "lines=88"
 	assert_file_contains "$GITHUB_OUTPUT" "branches=77"
+	assert_file_contains "$GITHUB_OUTPUT" "functions=88"
 	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
 	assert_file_contains "$GITHUB_OUTPUT" "Code Coverage Report"
 }

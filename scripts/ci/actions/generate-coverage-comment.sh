@@ -165,8 +165,8 @@ cobertura)
 	extract_coverage_details "$COVERAGE_FILE"
 	LINES_RAW=${COVERAGE_LINES:-0}
 	BRANCHES_RAW=${COVERAGE_BRANCHES:-0}
-	FUNCTIONS_RAW=${COVERAGE_LINES:-0}
-	STATEMENTS_RAW=${COVERAGE_LINES:-0}
+	FUNCTIONS_RAW=$LINES_RAW # Cobertura XML only exposes line/branch rates
+	STATEMENTS_RAW=$LINES_RAW
 	;;
 *)
 	echo "::error::Unknown coverage format: $FORMAT"
