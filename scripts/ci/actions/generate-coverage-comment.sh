@@ -4,7 +4,7 @@
 #
 # Required environment variables:
 #   COVERAGE_FILE - Path to coverage summary JSON file
-#   FORMAT - Coverage format: istanbul, coverage-py, lcov, or auto
+#   FORMAT - Coverage format: istanbul, coverage-py, cobertura, lcov, or auto
 #   REPORT_URL - URL to full report (optional)
 #   THRESHOLD_LINES - Minimum line coverage percentage
 #   THRESHOLD_BRANCHES - Minimum branch coverage percentage
@@ -121,8 +121,14 @@ if [[ "$FORMAT" == "auto" ]]; then
 		FORMAT="istanbul"
 	elif jq -e '.totals' "$COVERAGE_FILE" >/dev/null 2>&1; then
 		FORMAT="coverage-py"
-	elif declare -f detect_coverage_format &>/dev/null && [[ "$(detect_coverage_format "$COVERAGE_FILE")" == "lcov" ]]; then
-		FORMAT="lcov"
+	elif declare -f detect_coverage_format &>/dev/null; then
+		case "$(detect_coverage_format "$COVERAGE_FILE")" in
+		lcov) FORMAT="lcov" ;;
+		cobertura) FORMAT="cobertura" ;;
+		coverage-py) FORMAT="coverage-py" ;;
+		istanbul) FORMAT="istanbul" ;;
+		*) FORMAT="istanbul" ;;
+		esac
 	else
 		FORMAT="istanbul"
 	fi
@@ -152,6 +158,17 @@ lcov)
 	BRANCHES_RAW=${COVERAGE_BRANCHES:-0}
 	FUNCTIONS_RAW=${COVERAGE_FUNCTIONS:-0}
 	STATEMENTS_RAW=${COVERAGE_STATEMENTS:-$LINES_RAW}
+	;;
+cobertura)
+	if ! declare -f extract_coverage_details &>/dev/null; then
+		echo "::error::Cobertura support requires scripts/ci/lib/testing/coverage/extract.sh"
+		exit 1
+	fi
+	extract_coverage_details "$COVERAGE_FILE"
+	LINES_RAW=${COVERAGE_LINES:-0}
+	BRANCHES_RAW=${COVERAGE_BRANCHES:-0}
+	FUNCTIONS_RAW=$LINES_RAW # Cobertura XML only exposes line/branch rates
+	STATEMENTS_RAW=$LINES_RAW
 	;;
 *)
 	echo "::error::Unknown coverage format: $FORMAT"

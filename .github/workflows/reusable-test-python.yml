@@ -556,5 +556,8 @@ jobs:
       coverage-file: >-
         ${{ inputs.coverage-format == 'xml' && 'coverage.xml' ||
         (inputs.coverage-format == 'lcov' && 'coverage.lcov' || 'coverage.json') }}
-      coverage-format: ${{ inputs.coverage-format }}
+      coverage-format: >-
+        ${{ inputs.coverage-format == 'lcov' && 'lcov' ||
+        (inputs.coverage-format == 'xml' && 'cobertura' ||
+        'coverage-py') }}
       tooling-ref: ${{ inputs.tooling-ref }}
