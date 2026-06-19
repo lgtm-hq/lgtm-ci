@@ -73,3 +73,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-test-python: publish-test-summary maps pytest formats to comment semantics" {
+	run awk '
+		/^  publish-test-summary:/ { in_publish = 1; in_cov = 0; passthrough = 0; semantic = 0 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  publish-test-summary:/ { in_publish = 0 }
+		in_publish && /coverage-format:/ { in_cov = 1 }
+		in_publish && in_cov && /coverage-py/ { semantic = 1 }
+		in_publish && in_cov && /cobertura/ { semantic = 1 }
+		in_publish && in_cov && /coverage-format: \$\{\{ inputs\.coverage-format \}\}/ { passthrough = 1 }
+		END { exit !(semantic && !passthrough) }
+	' "$WORKFLOW"
+	assert_success
+}

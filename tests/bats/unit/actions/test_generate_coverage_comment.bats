@@ -243,3 +243,27 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
 	assert_file_contains "$GITHUB_OUTPUT" "Code Coverage Report"
 }
+
+@test "generate-coverage-comment: extracts cobertura coverage from pytest xml" {
+	local coverage_file="${BATS_TEST_TMPDIR}/coverage.xml"
+	cat >"$coverage_file" <<'EOF'
+<?xml version="1.0" ?>
+<coverage line-rate="0.88" branch-rate="0.77" lines-covered="880" lines-valid="1000" branches-covered="77" branches-valid="100" version="7.6.1">
+</coverage>
+EOF
+
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="$coverage_file" \
+		FORMAT="cobertura" \
+		THRESHOLD_LINES="80" \
+		THRESHOLD_BRANCHES="70" \
+		THRESHOLD_FUNCTIONS="80" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "lines=88"
+	assert_file_contains "$GITHUB_OUTPUT" "branches=77"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+	assert_file_contains "$GITHUB_OUTPUT" "Code Coverage Report"
+}
