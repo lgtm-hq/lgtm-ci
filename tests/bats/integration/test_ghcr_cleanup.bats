@@ -258,6 +258,21 @@ EOF
 	refute_output --partial "Deleted"
 }
 
+@test "ghcr-cleanup: URL-encodes nested package names in Packages API paths" {
+	mock_command_record "gh" '[]' 0
+	export PACKAGE_NAME="nested/sub-package"
+	export PROTECT_REFERENCED="false"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "nothing to delete"
+
+	local calls
+	calls=$(cat "$BATS_TEST_TMPDIR/mock_calls_gh")
+	[[ "$calls" == *"nested%2Fsub-package"* ]]
+	[[ "$calls" != *"packages/container/nested/sub-package"* ]]
+}
+
 @test "ghcr-cleanup: protects referenced digests from untagged deletion" {
 	mock_gh_versions '[
 		{"id": 1, "name": "sha256:tagged-index", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["v1.0.0"]}}},

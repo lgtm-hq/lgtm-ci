@@ -96,11 +96,25 @@ EOF
 
 mock_gh_for_cleanup_pr() {
 	local pr_url="${1:-https://github.com/test-org/test-repo/pull/1}"
-	mock_command_multi "gh" "
-		*pr\ list*) :;;
-		*pr\ create*) echo '$pr_url';;
-		*) exit 1;;
-	"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	local calls_file="${BATS_TEST_TMPDIR}/mock_calls_gh"
+	: >"$calls_file"
+
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${calls_file}'
+case "\$*" in
+	*pr\ list*) :;;
+	*pr\ create*) echo '${pr_url}';;
+	*) exit 1;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
 }
 
 @test "vuln-suppressions: removes stale suppressions via cleanup PR" {
@@ -125,6 +139,34 @@ EOF
 	assert_output --partial "Cleanup PR created"
 
 	[[ ! -f "$MOCK_GIT_REPO/.osv-scanner.toml" ]] || ! grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml"
+}
+
+@test "vuln-suppressions: passes each cleanup label separately to gh pr create" {
+	setup_suppression_repo
+	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+ignoreUntil = 2099-12-31
+reason = "resolved upstream"
+EOF
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git add .osv-scanner.toml
+		git commit -q --amend --no-edit
+	)
+
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/55"
+
+	run_check_script
+	assert_success
+
+	local calls
+	calls=$(cat "$BATS_TEST_TMPDIR/mock_calls_gh")
+	[[ "$calls" == *"--label security"* ]]
+	[[ "$calls" == *"--label dependencies"* ]]
+	[[ "$calls" == *"--label automation"* ]]
+	[[ "$calls" != *"--label security,dependencies,automation"* ]]
 }
 
 @test "vuln-suppressions: removes expired suppressions via cleanup PR and exits 1" {

@@ -45,12 +45,15 @@ source "$SCRIPT_DIR/../lib/ghcr/registry.sh"
 # shellcheck source=../lib/ghcr/tags.sh
 source "$SCRIPT_DIR/../lib/ghcr/tags.sh"
 
+# GitHub Packages REST API encodes nested path slashes; registry v2 paths do not.
+PACKAGE_NAME_API="${PACKAGE_NAME//\//%2F}"
+
 ghcr_fetch_versions() {
 	all_versions=$(gh api --paginate \
-		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions" \
+		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
 		2>/dev/null | jq -s 'add // []') || {
 		all_versions=$(gh api --paginate \
-			"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions" \
+			"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
 			2>/dev/null | jq -s 'add // []') || die "Failed to fetch package versions"
 	}
 }
@@ -64,13 +67,13 @@ ghcr_delete_version() {
 
 	local err=""
 	if err=$(gh api --method DELETE \
-		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
+		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions/${version_id}" \
 		2>&1); then
 		return 0
 	fi
 
 	if err=$(gh api --method DELETE \
-		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
+		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions/${version_id}" \
 		2>&1); then
 		return 0
 	fi

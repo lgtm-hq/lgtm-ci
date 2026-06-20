@@ -200,9 +200,17 @@ ${EXPIRED_LIST}"
 ---
 *Auto-created by [vuln-suppression-check](${WF_URL}).*"
 
+	gh_pr_label_args=()
+	IFS=',' read -ra _cleanup_labels <<<"${CLEANUP_PR_LABELS}"
+	for label in "${_cleanup_labels[@]}"; do
+		label="${label#"${label%%[![:space:]]*}"}"
+		label="${label%"${label##*[![:space:]]}"}"
+		[[ -n "$label" ]] && gh_pr_label_args+=(--label "$label")
+	done
+
 	gh pr create \
 		--title "chore(security): remove stale vulnerability suppressions" \
-		--label "$CLEANUP_PR_LABELS" \
+		"${gh_pr_label_args[@]}" \
 		--body "$PR_BODY"
 
 	log_success "Cleanup PR created on branch $BRANCH"
