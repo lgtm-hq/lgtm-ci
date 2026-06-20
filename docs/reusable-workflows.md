@@ -772,13 +772,14 @@ For push/schedule workflows, omit the publish job and pass
 
 `reusable-vuln-suppression-check.yml` installs `osv-scanner` directly (no Docker),
 probes the repository without suppressions, and opens a cleanup PR when entries are
-stale (vulnerability resolved upstream). Expired suppressions fail the job.
+stale (vulnerability resolved upstream) or expired (past `ignoreUntil`).
 
 | Input                    | Default                 | Notes                                      |
 | ------------------------ | ----------------------- | ------------------------------------------ |
 | `osv-version`            | `2.3.5`                 | osv-scanner release version                |
 | `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
 | `check-script`           | tooling default         | Repo-local override supported              |
+| `cleanup-pr-labels`      | see below | Labels on cleanup PR |
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
@@ -807,6 +808,59 @@ jobs:
       workflow-file: vuln-suppression-check.yml
     secrets:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### GHCR cleanup
+
+`reusable-ghcr-cleanup.yml` prunes aged untagged container versions and ephemeral
+build-cache tags (`pr-*`, `mq-*`, `dispatch-*`). Before deleting untagged
+versions it collects digests referenced by tagged manifest indexes (multi-arch
+children, cosign/SLSA attestations) and skips the entire prune when that
+collection is incomplete.
+
+| Input | Default | Notes |
+| --- | --- | --- |
+| `package-name` | — | Required GHCR package name |
+| `min-age-days` | `7` | Min age before untagged deletion |
+| `keep-latest` | `0` | Keep N most recent untagged |
+| `build-cache-pr-age-days` | `14` | Min age before cache deletion |
+| `protect-referenced` | `true` | Skip when refs incomplete |
+| `prune-buildcache` | `true` | Delete aged ephemeral tags |
+| `dry-run` | `false` | Log only, no deletions |
+| `egress-policy` | `block` | `audit` or `block` |
+| `egress-preset` | `github-tooling` | API + GHCR hosts |
+| `allowed-endpoints` | `""` | Custom endpoints |
+| `allowed-endpoints-mode` | `replace` | `replace` or `append` |
+| `tooling-ref` | `""` | lgtm-ci tooling git ref |
+| `runner-image` | `ubuntu-24.04` | Runner image label |
+
+Grant `contents: read` and `packages: write` on the caller job. Forward a token with
+`packages:write` via `secrets.token` (or `secrets: inherit`).
+
+```yaml
+'on':
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      min_age_days:
+        description: Minimum age in days
+        type: number
+        default: 7
+
+permissions: {}
+
+jobs:
+  ghcr-cleanup:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@<sha>
+    permissions:
+      contents: read
+      packages: write
+    with:
+      package-name: my-image
+      min-age-days: ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      keep-latest: 0
+    secrets: inherit
 ```
 
 ### Documentation site quality

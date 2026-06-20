@@ -85,3 +85,19 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-vuln-suppression-check: cleanup-pr-labels defaults to security labels" {
+	run awk '/^      cleanup-pr-labels:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: "security,dependencies,automation"'
+}
+
+@test "reusable-vuln-suppression-check: passes cleanup-pr-labels to check script" {
+	run awk '
+		/- name: Check suppression staleness/ { step = 1 }
+		step && /CLEANUP_PR_LABELS:/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}

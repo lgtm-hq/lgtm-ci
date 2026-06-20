@@ -40,6 +40,12 @@ on:
         required: false
         type: string
         default: ""
+      cleanup-pr-labels:
+        description: >-
+          Comma-separated labels for auto-created cleanup PRs
+        required: false
+        type: string
+        default: "security,dependencies,automation"
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -147,5 +153,6 @@ jobs:
           GH_TOKEN: ${{ secrets.GH_TOKEN }}
           CONFIG_PATH: ${{ inputs.config-path }}
           WORKFLOW_FILE: ${{ inputs.workflow-file }}
+          CLEANUP_PR_LABELS: ${{ inputs.cleanup-pr-labels }}
           CHECK_SCRIPT: ${{ inputs.check-script }}
         run: bash "$GITHUB_WORKSPACE/$CHECK_SCRIPT"

@@ -90,3 +90,39 @@ YAML
 	' "$action"
 	assert_success
 }
+
+@test "composite actions: resolve SCRIPTS_DIR from GITHUB_ACTION_PATH" {
+	local rc=0
+	local total=0
+	while IFS= read -r -d '' action; do
+		total=$((total + 1))
+		if grep -q 'SCRIPTS_DIR=${GITHUB_ACTION_PATH' "$action"; then
+			echo "broken SCRIPTS_DIR pattern in $action" >&2
+			rc=1
+		fi
+		if grep -q 'SCRIPTS_DIR=.*GITHUB_ACTION_PATH//' "$action"; then
+			echo "slash-stripping SCRIPTS_DIR bug in $action" >&2
+			rc=1
+		fi
+	done < <(find "${PROJECT_ROOT}/.github/actions" -path '*/action.yml' -type f -print0)
+
+	[[ "$rc" -eq 0 ]]
+
+	local checked=0
+	rc=0
+	while IFS= read -r -d '' action; do
+		if ! grep -q 'SCRIPTS_DIR=.*GITHUB_ACTION_PATH' "$action"; then
+			continue
+		fi
+		checked=$((checked + 1))
+		if ! awk '
+			/SCRIPTS_DIR="\$\(cd "\$\{GITHUB_ACTION_PATH\}\/\.\.\/\.\.\/\.\.\/scripts" && pwd\)"/ { found = 1 }
+			END { exit !found }
+		' "$action"; then
+			echo "missing SCRIPTS_DIR cd/pwd pattern in $action" >&2
+			rc=1
+		fi
+	done < <(find "${PROJECT_ROOT}/.github/actions" -path '*/action.yml' -type f -print0)
+
+	[[ "$checked" -ge 1 && "$rc" -eq 0 ]]
+}

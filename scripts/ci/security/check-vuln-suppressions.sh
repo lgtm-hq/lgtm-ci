@@ -8,9 +8,10 @@
 #   check-vuln-suppressions.sh
 #
 # Environment:
-#   GH_TOKEN     - GitHub token for PR creation (required)
-#   CONFIG_PATH  - Suppression TOML path (default: .osv-scanner.toml)
-#   WORKFLOW_FILE - Caller workflow filename for PR footer link (optional)
+#   GH_TOKEN           - GitHub token for PR creation (required)
+#   CONFIG_PATH        - Suppression TOML path (default: .osv-scanner.toml)
+#   WORKFLOW_FILE      - Caller workflow filename for PR footer link (optional)
+#   CLEANUP_PR_LABELS  - Comma-separated PR labels (default when unset: security,dependencies,automation; empty opts out)
 
 set -euo pipefail
 
@@ -22,7 +23,8 @@ Detect stale or expired vulnerability suppressions in .osv-scanner.toml.
 
 Runs osv-scanner recursively without suppressions to scan all
 supported lockfiles and see which suppressed vulnerabilities are still
-present. Opens a PR removing entries that are stale (vuln resolved).
+present. Opens a PR removing entries that are stale (vuln resolved) or
+expired (past ignoreUntil).
 
 Requires GH_TOKEN for PR management.
 EOF
@@ -41,6 +43,8 @@ source "$LIB_DIR/github/output.sh"
 cd "$REPO_ROOT"
 
 OSV_TOML="${CONFIG_PATH:-.osv-scanner.toml}"
+# Default labels only when unset; explicit "" opts out of labeling.
+CLEANUP_PR_LABELS="${CLEANUP_PR_LABELS-security,dependencies,automation}"
 
 if [[ ! -f "$OSV_TOML" ]]; then
 	log_success "No $OSV_TOML found. Nothing to check."
@@ -88,7 +92,7 @@ for k in ('stale', 'expired', 'active'):
         print(f'{k.upper()}:{i}')
 ")
 
-REMOVE_IDS=("${STALE_IDS[@]+"${STALE_IDS[@]}"}")
+REMOVE_IDS=("${STALE_IDS[@]+"${STALE_IDS[@]}"}" "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}")
 
 for id in "${ACTIVE_IDS[@]+"${ACTIVE_IDS[@]}"}"; do
 	log_success "Active: $id"
@@ -100,11 +104,13 @@ for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
 	log_warning "Expired: $id"
 done
 
-if [[ ${#REMOVE_IDS[@]} -eq 0 && ${#EXPIRED_IDS[@]} -eq 0 ]]; then
+if [[ ${#REMOVE_IDS[@]} -eq 0 ]]; then
 	log_success "All suppressions are active. Nothing to do."
 	exit 0
 fi
 
+# Check for an existing cleanup PR. If one exists and the current run found
+# new expired suppressions, fail instead of silently masking them.
 PR_LIST_OUTPUT=""
 PR_LIST_EXIT=0
 PR_LIST_OUTPUT=$(
@@ -116,98 +122,115 @@ if [[ "$PR_LIST_EXIT" -ne 0 ]]; then
 	log_error "gh pr list failed: $PR_LIST_OUTPUT"
 	exit 1
 fi
-OPEN_CLEANUP_PR=""
 if [[ -n "$PR_LIST_OUTPUT" ]]; then
-	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping PR creation."
-	OPEN_CLEANUP_PR="$PR_LIST_OUTPUT"
+	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+		log_error "Cleanup PR #${PR_LIST_OUTPUT} already open, but new expired suppressions found. Manual review required."
+		exit 1
+	fi
+	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping."
+	exit 0
 fi
 
-if [[ -z "$OPEN_CLEANUP_PR" ]]; then
-	if [[ ${#REMOVE_IDS[@]} -eq 0 ]]; then
-		log_info "No stale suppressions to remove."
-	else
-		export REMOVE_IDS_JSON
-		REMOVE_IDS_JSON=$(printf '%s\n' "${REMOVE_IDS[@]}" | python3 -c "
+export REMOVE_IDS_JSON
+REMOVE_IDS_JSON=$(printf '%s\n' "${REMOVE_IDS[@]}" | python3 -c "
 import json, sys
 print(json.dumps([line.strip() for line in sys.stdin if line.strip()]))
 ")
 
-		python3 "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
+python3 "$SCRIPTS_DIR/remove_stale_suppressions.py" "$OSV_TOML"
 
-		if [[ -f "$OSV_TOML" ]]; then
-			if ! grep -qEv '^[[:space:]]*(#.*)?$' "$OSV_TOML"; then
-				log_info "No substantive content left in $OSV_TOML, removing file"
-				rm -f "$OSV_TOML"
-			fi
-		fi
+if [[ -f "$OSV_TOML" ]]; then
+	if ! grep -qEv '^[[:space:]]*(#.*)?$' "$OSV_TOML"; then
+		log_info "No substantive content left in $OSV_TOML, removing file"
+		rm -f "$OSV_TOML"
+	fi
+fi
 
-		if ! git diff --quiet; then
-			REMOVED_LIST=""
-			for id in "${REMOVE_IDS[@]+"${REMOVE_IDS[@]}"}"; do
-				REMOVED_LIST="${REMOVED_LIST}- \`${id}\`
+if ! git diff --quiet; then
+	STALE_LIST=""
+	for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
+		STALE_LIST="${STALE_LIST}- \`${id}\` (stale — vulnerability resolved)
 "
-			done
-
-			EXPIRED_LIST=""
-			for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
-				EXPIRED_LIST="${EXPIRED_LIST}- \`${id}\`
+	done
+	EXPIRED_LIST=""
+	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
+		EXPIRED_LIST="${EXPIRED_LIST}- \`${id}\` (expired — past ignoreUntil date)
 "
-			done
+	done
+	REMOVED_LIST="${STALE_LIST}${EXPIRED_LIST}"
 
-			BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
-			configure_git_ci_user
-			git checkout -b "$BRANCH"
-			git add -A -- "$OSV_TOML"
-			git commit -m "$(
-				cat <<EOF
+	BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
+	configure_git_ci_user
+	git checkout -b "$BRANCH"
+	git add -A -- "$OSV_TOML"
+	git commit -m "$(
+		cat <<EOF
 chore(security): remove stale vulnerability suppressions
 
 The following suppressions are no longer needed:
 ${REMOVED_LIST}
 Detected by the weekly vuln-suppression-check workflow.
 EOF
-			)"
+	)"
 
-			git push -u origin "$BRANCH"
+	git push -u origin "$BRANCH"
 
-			WF_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions"
-			if [[ -n "${WORKFLOW_FILE:-}" ]]; then
-				WF_URL="${WF_URL}/workflows/${WORKFLOW_FILE}"
-			fi
+	WF_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions"
+	if [[ -n "${WORKFLOW_FILE:-}" ]]; then
+		WF_URL="${WF_URL}/workflows/${WORKFLOW_FILE}"
+	fi
 
-			gh pr create \
-				--title "chore(security): remove stale vulnerability suppressions" \
-				--body "$(
-					cat <<EOF
-## Summary
-- Remove stale vulnerability suppressions (vuln resolved upstream)
-${REMOVED_LIST:+
+	PR_BODY="## Summary
+- Remove stale/expired vulnerability suppressions that are no longer needed
+"
+	if [[ -n "$STALE_LIST" ]]; then
+		PR_BODY="${PR_BODY}
 ### Removed (stale)
-${REMOVED_LIST}}${EXPIRED_LIST:+
-### ⚠️ Expired (needs manual review)
-The following suppressions have passed their ignoreUntil date but
-the vulnerability may still be present. Renew or fix:
-${EXPIRED_LIST}}
+${STALE_LIST}"
+	fi
+	if [[ -n "$EXPIRED_LIST" ]]; then
+		PR_BODY="${PR_BODY}
+### Removed (expired)
+${EXPIRED_LIST}"
+	fi
+	PR_BODY="${PR_BODY}
 ## Test plan
 - [ ] CI security audit passes without these suppressions
 - [ ] osv-scanner scan passes without these suppressions
 
 ---
-*Auto-created by [vuln-suppression-check](${WF_URL}).*
-EOF
-				)"
+*Auto-created by [vuln-suppression-check](${WF_URL}).*"
 
-			log_success "Cleanup PR created on branch $BRANCH"
-		else
-			log_info "No file changes needed."
-		fi
+	gh_pr_label_args=()
+	if [[ -n "${CLEANUP_PR_LABELS}" ]]; then
+		IFS=',' read -ra _cleanup_labels <<<"${CLEANUP_PR_LABELS}"
+		for label in "${_cleanup_labels[@]}"; do
+			label="${label#"${label%%[![:space:]]*}"}"
+			label="${label%"${label##*[![:space:]]}"}"
+			[[ -n "$label" ]] && gh_pr_label_args+=(--label "$label")
+		done
 	fi
-fi
 
-if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-	log_error "Expired suppressions need manual review — renew or fix:"
-	for id in "${EXPIRED_IDS[@]}"; do
-		log_error "  $id"
-	done
-	exit 1
+	if ((${#gh_pr_label_args[@]} > 0)); then
+		gh pr create \
+			--title "chore(security): remove stale vulnerability suppressions" \
+			"${gh_pr_label_args[@]}" \
+			--body "$PR_BODY"
+	else
+		gh pr create \
+			--title "chore(security): remove stale vulnerability suppressions" \
+			--body "$PR_BODY"
+	fi
+
+	log_success "Cleanup PR created on branch $BRANCH"
+
+	# Expired suppressions may indicate still-active vulnerabilities
+	# past their ignoreUntil date. Fail the workflow so the team
+	# reviews the PR before the next scan.
+	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+		log_error "Expired suppression(s) removed; review the cleanup PR before merging"
+		exit 1
+	fi
+else
+	log_info "No file changes needed."
 fi

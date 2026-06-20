@@ -17,7 +17,26 @@ on:
         description: "Always keep N most recent untagged versions"
         required: false
         type: number
-        default: 5
+        default: 0
+      build-cache-pr-age-days:
+        description: >-
+          Minimum age in days before deleting ephemeral pr-*/mq-*/dispatch-*
+          build-cache tags
+        required: false
+        type: number
+        default: 14
+      protect-referenced:
+        description: >-
+          Collect digests referenced by tagged manifest indexes and skip prune
+          when collection is incomplete
+        required: false
+        type: boolean
+        default: true
+      prune-buildcache:
+        description: "Delete aged ephemeral build-cache tags (pr-*, mq-*, dispatch-*)"
+        required: false
+        type: boolean
+        default: true
       dry-run:
         description: "Log only, no deletions"
         required: false
@@ -121,6 +140,9 @@ jobs:
           PACKAGE_NAME: ${{ inputs.package-name }}
           MIN_AGE_DAYS: ${{ inputs.min-age-days }}
           KEEP_LATEST: ${{ inputs.keep-latest }}
+          BUILD_CACHE_PR_AGE_DAYS: ${{ inputs.build-cache-pr-age-days }}
+          PROTECT_REFERENCED: ${{ inputs.protect-referenced }}
+          PRUNE_BUILDCACHE: ${{ inputs.prune-buildcache }}
           DRY_RUN: ${{ inputs.dry-run }}
           GITHUB_ORG: ${{ github.repository_owner }}
         run: .lgtm-ci-tooling/scripts/ci/actions/ghcr-cleanup.sh
