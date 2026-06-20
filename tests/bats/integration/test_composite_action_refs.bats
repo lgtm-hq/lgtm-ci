@@ -100,7 +100,7 @@ YAML
 			echo "broken SCRIPTS_DIR pattern in $action" >&2
 			rc=1
 		fi
-		if grep -q 'GITHUB_ACTION_PATH//\\/' "$action"; then
+		if grep -q 'SCRIPTS_DIR=.*GITHUB_ACTION_PATH//' "$action"; then
 			echo "slash-stripping SCRIPTS_DIR bug in $action" >&2
 			rc=1
 		fi

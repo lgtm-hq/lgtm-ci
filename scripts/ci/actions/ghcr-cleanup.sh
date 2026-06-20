@@ -163,6 +163,7 @@ eligible_versions=$(echo "$all_versions" | jq --arg cutoff "$cutoff_date" --argj
 	def version_time: .updated_at // .created_at // "";
 	[ .[] |
 	  select((.metadata.container.tags | length) == 0) |
+	  select(version_time != "") |
 	  select(version_time < $cutoff) |
 	  select(.name as $n | ($refs | index($n) | not))
 	] | sort_by(.updated_at // .created_at) | reverse
@@ -201,6 +202,7 @@ if [[ "$PRUNE_BUILDCACHE" == "true" ]]; then
 		def version_time: .updated_at // .created_at // "";
 		[ .[] |
 		  select((.metadata.container.tags | length) > 0) |
+		  select(version_time != "") |
 		  select(version_time < $cutoff) |
 		  select(.name as $n | ($refs | index($n) | not))
 		]

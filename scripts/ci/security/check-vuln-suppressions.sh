@@ -11,7 +11,7 @@
 #   GH_TOKEN           - GitHub token for PR creation (required)
 #   CONFIG_PATH        - Suppression TOML path (default: .osv-scanner.toml)
 #   WORKFLOW_FILE      - Caller workflow filename for PR footer link (optional)
-#   CLEANUP_PR_LABELS  - Comma-separated PR labels (default: security,dependencies,automation)
+#   CLEANUP_PR_LABELS  - Comma-separated PR labels (default when unset: security,dependencies,automation; empty opts out)
 
 set -euo pipefail
 
@@ -43,7 +43,8 @@ source "$LIB_DIR/github/output.sh"
 cd "$REPO_ROOT"
 
 OSV_TOML="${CONFIG_PATH:-.osv-scanner.toml}"
-CLEANUP_PR_LABELS="${CLEANUP_PR_LABELS:-security,dependencies,automation}"
+# Default labels only when unset; explicit "" opts out of labeling.
+CLEANUP_PR_LABELS="${CLEANUP_PR_LABELS-security,dependencies,automation}"
 
 if [[ ! -f "$OSV_TOML" ]]; then
 	log_success "No $OSV_TOML found. Nothing to check."
@@ -201,17 +202,25 @@ ${EXPIRED_LIST}"
 *Auto-created by [vuln-suppression-check](${WF_URL}).*"
 
 	gh_pr_label_args=()
-	IFS=',' read -ra _cleanup_labels <<<"${CLEANUP_PR_LABELS}"
-	for label in "${_cleanup_labels[@]}"; do
-		label="${label#"${label%%[![:space:]]*}"}"
-		label="${label%"${label##*[![:space:]]}"}"
-		[[ -n "$label" ]] && gh_pr_label_args+=(--label "$label")
-	done
+	if [[ -n "${CLEANUP_PR_LABELS}" ]]; then
+		IFS=',' read -ra _cleanup_labels <<<"${CLEANUP_PR_LABELS}"
+		for label in "${_cleanup_labels[@]}"; do
+			label="${label#"${label%%[![:space:]]*}"}"
+			label="${label%"${label##*[![:space:]]}"}"
+			[[ -n "$label" ]] && gh_pr_label_args+=(--label "$label")
+		done
+	fi
 
-	gh pr create \
-		--title "chore(security): remove stale vulnerability suppressions" \
-		"${gh_pr_label_args[@]}" \
-		--body "$PR_BODY"
+	if ((${#gh_pr_label_args[@]} > 0)); then
+		gh pr create \
+			--title "chore(security): remove stale vulnerability suppressions" \
+			"${gh_pr_label_args[@]}" \
+			--body "$PR_BODY"
+	else
+		gh pr create \
+			--title "chore(security): remove stale vulnerability suppressions" \
+			--body "$PR_BODY"
+	fi
 
 	log_success "Cleanup PR created on branch $BRANCH"
 

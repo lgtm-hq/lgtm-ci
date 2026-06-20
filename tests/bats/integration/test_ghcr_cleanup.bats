@@ -295,3 +295,32 @@ EOF
 	assert_output --partial "Deleted untagged version 3"
 	refute_output --partial "Deleted untagged version 2"
 }
+
+@test "ghcr-cleanup: skips untagged versions with unknown age" {
+	mock_gh_versions '[
+		{"id": 1, "name": "sha256:dated", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 2, "name": "sha256:undated", "metadata": {"container": {"tags": []}}}
+	]'
+
+	export KEEP_LATEST="0"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Deleted untagged version 1"
+	refute_output --partial "Deleted untagged version 2"
+}
+
+@test "ghcr-cleanup: skips ephemeral cache versions with unknown age" {
+	mock_gh_versions '[
+		{"id": 10, "name": "sha256:dated-cache", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["pr-42"]}}},
+		{"id": 11, "name": "sha256:undated-cache", "metadata": {"container": {"tags": ["pr-99"]}}}
+	]'
+
+	export PRUNE_BUILDCACHE="true"
+	export KEEP_LATEST="0"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Deleted build-cache version 10"
+	refute_output --partial "Deleted build-cache version 11"
+}

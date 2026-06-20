@@ -55,7 +55,7 @@ run_check_script() {
 		cd '$MOCK_GIT_REPO'
 		export GITHUB_WORKSPACE='$MOCK_GIT_REPO'
 		export GH_TOKEN='$GH_TOKEN'
-		export CLEANUP_PR_LABELS='${CLEANUP_PR_LABELS:-security,dependencies,automation}'
+		export CLEANUP_PR_LABELS='${CLEANUP_PR_LABELS-security,dependencies,automation}'
 		export PATH='$PATH'
 		'$SCRIPT' 2>&1
 	"
@@ -167,6 +167,38 @@ EOF
 	[[ "$calls" == *"--label dependencies"* ]]
 	[[ "$calls" == *"--label automation"* ]]
 	[[ "$calls" != *"--label security,dependencies,automation"* ]]
+}
+
+@test "vuln-suppressions: creates unlabeled cleanup PR when labels are empty" {
+	setup_suppression_repo
+	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+ignoreUntil = 2099-12-31
+reason = "resolved upstream"
+EOF
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git add .osv-scanner.toml
+		git commit -q --amend --no-edit
+	)
+
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/56"
+
+	run bash -c "
+		cd '$MOCK_GIT_REPO'
+		export GITHUB_WORKSPACE='$MOCK_GIT_REPO'
+		export GH_TOKEN='$GH_TOKEN'
+		export CLEANUP_PR_LABELS=''
+		export PATH='$PATH'
+		'$SCRIPT' 2>&1
+	"
+	assert_success
+
+	local calls
+	calls=$(cat "$BATS_TEST_TMPDIR/mock_calls_gh")
+	[[ "$calls" != *"--label"* ]]
 }
 
 @test "vuln-suppressions: removes expired suppressions via cleanup PR and exits 1" {
