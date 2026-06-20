@@ -303,6 +303,7 @@ EOF
 	]'
 
 	export KEEP_LATEST="0"
+	export PROTECT_REFERENCED="false"
 
 	run bash -c 'bash "$SCRIPT" 2>&1'
 	assert_success
@@ -318,6 +319,7 @@ EOF
 
 	export PRUNE_BUILDCACHE="true"
 	export KEEP_LATEST="0"
+	export PROTECT_REFERENCED="false"
 
 	run bash -c 'bash "$SCRIPT" 2>&1'
 	assert_success
