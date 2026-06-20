@@ -90,3 +90,26 @@ YAML
 	' "$action"
 	assert_success
 }
+
+@test "composite actions: resolve SCRIPTS_DIR from GITHUB_ACTION_PATH" {
+	local rc=0
+	while IFS= read -r -d '' action; do
+		if grep -q 'SCRIPTS_DIR=\${GITHUB_ACTION_PATH' "$action"; then
+			echo "broken SCRIPTS_DIR pattern in $action" >&2
+			rc=1
+		fi
+		if grep -q 'GITHUB_ACTION_PATH//\\\\//' "$action"; then
+			echo "slash-stripping SCRIPTS_DIR bug in $action" >&2
+			rc=1
+		fi
+	done < <(find "${PROJECT_ROOT}/.github/actions" -path '*/action.yml' -type f -print0)
+
+	[[ "$rc" -eq 0 ]]
+
+	run awk '
+		BEGIN { found = 0 }
+		/SCRIPTS_DIR="\$\(cd "\$\{GITHUB_ACTION_PATH\}\/\.\.\/\.\.\/\.\.\/scripts" && pwd\)"/ { found++ }
+		END { exit found < 1 }
+	' "${PROJECT_ROOT}/.github/actions/secure-checkout/action.yml"
+	assert_success
+}
