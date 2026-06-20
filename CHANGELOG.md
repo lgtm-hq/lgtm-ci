@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.46.0] - 2026-06-20
+
+### Added
+
+- **ci**: close adoption gaps blocking py-lintro reusable workflow migration (#364) (1ea1da7)
 - **ghcr**: referenced-digest protection and ephemeral build-cache tag pruning in
   `reusable-ghcr-cleanup.yml` (#363)
 - **workflows**: `cleanup-pr-labels` input on `reusable-vuln-suppression-check.yml`
@@ -24,10 +39,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **security**: vuln suppression cleanup removes stale and expired entries via PR;
   expired entries cause workflow failure for manual review (#363)
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
 - **actions**: fix `SCRIPTS_DIR` resolution across composite actions using
@@ -36,8 +47,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **ghcr**: fix empty referenced-digests array producing `[""]` in jq filter (#363)
 - **security**: fail workflow when existing cleanup PR masks new expired
   suppressions (#363)
-
-### Security
 
 ## [0.45.2] - 2026-06-19
 
@@ -1146,7 +1155,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.46.0...HEAD
+[0.46.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.2...v0.46.0
 [0.45.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.1...v0.45.2
 [0.45.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.0...v0.45.1
 [0.45.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.44.1...v0.45.0
