@@ -18,8 +18,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **ghcr**: `keep-latest` default is now `0` (delete all eligible untagged versions)
   (#363)
-- **security**: vuln suppression cleanup removes stale and expired entries via PR
-  (#363)
+- **ghcr**: use `updated_at` for age and keep-latest sorting to avoid
+  deleting recently refreshed versions (#363)
+- **ghcr**: ephemeral tag pattern matches any suffix, not just numeric (#363)
+- **security**: vuln suppression cleanup removes stale and expired entries via PR;
+  expired entries cause workflow failure for manual review (#363)
 
 ### Deprecated
 
@@ -29,6 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **actions**: fix `SCRIPTS_DIR` resolution across composite actions using
   `GITHUB_ACTION_PATH` (#363)
+- **ghcr**: protect root tagged digest in referenced-digest collection (#363)
+- **ghcr**: fix empty referenced-digests array producing `[""]` in jq filter (#363)
+- **security**: fail workflow when existing cleanup PR masks new expired
+  suppressions (#363)
 
 ### Security
 

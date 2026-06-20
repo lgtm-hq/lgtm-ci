@@ -779,7 +779,7 @@ stale (vulnerability resolved upstream) or expired (past `ignoreUntil`).
 | `osv-version`            | `2.3.5`                 | osv-scanner release version                |
 | `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
 | `check-script`           | tooling default         | Repo-local override supported              |
-| `cleanup-pr-labels`      | `security,dependencies,automation` | Labels on auto-created cleanup PR |
+| `cleanup-pr-labels`      | see below | Labels on cleanup PR |
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
@@ -818,21 +818,21 @@ versions it collects digests referenced by tagged manifest indexes (multi-arch
 children, cosign/SLSA attestations) and skips the entire prune when that
 collection is incomplete.
 
-| Input                     | Default | Notes                                                       |
-| ------------------------- | ------- | ----------------------------------------------------------- |
-| `package-name`            | —       | Required GHCR package name                                  |
-| `min-age-days`            | `7`     | Minimum age before untagged deletion                        |
-| `keep-latest`             | `0`     | Keep N most recent eligible untagged versions               |
-| `build-cache-pr-age-days` | `14`    | Minimum age before ephemeral build-cache tag deletion       |
-| `protect-referenced`      | `true`  | Skip prune when referenced-digest collection is incomplete  |
-| `prune-buildcache`        | `true`  | Delete aged `pr-*` / `mq-*` / `dispatch-*` tags             |
-| `dry-run`                 | `false` | Log only, no deletions                                      |
-| `egress-policy`           | `block` | Pass `block` (not `audit`) for production maintenance       |
-| `egress-preset`           | `github-tooling` | Includes GitHub API + GHCR registry hosts          |
-| `allowed-endpoints`       | `""`    | Custom endpoints when `egress-policy` is `block`              |
-| `allowed-endpoints-mode`  | `replace` | Merge or replace preset endpoints (`replace`/`append`)    |
-| `tooling-ref`             | `""`    | Git ref for lgtm-ci tooling sparse checkout                 |
-| `runner-image`            | `ubuntu-24.04` | GitHub-hosted runner image label                     |
+| Input | Default | Notes |
+| --- | --- | --- |
+| `package-name` | — | Required GHCR package name |
+| `min-age-days` | `7` | Min age before untagged deletion |
+| `keep-latest` | `0` | Keep N most recent untagged |
+| `build-cache-pr-age-days` | `14` | Min age before cache deletion |
+| `protect-referenced` | `true` | Skip when refs incomplete |
+| `prune-buildcache` | `true` | Delete aged ephemeral tags |
+| `dry-run` | `false` | Log only, no deletions |
+| `egress-policy` | `block` | `audit` or `block` |
+| `egress-preset` | `github-tooling` | API + GHCR hosts |
+| `allowed-endpoints` | `""` | Custom endpoints |
+| `allowed-endpoints-mode` | `replace` | `replace` or `append` |
+| `tooling-ref` | `""` | lgtm-ci tooling git ref |
+| `runner-image` | `ubuntu-24.04` | Runner image label |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward a token with
 `packages:write` via `secrets.token` (or `secrets: inherit`).

@@ -899,21 +899,21 @@ build-cache tags. Referenced-digest protection walks tagged manifest indexes and
 OCI Referrers before untagged deletion; the job skips pruning when registry auth
 or manifest collection is incomplete.
 
-| Input                     | Default          | Notes                                              |
-| ------------------------- | ---------------- | -------------------------------------------------- |
-| `package-name`            | required         | GHCR package name                                  |
-| `min-age-days`            | `7`              | Minimum age before untagged deletion               |
-| `keep-latest`             | `0`              | Keep N most recent eligible untagged versions      |
-| `build-cache-pr-age-days` | `14`             | Minimum age before ephemeral tag deletion          |
-| `protect-referenced`      | `true`           | Skip prune when reference protection is incomplete |
-| `prune-buildcache`        | `true`           | Delete aged `pr-*` / `mq-*` / `dispatch-*` tags    |
-| `dry-run`                 | `false`          | Log only                                           |
-| `egress-policy`           | `block`          | `audit` or `block`                                 |
-| `egress-preset`           | `github-tooling` | `github-minimal`, `github-tooling`, `docker`, etc. |
-| `allowed-endpoints`       | `""`             | Custom endpoints when `egress-policy` is `block`   |
-| `allowed-endpoints-mode`  | `replace`        | `replace` or `append` with preset endpoints        |
-| `tooling-ref`             | `""`             | Git ref for lgtm-ci tooling sparse checkout        |
-| `runner-image`            | `ubuntu-24.04`   | GitHub-hosted runner image label                   |
+| Input | Default | Notes |
+| --- | --- | --- |
+| `package-name` | required | GHCR package name |
+| `min-age-days` | `7` | Min age before deletion |
+| `keep-latest` | `0` | Keep N most recent |
+| `build-cache-pr-age-days` | `14` | Min cache age |
+| `protect-referenced` | `true` | Skip when incomplete |
+| `prune-buildcache` | `true` | Delete ephemeral tags |
+| `dry-run` | `false` | Log only |
+| `egress-policy` | `block` | `audit` or `block` |
+| `egress-preset` | `github-tooling` | Preset host list |
+| `allowed-endpoints` | `""` | Custom endpoints |
+| `allowed-endpoints-mode` | `replace` | `replace` / `append` |
+| `tooling-ref` | `""` | lgtm-ci git ref |
+| `runner-image` | `ubuntu-24.04` | Runner image label |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward `secrets.token` with
 `packages:write` scope (or `secrets: inherit`).

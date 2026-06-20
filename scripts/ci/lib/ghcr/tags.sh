@@ -9,7 +9,7 @@
 [[ -n "${_LGTM_CI_GHCR_TAGS_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_GHCR_TAGS_LOADED=1
 
-readonly _GHCR_EPHEMERAL_TAG_PATTERN='^(pr-[0-9]+|mq-[0-9]+|dispatch-[0-9]+)$'
+readonly _GHCR_EPHEMERAL_TAG_PATTERN='^(pr-[a-zA-Z0-9_.-]+|mq-[a-zA-Z0-9_.-]+|dispatch-[a-zA-Z0-9_.-]+)$'
 
 # Return 0 when every tag on the version matches the ephemeral pattern.
 # Args:

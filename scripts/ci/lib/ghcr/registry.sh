@@ -2,6 +2,11 @@
 # SPDX-License-Identifier: MIT
 # Purpose: GHCR registry helpers for referenced-digest protection during prune
 #
+# These functions use raw curl against the Docker registry v2 API (ghcr.io)
+# because `gh api` only speaks the GitHub REST API. Token exchange, manifest
+# fetches, and OCI Referrers lookups require registry-native endpoints that
+# the GitHub CLI cannot reach.
+#
 # Usage:
 #   source "$(dirname "${BASH_SOURCE:-$0}")/registry.sh"
 #   ghcr_exchange_registry_token owner package github_token
@@ -135,14 +140,15 @@ ghcr_fetch_referrers() {
 }
 
 # Collect digests referenced by tagged manifest indexes and referrers.
+# Includes the root tagged digest itself, its manifest children, subject
+# digests, and OCI Referrers descriptors.
 # Args:
 #   $1 - owner
 #   $2 - package name
 #   $3 - versions JSON array (GitHub API shape)
 #   $4 - registry bearer token
-# Prints newline-delimited digests on stdout.
-# Sets GHCR_REFERENCED_COMPLETE=true|false in caller scope via named return vars:
-#   referenced_complete_var referenced_digests_var
+#   $5 - name of caller variable to set complete status (true/false)
+#   $6 - name of caller variable to set newline-delimited digests
 ghcr_collect_referenced_digests() {
 	local owner="${1:?owner required}"
 	local package_name="${2:?package required}"
@@ -156,6 +162,9 @@ ghcr_collect_referenced_digests() {
 
 	while IFS= read -r digest; do
 		[[ -z "$digest" ]] && continue
+
+		# P1: protect the root tagged digest itself
+		digests+=("$digest")
 
 		manifest=$(ghcr_fetch_manifest \
 			"$owner" \

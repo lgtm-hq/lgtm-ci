@@ -57,25 +57,25 @@ ghcr_fetch_versions() {
 
 ghcr_delete_version() {
 	local version_id="$1"
-	local api_err=""
 
 	if [[ "$DRY_RUN" == "true" ]]; then
 		return 0
 	fi
 
-	if api_err=$(gh api --method DELETE \
+	local err=""
+	if err=$(gh api --method DELETE \
 		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
 		2>&1); then
 		return 0
 	fi
 
-	if api_err=$(gh api --method DELETE \
+	if err=$(gh api --method DELETE \
 		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions/${version_id}" \
 		2>&1); then
 		return 0
 	fi
 
-	log_error "Failed to delete version ${version_id}: ${api_err}"
+	log_error "Failed to delete version ${version_id}: ${err}"
 	return 1
 }
 
@@ -141,6 +141,8 @@ fi
 
 # =============================================================================
 # Filter to untagged versions eligible for deletion
+# Uses updated_at for age comparison to avoid deleting recently refreshed
+# versions whose created_at predates the cutoff.
 # =============================================================================
 cutoff_date=$(date -u -v-"${MIN_AGE_DAYS}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
 	date -u -d "${MIN_AGE_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
@@ -148,13 +150,19 @@ cutoff_date=$(date -u -v-"${MIN_AGE_DAYS}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
 
 log_info "Cutoff date: $cutoff_date (older than $MIN_AGE_DAYS days)"
 
-eligible_versions=$(echo "$all_versions" | jq --arg cutoff "$cutoff_date" --argjson refs "$(printf '%s\n' "${referenced_digests[@]}" | jq -R . | jq -s .)" '
-	def version_time: .created_at // .updated_at // "";
+if ((${#referenced_digests[@]} > 0)); then
+	refs_json=$(printf '%s\n' "${referenced_digests[@]}" | jq -R . | jq -s .)
+else
+	refs_json='[]'
+fi
+
+eligible_versions=$(echo "$all_versions" | jq --arg cutoff "$cutoff_date" --argjson refs "$refs_json" '
+	def version_time: .updated_at // .created_at // "";
 	[ .[] |
 	  select((.metadata.container.tags | length) == 0) |
 	  select(version_time < $cutoff) |
 	  select(.name as $n | ($refs | index($n) | not))
-	] | sort_by(.created_at // .updated_at) | reverse
+	] | sort_by(.updated_at // .created_at) | reverse
 ')
 
 eligible_count=$(echo "$eligible_versions" | jq 'length')
@@ -169,11 +177,14 @@ if [[ "$eligible_count" -le "$KEEP_LATEST" ]]; then
 else
 	to_delete=$(echo "$eligible_versions" | jq --argjson skip "$KEEP_LATEST" '.[$skip:]')
 	delete_count=$(echo "$to_delete" | jq 'length')
-	log_info "Will delete $delete_count untagged version(s) (keeping $KEEP_LATEST most recent untagged)"
+	actual_kept=$((eligible_count - delete_count))
+	log_info "Will delete $delete_count untagged version(s) (keeping $actual_kept most recent untagged)"
 fi
 
 # =============================================================================
 # Build-cache ephemeral tag pruning
+# Uses updated_at for age comparison to avoid deleting recently refreshed
+# cache entries whose created_at predates the cutoff.
 # =============================================================================
 buildcache_delete_count=0
 buildcache_to_delete='[]'
@@ -184,7 +195,7 @@ if [[ "$PRUNE_BUILDCACHE" == "true" ]]; then
 		die "Could not compute buildcache cutoff date")
 
 	buildcache_candidates=$(echo "$all_versions" | jq --arg cutoff "$buildcache_cutoff" '
-		def version_time: .created_at // .updated_at // "";
+		def version_time: .updated_at // .created_at // "";
 		[ .[] |
 		  select((.metadata.container.tags | length) > 0) |
 		  select(version_time < $cutoff)
@@ -198,7 +209,7 @@ if [[ "$PRUNE_BUILDCACHE" == "true" ]]; then
 			log_info "Buildcache eligible: version $version_id ($version_name, tags=$(jq -r 'join(",")' <<<"$tags_json"), updated $updated_at)"
 		fi
 	done < <(
-		echo "$buildcache_candidates" | jq -r '.[] | [.id, (.metadata.container.tags | @json), .name, (.created_at // .updated_at)] | @tsv'
+		echo "$buildcache_candidates" | jq -r '.[] | [.id, (.metadata.container.tags | @json), .name, (.updated_at // .created_at)] | @tsv'
 	)
 
 	if ((${#buildcache_ids[@]} > 0)); then
@@ -242,7 +253,7 @@ while IFS=$'\t' read -r version_id version_name updated_at; do
 	else
 		failed=$((failed + 1))
 	fi
-done < <(echo "$to_delete" | jq -r '.[] | [.id, .name, (.created_at // .updated_at)] | @tsv')
+done < <(echo "$to_delete" | jq -r '.[] | [.id, .name, (.updated_at // .created_at)] | @tsv')
 
 while IFS= read -r version_id; do
 	[[ -z "$version_id" ]] && continue
@@ -269,6 +280,8 @@ else
 	log_success "Cleanup complete: $deleted deleted, $failed failed"
 fi
 
+actual_kept=$((eligible_count < KEEP_LATEST ? eligible_count : KEEP_LATEST))
+
 add_github_summary "## GHCR Cleanup"
 add_github_summary ""
 add_github_summary "| Property | Value |"
@@ -277,7 +290,7 @@ add_github_summary "| Package | \`${GITHUB_ORG}/${PACKAGE_NAME}\` |"
 add_github_summary "| Total versions | $total_count |"
 add_github_summary "| Eligible untagged | $eligible_count |"
 add_github_summary "| Eligible build-cache | $buildcache_delete_count |"
-add_github_summary "| Kept (most recent untagged) | $KEEP_LATEST |"
+add_github_summary "| Kept (most recent untagged) | $actual_kept |"
 add_github_summary "| Referenced digests protected | ${#referenced_digests[@]} |"
 
 if [[ "$DRY_RUN" == "true" ]]; then

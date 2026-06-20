@@ -127,7 +127,7 @@ EOF
 	[[ ! -f "$MOCK_GIT_REPO/.osv-scanner.toml" ]] || ! grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml"
 }
 
-@test "vuln-suppressions: removes expired suppressions via cleanup PR" {
+@test "vuln-suppressions: removes expired suppressions via cleanup PR and exits 1" {
 	setup_suppression_repo
 	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
 [[IgnoredVulns]]
@@ -145,14 +145,14 @@ EOF
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/43"
 
 	run_check_script
-	assert_success
+	assert_failure
 	assert_output --partial "Cleanup PR created"
-	refute_output --partial "need manual review"
+	assert_output --partial "Expired suppression(s) removed"
 
 	[[ ! -f "$MOCK_GIT_REPO/.osv-scanner.toml" ]] || ! grep -q 'GHSA-expired-3333' "$MOCK_GIT_REPO/.osv-scanner.toml"
 }
 
-@test "vuln-suppressions: removes stale and expired in one cleanup PR" {
+@test "vuln-suppressions: removes stale and expired in one cleanup PR and exits 1" {
 	setup_suppression_repo
 	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
 [[IgnoredVulns]]
@@ -175,8 +175,9 @@ EOF
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/44"
 
 	run_check_script
-	assert_success
+	assert_failure
 	assert_output --partial "Cleanup PR created"
+	assert_output --partial "Expired suppression(s) removed"
 
 	[[ ! -f "$MOCK_GIT_REPO/.osv-scanner.toml" ]] || {
 		! grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml" &&
@@ -184,7 +185,7 @@ EOF
 	}
 }
 
-@test "vuln-suppressions: skips when cleanup PR already open" {
+@test "vuln-suppressions: skips when cleanup PR already open for stale-only" {
 	setup_suppression_repo
 	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
 [[IgnoredVulns]]
@@ -207,4 +208,29 @@ EOF
 	run_check_script
 	assert_success
 	assert_output --partial "Cleanup PR #99 already open"
+}
+
+@test "vuln-suppressions: fails when cleanup PR open but new expired found" {
+	setup_suppression_repo
+	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-expired-4444"
+ignoreUntil = 2020-01-01
+reason = "past due"
+EOF
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git add .osv-scanner.toml
+		git commit -q --amend --no-edit
+	)
+
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-expired-4444"}]}]}]}'
+	mock_command_multi "gh" '
+		*pr\ list*) echo -n "99";;
+		*) exit 1;;
+	'
+
+	run_check_script
+	assert_failure
+	assert_output --partial "new expired suppressions found"
 }

@@ -108,6 +108,8 @@ if [[ ${#REMOVE_IDS[@]} -eq 0 ]]; then
 	exit 0
 fi
 
+# Check for an existing cleanup PR. If one exists and the current run found
+# new expired suppressions, fail instead of silently masking them.
 PR_LIST_OUTPUT=""
 PR_LIST_EXIT=0
 PR_LIST_OUTPUT=$(
@@ -120,6 +122,10 @@ if [[ "$PR_LIST_EXIT" -ne 0 ]]; then
 	exit 1
 fi
 if [[ -n "$PR_LIST_OUTPUT" ]]; then
+	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+		log_error "Cleanup PR #${PR_LIST_OUTPUT} already open, but new expired suppressions found. Manual review required."
+		exit 1
+	fi
 	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping."
 	exit 0
 fi
@@ -140,11 +146,17 @@ if [[ -f "$OSV_TOML" ]]; then
 fi
 
 if ! git diff --quiet; then
-	REMOVED_LIST=""
-	for id in "${REMOVE_IDS[@]}"; do
-		REMOVED_LIST="${REMOVED_LIST}- \`${id}\`
+	STALE_LIST=""
+	for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
+		STALE_LIST="${STALE_LIST}- \`${id}\` (stale — vulnerability resolved)
 "
 	done
+	EXPIRED_LIST=""
+	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
+		EXPIRED_LIST="${EXPIRED_LIST}- \`${id}\` (expired — past ignoreUntil date)
+"
+	done
+	REMOVED_LIST="${STALE_LIST}${EXPIRED_LIST}"
 
 	BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
 	configure_git_ci_user
@@ -167,26 +179,41 @@ EOF
 		WF_URL="${WF_URL}/workflows/${WORKFLOW_FILE}"
 	fi
 
-	gh pr create \
-		--title "chore(security): remove stale vulnerability suppressions" \
-		--label "$CLEANUP_PR_LABELS" \
-		--body "$(
-			cat <<EOF
-## Summary
+	PR_BODY="## Summary
 - Remove stale/expired vulnerability suppressions that are no longer needed
-
-### Removed
-${REMOVED_LIST}
+"
+	if [[ -n "$STALE_LIST" ]]; then
+		PR_BODY="${PR_BODY}
+### Removed (stale)
+${STALE_LIST}"
+	fi
+	if [[ -n "$EXPIRED_LIST" ]]; then
+		PR_BODY="${PR_BODY}
+### Removed (expired)
+${EXPIRED_LIST}"
+	fi
+	PR_BODY="${PR_BODY}
 ## Test plan
 - [ ] CI security audit passes without these suppressions
 - [ ] osv-scanner scan passes without these suppressions
 
 ---
-*Auto-created by [vuln-suppression-check](${WF_URL}).*
-EOF
-		)"
+*Auto-created by [vuln-suppression-check](${WF_URL}).*"
+
+	gh pr create \
+		--title "chore(security): remove stale vulnerability suppressions" \
+		--label "$CLEANUP_PR_LABELS" \
+		--body "$PR_BODY"
 
 	log_success "Cleanup PR created on branch $BRANCH"
+
+	# Expired suppressions may indicate still-active vulnerabilities
+	# past their ignoreUntil date. Fail the workflow so the team
+	# reviews the PR before the next scan.
+	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+		log_error "Expired suppression(s) removed; review the cleanup PR before merging"
+		exit 1
+	fi
 else
 	log_info "No file changes needed."
 fi
