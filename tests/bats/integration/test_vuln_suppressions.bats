@@ -179,8 +179,8 @@ EOF
 	assert_output --partial "Cleanup PR created"
 
 	[[ ! -f "$MOCK_GIT_REPO/.osv-scanner.toml" ]] || {
-		! grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml"
-		! grep -q 'GHSA-expired-3333' "$MOCK_GIT_REPO/.osv-scanner.toml"
+		! grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml" &&
+			! grep -q 'GHSA-expired-3333' "$MOCK_GIT_REPO/.osv-scanner.toml"
 	}
 }
 

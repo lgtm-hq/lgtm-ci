@@ -35,7 +35,7 @@ ghcr_exchange_registry_token() {
 	url="https://ghcr.io/token?service=ghcr.io&scope=repository:${owner}/${package_name}:pull"
 
 	if ! token=$(
-		curl -fsS "$url" \
+		curl -fsS --max-time 30 "$url" \
 			-H "Authorization: Basic ${auth}" 2>/dev/null |
 			jq -r '.token // .access_token // empty'
 	); then
@@ -61,7 +61,7 @@ ghcr_fetch_manifest() {
 
 	url="https://ghcr.io/v2/${owner}/${package_name}/manifests/${digest}"
 	body=$(
-		curl -sS -w '\n%{http_code}' "$url" \
+		curl -sS --max-time 30 -w '\n%{http_code}' "$url" \
 			-H "Authorization: Bearer ${registry_token}" \
 			-H "Accept: ${_GHCR_MANIFEST_ACCEPT}" 2>/dev/null
 	) || {
@@ -103,7 +103,7 @@ ghcr_fetch_referrers() {
 
 	url="https://ghcr.io/v2/${owner}/${package_name}/referrers/${digest}"
 	body=$(
-		curl -sS -w '\n%{http_code}' "$url" \
+		curl -sS --max-time 30 -w '\n%{http_code}' "$url" \
 			-H "Authorization: Bearer ${registry_token}" \
 			-H "Accept: ${_GHCR_REFERRERS_ACCEPT}" 2>/dev/null
 	) || {

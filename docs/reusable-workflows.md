@@ -829,8 +829,12 @@ collection is incomplete.
 | `dry-run`                 | `false` | Log only, no deletions                                      |
 | `egress-policy`           | `block` | Pass `block` (not `audit`) for production maintenance       |
 | `egress-preset`           | `github-tooling` | Includes GitHub API + GHCR registry hosts          |
+| `allowed-endpoints`       | `""`    | Custom endpoints when `egress-policy` is `block`              |
+| `allowed-endpoints-mode`  | `replace` | Merge or replace preset endpoints (`replace`/`append`)    |
+| `tooling-ref`             | `""`    | Git ref for lgtm-ci tooling sparse checkout                 |
+| `runner-image`            | `ubuntu-24.04` | GitHub-hosted runner image label                     |
 
-Grant `packages: write` on the caller job. Forward a token with
+Grant `contents: read` and `packages: write` on the caller job. Forward a token with
 `packages:write` via `secrets.token` (or `secrets: inherit`).
 
 ```yaml

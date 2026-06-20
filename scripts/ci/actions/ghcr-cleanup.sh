@@ -46,7 +46,6 @@ source "$SCRIPT_DIR/../lib/ghcr/registry.sh"
 source "$SCRIPT_DIR/../lib/ghcr/tags.sh"
 
 ghcr_fetch_versions() {
-	local api_err=""
 	all_versions=$(gh api --paginate \
 		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME}/versions" \
 		2>/dev/null | jq -s 'add // []') || {
@@ -80,24 +79,6 @@ ghcr_delete_version() {
 	return 1
 }
 
-ghcr_version_timestamp() {
-	jq -r '.created_at // .updated_at // ""'
-}
-
-ghcr_is_older_than_days() {
-	local timestamp="$1"
-	local min_days="$2"
-	local cutoff_date
-
-	[[ -z "$timestamp" ]] && return 1
-
-	cutoff_date=$(date -u -v-"${min_days}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
-		date -u -d "${min_days} days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
-		die "Could not compute cutoff date")
-
-	[[ "$timestamp" < "$cutoff_date" ]]
-}
-
 # =============================================================================
 # Fetch all package versions
 # =============================================================================
@@ -113,7 +94,6 @@ log_info "Found $total_count total version(s)"
 # =============================================================================
 referenced_digests=()
 referenced_complete=true
-protected_refs=0
 
 if [[ "$PROTECT_REFERENCED" == "true" && "$total_count" -gt 0 ]]; then
 	registry_token=""

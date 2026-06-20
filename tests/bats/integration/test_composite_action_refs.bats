@@ -106,10 +106,19 @@ YAML
 
 	[[ "$rc" -eq 0 ]]
 
-	run awk '
-		BEGIN { found = 0 }
-		/SCRIPTS_DIR="\$\(cd "\$\{GITHUB_ACTION_PATH\}\/\.\.\/\.\.\/\.\.\/scripts" && pwd\)"/ { found++ }
-		END { exit found < 1 }
-	' "${PROJECT_ROOT}/.github/actions/secure-checkout/action.yml"
-	assert_success
+	local checked=0
+	rc=0
+	while IFS= read -r -d '' action; do
+		grep -q 'GITHUB_ACTION_PATH}/../../../scripts' "$action" || continue
+		checked=$((checked + 1))
+		if ! awk '
+			/SCRIPTS_DIR="\$\(cd "\$\{GITHUB_ACTION_PATH\}\/\.\.\/\.\.\/\.\.\/scripts" && pwd\)"/ { found = 1 }
+			END { exit !found }
+		' "$action"; then
+			echo "missing SCRIPTS_DIR cd/pwd pattern in $action" >&2
+			rc=1
+		fi
+	done < <(find "${PROJECT_ROOT}/.github/actions" -path '*/action.yml' -type f -print0)
+
+	[[ "$checked" -ge 1 && "$rc" -eq 0 ]]
 }

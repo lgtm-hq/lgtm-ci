@@ -908,10 +908,14 @@ or manifest collection is incomplete.
 | `protect-referenced`      | `true`           | Skip prune when reference protection is incomplete |
 | `prune-buildcache`        | `true`           | Delete aged `pr-*` / `mq-*` / `dispatch-*` tags    |
 | `dry-run`                 | `false`          | Log only                                           |
-| `egress-policy`           | `block`          | Use `block` for production maintenance             |
-| `egress-preset`           | `github-tooling` | GitHub API + GHCR registry hosts                   |
+| `egress-policy`           | `block`          | `audit` or `block`                                 |
+| `egress-preset`           | `github-tooling` | `github-minimal`, `github-tooling`, `docker`, etc. |
+| `allowed-endpoints`       | `""`             | Custom endpoints when `egress-policy` is `block`   |
+| `allowed-endpoints-mode`  | `replace`        | `replace` or `append` with preset endpoints        |
+| `tooling-ref`             | `""`             | Git ref for lgtm-ci tooling sparse checkout        |
+| `runner-image`            | `ubuntu-24.04`   | GitHub-hosted runner image label                   |
 
-Grant `packages: write` on the caller job. Forward `secrets.token` with
+Grant `contents: read` and `packages: write` on the caller job. Forward `secrets.token` with
 `packages:write` scope (or `secrets: inherit`).
 
 ## Documentation site quality
