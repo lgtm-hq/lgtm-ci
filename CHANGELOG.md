@@ -9,13 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ghcr**: referenced-digest protection and ephemeral build-cache tag pruning in
+  `reusable-ghcr-cleanup.yml` (#363)
+- **workflows**: `cleanup-pr-labels` input on `reusable-vuln-suppression-check.yml`
+  (#363)
+
 ### Changed
+
+- **ghcr**: `keep-latest` default is now `0` (delete all eligible untagged versions)
+  (#363)
+- **security**: vuln suppression cleanup removes stale and expired entries via PR
+  (#363)
 
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **actions**: fix `SCRIPTS_DIR` resolution across composite actions using
+  `GITHUB_ACTION_PATH` (#363)
 
 ### Security
 

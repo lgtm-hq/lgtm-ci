@@ -868,7 +868,7 @@ Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
 suppression cleanup pattern used by Rustume, py-lintro, and turbo-themes. The job
 installs `osv-scanner` directly (no Docker), runs
 `scripts/ci/security/check-vuln-suppressions.sh`, and may open a cleanup PR
-removing stale entries. Expired suppressions fail the job for manual review.
+removing stale and expired entries.
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
@@ -877,6 +877,7 @@ removing stale entries. Expired suppressions fail the job for manual review.
 | `osv-version`            | `2.3.5`                                              | osv-scanner release to install                  |
 | `config-path`            | `.osv-scanner.toml`                                  | Suppression TOML relative to repo root          |
 | `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported |
+| `cleanup-pr-labels`      | `security,dependencies,automation`                   | Labels on auto-created cleanup PR               |
 | `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
 | `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
 | `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
@@ -890,6 +891,28 @@ Grant `contents: write` and `pull-requests: write` on the caller job. Forward
 `runner-image`; the install script downloads `linux_*` release binaries only.
 
 Required secrets: `GH_TOKEN`.
+
+## GHCR cleanup
+
+`reusable-ghcr-cleanup.yml` prunes aged untagged container versions and ephemeral
+build-cache tags. Referenced-digest protection walks tagged manifest indexes and
+OCI Referrers before untagged deletion; the job skips pruning when registry auth
+or manifest collection is incomplete.
+
+| Input                     | Default          | Notes                                              |
+| ------------------------- | ---------------- | -------------------------------------------------- |
+| `package-name`            | required         | GHCR package name                                  |
+| `min-age-days`            | `7`              | Minimum age before untagged deletion               |
+| `keep-latest`             | `0`              | Keep N most recent eligible untagged versions      |
+| `build-cache-pr-age-days` | `14`             | Minimum age before ephemeral tag deletion          |
+| `protect-referenced`      | `true`           | Skip prune when reference protection is incomplete |
+| `prune-buildcache`        | `true`           | Delete aged `pr-*` / `mq-*` / `dispatch-*` tags    |
+| `dry-run`                 | `false`          | Log only                                           |
+| `egress-policy`           | `block`          | Use `block` for production maintenance             |
+| `egress-preset`           | `github-tooling` | GitHub API + GHCR registry hosts                   |
+
+Grant `packages: write` on the caller job. Forward `secrets.token` with
+`packages:write` scope (or `secrets: inherit`).
 
 ## Documentation site quality
 
