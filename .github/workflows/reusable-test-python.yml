@@ -168,13 +168,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -244,13 +244,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -276,7 +276,7 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Install uv
-        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        uses: astral-sh/setup-uv@fac544c07dec837d0ccb6301d7b5580bf5edae39 # v8.2.0
         with:
           version: latest
           enable-cache: false
@@ -291,7 +291,7 @@ jobs:
 
       - name: Cache uv dependencies
         id: cache
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: |
             ~/.cache/uv
@@ -447,13 +447,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
