@@ -129,20 +129,20 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout for scripts
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
           sparse-checkout: scripts/ci
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -193,13 +193,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -226,7 +226,7 @@ jobs:
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Cache Playwright browsers
         # Pinned to SHA for supply chain security
-        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
         with:
           path: ~/.cache/ms-playwright
           key: playwright-${{ matrix.browser }}-${{ hashFiles('**/bun.lock',
@@ -282,13 +282,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -361,13 +361,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling

@@ -169,7 +169,7 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           ref: >-
             ${{ inputs.commit-sha != '' && inputs.commit-sha || github.sha }}
@@ -177,7 +177,7 @@ jobs:
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -221,7 +221,7 @@ jobs:
 
       - name: Setup pnpm
         if: inputs.build-command != '' && inputs.package-manager == 'pnpm'
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
 
       - name: Install dependencies
         if: inputs.build-command != '' && inputs.package-manager != ''
@@ -283,13 +283,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
