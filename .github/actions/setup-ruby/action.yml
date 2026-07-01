@@ -53,7 +53,7 @@ runs:
 
     - name: Setup Ruby
       # Pinned to SHA for supply chain security
-      uses: ruby/setup-ruby@afeafc3d1ab54a631816aba4c914a0081c12ff2f # v1.310.0
+      uses: ruby/setup-ruby@0dafeac902942906541bc140009cdbf32665b601 # v1.315.0
       with:
         ruby-version: ${{ inputs.ruby-version }}
         bundler: ${{ inputs.bundler-version }}
@@ -84,7 +84,7 @@ runs:
       if: inputs.cache == 'true'
       id: cache
       # Pinned to SHA for supply chain security
-      uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
       with:
         path: |
           ${{ inputs.working-directory }}/vendor/bundle

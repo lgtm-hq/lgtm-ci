@@ -239,13 +239,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -339,13 +339,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -373,7 +373,7 @@ jobs:
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Setup QEMU
         # Pinned to SHA for supply chain security
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
@@ -437,7 +437,7 @@ jobs:
       - name: Build and push
         id: build
         # Pinned to SHA for supply chain security
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.file }}
@@ -542,14 +542,14 @@ jobs:
       - name: Upload Trivy scan results
         if: always() && inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: "trivy-results.sarif"
 
       - name: Generate artifact attestation
         if: inputs.push && inputs.provenance
         # Pinned to SHA for supply chain security
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.metadata.outputs.digest }}
@@ -558,7 +558,7 @@ jobs:
       - name: Generate SBOM attestation
         if: inputs.push && inputs.sbom && inputs.health-check-cmd != ''
         # Pinned to SHA for supply chain security
-        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        uses: actions/attest@a1948c3f048ba23858d222213b7c278aabede763 # v4.1.1
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.metadata.outputs.digest }}
@@ -614,13 +614,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -649,7 +649,7 @@ jobs:
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
@@ -703,7 +703,7 @@ jobs:
       - name: Build and push (${{ matrix.platform }})
         id: build
         # Pinned to SHA for supply chain security
-        uses: docker/build-push-action@f9f3042f7e2789586610d6e8b85c8f03e5195baf # v7.2.0
+        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a # v7.3.0
         with:
           context: ${{ inputs.context }}
           file: ${{ inputs.file }}
@@ -786,7 +786,7 @@ jobs:
       - name: Upload Trivy scan results (${{ matrix.platform }})
         if: always() && inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: "trivy-results-${{ matrix.slug }}.sarif"
           category: "trivy-${{ matrix.slug }}"
@@ -828,13 +828,13 @@ jobs:
     steps:
       - name: Checkout repository (for smoke-test-script)
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -863,7 +863,7 @@ jobs:
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Validate registry
         if: inputs.push
@@ -939,7 +939,7 @@ jobs:
     steps:
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -968,7 +968,7 @@ jobs:
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
-        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
 
       - name: Validate registry
         if: inputs.push
@@ -1045,13 +1045,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -1157,7 +1157,7 @@ jobs:
       - name: Generate artifact attestation
         if: inputs.provenance
         # Pinned to SHA for supply chain security
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.metadata.outputs.digest }}
@@ -1220,13 +1220,13 @@ jobs:
     steps:
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -1287,7 +1287,7 @@ jobs:
     steps:
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
@@ -1326,6 +1326,6 @@ jobs:
 
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
+        uses: github/codeql-action/upload-sarif@8aad20d150bbac5944a9f9d289da16a4b0d87c1e # v4.36.2
         with:
           sarif_file: "trivy-results.sarif"
