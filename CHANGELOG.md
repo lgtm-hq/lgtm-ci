@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **scripts**: parameterize near-duplicate language-family scripts (#372):
+  `aggregate-{node,python,rust}-results.sh` merged into `aggregate-results.sh`
+  (`RESULTS_DIR`), `write-{node,python,rust}-summary.sh` merged into
+  `write-test-summary.sh` (`MATRIX_KEY`/`MATRIX_VALUE`), and
+  `generate-{node,python}-matrix.sh` plus `generate-rust-toolchain-matrix.sh`
+  merged into `generate-version-matrix.sh` (`MATRIX_KEY`, `DEFAULT_VERSION`,
+  `VERSIONS_INPUT`, optional `FIRST_VERSION_OUTPUT`). Node matrix generation
+  now deduplicates repeated versions, matching Python and Rust behavior.
+
 ### Deprecated
 
 - **workflows**: `node-version` input on `reusable-publish-npm.yml` is now a
