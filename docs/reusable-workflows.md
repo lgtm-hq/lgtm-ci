@@ -559,6 +559,75 @@ allowlist, and `workflow_run` caller patterns.
 See [python-release-publish.md](python-release-publish.md) for a full production
 tag-push layout (quality, SBOM, split publish, release assets).
 
+### Artifact download preview comment (`reusable-publish-artifact-preview.yml`)
+
+Posts (or updates) one **sticky PR comment** with a direct **download link** to a
+named build artifact, optionally prefixed with a short build summary. Use it when
+a PR uploads an artifact (a generated static site, a rendered report, a built
+bundle) and reviewers want to grab it in one click instead of hunting through the
+run page.
+
+The link is the `artifact-url` output of `actions/upload-artifact` v4+
+(`https://github.com/<owner>/<repo>/actions/runs/<run_id>/artifacts/<artifact_id>`).
+
+> **Constraint (honest):** the link downloads a **`.zip`** and requires the viewer
+> to be **signed in to GitHub with access to the repository**. It is a reviewer
+> convenience, not a public preview URL.
+
+Re-running on the same PR **updates** the existing comment (marker upsert — no
+duplicates). A missing/empty `artifact-url` degrades gracefully: a warning is
+emitted and any stale comment is removed (delete-on-empty) rather than posting a
+broken link. Fork PRs are skipped (they cannot receive workflow comments).
+
+```yaml
+jobs:
+  build-site:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      artifact-url: ${{ steps.upload.outputs.artifact-url }}
+    steps:
+      # ... build the site into ./dist ...
+      - id: upload
+        uses: actions/upload-artifact@<sha> # v4+
+        with:
+          name: site-preview
+          path: dist
+
+  preview-comment:
+    needs: build-site
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-artifact-preview.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      artifact-name: site-preview
+      artifact-url: ${{ needs.build-site.outputs.artifact-url }}
+      marker: site-preview
+      summary: "Rendered landing site from this PR's formulae."
+      tooling-ref: "<sha>" # vX.Y.Z
+```
+
+<!-- markdownlint-disable MD013 -- input reference table -->
+
+| Input           | Type   | Required | Default                     | Purpose                                                      |
+| --------------- | ------ | -------- | --------------------------- | ----------------------------------------------------------- |
+| `artifact-name` | string | yes      | —                           | Name shown in the "⬇ Download …" link text                  |
+| `artifact-url`  | string | yes      | —                           | `upload-artifact` v4 `artifact-url` output (empty degrades) |
+| `marker`        | string | yes      | —                           | Sticky-comment upsert identity                              |
+| `summary`       | string | no       | `""`                        | Inline markdown prepended to the comment                    |
+| `summary-file`  | string | no       | `""`                        | Markdown file (wins over `summary` when non-empty)          |
+| `job-name`      | string | no       | `Publish artifact preview`  | Job display name                                            |
+
+<!-- markdownlint-enable MD013 -->
+
+Plus the standard contract inputs (`tooling-ref`, `egress-policy`,
+`egress-preset`, `allowed-endpoints`, `allowed-endpoints-mode`, `runner-image`,
+`timeout-minutes`). Unlike `reusable-publish-artifact-report.yml` (which posts
+the **contents** of a markdown file from inside a downloaded artifact), this
+workflow does not download the artifact — it only links to it.
+
 ## Build, Coverage, And Supply Chain
 
 ### Push (publish to registry)
