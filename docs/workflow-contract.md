@@ -103,6 +103,15 @@ Contract enforcement: `scripts/ci/quality/validate-runner-contract.sh` (covered
 by BATS). See [reusable-workflows.md](reusable-workflows.md#runner-pinning) for
 caller examples including `runner-map`.
 
+#### Egress policy exceptions
+
+`reusable-publish-rust-release.yml` intentionally omits the `egress-policy`
+input. Every job hardcodes `egress-policy: block` and validates the runner
+policy at tier `strict`, so callers cannot downgrade release publishing to
+`audit`. Callers can still extend the allowlist through `allowed-endpoints`
+and `allowed-endpoints-mode`. Contract checks should not flag the missing
+input.
+
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
 
