@@ -183,15 +183,15 @@ jobs:
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
-            .github/actions/
-            scripts/ci/
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
-      - name: Resolve egress allowlist
+      - name: Checkout and harden
         id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
+          tooling-ref: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: >-
             ${{ inputs.egress-build-preset != '' && inputs.egress-build-preset ||
@@ -200,13 +200,9 @@ jobs:
           allowed-endpoints: >-
             ${{ inputs.allowed-endpoints-build != '' && inputs.allowed-endpoints-build ||
             inputs.allowed-endpoints }}
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
       - name: Setup Node.js
         if: inputs.build-command != '' && inputs.package-manager != ''
         uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
@@ -295,15 +291,15 @@ jobs:
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
-            .github/actions/harden-runner
-            .github/actions/resolve-egress-allowlist
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
-      - name: Resolve egress allowlist
+      - name: Checkout and harden
         id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
+          tooling-ref: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: >-
             ${{ inputs.egress-deploy-preset != '' && inputs.egress-deploy-preset ||
@@ -312,13 +308,6 @@ jobs:
           allowed-endpoints: >-
             ${{ inputs.allowed-endpoints-deploy != '' && inputs.allowed-endpoints-deploy ||
             inputs.allowed-endpoints }}
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
