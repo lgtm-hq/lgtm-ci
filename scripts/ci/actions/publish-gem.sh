@@ -55,7 +55,7 @@ validate)
 	fi
 
 	# Extract metadata
-	name=$(grep -E '\.(name)\s*=' "$gemspec" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	name=$(grep -E '\.(name)[[:space:]]*=' "$gemspec" | head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
 	version=$(extract_gem_version "$gemspec") || die "Could not extract version"
 
 	log_success "Gemspec valid: $name@$version"
@@ -80,7 +80,7 @@ build)
 	fi
 
 	# Extract metadata from gemspec
-	name=$(grep -E '\.(name)\s*=' "$gemspec" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/')
+	name=$(grep -E '\.(name)[[:space:]]*=' "$gemspec" | head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/')
 	version=$(extract_gem_version "$gemspec") || die "Could not extract version"
 
 	log_success "Built: $gem_file"

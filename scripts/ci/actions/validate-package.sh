@@ -117,7 +117,7 @@ validate)
 		;;
 	npm)
 		if validate_npm_package "$PACKAGE_PATH"; then
-			name=$(grep -E '^\s*"name"\s*:' "$PACKAGE_PATH/package.json" | sed 's/.*:\s*"\([^"]*\)".*/\1/')
+			name=$(grep -E '^[[:space:]]*"name"[[:space:]]*:' "$PACKAGE_PATH/package.json" | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
 			version=$(extract_npm_version "$PACKAGE_PATH") || true
 			valid="true"
 		fi
@@ -127,7 +127,7 @@ validate)
 			version=$(extract_gem_version "$PACKAGE_PATH") || true
 			gemspec=$(find "$PACKAGE_PATH" -maxdepth 1 -name "*.gemspec" -print -quit 2>/dev/null || true)
 			if [[ -n "$gemspec" ]]; then
-				name=$(grep -E '\.(name)\s*=' "$gemspec" | head -1 | sed 's/.*=\s*["\x27]\([^"\x27]*\)["\x27].*/\1/' || true)
+				name=$(grep -E '\.(name)[[:space:]]*=' "$gemspec" | head -1 | sed 's/.*=[[:space:]]*["\x27]\([^"\x27]*\)["\x27].*/\1/' || true)
 			fi
 			valid="true"
 		fi
