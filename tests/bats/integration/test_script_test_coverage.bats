@@ -109,6 +109,19 @@ run_fixture_validator() {
 	assert_output --partial "0 allowlisted"
 }
 
+@test "script-test-coverage: tolerates trailing slash in SCRIPTS_DIR override" {
+	mkdir -p "${FIXTURE_SCRIPTS}/actions"
+	printf '#!/usr/bin/env bash\n' >"${FIXTURE_SCRIPTS}/actions/example-untested.sh"
+	echo "actions/example-untested.sh" >"${FIXTURE_ALLOWLIST}"
+
+	SCRIPTS_DIR="${FIXTURE_SCRIPTS}/" \
+		TESTS_DIR="${FIXTURE_TESTS}" \
+		ALLOWLIST_FILE="${FIXTURE_ALLOWLIST}" \
+		run "${VALIDATOR}"
+	assert_success
+	assert_output --partial "1 allowlisted"
+}
+
 @test "script-test-coverage: ignores comments and blank lines in allowlist" {
 	mkdir -p "${FIXTURE_SCRIPTS}/actions"
 	printf '#!/usr/bin/env bash\n' >"${FIXTURE_SCRIPTS}/actions/example-untested.sh"

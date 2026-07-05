@@ -22,6 +22,7 @@ if [[ -z "${REPO_ROOT:-}" ]]; then
 	REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 fi
 SCRIPTS_DIR="${SCRIPTS_DIR:-${REPO_ROOT}/scripts/ci}"
+SCRIPTS_DIR="${SCRIPTS_DIR%/}" # normalize: a trailing slash would break rel-path stripping
 TESTS_DIR="${TESTS_DIR:-${REPO_ROOT}/tests}"
 ALLOWLIST_FILE="${ALLOWLIST_FILE:-${SCRIPT_DIR}/script-test-coverage-allowlist.txt}"
 
