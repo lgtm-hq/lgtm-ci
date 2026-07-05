@@ -20,7 +20,14 @@ from typing import Any
 try:
     import tomllib
 except ImportError:
-    import tomli as tomllib  # type: ignore[no-redef]
+    try:
+        import tomli as tomllib  # type: ignore[no-redef]
+    except ImportError:
+        print(
+            "ERROR: tomllib (Python >= 3.11) or tomli is required.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
 
 # Source table keys uv uses for local (non-registry) packages. The
 # project's own entry always carries one of these, which disambiguates

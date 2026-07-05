@@ -16,7 +16,10 @@ The package name must already be normalized the way uv records it in
 uv.lock (PEP 503: lowercase, runs of ``-_.`` collapsed to a dash).
 """
 
+import contextlib
+import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -110,8 +113,23 @@ def main() -> None:
     for package in targets:
         package["version"] = new_version
 
+    # Atomic replace: write to a temp file in the same directory and
+    # rename over the lockfile so an interrupted run cannot leave a
+    # truncated uv.lock behind.
     try:
-        lock_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
+        fd, tmp_name = tempfile.mkstemp(
+            dir=lock_path.parent,
+            prefix=f".{lock_path.name}.",
+            suffix=".tmp",
+        )
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as tmp_file:
+                tmp_file.write(tomlkit.dumps(doc))
+            os.replace(tmp_name, lock_path)
+        except BaseException:
+            with contextlib.suppress(OSError):
+                os.unlink(tmp_name)
+            raise
     except OSError as exc:
         print(f"ERROR: cannot write {lock_path}: {exc}", file=sys.stderr)
         sys.exit(1)
