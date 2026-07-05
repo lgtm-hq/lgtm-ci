@@ -8,7 +8,7 @@ Usage:
 The package name must already be normalized the way uv records it in
 uv.lock (PEP 503: lowercase, runs of ``-_.`` collapsed to a dash).
 Prints an empty string when the package is not present. With
-``--local-only``, only local (editable/virtual/directory/path) entries
+``--local-only``, only local (editable/virtual/directory/path/workspace) entries
 are considered — used to test whether a lockfile locks the project as
 a workspace member.
 """
@@ -25,7 +25,7 @@ except ImportError:
 # Source table keys uv uses for local (non-registry) packages. The
 # project's own entry always carries one of these, which disambiguates
 # it from a same-name registry package elsewhere in the lockfile.
-LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path")
+LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path", "workspace")
 
 
 def is_local_source(package: dict[str, Any]) -> bool:
@@ -35,7 +35,8 @@ def is_local_source(package: dict[str, Any]) -> bool:
         package: A parsed ``[[package]]`` table from uv.lock.
 
     Returns:
-        True if the entry's source is editable, virtual, directory, or path.
+        True if the entry's source is editable, virtual, directory,
+        path, or workspace.
     """
     source = package.get("source") or {}
     return any(key in source for key in LOCAL_SOURCE_KEYS)
