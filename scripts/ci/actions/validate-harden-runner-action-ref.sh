@@ -196,6 +196,10 @@ _check_checkout_and_harden() {
 		violations=$((violations + 1))
 	fi
 	if ! awk '
+		BEGIN { in_jobs = 0; tooling = 0 }
+		/^jobs:/ { in_jobs = 1; next }
+		!in_jobs { next }
+		/^  [a-zA-Z_][a-zA-Z0-9_-]*: *$/ { tooling = 0; next }
 		/- name: Checkout lgtm-ci tooling/ { tooling = NR }
 		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
 			if (tooling == 0 || tooling >= NR) {
