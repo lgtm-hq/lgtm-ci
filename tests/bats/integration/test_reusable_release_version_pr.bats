@@ -135,13 +135,15 @@ load "../../helpers/common"
 	assert_success
 }
 
-@test "reusable-release-version-pr: enforces 20 minute job timeout" {
+@test "reusable-release-version-pr: enforces caller-tunable job timeout" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
 
+	run grep -F 'default: 20' "$workflow"
+	assert_success
 	run awk '
 		/^  version-pr:/ { in_job = 1 }
 		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /version-pr:/ { in_job = 0 }
-		in_job && /timeout-minutes: 20/ { found = 1; exit }
+		in_job && /timeout-minutes: \$\{\{ inputs\.timeout-minutes \}\}/ { found = 1; exit }
 		END { exit !found }
 	' "$workflow"
 	assert_success

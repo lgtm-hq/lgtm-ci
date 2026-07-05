@@ -89,6 +89,12 @@ on:
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 20
+
     outputs:
       sbom-file:
         description: "Path to the generated SBOM file, or 'none' if not generated"
@@ -106,6 +112,7 @@ jobs:
   sbom:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       security-events: write

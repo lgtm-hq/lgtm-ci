@@ -73,10 +73,17 @@ on:
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
 jobs:
   validate-lintro-version:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Checkout repository and lgtm-ci tooling
       contents: read

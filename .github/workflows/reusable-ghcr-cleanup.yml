@@ -81,6 +81,12 @@ on:
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
     secrets:
       token:
         description: "GitHub token with packages:write scope"
@@ -90,7 +96,7 @@ jobs:
   cleanup:
     name: Clean Untagged Images
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write

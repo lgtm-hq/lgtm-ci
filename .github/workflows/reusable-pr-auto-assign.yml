@@ -56,11 +56,17 @@ name: Reusable PR Auto Assign
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 5
+
 jobs:
   assign:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: 5
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       pull-requests: write
