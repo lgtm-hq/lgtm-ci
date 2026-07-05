@@ -184,9 +184,40 @@ if grep -qE "^\s+egress-preset:" "$HARDEN_ACTION"; then
 	violations=$((violations + 1))
 fi
 
+TOOLING_CAH_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden[[:space:]]*$'
+
+_check_checkout_and_harden() {
+	local workflow="$1"
+	local wf_name="${workflow##*/}"
+
+	grep -qE "$TOOLING_CAH_RE" "$workflow" || return 0
+	if ! grep -qE 'Checkout lgtm-ci (egress )?tooling' "$workflow"; then
+		echo "${wf_name}: missing bootstrap Checkout lgtm-ci tooling step before checkout-and-harden" >&2
+		violations=$((violations + 1))
+	fi
+	if ! awk '
+		/- name: Checkout lgtm-ci tooling/ { tooling = NR }
+		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
+			if (tooling == 0 || tooling >= NR) {
+				bad = 1
+			}
+			tooling = 0
+		}
+		END { exit bad }
+	' "$workflow"; then
+		echo "${wf_name}: Checkout lgtm-ci tooling must precede checkout-and-harden" >&2
+		violations=$((violations + 1))
+	fi
+	if grep -qE "$IN_REPO_RESOLVE_RE" "$workflow" || grep -qE "$IN_REPO_HARDEN_RE" "$workflow"; then
+		echo "${wf_name}: caller-local ./.github/actions egress paths are forbidden in reusables" >&2
+		violations=$((violations + 1))
+	fi
+}
+
 while IFS= read -r -d '' workflow; do
 	[[ -f "$workflow" ]] || continue
 	wf_name="${workflow##*/}"
+	_check_checkout_and_harden "$workflow"
 	if ! grep -qE "$TOOLING_HARDEN_RE" "$workflow"; then
 		continue
 	fi

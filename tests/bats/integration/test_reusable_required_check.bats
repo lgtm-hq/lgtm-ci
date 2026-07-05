@@ -52,16 +52,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-required-check.yml"
 	assert_success
 }
 
-@test "reusable-required-check: uses harden-runner and tooling checkout" {
-	run grep -E '^\s*uses:\s*\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist\s*$' "$WORKFLOW"
-	assert_success
-	run grep -E '^\s*uses:\s*\./\.lgtm-ci-tooling/\.github/actions/harden-runner\s*$' "$WORKFLOW"
+@test "reusable-required-check: uses checkout-and-harden and tooling checkout" {
+	run grep -E '^\s*uses:\s*\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden\s*$' "$WORKFLOW"
 	assert_success
 	run awk '
 		/- name: Checkout repository/ { checkout = 1 }
 		/- name: Checkout lgtm-ci tooling/ { tooling = 1 }
-		tooling && /- name: Resolve egress allowlist/ { resolve = 1 }
-		resolve && /- name: Harden runner/ { found = 1 }
+		tooling && /- name: Checkout and harden/ { found = 1 }
 		END { exit !(checkout && tooling && found) }
 	' "$WORKFLOW"
 	assert_success

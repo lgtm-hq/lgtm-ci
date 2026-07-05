@@ -37,7 +37,7 @@ for action_yml in actions_dir.glob("*/action.yml"):
     text = action_yml.read_text()
     if re.search(r"scripts/ci|SCRIPTS_DIR/ci/|GITHUB_ACTION_PATH.*scripts", text):
         script_composites.add(action_yml.parent.name)
-script_composites -= {"harden-runner", "resolve-egress-allowlist"}
+script_composites -= {"checkout-and-harden", "harden-runner", "resolve-egress-allowlist"}
 
 
 def parse_sparse(block: str) -> list[str]:
@@ -46,6 +46,13 @@ def parse_sparse(block: str) -> list[str]:
         return [line[12:].strip() for line in match.group(1).splitlines() if line.strip()]
     single = re.search(r"sparse-checkout:\s*([^\n]+)", block)
     return [single.group(1).strip()] if single else []
+
+
+def parse_sparse_extra(block: str) -> list[str]:
+    match = re.search(r"sparse-checkout-extra:\s*\|\s*\n((?:\s{12}.+\n)+)", block)
+    if not match:
+        return []
+    return [line[12:].strip() for line in match.group(1).splitlines() if line.strip()]
 
 
 def has_scripts_ci(paths: list[str]) -> bool:
@@ -73,6 +80,13 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
                 continue
 
             paths = parse_sparse(block)
+            # checkout-and-harden performs the full tooling checkout itself;
+            # its sparse-checkout-extra paths count toward the contract.
+            if re.search(
+                r"uses:\s+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden",
+                block,
+            ):
+                paths = paths + parse_sparse_extra(block)
             block_composites = set(
                 re.findall(
                     r"uses:\s+\./\.lgtm-ci-tooling/\.github/actions/([^\s#]+)",
