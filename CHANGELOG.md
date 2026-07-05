@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.46.1] - 2026-07-05
+
+### Changed
+
+- **examples**: add consumer starter workflows (#391) (39849b9)
+- **security**: document self-gating limitation and repo hygiene (#387) (232d999)
+
+### Fixed
+
+- **deps**: cover all lintro digest pins in renovate custom manager (#389) (b19d43a)
+
 ## [0.46.0] - 2026-06-20
 
 ### Added
@@ -1155,7 +1166,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.46.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.46.1...HEAD
+[0.46.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.46.0...v0.46.1
 [0.46.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.2...v0.46.0
 [0.45.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.1...v0.45.2
 [0.45.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.0...v0.45.1
