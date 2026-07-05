@@ -15,6 +15,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **log**: legacy un-namespaced color constant aliases (`RED`, `GREEN`, `YELLOW`,
+  `BLUE`, `NC`) from `scripts/ci/lib/log.sh` (#383). Consumers sourcing `log.sh`
+  must migrate to the namespaced `LGTM_CI_*` names (e.g. `LGTM_CI_RED`,
+  `LGTM_CI_NC`).
+
 ### Fixed
 
 ### Security
