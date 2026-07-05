@@ -44,7 +44,7 @@ if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
 fi
 
 # Force-update the floating tag locally
-git tag -fa "$FLOATING_TAG" "$TAG" -m "Release ${FLOATING_TAG} (latest: ${TAG})"
+git tag -fa "$FLOATING_TAG" "${TAG}^{}" -m "Release ${FLOATING_TAG} (latest: ${TAG})"
 log_success "Updated local tag: $FLOATING_TAG -> $TAG"
 
 # Push if requested

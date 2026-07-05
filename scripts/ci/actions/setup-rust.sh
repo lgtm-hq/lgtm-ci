@@ -30,8 +30,55 @@ cargo-env)
 
 binstall)
 	if ! command -v cargo-binstall &>/dev/null; then
-		echo "Installing cargo-binstall..."
-		curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
+		# Pinned release binary download (no pipe-to-bash of main-branch
+		# script). cargo-binstall publishes minisign signatures (.sig)
+		# but no sha256 checksum files, so pinning the version + TLS is
+		# the integrity control here.
+		# renovate: datasource=github-releases depName=cargo-bins/cargo-binstall
+		CARGO_BINSTALL_VERSION="1.20.1"
+		echo "Installing cargo-binstall v${CARGO_BINSTALL_VERSION}..."
+
+		os=$(uname -s)
+		arch=$(uname -m)
+		case "$os" in
+		Linux)
+			case "$arch" in
+			x86_64) target="x86_64-unknown-linux-musl" ;;
+			aarch64 | arm64) target="aarch64-unknown-linux-musl" ;;
+			*)
+				echo "Unsupported architecture: $arch"
+				exit 1
+				;;
+			esac
+			ext="tgz"
+			;;
+		Darwin)
+			target="universal-apple-darwin"
+			ext="zip"
+			;;
+		*)
+			echo "Unsupported OS: $os"
+			exit 1
+			;;
+		esac
+
+		url="https://github.com/cargo-bins/cargo-binstall/releases/download/v${CARGO_BINSTALL_VERSION}/cargo-binstall-${target}.${ext}"
+		tmpdir=$(mktemp -d)
+		trap 'rm -rf "$tmpdir"' EXIT
+
+		echo "Downloading pinned release: $url"
+		curl -L --proto '=https' --tlsv1.2 -sSf -o "$tmpdir/cargo-binstall.$ext" "$url"
+
+		if [[ "$ext" == "tgz" ]]; then
+			tar -xzf "$tmpdir/cargo-binstall.$ext" -C "$tmpdir"
+		else
+			unzip -q "$tmpdir/cargo-binstall.$ext" -d "$tmpdir"
+		fi
+
+		install_dir="${CARGO_HOME:-$HOME/.cargo}/bin"
+		mkdir -p "$install_dir"
+		install -m 0755 "$tmpdir/cargo-binstall" "$install_dir/cargo-binstall"
+		echo "cargo-binstall v${CARGO_BINSTALL_VERSION} installed to $install_dir"
 	else
 		echo "cargo-binstall already installed"
 	fi

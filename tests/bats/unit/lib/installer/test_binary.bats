@@ -103,6 +103,52 @@ EOF
 	export PATH="${mock_bin}:$PATH"
 }
 
+# Mock curl for install_anchore_tool flows:
+# - records all invocations to $BATS_TEST_TMPDIR/mock_calls_curl
+# - answers releases/latest resolution (-w '%{url_effective}') with .../tag/v9.9.9
+# - writes the given installer script body to the -o output file otherwise
+# Usage: create_anchore_curl_mock "installer script body"
+create_anchore_curl_mock() {
+	local installer_body="$1"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+
+	local calls_file="${BATS_TEST_TMPDIR}/mock_calls_curl"
+	: >"$calls_file"
+
+	local installer_file="${mock_bin}/.fake_installer"
+	printf '%s\n' "$installer_body" >"$installer_file"
+
+	cat >"${mock_bin}/curl" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >>'${calls_file}'
+output_file=""
+url=""
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        -o) output_file="\$2"; shift 2;;
+        -w) shift 2;;
+        http*) url="\$1"; shift;;
+        *) shift;;
+    esac
+done
+if [[ "\$url" == *"/releases/latest"* ]]; then
+    # Simulate the redirect target reported via -w '%{url_effective}'
+    printf '%s' "\${url%/latest}/tag/v9.9.9"
+    exit 0
+fi
+if [[ -n "\$output_file" ]]; then
+    cat '${installer_file}' >"\$output_file"
+fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/curl"
+
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
+}
+
 # =============================================================================
 # installer_download_binary tests - basic functionality
 # =============================================================================
@@ -450,47 +496,27 @@ EOF
 	assert_output --partial "already installed"
 }
 
-@test "install_anchore_tool: reinstalls when version mismatch" {
-	# Mock existing syft with different version
+@test "install_anchore_tool: reinstalls when version mismatch using pinned installer" {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-	mkdir -p "$mock_bin"
+	local flag_file="${BATS_TEST_TMPDIR}/installed_flag"
 
-	# First call returns wrong version, subsequent calls after "install" return correct
-	local call_count_file="${mock_bin}/.syft_calls"
-	echo "0" >"$call_count_file"
-
+	# syft reports the old version until the fake installer runs
 	cat >"${mock_bin}/syft" <<EOF
 #!/usr/bin/env bash
-count=\$(cat "$call_count_file")
-if [[ \$count -eq 0 ]]; then
-    echo "Application: syft"
-    echo "Version: 0.80.0"
-else
+if [[ -f "$flag_file" ]]; then
     echo "Application: syft"
     echo "Version: 0.90.0"
+else
+    echo "Application: syft"
+    echo "Version: 0.80.0"
 fi
 exit 0
 EOF
 	chmod +x "${mock_bin}/syft"
 
-	# Mock curl for installer script
-	cat >"${mock_bin}/curl" <<EOF
-#!/usr/bin/env bash
-# Return a mock installer script that just updates the syft mock
-echo '#!/bin/bash'
-echo "echo \"1\" > \"$call_count_file\""
-EOF
-	chmod +x "${mock_bin}/curl"
-
-	# Mock sh to "run" the installer
-	cat >"${mock_bin}/sh" <<EOF
-#!/usr/bin/env bash
-echo "1" > "$call_count_file"
-exit 0
-EOF
-	chmod +x "${mock_bin}/sh"
-
-	export PATH="${mock_bin}:$PATH"
+	create_anchore_curl_mock "#!/usr/bin/env bash
+touch '$flag_file'
+"
 
 	run bash -c '
 		source "$LIB_DIR/installer/binary.sh"
@@ -500,41 +526,88 @@ EOF
 	# Should attempt reinstall due to version mismatch
 	assert_output --partial "version mismatch"
 
-	# Verify the mock installer ran (sh wrote "1" to call_count_file)
-	[[ -f "${BATS_TEST_TMPDIR}/bin/.syft_calls" ]]
-	[[ "$(cat "${BATS_TEST_TMPDIR}/bin/.syft_calls")" == "1" ]]
+	# Verify the downloaded (not piped) installer actually ran
+	[[ -f "$flag_file" ]]
+
+	# Verify the installer was fetched from the tag-pinned URL
+	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
+	assert_output --partial "raw.githubusercontent.com/anchore/syft/v0.90.0/install.sh"
+	refute_output --partial "/main/install.sh"
 }
 
-@test "install_anchore_tool: uses correct installer URL for syft" {
-	# Track curl calls to verify URL
-	mock_command_record "curl" '#!/bin/bash\necho installed' 0
+@test "install_anchore_tool: requests tag-pinned installer URL for explicit version" {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-
-	# Mock sh to simulate installer creating the syft binary
-	cat >"${mock_bin}/sh" <<MOCK
-#!/usr/bin/env bash
-cat >"${mock_bin}/syft" <<'INNER'
-#!/usr/bin/env bash
-echo "Application: syft"
-echo "Version: latest"
-INNER
-chmod +x "${mock_bin}/syft"
-MOCK
-	chmod +x "${mock_bin}/sh"
 
 	# Remove any existing syft mock so it's "not installed"
 	rm -f "${mock_bin}/syft"
 
+	create_anchore_curl_mock "#!/usr/bin/env bash
+cat >'${mock_bin}/syft' <<'INNER'
+#!/usr/bin/env bash
+echo \"Application: syft\"
+echo \"Version: 1.2.3\"
+INNER
+chmod +x '${mock_bin}/syft'
+"
+
 	run bash -c '
-		export PATH="${BATS_TEST_TMPDIR}/bin:$PATH"
 		source "$LIB_DIR/installer/binary.sh"
-		install_anchore_tool "syft" "latest" 2>&1
+		install_anchore_tool "syft" "1.2.3" 2>&1
 	'
 	assert_success
 
-	# Verify curl was called with anchore/syft URL
 	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
-	assert_output --partial "anchore"
+	assert_output --partial "raw.githubusercontent.com/anchore/syft/v1.2.3/install.sh"
+	refute_output --partial "/main/install.sh"
+}
+
+@test "install_anchore_tool: resolves latest to a pinned tag before install" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+
+	# Ensure grype is "not installed"
+	rm -f "${mock_bin}/grype"
+	command -v grype >/dev/null 2>&1 && skip "grype installed on host"
+
+	create_anchore_curl_mock "#!/usr/bin/env bash
+cat >'${mock_bin}/grype' <<'INNER'
+#!/usr/bin/env bash
+echo \"Application: grype\"
+echo \"Version: 9.9.9\"
+INNER
+chmod +x '${mock_bin}/grype'
+"
+
+	run bash -c '
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "grype" "latest" 2>&1
+	'
+	assert_success
+
+	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
+	assert_output --partial "github.com/anchore/grype/releases/latest"
+	assert_output --partial "raw.githubusercontent.com/anchore/grype/v9.9.9/install.sh"
+	refute_output --partial "/main/install.sh"
+}
+
+@test "install_anchore_tool: fails when latest release cannot be resolved" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	rm -f "${mock_bin}/syft"
+	command -v syft >/dev/null 2>&1 && skip "syft installed on host"
+
+	# curl fails for every request
+	mock_command "curl" "" 22
+
+	run bash -c '
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "syft" "latest" 2>&1
+	'
+	assert_failure
+	assert_output --partial "Failed to resolve latest release"
+}
+
+@test "binary.sh: does not pipe remote content to a shell" {
+	run grep -nE '^[^#]*curl[^|#]*\|[[:space:]]*(ba)?sh' "$LIB_DIR/installer/binary.sh"
+	assert_failure
 }
 
 @test "install_anchore_tool: defaults to latest version" {
@@ -636,4 +709,244 @@ MOCK
 @test "binary.sh: sources fs.sh when available" {
 	run bash -c 'source "$LIB_DIR/installer/binary.sh" && declare -F ensure_directory'
 	assert_success
+}
+
+# =============================================================================
+# installer_download_binary tests - extraction and checksum edge cases
+# =============================================================================
+
+# Mock curl that serves arbitrary content for every -o download
+create_mock_curl_serving() {
+	local first_content="$1"
+	local second_content="${2-}"
+
+	local mock_bin="${BATS_TEST_TMPDIR}/mock_bin"
+	mkdir -p "$mock_bin"
+	local call_count_file="${mock_bin}/.curl_call_count"
+	echo "0" >"$call_count_file"
+	printf '%s' "$first_content" >"${mock_bin}/.first_payload"
+	printf '%s' "$second_content" >"${mock_bin}/.second_payload"
+
+	cat >"${mock_bin}/curl" <<EOF
+#!/usr/bin/env bash
+call_count=\$(cat "$call_count_file")
+output_file=""
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        -o) output_file="\$2"; shift 2;;
+        --output) output_file="\$2"; shift 2;;
+        *) shift;;
+    esac
+done
+if [[ -n "\$output_file" ]]; then
+    if [[ \$call_count -eq 0 ]]; then
+        cat "${mock_bin}/.first_payload" > "\$output_file"
+    else
+        cat "${mock_bin}/.second_payload" > "\$output_file"
+    fi
+    echo \$((\$call_count + 1)) > "$call_count_file"
+fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/curl"
+	export PATH="${mock_bin}:$PATH"
+}
+
+@test "installer_download_binary: fails on tar.xz extraction error" {
+	require_bash4
+	create_mock_curl_serving "not a tar.xz archive"
+
+	run bash -c "
+		export BIN_DIR='$BIN_DIR'
+		source \"\$LIB_DIR/installer/binary.sh\"
+		installer_download_binary 'https://example.com/tool.tar.xz' '' 'tar.xz' 'mytool' 2>&1
+	"
+	assert_failure
+	assert_output --partial "tar.xz extraction failed"
+}
+
+@test "installer_download_binary: fails on zip extraction error" {
+	require_bash4
+	create_mock_curl_serving "not a zip archive"
+
+	run bash -c "
+		export BIN_DIR='$BIN_DIR'
+		source \"\$LIB_DIR/installer/binary.sh\"
+		installer_download_binary 'https://example.com/tool.zip' '' 'zip' 'mytool' 2>&1
+	"
+	assert_failure
+	assert_output --partial "zip extraction failed"
+}
+
+@test "installer_download_binary: fails when checksum file cannot be parsed" {
+	require_bash4
+	create_mock_download_binary "mytool" '#!/bin/bash\necho "tool"'
+	create_mock_curl_serving "archive content" ""
+
+	run bash -c "
+		export BIN_DIR='$BIN_DIR'
+		source \"\$LIB_DIR/installer/binary.sh\"
+		installer_download_binary 'https://example.com/tool.tar.gz' 'https://example.com/checksums.txt' 'tar.gz' 'mytool' 2>&1
+	"
+	assert_failure
+	assert_output --partial "Could not parse checksum"
+}
+
+@test "installer_download_binary: unparseable checksum passes with ALLOW_UNVERIFIED=1" {
+	require_bash4
+	local archive_dir="${BATS_TEST_TMPDIR}/xdir"
+	mkdir -p "$archive_dir"
+	printf '#!/bin/bash\necho tool\n' >"$archive_dir/mytool"
+	chmod +x "$archive_dir/mytool"
+	tar -czf "${BATS_TEST_TMPDIR}/good.tar.gz" -C "$archive_dir" mytool
+	create_mock_curl_serving "placeholder" ""
+	# Binary-safe payload: overwrite first payload with the real archive bytes
+	cp "${BATS_TEST_TMPDIR}/good.tar.gz" "${BATS_TEST_TMPDIR}/mock_bin/.first_payload"
+
+	run bash -c "
+		export BIN_DIR='$BIN_DIR'
+		export ALLOW_UNVERIFIED=1
+		source \"\$LIB_DIR/installer/binary.sh\"
+		installer_download_binary 'https://example.com/tool.tar.gz' 'https://example.com/checksums.txt' 'tar.gz' 'mytool' 2>&1
+	"
+	assert_success
+	assert_output --partial "Could not parse checksum, skipping verification"
+}
+
+@test "installer_download_binary: fails when checksum download fails without ALLOW_UNVERIFIED" {
+	require_bash4
+
+	local mock_bin="${BATS_TEST_TMPDIR}/mock_bin"
+	mkdir -p "$mock_bin"
+	local call_count_file="${mock_bin}/.curl_call_count"
+	echo "0" >"$call_count_file"
+
+	cat >"${mock_bin}/curl" <<EOF
+#!/usr/bin/env bash
+call_count=\$(cat "$call_count_file")
+output_file=""
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        -o) output_file="\$2"; shift 2;;
+        *) shift;;
+    esac
+done
+echo \$((\$call_count + 1)) > "$call_count_file"
+if [[ \$call_count -eq 0 ]]; then
+    [[ -n "\$output_file" ]] && echo "archive content" > "\$output_file"
+    exit 0
+fi
+exit 22
+EOF
+	chmod +x "${mock_bin}/curl"
+	export PATH="${mock_bin}:$PATH"
+
+	run bash -c "
+		export BIN_DIR='$BIN_DIR'
+		source \"\$LIB_DIR/installer/binary.sh\"
+		installer_download_binary 'https://example.com/tool.tar.gz' 'https://example.com/checksums.txt' 'tar.gz' 'mytool' 2>&1
+	"
+	assert_failure
+	assert_output --partial "Could not download checksum"
+}
+
+@test "installer_download_binary: fails when binary missing from archive" {
+	require_bash4
+	create_mock_download_binary "othertool" '#!/bin/bash\necho other'
+
+	run bash -c "
+		export BIN_DIR='$BIN_DIR'
+		source \"\$LIB_DIR/installer/binary.sh\"
+		installer_download_binary 'https://example.com/tool.tar.gz' '' 'tar.gz' 'missingtool' 2>&1
+	"
+	assert_failure
+}
+
+@test "installer_download_binary: falls back to mkdir when mktemp fails" {
+	require_bash4
+	create_mock_download_binary "mytool" '#!/bin/bash\necho "mytool"'
+
+	local mock_bin="${BATS_TEST_TMPDIR}/mock_bin"
+	cat >"${mock_bin}/mktemp" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+	chmod +x "${mock_bin}/mktemp"
+
+	run bash -c "
+		export BIN_DIR='$BIN_DIR'
+		source \"\$LIB_DIR/installer/binary.sh\"
+		installer_download_binary 'https://example.com/mytool.tar.gz' '' 'tar.gz' 'mytool' 2>&1
+	"
+	assert_success
+	assert_output --partial "installed to"
+	[[ -x "$BIN_DIR/mytool" ]]
+}
+
+# =============================================================================
+# install_anchore_tool tests - failure paths
+# =============================================================================
+
+@test "install_anchore_tool: fails when latest resolves to a non-version URL" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	rm -f "${mock_bin}/syft"
+	command -v syft >/dev/null 2>&1 && skip "syft installed on host"
+
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/curl" <<'EOF'
+#!/usr/bin/env bash
+url=""
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+        http*) url="$1"; shift;;
+        *) shift;;
+    esac
+done
+if [[ "$url" == *"/releases/latest"* ]]; then
+    printf '%s' "${url%/latest}"
+    exit 0
+fi
+exit 22
+EOF
+	chmod +x "${mock_bin}/curl"
+	[[ ":$PATH:" != *":${mock_bin}:"* ]] && export PATH="${mock_bin}:$PATH"
+
+	run bash -c '
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "syft" "latest" 2>&1
+	'
+	assert_failure
+	assert_output --partial "Could not determine latest version"
+}
+
+@test "install_anchore_tool: fails when installer script exits non-zero" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	rm -f "${mock_bin}/syft"
+	command -v syft >/dev/null 2>&1 && skip "syft installed on host"
+
+	create_anchore_curl_mock '#!/usr/bin/env bash
+exit 1'
+
+	run bash -c '
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "syft" "v1.2.3" 2>&1
+	'
+	assert_failure
+	assert_output --partial "Failed to install syft"
+}
+
+@test "install_anchore_tool: fails when tool missing after installer succeeds" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	rm -f "${mock_bin}/syft"
+	command -v syft >/dev/null 2>&1 && skip "syft installed on host"
+
+	create_anchore_curl_mock '#!/usr/bin/env bash
+exit 0'
+
+	run bash -c '
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "syft" "v1.2.3" 2>&1
+	'
+	assert_failure
+	assert_output --partial "not found in PATH"
 }

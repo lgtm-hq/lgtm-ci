@@ -3,10 +3,11 @@
 # Purpose: Scan for vulnerabilities using Grype
 #
 # Required environment variables:
-#   STEP - Which step to run: install, scan, parse, sarif, summary
+#   STEP - Which step to run: install, scan, parse, counts, sarif, summary
 #   TARGET - Target to scan (SBOM file, image, directory)
 #   TARGET_TYPE - Type of target (sbom, image, dir)
 #   FAIL_ON - Severity threshold to fail on (critical, high, medium, low, none)
+#   RESULTS_FILE - Path to grype JSON results (counts, parse, summary steps)
 
 set -euo pipefail
 
@@ -122,6 +123,45 @@ parse)
 	# Output vulnerability details
 	log_info "Vulnerability Details:"
 	jq -r '.matches[]? | "\(.vulnerability.severity): \(.vulnerability.id) in \(.artifact.name)@\(.artifact.version)"' "$RESULTS_FILE" | sort | head -50
+	;;
+
+counts)
+	: "${RESULTS_FILE:?RESULTS_FILE is required}"
+
+	if [[ ! -f "$RESULTS_FILE" || ! -r "$RESULTS_FILE" ]]; then
+		log_error "Results file not found or unreadable: $RESULTS_FILE"
+		exit 1
+	fi
+
+	if ! command -v jq >/dev/null 2>&1; then
+		log_error "jq is required to parse vulnerability counts"
+		exit 1
+	fi
+
+	if ! counts_line=$(jq -r '[
+			([.matches[]? | select(.vulnerability.severity == "Critical")] | length),
+			([.matches[]? | select(.vulnerability.severity == "High")] | length),
+			([.matches[]? | select(.vulnerability.severity == "Medium")] | length),
+			([.matches[]? | select(.vulnerability.severity == "Low")] | length)
+		] | join(" ")' "$RESULTS_FILE"); then
+		log_error "Failed to parse grype results with jq: $RESULTS_FILE"
+		exit 1
+	fi
+	read -r critical_count high_count medium_count low_count <<<"$counts_line"
+
+	vulnerabilities_found="false"
+	total=$((critical_count + high_count + medium_count + low_count))
+	if [[ $total -gt 0 ]]; then
+		vulnerabilities_found="true"
+	fi
+
+	set_github_output "vulnerabilities-found" "$vulnerabilities_found"
+	set_github_output "critical-count" "$critical_count"
+	set_github_output "high-count" "$high_count"
+	set_github_output "medium-count" "$medium_count"
+	set_github_output "low-count" "$low_count"
+
+	log_info "Critical: $critical_count, High: $high_count, Medium: $medium_count, Low: $low_count"
 	;;
 
 sarif)

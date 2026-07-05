@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: MIT
+# Starter auto-tag workflow: tags the release commit created by the version
+# PR (chore(release): ...) and creates a GitHub Release.
+# Copy into your repository as .github/workflows/release-auto-tag.yml.
+# Requires a GitHub App (RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY secrets).
+# Permissions per docs/workflow-contract.md "Permissions by mode":
+# actions: read + issues: write cover the report-release-failure job.
+# Rust monorepos tagging from Cargo.toml: see the "Cargo auto-tag contract"
+# section (version-source: cargo).
+---
+name: "Release: Auto Tag"
+
+"on":
+  push:
+    branches: [main]
+    paths:
+      - "CHANGELOG.md"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The version to tag (e.g., 1.2.3)"
+        required: true
+        type: string
+
+permissions: {}
+
+concurrency:
+  group: release-auto-tag-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  auto-tag:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
+      tag-prefix: v
+      create-release: true
+      egress-policy: block
+      egress-preset: github-tooling
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
