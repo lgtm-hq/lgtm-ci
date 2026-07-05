@@ -13,8 +13,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **workflows**: `node-version` input on `reusable-publish-npm.yml` is now a
+  documented no-op kept for caller compatibility; it is no longer forwarded
+  to the publish-npm action (#371)
+
 ### Removed
 
+- **actions**: no-op inputs `config-file` (run-tests) and `node-version`
+  (publish-npm) — declared but never interpolated in any step (#371)
+- **actions**: unreferenced `docker-metadata` and `resolve-tooling-ref`
+  composite actions — logic is inlined in `reusable-docker.yml` and the
+  reusable workflows' `tooling-ref` expressions respectively (#371)
+- **scripts**: dead CI scripts with no action/workflow/script references:
+  `bump-harden-runner-action-ref.sh` (+ its `migrate-egress-via-tooling-checkout.py`
+  one-time migration), `skip-fork-pr-comment.sh`, `actionlint-check.sh`,
+  `shellcheck-report.sh`, `check-release-needed.sh`, `fail-on-coverage.sh`,
+  `utils.sh` aggregator, and the `ghcr.sh` barrel, along with their BATS
+  tests where present (#371)
 - **log**: legacy un-namespaced color constant aliases (`RED`, `GREEN`, `YELLOW`,
   `BLUE`, `NC`) from `scripts/ci/lib/log.sh` (#383). Consumers sourcing `log.sh`
   must migrate to the namespaced `LGTM_CI_*` names (e.g. `LGTM_CI_RED`,

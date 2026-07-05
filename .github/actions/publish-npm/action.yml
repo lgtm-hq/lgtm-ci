@@ -4,10 +4,6 @@ description: "Build and publish Node.js package to npm with provenance"
 author: "lgtm-hq"
 
 inputs:
-  node-version:
-    description: "Node.js version"
-    required: false
-    default: "22"
   dist-tag:
     description: "npm dist-tag (latest, beta, next, etc.)"
     required: false
