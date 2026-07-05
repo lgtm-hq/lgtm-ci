@@ -398,6 +398,11 @@ and fails when those directories are absent. Do **not** use
 allow expressions in action `@ref` segments ([runner#895](https://github.com/actions/runner/issues/895));
 actionlint reports errors and workflows may fail validation.
 
+Most reusable workflows use the shared `checkout-and-harden` composite (#379):
+a bootstrap sparse checkout materialises only the composite directory, and the
+composite then performs the full tooling checkout (base egress paths plus
+`sparse-checkout-extra`), resolves the allowlist, and hardens the runner.
+
 ```yaml
 - name: Checkout repository
   uses: actions/checkout@<pin> # v6.0.2
@@ -411,12 +416,32 @@ actionlint reports errors and workflows may fail validation.
     path: .lgtm-ci-tooling
     ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
     sparse-checkout: |
-      .github/actions/harden-runner
-      .github/actions/resolve-egress-allowlist
-      scripts/ci/
+      .github/actions/checkout-and-harden
     sparse-checkout-cone-mode: true
     persist-credentials: false
 
+- name: Checkout and harden
+  id: egress
+  uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+  with:
+    tooling-ref: ${{ inputs.tooling-ref }}
+    egress-policy: ${{ inputs.egress-policy }}
+    egress-preset: ${{ inputs.egress-preset }}
+    allowed-endpoints: ${{ inputs.allowed-endpoints }}
+    allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+    sparse-checkout-extra: |
+      scripts/ci/
+```
+
+Workflows that cannot use the composite keep the explicit
+tooling checkout → `resolve-egress-allowlist` → `harden-runner` step sequence:
+the release workflows' two-phase checkouts (`reusable-release-auto-tag`,
+`reusable-release-version-pr`), the tiered Rust workflows where
+`validate-runner-policy` must run between checkout and resolve
+(`reusable-build-rust-binaries`, `reusable-publish-rust-release`), and the
+bootstrap/fallback flow in `reusable-validate-lintro-version`.
+
+```yaml
 - name: Resolve egress allowlist
   id: egress
   uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
@@ -459,9 +484,12 @@ Keep `Create GitHub App installation token` before any step that uses
 The `harden-runner` bundle is **self-contained** (`lib/egress/`). Canonical preset
 definitions live in `scripts/ci/lib/egress/presets.sh`; release maintainers run
 `scripts/ci/actions/sync-harden-runner-bundle.sh` before tagging.
-`resolve-egress-allowlist` invokes the bundled resolver script in a **prior workflow
-step** because step-security's pre-hook runs before composite steps and cannot read
-`steps.resolve.outputs` from inside `harden-runner`.
+`resolve-egress-allowlist` runs **before** `harden-runner` — as a prior workflow
+step in the exempt workflows, or as the preceding sibling step inside
+`checkout-and-harden`. The runner does not execute step-security's pre-hook for
+workspace-local actions (it warns "`pre` execution is not supported for local
+action"), so harden-runner inputs are evaluated when the step itself runs; the
+resolve output is available in both arrangements.
 
 Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
 
