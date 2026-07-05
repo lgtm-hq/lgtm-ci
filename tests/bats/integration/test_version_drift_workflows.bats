@@ -25,7 +25,7 @@ load "../../helpers/common"
 @test "validate-action-pinning action: wires GH_TOKEN for verify-tags API resolution" {
 	local action="${PROJECT_ROOT}/.github/actions/validate-action-pinning/action.yml"
 
-	run grep -F 'GH_TOKEN: ${{ env.GH_TOKEN || github.token }}' "$action"
+	run grep -F "GH_TOKEN: \${{ inputs['gh-token'] || env.GH_TOKEN || github.token }}" "$action"
 	assert_success
 }
 
