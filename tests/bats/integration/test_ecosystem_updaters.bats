@@ -234,6 +234,7 @@ run_ecosystem_without_cmd() {
 	local script="$2"
 	local dir="$3"
 	local version="${4:-9.8.7}"
+	local config="${5:-"{}"}"
 	local shim_dir="${BATS_TEST_TMPDIR}/shim_bin_$$"
 	mkdir -p "$shim_dir"
 	local d f name
@@ -252,7 +253,7 @@ run_ecosystem_without_cmd() {
 		done
 	done < <(echo "$PATH" | tr ':' '\n')
 	NEXT_VERSION="$version" \
-		ECOSYSTEM_CONFIG_JSON='{}' \
+		ECOSYSTEM_CONFIG_JSON="$config" \
 		PATH="$shim_dir" \
 		run bash -c "cd '$dir' && '$ECOSYSTEMS_DIR/$script' 2>&1"
 }
@@ -607,6 +608,86 @@ EOF
 
 	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
 	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: finds workspace-root uv.lock for subdirectory pyproject" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# uv workspace layout: member pyproject in a subdirectory, single
+	# lockfile at the workspace root.
+	mkdir -p "$BATS_TEST_TMPDIR/pkg"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/pkg" "1.0.0" "test-pkg"
+	cat >"$BATS_TEST_TMPDIR/uv.lock" <<EOF
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "test-pkg"
+version = "1.0.0"
+source = { editable = "pkg" }
+
+[[package]]
+name = "requests"
+version = "2.32.3"
+source = { registry = "https://pypi.org/simple" }
+EOF
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR" \
+		"9.8.7" '{"pyproject": "pkg/pyproject.toml"}'
+	assert_success
+	assert_line --partial "tomlkit fallback"
+
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
+	[[ "$ACTUAL" == "9.8.7" ]]
+	DEP=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "requests")
+	[[ "$DEP" == "2.32.3" ]]
+}
+
+@test "python: uv.lock fallback updates local entry, not same-name registry entry" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
+	# Same-name registry entry listed BEFORE the local project entry:
+	# the fallback must update the editable entry only.
+	cat >"$BATS_TEST_TMPDIR/uv.lock" <<EOF
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "test-pkg"
+version = "0.0.1"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "test-pkg"
+version = "1.0.0"
+source = { editable = "." }
+EOF
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	# Local (editable) entry re-locked; registry entry untouched
+	python3 - "$BATS_TEST_TMPDIR/uv.lock" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as f:
+    data = tomllib.load(f)
+versions = {}
+for pkg in data["package"]:
+    source = pkg.get("source", {})
+    kind = "registry" if "registry" in source else "local"
+    versions[kind] = pkg["version"]
+assert versions["local"] == "9.8.7", versions
+assert versions["registry"] == "0.0.1", versions
+PY
 }
 
 @test "python: fails when uv lock does not update own-package version" {

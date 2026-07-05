@@ -69,9 +69,29 @@ log_success "[python] $PYPROJECT updated to $NEXT_VERSION"
 # package (see lgtm-ci issue #376).
 
 PYPROJECT_DIR=$(dirname "$PYPROJECT")
-UV_LOCK="${PYPROJECT_DIR}/uv.lock"
 
-if [[ -f "$UV_LOCK" ]]; then
+# Locate the lockfile: uv workspaces keep a single uv.lock at the
+# workspace root, so check beside pyproject.toml first, then walk up
+# parent directories (bounded by the git repository root — or the
+# working directory outside a checkout — mirroring uv's own
+# project-root discovery).
+UV_LOCK=""
+SEARCH_DIR=$(cd "$PYPROJECT_DIR" && pwd)
+STOP_DIR=$(git -C "$SEARCH_DIR" rev-parse --show-toplevel 2>/dev/null || pwd)
+while :; do
+	if [[ -f "$SEARCH_DIR/uv.lock" ]]; then
+		UV_LOCK="$SEARCH_DIR/uv.lock"
+		break
+	fi
+	# Stop at the boundary, and never walk outside it (an unrelated
+	# uv.lock above the checkout must not be picked up).
+	if [[ "$SEARCH_DIR" == "$STOP_DIR" || "$SEARCH_DIR" != "$STOP_DIR"/* ]]; then
+		break
+	fi
+	SEARCH_DIR=$(dirname "$SEARCH_DIR")
+done
+
+if [[ -n "$UV_LOCK" ]]; then
 	PROJECT_NAME=$(python3 "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" name)
 	if [[ -z "$PROJECT_NAME" ]]; then
 		log_error "[python] Could not read project name from $PYPROJECT for uv.lock update"

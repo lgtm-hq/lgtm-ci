@@ -18,6 +18,7 @@ uv.lock (PEP 503: lowercase, runs of ``-_.`` collapsed to a dash).
 
 import sys
 from pathlib import Path
+from typing import Any
 
 try:
     import tomlkit
@@ -27,6 +28,24 @@ except ImportError:
         file=sys.stderr,
     )
     sys.exit(1)
+
+# Source table keys uv uses for local (non-registry) packages. The
+# project's own entry always carries one of these, which disambiguates
+# it from a same-name registry package elsewhere in the lockfile.
+LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory")
+
+
+def is_local_source(package: dict[str, Any]) -> bool:
+    """Return True when a [[package]] entry has a local source.
+
+    Args:
+        package: A parsed ``[[package]]`` table from uv.lock.
+
+    Returns:
+        True if the entry's source is editable, virtual, or directory.
+    """
+    source = package.get("source") or {}
+    return any(key in source for key in LOCAL_SOURCE_KEYS)
 
 
 def main() -> None:
@@ -62,19 +81,33 @@ def main() -> None:
         print(f"ERROR: no [[package]] entries in {lock_path}", file=sys.stderr)
         sys.exit(1)
 
-    updated = False
-    for package in packages:
-        if package.get("name") == package_name:
-            package["version"] = new_version
-            updated = True
-            break
-
-    if not updated:
+    matches = [p for p in packages if p.get("name") == package_name]
+    if not matches:
         print(
             f"ERROR: package {package_name!r} not found in {lock_path}",
             file=sys.stderr,
         )
         sys.exit(1)
+
+    # Prefer the local project entry (editable/virtual/directory source)
+    # so a same-name registry package earlier in the file is never
+    # rewritten by mistake. Without a local marker, only a unique
+    # name match is safe to update.
+    local_matches = [p for p in matches if is_local_source(p)]
+    if local_matches:
+        targets = local_matches
+    elif len(matches) == 1:
+        targets = matches
+    else:
+        print(
+            f"ERROR: multiple non-local {package_name!r} entries in "
+            f"{lock_path}; cannot identify the project package",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    for package in targets:
+        package["version"] = new_version
 
     try:
         lock_path.write_text(tomlkit.dumps(doc), encoding="utf-8")
