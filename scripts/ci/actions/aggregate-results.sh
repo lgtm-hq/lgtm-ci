@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Aggregate per-matrix Rust test result summaries.
+# Purpose: Aggregate per-matrix test result summaries for any language family.
+#
+# Environment:
+#   RESULTS_DIR  (required) Directory containing per-matrix summary.json files.
+#   MATRIX_JSON  (optional) Matrix JSON to validate the summary count against.
 
 set -euo pipefail
 
-: "${RESULTS_DIR:=rust-results}"
+: "${RESULTS_DIR:?RESULTS_DIR is required}"
 
 python3 - "$RESULTS_DIR" <<'PY'
 from __future__ import annotations

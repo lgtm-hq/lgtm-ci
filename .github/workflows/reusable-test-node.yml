@@ -251,9 +251,12 @@ jobs:
         id: matrix
         shell: bash
         env:
-          NODE_VERSION: ${{ inputs.node-version }}
-          NODE_VERSIONS: ${{ inputs.node-versions }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-node-matrix.sh
+          MATRIX_KEY: node-version
+          MATRIX_LABEL: Node.js
+          DEFAULT_VERSION: ${{ inputs.node-version || '20' }}
+          VERSIONS_INPUT: ${{ inputs.node-versions }}
+          FIRST_VERSION_OUTPUT: pages-coverage-node-version
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
 
   test-vitest:
     name: ${{ inputs.job-name }}
@@ -430,7 +433,8 @@ jobs:
         if: always()
         shell: bash
         env:
-          NODE_VERSION: ${{ matrix.node-version }}
+          MATRIX_KEY: node-version
+          MATRIX_VALUE: ${{ matrix.node-version }}
           TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
           TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
           TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
@@ -443,7 +447,7 @@ jobs:
                 || steps.coverage-gate.outcome == 'skipped'
               )
             }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-node-summary.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
 
       - name: Upload matrix test summary
         if: always()
@@ -700,7 +704,7 @@ jobs:
         env:
           RESULTS_DIR: node-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-node-results.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
 
   publish-test-summary:
     needs: aggregate-tests

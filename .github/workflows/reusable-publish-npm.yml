@@ -5,7 +5,9 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: "Node.js version"
+        description: >-
+          Deprecated no-op: publishing uses the runner's Node runtime. Kept
+          only so existing callers passing it do not break; ignored.
         required: false
         type: string
         default: "22"
@@ -72,6 +74,12 @@ on:
         type: string
         default: "Publish to npm"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
     outputs:
       published:
         description: "Whether the package was published"
@@ -91,6 +99,7 @@ jobs:
     name: ${{ inputs.job-name }}
     # CRITICAL: Must use GitHub-hosted runner for provenance attestation
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       id-token: write
@@ -140,7 +149,6 @@ jobs:
         id: npm
         uses: ./.lgtm-ci-tooling/.github/actions/publish-npm
         with:
-          node-version: ${{ inputs.node-version }}
           dist-tag: ${{ inputs.dist-tag }}
           provenance: ${{ inputs.provenance }}
           access: ${{ inputs.access }}

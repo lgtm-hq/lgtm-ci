@@ -237,11 +237,13 @@ jobs:
         id: matrix
         shell: bash
         env:
-          RUST_TOOLCHAIN: >-
+          MATRIX_KEY: rust-toolchain
+          MATRIX_LABEL: Rust toolchain
+          DEFAULT_VERSION: >-
             ${{ inputs.rust-toolchain != '' && inputs.rust-toolchain ||
-            inputs.toolchain }}
-          RUST_TOOLCHAINS: ${{ inputs.rust-toolchains }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-rust-toolchain-matrix.sh
+            inputs.toolchain || 'stable' }}
+          VERSIONS_INPUT: ${{ inputs.rust-toolchains }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
 
   test:
     name: ${{ inputs.job-name }}
@@ -386,7 +388,8 @@ jobs:
         if: always()
         shell: bash
         env:
-          RUST_TOOLCHAIN: ${{ matrix.rust-toolchain }}
+          MATRIX_KEY: rust-toolchain
+          MATRIX_VALUE: ${{ matrix.rust-toolchain }}
           TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
           TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
           TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
@@ -402,7 +405,7 @@ jobs:
                 || steps.coverage-gate.outcome == 'skipped'
               )
             }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-rust-summary.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
 
       - name: Upload matrix test summary
         if: always()
@@ -558,7 +561,7 @@ jobs:
         env:
           RESULTS_DIR: rust-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-rust-results.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
 
   publish-test-summary:
     needs:

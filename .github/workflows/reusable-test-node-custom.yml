@@ -210,9 +210,12 @@ jobs:
         id: matrix
         shell: bash
         env:
-          NODE_VERSION: ${{ inputs.node-version }}
-          NODE_VERSIONS: ${{ inputs.node-versions }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-node-matrix.sh
+          MATRIX_KEY: node-version
+          MATRIX_LABEL: Node.js
+          DEFAULT_VERSION: ${{ inputs.node-version || '20' }}
+          VERSIONS_INPUT: ${{ inputs.node-versions }}
+          FIRST_VERSION_OUTPUT: pages-coverage-node-version
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
 
   test:
     name: ${{ inputs.job-name }}

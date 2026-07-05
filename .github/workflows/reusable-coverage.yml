@@ -96,6 +96,12 @@ on:
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 30
+
     outputs:
       coverage-percent:
         description: "Overall coverage percentage"
@@ -114,6 +120,7 @@ jobs:
   coverage:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
 
@@ -207,6 +214,7 @@ jobs:
     needs: coverage
     if: inputs.publish-pages
     runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
       group: pages-${{ github.repository }}-${{ github.ref }}
       cancel-in-progress: false

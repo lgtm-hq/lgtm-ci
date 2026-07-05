@@ -205,6 +205,12 @@ on:
         type: string
         default: "docker"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 60
+
     outputs:
       tags:
         description: "Generated image tags"
@@ -228,6 +234,7 @@ jobs:
   classify:
     name: Classify Platforms
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
     outputs:
@@ -291,6 +298,7 @@ jobs:
     needs: classify
     if: ${{ needs.classify.outputs.use-split == 'false' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write
@@ -572,6 +580,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write
@@ -787,6 +796,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: read
@@ -896,6 +906,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     # contents: read — sparse-checkout lgtm-ci tooling scripts for build-docker.sh.
     # packages: read — pull per-platform staging images by digest before merge.
     permissions:
@@ -998,6 +1009,7 @@ jobs:
       (needs.health-check-per-platform.result == 'success' ||
        needs.health-check-per-platform.result == 'skipped')
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write
@@ -1180,6 +1192,7 @@ jobs:
       inputs.validate-on-pr &&
       inputs.push == false
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
 
@@ -1246,6 +1259,7 @@ jobs:
         (needs.classify.outputs.use-split == 'true' && needs.merge.result == 'success')
       )
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       security-events: write
