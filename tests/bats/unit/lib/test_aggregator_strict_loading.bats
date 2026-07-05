@@ -131,3 +131,89 @@ SMOKE
 	assert_success
 	assert_output --partial "ok"
 }
+
+# =============================================================================
+# Exhaustive per-module coverage: every required-module error path fires
+# =============================================================================
+
+# Re-create the temp lib copy (used between iterations of the loops below).
+_reset_tmp_lib() {
+	rm -rf "$TMP_LIB_DIR"
+	cp -R "$PROJECT_ROOT/scripts/ci/lib" "$TMP_LIB_DIR"
+}
+
+# Resolve a "missing required module" token from an aggregator to the path
+# (relative to the lib root) that must be removed to trigger it.
+_module_removal_path() {
+	local agg_dir="$1" token="$2"
+	if [[ "$token" == */* ]]; then
+		echo "$token"
+	elif [[ -f "$TMP_LIB_DIR/$agg_dir/$token" ]]; then
+		echo "$agg_dir/$token"
+	else
+		echo "$token"
+	fi
+}
+
+# For the given aggregator, remove each required module in turn and assert
+# sourcing fails with the "missing required module" error.
+_assert_all_modules_required() {
+	local agg="$1"
+	local agg_dir="${agg%.sh}"
+	local token path
+	while IFS= read -r token; do
+		[[ -n "$token" ]] || continue
+		_reset_tmp_lib
+		path="$(_module_removal_path "$agg_dir" "$token")"
+		rm "$TMP_LIB_DIR/$path"
+		run _source_tmp_lib "$agg"
+		assert_failure
+		assert_output --partial "missing required module"
+	done < <(grep -oE 'missing required module [A-Za-z0-9/_.-]+' \
+		"$PROJECT_ROOT/scripts/ci/lib/$agg" | awk '{print $4}' | sort -u)
+}
+
+@test "github.sh: every required module is enforced" {
+	_assert_all_modules_required "github.sh"
+}
+
+@test "network.sh: every required module is enforced" {
+	_assert_all_modules_required "network.sh"
+}
+
+@test "sbom.sh: every required module is enforced" {
+	_assert_all_modules_required "sbom.sh"
+}
+
+@test "installer.sh: every required module is enforced" {
+	_assert_all_modules_required "installer.sh"
+}
+
+@test "publish.sh: every required module is enforced" {
+	_assert_all_modules_required "publish.sh"
+}
+
+@test "docker.sh: every required module is enforced" {
+	_assert_all_modules_required "docker.sh"
+}
+
+@test "testing.sh: every required module is enforced" {
+	_assert_all_modules_required "testing.sh"
+}
+
+@test "release.sh: every required module is enforced" {
+	_assert_all_modules_required "release.sh"
+}
+
+@test "actions.sh: every required library is enforced" {
+	local token
+	while IFS= read -r token; do
+		[[ -n "$token" ]] || continue
+		_reset_tmp_lib
+		rm "$TMP_LIB_DIR/$token"
+		run _source_tmp_lib "actions.sh"
+		assert_failure
+		assert_output --partial "missing required library"
+	done < <(grep -oE 'missing required library [A-Za-z0-9/_.-]+' \
+		"$PROJECT_ROOT/scripts/ci/lib/actions.sh" | awk '{print $4}' | sort -u)
+}
