@@ -116,6 +116,17 @@ There are currently no exceptions; the same
 `scripts/ci/quality/validate-runner-contract.sh` script enforces the input's
 presence and maintains the exception list should one become necessary.
 
+#### Egress policy exceptions
+
+`reusable-publish-rust-release.yml` intentionally omits the `egress-policy`
+input. Every job hardcodes `egress-policy: block` and validates the runner
+policy at tier `strict`, so callers cannot downgrade release publishing to
+`audit`. Callers can still extend the allowlist for the binary build job
+through `allowed-endpoints` and `allowed-endpoints-mode`; the tag
+verification and GitHub release jobs keep their fixed presets
+(`github-minimal` and `github-tooling`) and do not accept caller endpoints.
+Contract checks should not flag the missing input.
+
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
 

@@ -35,6 +35,13 @@ inputs:
       Warn when pinned composite actions reference nested actions by mutable tag
     required: false
     default: "false"
+  gh-token:
+    description: >-
+      GitHub token used by gh for verify-tags / audit-transitive API
+      resolution (e.g. a PAT able to resolve private or cross-org actions).
+      Falls back to a caller-set GH_TOKEN env var, then the workflow token.
+    required: false
+    default: ""
 
 outputs:
   offenders:
@@ -57,6 +64,10 @@ runs:
       id: validate
       shell: bash
       env:
+        # gh api needs a token for verify-tags / audit-transitive resolution.
+        # Precedence: explicit gh-token input, caller-set GH_TOKEN env var,
+        # then the workflow token.
+        GH_TOKEN: ${{ inputs['gh-token'] || env.GH_TOKEN || github.token }}
         INPUT_ENFORCE: ${{ inputs.enforce }}
         INPUT_ALLOW_TAG_EXCEPTIONS: ${{ inputs['allow-tag-exceptions'] }}
         INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}

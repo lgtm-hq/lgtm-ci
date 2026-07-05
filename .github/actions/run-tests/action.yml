@@ -8,10 +8,6 @@ inputs:
     description: "Test runner to use: pytest, vitest, playwright, auto"
     required: false
     default: "auto"
-  config-file:
-    description: "Path to test configuration file"
-    required: false
-    default: ""
   coverage:
     description: "Whether to collect coverage (true/false)"
     required: false

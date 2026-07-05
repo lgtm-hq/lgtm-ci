@@ -5,7 +5,9 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: "Node.js version"
+        description: >-
+          Deprecated no-op: publishing uses the runner's Node runtime. Kept
+          only so existing callers passing it do not break; ignored.
         required: false
         type: string
         default: "22"
@@ -147,7 +149,6 @@ jobs:
         id: npm
         uses: ./.lgtm-ci-tooling/.github/actions/publish-npm
         with:
-          node-version: ${{ inputs.node-version }}
           dist-tag: ${{ inputs.dist-tag }}
           provenance: ${{ inputs.provenance }}
           access: ${{ inputs.access }}

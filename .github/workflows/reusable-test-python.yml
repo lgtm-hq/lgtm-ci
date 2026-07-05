@@ -215,9 +215,11 @@ jobs:
         id: matrix
         shell: bash
         env:
-          PYTHON_VERSION: ${{ inputs.python-version }}
-          PYTHON_VERSIONS: ${{ inputs.python-versions }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-python-matrix.sh
+          MATRIX_KEY: python-version
+          MATRIX_LABEL: Python
+          DEFAULT_VERSION: ${{ inputs.python-version || '3.12' }}
+          VERSIONS_INPUT: ${{ inputs.python-versions }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
 
   test:
     name: ${{ inputs.job-name }}
@@ -370,7 +372,8 @@ jobs:
         if: always()
         shell: bash
         env:
-          PYTHON_VERSION: ${{ matrix.python-version }}
+          MATRIX_KEY: python-version
+          MATRIX_VALUE: ${{ matrix.python-version }}
           TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
           TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
           TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
@@ -383,7 +386,7 @@ jobs:
                 || steps.coverage-gate.outcome == 'skipped'
               )
             }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-python-summary.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
 
       - name: Upload matrix test summary
         if: always()
@@ -493,7 +496,7 @@ jobs:
         env:
           RESULTS_DIR: python-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-python-results.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
 
       - name: Merge per-version coverage artifacts
         if: inputs.upload-coverage && inputs.coverage
