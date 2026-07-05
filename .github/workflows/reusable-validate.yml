@@ -78,6 +78,12 @@ on:
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
     outputs:
       exit-code:
         description: "Exit code from the validation script"
@@ -92,6 +98,7 @@ jobs:
       ${{ inputs.job-name != '' && inputs.job-name ||
       (inputs.name != '' && inputs.name || 'Validation') }}
     runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
     outputs:

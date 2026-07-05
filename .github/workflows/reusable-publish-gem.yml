@@ -62,6 +62,12 @@ on:
         type: string
         default: "Publish to RubyGems"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
     outputs:
       published:
         description: "Whether the gem was published"
@@ -80,6 +86,7 @@ jobs:
   publish:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       id-token: write

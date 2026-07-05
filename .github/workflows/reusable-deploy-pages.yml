@@ -85,6 +85,12 @@ on:
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
     outputs:
       page-url:
         description: "URL of the deployed GitHub Pages site"
@@ -99,6 +105,7 @@ jobs:
   build:
     name: Build
     runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
 
@@ -176,6 +183,7 @@ jobs:
     name: Deploy
     needs: build
     runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       pages: write
       id-token: write

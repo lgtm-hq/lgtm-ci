@@ -72,6 +72,57 @@ YAML
 	assert_output --partial "hardcodes runs-on"
 }
 
+@test "validate-runner-contract: flags reusable without timeout-minutes input" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-no-timeout-bad.yml" <<'YAML'
+---
+name: No timeout bad example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+jobs:
+  work:
+    runs-on: ${{ inputs.runner-image }}
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "missing timeout-minutes input"
+}
+
+@test "validate-runner-contract: accepts reusable with timeout-minutes input" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-with-timeout-good.yml" <<'YAML'
+---
+name: With timeout good example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  work:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_success
+}
+
 @test "validate-runner-contract: allows documented action-only exception" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"

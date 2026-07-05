@@ -132,6 +132,12 @@ name: "Reusable: Release Version PR"
         type: string
         default: "ubuntu-24.04"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 20
+
     secrets:
       RELEASE_APP_ID:
         description: "GitHub App ID for creating release tokens"
@@ -144,7 +150,7 @@ jobs:
   version-pr:
     name: Create Version PR
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: 20
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
       # Distinct from the caller's workflow-level group to avoid
       # a self-deadlock when a same-repo caller also serializes on
@@ -495,7 +501,7 @@ jobs:
       inputs.report-failures &&
       needs.version-pr.result == 'failure'
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: 10
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Read workflow/job metadata to generate failure context
       actions: read

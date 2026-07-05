@@ -35,6 +35,10 @@ RUNNER_PINNING_EXCEPTIONS = {
     "reusable-publish-gem.yml",
 }
 
+# Reusables documented in docs/workflow-contract.md as exempt from the
+# timeout-minutes input requirement. Currently every reusable exposes it.
+TIMEOUT_MINUTES_EXCEPTIONS: set[str] = set()
+
 DOCKER_FILE = "reusable-docker.yml"
 DOCKER_INTERNAL_JOBS = {
     "classify",
@@ -76,6 +80,10 @@ def has_runner_map_input(content: str) -> bool:
     return bool(re.search(r"^\s+runner-map:", content, re.M))
 
 
+def has_timeout_minutes_input(content: str) -> bool:
+    return bool(re.search(r"^      timeout-minutes:", content, re.M))
+
+
 def is_script_backed(content: str) -> bool:
     return "scripts/ci/" in content
 
@@ -98,6 +106,11 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     rel = workflow.name
     jobs = parse_jobs(content)
     has_runner = has_runner_image_input(content)
+
+    if rel not in TIMEOUT_MINUTES_EXCEPTIONS and not has_timeout_minutes_input(
+        content,
+    ):
+        violations.append(f"{rel}: missing timeout-minutes input")
 
     if rel == DOCKER_FILE:
         if not has_runner_map_input(content):

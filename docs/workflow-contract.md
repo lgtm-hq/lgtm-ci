@@ -103,6 +103,19 @@ Contract enforcement: `scripts/ci/quality/validate-runner-contract.sh` (covered
 by BATS). See [reusable-workflows.md](reusable-workflows.md#runner-pinning) for
 caller examples including `runner-map`.
 
+### Job timeouts
+
+Every reusable exposes a `timeout-minutes` input (type: number) wired to
+`timeout-minutes:` on its jobs so callers can bound runtime. Defaults are
+sized per workflow (small API wrappers 5–10, builds/tests 15–60; scan-style
+workflows such as CodeQL and Scorecard get larger defaults). Jobs that
+compose another reusable via `uses:` rely on the called workflow's own
+`timeout-minutes` default instead.
+
+There are currently no exceptions; the same
+`scripts/ci/quality/validate-runner-contract.sh` script enforces the input's
+presence and maintains the exception list should one become necessary.
+
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
 

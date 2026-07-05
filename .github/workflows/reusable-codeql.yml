@@ -77,10 +77,17 @@ on:
         type: string
         default: "CodeQL"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 60
+
 jobs:
   setup:
     name: Setup CodeQL matrix
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
     outputs:
@@ -129,6 +136,7 @@ jobs:
     name: ${{ inputs.job-name }}
     needs: setup
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       security-events: write

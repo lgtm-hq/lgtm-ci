@@ -61,10 +61,17 @@ on:
         type: string
         default: "Dependency Review"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
 jobs:
   dependency-review:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     permissions:
       contents: read
