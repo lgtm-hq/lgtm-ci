@@ -15,6 +15,20 @@ load "../../helpers/common"
 	assert_success
 }
 
+@test "reusable-validate-action-pinning: forwards verify-tags input to action" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-validate-action-pinning.yml"
+
+	run grep -F 'verify-tags: ${{ inputs.verify-tags }}' "$workflow"
+	assert_success
+}
+
+@test "validate-action-pinning action: wires GH_TOKEN for verify-tags API resolution" {
+	local action="${PROJECT_ROOT}/.github/actions/validate-action-pinning/action.yml"
+
+	run grep -F "GH_TOKEN: \${{ inputs['gh-token'] || env.GH_TOKEN || github.token }}" "$action"
+	assert_success
+}
+
 @test "dependency-review workflow: calls reusable dependency review" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/dependency-review.yml"
 
