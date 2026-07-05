@@ -233,8 +233,6 @@ jobs:
     outputs:
       use-split: ${{ steps.classify.outputs.use-split }}
       matrix: ${{ steps.classify.outputs.matrix }}
-      tooling-ref: ${{ steps.tooling.outputs.ref }}
-      tooling-repository: ${{ steps.tooling.outputs.repository }}
 
     steps:
       - name: Checkout repository
@@ -271,38 +269,6 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Resolve tooling ref
-        id: tooling
-        shell: bash
-        env:
-          TOOLING_REF: ${{ inputs.tooling-ref }}
-          JOB_CONTEXT: ${{ toJson(job) }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          try:
-              job_context = json.loads(os.environ["JOB_CONTEXT"])
-              workflow_sha = job_context["workflow_sha"]
-              workflow_repository = job_context["workflow_repository"]
-              github_output = os.environ["GITHUB_OUTPUT"]
-          except KeyError as exc:
-              print(f"Missing required workflow context key: {exc}", file=sys.stderr)
-              sys.exit(1)
-          except json.JSONDecodeError as exc:
-              print(f"Invalid JOB_CONTEXT JSON: {exc}", file=sys.stderr)
-              sys.exit(1)
-
-          tooling_ref = os.environ.get("TOOLING_REF", "")
-          ref = tooling_ref if tooling_ref else workflow_sha
-
-          with open(github_output, "a", encoding="utf-8") as output:
-              output.write(f"ref={ref}\n")
-              output.write(f"repository={workflow_repository}\n")
-          PY
-
       - name: Classify platforms
         id: classify
         shell: bash
