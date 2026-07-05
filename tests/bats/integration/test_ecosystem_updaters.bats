@@ -646,6 +646,28 @@ EOF
 	[[ "$DEP" == "2.32.3" ]]
 }
 
+@test "python: ignores unrelated parent uv.lock when project is not a member" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# Root uv.lock belongs to a different project; pkg/ is NOT a
+	# workspace member, so the walk must not touch the root lockfile.
+	mkdir -p "$BATS_TEST_TMPDIR/pkg"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/pkg" "1.0.0" "test-pkg"
+	create_uv_lock "$BATS_TEST_TMPDIR" "other-proj" "1.0.0"
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR" \
+		"9.8.7" '{"pyproject": "pkg/pyproject.toml"}'
+	assert_success
+	assert_line --partial "not a local package there"
+	assert_line --partial "No uv.lock found"
+
+	# Unrelated root lockfile untouched
+	OTHER=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "other-proj")
+	[[ "$OTHER" == "1.0.0" ]]
+}
+
 @test "python: uv.lock fallback updates local entry, not same-name registry entry" {
 	if ! python3 -c 'import tomlkit' 2>/dev/null; then
 		skip "tomlkit not available"

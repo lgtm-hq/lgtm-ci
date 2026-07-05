@@ -70,37 +70,47 @@ log_success "[python] $PYPROJECT updated to $NEXT_VERSION"
 
 PYPROJECT_DIR=$(dirname "$PYPROJECT")
 
+PROJECT_NAME=$(python3 "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" name)
+
+# uv records package names in uv.lock in PEP 503 normalized form:
+# lowercase, with runs of '-', '_', '.' collapsed to a single dash.
+LOCK_NAME=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_.]+/-/g')
+
 # Locate the lockfile: uv workspaces keep a single uv.lock at the
 # workspace root, so check beside pyproject.toml first, then walk up
 # parent directories (bounded by the git repository root — or the
 # working directory outside a checkout — mirroring uv's own
-# project-root discovery).
+# project-root discovery). A parent lockfile is only used when it
+# locks this project as a local (workspace member) package — an
+# unrelated root uv.lock must never be rewritten.
 UV_LOCK=""
 SEARCH_DIR=$(cd "$PYPROJECT_DIR" && pwd)
 STOP_DIR=$(git -C "$SEARCH_DIR" rev-parse --show-toplevel 2>/dev/null || pwd)
-while :; do
-	if [[ -f "$SEARCH_DIR/uv.lock" ]]; then
-		UV_LOCK="$SEARCH_DIR/uv.lock"
-		break
-	fi
-	# Stop at the boundary, and never walk outside it (an unrelated
-	# uv.lock above the checkout must not be picked up).
-	if [[ "$SEARCH_DIR" == "$STOP_DIR" || "$SEARCH_DIR" != "$STOP_DIR"/* ]]; then
-		break
-	fi
-	SEARCH_DIR=$(dirname "$SEARCH_DIR")
-done
+if [[ -f "$SEARCH_DIR/uv.lock" ]]; then
+	UV_LOCK="$SEARCH_DIR/uv.lock"
+else
+	while [[ -n "$LOCK_NAME" && "$SEARCH_DIR" == "$STOP_DIR"/* ]]; do
+		SEARCH_DIR=$(dirname "$SEARCH_DIR")
+		if [[ -f "$SEARCH_DIR/uv.lock" ]]; then
+			# Nearest ancestor lockfile decides: accept it only when
+			# it carries this project as a local package.
+			LOCAL_VERSION=$(python3 "$SCRIPT_DIR/read-uv-lock-version.py" \
+				"$SEARCH_DIR/uv.lock" "$LOCK_NAME" --local-only 2>/dev/null || true)
+			if [[ -n "$LOCAL_VERSION" ]]; then
+				UV_LOCK="$SEARCH_DIR/uv.lock"
+			else
+				log_info "[python] Ignoring $SEARCH_DIR/uv.lock — $LOCK_NAME is not a local package there"
+			fi
+			break
+		fi
+	done
+fi
 
 if [[ -n "$UV_LOCK" ]]; then
-	PROJECT_NAME=$(python3 "$SCRIPT_DIR/read-pyproject-field.py" "$PYPROJECT" name)
 	if [[ -z "$PROJECT_NAME" ]]; then
 		log_error "[python] Could not read project name from $PYPROJECT for uv.lock update"
 		exit 1
 	fi
-
-	# uv records package names in uv.lock in PEP 503 normalized form:
-	# lowercase, with runs of '-', '_', '.' collapsed to a single dash.
-	LOCK_NAME=$(echo "$PROJECT_NAME" | tr '[:upper:]' '[:lower:]' | sed -E 's/[-_.]+/-/g')
 
 	RELOCKED="false"
 	if command -v uv >/dev/null 2>&1; then
