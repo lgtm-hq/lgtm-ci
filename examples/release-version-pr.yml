@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT
+# Starter version-PR workflow: opens a chore(release) PR that bumps version
+# files and CHANGELOG from conventional commits since the last tag.
+# Copy into your repository as .github/workflows/release-version-pr.yml.
+# Pair with examples/release-auto-tag.yml, which tags once the PR merges.
+# Requires a GitHub App (RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY secrets).
+# Permissions per docs/workflow-contract.md "Permissions by mode":
+# actions: read + issues: write cover the report-release-failure job.
+# CHANGELOG-only repos: see examples/release-version-pr-changelog-only.yml.
+---
+name: "Release: Create Version PR"
+
+"on":
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-version-pr-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  version-pr:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      issues: write
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      # Ecosystems whose version files get bumped: node, rust, python,
+      # ruby, swift, dart, kotlin (comma-separated). Empty = CHANGELOG only.
+      ecosystems: python
+      max-bump: minor
+      egress-policy: block
+      egress-preset: github-tooling
+    secrets:
+      RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
+      RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

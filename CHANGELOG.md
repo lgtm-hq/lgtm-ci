@@ -30,6 +30,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `shellcheck-report.sh`, `check-release-needed.sh`, `fail-on-coverage.sh`,
   `utils.sh` aggregator, and the `ghcr.sh` barrel, along with their BATS
   tests where present (#371)
+- **log**: legacy un-namespaced color constant aliases (`RED`, `GREEN`, `YELLOW`,
+  `BLUE`, `NC`) from `scripts/ci/lib/log.sh` (#383). Consumers sourcing `log.sh`
+  must migrate to the namespaced `LGTM_CI_*` names (e.g. `LGTM_CI_RED`,
+  `LGTM_CI_NC`).
 
 ### Fixed
 

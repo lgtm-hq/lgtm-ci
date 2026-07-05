@@ -6,7 +6,9 @@
       "customType": "regex",
       "description": "Track pinned py-lintro Docker image digests",
       "managerFilePatterns": [
-        "/^\\.github/workflows/reusable-quality\\.yml$/",
+        "/^\\.github/workflows/reusable-quality-lint\\.yml$/",
+        "/^\\.github/workflows/reusable-security-audit\\.yml$/",
+        "/^scripts/ci/quality/resolve-lintro-image\\.sh$/",
         "/^\\.github/actions/run-quality/action\\.yml$/",
         "/^README\\.md$/",
         "/^\\.github/actions/README\\.md$/"
@@ -17,6 +19,14 @@
       "depNameTemplate": "ghcr.io/lgtm-hq/py-lintro",
       "currentValueTemplate": "latest",
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track pinned tool versions in shell scripts via renovate comments",
+      "managerFilePatterns": ["/^scripts/.*\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\n\\s*[A-Za-z_]+=\"?v?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"?"
+      ]
     }
   ],
   "packageRules": [
