@@ -35,8 +35,9 @@ Choose by repository type and copy the example into your repository's
 A typical repository takes one CI example plus, when it releases, the
 version-PR and auto-tag pair.
 
-The examples pin `uses:` refs and `tooling-ref` to a specific lgtm-ci release
-commit SHA with a `# vX.Y.Z` comment. The shipped pin ages; resolve the
+Most examples pin `uses:` refs and `tooling-ref` to a specific lgtm-ci
+release commit SHA with a `# vX.Y.Z` comment; examples that contain `<sha>`
+placeholders must be filled in before use. The shipped pin ages; resolve the
 current release SHA (see
 [Resolve the release commit SHA](#4-resolve-the-release-commit-sha)) and
 update both pins together before committing.
@@ -167,8 +168,13 @@ gh api repos/lgtm-hq/lgtm-ci/git/ref/tags/v0.46.0 --jq '.object.sha' |
 ```
 
 Both print the release commit SHA (for v0.46.0:
-`4aaefe64763b7841b6d92d94dc47185083d34c9a`). Use it in both places, always
-together:
+`4aaefe64763b7841b6d92d94dc47185083d34c9a`). lgtm-ci release tags are
+annotated; if a tag ever does not peel (lightweight tag), the `^{}` query
+prints nothing and the `git/tags/{}` API call fails — in that case the tag
+ref itself already points at the commit, so use
+`git ls-remote https://github.com/lgtm-hq/lgtm-ci refs/tags/vX.Y.Z` or
+`gh api repos/lgtm-hq/lgtm-ci/git/ref/tags/vX.Y.Z --jq '.object.sha'`
+directly. Use the commit SHA in both places, always together:
 
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
