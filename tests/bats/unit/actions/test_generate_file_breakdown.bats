@@ -152,6 +152,40 @@ EOF
 	assert_output --partial 'weird\|namex.txt'
 }
 
+@test "generate-file-breakdown: normalizes leading-zero MAX_ROWS" {
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		MAX_ROWS="02" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "Changed files (first 2 of 4)"
+}
+
+@test "generate-file-breakdown: clamps MAX_ROWS to the hard cap" {
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		MAX_ROWS="999999" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "4 file(s) changed"
+}
+
+@test "generate-file-breakdown: neutralizes newlines in filenames" {
+	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
+[{"filename": "line1\nline2.txt", "status": "added", "additions": 1, "deletions": 0}]
+EOF
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| `line1 line2.txt` | added | +1 | -0 |'
+}
+
 @test "generate-file-breakdown: includes build details link" {
 	printf '[]' >"${BATS_TEST_TMPDIR}/files.json"
 	run env \

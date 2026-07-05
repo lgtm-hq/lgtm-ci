@@ -873,7 +873,7 @@ fork PRs skip the comment post.
 | Input            | Default                  | Notes                                     |
 | ---------------- | ------------------------ | ----------------------------------------- |
 | `comment-marker` | `file-breakdown`         | Upsert marker for the PR comment          |
-| `max-rows`       | `50`                     | Per-file rows shown; the rest summarized  |
+| `max-rows`       | `50`                     | Per-file rows shown (capped at 500)       |
 | `job-name`       | `Publish file breakdown` | Display name                              |
 | `egress-preset`  | `github-minimal`         | GitHub API + tooling checkout             |
 

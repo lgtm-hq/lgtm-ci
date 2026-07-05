@@ -52,8 +52,17 @@ step_generate() {
 		echo "::error::PR files payload is not a JSON array: ${PR_FILES_JSON}" >&2
 		exit 1
 	fi
+	# Normalize: reject non-numeric/zero, strip leading zeros (jq --argjson
+	# rejects "05"), and clamp to a hard cap so a huge max-rows cannot push
+	# the rendered comment past GitHub's comment size limit.
+	local max_rows_cap=500
 	if ! [[ "$max_rows" =~ ^[0-9]+$ ]] || [[ "$max_rows" -eq 0 ]]; then
 		max_rows=50
+	else
+		max_rows=$((10#$max_rows))
+	fi
+	if ((max_rows > max_rows_cap)); then
+		max_rows=$max_rows_cap
 	fi
 
 	local repo build_url
@@ -88,7 +97,7 @@ EOF
 
 		# Group by top-level directory; files at the repo root group as (root)
 		group_rows=$(jq -r '
-			def esc: gsub("\\|"; "\\\\|") | gsub("`"; "");
+			def esc: gsub("[\r\n]"; " ") | gsub("\\|"; "\\|") | gsub("`"; "");
 			map(. + {
 				group: (if (.filename | test("/"))
 					then (.filename | split("/")[0] + "/")
@@ -101,7 +110,7 @@ EOF
 		' "$PR_FILES_JSON")
 
 		detail_rows=$(jq -r --argjson max "$max_rows" '
-			def esc: gsub("\\|"; "\\\\|") | gsub("`"; "");
+			def esc: gsub("[\r\n]"; " ") | gsub("\\|"; "\\|") | gsub("`"; "");
 			.[:$max][]
 			| "| `\(.filename | esc)` | \(.status) | +\(.additions) | -\(.deletions) |"
 		' "$PR_FILES_JSON")
