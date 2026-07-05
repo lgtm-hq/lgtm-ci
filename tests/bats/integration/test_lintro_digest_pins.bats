@@ -4,11 +4,12 @@
 
 load "../../helpers/common"
 
-@test "lintro digest pins: all py-lintro@sha256 pins in .github/ and scripts/ are identical" {
+@test "lintro digest pins: all py-lintro@sha256 pins in .github/, scripts/, and README.md are identical" {
 	run bash -c '
 		grep -rhoE "py-lintro@sha256:[a-f0-9]{64}" \
 			"'"${PROJECT_ROOT}"'/.github" \
 			"'"${PROJECT_ROOT}"'/scripts" \
+			"'"${PROJECT_ROOT}"'/README.md" \
 			| sort -u
 	'
 	assert_success
