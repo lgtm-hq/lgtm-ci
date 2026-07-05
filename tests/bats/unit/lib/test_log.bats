@@ -26,10 +26,10 @@ teardown() {
 	assert_output --partial "test"
 }
 
-@test "log.sh: exports legacy color aliases" {
+@test "log.sh: does not define legacy un-namespaced color aliases" {
 	run bash -c '
 		source "$LIB_DIR/log.sh"
-		declare -p RED GREEN YELLOW BLUE NC >/dev/null 2>&1
+		! declare -p RED GREEN YELLOW BLUE NC >/dev/null 2>&1
 	'
 	assert_success
 }

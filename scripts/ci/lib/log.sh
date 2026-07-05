@@ -19,19 +19,6 @@ readonly LGTM_CI_YELLOW='\033[1;33m'
 readonly LGTM_CI_BLUE='\033[0;34m'
 readonly LGTM_CI_NC='\033[0m' # No Color
 
-# Export for compatibility with scripts expecting these names
-# SC2034: These appear unused but are exported for scripts that source this file
-# shellcheck disable=SC2034
-readonly RED="${LGTM_CI_RED}"
-# shellcheck disable=SC2034
-readonly GREEN="${LGTM_CI_GREEN}"
-# shellcheck disable=SC2034
-readonly YELLOW="${LGTM_CI_YELLOW}"
-# shellcheck disable=SC2034
-readonly BLUE="${LGTM_CI_BLUE}"
-# shellcheck disable=SC2034
-readonly NC="${LGTM_CI_NC}"
-
 # =============================================================================
 # Logging functions
 # =============================================================================
