@@ -950,3 +950,118 @@ exit 0'
 	assert_failure
 	assert_output --partial "not found in PATH"
 }
+
+# =============================================================================
+# _lgtm_ci_installer_build_curl_args (hardened fallback curl args)
+# =============================================================================
+
+@test "installer curl args: baseline includes TLS floor and https-only" {
+	run bash -c 'source "$LIB_DIR/installer/binary.sh" &&
+		_lgtm_ci_installer_build_curl_args 120 &&
+		printf "%s\n" "${_LGTM_CI_INSTALLER_CURL_ARGS[@]}"'
+	assert_success
+	assert_output --partial -- "--tlsv1.2"
+	assert_output --partial "=https"
+	assert_output --partial "120"
+}
+
+@test "installer curl args: appends --cacert when LGTM_CI_CA_BUNDLE is readable" {
+	local bundle="${BATS_TEST_TMPDIR}/ca.pem"
+	echo "cert" >"$bundle"
+	run bash -c 'export LGTM_CI_CA_BUNDLE="'"$BATS_TEST_TMPDIR"'/ca.pem"
+		source "$LIB_DIR/installer/binary.sh" &&
+		_lgtm_ci_installer_build_curl_args &&
+		printf "%s\n" "${_LGTM_CI_INSTALLER_CURL_ARGS[@]}"'
+	assert_success
+	assert_output --partial -- "--cacert"
+}
+
+@test "installer curl args: fails closed when LGTM_CI_CA_BUNDLE is unreadable" {
+	run bash -c 'export LGTM_CI_CA_BUNDLE="'"$BATS_TEST_TMPDIR"'/missing.pem"
+		source "$LIB_DIR/installer/binary.sh" &&
+		_lgtm_ci_installer_build_curl_args'
+	assert_failure
+	assert_output --partial "CA bundle not readable"
+}
+
+@test "installer curl args: appends --pinnedpubkey when LGTM_CI_PINNED_PUBKEY set" {
+	run bash -c 'export LGTM_CI_PINNED_PUBKEY="sha256//AAAA"
+		source "$LIB_DIR/installer/binary.sh" &&
+		_lgtm_ci_installer_build_curl_args &&
+		printf "%s\n" "${_LGTM_CI_INSTALLER_CURL_ARGS[@]}"'
+	assert_success
+	assert_output --partial -- "--pinnedpubkey"
+	assert_output --partial "sha256//AAAA"
+}
+
+# =============================================================================
+# Fallback downloaders (no network/ modules present)
+# =============================================================================
+
+# Copy binary.sh into an isolated lib tree without network/ so the minimal
+# fallback implementations are defined instead of network/download.sh.
+_setup_isolated_binary_lib() {
+	local iso="${BATS_TEST_TMPDIR}/isolated-lib"
+	mkdir -p "$iso/installer"
+	cp "$LIB_DIR/log.sh" "$iso/log.sh"
+	cp "$LIB_DIR/fs.sh" "$iso/fs.sh"
+	cp "$LIB_DIR/installer/binary.sh" "$iso/installer/binary.sh"
+	echo "$iso"
+}
+
+@test "fallback download_with_retries: uses hardened curl args" {
+	local iso
+	iso="$(_setup_isolated_binary_lib)"
+	mock_command_record "curl" ""
+	run bash -c 'source "$1/installer/binary.sh" &&
+		download_with_retries "https://example.com/f" "$2/out.txt" 1' _ "$iso" "$BATS_TEST_TMPDIR"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_curl"
+	assert_output --partial -- "--tlsv1.2"
+	assert_output --partial "https://example.com/f"
+}
+
+@test "fallback download_with_retries: passes pinned pubkey from env" {
+	local iso
+	iso="$(_setup_isolated_binary_lib)"
+	mock_command_record "curl" ""
+	run bash -c 'export LGTM_CI_PINNED_PUBKEY="sha256//BBBB"
+		source "$1/installer/binary.sh" &&
+		download_with_retries "https://example.com/f" "$2/out.txt" 1' _ "$iso" "$BATS_TEST_TMPDIR"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_curl"
+	assert_output --partial -- "--pinnedpubkey sha256//BBBB"
+}
+
+@test "fallback download_with_retries: fails after exhausting attempts" {
+	local iso
+	iso="$(_setup_isolated_binary_lib)"
+	mock_command "curl" "" 1
+	run bash -c 'source "$1/installer/binary.sh" &&
+		download_with_retries "https://example.com/f" "$2/out.txt" 2' _ "$iso" "$BATS_TEST_TMPDIR"
+	assert_failure
+}
+
+@test "fallback download_and_run_installer: downloads and executes script" {
+	local iso
+	iso="$(_setup_isolated_binary_lib)"
+	local mock_bin="${BATS_TEST_TMPDIR}/fbbin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/curl" <<'CURL'
+#!/usr/bin/env bash
+out=""
+while [[ $# -gt 0 ]]; do
+	case "$1" in
+	-o) out="$2"; shift 2 ;;
+	*) shift ;;
+	esac
+done
+printf '#!/usr/bin/env bash\necho installer-ran\n' >"$out"
+CURL
+	chmod +x "${mock_bin}/curl"
+	export PATH="${mock_bin}:$PATH"
+	run bash -c 'source "$1/installer/binary.sh" &&
+		download_and_run_installer "https://example.com/install.sh"' _ "$iso"
+	assert_success
+	assert_output --partial "installer-ran"
+}
