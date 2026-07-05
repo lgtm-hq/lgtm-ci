@@ -57,11 +57,17 @@ name: Reusable PR Auto Label
         type: string
         default: "github-tooling"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 5
+
 jobs:
   label:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       pull-requests: write

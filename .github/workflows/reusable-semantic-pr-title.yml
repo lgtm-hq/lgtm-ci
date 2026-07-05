@@ -87,10 +87,17 @@ on:
         type: string
         default: "Semantic PR Title"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
 jobs:
   semantic-title:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     if: github.event_name != 'merge_group'
     permissions:
       contents: read
