@@ -349,6 +349,11 @@ layout so the artifact root is browsable HTML.
 
 ## Release
 
+`reusable-release-version-pr.yml` generates Keep a Changelog section headings
+(`Added` / `Changed` / `Fixed`) as of v0.43.1. If your pin predates that, see
+[release-changelog.md](release-changelog.md) for the consumer migration guide
+(minimum pin, heading mapping, MD024 lint note).
+
 When release automation fails on the default branch, the follow-up
 `report-release-failure` job runs two steps in order: it first writes release
 trigger context to the job step summary, then creates or updates a deduplicated
