@@ -17,7 +17,7 @@ _LGTM_CI_EGRESS_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/egress" && pwd)" || {
 	return 1
 }
 # shellcheck source=egress/presets.sh
-source "$_LGTM_CI_EGRESS_DIR/presets.sh"
+source "$_LGTM_CI_EGRESS_DIR/presets.sh" || return 1
 readonly _LGTM_CI_EGRESS_LOADED=1
 
 # Normalize multiline host:port list (trim lines, drop blanks).

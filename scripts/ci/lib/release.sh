@@ -4,32 +4,63 @@
 #
 # Sources all release-related libraries for convenient single-file import.
 # Usage: source "scripts/ci/lib/release.sh"
+#
+# Loading contract: all release/* modules are required; sourcing fails loudly
+# (returns 1 with an error naming the missing module) when one is absent.
 
 # Guard against multiple sourcing
 [[ -n "${_RELEASE_LOADED:-}" ]] && return 0
-readonly _RELEASE_LOADED=1
 
 # Get the directory of this script
-RELEASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+RELEASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)" || {
+	echo "release.sh: cannot resolve library directory" >&2
+	return 1
+}
 
-# Source all release sub-libraries in dependency order
+# Source all release sub-libraries in dependency order (all required)
+[[ -f "$RELEASE_LIB_DIR/release/version.sh" ]] || {
+	echo "release.sh: missing required module release/version.sh in $RELEASE_LIB_DIR" >&2
+	return 1
+}
 # shellcheck source=./release/version.sh
-source "$RELEASE_LIB_DIR/release/version.sh"
+source "$RELEASE_LIB_DIR/release/version.sh" || return 1
 
+[[ -f "$RELEASE_LIB_DIR/release/extract.sh" ]] || {
+	echo "release.sh: missing required module release/extract.sh in $RELEASE_LIB_DIR" >&2
+	return 1
+}
 # shellcheck source=./release/extract.sh
-source "$RELEASE_LIB_DIR/release/extract.sh"
+source "$RELEASE_LIB_DIR/release/extract.sh" || return 1
 
+[[ -f "$RELEASE_LIB_DIR/release/conventional.sh" ]] || {
+	echo "release.sh: missing required module release/conventional.sh in $RELEASE_LIB_DIR" >&2
+	return 1
+}
 # shellcheck source=./release/conventional.sh
-source "$RELEASE_LIB_DIR/release/conventional.sh"
+source "$RELEASE_LIB_DIR/release/conventional.sh" || return 1
 
+[[ -f "$RELEASE_LIB_DIR/release/analyze.sh" ]] || {
+	echo "release.sh: missing required module release/analyze.sh in $RELEASE_LIB_DIR" >&2
+	return 1
+}
 # shellcheck source=./release/analyze.sh
-source "$RELEASE_LIB_DIR/release/analyze.sh"
+source "$RELEASE_LIB_DIR/release/analyze.sh" || return 1
 
+[[ -f "$RELEASE_LIB_DIR/release/changelog.sh" ]] || {
+	echo "release.sh: missing required module release/changelog.sh in $RELEASE_LIB_DIR" >&2
+	return 1
+}
 # shellcheck source=./release/changelog.sh
-source "$RELEASE_LIB_DIR/release/changelog.sh"
+source "$RELEASE_LIB_DIR/release/changelog.sh" || return 1
 
+[[ -f "$RELEASE_LIB_DIR/release/fileops.sh" ]] || {
+	echo "release.sh: missing required module release/fileops.sh in $RELEASE_LIB_DIR" >&2
+	return 1
+}
 # shellcheck source=./release/fileops.sh
-source "$RELEASE_LIB_DIR/release/fileops.sh"
+source "$RELEASE_LIB_DIR/release/fileops.sh" || return 1
+
+readonly _RELEASE_LOADED=1
 
 # ============================================================================
 # High-level release functions
