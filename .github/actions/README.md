@@ -1154,7 +1154,6 @@ Build and publish Node.js packages to npm with provenance attestation.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-npm@main
   with:
-    node-version: "22" # optional
     dist-tag: "latest" # optional, npm dist-tag
     provenance: "true" # optional, enable provenance attestation
     access: "public" # optional, package access level
