@@ -103,6 +103,52 @@ EOF
 	export PATH="${mock_bin}:$PATH"
 }
 
+# Mock curl for install_anchore_tool flows:
+# - records all invocations to $BATS_TEST_TMPDIR/mock_calls_curl
+# - answers releases/latest resolution (-w '%{url_effective}') with .../tag/v9.9.9
+# - writes the given installer script body to the -o output file otherwise
+# Usage: create_anchore_curl_mock "installer script body"
+create_anchore_curl_mock() {
+	local installer_body="$1"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+
+	local calls_file="${BATS_TEST_TMPDIR}/mock_calls_curl"
+	: >"$calls_file"
+
+	local installer_file="${mock_bin}/.fake_installer"
+	printf '%s\n' "$installer_body" >"$installer_file"
+
+	cat >"${mock_bin}/curl" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >>'${calls_file}'
+output_file=""
+url=""
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        -o) output_file="\$2"; shift 2;;
+        -w) shift 2;;
+        http*) url="\$1"; shift;;
+        *) shift;;
+    esac
+done
+if [[ "\$url" == *"/releases/latest"* ]]; then
+    # Simulate the redirect target reported via -w '%{url_effective}'
+    printf '%s' "\${url%/latest}/tag/v9.9.9"
+    exit 0
+fi
+if [[ -n "\$output_file" ]]; then
+    cat '${installer_file}' >"\$output_file"
+fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/curl"
+
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
+}
+
 # =============================================================================
 # installer_download_binary tests - basic functionality
 # =============================================================================
@@ -450,47 +496,27 @@ EOF
 	assert_output --partial "already installed"
 }
 
-@test "install_anchore_tool: reinstalls when version mismatch" {
-	# Mock existing syft with different version
+@test "install_anchore_tool: reinstalls when version mismatch using pinned installer" {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-	mkdir -p "$mock_bin"
+	local flag_file="${BATS_TEST_TMPDIR}/installed_flag"
 
-	# First call returns wrong version, subsequent calls after "install" return correct
-	local call_count_file="${mock_bin}/.syft_calls"
-	echo "0" >"$call_count_file"
-
+	# syft reports the old version until the fake installer runs
 	cat >"${mock_bin}/syft" <<EOF
 #!/usr/bin/env bash
-count=\$(cat "$call_count_file")
-if [[ \$count -eq 0 ]]; then
-    echo "Application: syft"
-    echo "Version: 0.80.0"
-else
+if [[ -f "$flag_file" ]]; then
     echo "Application: syft"
     echo "Version: 0.90.0"
+else
+    echo "Application: syft"
+    echo "Version: 0.80.0"
 fi
 exit 0
 EOF
 	chmod +x "${mock_bin}/syft"
 
-	# Mock curl for installer script
-	cat >"${mock_bin}/curl" <<EOF
-#!/usr/bin/env bash
-# Return a mock installer script that just updates the syft mock
-echo '#!/bin/bash'
-echo "echo \"1\" > \"$call_count_file\""
-EOF
-	chmod +x "${mock_bin}/curl"
-
-	# Mock sh to "run" the installer
-	cat >"${mock_bin}/sh" <<EOF
-#!/usr/bin/env bash
-echo "1" > "$call_count_file"
-exit 0
-EOF
-	chmod +x "${mock_bin}/sh"
-
-	export PATH="${mock_bin}:$PATH"
+	create_anchore_curl_mock "#!/usr/bin/env bash
+touch '$flag_file'
+"
 
 	run bash -c '
 		source "$LIB_DIR/installer/binary.sh"
@@ -500,41 +526,88 @@ EOF
 	# Should attempt reinstall due to version mismatch
 	assert_output --partial "version mismatch"
 
-	# Verify the mock installer ran (sh wrote "1" to call_count_file)
-	[[ -f "${BATS_TEST_TMPDIR}/bin/.syft_calls" ]]
-	[[ "$(cat "${BATS_TEST_TMPDIR}/bin/.syft_calls")" == "1" ]]
+	# Verify the downloaded (not piped) installer actually ran
+	[[ -f "$flag_file" ]]
+
+	# Verify the installer was fetched from the tag-pinned URL
+	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
+	assert_output --partial "raw.githubusercontent.com/anchore/syft/v0.90.0/install.sh"
+	refute_output --partial "/main/install.sh"
 }
 
-@test "install_anchore_tool: uses correct installer URL for syft" {
-	# Track curl calls to verify URL
-	mock_command_record "curl" '#!/bin/bash\necho installed' 0
+@test "install_anchore_tool: requests tag-pinned installer URL for explicit version" {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-
-	# Mock sh to simulate installer creating the syft binary
-	cat >"${mock_bin}/sh" <<MOCK
-#!/usr/bin/env bash
-cat >"${mock_bin}/syft" <<'INNER'
-#!/usr/bin/env bash
-echo "Application: syft"
-echo "Version: latest"
-INNER
-chmod +x "${mock_bin}/syft"
-MOCK
-	chmod +x "${mock_bin}/sh"
 
 	# Remove any existing syft mock so it's "not installed"
 	rm -f "${mock_bin}/syft"
 
+	create_anchore_curl_mock "#!/usr/bin/env bash
+cat >'${mock_bin}/syft' <<'INNER'
+#!/usr/bin/env bash
+echo \"Application: syft\"
+echo \"Version: 1.2.3\"
+INNER
+chmod +x '${mock_bin}/syft'
+"
+
 	run bash -c '
-		export PATH="${BATS_TEST_TMPDIR}/bin:$PATH"
 		source "$LIB_DIR/installer/binary.sh"
-		install_anchore_tool "syft" "latest" 2>&1
+		install_anchore_tool "syft" "1.2.3" 2>&1
 	'
 	assert_success
 
-	# Verify curl was called with anchore/syft URL
 	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
-	assert_output --partial "anchore"
+	assert_output --partial "raw.githubusercontent.com/anchore/syft/v1.2.3/install.sh"
+	refute_output --partial "/main/install.sh"
+}
+
+@test "install_anchore_tool: resolves latest to a pinned tag before install" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+
+	# Ensure grype is "not installed"
+	rm -f "${mock_bin}/grype"
+	command -v grype >/dev/null 2>&1 && skip "grype installed on host"
+
+	create_anchore_curl_mock "#!/usr/bin/env bash
+cat >'${mock_bin}/grype' <<'INNER'
+#!/usr/bin/env bash
+echo \"Application: grype\"
+echo \"Version: 9.9.9\"
+INNER
+chmod +x '${mock_bin}/grype'
+"
+
+	run bash -c '
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "grype" "latest" 2>&1
+	'
+	assert_success
+
+	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
+	assert_output --partial "github.com/anchore/grype/releases/latest"
+	assert_output --partial "raw.githubusercontent.com/anchore/grype/v9.9.9/install.sh"
+	refute_output --partial "/main/install.sh"
+}
+
+@test "install_anchore_tool: fails when latest release cannot be resolved" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	rm -f "${mock_bin}/syft"
+	command -v syft >/dev/null 2>&1 && skip "syft installed on host"
+
+	# curl fails for every request
+	mock_command "curl" "" 22
+
+	run bash -c '
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "syft" "latest" 2>&1
+	'
+	assert_failure
+	assert_output --partial "Failed to resolve latest release"
+}
+
+@test "binary.sh: does not pipe remote content to a shell" {
+	run grep -nE '^[^#]*curl[^|#]*\|[[:space:]]*(ba)?sh' "$LIB_DIR/installer/binary.sh"
+	assert_failure
 }
 
 @test "install_anchore_tool: defaults to latest version" {

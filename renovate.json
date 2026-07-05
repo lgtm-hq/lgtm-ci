@@ -17,6 +17,14 @@
       "depNameTemplate": "ghcr.io/lgtm-hq/py-lintro",
       "currentValueTemplate": "latest",
       "datasourceTemplate": "docker"
+    },
+    {
+      "customType": "regex",
+      "description": "Track pinned tool versions in shell scripts via renovate comments",
+      "managerFilePatterns": ["/^scripts/.*\\.sh$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\n\\s*[A-Za-z_]+=\"?v?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"?"
+      ]
     }
   ],
   "packageRules": [
