@@ -9,6 +9,9 @@
 #   INPUT_SCAN_PATHS           - Space-separated paths to scan for workflow files
 #   INPUT_VERIFY_TAGS          - Verify Renovate version comments match pinned SHAs
 #   INPUT_AUDIT_TRANSITIVE     - Warn on mutable tag refs in nested composite actions
+#   GH_TOKEN                   - GitHub token consumed by gh for API resolution
+#                                (required when INPUT_VERIFY_TAGS or
+#                                INPUT_AUDIT_TRANSITIVE is true)
 
 set -euo pipefail
 

@@ -1,0 +1,122 @@
+# SPDX-License-Identifier: MIT
+# Starter CI for a Rust workspace using lgtm-ci reusables.
+# Copy into your repository as .github/workflows/ci.yml.
+# This example demonstrates explicit allowed-endpoints allowlists instead of
+# egress presets (contract: "Egress block examples"); the other starters use
+# egress-preset. Permissions per docs/workflow-contract.md
+# "Permissions by mode".
+---
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Lintro Quality Checks"
+      egress-policy: block
+      # GHCR image pulls resolve layers via pkg-containers.githubusercontent.com;
+      # codeload/objects cover tooling checkout and action release downloads.
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        api.osv.dev:443
+        semgrep.dev:443
+        metrics.semgrep.dev:443
+
+  publish-quality-summary:
+    needs: quality
+    # Fork PRs cannot post comments (contract: "Fork PR summaries and reports")
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+
+  rust-build:
+    # Build-only check, separate from tests (contract:
+    # "Low-noise Rust and Node checks").
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Build Check"
+      egress-policy: block
+      # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
+      # (installer script + release binary downloads) run by setup-rust.
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        raw.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        static.rust-lang.org:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+
+  rust-coverage:
+    # Coverage mode: single rust-toolchain + coverage: true (contract:
+    # "Compat vs coverage contract"). PR summary posts via the reusable's
+    # internal publish-test-summary job.
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Rust Coverage"
+      rust-toolchain: stable
+      coverage: true
+      publish-test-summary: true
+      runner-image: ubuntu-24.04
+      egress-policy: block
+      # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
+      # (installer script + release binary downloads) used to install
+      # cargo-nextest and cargo-llvm-cov; pipelines host covers the coverage
+      # artifact upload for the PR summary.
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        raw.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
+        static.rust-lang.org:443
+        sh.rustup.rs:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443

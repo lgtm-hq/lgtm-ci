@@ -58,6 +58,27 @@ if ! declare -f download_with_retries &>/dev/null; then
 	}
 fi
 
+if ! declare -f download_and_run_installer &>/dev/null; then
+	download_and_run_installer() {
+		local url="$1"
+		shift
+		# Skip optional checksum arg (64 hex chars) for signature parity
+		# with network/download.sh; the fallback cannot verify it
+		if [[ $# -gt 0 && "$1" =~ ^[a-fA-F0-9]{64}$ ]]; then
+			shift
+		fi
+		(
+			local tmpdir
+			tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/lgtm-installer.XXXXXXXXXX") || exit 1
+			trap 'rm -rf "$tmpdir"' EXIT
+			local script_file="$tmpdir/installer.sh"
+			curl -fsSL --connect-timeout 30 --max-time 120 "$url" -o "$script_file" || exit 1
+			chmod +x "$script_file" || exit 1
+			"$script_file" "$@"
+		)
+	}
+fi
+
 if ! declare -f verify_checksum &>/dev/null; then
 	verify_checksum() {
 		local file="$1" expected="$2" actual
@@ -243,10 +264,32 @@ install_anchore_tool() {
 
 	log_info "Installing $tool ${version}..."
 
-	# Use official installer script with version parameter
-	local installer_url="https://raw.githubusercontent.com/anchore/${tool}/main/install.sh"
+	# Resolve 'latest' to a concrete release tag so the installer script can
+	# be pinned to that tag instead of executing main-branch code
+	local resolved_version="$version"
+	if [[ "$version" == "latest" ]]; then
+		local latest_url
+		if ! latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+			--connect-timeout 30 --max-time 60 \
+			"https://github.com/anchore/${tool}/releases/latest"); then
+			log_error "Failed to resolve latest release for $tool"
+			return 1
+		fi
+		resolved_version="${latest_url##*/}"
+		if [[ ! "$resolved_version" =~ ^v[0-9] ]]; then
+			log_error "Could not determine latest version for $tool (got: ${resolved_version:-empty})"
+			return 1
+		fi
+	fi
+	local tag="v${resolved_version#v}"
 
-	if ! curl -sSfL "$installer_url" | sh -s -- -b "$bin_dir" "$version"; then
+	# Tag-pinned installer script (never main-branch). Anchore does not
+	# publish checksums for install.sh itself, so the script is downloaded
+	# to a temp file and executed (no curl|sh); the installer verifies the
+	# release binary checksums internally.
+	local installer_url="https://raw.githubusercontent.com/anchore/${tool}/${tag}/install.sh"
+
+	if ! download_and_run_installer "$installer_url" -b "$bin_dir" "$tag"; then
 		log_error "Failed to install $tool"
 		return 1
 	fi
