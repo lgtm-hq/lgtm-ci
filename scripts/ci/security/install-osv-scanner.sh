@@ -59,13 +59,15 @@ TMPDIR=$(create_temp_dir)
 
 log_info "Installing osv-scanner v${OSV_VERSION}..."
 
-curl -fsSL "$BINARY_URL" -o "${TMPDIR}/osv-scanner"
-curl -fsSL "$CHECKSUMS_URL" -o "${TMPDIR}/SHA256SUMS"
+CURL_ARGS=(-fsSL --proto '=https' --tlsv1.2 --connect-timeout 30 --max-time 300)
+
+curl "${CURL_ARGS[@]}" "$BINARY_URL" -o "${TMPDIR}/osv-scanner"
+curl "${CURL_ARGS[@]}" "$CHECKSUMS_URL" -o "${TMPDIR}/SHA256SUMS"
 
 CHECKSUMS_SIG_URL="${BASE_URL}/osv-scanner_SHA256SUMS.sig"
 CHECKSUMS_CERT_URL="${BASE_URL}/osv-scanner_SHA256SUMS.pem"
-if curl -fsSL "$CHECKSUMS_SIG_URL" -o "${TMPDIR}/SHA256SUMS.sig" 2>/dev/null &&
-	curl -fsSL "$CHECKSUMS_CERT_URL" -o "${TMPDIR}/SHA256SUMS.pem" 2>/dev/null; then
+if curl "${CURL_ARGS[@]}" "$CHECKSUMS_SIG_URL" -o "${TMPDIR}/SHA256SUMS.sig" 2>/dev/null &&
+	curl "${CURL_ARGS[@]}" "$CHECKSUMS_CERT_URL" -o "${TMPDIR}/SHA256SUMS.pem" 2>/dev/null; then
 	if command -v cosign >/dev/null 2>&1; then
 		log_info "Verifying SHA256SUMS sigstore signature..."
 		cosign verify-blob \

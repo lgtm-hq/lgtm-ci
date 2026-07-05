@@ -52,7 +52,7 @@ if ! declare -f download_with_retries &>/dev/null; then
 	download_with_retries() {
 		local url="$1" out="$2" attempts="${3:-3}" i
 		for ((i = 1; i <= attempts; i++)); do
-			curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" 2>/dev/null && return 0
+			curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 30 --max-time 300 "$url" -o "$out" 2>/dev/null && return 0
 		done
 		return 1
 	}
@@ -72,7 +72,7 @@ if ! declare -f download_and_run_installer &>/dev/null; then
 			tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/lgtm-installer.XXXXXXXXXX") || exit 1
 			trap 'rm -rf "$tmpdir"' EXIT
 			local script_file="$tmpdir/installer.sh"
-			curl -fsSL --connect-timeout 30 --max-time 120 "$url" -o "$script_file" || exit 1
+			curl -fsSL --proto '=https' --tlsv1.2 --connect-timeout 30 --max-time 120 "$url" -o "$script_file" || exit 1
 			chmod +x "$script_file" || exit 1
 			"$script_file" "$@"
 		)
@@ -269,7 +269,8 @@ install_anchore_tool() {
 	local resolved_version="$version"
 	if [[ "$version" == "latest" ]]; then
 		local latest_url
-		if ! latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
+		if ! latest_url=$(curl -fsSL --proto '=https' --tlsv1.2 \
+			-o /dev/null -w '%{url_effective}' \
 			--connect-timeout 30 --max-time 60 \
 			"https://github.com/anchore/${tool}/releases/latest"); then
 			log_error "Failed to resolve latest release for $tool"
