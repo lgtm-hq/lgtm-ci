@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: MIT
+# Starter CI for a Node.js repository with a custom test command (Bun shown).
+# Copy into your repository as .github/workflows/ci.yml.
+# Uses reusable-test-node-custom.yml (required test-command); for plain
+# Vitest see examples/ci-node-vitest.yml. Permissions per
+# docs/workflow-contract.md "Permissions by mode".
+---
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Lintro Quality Checks"
+      egress-policy: block
+      egress-preset: quality
+
+  publish-quality-summary:
+    needs: quality
+    # Fork PRs cannot post comments (contract: "Fork PR summaries and reports")
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+
+  web-coverage:
+    # Custom command runs in working-directory after dependency install
+    # (contract: "Low-noise Rust and Node checks").
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node-custom.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Web Coverage"
+      working-directory: apps/web
+      package-manager: bun
+      test-command: bun run test:coverage
+      coverage: true
+      publish-test-summary: true
+      runner-image: ubuntu-24.04
+      egress-policy: block
+      egress-preset: quality
