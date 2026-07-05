@@ -1590,25 +1590,48 @@ jobs:
 
 ### reusable-deploy-pages.yml
 
-Deploy static content to GitHub Pages with OIDC authentication.
+Deploy-only GitHub Pages publisher with OIDC authentication. The caller builds
+the site and uploads the Pages artifact (`actions/upload-pages-artifact`) in a
+prior job; this workflow deploys that named artifact. For build+deploy in one
+workflow, use `reusable-deploy-site-with-reports.yml`.
 
 ```yaml
 jobs:
+  build-site:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@<sha> # v6.x
+        with:
+          persist-credentials: false
+      # ... build the site into ./dist ...
+      - uses: actions/upload-pages-artifact@<sha> # v4.x
+        with:
+          name: github-pages
+          path: dist
+
   deploy:
+    needs: build-site
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-pages.yml@main
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     with:
-      source-path: "dist"
-      build-command: "bun run build"
-      environment: "github-pages"
+      artifact-name: github-pages
 ```
 
 **Inputs:**
 
-- `source-path` - Path to static content (default: 'dist')
-- `build-command` - Optional build command
-- `node-version` - Node.js version for build (default: '20')
+- `artifact-name` - Name of the Pages artifact from the build job (default:
+  'github-pages')
 - `environment` - GitHub environment name (default: 'github-pages')
-- `artifact-name` - Pages artifact name (default: 'github-pages')
+- `runner-image` - Runner image label (default: 'ubuntu-24.04')
+- `tooling-ref` - Git ref for lgtm-ci tooling checkout
+- `egress-policy`, `egress-preset` (default: 'github-pages'),
+  `allowed-endpoints`, `allowed-endpoints-mode` - harden-runner egress contract
+- `timeout-minutes` - Job timeout (default: 10)
 
 **Outputs:**
 
@@ -1616,10 +1639,12 @@ jobs:
 
 **Features:**
 
-- Two-job workflow (build + deploy) for proper separation
+- Deploy-only: build tooling stays in the caller, so any static site deploys
+  regardless of how it was produced
 - OIDC authentication (no secrets required)
 - Configurable GitHub environment for deployment protection
-- Concurrency control to prevent parallel deployments
+- `concurrency: { group: pages, cancel-in-progress: false }` serializes deploys
+- harden-runner with the `github-pages` egress preset by default
 
 **Permissions Required:**
 
@@ -1661,7 +1686,8 @@ jobs:
 - `fallback-ref` - Optional branch for fallback artifact lookup (default: strict)
 - `strict-bundle` - Fail when any manifest entry is missing (default: `false`)
 - `node-version`, `package-manager`, `working-directory`, `frozen-lockfile` -
-  Same as `reusable-deploy-pages`
+  Build-step tooling controls (this workflow builds; `reusable-deploy-pages` is
+  deploy-only)
 - `tooling-ref`, `egress-policy`, `allowed-endpoints`, `runner-image`,
   `timeout-minutes`, `artifact-name`, `environment` - Standard contract
 

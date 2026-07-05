@@ -1,49 +1,29 @@
 ---
 name: Reusable Deploy to GitHub Pages
 
+# Deploy-only GitHub Pages publisher. The caller builds the site and runs
+# actions/upload-pages-artifact in a prior job; this workflow (called with
+# needs: <build-job>) runs actions/deploy-pages to publish the named artifact.
+# For build+deploy in one workflow, use reusable-deploy-site-with-reports.yml.
+
 on:
   workflow_call:
     inputs:
-      source-path:
-        description: "Path to static content to deploy"
+      artifact-name:
+        description: "Name of the Pages artifact uploaded by the caller's build job"
         required: false
         type: string
-        default: "dist"
-      build-command:
-        description: "Optional build command to run before deployment"
-        required: false
-        type: string
-        default: ""
-      node-version:
-        description: "Node.js version for build step"
-        required: false
-        type: string
-        default: "20"
-      package-manager:
-        description: "Package manager for dependency install: npm, bun, pnpm (empty = skip)"
-        required: false
-        type: string
-        default: "npm"
-      working-directory:
-        description: "Working directory for dependency installation"
-        required: false
-        type: string
-        default: "."
-      frozen-lockfile:
-        description: "Use lockfile enforcement during dependency installation"
-        required: false
-        type: boolean
-        default: true
+        default: "github-pages"
       environment:
         description: "GitHub environment name for deployment"
         required: false
         type: string
         default: "github-pages"
-      artifact-name:
-        description: "Name for the pages artifact"
+      runner-image:
+        description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "github-pages"
+        default: "ubuntu-24.04"
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -55,12 +35,18 @@ on:
         required: false
         type: string
         default: "block"
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block. Defaults to github-pages for the GitHub Pages OIDC deploy.
+        required: false
+        type: string
+        default: "github-pages"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
-
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -69,122 +55,29 @@ on:
         type: string
         default: "replace"
 
-      egress-preset:
-        description: >-
-          Named allowlist when allowed-endpoints is empty and egress-policy is
-          block (github-minimal, github-pages, github-tooling, docker,
-          playwright, pypi, rubygems, npm-publish, quality, sbom, scorecard).
-          Build job uses this input; deploy job always uses github-pages.
-        required: false
-        type: string
-        default: "playwright"
-
-      runner-image:
-        description: "GitHub-hosted runner image label"
-        required: false
-        type: string
-        default: "ubuntu-24.04"
-
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
         type: number
-        default: 15
+        default: 10
 
     outputs:
       page-url:
         description: "URL of the deployed GitHub Pages site"
         value: ${{ jobs.deploy.outputs.page-url }}
 
-# Allow only one deployment at a time
+# Serialize Pages deployments so concurrent runs do not stomp each other.
 concurrency:
-  group: pages-${{ github.repository }}-${{ github.ref }}
+  group: pages
   cancel-in-progress: false
 
 jobs:
-  build:
-    name: Build
+  deploy:
+    name: Deploy to GitHub Pages
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
-
-    steps:
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
-
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Resolve egress allowlist
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-      - name: Setup Node.js
-        if: inputs.build-command != '' && inputs.package-manager != ''
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version: ${{ inputs.node-version }}
-
-      - name: Setup Bun
-        if: inputs.build-command != '' && inputs.package-manager == 'bun'
-        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
-        with:
-          bun-version: latest
-
-      - name: Setup pnpm
-        if: inputs.build-command != '' && inputs.package-manager == 'pnpm'
-        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
-
-      - name: Install dependencies
-        if: inputs.build-command != '' && inputs.package-manager != ''
-        shell: bash
-        env:
-          PACKAGE_MANAGER: ${{ inputs.package-manager }}
-          WORKING_DIRECTORY: ${{ inputs.working-directory }}
-          FROZEN_LOCKFILE: ${{ inputs.frozen-lockfile }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
-
-      - name: Configure Pages
-        # Pinned to SHA for supply chain security
-        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-
-      - name: Prepare and upload artifact
-        uses: ./.lgtm-ci-tooling/.github/actions/deploy-pages
-        with:
-          source-path: ${{ inputs.source-path }}
-          build-command: ${{ inputs.build-command }}
-          artifact-name: ${{ inputs.artifact-name }}
-
-  deploy:
-    name: Deploy
-    needs: build
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    permissions:
       pages: write
       id-token: write
 
@@ -220,7 +113,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: github-pages
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Harden runner

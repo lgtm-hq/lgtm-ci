@@ -522,15 +522,31 @@ jobs:
       contents: read
       id-token: write
 
+  # reusable-deploy-pages.yml is deploy-only: the caller builds the site and
+  # uploads the Pages artifact, then this workflow deploys it.
+  build-site:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@<sha> # v6.x
+        with:
+          persist-credentials: false
+      # ... build the site into ./dist however the repo builds ...
+      - uses: actions/upload-pages-artifact@<sha> # v4.x
+        with:
+          name: github-pages
+          path: dist
+
   pages:
+    needs: build-site
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-pages.yml@<sha>
     permissions:
       contents: read
       pages: write
       id-token: write
     with:
-      build-command: bun run build
-      package-manager: bun
+      artifact-name: github-pages
 ```
 
 ### Site + bundled CI reports (Model B)

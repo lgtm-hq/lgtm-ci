@@ -39,7 +39,7 @@ instead.
 | Workflow / action                        | Content                     | `target-dir` / `site-root`  |
 | ---------------------------------------- | --------------------------- | --------------------------- |
 | `publish-test-results`                   | Coverage, badges, test HTML | configurable (`target-dir`) |
-| `deploy-pages` + `reusable-deploy-pages` | Built static sites          | `dist` (site root)          |
+| `reusable-deploy-pages` (deploy-only)    | Caller-built static sites   | caller-uploaded artifact    |
 | `reusable-deploy-site-with-reports`      | Site + CI HTML bundles      | `site-root`                 |
 
 <!-- markdownlint-enable MD013 -->
@@ -156,15 +156,24 @@ allowed-endpoints: >
 
 ## Concurrency
 
-All Pages deploy jobs in lgtm-ci share:
+The Model B publishers (`reusable-deploy-site-with-reports` and coverage/test
+publish workflows) share a per-ref group:
 
 ```text
 pages-${{ github.repository }}-${{ github.ref }}
 ```
 
-This serializes deployments to the same site on the same ref (including
-`reusable-deploy-pages`, `reusable-deploy-site-with-reports`, and coverage/test
-publish workflows).
+This serializes deployments to the same site on the same ref.
+
+The deploy-only `reusable-deploy-pages` uses the canonical GitHub Pages group
+instead, matching GitHub's official Pages workflow:
+
+```text
+pages
+```
+
+with `cancel-in-progress: false`, so concurrent Pages deploys never stomp each
+other.
 
 ## Multi-publisher limitation (Model A)
 
