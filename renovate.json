@@ -6,7 +6,9 @@
       "customType": "regex",
       "description": "Track pinned py-lintro Docker image digests",
       "managerFilePatterns": [
-        "/^\\.github/workflows/reusable-quality\\.yml$/",
+        "/^\\.github/workflows/reusable-quality-lint\\.yml$/",
+        "/^\\.github/workflows/reusable-security-audit\\.yml$/",
+        "/^scripts/ci/quality/resolve-lintro-image\\.sh$/",
         "/^\\.github/actions/run-quality/action\\.yml$/",
         "/^README\\.md$/",
         "/^\\.github/actions/README\\.md$/"
