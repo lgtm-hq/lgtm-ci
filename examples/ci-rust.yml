@@ -31,10 +31,16 @@ jobs:
       tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
       job-name: "Lintro Quality Checks"
       egress-policy: block
+      # GHCR image pulls resolve layers via pkg-containers.githubusercontent.com;
+      # codeload/objects cover tooling checkout and action release downloads.
       allowed-endpoints: >
         github.com:443
         api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
         ghcr.io:443
+        pkg-containers.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
         api.osv.dev:443
         semgrep.dev:443
         metrics.semgrep.dev:443
@@ -66,10 +72,15 @@ jobs:
       tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
       job-name: "Build Check"
       egress-policy: block
+      # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
+      # (installer script + release binary downloads) run by setup-rust.
       allowed-endpoints: >
         github.com:443
         api.github.com:443
         codeload.github.com:443
+        raw.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
         static.rust-lang.org:443
         crates.io:443
         static.crates.io:443
@@ -92,10 +103,18 @@ jobs:
       publish-test-summary: true
       runner-image: ubuntu-24.04
       egress-policy: block
+      # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
+      # (installer script + release binary downloads) used to install
+      # cargo-nextest and cargo-llvm-cov; pipelines host covers the coverage
+      # artifact upload for the PR summary.
       allowed-endpoints: >
         github.com:443
         api.github.com:443
         codeload.github.com:443
+        raw.githubusercontent.com:443
+        objects.githubusercontent.com:443
+        github-releases.githubusercontent.com:443
+        pipelines.actions.githubusercontent.com:443
         static.rust-lang.org:443
         sh.rustup.rs:443
         crates.io:443

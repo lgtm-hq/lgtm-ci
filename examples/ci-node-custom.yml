@@ -64,6 +64,10 @@ jobs:
       test-command: bun run test:coverage
       coverage: true
       publish-test-summary: true
+      # The PR summary reads counts from this file; it must match where your
+      # test command writes its JSON summary (Vitest: coverage.reporter
+      # "json-summary"), otherwise the summary reports zeros.
+      coverage-summary-file: coverage/coverage-summary.json
       runner-image: ubuntu-24.04
       egress-policy: block
       egress-preset: quality
