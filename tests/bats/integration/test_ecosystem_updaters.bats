@@ -653,7 +653,9 @@ EOF
 
 	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
 	# Same-name registry entry listed BEFORE the local project entry:
-	# the fallback must update the editable entry only.
+	# the fallback must update the local (path-sourced) entry only.
+	# Uses a path source here; editable sources are covered by the
+	# other uv.lock tests via create_uv_lock.
 	cat >"$BATS_TEST_TMPDIR/uv.lock" <<EOF
 version = 1
 revision = 3
@@ -667,7 +669,7 @@ source = { registry = "https://pypi.org/simple" }
 [[package]]
 name = "test-pkg"
 version = "1.0.0"
-source = { editable = "." }
+source = { path = "." }
 EOF
 
 	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR"
