@@ -1475,6 +1475,12 @@ Org ruleset gate: asserts an upstream reusable job succeeded (and optional
 outputs) under a caller-controlled `job-name`. Replaces consumer-local shim
 `runs-on` jobs. See `docs/workflow-contract.md` (Org ruleset check names).
 
+The gate reports its check as `{caller_job_id} / {job-name}` (below:
+`lintro-code-quality / 🛠️ Lintro Code Quality`), and org rulesets must
+require that exact prefixed context. The registry of org rulesets and the
+required context names per consumer repo lives in `docs/org-rulesets.md`,
+alongside the export/sync tooling under `scripts/ci/org/`.
+
 ```yaml
 lintro-code-quality:
   needs: dogfooding-lint

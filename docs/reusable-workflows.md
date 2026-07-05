@@ -124,9 +124,13 @@ jobs:
 
 ### Org ruleset gate (`reusable-required-check.yml`)
 
-Thin aggregate-status gate for branch-protection check names that differ from
-the work reusable’s `job-name`. See [workflow-contract.md](workflow-contract.md)
-(Org ruleset check names).
+Thin aggregate-status gate for org rulesets. Like every `uses:` job, it
+reports its check as `{caller_job_id} / {job-name}` — the ruleset must
+require that prefixed path (below:
+`test-suite-coverage / 🧪 Test Suite & Coverage`), never the unprefixed
+`job-name`. Only inline `runs-on` jobs match on `name:` alone. See
+[workflow-contract.md](workflow-contract.md) (Org ruleset check names) and
+the ruleset registry in [org-rulesets.md](org-rulesets.md).
 
 ```yaml
 test-suite-coverage:
