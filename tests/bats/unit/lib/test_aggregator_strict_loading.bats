@@ -21,7 +21,7 @@ teardown() {
 # Helper: source an aggregator from the temp lib copy and capture rc/output
 _source_tmp_lib() {
 	local file="$1"
-	bash -c "source '$TMP_LIB_DIR/$file'"
+	bash -c 'source "$1"' _ "$TMP_LIB_DIR/$file"
 }
 
 @test "github.sh: fails loudly when a required module is missing" {
@@ -108,22 +108,26 @@ _source_tmp_lib() {
 	assert_output --partial "missing required module detect.sh"
 }
 
+# Runs from a script file (not bash -c) so BASH_SOURCE is bound: kcov's
+# bash instrumentation references BASH_SOURCE in a DEBUG trap and aborts
+# under set -u inside a bash -c script. Paths are passed via the exported
+# TMP_LIB_DIR, never interpolated into shell syntax.
 @test "aggregators: all load successfully when modules are present" {
-	run bash -c "set -euo pipefail
-		source '$TMP_LIB_DIR/actions.sh'
-		source '$TMP_LIB_DIR/testing.sh'
-		source '$TMP_LIB_DIR/release.sh'
-		source '$TMP_LIB_DIR/docker.sh'
-		source '$TMP_LIB_DIR/publish.sh'
-		source '$TMP_LIB_DIR/network.sh'
-		source '$TMP_LIB_DIR/egress.sh'
-		echo loaded"
+	local smoke="$BATS_TEST_TMPDIR/aggregator_smoke.sh"
+	cat >"$smoke" <<'SMOKE'
+set -euo pipefail
+for lib in actions testing release docker publish network egress; do
+	source "$TMP_LIB_DIR/$lib.sh"
+done
+echo loaded
+SMOKE
+	run bash "$smoke"
 	assert_success
 	assert_output --partial "loaded"
 }
 
 @test "aggregators: sourcing twice is still a no-op" {
-	run bash -c "source '$TMP_LIB_DIR/github.sh' && source '$TMP_LIB_DIR/github.sh' && echo ok"
+	run bash -c 'source "$1" && source "$1" && echo ok' _ "$TMP_LIB_DIR/github.sh"
 	assert_success
 	assert_output --partial "ok"
 }

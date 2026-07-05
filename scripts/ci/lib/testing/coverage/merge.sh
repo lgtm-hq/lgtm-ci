@@ -23,17 +23,20 @@ _LGTM_CI_TESTING_COV_MERGE_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." && pwd
 # shellcheck source=../detect.sh
 source "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh" || return 1
 
-# Source actions.sh for logging (required)
+# Source actions.sh for logging when the full lib tree is present.
+# It is optional so a minimal coverage-only copy still works, but if the
+# file exists it must load cleanly (fail explicitly on a broken tree).
 _LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/../.." && pwd)" || {
 	echo "merge.sh: cannot resolve lib directory" >&2
 	return 1
 }
-[[ -f "$_LGTM_CI_LIB_DIR/actions.sh" ]] || {
-	echo "merge.sh: missing required library actions.sh in $_LGTM_CI_LIB_DIR" >&2
-	return 1
-}
-# shellcheck source=../../actions.sh
-source "$_LGTM_CI_LIB_DIR/actions.sh" || return 1
+if [[ -f "$_LGTM_CI_LIB_DIR/actions.sh" ]]; then
+	# shellcheck source=../../actions.sh
+	source "$_LGTM_CI_LIB_DIR/actions.sh" || return 1
+fi
+if ! declare -f log_warn &>/dev/null; then
+	log_warn() { echo "[WARN] $*" >&2; }
+fi
 
 readonly _LGTM_CI_TESTING_COVERAGE_MERGE_LOADED=1
 
