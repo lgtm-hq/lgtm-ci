@@ -108,9 +108,11 @@ caller examples including `runner-map`.
 `reusable-publish-rust-release.yml` intentionally omits the `egress-policy`
 input. Every job hardcodes `egress-policy: block` and validates the runner
 policy at tier `strict`, so callers cannot downgrade release publishing to
-`audit`. Callers can still extend the allowlist through `allowed-endpoints`
-and `allowed-endpoints-mode`. Contract checks should not flag the missing
-input.
+`audit`. Callers can still extend the allowlist for the binary build job
+through `allowed-endpoints` and `allowed-endpoints-mode`; the tag
+verification and GitHub release jobs keep their fixed presets
+(`github-minimal` and `github-tooling`) and do not accept caller endpoints.
+Contract checks should not flag the missing input.
 
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
