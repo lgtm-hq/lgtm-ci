@@ -13,6 +13,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **workflows**: `node-version` input on `reusable-publish-npm.yml` is now a
+  documented no-op kept for caller compatibility; it is no longer forwarded
+  to the publish-npm action (#371)
+
 ### Removed
 
 - **actions**: no-op inputs `config-file` (run-tests) and `node-version`
