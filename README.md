@@ -22,6 +22,10 @@ and shell utilities.
 
 ## 🚀 Quick Start
 
+New repository? Follow the task-ordered consumer guide in
+[docs/onboarding.md](docs/onboarding.md) — starter example selection, release
+GitHub App secrets, egress audit→block flow, and release-SHA pinning.
+
 ### Using a Composite Action
 
 ```yaml
