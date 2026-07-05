@@ -81,7 +81,13 @@ teardown() {
 }
 
 @test "sync-ruleset: --apply PUTs the sanitized payload via gh" {
-	mock_command_record "gh"
+	mock_command_multi "gh" '
+	"api orgs/lgtm-hq/rulesets/16132640 --jq .name")
+		echo "checks-py-lintro"
+		;;
+	*)
+		echo "$@" >>"'"${BATS_TEST_TMPDIR}"'/mock_calls_gh"
+		;;'
 	run bash "$SCRIPT" --apply "$FIXTURE"
 	assert_success
 	assert_output --partial "Updated ruleset 16132640"
@@ -89,8 +95,29 @@ teardown() {
 	assert_output --partial "api --method PUT orgs/lgtm-hq/rulesets/16132640 --input -"
 }
 
-@test "sync-ruleset: --apply fails when gh returns an error" {
+@test "sync-ruleset: --apply fails when the identity check GET fails" {
 	mock_command "gh" "" 1
+	run bash "$SCRIPT" --apply "$FIXTURE"
+	assert_failure
+	assert_output --partial "Failed to fetch live ruleset orgs/lgtm-hq/rulesets/16132640"
+}
+
+@test "sync-ruleset: --apply refuses when live ruleset name mismatches payload" {
+	mock_command "gh" "checks-rustume"
+	run bash "$SCRIPT" --apply "$FIXTURE"
+	assert_failure
+	assert_output --partial "Ruleset identity mismatch"
+	assert_output --partial "checks-rustume"
+}
+
+@test "sync-ruleset: --apply fails when the PUT returns an error" {
+	mock_command_multi "gh" '
+	"api orgs/lgtm-hq/rulesets/16132640 --jq .name")
+		echo "checks-py-lintro"
+		;;
+	*)
+		exit 1
+		;;'
 	run bash "$SCRIPT" --apply "$FIXTURE"
 	assert_failure
 	assert_output --partial "Failed to update orgs/lgtm-hq/rulesets/16132640"

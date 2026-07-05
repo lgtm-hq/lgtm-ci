@@ -126,6 +126,22 @@ if ! command -v gh >/dev/null 2>&1; then
 	exit 1
 fi
 
+# Identity check: refuse to overwrite a ruleset whose live name does not
+# match the payload (guards against a wrong --id or stale LGTM_ORG).
+payload_name="$(jq -r '.name // empty' <<<"$sanitized")"
+if [[ -z "$payload_name" ]]; then
+	log_error "Payload has no .name; cannot verify ruleset identity"
+	exit 1
+fi
+if ! live_name="$(gh api "$ENDPOINT" --jq '.name')"; then
+	log_error "Failed to fetch live ruleset ${ENDPOINT} for identity check"
+	exit 1
+fi
+if [[ "$live_name" != "$payload_name" ]]; then
+	log_error "Ruleset identity mismatch: live ruleset ${RULESET_ID} is named '${live_name}' but payload is '${payload_name}' (check --id and LGTM_ORG)"
+	exit 1
+fi
+
 log_info "Applying ruleset payload to ${ENDPOINT}"
 if ! gh api --method PUT "$ENDPOINT" --input - <<<"$sanitized" >/dev/null; then
 	log_error "Failed to update ${ENDPOINT}"
