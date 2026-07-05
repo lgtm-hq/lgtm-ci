@@ -84,6 +84,21 @@ def has_timeout_minutes_input(content: str) -> bool:
     return bool(re.search(r"^      timeout-minutes:", content, re.M))
 
 
+def timeout_minutes_input_is_number(content: str) -> bool:
+    match = re.search(
+        r"^      timeout-minutes:\n(?:        .+\n)+",
+        content,
+        re.M,
+    )
+    if not match:
+        return False
+    return bool(re.search(r"^        type: number$", match.group(0), re.M))
+
+
+def uses_timeout_minutes_input(content: str) -> bool:
+    return "timeout-minutes: ${{ inputs.timeout-minutes }}" in content
+
+
 def is_script_backed(content: str) -> bool:
     return "scripts/ci/" in content
 
@@ -107,10 +122,18 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     jobs = parse_jobs(content)
     has_runner = has_runner_image_input(content)
 
-    if rel not in TIMEOUT_MINUTES_EXCEPTIONS and not has_timeout_minutes_input(
-        content,
-    ):
-        violations.append(f"{rel}: missing timeout-minutes input")
+    if rel not in TIMEOUT_MINUTES_EXCEPTIONS:
+        if not has_timeout_minutes_input(content):
+            violations.append(f"{rel}: missing timeout-minutes input")
+        else:
+            if not timeout_minutes_input_is_number(content):
+                violations.append(
+                    f"{rel}: timeout-minutes input is not type: number",
+                )
+            if not uses_timeout_minutes_input(content):
+                violations.append(
+                    f"{rel}: timeout-minutes input is never applied to a job",
+                )
 
     if rel == DOCKER_FILE:
         if not has_runner_map_input(content):

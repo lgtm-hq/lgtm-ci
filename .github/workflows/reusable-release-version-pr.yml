@@ -501,7 +501,9 @@ jobs:
       inputs.report-failures &&
       needs.version-pr.result == 'failure'
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # Keep an independent short cap: the caller's timeout-minutes bounds the
+    # main version-pr job, and lowering it must not cancel failure reporting.
+    timeout-minutes: 10
     permissions:
       # Read workflow/job metadata to generate failure context
       actions: read

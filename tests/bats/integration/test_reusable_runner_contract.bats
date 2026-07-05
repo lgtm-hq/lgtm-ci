@@ -123,6 +123,62 @@ YAML
 	assert_success
 }
 
+@test "validate-runner-contract: flags timeout-minutes input that is not type number" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-with-timeout-string.yml" <<'YAML'
+---
+name: With timeout string example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: string
+        default: "10"
+jobs:
+  work:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "timeout-minutes input is not type: number"
+}
+
+@test "validate-runner-contract: flags timeout-minutes input never applied to a job" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-with-timeout-unused.yml" <<'YAML'
+---
+name: With timeout unused example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  work:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 30
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "timeout-minutes input is never applied to a job"
+}
+
 @test "validate-runner-contract: allows documented action-only exception" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
