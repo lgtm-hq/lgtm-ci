@@ -57,6 +57,8 @@ runs:
       id: validate
       shell: bash
       env:
+        # gh api needs a token for verify-tags / audit-transitive resolution
+        GH_TOKEN: ${{ github.token }}
         INPUT_ENFORCE: ${{ inputs.enforce }}
         INPUT_ALLOW_TAG_EXCEPTIONS: ${{ inputs['allow-tag-exceptions'] }}
         INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}
