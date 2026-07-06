@@ -10,7 +10,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HARDEN_ACTION="$REPO_ROOT/.github/actions/harden-runner/action.yml"
-WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
+# Overridable so tests can point the validator at a fixture directory. The
+# release/renovate-specific checks below tolerate missing files, so a fixture
+# dir containing only reusable-*.yml is safe.
+WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 
 TOOLING_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 TOOLING_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/harden-runner[[:space:]]*$'
@@ -49,7 +52,8 @@ _check_job_egress_order() {
 			!in_jobs {
 				next
 			}
-			/^  [a-zA-Z_][a-zA-Z0-9_-]*: *$/ {
+			# Recognize quoted job keys as boundaries too (\047 = single quote).
+			/^  (["\047][^"\047]*["\047]|[a-zA-Z_][a-zA-Z0-9_-]*): *$/ {
 				tooling_line = 0
 				resolve_line = 0
 				next
@@ -199,7 +203,12 @@ _check_checkout_and_harden() {
 		BEGIN { in_jobs = 0; tooling = 0 }
 		/^jobs:/ { in_jobs = 1; next }
 		!in_jobs { next }
-		/^  [a-zA-Z_][a-zA-Z0-9_-]*: *$/ { tooling = 0; next }
+		# Job-key boundary: reset the tooling checkout carried from a
+		# previous job. Recognize quoted job keys (e.g. a double- or
+		# single-quoted "release":) as well as bare keys, so a quoted job
+		# cannot inherit a prior job tooling checkout and bypass this
+		# contract (\047 is the octal escape for a single quote).
+		/^  (["\047][^"\047]*["\047]|[a-zA-Z_][a-zA-Z0-9_-]*): *$/ { tooling = 0; next }
 		/- name: Checkout lgtm-ci tooling/ { tooling = NR }
 		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
 			if (tooling == 0 || tooling >= NR) {
