@@ -34,6 +34,12 @@ run_detect() {
 	assert_output --partial "invalid filter line"
 }
 
+@test "detect-changes: fails on JSON-unsafe filter name" {
+	run_detect FILTERS='bad"name=tests/*' CHANGED_FILES="a.txt"
+	assert_failure
+	assert_output --partial "invalid filter name"
+}
+
 @test "detect-changes: fails on empty filter list" {
 	run_detect FILTERS=$'\n  \n' CHANGED_FILES="a.txt"
 	assert_failure
@@ -82,11 +88,22 @@ run_detect() {
 
 @test "detect-changes: comments and blank filter lines are ignored" {
 	run_detect \
-		FILTERS=$'# tests below\n\ntests=tests/*' \
+		FILTERS=$'# tests below\n  # indented comment\n\ntests=tests/*' \
 		CHANGED_FILES=$'tests/a.rs'
 	assert_success
 	run get_github_output "changes"
 	assert_output '{"tests":true}'
+}
+
+@test "detect-changes: set-but-empty CHANGED_FILES means no changes" {
+	run_detect \
+		FILTERS=$'tests=tests/*\ndocs=docs/*' \
+		CHANGED_FILES=""
+	assert_success
+	run get_github_output "changes"
+	assert_output '{"tests":false,"docs":false}'
+	run get_github_output "any-changed"
+	assert_output "false"
 }
 
 @test "detect-changes: empty base fails open (all filters true)" {
@@ -104,11 +121,12 @@ run_detect() {
 	cd "$BATS_TEST_TMPDIR"
 	git init -q repo
 	cd repo
+	git config user.email "test@example.com"
+	git config user.name "Test"
 	git commit -q --allow-empty -m init
 	run env \
 		FILTERS="tests=tests/*" \
 		BASE_SHA="0000000000000000000000000000000000000001" \
-		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
 		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
 	run get_github_output "changes"
@@ -119,6 +137,8 @@ run_detect() {
 	cd "$BATS_TEST_TMPDIR"
 	git init -q repo
 	cd repo
+	git config user.email "test@example.com"
+	git config user.name "Test"
 	git commit -q --allow-empty -m init
 	base="$(git rev-parse HEAD)"
 	mkdir -p tests
@@ -128,7 +148,6 @@ run_detect() {
 	run env \
 		FILTERS=$'tests=tests/*\ndocs=docs/*' \
 		BASE_SHA="$base" \
-		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
 		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
 	run get_github_output "changes"

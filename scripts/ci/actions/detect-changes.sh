@@ -33,13 +33,16 @@ HEAD_SHA="${HEAD_SHA:-HEAD}"
 # dispatch, shallow history) -> fail open: report every filter as changed so
 # a required check runs its full job rather than silently early-exiting.
 fail_open=0
-if [[ -n "${CHANGED_FILES:-}" ]]; then
+if [[ -n "${CHANGED_FILES+x}" ]]; then
+	# Test seam: set-but-empty means "no files changed".
 	changed="$CHANGED_FILES"
 elif [[ -z "$BASE_SHA" ]]; then
+	echo "detect-changes: BASE_SHA is empty; failing open (all filters true)" >&2
 	fail_open=1
 	changed=""
 elif ! changed="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>/dev/null)"; then
 	# Unreachable base (shallow clone, force-push): fail open, same rationale.
+	echo "detect-changes: cannot diff ${BASE_SHA}...${HEAD_SHA}; failing open (all filters true)" >&2
 	fail_open=1
 	changed=""
 fi
@@ -61,8 +64,10 @@ json="{"
 any="false"
 first=1
 while IFS= read -r line; do
-	# Skip blanks and comments.
-	[[ -z "${line// /}" || "$line" == \#* ]] && continue
+	# Skip blanks and comments (allowing leading whitespace).
+	trimmed="${line#"${line%%[![:space:]]*}"}"
+	[[ -z "$trimmed" || "$trimmed" == \#* ]] && continue
+	line="$trimmed"
 	if [[ "$line" != *=* ]]; then
 		echo "detect-changes: invalid filter line (expected name=patterns): $line" >&2
 		exit 1
@@ -72,6 +77,12 @@ while IFS= read -r line; do
 	read -r -a patterns <<<"${line#*=}"
 	if [[ -z "$name" || "${#patterns[@]}" -eq 0 ]]; then
 		echo "detect-changes: invalid filter line (empty name or patterns): $line" >&2
+		exit 1
+	fi
+	# Names become JSON keys verbatim; restrict to characters that need no
+	# escaping so the output can never be malformed JSON.
+	if [[ ! "$name" =~ ^[A-Za-z0-9_-]+$ ]]; then
+		echo "detect-changes: invalid filter name (allowed: [A-Za-z0-9_-]): $name" >&2
 		exit 1
 	fi
 

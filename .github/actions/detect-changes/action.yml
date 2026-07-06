@@ -51,7 +51,7 @@ runs:
         BASE_SHA: ${{ inputs.base || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         HEAD_SHA: ${{ inputs.head || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         # yamllint enable rule:line-length
-      run: $SCRIPTS_DIR/ci/actions/detect-changes.sh
+      run: "$SCRIPTS_DIR/ci/actions/detect-changes.sh"
 
 branding:
   icon: "filter"
