@@ -23,16 +23,19 @@ _LGTM_CI_TESTING_COV_MERGE_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." && pwd
 # shellcheck source=../detect.sh
 source "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh" || return 1
 
-# Source actions.sh for logging when the full lib tree is present.
-# It is optional so a minimal coverage-only copy still works, but if the
-# file exists it must load cleanly (fail explicitly on a broken tree).
+# Source log.sh for logging when the lib tree is present. merge.sh only needs
+# log_warn, so it depends on the minimal log module rather than the heavy
+# actions.sh aggregator (which also pulls in the unrelated github/sbom/installer
+# trees). This keeps a coverage-only copy loadable when those trees are absent
+# or broken, while still failing explicitly if log.sh itself is present but
+# broken. If log.sh is missing entirely, fall back to a local log_warn.
 _LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/../.." && pwd)" || {
 	echo "merge.sh: cannot resolve lib directory" >&2
 	return 1
 }
-if [[ -f "$_LGTM_CI_LIB_DIR/actions.sh" ]]; then
-	# shellcheck source=../../actions.sh
-	source "$_LGTM_CI_LIB_DIR/actions.sh" || return 1
+if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
+	# shellcheck source=../../log.sh
+	source "$_LGTM_CI_LIB_DIR/log.sh" || return 1
 fi
 if ! declare -f log_warn &>/dev/null; then
 	log_warn() { echo "[WARN] $*" >&2; }

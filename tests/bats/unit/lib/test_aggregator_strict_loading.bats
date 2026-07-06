@@ -108,6 +108,25 @@ _source_tmp_lib() {
 	assert_output --partial "missing required module detect.sh"
 }
 
+# merge.sh only needs log_warn (from log.sh), so it must NOT be coupled to the
+# unrelated github/sbom/installer trees that the heavy actions.sh aggregator
+# pulls in. A coverage-only copy with those trees absent must still load.
+@test "coverage/merge.sh: loads when unrelated lib trees are absent" {
+	rm -rf "$TMP_LIB_DIR/github" "$TMP_LIB_DIR/sbom" "$TMP_LIB_DIR/installer"
+	run bash -c 'source "$1" && declare -f merge_lcov_files >/dev/null && declare -f merge_istanbul_files >/dev/null && echo loaded' _ "$TMP_LIB_DIR/testing/coverage/merge.sh"
+	assert_success
+	assert_output --partial "loaded"
+}
+
+# Even when log.sh is entirely absent, merge.sh falls back to a local log_warn
+# and still defines its merge helpers.
+@test "coverage/merge.sh: loads with a fallback logger when log.sh is absent" {
+	rm "$TMP_LIB_DIR/log.sh"
+	run bash -c 'source "$1" && declare -f merge_lcov_files >/dev/null && declare -f log_warn >/dev/null && echo loaded' _ "$TMP_LIB_DIR/testing/coverage/merge.sh"
+	assert_success
+	assert_output --partial "loaded"
+}
+
 # Runs from a script file (not bash -c) so BASH_SOURCE is bound: kcov's
 # bash instrumentation references BASH_SOURCE in a DEBUG trap and aborts
 # under set -u inside a bash -c script. Paths are passed via the exported
