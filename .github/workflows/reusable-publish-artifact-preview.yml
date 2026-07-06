@@ -1,0 +1,152 @@
+---
+name: Reusable Publish Artifact Preview Workflow
+
+# Posts (or updates) one sticky PR comment containing a direct download link to
+# a named build artifact, optionally prefixed with a short build summary. The
+# link comes from actions/upload-artifact v4+'s `artifact-url` output.
+#
+# Constraint (documented honestly): the link downloads a `.zip` and requires the
+# viewer to be signed in to GitHub with access to the repository. It is a
+# reviewer convenience, not a public preview URL. Re-running on the same PR
+# updates the existing comment (marker upsert) rather than adding a duplicate.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: "Name of the uploaded artifact (used in the download link text)"
+        required: true
+        type: string
+      artifact-url:
+        description: >-
+          Download URL from actions/upload-artifact v4 `artifact-url` output.
+          Empty/missing degrades gracefully (warning, no broken comment).
+        required: true
+        type: string
+      marker:
+        description: "Upsert marker identifying the sticky preview comment"
+        required: true
+        type: string
+      summary:
+        description: "Optional inline markdown summary prepended to the comment"
+        required: false
+        type: string
+        default: ""
+      summary-file:
+        description: >-
+          Optional path to a markdown summary file (takes precedence over
+          `summary` when it exists and is non-empty)
+        required: false
+        type: string
+        default: ""
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-minimal"
+      job-name:
+        description: "Display name for the artifact preview comment job"
+        required: false
+        type: string
+        default: "Publish artifact preview"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
+jobs:
+  publish-artifact-preview:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Compose artifact preview comment
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          ARTIFACT_URL: ${{ inputs.artifact-url }}
+          SUMMARY: ${{ inputs.summary }}
+          SUMMARY_FILE: ${{ inputs.summary-file }}
+          COMMENT_OUTPUT: artifact-preview-comment.md
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/compose-artifact-preview-comment.sh
+
+      # Missing/empty artifact-url yields an empty body above; delete-on-empty
+      # removes any stale comment instead of posting a broken link. Fork-PR skip
+      # is handled inside the post-pr-comment action.
+      - name: Publish artifact preview comment
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: artifact-preview-comment.md
+          marker: ${{ inputs.marker }}
+          delete-on-empty: "true"
