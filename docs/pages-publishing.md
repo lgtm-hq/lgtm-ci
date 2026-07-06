@@ -165,15 +165,18 @@ pages-${{ github.repository }}-${{ github.ref }}
 
 This serializes deployments to the same site on the same ref.
 
-The deploy-only `reusable-deploy-pages` uses the canonical GitHub Pages group
-instead, matching GitHub's official Pages workflow:
+The deploy-only `reusable-deploy-pages` shares the same concurrency group as the
+other Pages publishers:
 
 ```text
-pages
+pages-${{ github.repository }}-${{ github.ref }}
 ```
 
-with `cancel-in-progress: false`, so concurrent Pages deploys never stomp each
-other.
+with `cancel-in-progress: false`. Sharing one group (rather than the canonical
+`pages` group from GitHub's official example) ensures a deploy-only run and any
+Model A report/coverage publisher for the same repo and ref are serialized
+against each other, so two complete Pages artifacts cannot race and overwrite
+each other's content.
 
 ## Multi-publisher limitation (Model A)
 

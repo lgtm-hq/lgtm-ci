@@ -67,8 +67,12 @@ on:
         value: ${{ jobs.deploy.outputs.page-url }}
 
 # Serialize Pages deployments so concurrent runs do not stomp each other.
+# Share the same concurrency group as the other Pages publishers
+# (coverage, site-with-reports, test-*-publish) so a deploy-only run and a
+# report/coverage publisher for the same repo+ref cannot race and overwrite
+# each other's Pages content.
 concurrency:
-  group: pages
+  group: pages-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:

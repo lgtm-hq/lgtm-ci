@@ -48,11 +48,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-deploy-pages.yml"
 	assert_success
 }
 
-@test "reusable-deploy-pages: concurrency group is pages with cancel-in-progress false" {
+@test "reusable-deploy-pages: shares the pages concurrency group with cancel-in-progress false" {
 	run awk '
 		/^concurrency:/ { in_conc = 1 }
 		in_conc && /^[a-zA-Z]/ && !/^concurrency:/ { in_conc = 0 }
-		in_conc && /^  group: pages$/ { has_group = 1 }
+		in_conc && /^  group: pages-\$\{\{ github.repository \}\}-\$\{\{ github.ref \}\}$/ { has_group = 1 }
 		in_conc && /cancel-in-progress: false/ { has_cancel = 1 }
 		END { exit !(has_group && has_cancel) }
 	' "$WORKFLOW"

@@ -134,9 +134,9 @@ _publish_no_contents_write_ok() {
 	assert_success
 }
 
-@test "reusable-deploy-pages: uses canonical Pages concurrency group" {
+@test "reusable-deploy-pages: shares the Pages concurrency group with publishers" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-pages.yml"
-	run grep -qE '^  group: pages$' "$workflow"
+	run grep -q 'group: pages-${{ github.repository }}-${{ github.ref }}' "$workflow"
 	assert_success
 	run grep -q 'cancel-in-progress: false' "$workflow"
 	assert_success
