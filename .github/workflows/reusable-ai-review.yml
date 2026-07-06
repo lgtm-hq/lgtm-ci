@@ -1,0 +1,248 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Reusable AI Review
+
+# Org-wide AI code review. Installs a pinned lintro[ai] from PyPI, runs
+# `lintro review` hardened in CI, and publishes a single sticky, telemetry-rich
+# PR comment (updated in place; cumulative state embedded in an HTML comment).
+#
+# Trusted-install invariant (security): the job only installs a *pinned lintro
+# from PyPI* and runs `lintro review`, which reads the PR diff via the GitHub API
+# and calls the model. It never installs or executes the PR's own code (no
+# `uv sync`, no `pip install .`, no build hooks), so ANTHROPIC_API_KEY is scoped
+# to the single "Run AI review" step and is never in scope while PR-controlled
+# code could execute. The job is non-blocking (continue-on-error) and skips
+# gracefully on fork PRs, when no key is present, and off same-repo PRs.
+#
+# Org secret rollout: lgtm-hq provisions ANTHROPIC_API_KEY as an org-wide
+# secret, so callers just forward it (or `secrets: inherit`) with zero per-repo
+# setup. The missing-key skip path is the fork/safety-net case, not the norm.
+
+on:
+  workflow_call:
+    inputs:
+      depth:
+        description: "Review depth (1=checklist, 2=+questions, 3=+adversarial)"
+        required: false
+        type: number
+        default: 1
+      post:
+        description: "Post/update the sticky PR comment"
+        required: false
+        type: boolean
+        default: true
+      max-cost-usd:
+        description: "Advisory per-run cost cap in USD (annotated when exceeded)"
+        required: false
+        type: string
+        default: "0.50"
+      paths:
+        description: >-
+          Optional path prefixes to limit the review to (newline/comma/space
+          separated). Empty reviews the whole diff.
+        required: false
+        type: string
+        default: ""
+      lintro-version:
+        description: "Pinned lintro PyPI version (Renovate-managed centrally)"
+        required: false
+        type: string
+        # renovate: datasource=pypi depName=lintro
+        default: "0.65.0" # v0.65.0
+      strictness:
+        description: "Review sensitivity: focused | balanced | thorough"
+        required: false
+        type: string
+        default: "balanced"
+      model:
+        description: >-
+          Optional model override passed through to lintro (no default; lintro
+          uses its own configured default when empty)
+        required: false
+        type: string
+        default: ""
+
+      # --- Standard reusable contract inputs -------------------------------
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling checkout"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (defaults to ai-review)
+        required: false
+        type: string
+        default: "ai-review"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+      job-name:
+        description: "GitHub check name"
+        required: false
+        type: string
+        default: "AI Review"
+    secrets:
+      anthropic-api-key:
+        description: >-
+          Anthropic API key. Forward the lgtm-hq org secret ANTHROPIC_API_KEY
+          or use `secrets: inherit`. Absent on fork PRs (skips gracefully).
+        required: false
+
+jobs:
+  ai-review:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # Non-blocking: AI review never fails a PR check.
+    continue-on-error: true
+    permissions:
+      # Checkout repository and lgtm-ci tooling.
+      contents: read
+      # Post/update the sticky review comment on the PR.
+      pull-requests: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            .github/actions/post-pr-comment
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+
+      - name: Preflight guards
+        id: preflight
+        shell: bash
+        env:
+          STEP: preflight
+          EVENT_NAME: ${{ github.event_name }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          BASE_REPO: ${{ github.repository }}
+          HAS_KEY: ${{ secrets.anthropic-api-key != '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
+
+      # ANTHROPIC_API_KEY is in scope ONLY here — after checkout/harden, running
+      # a pinned PyPI lintro that never executes PR-controlled code.
+      - name: Run AI review
+        id: review
+        if: steps.preflight.outputs.should-run == 'true'
+        shell: bash
+        env:
+          STEP: run
+          ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LINTRO_VERSION: ${{ inputs.lintro-version }}
+          DEPTH: ${{ inputs.depth }}
+          STRICTNESS: ${{ inputs.strictness }}
+          MODEL: ${{ inputs.model }}
+          MAX_COST_USD: ${{ inputs.max-cost-usd }}
+          PATHS: ${{ inputs.paths }}
+          RUN_FILE: ${{ runner.temp }}/ai-review-run.json
+          VENV_DIR: ${{ runner.temp }}/ai-review-venv
+        run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
+
+      - name: Fetch existing comment state
+        id: fetch-state
+        if: >-
+          inputs.post &&
+          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
+          steps.preflight.outputs.skip-reason != 'fork'
+        shell: bash
+        env:
+          STEP: fetch-state
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          STATE_FILE: ${{ runner.temp }}/ai-review-state.json
+        run: .lgtm-ci-tooling/scripts/ci/actions/render-ai-review-comment.sh
+
+      - name: Render comment body
+        id: render
+        if: >-
+          inputs.post &&
+          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
+          steps.preflight.outputs.skip-reason != 'fork'
+        shell: bash
+        env:
+          STEP: render
+          STATE_FILE: ${{ runner.temp }}/ai-review-state.json
+          RUN_FILE: ${{ runner.temp }}/ai-review-run.json
+          SKIP_REASON: >-
+            ${{ steps.preflight.outputs.should-run == 'true' && ''
+            || steps.preflight.outputs.skip-reason }}
+          OUTPUT_FILE: ${{ runner.temp }}/ai-review-comment.md
+        run: .lgtm-ci-tooling/scripts/ci/actions/render-ai-review-comment.sh
+
+      - name: Post sticky review comment
+        if: >-
+          inputs.post &&
+          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
+          steps.preflight.outputs.skip-reason != 'fork'
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: ${{ runner.temp }}/ai-review-comment.md
+          marker: lintro-ai-review
+          mode: upsert
+          pr-number: ${{ github.event.pull_request.number }}

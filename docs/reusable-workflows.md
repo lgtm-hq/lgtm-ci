@@ -891,6 +891,102 @@ jobs:
       tooling-ref: "<sha>"
 ```
 
+### AI code review (`reusable-ai-review.yml`)
+
+Org-wide AI code review. Installs a pinned `lintro[ai]` from PyPI, runs
+`lintro review` hardened in CI, and publishes **one sticky, telemetry-rich PR
+comment** updated in place on every run. The engine is py-lintro (`lintro
+review`, released on PyPI); this reusable is the CI orchestration +
+comment-publishing layer — the same shape as `reusable-validate-lintro-version.yml`.
+
+**Zero-setup for consumers.** `ANTHROPIC_API_KEY` is provisioned as an lgtm-hq
+**org-wide secret**, so callers just forward it (or use `secrets: inherit`) with
+no per-repo key management:
+
+```yaml
+# any lgtm-hq repo: .github/workflows/ai-review.yml
+'on':
+  pull_request:
+
+jobs:
+  ai-review:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      depth: 1 # 1=checklist, 2=+questions, 3=+adversarial
+      post: true
+      max-cost-usd: "0.50"
+    secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }} # inherited org secret
+```
+
+| Input            | Default       | Notes                                             |
+| ---------------- | ------------- | ------------------------------------------------- |
+| `depth`          | `1`           | Review depth (clamped to 1..3)                    |
+| `post`           | `true`        | Post/update the sticky PR comment                 |
+| `max-cost-usd`   | `"0.50"`      | Advisory per-run cost cap (annotated if exceeded) |
+| `paths`          | `""`          | Optional path prefixes; empty reviews whole diff  |
+| `lintro-version` | pinned        | Renovate-managed centrally (grouped with lintro)  |
+| `strictness`     | `balanced`    | `focused` \| `balanced` \| `thorough`             |
+| `model`          | `""`          | Optional pass-through; no default (lintro decides)|
+| `egress-preset`  | `ai-review`   | Allowlists PyPI, uv, Anthropic, GitHub + raw CDN  |
+| `timeout-minutes`| `15`          | Job timeout                                       |
+| `job-name`       | `AI Review`   | Check name                                        |
+
+**Hardening guarantees:**
+
+- **Trusted install.** The job only installs a *pinned lintro from PyPI* and
+  runs `lintro review` (which reads the PR diff via the GitHub API and calls the
+  model). It never installs or executes the PR's own code (no `uv sync`, no
+  `pip install .`, no build hooks), so `ANTHROPIC_API_KEY` is scoped to the
+  single "Run AI review" step and is never in scope while PR-controlled code
+  could execute.
+- **Graceful skip (exit 0).** Skips with an informative note when no key is
+  present, on **fork PRs** (no secret access), and off same-repo PRs. The job is
+  **non-blocking** (`continue-on-error: true`) — AI review never fails a check.
+- **Cost + depth caps.** Depth is clamped to 1..3; per-run cost is compared to
+  `max-cost-usd` and annotated when exceeded. (Pre-spend budget enforcement
+  requires a lintro budget flag — tracked upstream.)
+- **Egress allowlist.** The `ai-review` preset covers PyPI
+  (`pypi.org`, `files.pythonhosted.org`), uv (`astral.sh`, `releases.astral.sh`),
+  Anthropic (`api.anthropic.com`), GitHub, and `raw.githubusercontent.com`.
+
+**The sticky comment.** One comment per PR (marker `lintro-ai-review`), with
+machine-readable state embedded in a trailing HTML comment
+(`<!-- lintro-ai-review-state: {"runs":[...]} -->`) so cumulative data survives
+across runs without external storage. Layout, top → bottom:
+
+1. **Cumulative (always visible):** total tokens (in/out/combined), total cost
+   USD, per-model counts (e.g. `claude-sonnet-4 ×3`), and run count.
+2. **Latest run:** findings (from `lintro review --output json`) plus per-run
+   mechanics (model, provider, tokens, cost, depth, duration).
+3. **Previous runs:** collapsible `<details>` with per-run mechanics. History is
+   bounded to the last 20 runs.
+
+Errored runs are recorded (status `error`, 0 tokens) and shown in the
+collapsible, contributing 0 to cumulative totals. Provider errors are formatted
+in the comment (401 invalid key, 429 rate limited, quota/no-credits,
+5xx/timeout) rather than failing silently.
+
+**Security (untrusted model output).** Review content derives from an untrusted
+PR diff. Before posting, model-derived text has `@mentions` neutralized and HTML
+comment delimiters escaped (so injected text cannot forge the state marker), is
+length-capped, and the comment is labelled as automated.
+
+**Error-contract note.** py-lintro 0.65.0 does not yet expose a machine-readable
+error contract for `lintro review --output json` (errors surface as
+`click.ClickException` on stderr with an overloaded exit code). The workflow
+degrades gracefully: it treats "valid review JSON on stdout" as success and uses
+a narrow, documented interim heuristic on the stable `AIError` message prefixes
+for the 401/429/quota classification. A structured contract is requested in
+lgtm-hq/py-lintro#1095.
+
+**Rollout.** py-lintro will migrate its bespoke `ai-review.yml` to a thin caller
+of this reusable (out of scope here) so lintro dogfoods the same reusable
+everyone uses.
+
 ### Vulnerability suppression check (osv-scanner)
 
 `reusable-vuln-suppression-check.yml` installs `osv-scanner` directly (no Docker),

@@ -97,6 +97,18 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "egress preset ai-review includes PyPI, uv, and Anthropic hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints ai-review"
+	assert_success
+	assert_output --partial 'pypi.org:443'
+	assert_output --partial 'files.pythonhosted.org:443'
+	assert_output --partial 'astral.sh:443'
+	assert_output --partial 'releases.astral.sh:443'
+	assert_output --partial 'api.anthropic.com:443'
+	assert_output --partial 'raw.githubusercontent.com:443'
+	assert_output --partial 'api.github.com:443'
+}
+
 @test "egress preset osv-scanner includes release assets and OSV API hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints osv-scanner"
 	assert_success
@@ -164,6 +176,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 		rust-release
 		sbom
 		scorecard
+		ai-review
 	)
 	for preset in "${presets[@]}"; do
 		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | grep -c ."

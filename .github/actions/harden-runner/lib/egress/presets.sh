@@ -202,6 +202,20 @@ egress_preset_endpoints() {
 			api.osv.dev:443 \
 			api.deps.dev:443
 		;;
+	ai-review)
+		# AI code review (reusable-ai-review.yml): GitHub checkout/tooling + gh PR
+		# diff API, uv/PyPI install of pinned lintro[ai], and the Anthropic API.
+		# raw.githubusercontent.com is required (astral setup-uv/self-checks fetch
+		# from it — its omission previously broke py-lintro's dogfood workflow).
+		egress_preset_endpoints github-tooling
+		printf '%s\n' \
+			release-assets.githubusercontent.com:443 \
+			pypi.org:443 \
+			files.pythonhosted.org:443 \
+			astral.sh:443 \
+			releases.astral.sh:443 \
+			api.anthropic.com:443
+		;;
 	rust-release)
 		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
 		# Minimal base: GitHub checkout/tooling, Rust/crates, cross Docker, apt, Sigstore.

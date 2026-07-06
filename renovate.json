@@ -27,6 +27,14 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\n\\s*[A-Za-z_]+=\"?v?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"?"
       ]
+    },
+    {
+      "customType": "regex",
+      "description": "Track pinned lintro PyPI version in reusable-ai-review.yml",
+      "managerFilePatterns": ["/^\\.github/workflows/reusable-ai-review\\.yml$/"],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\n\\s*default: \"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
+      ]
     }
   ],
   "packageRules": [
