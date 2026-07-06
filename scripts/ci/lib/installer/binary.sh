@@ -48,11 +48,38 @@ if [[ -f "$_LGTM_CI_INSTALLER_LIB_DIR/network/checksum.sh" ]]; then
 fi
 
 # Minimal fallbacks if libraries unavailable
+# Build hardened curl args into _LGTM_CI_INSTALLER_CURL_ARGS, honoring the
+# same opt-in env knobs as network/download.sh (LGTM_CI_CA_BUNDLE,
+# LGTM_CI_PINNED_PUBKEY) so pinning is not silently bypassed here.
+# Returns 1 (fail closed) if LGTM_CI_CA_BUNDLE is set but not readable.
+_lgtm_ci_installer_build_curl_args() {
+	local max_time="${1:-300}"
+	_LGTM_CI_INSTALLER_CURL_ARGS=(
+		-fsSL
+		--proto '=https'
+		--tlsv1.2
+		--connect-timeout 30
+		--max-time "$max_time"
+	)
+	if [[ -n "${LGTM_CI_CA_BUNDLE:-}" ]]; then
+		if [[ ! -r "$LGTM_CI_CA_BUNDLE" ]]; then
+			log_error "CA bundle not readable: $LGTM_CI_CA_BUNDLE"
+			return 1
+		fi
+		_LGTM_CI_INSTALLER_CURL_ARGS+=(--cacert "$LGTM_CI_CA_BUNDLE")
+	fi
+	if [[ -n "${LGTM_CI_PINNED_PUBKEY:-}" ]]; then
+		_LGTM_CI_INSTALLER_CURL_ARGS+=(--pinnedpubkey "$LGTM_CI_PINNED_PUBKEY")
+	fi
+	return 0
+}
+
 if ! declare -f download_with_retries &>/dev/null; then
 	download_with_retries() {
 		local url="$1" out="$2" attempts="${3:-3}" i
+		_lgtm_ci_installer_build_curl_args 300 || return 1
 		for ((i = 1; i <= attempts; i++)); do
-			curl -fsSL --connect-timeout 30 --max-time 300 "$url" -o "$out" 2>/dev/null && return 0
+			curl "${_LGTM_CI_INSTALLER_CURL_ARGS[@]}" "$url" -o "$out" 2>/dev/null && return 0
 		done
 		return 1
 	}
@@ -72,7 +99,8 @@ if ! declare -f download_and_run_installer &>/dev/null; then
 			tmpdir=$(mktemp -d "${TMPDIR:-/tmp}/lgtm-installer.XXXXXXXXXX") || exit 1
 			trap 'rm -rf "$tmpdir"' EXIT
 			local script_file="$tmpdir/installer.sh"
-			curl -fsSL --connect-timeout 30 --max-time 120 "$url" -o "$script_file" || exit 1
+			_lgtm_ci_installer_build_curl_args 120 || exit 1
+			curl "${_LGTM_CI_INSTALLER_CURL_ARGS[@]}" "$url" -o "$script_file" || exit 1
 			chmod +x "$script_file" || exit 1
 			"$script_file" "$@"
 		)
@@ -269,8 +297,9 @@ install_anchore_tool() {
 	local resolved_version="$version"
 	if [[ "$version" == "latest" ]]; then
 		local latest_url
-		if ! latest_url=$(curl -fsSL -o /dev/null -w '%{url_effective}' \
-			--connect-timeout 30 --max-time 60 \
+		_lgtm_ci_installer_build_curl_args 60 || return 1
+		if ! latest_url=$(curl "${_LGTM_CI_INSTALLER_CURL_ARGS[@]}" \
+			-o /dev/null -w '%{url_effective}' \
 			"https://github.com/anchore/${tool}/releases/latest"); then
 			log_error "Failed to resolve latest release for $tool"
 			return 1
