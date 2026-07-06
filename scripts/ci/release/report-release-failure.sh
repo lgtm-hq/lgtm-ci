@@ -8,12 +8,13 @@
 #   write_trigger_summary — append trigger context to $GITHUB_STEP_SUMMARY
 #   notify_failure        — create or comment on a deduplicated GitHub issue
 #
-# Required environment variables (notify_failure):
-#   GH_TOKEN            — GitHub token with issues: write
-#   GITHUB_REPOSITORY   — Target repository (owner/name)
+# Required environment variables:
 #   WORKFLOW_KEY        — Stable workflow key for marker namespacing
 #                         (e.g. release-version-pr, docker-publish).
 #                         RELEASE_WORKFLOW_KEY is honored as a fallback.
+#                         Required by both subcommands.
+#   GH_TOKEN            — GitHub token with issues: write (notify_failure only)
+#   GITHUB_REPOSITORY   — Target repository (owner/name) (notify_failure only)
 #
 # Optional parameterization (defaults preserve the release wording so existing
 # callers and open dedup'd issues keep working):
