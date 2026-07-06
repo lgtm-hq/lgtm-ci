@@ -296,4 +296,6 @@ in the product repository release workflow.
 
 - [workflow-contract.md](workflow-contract.md)
 - [reusable-workflows.md](reusable-workflows.md)
+- [release-changelog.md](release-changelog.md) — migrating consumer changelogs
+  to the Keep a Changelog generator (v0.43.1+)
 - [homebrew-tap](https://github.com/lgtm-hq/homebrew-tap) — formula config and dispatch handler
