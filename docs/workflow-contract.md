@@ -343,18 +343,26 @@ Custom package scripts use `reusable-test-node-custom.yml` with required
 ## Org ruleset check names
 
 Reusable workflows report checks as **`caller_job_id / inner_job_name`**. Org
-rulesets may require a **legacy display name** that does not match the inner
-`job-name` on the work job (for example ruleset `🧪 Test Suite & Coverage` vs
-`test / Python Compatibility`).
+rulesets **must require that exact prefixed path** for every `uses:` gate —
+the inner `job-name` alone is never sufficient. Inline `runs-on` jobs are the
+only unprefixed contexts: the ruleset matches their `name:` directly (for
+example `🔐 Security Audit`). A ruleset that requires an unprefixed name for a
+`uses:` gate leaves the PR stuck on **Expected** while Actions shows the green
+prefixed check.
 
-**Preferred (no shim):** Update the org ruleset to require the actual check path
-after repinning, and set `job-name` (and caller job `id` when helpful) to match.
+The registry of org rulesets, their GitHub ids, and the exact required
+contexts lives in [org-rulesets.md](org-rulesets.md), together with the
+export/sync tooling under `scripts/ci/org/`. When a check name must change,
+update the org ruleset to the new `{caller_job_id} / {job-name}` path in the
+same change.
 
-**Legacy gate:** When the ruleset cannot change yet, add a thin caller job that
-calls `reusable-required-check.yml` instead of hand-rolled `runs-on` shims. Pass
-`upstream-result` and optional `passed-output` / `status-output` from the work
-job. Use `always()` on the caller job so the gate still runs when the upstream
-job fails.
+**Aggregate gate:** When a single ruleset context should summarize one or more
+work jobs, add a thin caller job that calls `reusable-required-check.yml`
+instead of hand-rolled `runs-on` shims. The gate itself is a `uses:` job, so
+the ruleset must require its prefixed path too (below:
+`test-suite-coverage / 🧪 Test Suite & Coverage`). Pass `upstream-result` and
+optional `passed-output` / `status-output` from the work job. Use `always()`
+on the caller job so the gate still runs when the upstream job fails.
 
 ```yaml
 test:
