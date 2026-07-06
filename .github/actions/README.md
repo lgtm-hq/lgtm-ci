@@ -991,6 +991,51 @@ Build and push Docker images with multi-platform support.
 
 ## Quality Actions
 
+### detect-changes
+
+Maps changed paths to named filters so conditional jobs **always run and
+early-exit green** when their paths didn't change. This is the
+required-check-safe replacement for `on.<event>.paths` filters, which
+deadlock required checks (a check that never reports blocks the PR and
+times out merge-queue entries). Resolves the diff range from
+`pull_request`, `merge_group`, and `push` contexts; an unresolvable base
+fails open (all filters report changed).
+
+```yaml
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.detect.outputs.changes }}
+    steps:
+      - uses: actions/checkout@<sha> # vX.Y.Z
+        with:
+          fetch-depth: 0
+      - uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@<sha> # vX.Y.Z
+        id: detect
+        with:
+          filters: |
+            examples=examples/* packages/*
+            docs=docs/* *.md
+
+  validate-examples:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate examples
+        if: fromJSON(needs.changes.outputs.changes).examples
+        run: bash scripts/ci/validate-examples.sh
+      - name: Skip (no example changes)
+        if: ${{ !fromJSON(needs.changes.outputs.changes).examples }}
+        run: echo "No example changes; validation not required."
+```
+
+**Outputs:** `changes` (JSON object of filter name → boolean),
+`any-changed`. Keep the downstream job name static — it is the required
+check's identity.
+
+---
+
 ### run-quality
 
 Runs **lintro inside the full [`py-lintro`](https://github.com/lgtm-hq/py-lintro)

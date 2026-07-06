@@ -1,0 +1,58 @@
+---
+name: "Detect Changes"
+description: >-
+  Map changed paths to named filters so conditional jobs always run and
+  early-exit green when their paths didn't change (required-check-safe
+  replacement for on.<event>.paths). Resolves the diff range from
+  pull_request, merge_group, and push contexts.
+author: "lgtm-hq"
+
+inputs:
+  filters:
+    description: >-
+      One filter per line: `name=pattern [pattern...]`. Patterns are
+      bash-style globs matched against full repo-relative paths; `*`
+      crosses directory separators.
+    required: true
+  base:
+    description: >-
+      Base SHA override. Default: pull_request base, merge_group base,
+      or push before-SHA. Empty base fails open (all filters true).
+    required: false
+    default: ""
+  head:
+    description: "Head SHA override (default: event head or HEAD)"
+    required: false
+    default: ""
+
+outputs:
+  changes:
+    description: 'JSON object mapping each filter name to true/false'
+    value: ${{ steps.detect.outputs.changes }}
+  any-changed:
+    description: "Whether any filter matched"
+    value: ${{ steps.detect.outputs.any-changed }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+
+    - name: Detect changed paths
+      id: detect
+      shell: bash
+      env:
+        FILTERS: ${{ inputs.filters }}
+        # yamllint disable rule:line-length
+        BASE_SHA: ${{ inputs.base || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
+        HEAD_SHA: ${{ inputs.head || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+        # yamllint enable rule:line-length
+      run: $SCRIPTS_DIR/ci/actions/detect-changes.sh
+
+branding:
+  icon: "filter"
+  color: "blue"
