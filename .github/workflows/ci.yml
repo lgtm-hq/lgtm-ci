@@ -46,3 +46,14 @@ jobs:
       coverage-threshold: 84
       upload-coverage: true
       tooling-ref: ${{ github.sha }}
+
+  file-breakdown:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: ./.github/workflows/reusable-publish-file-breakdown.yml
+    with:
+      tooling-ref: ${{ github.sha }}
+    permissions:
+      contents: read
+      pull-requests: write

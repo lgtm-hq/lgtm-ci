@@ -862,6 +862,35 @@ jobs:
 For push/schedule workflows, omit the publish job and pass
 `upload-comment-artifact: false`.
 
+### PR file breakdown comment
+
+`reusable-publish-file-breakdown.yml` fetches the PR changed-files payload via
+`gh api --paginate`, renders a grouped breakdown (files/additions/deletions per
+top-level directory) with a capped collapsible per-file table, and upserts it as
+a marker-based PR comment. All steps skip when no PR number can be detected;
+fork PRs skip the comment post.
+
+| Input            | Default                  | Notes                                     |
+| ---------------- | ------------------------ | ----------------------------------------- |
+| `comment-marker` | `file-breakdown`         | Upsert marker for the PR comment          |
+| `max-rows`       | `50`                     | Per-file rows shown (capped at 500)       |
+| `job-name`       | `Publish file breakdown` | Display name                              |
+| `egress-preset`  | `github-minimal`         | GitHub API + tooling checkout             |
+
+```yaml
+jobs:
+  file-breakdown:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-file-breakdown.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+```
+
 ### Vulnerability suppression check (osv-scanner)
 
 `reusable-vuln-suppression-check.yml` installs `osv-scanner` directly (no Docker),
