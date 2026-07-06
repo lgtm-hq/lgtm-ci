@@ -1022,6 +1022,9 @@ jobs:
     needs: changes
     runs-on: ubuntu-latest
     steps:
+      # Each job runs in a fresh workspace — checkout again here.
+      - uses: actions/checkout@<sha> # vX.Y.Z
+        if: fromJSON(needs.changes.outputs.changes).examples
       - name: Validate examples
         if: fromJSON(needs.changes.outputs.changes).examples
         run: bash scripts/ci/validate-examples.sh
