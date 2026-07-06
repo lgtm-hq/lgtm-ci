@@ -297,9 +297,9 @@ install_anchore_tool() {
 	local resolved_version="$version"
 	if [[ "$version" == "latest" ]]; then
 		local latest_url
-		if ! latest_url=$(curl -fsSL --proto '=https' --tlsv1.2 \
+		_lgtm_ci_installer_build_curl_args 60 || return 1
+		if ! latest_url=$(curl "${_LGTM_CI_INSTALLER_CURL_ARGS[@]}" \
 			-o /dev/null -w '%{url_effective}' \
-			--connect-timeout 30 --max-time 60 \
 			"https://github.com/anchore/${tool}/releases/latest"); then
 			log_error "Failed to resolve latest release for $tool"
 			return 1

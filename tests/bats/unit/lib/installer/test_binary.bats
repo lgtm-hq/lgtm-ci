@@ -589,6 +589,37 @@ chmod +x '${mock_bin}/grype'
 	refute_output --partial "/main/install.sh"
 }
 
+@test "install_anchore_tool: latest resolver honors LGTM_CI_CA_BUNDLE" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+
+	rm -f "${mock_bin}/grype"
+	command -v grype >/dev/null 2>&1 && skip "grype installed on host"
+
+	local ca_bundle="${BATS_TEST_TMPDIR}/ca.pem"
+	echo "fake-ca" >"$ca_bundle"
+
+	create_anchore_curl_mock "#!/usr/bin/env bash
+cat >'${mock_bin}/grype' <<'INNER'
+#!/usr/bin/env bash
+echo \"Application: grype\"
+echo \"Version: 9.9.9\"
+INNER
+chmod +x '${mock_bin}/grype'
+"
+
+	run bash -c '
+		export LGTM_CI_CA_BUNDLE="'"$ca_bundle"'"
+		source "$LIB_DIR/installer/binary.sh"
+		install_anchore_tool "grype" "latest" 2>&1
+	'
+	assert_success
+
+	# The releases/latest resolution call must carry the CA bundle
+	run grep "releases/latest" "$BATS_TEST_TMPDIR/mock_calls_curl"
+	assert_success
+	assert_output --partial "--cacert ${ca_bundle}"
+}
+
 @test "install_anchore_tool: fails when latest release cannot be resolved" {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	rm -f "${mock_bin}/syft"
