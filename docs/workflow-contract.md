@@ -1016,17 +1016,34 @@ caller publish job path). Outputs: `passed`, `build-passed`, `test-passed`.
 
 ## Merge queue (`merge_group`)
 
-Callers using GitHub merge queue can add `merge_group:` triggers to thin
-caller workflows alongside `pull_request:`.
+Callers using GitHub merge queue must add `merge_group:` triggers to every
+caller workflow that produces a required check, alongside `pull_request:` —
+otherwise queued PRs time out waiting for checks that never report. The
+starter examples (`examples/ci-*.yml`) include `merge_group:` by default.
 
 | Workflow                               | `merge_group` behavior                         |
 | -------------------------------------- | ---------------------------------------------- |
+| `reusable-quality-lint.yml`            | Safe to run — no PR context required           |
 | `reusable-codeql.yml`                  | Safe to run — no PR context required           |
 | `reusable-validate-action-pinning.yml` | Safe to run — no PR context required           |
 | `reusable-dependency-review.yml`       | Runs on `merge_group` (same as PR)             |
 | `reusable-security-audit.yml`          | Audit on `merge_group`; PR comment on PR only  |
 | `reusable-site-quality.yml`            | Safe to run — no PR context required           |
+| `reusable-docker.yml`                  | Safe to run — no PR context required           |
+| `reusable-test-shell.yml`              | Tests run; PR summary comment on PR only       |
+| `reusable-test-python.yml`             | Tests run; PR summary comment on PR only       |
+| `reusable-test-node.yml`               | Tests run; PR summary comment on PR only       |
+| `reusable-test-node-custom.yml`        | Tests run; PR summary comment on PR only       |
+| `reusable-test-rust-build.yml`         | Safe to run — no PR context required           |
+| `reusable-coverage.yml`                | Coverage runs; PR comment on PR only           |
 | `reusable-semantic-pr-title.yml`       | Skips on `merge_group` — title validated on PR |
+
+Test reusables gate their draft-PR skip on `github.event_name ==
+'pull_request'`, so work jobs always run in the merge queue; PR summary
+comments are gated on `pull_request` events in workflow conditions and in
+`post-pr-comment.sh`, so they skip cleanly. Caller-side summary jobs (e.g.
+the split `publish-quality-summary` pattern) already carry a
+`github.event_name == 'pull_request'` guard and skip in the queue.
 
 Semantic title validation is intentionally skipped in the merge queue because
 `amannn/action-semantic-pull-request` requires pull request context.
