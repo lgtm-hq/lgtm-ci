@@ -102,26 +102,21 @@ jobs:
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
-            .github/actions/harden-runner
-            .github/actions/resolve-egress-allowlist
-            scripts/ci/actions/
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
-      - name: Resolve egress allowlist
+      - name: Checkout and harden
         id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
+          tooling-ref: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          sparse-checkout-extra: |
+            scripts/ci/actions/
 
       - name: Generate CodeQL matrix
         id: matrix
@@ -159,25 +154,19 @@ jobs:
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
-            .github/actions/harden-runner
-            .github/actions/resolve-egress-allowlist
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
-      - name: Resolve egress allowlist
+      - name: Checkout and harden
         id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
+          tooling-ref: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Initialize CodeQL
         if: inputs.config-file == '' && matrix.language != ''

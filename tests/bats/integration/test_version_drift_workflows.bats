@@ -120,7 +120,7 @@ load "../../helpers/common"
 		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /open-registry-health-issue:/ {
 			in_job = 0
 		}
-		in_job && /harden-runner/ { found = 1; exit }
+		in_job && /harden-runner|checkout-and-harden/ { found = 1; exit }
 		END { exit !found }
 	' "$workflow"
 	assert_success

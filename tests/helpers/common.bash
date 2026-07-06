@@ -528,6 +528,8 @@ assert_readonly_var() {
 }
 
 # Assert repository → tooling → resolve → harden step order (#279 egress contract).
+# Also accepts the checkout-and-harden composite form (#379): repository →
+# bootstrap tooling checkout → Checkout and harden.
 # Usage: egress_tooling_checkout_order_ok "$workflow" [job-name]
 egress_tooling_checkout_order_ok() {
 	local workflow="$1"
@@ -539,7 +541,7 @@ egress_tooling_checkout_order_ok() {
 		job != "" && $0 ~ "^  " job ":" {
 			in_job = 1
 			in_steps = 0
-			repo = tooling = resolve = harden = 0
+			repo = tooling = resolve = harden = cah = 0
 			next
 		}
 		job != "" && in_job && /^  [a-zA-Z0-9_-]+:/ && $0 !~ "^  " job ":" {
@@ -553,9 +555,13 @@ egress_tooling_checkout_order_ok() {
 				tooling = NR
 			}
 		}
+		active_job() && in_steps && /^      - name: Checkout and harden/ { cah = NR }
 		active_job() && in_steps && /^      - name: Resolve egress allowlist/ { resolve = NR }
 		active_job() && in_steps && /^      - name: Harden runner/ { harden = NR }
 		END {
+			if (cah > 0 && harden == 0 && resolve == 0) {
+				exit !(repo > 0 && tooling > 0 && repo < tooling && tooling < cah)
+			}
 			ok = (repo > 0 && tooling > 0 && harden > 0 && repo < tooling && tooling < harden)
 			if (resolve > 0) {
 				ok = ok && tooling < resolve && resolve < harden

@@ -62,14 +62,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 	assert_success
 }
 
-@test "reusable-vuln-suppression-check: resolve egress before harden-runner composite" {
+@test "reusable-vuln-suppression-check: hardens via checkout-and-harden composite" {
 	run awk '
 		/^  vuln-suppression-check:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  vuln-suppression-check:/ { in_job = 0 }
 		in_job && /- name: Checkout repository/ { checkout = 1 }
 		in_job && /- name: Checkout lgtm-ci tooling/ { tooling = 1 }
-		in_job && /- name: Resolve egress allowlist/ { resolve = 1 }
-		in_job && resolve && /- name: Harden runner/ { found = 1 }
+		in_job && tooling && /- name: Checkout and harden/ { found = 1 }
 		END { exit !(checkout && tooling && found) }
 	' "$WORKFLOW"
 	assert_success

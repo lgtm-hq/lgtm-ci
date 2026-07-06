@@ -118,11 +118,48 @@ Setup Rust toolchain with cargo caching.
 
 ## Security Actions
 
+### checkout-and-harden
+
+Shared reusable-workflow preamble (#379): checks out lgtm-ci tooling into
+`.lgtm-ci-tooling/`, resolves the egress allowlist, and hardens the runner in one
+step. Requires a prior bootstrap sparse checkout of
+`.github/actions/checkout-and-harden` (the composite lives in lgtm-ci).
+
+```yaml
+- name: Checkout lgtm-ci tooling
+  uses: actions/checkout@<pin>
+  with:
+    repository: lgtm-hq/lgtm-ci
+    path: .lgtm-ci-tooling
+    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+    sparse-checkout: |
+      .github/actions/checkout-and-harden
+    sparse-checkout-cone-mode: true
+    persist-credentials: false
+
+- name: Checkout and harden
+  id: egress
+  uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+  with:
+    tooling-ref: ${{ inputs.tooling-ref }}
+    egress-preset: quality
+    sparse-checkout-extra: |
+      scripts/ci/
+```
+
+**Inputs:** `tooling-ref`, `egress-policy` (default `block`), `egress-preset`,
+`allowed-endpoints`, `allowed-endpoints-mode` (default `replace`),
+`sparse-checkout-extra`, `persist-credentials` (default `false`).
+
+**Outputs:** `allowed-endpoints` (resolved allowlist), `scripts-dir` (absolute
+path to `.lgtm-ci-tooling/scripts`).
+
 ### resolve-egress-allowlist
 
-Resolves `allowed-endpoints` from explicit lists or `egress-preset` names. Run as a
-**workflow step before** `harden-runner` so step-security's pre-hook receives the
-allowlist (composite step outputs are not available at pre-hook time).
+Resolves `allowed-endpoints` from explicit lists or `egress-preset` names. Run
+**before** `harden-runner` — as a prior workflow step, or as the preceding sibling
+step inside `checkout-and-harden` — so the resolved allowlist is available when
+the harden step's inputs are evaluated.
 
 ```yaml
 - name: Checkout lgtm-ci tooling

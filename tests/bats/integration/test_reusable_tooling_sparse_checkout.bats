@@ -239,3 +239,107 @@ YAML
 	assert_failure
 	assert_output --partial "validate-action-pinning"
 }
+
+@test "validate-tooling-sparse-checkout: allows checkout-and-harden with scripts/ci/ extra" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local actions_dir="${BATS_TEST_TMPDIR}/.github/actions"
+	mkdir -p "${workflows_dir}" \
+		"${actions_dir}/checkout-and-harden" \
+		"${actions_dir}/validate-action-pinning"
+	cat >"${actions_dir}/checkout-and-harden/action.yml" <<'YAML'
+---
+name: Checkout and harden
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: |
+          scripts/ci/
+YAML
+	cat >"${actions_dir}/validate-action-pinning/action.yml" <<'YAML'
+---
+name: Validate action pinning
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh
+YAML
+	cat >"${workflows_dir}/reusable-composite-preamble.yml" <<'YAML'
+---
+name: Composite preamble example
+on:
+  workflow_call:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+      - name: Checkout and harden
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Validate action pinning
+        uses: ./.lgtm-ci-tooling/.github/actions/validate-action-pinning
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" ACTIONS_DIR="${actions_dir}" run "${VALIDATOR}"
+	assert_success
+}
+
+@test "validate-tooling-sparse-checkout: flags checkout-and-harden missing scripts/ci/ extra" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local actions_dir="${BATS_TEST_TMPDIR}/.github/actions"
+	mkdir -p "${workflows_dir}" \
+		"${actions_dir}/checkout-and-harden" \
+		"${actions_dir}/validate-action-pinning"
+	cat >"${actions_dir}/checkout-and-harden/action.yml" <<'YAML'
+---
+name: Checkout and harden
+runs:
+  using: composite
+  steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: |
+          scripts/ci/
+YAML
+	cat >"${actions_dir}/validate-action-pinning/action.yml" <<'YAML'
+---
+name: Validate action pinning
+runs:
+  using: composite
+  steps:
+    - shell: bash
+      run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh
+YAML
+	cat >"${workflows_dir}/reusable-composite-preamble-bad.yml" <<'YAML'
+---
+name: Composite preamble bad example
+on:
+  workflow_call:
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@v4
+        with:
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+      - name: Checkout and harden
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+      - name: Validate action pinning
+        uses: ./.lgtm-ci-tooling/.github/actions/validate-action-pinning
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" ACTIONS_DIR="${actions_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "validate-action-pinning"
+}

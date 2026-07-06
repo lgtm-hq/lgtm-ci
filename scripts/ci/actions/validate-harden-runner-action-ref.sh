@@ -10,7 +10,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 HARDEN_ACTION="$REPO_ROOT/.github/actions/harden-runner/action.yml"
-WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
+# Overridable so tests can point the validator at a fixture directory. The
+# release/renovate-specific checks below tolerate missing files, so a fixture
+# dir containing only reusable-*.yml is safe.
+WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 
 TOOLING_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 TOOLING_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/harden-runner[[:space:]]*$'
@@ -41,6 +44,7 @@ _check_job_egress_order() {
 				in_jobs = 0
 				tooling_line = 0
 				resolve_line = 0
+				job_indent = -1
 			}
 			/^jobs:/ {
 				in_jobs = 1
@@ -49,10 +53,24 @@ _check_job_egress_order() {
 			!in_jobs {
 				next
 			}
-			/^  [a-zA-Z_][a-zA-Z0-9_-]*: *$/ {
-				tooling_line = 0
-				resolve_line = 0
-				next
+			# Job-key boundary at the actual job indent, detected from the
+			# first key under jobs:. This resets carried state for 2-space,
+			# 4-space, or quoted job keys alike, so a deeper-indented job
+			# cannot inherit a prior job tooling checkout and bypass the
+			# contract (\047 = single quote).
+			{
+				if ($0 ~ /^ +(["\047][^"\047]*["\047]|[a-zA-Z_][a-zA-Z0-9_-]*): *$/) {
+					lead = $0
+					sub(/[^ ].*$/, "", lead)
+					if (job_indent < 0) {
+						job_indent = length(lead)
+					}
+					if (length(lead) == job_indent) {
+						tooling_line = 0
+						resolve_line = 0
+						next
+					}
+				}
 			}
 			$0 ~ /^[[:space:]]+- name: Checkout lgtm-ci egress tooling/ {
 				tooling_line = NR
@@ -184,9 +202,56 @@ if grep -qE "^\s+egress-preset:" "$HARDEN_ACTION"; then
 	violations=$((violations + 1))
 fi
 
+TOOLING_CAH_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden[[:space:]]*$'
+
+_check_checkout_and_harden() {
+	local workflow="$1"
+	local wf_name="${workflow##*/}"
+
+	grep -qE "$TOOLING_CAH_RE" "$workflow" || return 0
+	if ! grep -qE 'Checkout lgtm-ci (egress )?tooling' "$workflow"; then
+		echo "${wf_name}: missing bootstrap Checkout lgtm-ci tooling step before checkout-and-harden" >&2
+		violations=$((violations + 1))
+	fi
+	if ! awk '
+		BEGIN { in_jobs = 0; tooling = 0; job_indent = -1 }
+		/^jobs:/ { in_jobs = 1; next }
+		!in_jobs { next }
+		# Job-key boundary: reset the tooling checkout carried from a
+		# previous job. The boundary indent is detected from the first key
+		# under jobs:, so bare or quoted job keys at any indentation
+		# (2-space, 4-space, single- or double-quoted "release":) reset the
+		# carried checkout and cannot bypass this contract (\047 = single quote).
+		{
+			if ($0 ~ /^ +(["\047][^"\047]*["\047]|[a-zA-Z_][a-zA-Z0-9_-]*): *$/) {
+				lead = $0
+				sub(/[^ ].*$/, "", lead)
+				if (job_indent < 0) { job_indent = length(lead) }
+				if (length(lead) == job_indent) { tooling = 0; next }
+			}
+		}
+		/- name: Checkout lgtm-ci tooling/ { tooling = NR }
+		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
+			if (tooling == 0 || tooling >= NR) {
+				bad = 1
+			}
+			tooling = 0
+		}
+		END { exit bad }
+	' "$workflow"; then
+		echo "${wf_name}: Checkout lgtm-ci tooling must precede checkout-and-harden" >&2
+		violations=$((violations + 1))
+	fi
+	if grep -qE "$IN_REPO_RESOLVE_RE" "$workflow" || grep -qE "$IN_REPO_HARDEN_RE" "$workflow"; then
+		echo "${wf_name}: caller-local ./.github/actions egress paths are forbidden in reusables" >&2
+		violations=$((violations + 1))
+	fi
+}
+
 while IFS= read -r -d '' workflow; do
 	[[ -f "$workflow" ]] || continue
 	wf_name="${workflow##*/}"
+	_check_checkout_and_harden "$workflow"
 	if ! grep -qE "$TOOLING_HARDEN_RE" "$workflow"; then
 		continue
 	fi

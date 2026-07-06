@@ -33,15 +33,24 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-file-breakdown.yml"
 	assert_success
 }
 
-@test "publish-file-breakdown: sparse checkout includes scripts and post-pr-comment" {
+@test "publish-file-breakdown: uses checkout-and-harden with scripts and post-pr-comment extras" {
+	# Bootstrap sparse-checkout of the composite, then the single composite step.
+	run grep -F '.github/actions/checkout-and-harden' "$WORKFLOW"
+	assert_success
+	run grep -F 'uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden' "$WORKFLOW"
+	assert_success
+	# Workflow-specific paths are preserved via sparse-checkout-extra.
+	run grep -F 'sparse-checkout-extra:' "$WORKFLOW"
+	assert_success
 	run grep -F 'scripts/ci/' "$WORKFLOW"
 	assert_success
 	run grep -F '.github/actions/post-pr-comment' "$WORKFLOW"
 	assert_success
+	# The four-step harden preamble is gone (folded into the composite).
 	run grep -F '.github/actions/harden-runner' "$WORKFLOW"
-	assert_success
+	assert_failure
 	run grep -F '.github/actions/resolve-egress-allowlist' "$WORKFLOW"
-	assert_success
+	assert_failure
 }
 
 @test "publish-file-breakdown: defaults to github-minimal egress preset" {

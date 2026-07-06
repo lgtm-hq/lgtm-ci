@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `configure-git-remote.sh`, `enable-auto-merge.sh`, `publish-npm.sh`,
   `publish-gem.sh`, `wait-for-package.sh`, `validate-package.sh`,
   `egress-audit.sh`, `verify-attestation.sh`, `docker-login.sh`
+- **actions**: `checkout-and-harden` composite — shared reusable-workflow
+  preamble that checks out lgtm-ci tooling into `.lgtm-ci-tooling/`, resolves
+  the egress allowlist, and hardens the runner in one step; outputs
+  `allowed-endpoints` and `scripts-dir` (#379)
 
 ### Changed
 
@@ -30,9 +34,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `needs: <build-job>` to deploy the named artifact via `actions/deploy-pages`.
   The build-related inputs (`source-path`, `build-command`, `node-version`,
   `package-manager`, `working-directory`, `frozen-lockfile`) are removed and the
-  in-workflow `build` job is gone; the concurrency group is now `pages`. Callers
-  that relied on the old build+deploy behavior should migrate to
+  in-workflow `build` job is gone; the concurrency group is shared with the
+  other Pages publishers
+  (`pages-${{ github.repository }}-${{ github.ref }}`). Callers that relied on
+  the old build+deploy behavior should migrate to
   `reusable-deploy-site-with-reports.yml` (which still builds and deploys).
+- **workflows**: 65 job preambles across 40 reusable workflows now use a
+  bootstrap sparse checkout of `.github/actions/checkout-and-harden` plus a
+  single `Checkout and harden` step instead of the four-step
+  checkout → resolve → harden sequence; sparse-checkout paths are preserved
+  per workflow via `sparse-checkout-extra`. Exempt (unchanged): the release
+  dual-checkout workflows (`reusable-release-auto-tag`,
+  `reusable-release-version-pr`), the tiered Rust workflows where
+  `validate-runner-policy` runs between checkout and resolve
+  (`reusable-build-rust-binaries`, `reusable-publish-rust-release`), and
+  `reusable-validate-lintro-version` (bootstrap/fallback checkout flow) (#379)
 - **scripts**: parameterize near-duplicate language-family scripts (#372):
   `aggregate-{node,python,rust}-results.sh` merged into `aggregate-results.sh`
   (`RESULTS_DIR`), `write-{node,python,rust}-summary.sh` merged into
