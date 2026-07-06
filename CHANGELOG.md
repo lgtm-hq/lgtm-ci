@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **quality**: script-to-BATS-test coverage ratchet (#370):
+  `scripts/ci/quality/validate-script-test-coverage.sh` requires every
+  `scripts/ci` entrypoint (excluding `lib/`) to be referenced by a BATS test,
+  with known-untested scripts tracked in
+  `scripts/ci/quality/script-test-coverage-allowlist.txt` (seeded with 53
+  entries, ratcheted down to 42 in this change). Wired into the BATS
+  integration suite via `tests/bats/integration/test_script_test_coverage.bats`
+- **tests**: first tranche of BATS tests for release/publish entrypoints
+  (#370): `create-tag.sh`, `create-github-release.sh`,
+  `configure-git-remote.sh`, `enable-auto-merge.sh`, `publish-npm.sh`,
+  `publish-gem.sh`, `wait-for-package.sh`, `validate-package.sh`,
+  `egress-audit.sh`, `verify-attestation.sh`, `docker-login.sh`
+
 ### Changed
 
 - **workflows**: **BREAKING** — `reusable-deploy-pages.yml` is now a hardened
@@ -52,8 +65,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `BLUE`, `NC`) from `scripts/ci/lib/log.sh` (#383). Consumers sourcing `log.sh`
   must migrate to the namespaced `LGTM_CI_*` names (e.g. `LGTM_CI_RED`,
   `LGTM_CI_NC`).
+- **python**: `[tool.pytest.ini_options]` and pytest-only dev dependencies
+  (`pytest`, `assertpy`, `pytest-timeout`, `pytest-xdist`) from
+  `pyproject.toml` — the repository has no Python test suite; its Python
+  helpers are exercised through the BATS suite (#370)
 
 ### Fixed
+
+- **actions**: BSD/macOS-incompatible `\s` regex escapes in the
+  name-extraction pipelines of `publish-npm.sh`, `publish-gem.sh`, and
+  `validate-package.sh` replaced with POSIX `[[:space:]]` (#370)
 
 ### Security
 

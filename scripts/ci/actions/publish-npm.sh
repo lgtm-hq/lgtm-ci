@@ -34,7 +34,7 @@ validate)
 	fi
 
 	# Check for required fields for publishing
-	name=$(grep -E '^\s*"name"\s*:' package.json | sed 's/.*:\s*"\([^"]*\)".*/\1/')
+	name=$(grep -E '^[[:space:]]*"name"[[:space:]]*:' package.json | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
 	version=$(extract_npm_version ".") || die "Could not extract version"
 
 	log_success "Package valid: $name@$version"
@@ -44,7 +44,7 @@ build)
 	log_info "Building and packing npm package..."
 
 	# Extract metadata
-	name=$(grep -E '^\s*"name"\s*:' package.json | sed 's/.*:\s*"\([^"]*\)".*/\1/')
+	name=$(grep -E '^[[:space:]]*"name"[[:space:]]*:' package.json | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/')
 	version=$(extract_npm_version ".") || die "Could not extract version"
 
 	# Detect package manager once based on lockfile
