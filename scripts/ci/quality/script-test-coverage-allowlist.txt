@@ -40,6 +40,5 @@ release/remove-tooling-checkout.sh
 release/run-version-update-script.sh
 release/write-release-summary.sh
 release/write-version-pr-summary.sh
-security/install-osv-scanner.sh
 testing/rust/build-workspace.sh
 testing/rust/setup-rust-nextest.sh
