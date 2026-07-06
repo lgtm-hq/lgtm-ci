@@ -14,7 +14,7 @@ inputs:
     description: >-
       Named baseline allowlist for block policy (github-minimal, github-pages,
       github-tooling, docker, playwright, pypi, rubygems, npm-publish, quality,
-      osv-scanner, rust-release, sbom, scorecard)
+      osv-scanner, rust-release, sbom, scorecard, ai-review)
     required: false
     default: ""
   allowed-endpoints:
