@@ -339,12 +339,22 @@ EOF
 	assert_success
 }
 
-@test "report-release-failure: reports missing WORKFLOW_KEY and RELEASE_WORKFLOW_KEY" {
+@test "report-release-failure: fails without WORKFLOW_KEY or RELEASE_WORKFLOW_KEY" {
 	unset RELEASE_WORKFLOW_KEY
 
-	# The :? expansion fires inside command substitutions, so the message is
-	# surfaced in output (matching the script's historical behavior).
 	run bash "$SCRIPT" write_trigger_summary
+	assert_failure
+	assert_output --partial "WORKFLOW_KEY (or RELEASE_WORKFLOW_KEY) is required"
+}
+
+@test "report-release-failure: notify_failure fails without a workflow key" {
+	unset RELEASE_WORKFLOW_KEY
+	mock_command_multi "gh" '
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_failure
 	assert_output --partial "WORKFLOW_KEY (or RELEASE_WORKFLOW_KEY) is required"
 }
 
@@ -402,16 +412,44 @@ EOF
 }
 
 @test "report-release-failure: FAILURE_SUMMARY_TEXT overrides the issue summary" {
-	mock_command_multi "gh" '
-		*repo*view*) echo "main";;
-		*issue*list*) echo "";;
-		*label*view*) exit 0;;
-		*issue*create*) echo "https://github.com/lgtm-hq/lgtm-ci/issues/44"; exit 0;;
-		*run*view*) exit 0;;
-		*) exit 1;;
-	'
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*repo*view*)
+		echo "main"
+		;;
+	*issue*list*)
+		echo ""
+		;;
+	*label*view*)
+		exit 0
+		;;
+	*issue*create*)
+		while [[ \$# -gt 0 ]]; do
+			if [[ "\$1" == "--body-file" && -n "\${2:-}" ]]; then
+				cp "\$2" '${BATS_TEST_TMPDIR}/issue-body.md'
+			fi
+			shift
+		done
+		echo "https://github.com/lgtm-hq/lgtm-ci/issues/44"
+		exit 0
+		;;
+	*run*view*)
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
 	export FAILURE_SUMMARY_TEXT="Custom failure summary sentence."
 
 	run bash "$SCRIPT" notify_failure
+	assert_success
+	[[ -f "${BATS_TEST_TMPDIR}/issue-body.md" ]]
+	run grep -F "Custom failure summary sentence." "${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
 }

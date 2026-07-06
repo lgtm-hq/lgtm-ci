@@ -131,6 +131,10 @@ write_trigger_summary() {
 		exit 1
 	fi
 
+	# Validate up front: later uses run in command substitutions, where the
+	# :? expansion would kill only the subshell and the script would exit 0.
+	workflow_key >/dev/null
+
 	branch="$(release_branch)"
 	sha="$(release_sha)"
 	current_run_url="$(run_url)"
@@ -386,6 +390,10 @@ notify_failure() {
 		log_error "gh CLI is required to report release automation failures"
 		exit 1
 	fi
+
+	# Validate up front: later uses run in command substitutions, where the
+	# :? expansion would kill only the subshell and the script would exit 0.
+	workflow_key >/dev/null
 
 	branch="$(release_branch)"
 	target_branch="$(resolve_target_branch)"

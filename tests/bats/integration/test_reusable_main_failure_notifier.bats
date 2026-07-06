@@ -37,6 +37,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-main-failure-notifier.yml"
 	assert_success
 	run grep -F "FAILURE_MARKER_PREFIX: main-workflow-failure" "$WORKFLOW"
 	assert_success
+	run grep -F "FAILURE_TITLE_PREFIX:" "$WORKFLOW"
+	assert_success
 	run grep -F "notify_failure" "$WORKFLOW"
 	assert_success
 	run grep -F "write_trigger_summary" "$WORKFLOW"
