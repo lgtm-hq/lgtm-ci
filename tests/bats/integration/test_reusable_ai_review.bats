@@ -128,3 +128,12 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 	assert_output --partial "marker: lintro-ai-review"
 }
+
+@test "reusable-ai-review: comment steps skip fork PRs (no upsert with read-only token)" {
+	# Each comment step (fetch-state, render, post) must exclude skip-reason
+	# 'fork' as well as 'not-a-pr', so fork PRs take the graceful skip path
+	# instead of attempting a sticky-comment upsert with a read-only token.
+	run grep -c "steps.preflight.outputs.skip-reason != 'fork'" "$WORKFLOW"
+	assert_success
+	assert_output "3"
+}

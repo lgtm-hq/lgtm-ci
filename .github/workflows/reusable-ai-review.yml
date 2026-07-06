@@ -207,7 +207,8 @@ jobs:
         id: fetch-state
         if: >-
           inputs.post &&
-          steps.preflight.outputs.skip-reason != 'not-a-pr'
+          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
+          steps.preflight.outputs.skip-reason != 'fork'
         shell: bash
         env:
           STEP: fetch-state
@@ -221,7 +222,8 @@ jobs:
         id: render
         if: >-
           inputs.post &&
-          steps.preflight.outputs.skip-reason != 'not-a-pr'
+          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
+          steps.preflight.outputs.skip-reason != 'fork'
         shell: bash
         env:
           STEP: render
@@ -236,7 +238,8 @@ jobs:
       - name: Post sticky review comment
         if: >-
           inputs.post &&
-          steps.preflight.outputs.skip-reason != 'not-a-pr'
+          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
+          steps.preflight.outputs.skip-reason != 'fork'
         uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
         with:
           file: ${{ runner.temp }}/ai-review-comment.md
