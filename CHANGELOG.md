@@ -11,6 +11,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **workflows**: **BREAKING** — `reusable-deploy-pages.yml` is now a hardened
+  **deploy-only** workflow (#410). The caller builds the site and runs
+  `actions/upload-pages-artifact` in a prior job, then calls this workflow with
+  `needs: <build-job>` to deploy the named artifact via `actions/deploy-pages`.
+  The build-related inputs (`source-path`, `build-command`, `node-version`,
+  `package-manager`, `working-directory`, `frozen-lockfile`) are removed and the
+  in-workflow `build` job is gone; the concurrency group is now `pages`. Callers
+  that relied on the old build+deploy behavior should migrate to
+  `reusable-deploy-site-with-reports.yml` (which still builds and deploys).
 - **scripts**: parameterize near-duplicate language-family scripts (#372):
   `aggregate-{node,python,rust}-results.sh` merged into `aggregate-results.sh`
   (`RESULTS_DIR`), `write-{node,python,rust}-summary.sh` merged into

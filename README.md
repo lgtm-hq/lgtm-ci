@@ -185,7 +185,7 @@ steps:
 | `reusable-github-release.yml`          | GitHub Release with artifact assets          |
 | `reusable-publish-npm.yml`             | npm publishing                               |
 | `reusable-publish-gem.yml`             | RubyGems publishing                          |
-| `reusable-deploy-pages.yml`            | GitHub Pages deployment                      |
+| `reusable-deploy-pages.yml`            | GitHub Pages deploy-only (caller builds)     |
 | `reusable-docker.yml`                  | Docker build and publish                     |
 | `reusable-coverage.yml`                | Test coverage collection                     |
 | `reusable-test-python.yml`             | Python tests with optional test summaries    |
