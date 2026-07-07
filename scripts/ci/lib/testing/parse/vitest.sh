@@ -5,6 +5,10 @@
 # Usage:
 #   source "$(dirname "${BASH_SOURCE:-$0}")/vitest.sh"
 #   parse_vitest_json "results.json"
+#
+# Supported JSON reporter shape:
+# - Vitest 4 aggregate JSON reporter: numPassedTests, numFailedTests,
+#   numTotalTests at root (plus numPendingTests / numTodoTests for skipped)
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_TESTING_PARSE_VITEST_LOADED:-}" ]] && return 0
@@ -16,32 +20,28 @@ readonly _LGTM_CI_TESTING_PARSE_VITEST_LOADED=1
 parse_vitest_json() {
 	local file="${1:-}"
 
+	TESTS_PASSED=0
+	TESTS_FAILED=0
+	TESTS_SKIPPED=0
+	TESTS_TOTAL=0
+	TESTS_DURATION="0"
+
 	if [[ ! -f "$file" ]]; then
-		TESTS_PASSED=0
-		TESTS_FAILED=0
-		TESTS_SKIPPED=0
-		TESTS_TOTAL=0
-		TESTS_DURATION="0"
 		return 1
 	fi
 
-	# Vitest JSON reporter format
-	TESTS_PASSED=$(jq -r '[.testResults[].assertionResults[] | select(.status == "passed")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_FAILED=$(jq -r '[.testResults[].assertionResults[] | select(.status == "failed")] | length' "$file" 2>/dev/null || echo "0")
-	TESTS_SKIPPED=$(jq -r '[.testResults[].assertionResults[] | select(.status == "pending" or .status == "skipped")] | length' "$file" 2>/dev/null || echo "0")
-
-	# Try alternative format (vitest built-in json reporter)
-	# Only fallback when ALL counts are zero (avoid overwriting skipped-only results)
-	if [[ "$TESTS_PASSED" == "0" ]] && [[ "$TESTS_FAILED" == "0" ]] && [[ "$TESTS_SKIPPED" == "0" ]]; then
-		TESTS_PASSED=$(jq -r '.numPassedTests // 0' "$file" 2>/dev/null || echo "0")
-		TESTS_FAILED=$(jq -r '.numFailedTests // 0' "$file" 2>/dev/null || echo "0")
-		TESTS_SKIPPED=$(jq -r '.numPendingTests // 0' "$file" 2>/dev/null || echo "0")
-		TESTS_TOTAL=$(jq -r '.numTotalTests // 0' "$file" 2>/dev/null || echo "0")
+	local num_total_type
+	num_total_type=$(jq -r '.numTotalTests | type' "$file" 2>/dev/null || echo "null")
+	if [[ "$num_total_type" != "number" ]]; then
+		return 1
 	fi
 
-	if [[ "$TESTS_TOTAL" == "0" ]] || [[ -z "$TESTS_TOTAL" ]]; then
-		TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED + TESTS_SKIPPED))
-	fi
+	TESTS_PASSED=$(jq -r '.numPassedTests // 0' "$file" 2>/dev/null || echo "0")
+	TESTS_FAILED=$(jq -r '.numFailedTests // 0' "$file" 2>/dev/null || echo "0")
+	TESTS_SKIPPED=$(
+		jq -r '(.numPendingTests // 0) + (.numTodoTests // 0)' "$file" 2>/dev/null || echo "0"
+	)
+	TESTS_TOTAL=$(jq -r '.numTotalTests // 0' "$file" 2>/dev/null || echo "0")
 
 	# Duration in milliseconds
 	local start_time end_time

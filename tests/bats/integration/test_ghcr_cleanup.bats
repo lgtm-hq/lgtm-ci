@@ -23,6 +23,9 @@ setup() {
 	export MIN_AGE_DAYS="7"
 	export KEEP_LATEST="2"
 	export DRY_RUN="false"
+	export PROTECT_REFERENCED="false"
+	export PRUNE_BUILDCACHE="false"
+	export GH_TOKEN="test-token"
 }
 
 teardown() {
@@ -190,4 +193,136 @@ EOF
 	assert_success
 	# Only 1 untagged, which is within keep-latest=2
 	assert_output --partial "nothing to delete"
+}
+
+# =============================================================================
+# keep-latest default and build-cache pruning
+# =============================================================================
+
+@test "ghcr-cleanup: keep-latest 0 deletes all eligible untagged versions" {
+	mock_gh_versions '[
+		{"id": 1, "name": "sha256:aaa", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 2, "name": "sha256:bbb", "updated_at": "2020-01-02T00:00:00Z", "metadata": {"container": {"tags": []}}}
+	]'
+
+	export KEEP_LATEST="0"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Deleted untagged version"
+}
+
+@test "ghcr-cleanup: deletes aged ephemeral build-cache tags" {
+	mock_gh_versions '[
+		{"id": 10, "name": "sha256:pr", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["pr-890"]}}},
+		{"id": 11, "name": "sha256:cache", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["cache"]}}}
+	]'
+
+	export PRUNE_BUILDCACHE="true"
+	export KEEP_LATEST="0"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Deleted build-cache version 10"
+	refute_output --partial "Deleted build-cache version 11"
+}
+
+@test "ghcr-cleanup: preserves mixed ephemeral and permanent tags" {
+	mock_gh_versions '[
+		{"id": 20, "name": "sha256:mixed", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["cache", "pr-3"]}}}
+	]'
+
+	export PRUNE_BUILDCACHE="true"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "nothing to delete"
+}
+
+@test "ghcr-cleanup: skips prune when registry auth fails with protect-referenced" {
+	mock_gh_versions '[
+		{"id": 1, "name": "sha256:orphan", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}}
+	]'
+
+	export PROTECT_REFERENCED="true"
+	export KEEP_LATEST="0"
+
+	mock_command_multi "curl" '
+		*ghcr.io/token*) exit 22;;
+		*) exit 1;;
+	'
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "registry auth failed"
+	refute_output --partial "Deleted"
+}
+
+@test "ghcr-cleanup: URL-encodes nested package names in Packages API paths" {
+	mock_command_record "gh" '[]' 0
+	export PACKAGE_NAME="nested/sub-package"
+	export PROTECT_REFERENCED="false"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "nothing to delete"
+
+	local calls
+	calls=$(cat "$BATS_TEST_TMPDIR/mock_calls_gh")
+	[[ "$calls" == *"nested%2Fsub-package"* ]]
+	[[ "$calls" != *"packages/container/nested/sub-package"* ]]
+}
+
+@test "ghcr-cleanup: protects referenced digests from untagged deletion" {
+	mock_gh_versions '[
+		{"id": 1, "name": "sha256:tagged-index", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["v1.0.0"]}}},
+		{"id": 2, "name": "sha256:slsa-child", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 3, "name": "sha256:orphan", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}}
+	]'
+
+	export PROTECT_REFERENCED="true"
+	export KEEP_LATEST="0"
+
+	mock_command_multi "curl" '
+		*ghcr.io/token*) printf "%s\n" "{\"token\":\"registry-bearer\"}";;
+		*manifests/sha256:tagged-index*) printf "%s\n200\n" "{\"manifests\":[{\"digest\":\"sha256:slsa-child\"}]}";;
+		*referrers/sha256:tagged-index*) printf "%s\n404\n" "{}";;
+		*) exit 1;;
+	'
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Deleted untagged version 3"
+	refute_output --partial "Deleted untagged version 2"
+}
+
+@test "ghcr-cleanup: skips untagged versions with unknown age" {
+	mock_gh_versions '[
+		{"id": 1, "name": "sha256:dated", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 2, "name": "sha256:undated", "metadata": {"container": {"tags": []}}}
+	]'
+
+	export KEEP_LATEST="0"
+	export PROTECT_REFERENCED="false"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Deleted untagged version 1"
+	refute_output --partial "Deleted untagged version 2"
+}
+
+@test "ghcr-cleanup: skips ephemeral cache versions with unknown age" {
+	mock_gh_versions '[
+		{"id": 10, "name": "sha256:dated-cache", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["pr-42"]}}},
+		{"id": 11, "name": "sha256:undated-cache", "metadata": {"container": {"tags": ["pr-99"]}}}
+	]'
+
+	export PRUNE_BUILDCACHE="true"
+	export KEEP_LATEST="0"
+	export PROTECT_REFERENCED="false"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Deleted build-cache version 10"
+	refute_output --partial "Deleted build-cache version 11"
 }

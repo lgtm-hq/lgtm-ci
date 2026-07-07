@@ -99,7 +99,7 @@ run_update_changelog() {
 
 [Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - add new feature (abc1234)"
 	assert_success
@@ -139,7 +139,7 @@ run_update_changelog() {
 	# a "## Unreleased" heading followed by section content
 	run_update_changelog "1.0.0" "## Unreleased
 
-### Features
+### Added
 
 - add new feature (abc1234)"
 	assert_success
@@ -178,6 +178,89 @@ run_update_changelog() {
 # Tests: preserve existing unreleased entries
 # =============================================================================
 
+@test "update-changelog: merges hand-curated entries into standard sections" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+### Added
+
+- Existing feature one ([#1])
+
+### Changed
+
+- Existing workflow change ([#2])
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD
+[#1]: https://github.com/test-org/test-repo/pull/1
+[#2]: https://github.com/test-org/test-repo/pull/2'
+
+	run_update_changelog "1.0.0" "### Added
+
+- new auto-generated entry (def5678)"
+	assert_success
+
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	echo "$changelog" | grep -q 'Previously Unreleased' && fail "Previously Unreleased should not appear"
+	echo "$changelog" | grep -q 'Existing feature one' || fail "'Existing feature one' not found in changelog"
+	echo "$changelog" | grep -q 'Existing workflow change' || fail "'Existing workflow change' not found in changelog"
+	echo "$changelog" | grep -q 'new auto-generated entry' || fail "'new auto-generated entry' not found in changelog"
+
+	run bash -c "awk '/^## \\[1\\.0\\.0\\]/{capture=1;next} capture && /^## \\[/{exit} capture' '${MOCK_GIT_REPO}/CHANGELOG.md' | grep -q '^### Added$'"
+	assert_success
+
+	run bash -c "awk '/^## \\[1\\.0\\.0\\]/{capture=1;next} capture && /^## \\[/{exit} capture' '${MOCK_GIT_REPO}/CHANGELOG.md' | grep -q '^### Changed$'"
+	assert_success
+}
+
+@test "update-changelog: preserves bare unreleased bullets without subsection headings" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+- Legacy flat entry ([#9])
+
+### Added
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD
+[#9]: https://github.com/test-org/test-repo/pull/9'
+
+	run_update_changelog "1.0.0" "### Added
+
+- generated entry (abc1234)"
+	assert_success
+
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	echo "$changelog" | grep -q 'Legacy flat entry' || fail "'Legacy flat entry' not found in changelog"
+	echo "$changelog" | grep -q 'generated entry' || fail "'generated entry' not found in changelog"
+}
+
 @test "update-changelog: preserves hand-curated unreleased entries" {
 	setup_changelog_repo
 
@@ -204,7 +287,7 @@ run_update_changelog() {
 [#1]: https://github.com/test-org/test-repo/pull/1
 [#2]: https://github.com/test-org/test-repo/pull/2'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - new auto-generated entry (def5678)"
 	assert_success
@@ -283,7 +366,7 @@ run_update_changelog() {
 [#10]: https://github.com/test-org/test-repo/pull/10
 [#20]: https://github.com/test-org/test-repo/pull/20'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - auto feature (aaa1111)"
 	assert_success
@@ -325,7 +408,7 @@ run_update_changelog() {
 
 [Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - a feature (abc1234)"
 	assert_success
@@ -376,7 +459,7 @@ run_update_changelog() {
 [Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD
 [#1]: https://github.com/test-org/test-repo/pull/1'
 
-	run_update_changelog "0.1.0" "### Features
+	run_update_changelog "0.1.0" "### Added
 
 - auto feature (bbb2222)"
 	assert_success
@@ -425,7 +508,7 @@ run_update_changelog() {
 
 [Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - new feature (ccc3333)"
 	assert_success
@@ -469,7 +552,7 @@ run_update_changelog() {
 
 ## [0.1.0] - 2026-01-01
 
-### Features
+### Added
 
 - old feature (aaa1111)
 
@@ -478,7 +561,7 @@ run_update_changelog() {
 
 	(cd "$MOCK_GIT_REPO" && git tag v0.1.0)
 
-	run_update_changelog "0.2.0" "### Features
+	run_update_changelog "0.2.0" "### Added
 
 - newer feature (ddd4444)"
 	assert_success
@@ -532,7 +615,7 @@ run_update_changelog() {
 [Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD
 [#1]: https://github.com/test-org/test-repo/pull/1'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - new feature (abc1234)"
 	assert_success
@@ -564,7 +647,7 @@ run_update_changelog() {
 
 [Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - a feature (abc1234)"
 	assert_success
@@ -601,13 +684,13 @@ run_update_changelog() {
 
 ## [0.6.0] - 2026-02-10
 
-### Features
+### Added
 
 - old feature from first run (aaa1111)
 
 ## [0.5.0] - 2026-02-09
 
-### Features
+### Added
 
 - even older feature (bbb2222)
 
@@ -617,11 +700,11 @@ run_update_changelog() {
 
 	(cd "$MOCK_GIT_REPO" && git tag v0.5.0)
 
-	run_update_changelog "0.6.0" "### Features
+	run_update_changelog "0.6.0" "### Added
 
 - old feature from first run (aaa1111)
 
-### Bug Fixes
+### Fixed
 
 - new fix added since first run (ccc3333)"
 	assert_success
@@ -682,18 +765,18 @@ run_update_changelog() {
 
 ## [1.0.0] - 2026-02-10
 
-### Features
+### Added
 
 - initial release feature (aaa1111)
 
 [Unreleased]: https://github.com/test-org/test-repo/compare/v1.0.0...HEAD
 [1.0.0]: https://github.com/test-org/test-repo/releases/tag/v1.0.0'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - initial release feature (aaa1111)
 
-### Bug Fixes
+### Fixed
 
 - hotfix after version PR merged (bbb2222)"
 	assert_success
@@ -730,6 +813,93 @@ run_update_changelog() {
 	echo "$changelog" | grep -q 'hotfix after version PR merged' || fail "'hotfix after version PR merged' not found in changelog"
 }
 
+@test "update-changelog: preserves breaking changes table with MD032 spacing" {
+	setup_changelog_repo
+
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+Target release: **v0.25.0** (breaking).
+
+### Added
+
+- **actions**: new composite (#99)
+
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+### Breaking changes
+
+| Removed | Use instead |
+| --- | --- |
+| old-workflow.yml | new-workflow.yml |
+
+See [docs/example.md](docs/example.md).
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v0.0.0...HEAD'
+
+	run_update_changelog "0.25.0" "### Changed
+
+- **ci**: breaking change (abc1234)"
+	assert_success
+
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	run bash -c 'grep -c "Target release: \*\*v0.25.0\*\*" <<<"$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one Target release line, found ${output}"
+
+	run bash -c 'grep -c "new composite" <<<"$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one new composite line, found ${output}"
+
+	run bash -c 'grep -c "| Removed | Use instead |" <<<"$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one migration table header, found ${output}"
+
+	run bash -c 'grep -c "### Breaking changes" <<<"$1"' _ "$changelog"
+	assert_success
+	[ "$output" -eq 1 ] || fail "expected exactly one breaking changes heading, found ${output}"
+
+	# MD032: blank line between list and table (no bullet line immediately before |)
+	run bash -c "
+		awk '
+			/^-/ { last = \$0; next }
+			/^\|/ && last ~ /^-/ {
+				print \"bullet immediately before table row\" > \"/dev/stderr\"
+				exit 1
+			}
+			{ last = \"\" }
+		' '${MOCK_GIT_REPO}/CHANGELOG.md'
+	"
+	assert_success
+
+	# MD032: blank line between prose and first bullet
+	run bash -c "
+		awk '
+			/^Target release:/ { prose = 1; prev = \$0; next }
+			prose && /^-/ {
+				if (prev !~ /^$/) {
+					print \"prose immediately before bullet\" > \"/dev/stderr\"
+					exit 1
+				}
+				prose = 0
+			}
+			{ prev = \$0 }
+		' '${MOCK_GIT_REPO}/CHANGELOG.md'
+	"
+	assert_success
+}
+
 @test "update-changelog: no triple-blank-line runs" {
 	setup_changelog_repo
 
@@ -756,7 +926,7 @@ run_update_changelog() {
 [#1]: https://github.com/test-org/test-repo/pull/1
 [#2]: https://github.com/test-org/test-repo/pull/2'
 
-	run_update_changelog "1.0.0" "### Features
+	run_update_changelog "1.0.0" "### Added
 
 - new feature (abc1234)"
 	assert_success

@@ -35,6 +35,11 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: "release-bump"
+      codeowners-path:
+        description: "Path to CODEOWNERS file"
+        required: false
+        type: string
+        default: ".github/CODEOWNERS"
       auto-merge:
         description: "Enable auto-merge (squash) on the created PR"
         required: false
@@ -78,12 +83,60 @@ name: "Reusable: Release Version PR"
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
+      report-failures:
+        description: >-
+          When true, open or update a deduplicated GitHub issue when the release
+          job fails on the target branch
+        required: false
+        type: boolean
+        default: true
+      failure-issue-labels:
+        description: Comma-separated labels for auto-opened release failure issues
+        required: false
+        type: string
+        default: "bug,ci,release,automation,infrastructure"
+      failure-target-branch:
+        description: >-
+          Branch name for failure notifications. Empty uses the repository default
+          branch.
+        required: false
+        type: string
+        default: ""
+
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 20
 
     secrets:
       RELEASE_APP_ID:
@@ -96,8 +149,8 @@ name: "Reusable: Release Version PR"
 jobs:
   version-pr:
     name: Create Version PR
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
       # Distinct from the caller's workflow-level group to avoid
       # a self-deadlock when a same-repo caller also serializes on
@@ -109,12 +162,39 @@ jobs:
       pull-requests: write
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci egress tooling
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
       - name: Create GitHub App installation token
         id: app-token
         # yamllint disable-line rule:line-length
@@ -140,7 +220,10 @@ jobs:
           path: .lgtm-ci-tooling
           # yamllint disable-line rule:line-length
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            scripts/ci/
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
@@ -210,7 +293,7 @@ jobs:
           && steps.version.outputs.release-needed == 'true'
           && contains(format(',{0},', inputs.ecosystems), ',rust,')
         # yamllint disable-line rule:line-length
-        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
 
@@ -292,6 +375,7 @@ jobs:
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
         with:
           token: ${{ steps.app-token.outputs.token }}
+          sign-commits: true
           branch: >-
             ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{
             steps.version.outputs.next-version }}
@@ -339,10 +423,42 @@ jobs:
           path: .lgtm-ci-tooling
           # yamllint disable-line rule:line-length
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            scripts/ci/
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
+
+      - name: Get PR author
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        id: pr-author
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
+          echo "author=${author}" >> "${GITHUB_OUTPUT}"
+
+      - name: Request CODEOWNER review
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+          PR_AUTHOR: ${{ steps.pr-author.outputs.author }}
+          PR_AUTHOR_TYPE: Bot
+          CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
+          REQUEST_CODEOWNER_REVIEW: "true"
+        run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh
 
       - name: Enable auto-merge
         # yamllint disable-line rule:line-length
@@ -376,3 +492,71 @@ jobs:
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
+
+  report-release-failure:
+    name: Report release automation failure
+    needs: [version-pr]
+    if: >-
+      always() &&
+      inputs.report-failures &&
+      needs.version-pr.result == 'failure'
+    runs-on: ${{ inputs.runner-image }}
+    # Keep an independent short cap: the caller's timeout-minutes bounds the
+    # main version-pr job, and lowering it must not cancel failure reporting.
+    timeout-minutes: 10
+    permissions:
+      # Read workflow/job metadata to generate failure context
+      actions: read
+      # Read repository context for issue body
+      contents: read
+      # Create or update failure notification issues
+      issues: write
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress-failure
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress-failure.outputs['allowed-endpoints'] }}
+
+      - name: Write failure trigger summary
+        shell: bash
+        env:
+          RELEASE_WORKFLOW_KEY: release-version-pr
+          PRIMARY_JOB_FAILED: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          write_trigger_summary
+
+      - name: Notify release failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_WORKFLOW_KEY: release-version-pr
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+          FAILURE_TARGET_BRANCH: ${{ inputs.failure-target-branch }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          notify_failure

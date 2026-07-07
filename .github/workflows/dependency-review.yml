@@ -1,0 +1,33 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Security - Dependency Review
+
+'on':
+  pull_request:
+    branches: [main]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: dependency-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependency-review:
+    uses: ./.github/workflows/reusable-dependency-review.yml
+    with:
+      fail-on-severity: high
+      tooling-ref: ${{ github.sha }}
+      egress-policy: block
+      egress-preset: scorecard
+      allowed-endpoints-mode: append
+      allowed-endpoints: |
+        api.deps.dev:443
+        release-assets.githubusercontent.com:443
+    permissions:
+      # Read repository contents for dependency-review-action
+      contents: read
+      # Read PR metadata for review comments
+      pull-requests: read

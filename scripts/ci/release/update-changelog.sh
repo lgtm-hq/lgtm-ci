@@ -25,6 +25,8 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 source "$LIB_DIR/log.sh"
 # shellcheck source=../lib/github.sh
 source "$LIB_DIR/github.sh"
+# shellcheck source=../lib/release/changelog_merge.sh
+source "$LIB_DIR/release/changelog_merge.sh"
 
 : "${VERSION:?VERSION is required}"
 : "${CHANGELOG_BODY=}"
@@ -96,29 +98,15 @@ capture && /^## \[/ { exit }
 capture { print }
 ' "$CHANGELOG_FILE")
 
-# Strip Keep-a-Changelog sub-headers, reference-style links, and blank lines
-# to get only bullet entries (lines starting with -)
-EXISTING_ENTRIES=$(echo "$EXISTING_UNRELEASED" | grep -v '^### ' | grep -v '^\[' | sed '/^[[:space:]]*$/d') || true
-
 # Strip leading H2 heading from CHANGELOG_BODY if present.
 # generate-changelog.sh outputs "## Unreleased" or "## [version] - date"
 # as the first line, but update-changelog.sh creates its own versioned
 # heading — keeping both produces duplicate H2s that violate MD024.
 CHANGELOG_BODY=$(printf '%s' "$CHANGELOG_BODY" | sed '1{/^## /d;}' | sed '/./,$!d')
 
-# If we have both existing and generated entries, combine them
-if [[ -n "$EXISTING_ENTRIES" ]] && [[ -n "$CHANGELOG_BODY" ]]; then
-	# Append existing entries under a "Previously Unreleased" sub-section
-	# to distinguish hand-curated entries from auto-generated ones
-	CHANGELOG_BODY="${CHANGELOG_BODY}
-
-### Previously Unreleased
-
-${EXISTING_ENTRIES}"
-elif [[ -n "$EXISTING_ENTRIES" ]]; then
-	CHANGELOG_BODY="### Previously Unreleased
-
-${EXISTING_ENTRIES}"
+# Merge hand-curated [Unreleased] sections with generated release notes.
+if [[ -n "$EXISTING_UNRELEASED" ]] || [[ -n "$CHANGELOG_BODY" ]]; then
+	CHANGELOG_BODY=$(merge_changelog_sections "$CHANGELOG_BODY" "$EXISTING_UNRELEASED")
 fi
 
 # Rebuild NEW_SECTION with the merged content

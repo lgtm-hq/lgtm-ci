@@ -36,12 +36,6 @@ teardown() {
 	assert_output "loaded"
 }
 
-@test "publish.sh: sources publish/homebrew.sh" {
-	run bash -c 'source "$LIB_DIR/publish.sh" && declare -f generate_formula_from_pypi >/dev/null && echo "loaded"'
-	assert_success
-	assert_output "loaded"
-}
-
 # =============================================================================
 # Guard pattern tests
 # =============================================================================

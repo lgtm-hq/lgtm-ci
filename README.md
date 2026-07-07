@@ -22,6 +22,10 @@ and shell utilities.
 
 ## 🚀 Quick Start
 
+New repository? Follow the task-ordered consumer guide in
+[docs/onboarding.md](docs/onboarding.md) — starter example selection, release
+GitHub App secrets, egress audit→block flow, and release-SHA pinning.
+
 ### Using a Composite Action
 
 ```yaml
@@ -44,14 +48,30 @@ jobs:
   quality:
     permissions:
       contents: read
-      packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality
-      pull-requests: write # post/update the standard lintro PR comment
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@v1
-    # Optional: with: { tools: "ruff,yamllint", post-pr-comment: true }
+      packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality-lint
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
+
+  publish-quality-summary:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    permissions:
+      contents: read
+      pull-requests: write
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@v1
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
 
 Reusable workflows share a standard contract (`tooling-ref`, `egress-policy`,
 `job-name`, permissions by mode). See [docs/workflow-contract.md](docs/workflow-contract.md).
+
+You do **not** need to copy `.github/actions/harden-runner` or
+`resolve-egress-allowlist` into your repository — reusables fetch them from lgtm-ci
+via `.lgtm-ci-tooling` (see [docs/reusable-workflows.md](docs/reusable-workflows.md) and
+[examples/README.md](examples/README.md)).
 
 ### Using Shell Libraries
 
@@ -85,12 +105,13 @@ steps:
 
 #### Security & Hardening
 
-| Action                 | Description                             |
-| ---------------------- | --------------------------------------- |
-| `harden-runner`        | Security hardening with egress presets  |
-| `secure-checkout`      | Hardened git checkout                   |
-| `scan-vulnerabilities` | Vulnerability scanning                  |
-| `egress-audit`         | Network egress monitoring and reporting |
+| Action                     | Description                                        |
+| -------------------------- | -------------------------------------------------- |
+| `resolve-egress-allowlist` | Resolve egress presets/endpoints before hardening  |
+| `harden-runner`            | StepSecurity hardening with resolved allowlist     |
+| `secure-checkout`          | Hardened git checkout                              |
+| `scan-vulnerabilities`     | Vulnerability scanning                             |
+| `egress-audit`             | Network egress monitoring and reporting            |
 
 #### Quality & Testing
 
@@ -102,21 +123,24 @@ steps:
 | `run-pytest`        | Pytest test execution                    |
 | `run-playwright`    | Playwright E2E test execution            |
 | `run-lighthouse`    | Lighthouse performance audits            |
-| `semantic-pr-title` | Conventional commits PR title validation |
 
 #### Reporting & Comments
 
-| Action                        | Description                   |
-| ----------------------------- | ----------------------------- |
-| `post-pr-comment`             | Marker-based PR commenting    |
-| `generate-coverage-badge`     | Coverage badge generation     |
-| `generate-coverage-comment`   | Coverage report PR comments   |
-| `generate-playwright-comment` | E2E test result comments      |
-| `generate-lighthouse-comment` | Performance metric comments   |
-| `publish-test-results`        | Test result publishing        |
-| `check-coverage-threshold`    | Coverage threshold validation |
-| `collect-coverage`            | Coverage data collection      |
-| `merge-playwright-reports`    | Playwright report merging     |
+<!-- markdownlint-disable MD013 -- action catalog table; descriptions exceed default line length -->
+
+| Action                        | Description                                              |
+| ----------------------------- | -------------------------------------------------------- |
+| `post-pr-comment`             | Marker-based PR comment transport (any summary/report)   |
+| `generate-coverage-badge`     | Coverage badge generation                                |
+| `generate-coverage-comment`   | Coverage test summary markdown                           |
+| `generate-playwright-comment` | E2E test result comments                                 |
+| `generate-lighthouse-comment` | Performance metric comments                              |
+| `publish-test-results`        | Test result publishing                                   |
+| `check-coverage-threshold`    | Coverage threshold validation                            |
+| `collect-coverage`            | Coverage data collection                                 |
+| `merge-playwright-reports`    | Playwright report merging                                |
+
+<!-- markdownlint-enable MD013 -->
 
 #### Build & Release
 
@@ -135,50 +159,62 @@ steps:
 
 #### Publishing & Deployment
 
-| Action             | Description                  |
-| ------------------ | ---------------------------- |
-| `publish-npm`      | npm package publishing       |
-| `publish-pypi`     | PyPI publishing with OIDC    |
-| `publish-gem`      | RubyGems publishing          |
-| `update-homebrew`  | Homebrew formula updates     |
-| `validate-package` | Package validation           |
-| `wait-for-package` | Package availability polling |
-| `deploy-pages`     | GitHub Pages deployment      |
+| Action                    | Description                                                  |
+| ------------------------- | ------------------------------------------------------------ |
+| `publish-npm`             | npm package publishing                                       |
+| `build-python-package`    | Build Python sdist/wheel                                     |
+| `prepare-pypi-upload`     | Download, validate, and expose dist metadata for PyPI upload |
+| `publish-gem`             | RubyGems publishing                                          |
+| `trigger-homebrew-update` | Dispatch Homebrew formula updates to homebrew-tap            |
+| `validate-package`        | Package validation                                           |
+| `wait-for-package`        | Package availability polling                                 |
+| `deploy-pages`            | GitHub Pages deployment                                      |
 
 ### Reusable Workflows
 
-| Workflow                               | Description                            |
-| -------------------------------------- | -------------------------------------- |
-| `reusable-quality.yml`                 | Lintro via full py-lintro Docker image |
-| `reusable-sbom.yml`                    | SBOM generation with Cosign signing    |
-| `reusable-release-version-pr.yml`      | Release version PR with changelog      |
-| `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge          |
-| `reusable-publish-pypi.yml`            | PyPI publishing with OIDC              |
-| `reusable-publish-npm.yml`             | npm publishing                         |
-| `reusable-publish-gem.yml`             | RubyGems publishing                    |
-| `reusable-publish-homebrew.yml`        | Homebrew formula publishing            |
-| `reusable-deploy-pages.yml`            | GitHub Pages deployment                |
-| `reusable-docker.yml`                  | Docker build and publish               |
-| `reusable-coverage.yml`                | Test coverage collection               |
-| `reusable-test-python.yml`             | Python tests with PR comments          |
-| `reusable-test-node.yml`               | Node.js tests with PR comments         |
-| `reusable-test-shell.yml`              | BATS shell tests with PR comments      |
-| `reusable-test-pr-comment.yml`         | Shared test PR comment workflow        |
-| `reusable-test-e2e.yml`                | E2E testing with Playwright            |
-| `reusable-test-e2e-matrix.yml`         | Matrix E2E testing                     |
-| `reusable-pr-auto-assign.yml`          | PR auto-assignment                     |
-| `reusable-pr-labeler.yml`              | PR auto-labeling                       |
-| `reusable-validate.yml`                | Generic repo validation script runner  |
-| `reusable-codeql.yml`                  | CodeQL security analysis               |
-| `reusable-dependency-review.yml`       | Dependency review gate                 |
-| `reusable-scorecards.yml`              | OpenSSF Scorecard analysis             |
-| `reusable-semantic-pr-title.yml`       | Conventional PR title validation       |
-| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation   |
-| `reusable-link-check.yml`              | Markdown and HTML link checking        |
+<!-- markdownlint-disable MD013 MD060 -- workflow catalog table; long workflow names exceed column width -->
+
+| Workflow                               | Description                                  |
+| -------------------------------------- | -------------------------------------------- |
+| `reusable-quality-lint.yml`            | Lintro via full py-lintro Docker image       |
+| `reusable-publish-quality-summary.yml` | Publish lintro quality summary               |
+| `reusable-sbom.yml`                    | SBOM generation with Cosign signing          |
+| `reusable-release-version-pr.yml`      | Release version PR with changelog            |
+| `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge                |
+| `reusable-build-python-dist.yml`       | Build Python dist artifact                   |
+| `reusable-github-release.yml`          | GitHub Release with artifact assets          |
+| `reusable-publish-npm.yml`             | npm publishing                               |
+| `reusable-publish-gem.yml`             | RubyGems publishing                          |
+| `reusable-deploy-pages.yml`            | GitHub Pages deploy-only (caller builds)     |
+| `reusable-docker.yml`                  | Docker build and publish                     |
+| `reusable-coverage.yml`                | Test coverage collection                     |
+| `reusable-test-python.yml`             | Python tests with optional test summaries    |
+| `reusable-test-node.yml`               | Node.js Vitest tests with optional summaries |
+| `reusable-test-node-custom.yml`        | Node.js custom test command workflow         |
+| `reusable-test-shell.yml`              | BATS shell tests with optional summaries     |
+| `reusable-publish-test-summary.yml`    | Publish test summary for test/coverage runs  |
+| `reusable-publish-artifact-report.yml` | Publish markdown report from artifact        |
+| `reusable-test-e2e.yml`                | E2E testing with Playwright                  |
+| `reusable-test-e2e-matrix.yml`         | Matrix E2E testing                           |
+| `reusable-pr-auto-assign.yml`          | PR auto-assignment                           |
+| `reusable-pr-labeler.yml`              | PR auto-labeling                             |
+| `reusable-validate.yml`                | Generic repo validation script runner        |
+| `reusable-codeql.yml`                  | CodeQL security analysis                     |
+| `reusable-dependency-review.yml`       | Dependency review gate                       |
+| `reusable-security-audit.yml`          | lintro/osv-scanner audit + comment artifact    |
+| `reusable-publish-security-audit-comment.yml` | Publish security audit PR comment     |
+| `reusable-vuln-suppression-check.yml`  | Weekly stale OSV suppression cleanup + auto-PR   |
+| `reusable-site-quality.yml`            | Docs site build, lychee, and site tests        |
+| `reusable-scorecards.yml`              | OpenSSF Scorecard analysis                   |
+| `reusable-semantic-pr-title.yml`       | Conventional PR title validation + comments  |
+| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation         |
+| `reusable-link-check.yml`              | Markdown and HTML link checking              |
+
+<!-- markdownlint-enable MD013 -->
 
 Test workflows are self-contained for consumers: they check out lgtm-ci
 tooling internally, run the configured test suite, and post/update the
-standard PR comment when callers grant `pull-requests: write`.
+standard summary comment when callers grant `pull-requests: write`.
 
 ### Shell Libraries
 
@@ -250,7 +286,7 @@ for working examples.
 
 ## 🔨 Development
 
-CI and `reusable-quality.yml` run **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro`
+CI and `reusable-quality-lint.yml` run **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro`
 image** so every bundled tool is available. Mirror CI locally:
 
 ```bash

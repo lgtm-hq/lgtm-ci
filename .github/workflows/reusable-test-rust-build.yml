@@ -29,12 +29,29 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "quality"
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
@@ -69,28 +86,36 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
-            .github/actions/
-            scripts/ci/
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
-      - name: Harden runner
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
+          tooling-ref: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
 
       - name: Setup Rust
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust

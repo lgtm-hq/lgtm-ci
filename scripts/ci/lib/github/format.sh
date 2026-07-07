@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Formatting helpers for GitHub PR comments and summaries
+# Purpose: Formatting helpers for GitHub PR summaries and reports
 #
 # Usage:
 #   source "$(dirname "${BASH_SOURCE:-$0}")/format.sh"
@@ -56,8 +56,38 @@ get_github_pages_url() {
 	fi
 }
 
+# Derive wget --cut-dirs from a GitHub Pages site root URL
+# Usage: get_github_pages_wget_cut_dirs "https://owner.github.io/repo/"
+get_github_pages_wget_cut_dirs() {
+	local site_url="$1"
+
+	if [[ -z "$site_url" ]]; then
+		echo ""
+		return 1
+	fi
+
+	local without_scheme="${site_url#*://}"
+	if [[ "$without_scheme" == "$site_url" ]]; then
+		echo ""
+		return 1
+	fi
+
+	local path="${without_scheme#*/}"
+	path="${path#/}"
+	path="${path%/}"
+
+	if [[ -z "$path" ]]; then
+		echo 0
+		return 0
+	fi
+
+	local -a segments=()
+	IFS='/' read -r -a segments <<<"$path"
+	echo "${#segments[@]}"
+}
+
 # =============================================================================
-# Score formatting helpers for PR comments
+# Score formatting helpers for PR summaries and reports
 # =============================================================================
 
 # Get score emoji based on threshold
@@ -187,7 +217,7 @@ get_github_actions_run_url() {
 	echo "${server_url}/${repo}/actions/runs/${run_id}"
 }
 
-# Format a commit metadata line for PR comments.
+# Format a commit metadata line for PR summaries and reports.
 # Usage: format_github_commit_line
 format_github_commit_line() {
 	local sha="${GITHUB_SHA:-}"
@@ -206,5 +236,5 @@ format_github_commit_line() {
 # =============================================================================
 # Export functions
 # =============================================================================
-export -f get_github_pages_url score_emoji format_score_with_color format_percentage_with_color
+export -f get_github_pages_url get_github_pages_wget_cut_dirs score_emoji format_score_with_color format_percentage_with_color
 export -f get_github_actions_run_url format_github_commit_line

@@ -25,11 +25,20 @@ jobs:
       group: renovate-${{ github.ref }}
       cancel-in-progress: false
     steps:
-      - name: Harden Runner
+      - name: Checkout
         # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 1
+          persist-credentials: true
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.github/actions/resolve-egress-allowlist
         with:
           egress-policy: block
+          allowed-endpoints-mode: replace
           allowed-endpoints: >
             github.com:443
             api.github.com:443
@@ -41,13 +50,11 @@ jobs:
             pypi.org:443
             files.pythonhosted.org:443
 
-      - name: Checkout
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Harden Runner
+        uses: ./.github/actions/harden-runner
         with:
-          fetch-depth: 1
-          persist-credentials: true
-          token: ${{ secrets.GITHUB_TOKEN }}
+          egress-policy: block
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Self-hosted Renovate
         # yamllint disable-line rule:line-length

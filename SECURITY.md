@@ -2,52 +2,37 @@
 
 ## Reporting Security Issues
 
-Found a security vulnerability? Here's how to report it:
+Please do **not** open public GitHub issues for security vulnerabilities.
+Report them privately via
+[GitHub private vulnerability reporting](https://github.com/lgtm-hq/lgtm-ci/security/advisories/new)
+or email [security@lgtm-hq.com](mailto:security@lgtm-hq.com).
 
-### **Private Reporting Only**
+## Threat Model: Self-Gating CI Checks
 
-Please **do not** create public GitHub issues for security vulnerabilities. This helps
-prevent potential exploitation while we work on a fix.
+This repository's own quality gates (`validate-action-pinning.yml`, quality,
+shell tests) run on `pull_request` events and execute code **from the PR
+branch**. That means the gates are self-gating: a pull request can modify a
+validator script and the workflow that runs it in the same change, so the
+checks validate the attacker's version of the validator rather than the
+trusted one on `main`.
 
-### **Reporting Channels**
+This is an accepted residual risk, mitigated by controls outside the
+workflows themselves:
 
-You can report security issues through either:
+- **CODEOWNERS** — changes to workflows and CI scripts require review by
+  designated owners.
+- **Organization rulesets and branch protection** — merges to `main` require
+  an approving review; direct pushes are blocked.
+- **Required human review** — reviewers are the trust boundary. A malicious
+  change to a validator plus its workflow passes CI by construction; only
+  review catches it.
 
-- **GitHub Security** (preferred): Use
-  [private vulnerability reporting](https://github.com/lgtm-hq/lgtm-ci/security/advisories/new)
-- **Email**: Send details to [security@lgtm-hq.com](mailto:security@lgtm-hq.com)
+### Consumer impact
 
-### **How to Report**
-
-1. **GitHub Security Advisories**: Use the private vulnerability reporting link above
-2. **Email**: Send details to [security@lgtm-hq.com](mailto:security@lgtm-hq.com)
-3. **Subject**: Include "SECURITY: LGTM CI" in the subject line
-4. **Details**: Provide a clear description of the issue
-5. **Encryption** (optional but recommended): For sensitive details, request our PGP
-   public key in your initial email
-
-### **What to Include**
-
-- Description of the vulnerability
-- Steps to reproduce (if possible)
-- Potential impact assessment
-- Any suggested fixes you might have
-
-### **Response Timeline**
-
-- **Acknowledgment**: Within 24-48 hours
-- **Investigation**: We'll look into it promptly
-- **Updates**: You'll be kept informed of progress
-- **Fix**: We'll work on a solution and coordinate disclosure
-
-## For Contributors
-
-- Review dependencies regularly
-- Test security-related changes thoroughly
-- Never commit sensitive data (API keys, passwords, etc.)
-- Follow secure coding practices
-
-## Contact
-
-- **Primary**: [security@lgtm-hq.com](mailto:security@lgtm-hq.com)
-- **Backup**: [turbocoder13@gmail.com](mailto:turbocoder13@gmail.com)
+Consumer repositories pull `scripts/ci/` and composite actions at a pinned
+`tooling-ref`. A malicious change merged to this repository does **not**
+reach consumers immediately — it ships at each consumer's next repin. This
+limits blast radius but does not remove it: once a consumer repins past a
+malicious merge, that consumer runs the compromised tooling. Review
+requirements on this repository are therefore a security control for every
+downstream consumer, not just for lgtm-ci itself.

@@ -4,12 +4,18 @@ description: "Security hardening for GitHub Actions runners using StepSecurity"
 author: "lgtm-hq"
 
 inputs:
+  # Default block is intentional (see CHANGELOG: reusable workflows #268). Callers
+  # that need audit-only must set egress-policy: audit explicitly.
   egress-policy:
     description: "Egress policy: audit (log) or block (enforce allowlist)"
     required: false
-    default: "audit"
+    default: "block"
   allowed-endpoints:
-    description: "Allowed endpoints when egress-policy is block"
+    description: >-
+      Allowed endpoints when egress-policy is block. Use
+      ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist in a prior workflow
+      step when
+      applying egress-preset or merging presets with caller overrides.
     required: false
     default: ""
   disable-sudo:
@@ -29,6 +35,16 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # Create agent state before harden-runner; uses sudo while disable-sudo is still off.
+    # Linux-only: StepSecurity agent requires /home/agent (unavailable on Windows/macOS).
+    # Call validate-runner-policy first and skip this action when enforce-egress is false.
+    - name: Ensure agent state for post cleanup
+      if: runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo mkdir -p /home/agent
+        echo '{"event":"post","status":"skipped"}' | sudo tee /home/agent/post_event.json >/dev/null
+
     - name: Harden Runner
       id: harden
       # Pinned to SHA for supply chain security

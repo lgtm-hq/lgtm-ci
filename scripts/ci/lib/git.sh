@@ -61,7 +61,8 @@ get_git_remote_url() {
 
 # Get the most recent reachable tag from HEAD matching a pattern
 # Note: Returns the tag closest to HEAD in commit history, not necessarily
-# the highest version number. Use get_tags for version-sorted list.
+# the highest version number. Use get_latest_reachable_tag for highest semver
+# among reachable tags, or get_tags for all tags version-sorted.
 get_latest_tag() {
 	local pattern="${1:-v*}"
 	git describe --tags --match "$pattern" --abbrev=0 2>/dev/null
@@ -71,6 +72,12 @@ get_latest_tag() {
 get_tags() {
 	local pattern="${1:-v*}"
 	git tag -l "$pattern" --sort=-v:refname 2>/dev/null
+}
+
+# Get the highest semver among tags reachable from HEAD matching a pattern
+get_latest_reachable_tag() {
+	local pattern="${1:-v*}"
+	git tag -l "$pattern" --sort=-v:refname --merged HEAD 2>/dev/null | head -1
 }
 
 # Check if a tag exists
@@ -85,4 +92,4 @@ tag_exists() {
 # =============================================================================
 export -f get_git_root get_current_branch get_commit_sha get_short_sha
 export -f is_git_repo is_git_clean get_git_remote_url
-export -f get_latest_tag get_tags tag_exists
+export -f get_latest_tag get_tags get_latest_reachable_tag tag_exists

@@ -1,3 +1,10 @@
+# SPDX-License-Identifier: MIT
+#
+# Caller permissions:
+#   post-failure-comment: true (default) → grant pull-requests: write
+#   post-failure-comment: false → pull-requests: read is sufficient
+# The reusable job always requests pull-requests: write; comment steps are
+# gated by post-failure-comment and callers may cap the grant to read.
 ---
 name: Reusable Semantic PR Title
 
@@ -5,12 +12,17 @@ on:
   workflow_call:
     inputs:
       types:
-        description: "Allowed conventional commit types"
+        description: >-
+          Allowed conventional commit types (newline-delimited; legacy
+          comma-separated values are normalized automatically). Leave empty
+          for the default list.
         required: false
         type: string
-        default: "feat,fix,docs,style,refactor,perf,test,build,ci,chore,revert"
+        default: ""
       scopes:
-        description: "Allowed scopes, comma-separated. Empty allows any scope."
+        description: >-
+          Allowed scopes (newline-delimited; legacy comma-separated values are
+          normalized automatically). Empty allows any scope.
         required: false
         type: string
         default: ""
@@ -19,42 +31,211 @@ on:
         required: false
         type: boolean
         default: false
+      max-length:
+        description: "Maximum PR title length (0 for no limit)"
+        required: false
+        type: string
+        default: "0"
+      post-failure-comment:
+        description: "Post or clear a PR comment on validation failure"
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Upsert marker for the failure comment"
+        required: false
+        type: string
+        default: "semantic-pr-title"
+      tooling-ref:
+        description: >-
+          Optional — pins egress composites and helper scripts under
+          scripts/ci/. Defaults to caller workflow SHA.
+        required: false
+        type: string
+        default: ""
 
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-minimal"
       job-name:
         description: "GitHub check name for the semantic title check"
         required: false
         type: string
         default: "Semantic PR Title"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
 jobs:
   semantic-title:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # Do NOT skip this job on merge_group: GitHub cannot evaluate the dynamic
+    # name of a skipped job, so its check would report as "inputs.job-name"
+    # and the required context would never arrive (queue timeout). Instead the
+    # job always runs and every PR-dependent step no-ops on merge_group — the
+    # job succeeds in seconds and satisfies the required check (the title was
+    # already validated on the pull_request event).
     permissions:
-      pull-requests: read
+      contents: read
+      # post-pr-comment upserts failure comments on the pull request
+      pull-requests: write
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+      - name: Checkout repository
+        if: github.event_name != 'merge_group'
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        if: github.event_name != 'merge_group'
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        if: github.event_name != 'merge_group'
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/post-pr-comment
+            scripts/ci/
+
+      - name: Prepare semantic PR lists
+        id: prepare
+        if: github.event_name != 'merge_group'
+        env:
+          TYPES_INPUT: ${{ inputs.types }}
+          SCOPES_INPUT: ${{ inputs.scopes }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/prepare-semantic-pr-lists.sh
+
+      - name: Validate PR title length
+        id: length
+        if: >-
+          github.event_name == 'pull_request'
+          && inputs.max-length != ''
+          && inputs.max-length != '0'
+        continue-on-error: true
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+          MAX_LENGTH: ${{ inputs.max-length }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-pr-title-length.sh
 
       - name: Validate semantic PR title
+        id: semantic
+        if: github.event_name != 'merge_group'
+        continue-on-error: true
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
           GITHUB_TOKEN: ${{ github.token }}
         with:
-          types: ${{ inputs.types }}
-          scopes: ${{ inputs.scopes }}
+          types: ${{ steps.prepare.outputs.types }}
+          scopes: ${{ steps.prepare.outputs.scopes }}
           requireScope: ${{ inputs.require-scope }}
+
+      - name: Format semantic PR title failure comment
+        id: failure-comment
+        if: >-
+          always()
+          && inputs.post-failure-comment
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+          && (
+            steps.length.outputs.error != ''
+            || steps.semantic.outputs.error_message != ''
+          )
+        env:
+          LENGTH_ERROR: ${{ steps.length.outputs.error }}
+          SEMANTIC_ERROR: ${{ steps.semantic.outputs.error_message }}
+          ALLOWED_TYPES: ${{ steps.prepare.outputs.types }}
+          COMMENT_FILE: semantic-pr-title-failure.md
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/format-semantic-pr-title-failure-comment.sh
+
+      - name: Post semantic PR title failure comment
+        if: >-
+          always()
+          && inputs.post-failure-comment
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+          && steps.failure-comment.outcome == 'success'
+          && (
+            steps.length.outputs.error != ''
+            || steps.semantic.outputs.error_message != ''
+          )
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          file: semantic-pr-title-failure.md
+          marker: ${{ inputs.comment-marker }}
+
+      - name: Clear semantic PR title failure comment
+        if: >-
+          always()
+          && inputs.post-failure-comment
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+          && steps.length.outputs.error == ''
+          && steps.semantic.outputs.error_message == ''
+          && steps.semantic.outcome == 'success'
+          && (
+            steps.length.outcome == 'success'
+            || steps.length.outcome == 'skipped'
+          )
+        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
+        with:
+          marker: ${{ inputs.comment-marker }}
+          delete-on-empty: "true"
+
+      - name: Fail on invalid PR title
+        if: >-
+          always()
+          && (
+            steps.semantic.outcome == 'failure'
+            || steps.length.outcome == 'failure'
+          )
+        env:
+          EXIT_CODE: "1"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh

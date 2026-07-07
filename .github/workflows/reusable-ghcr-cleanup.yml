@@ -17,7 +17,26 @@ on:
         description: "Always keep N most recent untagged versions"
         required: false
         type: number
-        default: 5
+        default: 0
+      build-cache-pr-age-days:
+        description: >-
+          Minimum age in days before deleting ephemeral pr-*/mq-*/dispatch-*
+          build-cache tags
+        required: false
+        type: number
+        default: 14
+      protect-referenced:
+        description: >-
+          Collect digests referenced by tagged manifest indexes and skip prune
+          when collection is incomplete
+        required: false
+        type: boolean
+        default: true
+      prune-buildcache:
+        description: "Delete aged ephemeral build-cache tags (pr-*, mq-*, dispatch-*)"
+        required: false
+        type: boolean
+        default: true
       dry-run:
         description: "Log only, no deletions"
         required: false
@@ -32,12 +51,41 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
+
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
 
     secrets:
       token:
@@ -47,8 +95,8 @@ on:
 jobs:
   cleanup:
     name: Clean Untagged Images
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write
@@ -57,27 +105,34 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
-        # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
 
       - name: Clean untagged GHCR images
         shell: bash
@@ -86,6 +141,9 @@ jobs:
           PACKAGE_NAME: ${{ inputs.package-name }}
           MIN_AGE_DAYS: ${{ inputs.min-age-days }}
           KEEP_LATEST: ${{ inputs.keep-latest }}
+          BUILD_CACHE_PR_AGE_DAYS: ${{ inputs.build-cache-pr-age-days }}
+          PROTECT_REFERENCED: ${{ inputs.protect-referenced }}
+          PRUNE_BUILDCACHE: ${{ inputs.prune-buildcache }}
           DRY_RUN: ${{ inputs.dry-run }}
           GITHUB_ORG: ${{ github.repository_owner }}
         run: .lgtm-ci-tooling/scripts/ci/actions/ghcr-cleanup.sh

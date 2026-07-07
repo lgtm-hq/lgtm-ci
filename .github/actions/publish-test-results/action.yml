@@ -16,22 +16,22 @@ inputs:
     description: "Path to badge files"
     required: false
     default: ""
-  target-branch:
-    description: "Branch to deploy to"
-    required: false
-    default: "gh-pages"
   target-dir:
-    description: "Directory on target branch"
+    description: "Subdirectory under the Pages site root"
     required: false
     default: "."
-  keep-history:
-    description: "Keep historical reports (true/false)"
+  merge-existing-site:
+    description: >-
+      When true, merge existing live site content (or base-site-path) before
+      uploading so parallel Model A publishers retain sibling target-dir trees
     required: false
     default: "false"
-  retention-days:
-    description: "Days to keep historical reports"
+  base-site-path:
+    description: >-
+      Optional local directory tree to use as the existing site instead of
+      mirroring the public GitHub Pages URL
     required: false
-    default: "30"
+    default: ""
   working-directory:
     description: "Working directory"
     required: false
@@ -55,21 +55,21 @@ runs:
         COVERAGE_PATH: ${{ inputs.coverage-path }}
         BADGE_PATH: ${{ inputs.badge-path }}
         TARGET_DIR: ${{ inputs.target-dir }}
-        KEEP_HISTORY: ${{ inputs.keep-history }}
-        RETENTION_DAYS: ${{ inputs.retention-days }}
+        MERGE_EXISTING_SITE: ${{ inputs.merge-existing-site }}
+        BASE_SITE_PATH: ${{ inputs.base-site-path }}
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/publish-test-results.sh"
 
-    - name: Deploy to GitHub Pages
-      id: deploy
-      # Pinned to SHA for supply chain security
-      uses: peaceiris/actions-gh-pages@84c30a85c19949d7eee79c4ff27748b70285e453 # v4.1.0
+    - name: Configure GitHub Pages
+      uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
+
+    - name: Upload GitHub Pages artifact
+      uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
       with:
-        github_token: ${{ github.token }}
-        publish_dir: ${{ steps.prepare.outputs.staging-dir }}
-        publish_branch: ${{ inputs.target-branch }}
-        force_orphan: ${{ inputs.keep-history != 'true' }}
-        keep_files: ${{ inputs.keep-history == 'true' }}
-        commit_message: "Deploy test results and coverage [skip ci]"
+        path: ${{ steps.prepare.outputs.staging-dir }}
+
+    - name: Deploy to GitHub Pages
+      id: deployment
+      uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
 
     - name: Get Pages URL
       id: pages-url
@@ -77,6 +77,7 @@ runs:
       env:
         STEP: pages-url
         TARGET_DIR: ${{ inputs.target-dir }}
+        BASE_PAGE_URL: ${{ steps.deployment.outputs.page_url }}
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/publish-test-results.sh"
 
     - name: Generate summary
@@ -84,7 +85,6 @@ runs:
       env:
         STEP: summary
         PAGES_URL: ${{ steps.pages-url.outputs.pages-url }}
-        TARGET_BRANCH: ${{ inputs.target-branch }}
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/publish-test-results.sh"
 
 branding:

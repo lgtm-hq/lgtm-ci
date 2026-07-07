@@ -1,0 +1,44 @@
+# SPDX-License-Identifier: MIT
+# Known-untested scripts/ci entrypoints (paths relative to scripts/ci).
+# Ratchet: do not add entries; remove one whenever its script gains a BATS test.
+actions/check-coverage-threshold.sh
+actions/collect-coverage.sh
+actions/deploy-pages.sh
+actions/docker/cleanup-staging.sh
+actions/docker/health-check-local.sh
+actions/docker/health-lib.sh
+actions/docker/merge-manifests.sh
+actions/docker/metadata.sh
+actions/docker/push.sh
+actions/docker/record-digest.sh
+actions/docker/resolve-local-health-check-image.sh
+actions/docker/resolve-local-scan-image.sh
+actions/docker/set-output-digest.sh
+actions/docker/setup.sh
+actions/docker/sign-image.sh
+actions/generate-coverage-badge.sh
+actions/generate-lintro-comment.sh
+actions/generate-matrix.sh
+actions/generate-sbom.sh
+actions/merge-node-coverage.sh
+actions/merge-playwright-reports.sh
+actions/run-bats-tests.sh
+actions/run-command.sh
+actions/run-lighthouse.sh
+actions/run-playwright.sh
+actions/run-pytest.sh
+actions/run-tests.sh
+actions/run-validate-script.sh
+actions/setup-env.sh
+actions/setup-node.sh
+actions/setup-package-manager.sh
+actions/setup-python.sh
+actions/setup-ruby.sh
+quality/lint-check.sh
+release/build-rust-binary.sh
+release/remove-tooling-checkout.sh
+release/run-version-update-script.sh
+release/write-release-summary.sh
+release/write-version-pr-summary.sh
+testing/rust/build-workspace.sh
+testing/rust/setup-rust-nextest.sh

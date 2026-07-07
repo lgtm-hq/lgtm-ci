@@ -1,6 +1,6 @@
 ---
 name: "Generate Playwright Comment"
-description: "Generate a formatted PR comment from Playwright test results"
+description: "Generate Playwright test summary markdown from test results"
 author: "lgtm-hq"
 
 inputs:
@@ -47,8 +47,8 @@ runs:
     - name: Resolve scripts directory
       shell: bash
       run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
     - name: Generate comment
       id: generate

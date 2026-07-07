@@ -9,8 +9,11 @@ on:
         required: false
         type: boolean
         default: true
-      allow-list:
-        description: "Comma-separated action prefixes exempt from SHA pinning"
+      allow-tag-exceptions:
+        description: >-
+          Comma-separated full action names allowed to use tag refs when no SHA
+          is available (narrow escape hatch; SHA + version comment is required
+          otherwise)
         required: false
         type: string
         default: ""
@@ -19,6 +22,18 @@ on:
         required: false
         type: string
         default: ".github/workflows .github/actions"
+      verify-tags:
+        description: >-
+          Verify Renovate version comments resolve to the pinned SHA via GitHub API
+        required: false
+        type: boolean
+        default: false
+      audit-transitive:
+        description: >-
+          Warn when pinned composite actions reference nested actions by mutable tag
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -29,46 +44,86 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
 
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
+
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
 jobs:
   action-pinning:
     name: Validate Action Pinning
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-          persist-credentials: false
 
       - name: Validate action pinning
         uses: ./.lgtm-ci-tooling/.github/actions/validate-action-pinning
         with:
           enforce: ${{ inputs.fail-on-error }}
-          allow-org-versions: ${{ inputs.allow-list }}
+          allow-tag-exceptions: ${{ inputs.allow-tag-exceptions }}
           scan-paths: ${{ inputs.scan-paths }}
+          verify-tags: ${{ inputs.verify-tags }}
+          audit-transitive: ${{ inputs.audit-transitive }}

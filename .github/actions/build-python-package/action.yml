@@ -1,0 +1,100 @@
+---
+name: "Build Python package"
+description: >-
+  Preflight tag checks, validate metadata, build sdist/wheel, and twine-check dist.
+  Does not upload to PyPI.
+author: "lgtm-hq"
+inputs:
+  validate:
+    description: "Run twine check on built distributions"
+    required: false
+    default: "true"
+  verify-tag-version:
+    description: "Verify git tag matches pyproject.toml version"
+    required: false
+    default: "true"
+  ensure-tag-on-default-branch:
+    description: "Verify tagged commit is on the default branch"
+    required: false
+    default: "true"
+  default-branch:
+    description: "Default branch name for tag-on-default-branch check"
+    required: false
+    default: "main"
+  working-directory:
+    description: "Working directory containing the package"
+    required: false
+    default: "."
+
+outputs:
+  version:
+    description: "Package version"
+    value: ${{ steps.build.outputs.version }}
+  package-name:
+    description: "Package name"
+    value: ${{ steps.build.outputs.name }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        action_dir="${GITHUB_ACTION_PATH//\\//}"
+        repo_root="$(cd "$action_dir" && git rev-parse --show-toplevel 2>/dev/null \
+          || echo "${action_dir%/.github/actions/*}")"
+        echo "SCRIPTS_DIR=${repo_root}/scripts" >> "$GITHUB_ENV"
+
+    - name: Preflight tag validation
+      if: >-
+        inputs.verify-tag-version == 'true' ||
+        inputs.ensure-tag-on-default-branch == 'true'
+      shell: bash
+      env:
+        STEP: preflight
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        VERIFY_TAG_VERSION: ${{ inputs.verify-tag-version }}
+        ENSURE_TAG_ON_DEFAULT_BRANCH: ${{ inputs.ensure-tag-on-default-branch }}
+        DEFAULT_BRANCH: ${{ inputs.default-branch }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+    - name: Validate package metadata
+      id: validate
+      if: inputs.validate == 'true'
+      shell: bash
+      env:
+        STEP: validate
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+    - name: Build package
+      id: build
+      shell: bash
+      env:
+        STEP: build
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+    - name: Validate distribution
+      if: inputs.validate == 'true'
+      shell: bash
+      env:
+        STEP: validate-dist
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+    - name: Generate summary
+      shell: bash
+      env:
+        STEP: summary
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        PACKAGE_NAME: ${{ steps.build.outputs.name }}
+        PACKAGE_VERSION: ${{ steps.build.outputs.version }}
+        DRY_RUN: "true"
+        TEST_PYPI: "false"
+        PUBLISHED: "false"
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+branding:
+  icon: "package"
+  color: "blue"

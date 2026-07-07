@@ -1,0 +1,71 @@
+# SPDX-License-Identifier: MIT
+# Starter CI for a Python (uv/pytest) repository using lgtm-ci reusables.
+# Copy into your repository as .github/workflows/ci.yml.
+# Permissions per docs/workflow-contract.md "Permissions by mode".
+# Quality summary is a split caller job with a fork-PR guard; the test
+# reusable routes its PR comment through an internal publish-test-summary
+# job (contract: "Permissions split").
+---
+name: CI
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Lintro Quality Checks"
+      egress-policy: block
+      egress-preset: quality
+
+  publish-quality-summary:
+    needs: quality
+    # Fork PRs cannot post comments (contract: "Fork PR summaries and reports")
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+
+  test:
+    # Coverage mode: single python-version + coverage: true (contract:
+    # "Compat vs coverage contract"). For a compat matrix instead, pass
+    # python-versions: "3.11,3.12,3.13" with coverage/publish disabled.
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Python Tests"
+      python-version: "3.12"
+      coverage: true
+      upload-coverage: true
+      publish-test-summary: true
+      runner-image: ubuntu-24.04
+      egress-policy: block
+      egress-preset: pypi

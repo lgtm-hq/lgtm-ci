@@ -1,37 +1,117 @@
 # Reusable Workflows
 
-Use reusable workflows from consumer repositories with a thin caller job:
+Use reusable workflows from consumer repositories with a thin caller job.
+
+**Tag/release and non-PR pipelines** should call lint/test/coverage reusables
+directly (for example `reusable-quality-lint.yml`) with `contents: read` only.
+Grant `pull-requests: write` only when invoking workflows that post PR summaries and reports.
 
 ```yaml
 jobs:
   quality:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
     permissions:
       contents: read
       packages: read
-      pull-requests: write
 ```
 
-Pass `tooling-ref` when testing an unreleased lgtm-ci branch. Production callers
-should pin the workflow ref to a commit SHA.
+Pull-request pipelines with PR summaries and reports call both reusables directly:
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+
+  publish-quality-summary:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+```
+
+Pass `tooling-ref` when testing an unreleased lgtm-ci branch on **script-backed**
+reusables (quality, test-*, validate-*, release-*, etc.). Production callers
+should pin the workflow ref to a commit SHA and pass the same ref as
+`tooling-ref` on script-backed workflows.
+
+## Runner pinning
+
+Script-backed reusables accept `runner-image` on every job. Pin explicitly in
+production so runner OS does not drift with GitHub's `ubuntu-latest` alias:
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    with:
+      runner-image: ubuntu-24.04
+      tooling-ref: <sha>
+```
+
+Multi-arch Docker builds use `runner-map` instead — see
+[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables and
+npm/gem publish workflows do not expose `runner-image`; see
+[workflow-contract.md](workflow-contract.md#runner-pinning).
+
+**Action-only reusables** (labeler, dependency review, semantic PR title,
+CodeQL, Scorecard) do not run the full `scripts/ci/` suite in their analysis
+jobs; `tooling-ref` is optional and primarily pins egress composites.
+**`reusable-codeql.yml`** is an exception when callers pass `languages` or
+`language-build-modes`: its setup job sparse-checkouts
+`scripts/ci/actions/generate-codeql-matrix.sh` to build per-language matrix
+legs. Each leg still uses `github/codeql-action/*` with the resolved
+`build-mode` — not caller repo scripts. Pass `tooling-ref` when testing
+unreleased matrix-generator changes. See
+[workflow-contract.md](workflow-contract.md#action-only-reusables).
+
+Consumers do **not** need to vendor `.github/actions/harden-runner` or
+`resolve-egress-allowlist` — reusables sparse-checkout lgtm-ci into
+`.lgtm-ci-tooling/` and invoke `./.lgtm-ci-tooling/.github/actions/...` (same
+`tooling-ref` / `github.workflow_sha` as other tooling steps).
 
 See [workflow-contract.md](workflow-contract.md) for the standard input contract,
-permissions by mode, egress allowlists, and Rustume migration examples.
+permissions by mode, egress allowlists, and Rust examples.
+
+Caller examples live under [examples/](../examples/) (see [examples/README.md](../examples/README.md)).
+
+For GitHub Pages (coverage, test reports, and static sites), see
+[pages-publishing.md](pages-publishing.md).
 
 ## Quality And Validation
 
 ```yaml
 jobs:
   quality:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
     permissions:
       contents: read
       packages: read
+    with:
+      job-name: "Lintro Quality Checks"
+      egress-preset: quality
+
+  publish-quality-summary:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@<sha>
+    permissions:
+      contents: read
       pull-requests: write
     with:
-      post-pr-comment: true
-      job-name: "Lintro Quality Checks"
-      egress-policy: audit
+      exit-code: ${{ needs.quality.outputs.exit-code }}
 
   validate:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate.yml@<sha>
@@ -40,6 +120,30 @@ jobs:
       pull-requests: write
     with:
       script: scripts/ci/validate.sh
+```
+
+### Org ruleset gate (`reusable-required-check.yml`)
+
+Thin aggregate-status gate for org rulesets. Like every `uses:` job, it
+reports its check as `{caller_job_id} / {job-name}` — the ruleset must
+require that prefixed path (below:
+`test-suite-coverage / 🧪 Test Suite & Coverage`), never the unprefixed
+`job-name`. Only inline `runs-on` jobs match on `name:` alone. See
+[workflow-contract.md](workflow-contract.md) (Org ruleset check names) and
+the ruleset registry in [org-rulesets.md](org-rulesets.md).
+
+```yaml
+test-suite-coverage:
+  needs: test
+  if: always()
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@<sha>
+  permissions:
+    contents: read
+  with:
+    tooling-ref: <sha>
+    job-name: "🧪 Test Suite & Coverage"
+    upstream-result: ${{ needs.test.result }}
+    passed-output: ${{ needs.test.outputs.passed }}
 ```
 
 ## Tests
@@ -91,14 +195,62 @@ jobs:
       browsers: chromium,firefox
 ```
 
-`reusable-test-pr-comment.yml` is the shared internal comment workflow used by
-the language-specific test workflows.
+`reusable-publish-test-summary.yml` is the shared internal workflow used by
+language test reusables to publish test summaries (rich coverage table when
+coverage was collected, otherwise test pass/fail totals). Artifact-based comments
+use `reusable-publish-artifact-report.yml`.
+Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
+`reusable-publish-quality-summary.yml` (called directly by the caller workflow).
+
+### Pages coverage HTML inputs (`reusable-test-node`)
+
+<!-- markdownlint-disable MD013 -- prettier table column alignment -->
+
+| Input                           | Type    | Required | Default         | Purpose                               |
+| ------------------------------- | ------- | -------- | --------------- | ------------------------------------- |
+| `upload-pages-coverage-html`    | boolean | no       | `false`         | Upload flat HTML for Model B bundling |
+| `pages-coverage-artifact-name`  | string  | no       | `coverage-html` | Flat HTML artifact name               |
+| `pages-coverage-upload-on`      | string  | no       | `push-main`     | Upload gate selector (v1)             |
+| `pages-coverage-source-subpath` | string  | no       | `coverage`      | HTML dir under `working-directory`    |
+
+<!-- markdownlint-enable MD013 -->
+
+Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
+
+**`pages-coverage-upload-on` (v1):** The `(v1)` suffix marks the first supported
+upload-gating behavior. Additional values may be added in later releases without
+breaking existing callers. Use the literal string values below — they are not
+Git ref aliases.
+
+| Value       | Meaning                                                                          |
+| ----------- | -------------------------------------------------------------------------------- |
+| `push-main` | Upload only when `github.event_name == push` and `github.ref == refs/heads/main` |
+
+When `node-versions` is a matrix, only the **first** listed version uploads the
+flat artifact (avoids `upload-artifact` name collisions). Matrix debug artifacts
+(`node-coverage-<version>/…`) are unchanged when `upload-coverage: true`.
+
+**Job display names:** Vitest and custom Node tests are **split workflows**
+(`reusable-test-node.yml` and `reusable-test-node-custom.yml`). Each test job uses
+`${{ inputs.job-name }}` for the GitHub check label — there are no mutually
+skipped Vitest/custom siblings. For Python, Docker per-platform, and E2E matrix
+jobs, inner names are static; see [workflow-contract.md](workflow-contract.md)
+(§ Job display names).
+
+**test summaries:** Set `publish-test-summary: true` (default) to post or update one
+comment per workflow run. All publish paths delegate to
+`reusable-publish-test-summary.yml` — rich coverage when `coverage: true`
+(single runtime only), pass/fail totals otherwise. Multi-runtime matrices
+(`node-versions`, `python-versions`, `rust-toolchains`) are **compat mode**
+only: `coverage: false` and `publish-test-summary: false`. See
+[workflow-contract.md](workflow-contract.md) (§ Compat vs coverage contract).
 
 ### Rust
 
-Prefer `reusable-rust-build.yml` and `reusable-rust-coverage.yml` for separate
-required checks without skipped sibling jobs. `reusable-test-rust.yml` remains
-for backward compatibility. See [rust-testing.md](rust-testing.md).
+Use `reusable-rust-build.yml` for compile checks and `reusable-rust-test.yml` for
+tests. Set `coverage: false` for fast nextest-only runs or `coverage: true` for a
+single instrumented `llvm-cov nextest` run (tests + LCOV). See
+[rust-testing.md](rust-testing.md).
 
 ```yaml
 jobs:
@@ -111,18 +263,152 @@ jobs:
       job-name: "Rust Build"
       egress-policy: block
 
+  rust-compat:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Compat"
+      rust-toolchains: "stable,beta"
+      coverage: false
+      publish-test-summary: false
+      egress-policy: block
+
+  rust-test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Rust Tests"
+      rust-toolchain: stable
+      coverage: false
+      egress-policy: block
+
   rust-coverage:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-coverage.yml@<sha>
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
     with:
       tooling-ref: "<sha>"
       job-name: "Rust Coverage"
+      coverage: true
       egress-policy: block
+      upload-pages-coverage-html: true
+      pages-coverage-artifact-name: rust-coverage-html
 ```
 
+### Pages coverage HTML inputs (`reusable-rust-test` with `coverage: true`)
+
+<!-- markdownlint-disable MD013 -- prettier table column alignment -->
+
+| Input                          | Type    | Required | Default              | Purpose                            |
+| ------------------------------ | ------- | -------- | -------------------- | ---------------------------------- |
+| `upload-pages-coverage-html`   | boolean | no       | `false`              | Upload flat HTML for Model B sites |
+| `pages-coverage-artifact-name` | string  | no       | `rust-coverage-html` | Rust HTML artifact name            |
+| `pages-coverage-upload-on`     | string  | no       | `push-main`          | Upload gate selector (v1)          |
+
+<!-- markdownlint-enable MD013 -->
+
+Outputs: `pages-coverage-artifact-name`, `pages-coverage-uploaded` (`true`/`false`).
+
+### Rust release (cross-compile from Linux)
+
+Use `reusable-publish-rust-release.yml` on tag pushes for block-only binary
+builds and GitHub release creation. The orchestrator verifies the tag against
+`Cargo.toml`, calls `reusable-build-rust-binaries.yml` (strict tier,
+`rust-release` egress preset), and uploads all matrix artifacts to a release.
+
+```yaml
+on:
+  push:
+    tags: ["v*"]
+
+jobs:
+  release:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-rust-release.yml@<sha>
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+    with:
+      tooling-ref: "<sha>"
+      packages: "my-cli,my-server"
+```
+
+See [workflow-contract.md](workflow-contract.md#rust-release-contract) for artifact
+naming, default target matrix, and runner policy tiers.
+
+**`pages-coverage-upload-on` (v1):** Same gating semantics as the Node reusable
+(see table above). `push-main` is a literal selector meaning push events to
+`refs/heads/main`; it is not a Git ref alias. The `(v1)` suffix denotes the
+current upload-gating API; new non-breaking values may appear in later releases.
+
+HTML is generated in the same job as the LCOV run via `cargo llvm-cov report --html`
+(no second test run). The script flattens cargo-llvm-cov's `<output-dir>/html/`
+layout so the artifact root is browsable HTML.
+
 ## Release
+
+`reusable-release-version-pr.yml` generates Keep a Changelog section headings
+(`Added` / `Changed` / `Fixed`) as of v0.43.1. If your pin predates that, see
+[release-changelog.md](release-changelog.md) for the consumer migration guide
+(minimum pin, heading mapping, MD024 lint note).
+
+When release automation fails on the default branch, the follow-up
+`report-release-failure` job runs two steps in order: it first writes release
+trigger context to the job step summary, then creates or updates a deduplicated
+GitHub issue with failed step details. Set `report-failures: false` to disable
+both actions. See [workflow-contract.md](workflow-contract.md) for inputs.
+
+### Main failure notifier
+
+`reusable-main-failure-notifier.yml` generalizes the same dedup'd-issue
+mechanism for **any** main-branch workflow (docker publish, Pages deploy,
+dogfood lint, …) — with auto-merge and merge queue landing PRs unattended,
+nobody is watching main between merges. Call it from a failure-gated job:
+
+```yaml
+notify-failure:
+  needs: [build]
+  if: failure() && github.ref == 'refs/heads/main'
+  # yamllint disable-line rule:line-length
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@<sha> # vX.Y.Z
+  with:
+    workflow-key: docker-publish # stable key: one open issue per key+branch
+  permissions:
+    actions: read
+    contents: read
+    issues: write
+```
+
+Repeat failures comment on the existing open issue instead of filing new
+ones (tracking key `main-workflow-failure:<key>:<branch>`). Companion
+convention: while such an issue is open, treat main as red — disarm pending
+auto-merges (`gh pr merge --disable-auto`) until a fix-forward PR lands.
+
+`report-failures` defaults to `true`. GitHub rejects a reusable-workflow call at
+startup when the caller job does not grant every permission the reusable
+workflow declares. Grant at least `actions: read` and `issues: write` on the
+caller job, or pass `report-failures: false` when upgrading from a release that
+did not include failure reporting.
+
+Recommended caller `run-name` (reusable workflows cannot set this for you):
+
+```yaml
+name: Release Version PR
+run-name: >-
+  Release version PR via ${{ github.event_name }} on ${{ github.ref_name }}
+  @ ${{ github.sha }}
+```
+
+Including `${{ github.event_name }}`, `${{ github.ref_name }}`, and
+`${{ github.sha }}` in the `run-name` makes it easier to triage failures: the
+workflow run list shows the triggering event, branch, and commit so you can
+quickly correlate a failed run with the code and event that started it.
 
 ```yaml
 jobs:
@@ -131,6 +417,8 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+      actions: read
+      issues: write
     with:
       ecosystems: node,ruby,python
       skip-patterns: "^chore(release):"
@@ -141,10 +429,43 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@<sha>
     permissions:
       contents: write
+      actions: read
+      issues: write
     with:
       create-release: false
     secrets: inherit
 ```
+
+**Cargo workspace auto-tag** (Rust monorepos that bump `Cargo.toml` on `main`):
+
+```yaml
+name: Release - Auto Tag
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - Cargo.toml
+
+jobs:
+  auto-tag:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@<sha>
+    permissions:
+      contents: write
+      actions: read
+      issues: write
+    with:
+      version-source: cargo
+      version-file: Cargo.toml
+      skip-if-unchanged: true
+      create-release: false
+    secrets: inherit
+```
+
+`guard-release-commit` skips non-`chore(release):` commits — version bumps must
+use a `chore(release):` subject or the job writes a skip summary without tagging.
+`skip-if-unchanged` compares the Cargo version to the latest `tag-prefix` tag
+before creating a new tag.
 
 ## Publishing And Deployment
 
@@ -157,12 +478,69 @@ jobs:
       id-token: write
       attestations: write
 
-  pypi:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@<sha>
+  pypi-build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "<sha>" # vX.Y.Z
+      artifact-name: python-dist
+
+  pypi-upload:
+    needs: pypi-build
+    runs-on: ubuntu-latest
+    environment: pypi
     permissions:
       contents: read
       id-token: write
       attestations: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@<pin> # v2.19.4
+        with:
+          egress-policy: block
+          # workflow-contract.md § PyPI upload (OIDC)
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            actions.githubusercontent.com:443
+            *.blob.core.windows.net:443
+            ghcr.io:443
+            pkg-containers.githubusercontent.com:443
+            pypi.org:443
+            upload.pypi.org:443
+            files.pythonhosted.org:443
+            fulcio.sigstore.dev:443
+            rekor.sigstore.dev:443
+            tuf-repo-cdn.sigstore.dev:443
+            oauth2.sigstore.dev:443
+      - name: Prepare PyPI upload
+        id: prepare
+        uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
+        with:
+          artifact-name: python-dist
+          tooling-ref: "<sha>"
+      - name: Upload to PyPI
+        uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+        with:
+          repository-url: https://upload.pypi.org/legacy/
+          packages-dir: ${{ steps.prepare.outputs.dist-path }}
+      - name: Attest build provenance
+        continue-on-error: true
+        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
+        with:
+          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
+
+  github-release:
+    needs: pypi-upload
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@<sha>
+    permissions:
+      contents: write
+    with:
+      artifact-name: python-dist
+      tooling-ref: "<sha>" # vX.Y.Z
 
   gem:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-gem.yml@<sha>
@@ -170,21 +548,127 @@ jobs:
       contents: read
       id-token: write
 
-  homebrew:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-homebrew.yml@<sha>
+  # reusable-deploy-pages.yml is deploy-only: the caller builds the site and
+  # uploads the Pages artifact, then this workflow deploys it.
+  build-site:
+    runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
+    steps:
+      - uses: actions/checkout@<sha> # v6.x
+        with:
+          persist-credentials: false
+      # ... build the site into ./dist however the repo builds ...
+      - uses: actions/upload-pages-artifact@<sha> # v4.x
+        with:
+          name: github-pages
+          path: dist
 
   pages:
+    needs: build-site
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-pages.yml@<sha>
     permissions:
       contents: read
       pages: write
       id-token: write
     with:
-      build-command: bun run build
-      package-manager: bun
+      artifact-name: github-pages
 ```
+
+### Site + bundled CI reports (Model B)
+
+```yaml
+deploy-site:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@<sha>
+  permissions:
+    contents: read
+    pages: write
+    id-token: write
+    actions: read
+  with:
+    site-root: apps/site/dist
+    build-command: bun run build
+    package-manager: bun
+    bundle-manifest: examples/bundle-manifest-turbo-themes.json
+    commit-sha: ${{ github.event.workflow_run.head_sha }}
+    fallback-ref: main
+    tooling-ref: "<sha>"
+```
+
+See [pages-publishing.md](pages-publishing.md) for manifest schema, egress
+allowlist, and `workflow_run` caller patterns.
+
+See [python-release-publish.md](python-release-publish.md) for a full production
+tag-push layout (quality, SBOM, split publish, release assets).
+
+### Artifact download preview comment (`reusable-publish-artifact-preview.yml`)
+
+Posts (or updates) one **sticky PR comment** with a direct **download link** to a
+named build artifact, optionally prefixed with a short build summary. Use it when
+a PR uploads an artifact (a generated static site, a rendered report, a built
+bundle) and reviewers want to grab it in one click instead of hunting through the
+run page.
+
+The link is the `artifact-url` output of `actions/upload-artifact` v4+
+(`https://github.com/<owner>/<repo>/actions/runs/<run_id>/artifacts/<artifact_id>`).
+
+> **Constraint (honest):** the link downloads a **`.zip`** and requires the viewer
+> to be **signed in to GitHub with access to the repository**. It is a reviewer
+> convenience, not a public preview URL.
+
+Re-running on the same PR **updates** the existing comment (marker upsert — no
+duplicates). A missing/empty `artifact-url` degrades gracefully: a warning is
+emitted and any stale comment is removed (delete-on-empty) rather than posting a
+broken link. Fork PRs are skipped (they cannot receive workflow comments).
+
+```yaml
+jobs:
+  build-site:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    outputs:
+      artifact-url: ${{ steps.upload.outputs.artifact-url }}
+    steps:
+      # ... build the site into ./dist ...
+      - id: upload
+        uses: actions/upload-artifact@<sha> # v4+
+        with:
+          name: site-preview
+          path: dist
+
+  preview-comment:
+    needs: build-site
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-artifact-preview.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      artifact-name: site-preview
+      artifact-url: ${{ needs.build-site.outputs.artifact-url }}
+      marker: site-preview
+      summary: "Rendered landing site from this PR's formulae."
+      tooling-ref: "<sha>" # vX.Y.Z
+```
+
+<!-- markdownlint-disable MD013 -- input reference table -->
+
+| Input           | Type   | Required | Default                     | Purpose                                                      |
+| --------------- | ------ | -------- | --------------------------- | ----------------------------------------------------------- |
+| `artifact-name` | string | yes      | —                           | Name shown in the "⬇ Download …" link text                  |
+| `artifact-url`  | string | yes      | —                           | `upload-artifact` v4 `artifact-url` output (empty degrades) |
+| `marker`        | string | yes      | —                           | Sticky-comment upsert identity                              |
+| `summary`       | string | no       | `""`                        | Inline markdown prepended to the comment                    |
+| `summary-file`  | string | no       | `""`                        | Markdown file (wins over `summary` when non-empty)          |
+| `job-name`      | string | no       | `Publish artifact preview`  | Job display name                                            |
+
+<!-- markdownlint-enable MD013 -->
+
+Plus the standard contract inputs (`tooling-ref`, `egress-policy`,
+`egress-preset`, `allowed-endpoints`, `allowed-endpoints-mode`, `runner-image`,
+`timeout-minutes`). Unlike `reusable-publish-artifact-report.yml` (which posts
+the **contents** of a markdown file from inside a downloaded artifact), this
+workflow does not download the artifact — it only links to it.
 
 ## Build, Coverage, And Supply Chain
 
@@ -228,6 +712,30 @@ jobs:
       scan-exit-code: "1"
       smoke-test: --version
 ```
+
+### Push with runtime health check
+
+```yaml
+jobs:
+  docker:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha>
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
+    with:
+      push: true
+      runner-map: '{"linux/arm64":"ubuntu-24.04-arm"}'
+      health-check-cmd: curl -f http://127.0.0.1:8080/health
+      health-check-port: "8080"
+      health-check-timeout: "30s"
+```
+
+When `health-check-cmd` is set, the workflow loads or pulls the built image,
+starts a detached container, waits for `health-check-port` on `127.0.0.1`, runs
+the command on the runner, and only then publishes the final manifest/tags.
 
 ### Combined push and PR validation
 
@@ -276,15 +784,15 @@ jobs:
 
 ### Docker workflow inputs
 
-| Input | Default | Description |
-| ----- | ------- | ----------- |
-| `validate-on-pr` | `false` | Use native split builds on PRs without pushing staging images |
-| `scan-exit-code` | `"0"` | Trivy exit code; set `"1"` to block PRs on CRITICAL/HIGH CVEs |
-| `cache-registry-ref` | `""` | Registry cache fallback (e.g. `ghcr.io/org/repo:cache`) |
-| `cosign-sign` | `false` | Keyless Cosign signature on pushed manifests |
-| `no-cache` | `false` | Disable GHA/registry cache for clean release builds |
-| `provenance` | `true` | Generate provenance attestation (only when `push: true`) |
-| `sbom` | `true` | Generate SBOM attestation (only when `push: true`) |
+| Input                | Default | Description                                                   |
+| -------------------- | ------- | ------------------------------------------------------------- |
+| `validate-on-pr`     | `false` | Use native split builds on PRs without pushing staging images |
+| `scan-exit-code`     | `"0"`   | Trivy exit code; set `"1"` to block PRs on CRITICAL/HIGH CVEs |
+| `cache-registry-ref` | `""`    | Registry cache fallback (e.g. `ghcr.io/org/repo:cache`)       |
+| `cosign-sign`        | `false` | Keyless Cosign signature on pushed manifests                  |
+| `no-cache`           | `false` | Disable GHA/registry cache for clean release builds           |
+| `provenance`         | `true`  | Generate provenance attestation (only when `push: true`)      |
+| `sbom`               | `true`  | Generate SBOM attestation (only when `push: true`)            |
 
 `sbom` and `provenance` only apply when `push: true`. PR validation
 (`validate-on-pr` with `scan`) loads images locally via `--load`; buildx cannot
@@ -295,6 +803,409 @@ receives full SBOM and provenance attestations.
 All inputs are opt-in; existing callers keep current behavior without changes.
 
 ## PR Automation And Security
+
+### Semantic PR title
+
+`amannn/action-semantic-pull-request` expects **newline-delimited** `types` and
+`scopes`. The reusable workflow normalizes legacy comma-separated overrides and
+ships a correct default when `types` is omitted.
+
+By default the workflow posts a marker-based PR comment on validation failure
+and clears it when the title is fixed. Set `post-failure-comment: false` for
+check-only adopters.
+
+| Input                  | Default              | Notes                                      |
+| ---------------------- | -------------------- | ------------------------------------------ |
+| `post-failure-comment` | `true`               | Opt out for check-only workflows           |
+| `comment-marker`       | `semantic-pr-title`  | Upsert marker for failure comments         |
+| `max-length`           | `0` (no limit)       | Optional title length cap                  |
+| `require-scope`        | `false`              | Passed through to amannn                   |
+| `types` / `scopes`     | built-in defaults    | Override only when needed                  |
+
+Callers must grant `pull-requests: write` when `post-failure-comment` is enabled
+(the default). With `post-failure-comment: false`, `pull-requests: read` is
+sufficient. Workflow root `permissions: {}` otherwise strips PR access from the
+reusable job.
+
+### Security audit (lintro + osv-scanner)
+
+`reusable-security-audit.yml` runs osv-scanner via the pinned py-lintro Docker
+image and uploads a comment artifact on pull requests. The audit step uses
+`continue-on-error` with an explicit fail step so comment generation still runs
+when vulnerabilities are found.
+
+Post the marker-based PR comment from a separate caller job using
+`reusable-publish-security-audit-comment.yml` (same split pattern as quality
+lint + publish-quality-summary). The audit reusable requires only
+`contents: read` and `packages: read`.
+
+Add `merge_group:` to the caller workflow when using merge queue (audit runs;
+artifact upload and PR comment publish remain `pull_request`-only).
+
+| Input                    | Default                 | Notes                                      |
+| ------------------------ | ----------------------- | ------------------------------------------ |
+| `lintro-image`           | pinned py-lintro        | Override when adopting a newer lintro pin  |
+| `audit-script`           | tooling default         | Rarely needed — override for custom scans  |
+| `upload-comment-artifact`| `true`                  | Set `false` for push/schedule check-only   |
+| `comment-marker`         | `security-audit-report` | Used by publish reusable                   |
+
+```yaml
+'on':
+  pull_request:
+  merge_group:
+    types: [checks_requested]
+  push:
+    branches: [main]
+  schedule:
+    - cron: '30 5 * * 1'
+
+jobs:
+  security-audit:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-security-audit.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "🔐 Security Audit"
+      lintro-image: ghcr.io/lgtm-hq/py-lintro@sha256:...
+      upload-comment-artifact: ${{ github.event_name == 'pull_request' }}
+
+  publish-security-audit-comment:
+    needs: security-audit
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-security-audit-comment.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+```
+
+For push/schedule workflows, omit the publish job and pass
+`upload-comment-artifact: false`.
+
+### PR file breakdown comment
+
+`reusable-publish-file-breakdown.yml` fetches the PR changed-files payload via
+`gh api --paginate`, renders a grouped breakdown (files/additions/deletions per
+top-level directory) with a capped collapsible per-file table, and upserts it as
+a marker-based PR comment. All steps skip when no PR number can be detected;
+fork PRs skip the comment post.
+
+| Input            | Default                  | Notes                                     |
+| ---------------- | ------------------------ | ----------------------------------------- |
+| `comment-marker` | `file-breakdown`         | Upsert marker for the PR comment          |
+| `max-rows`       | `50`                     | Per-file rows shown (capped at 500)       |
+| `job-name`       | `Publish file breakdown` | Display name                              |
+| `egress-preset`  | `github-minimal`         | GitHub API + tooling checkout             |
+
+```yaml
+jobs:
+  file-breakdown:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-file-breakdown.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      tooling-ref: "<sha>"
+```
+
+### AI code review (`reusable-ai-review.yml`)
+
+Org-wide AI code review. Installs a pinned `lintro[ai]` from PyPI, runs
+`lintro review` hardened in CI, and publishes **one sticky, telemetry-rich PR
+comment** updated in place on every run. The engine is py-lintro (`lintro
+review`, released on PyPI); this reusable is the CI orchestration +
+comment-publishing layer — the same shape as `reusable-validate-lintro-version.yml`.
+
+**Zero-setup for consumers.** `ANTHROPIC_API_KEY` is provisioned as an lgtm-hq
+**org-wide secret**, so callers just forward it (or use `secrets: inherit`) with
+no per-repo key management:
+
+```yaml
+# any lgtm-hq repo: .github/workflows/ai-review.yml
+'on':
+  pull_request:
+
+jobs:
+  ai-review:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      depth: 1 # 1=checklist, 2=+questions, 3=+adversarial
+      post: true
+      max-cost-usd: "0.50"
+    secrets:
+      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }} # inherited org secret
+```
+
+| Input            | Default       | Notes                                             |
+| ---------------- | ------------- | ------------------------------------------------- |
+| `depth`          | `1`           | Review depth (clamped to 1..3)                    |
+| `post`           | `true`        | Post/update the sticky PR comment                 |
+| `max-cost-usd`   | `"0.50"`      | Advisory per-run cost cap (annotated if exceeded) |
+| `paths`          | `""`          | Optional path prefixes; empty reviews whole diff  |
+| `lintro-version` | pinned        | Renovate-managed centrally (grouped with lintro)  |
+| `strictness`     | `balanced`    | `focused` \| `balanced` \| `thorough`             |
+| `model`          | `""`          | Optional pass-through; no default (lintro decides)|
+| `egress-preset`  | `ai-review`   | Allowlists PyPI, uv, Anthropic, GitHub + raw CDN  |
+| `timeout-minutes`| `15`          | Job timeout                                       |
+| `job-name`       | `AI Review`   | Check name                                        |
+
+**Hardening guarantees:**
+
+- **Trusted install.** The job only installs a *pinned lintro from PyPI* and
+  runs `lintro review` (which reads the PR diff via the GitHub API and calls the
+  model). It never installs or executes the PR's own code (no `uv sync`, no
+  `pip install .`, no build hooks), so `ANTHROPIC_API_KEY` is scoped to the
+  single "Run AI review" step and is never in scope while PR-controlled code
+  could execute.
+- **Graceful skip (exit 0).** Skips with an informative note when no key is
+  present, on **fork PRs** (no secret access), and off same-repo PRs. The job is
+  **non-blocking** (`continue-on-error: true`) — AI review never fails a check.
+- **Cost + depth caps.** Depth is clamped to 1..3; per-run cost is compared to
+  `max-cost-usd` and annotated when exceeded. (Pre-spend budget enforcement
+  requires a lintro budget flag — tracked upstream.)
+- **Egress allowlist.** The `ai-review` preset covers PyPI
+  (`pypi.org`, `files.pythonhosted.org`), uv (`astral.sh`, `releases.astral.sh`),
+  Anthropic (`api.anthropic.com`), GitHub, and `raw.githubusercontent.com`.
+
+**The sticky comment.** One comment per PR (marker `lintro-ai-review`), with
+machine-readable state embedded in a trailing HTML comment
+(`<!-- lintro-ai-review-state: {"runs":[...]} -->`) so cumulative data survives
+across runs without external storage. Layout, top → bottom:
+
+1. **Cumulative (always visible):** total tokens (in/out/combined), total cost
+   USD, per-model counts (e.g. `claude-sonnet-4 ×3`), and run count.
+2. **Latest run:** findings (from `lintro review --output json`) plus per-run
+   mechanics (model, provider, tokens, cost, depth, duration).
+3. **Previous runs:** collapsible `<details>` with per-run mechanics. History is
+   bounded to the last 20 runs.
+
+Errored runs are recorded (status `error`, 0 tokens) and shown in the
+collapsible, contributing 0 to cumulative totals. Provider errors are formatted
+in the comment (401 invalid key, 429 rate limited, quota/no-credits,
+5xx/timeout) rather than failing silently.
+
+**Security (untrusted model output).** Review content derives from an untrusted
+PR diff. Before posting, model-derived text has `@mentions` neutralized and HTML
+comment delimiters escaped (so injected text cannot forge the state marker), is
+length-capped, and the comment is labelled as automated.
+
+**Error-contract note.** py-lintro 0.65.0 does not yet expose a machine-readable
+error contract for `lintro review --output json` (errors surface as
+`click.ClickException` on stderr with an overloaded exit code). The workflow
+degrades gracefully: it treats "valid review JSON on stdout" as success and uses
+a narrow, documented interim heuristic on the stable `AIError` message prefixes
+for the 401/429/quota classification. A structured contract is requested in
+lgtm-hq/py-lintro#1095.
+
+**Rollout.** py-lintro will migrate its bespoke `ai-review.yml` to a thin caller
+of this reusable (out of scope here) so lintro dogfoods the same reusable
+everyone uses.
+
+### Vulnerability suppression check (osv-scanner)
+
+`reusable-vuln-suppression-check.yml` installs `osv-scanner` directly (no Docker),
+probes the repository without suppressions, and opens a cleanup PR when entries are
+stale (vulnerability resolved upstream) or expired (past `ignoreUntil`).
+
+| Input                    | Default                 | Notes                                      |
+| ------------------------ | ----------------------- | ------------------------------------------ |
+| `osv-version`            | `2.3.5`                 | osv-scanner release version                |
+| `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
+| `check-script`           | tooling default         | Repo-local override supported              |
+| `cleanup-pr-labels`      | see below | Labels on cleanup PR |
+| `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
+| `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
+| `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
+| `runner-image`           | `ubuntu-24.04`          | Linux runners only (install script)        |
+
+Use a Linux `runner-image`; the install script downloads `linux_*` release
+binaries only.
+
+```yaml
+'on':
+  schedule:
+    - cron: '0 4 * * 1'
+  workflow_dispatch: {}
+
+permissions: {}
+
+jobs:
+  check-suppressions:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@<sha>
+    permissions:
+      contents: write
+      pull-requests: write
+    with:
+      tooling-ref: '<sha>'
+      job-name: '🔍 Check Vulnerability Suppressions'
+      workflow-file: vuln-suppression-check.yml
+    secrets:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+```
+
+### GHCR cleanup
+
+`reusable-ghcr-cleanup.yml` prunes aged untagged container versions and ephemeral
+build-cache tags (`pr-*`, `mq-*`, `dispatch-*`). Before deleting untagged
+versions it collects digests referenced by tagged manifest indexes (multi-arch
+children, cosign/SLSA attestations) and skips the entire prune when that
+collection is incomplete.
+
+| Input | Default | Notes |
+| --- | --- | --- |
+| `package-name` | — | Required GHCR package name |
+| `min-age-days` | `7` | Min age before untagged deletion |
+| `keep-latest` | `0` | Keep N most recent untagged |
+| `build-cache-pr-age-days` | `14` | Min age before cache deletion |
+| `protect-referenced` | `true` | Skip when refs incomplete |
+| `prune-buildcache` | `true` | Delete aged ephemeral tags |
+| `dry-run` | `false` | Log only, no deletions |
+| `egress-policy` | `block` | `audit` or `block` |
+| `egress-preset` | `github-tooling` | API + GHCR hosts |
+| `allowed-endpoints` | `""` | Custom endpoints |
+| `allowed-endpoints-mode` | `replace` | `replace` or `append` |
+| `tooling-ref` | `""` | lgtm-ci tooling git ref |
+| `runner-image` | `ubuntu-24.04` | Runner image label |
+
+Grant `contents: read` and `packages: write` on the caller job. Forward a token with
+`packages:write` via `secrets.token` (or `secrets: inherit`).
+
+```yaml
+'on':
+  schedule:
+    - cron: '0 3 * * 0'
+  workflow_dispatch:
+    inputs:
+      min_age_days:
+        description: Minimum age in days
+        type: number
+        default: 7
+
+permissions: {}
+
+jobs:
+  ghcr-cleanup:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@<sha>
+    permissions:
+      contents: read
+      packages: write
+    with:
+      package-name: my-image
+      min-age-days: ${{ github.event_name != 'workflow_dispatch' && 7 || inputs.min_age_days }}
+      keep-latest: 0
+    secrets: inherit
+```
+
+### Documentation site quality
+
+`reusable-site-quality.yml` runs Astro (or similar) docs build, lychee link
+check on built HTML, and caller-provided check/test commands in two parallel
+jobs. Consumer repo scripts (e.g. `scripts/ci/site/build.sh`) stay in the
+consumer and are passed as command inputs.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                    | Default                    | Notes                                      |
+| ------------------------ | -------------------------- | ------------------------------------------ |
+| `build-command`          | required                   | Site build script or inline command        |
+| `test-command`           | required                   | Site test orchestrator                     |
+| `check-command`          | empty                      | Optional type-check step before tests      |
+| `build-env`              | empty                      | Multiline `KEY=VALUE` for build (ASTRO_BASE) |
+| `site-working-directory` | `.`                        | Node/Bun install path                      |
+| `lychee-paths`           | `.`                        | Built dist path for link check             |
+| `lychee-root-dir`        | first `lychee-paths` entry | `--root-dir` for relative href resolution  |
+| `upload-site-artifact`   | `false`                    | Set `true` with explicit artifact path     |
+| `python-version`         | empty                      | Enables Python setup when set              |
+| `python-test-command`    | empty                      | Hook before `test-command` when Python set |
+| `vitest-json-path`       | empty                      | Non-default Vitest JSON for PR summaries   |
+| `test-egress-preset`     | falls back to `egress-preset` | Override egress for site-test job       |
+
+<!-- markdownlint-enable MD013 -->
+
+```yaml
+jobs:
+  site-quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-site-quality.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: "<sha>"
+      job-name: "Build and check documentation site"
+      test-job-name: "Test documentation site"
+      node-version: "22"
+      package-manager: bun
+      site-working-directory: apps/site
+      cache-dependency-path: apps/site/bun.lock
+      build-command: ./scripts/ci/site/build.sh
+      build-env: |
+        ASTRO_BASE=/
+      lychee-paths: apps/site/dist
+      lychee-file-extensions: html
+      check-external: false
+      lychee-root-dir: apps/site/dist
+      upload-site-artifact: true
+      site-artifact-path: apps/site/dist
+      check-command: ./scripts/ci/site/check.sh
+      test-command: ./scripts/ci/site/test-all.sh
+      python-version: "3.12"
+      install-python-dependencies: false
+      egress-policy: block
+      allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        registry.npmjs.org:443
+        bun.sh:443
+      test-allowed-endpoints: >
+        github.com:443
+        api.github.com:443
+        codeload.github.com:443
+        objects.githubusercontent.com:443
+        release-assets.githubusercontent.com:443
+        raw.githubusercontent.com:443
+        registry.npmjs.org:443
+        bun.sh:443
+        pypi.org:443
+        files.pythonhosted.org:443
+```
+
+Path filters and concurrency remain on the caller workflow. Set
+`publish-test-summary: true` and `vitest-json-path` when adopting lgtm-ci
+Vitest JSON output for PR summaries.
+
+```yaml
+jobs:
+  semantic-title:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      egress-preset: github-minimal
+      # Optional: override types (newline-delimited; CSV is normalized)
+      # types: |
+      #   feat
+      #   fix
+      #   ci
+      # Optional: enforce a title length cap
+      # max-length: "72"
+      # Optional: check-only (no PR comments)
+      # post-failure-comment: false
+```
 
 ```yaml
 jobs:
@@ -308,11 +1219,6 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-pr-auto-assign.yml@<sha>
     permissions:
       pull-requests: write
-
-  semantic-title:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-semantic-pr-title.yml@<sha>
-    permissions:
-      contents: read
 
   action-pinning:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate-action-pinning.yml@<sha>
@@ -343,3 +1249,87 @@ jobs:
       security-events: write
       id-token: write
 ```
+
+### CodeQL build-mode
+
+`reusable-codeql.yml` defaults `build-mode` to `none`. Choose the mode from the
+language class — do **not** pass `build-mode: autobuild` for interpreted
+languages (legacy inline workflows often had a separate `codeql-action/autobuild`
+step; that maps to `autobuild` only for compiled languages).
+
+<!-- markdownlint-disable MD013 -->
+
+| Language class                          | `build-mode`              | Notes                                      |
+| --------------------------------------- | ------------------------- | ------------------------------------------ |
+| Python, JavaScript/TypeScript, Ruby, Go | `none` (default)          | Database built directly from source        |
+| C/C++, C#, Java, Kotlin, Swift, …       | `autobuild` or `manual`   | Requires build observation or custom steps |
+
+<!-- markdownlint-enable MD013 -->
+
+**Python-only caller** — omit `build-mode` or set `none` explicitly:
+
+```yaml
+jobs:
+  codeql:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: python
+      # build-mode defaults to none — do not use autobuild for Python
+```
+
+**Compiled-language caller** — use `autobuild` (or `manual` with your own build
+steps before `Analyze`):
+
+```yaml
+jobs:
+  codeql:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: java
+      build-mode: autobuild
+```
+
+**Multi-language caller** — when languages need different build modes (for example
+Rust plus GitHub Actions), pass `language-build-modes` as a JSON object. The
+reusable runs one matrix leg per language so `init` receives the correct
+`build-mode` for each extractor (do **not** rely on a single global
+`build-mode` across mixed language classes):
+
+```yaml
+jobs:
+  codeql:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+    with:
+      languages: rust,actions
+      language-build-modes: '{"rust":"autobuild","actions":"none"}'
+      egress-policy: block
+      allowed-endpoints-mode: append
+      allowed-endpoints: |
+        static.rust-lang.org:443
+        sh.rustup.rs:443
+        crates.io:443
+        static.crates.io:443
+        index.crates.io:443
+```
+
+When `category` is omitted, each matrix leg uploads SARIF under
+`/language:<language>`. Pass `category` explicitly to override all legs (for
+example `/language:all` on a single-language scan).
+
+Pin the workflow `uses:` ref to a commit SHA in production. `tooling-ref` is
+optional for egress composites only on single-language scans; for multi-language
+callers, pass a matching `tooling-ref` when testing unreleased
+`generate-codeql-matrix.sh` changes so the setup job and analysis legs stay
+aligned.
+
+See [CodeQL workflow configuration — build modes](https://docs.github.com/en/code-security/reference/code-scanning/workflow-configuration-options)
+and [workflow-contract.md](workflow-contract.md#action-only-reusables).

@@ -24,12 +24,29 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-pages"
       job-name:
         description: "GitHub check name for the publish job"
         required: false
@@ -39,24 +56,44 @@ on:
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: "ubuntu-24.04"
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
         type: number
         default: 30
 
+# Shared Pages concurrency serializes deploys per repository/ref.
+# WARNING: Do not invoke this workflow alongside reusable-test-node-publish
+# on the same event unless subtrees are combined in one publish job or each job
+# uses publish-test-results merge-existing-site: true (Model A fallback, #225).
+# Without merge, each deploy replaces the entire site and the last queued job
+# wins. Monorepos needing a site plus multiple report subtrees on one Pages
+# origin should prefer reusable-deploy-site-with-reports (Model B, #226).
+# See docs/pages-publishing.md.
+concurrency:
+  group: pages-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   publish:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    environment:
+      name: github-pages
+      url: ${{ steps.publish.outputs.pages-url }}
     permissions:
-      contents: write
+      contents: read
       pages: write
       id-token: write
 
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -65,21 +102,22 @@ jobs:
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
-            .github/actions/
-            scripts/ci/
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
-      - name: Harden runner
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
+          tooling-ref: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Checkout repository
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          persist-credentials: false
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
 
       - name: Download coverage
         if: inputs.upload-coverage
@@ -98,6 +136,7 @@ jobs:
 
       - name: Publish to GitHub Pages
         if: inputs.upload-coverage
+        id: publish
         uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
         with:
           results-path: coverage-report

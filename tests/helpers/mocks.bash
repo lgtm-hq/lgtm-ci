@@ -200,6 +200,46 @@ EOF
 	fi
 }
 
+# Mock curl for file download that also records its arguments
+# Usage: mock_curl_download_record "file content"
+# Check recorded args with: cat "$BATS_TEST_TMPDIR/mock_calls_curl"
+mock_curl_download_record() {
+	local content="${1:-downloaded content}"
+
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+
+	local calls_file="${BATS_TEST_TMPDIR}/mock_calls_curl"
+	: >"$calls_file"
+
+	local payload_file="${mock_bin}/.curl_payload"
+	printf '%s\n' "$content" >"$payload_file"
+
+	cat >"${mock_bin}/curl" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${calls_file}'
+output_file=""
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        -o) output_file="\$2"; shift 2;;
+        --output) output_file="\$2"; shift 2;;
+        --output=*) output_file="\${1#*=}"; shift;;
+        *) shift;;
+    esac
+done
+
+if [[ -n "\$output_file" ]]; then
+    cat '${payload_file}' > "\$output_file"
+fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/curl"
+
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
+}
+
 # =============================================================================
 # Checksum tool mocks
 # =============================================================================

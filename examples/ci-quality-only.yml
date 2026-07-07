@@ -1,0 +1,35 @@
+# SPDX-License-Identifier: MIT
+# Lint-only CI: Lintro quality checks with no PR comment jobs.
+# Copy into your repository as .github/workflows/quality.yml.
+# Suitable for tag/release pipelines or repos that disable PR summaries —
+# call the lint reusable only and omit the publish reusable entirely
+# (docs/workflow-contract.md "Permissions by mode"). No pull-requests: write
+# is needed anywhere.
+---
+name: Quality
+
+"on":
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: quality-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+    permissions:
+      contents: read
+      packages: read
+    with:
+      tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+      job-name: "Lintro Quality Checks"
+      egress-policy: block
+      egress-preset: quality

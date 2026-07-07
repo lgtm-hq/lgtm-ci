@@ -1,0 +1,36 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Quality Check - Action Pinning Validation
+
+'on':
+  # No path filter: this is a required check, so it must always run and report.
+  # A path-filtered required check never reports on PRs that miss the filter,
+  # which deadlocks them (and merge-queue entries). The validation is cheap
+  # (~1 min); the detect-changes early-exit pattern is reserved for the
+  # expensive path-filtered workflows.
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  push:
+    branches: [main]
+  merge_group:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: validate-action-pinning-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    uses: ./.github/workflows/reusable-validate-action-pinning.yml
+    with:
+      fail-on-error: true
+      verify-tags: true
+      audit-transitive: true
+      tooling-ref: ${{ github.sha }}
+      egress-policy: block
+      egress-preset: github-tooling
+    permissions:
+      contents: read

@@ -527,6 +527,50 @@ assert_readonly_var() {
 	fi
 }
 
+# Assert repository → tooling → resolve → harden step order (#279 egress contract).
+# Also accepts the checkout-and-harden composite form (#379): repository →
+# bootstrap tooling checkout → Checkout and harden.
+# Usage: egress_tooling_checkout_order_ok "$workflow" [job-name]
+egress_tooling_checkout_order_ok() {
+	local workflow="$1"
+	local job="${2:-}"
+	awk -v job="$job" '
+		function active_job() {
+			return job == "" || in_job
+		}
+		job != "" && $0 ~ "^  " job ":" {
+			in_job = 1
+			in_steps = 0
+			repo = tooling = resolve = harden = cah = 0
+			next
+		}
+		job != "" && in_job && /^  [a-zA-Z0-9_-]+:/ && $0 !~ "^  " job ":" {
+			in_job = 0
+			in_steps = 0
+		}
+		active_job() && /^    steps:/ { in_steps = 1 }
+		active_job() && in_steps && /^      - name: Checkout repository/ { repo = NR }
+		active_job() && in_steps && /^      - name: Checkout lgtm-ci/ {
+			if (tooling == 0 || NR < tooling) {
+				tooling = NR
+			}
+		}
+		active_job() && in_steps && /^      - name: Checkout and harden/ { cah = NR }
+		active_job() && in_steps && /^      - name: Resolve egress allowlist/ { resolve = NR }
+		active_job() && in_steps && /^      - name: Harden runner/ { harden = NR }
+		END {
+			if (cah > 0 && harden == 0 && resolve == 0) {
+				exit !(repo > 0 && tooling > 0 && repo < tooling && tooling < cah)
+			}
+			ok = (repo > 0 && tooling > 0 && harden > 0 && repo < tooling && tooling < harden)
+			if (resolve > 0) {
+				ok = ok && tooling < resolve && resolve < harden
+			}
+			exit !ok
+		}
+	' "$workflow"
+}
+
 # Assert exit code
 # Usage: assert_exit_code 0
 assert_exit_code() {

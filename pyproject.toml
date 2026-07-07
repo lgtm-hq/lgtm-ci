@@ -1,6 +1,7 @@
 [project]
 name = "lgtm-ci"
-version = "0.17.2"
+# Dev-manifest placeholder — release version is tracked in CHANGELOG.md and git tags.
+version = "0.0.0"
 description = "Reusable CI/CD components for GitHub Actions - composite actions, reusable workflows, and shell utilities"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,10 +27,8 @@ Issues = "https://github.com/lgtm-hq/lgtm-ci/issues"
 
 [project.optional-dependencies]
 dev = [
-  # Keep in sync with LINTRO_IMAGE digest in reusable-quality.yml / run-quality action
+  # Keep in sync with LINTRO_IMAGE digest in reusable-quality-lint.yml / run-quality action
   "lintro==0.64.1",
-  "pytest>=8.0.0",
-  "assertpy>=1.1",
   "ruff>=0.14.0",
   "black>=25.0.0",
   "tomli-w>=1.0.0",
@@ -59,13 +58,6 @@ convention = "google"
 line-length = 88
 target-version = ["py311", "py312", "py313"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-python_files = ["test_*.py"]
-python_classes = ["Test*"]
-python_functions = ["test_*"]
-addopts = "-v --tb=short"
-
 [tool.bandit]
 exclude_dirs = [".venv", "venv", "env", "build", "dist", "tests"]
 skips = [
@@ -75,6 +67,3 @@ skips = [
   "B607", # start_process_with_partial_path - using standard executables
   "B108", # hardcoded_tmp_directory - mocking GitHub env vars
 ]
-
-[dependency-groups]
-dev = ["pytest-timeout>=2.4.0", "pytest-xdist>=3.8.0"]

@@ -75,9 +75,9 @@ teardown() {
 	local commits
 	commits=$(printf 'abc1234567\x1Ffeat\x1Fauth\x1Fadd login\nabc1234568\x1Ffeat\x1F\x1Fadd logout')
 
-	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog_section \"Features\" '$commits' \"full\""
+	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog_section \"Added\" '$commits' \"full\""
 	assert_success
-	assert_output --partial "### Features"
+	assert_output --partial "### Added"
 	assert_output --partial "add login"
 	assert_output --partial "add logout"
 }
@@ -86,9 +86,9 @@ teardown() {
 	local commits
 	commits=$(printf 'abc1234567\x1Ffix\x1F\x1Ffix bug')
 
-	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog_section \"Bug Fixes\" '$commits' \"simple\""
+	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog_section \"Fixed\" '$commits' \"simple\""
 	assert_success
-	assert_output --partial "### Bug Fixes"
+	assert_output --partial "### Fixed"
 	assert_output --partial "- fix bug"
 }
 
@@ -114,42 +114,44 @@ teardown() {
 	assert_output --partial "## Unreleased"
 }
 
-@test "generate_changelog: includes features section" {
+@test "generate_changelog: includes added section" {
 	tag_mock_repo "v1.0.0"
 	add_commit "feat: add search"
 
 	run bash -c "cd \"$MOCK_GIT_REPO\" && source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog \"v1.0.0\" \"HEAD\" \"1.1.0\""
 	assert_success
-	assert_output --partial "### Features"
+	assert_output --partial "### Added"
 	assert_output --partial "add search"
 }
 
-@test "generate_changelog: includes bug fixes section" {
+@test "generate_changelog: includes fixed section" {
 	tag_mock_repo "v1.0.0"
 	add_commit "fix: resolve crash"
 
 	run bash -c "cd \"$MOCK_GIT_REPO\" && source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog \"v1.0.0\" \"HEAD\" \"1.0.1\""
 	assert_success
-	assert_output --partial "### Bug Fixes"
+	assert_output --partial "### Fixed"
 	assert_output --partial "resolve crash"
 }
 
-@test "generate_changelog: includes breaking changes section" {
+@test "generate_changelog: includes breaking changes under Changed" {
 	tag_mock_repo "v1.0.0"
 	add_commit "feat!: new API"
 
 	run bash -c "cd \"$MOCK_GIT_REPO\" && source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog \"v1.0.0\" \"HEAD\" \"2.0.0\""
 	assert_success
-	assert_output --partial "### Breaking Changes"
+	assert_output --partial "### Changed"
+	assert_output --partial "new API"
 }
 
-@test "generate_changelog: includes other changes in full format" {
+@test "generate_changelog: includes other changes under Changed in full format" {
 	tag_mock_repo "v1.0.0"
 	add_commit "chore: update deps"
 
 	run bash -c "cd \"$MOCK_GIT_REPO\" && source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog \"v1.0.0\" \"HEAD\" \"1.0.1\" \"full\""
 	assert_success
-	assert_output --partial "### Other Changes"
+	assert_output --partial "### Changed"
+	assert_output --partial "update deps"
 }
 
 # =============================================================================

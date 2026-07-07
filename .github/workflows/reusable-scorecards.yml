@@ -5,7 +5,9 @@ on:
   workflow_call:
     inputs:
       results-format:
-        description: "Scorecard output format"
+        description: >-
+          Scorecard output format (default sarif). When overriding to a non-sarif
+          format, also set results-file to a matching path (e.g. results.json).
         required: false
         type: string
         default: "sarif"
@@ -19,52 +21,110 @@ on:
         required: false
         type: boolean
         default: true
+      results-file:
+        description: >-
+          Scorecard results output path. Defaults to "results.sarif"; callers
+          using a non-sarif results-format should override this to match their
+          chosen format (e.g. "results.json").
+        required: false
+        type: string
+        default: "results.sarif"
+
+      tooling-ref:
+        description: >-
+          Optional — pins egress composites only (no scripts/ci checkout).
+          Defaults to caller workflow SHA.
+        required: false
+        type: string
+        default: ""
 
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "scorecard"
       job-name:
         description: "GitHub check name for OpenSSF Scorecard"
         required: false
         type: string
         default: "OpenSSF Scorecard"
 
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 30
+
 jobs:
   scorecards:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       security-events: write
       id-token: write
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
       - name: Run OpenSSF Scorecard
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
+          repo_token: ${{ github.token }}
           results_format: ${{ inputs.results-format }}
+          results_file: ${{ inputs.results-file }}
           publish_results: ${{ inputs.publish-results }}
 
       - name: Upload SARIF
         if: inputs.upload-sarif && inputs.results-format == 'sarif'
         uses: github/codeql-action/upload-sarif@7211b7c8077ea37d8641b6271f6a365a22a5fbfa # v4.36.0
         with:
-          sarif_file: results.sarif
+          sarif_file: ${{ inputs.results-file }}

@@ -1,0 +1,565 @@
+---
+name: Reusable Node.js Custom Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "20"
+      node-versions:
+        description: "Comma-separated Node.js versions for a test matrix"
+        required: false
+        type: string
+        default: ""
+      test-command:
+        description: >-
+          Shell command to run after dependency install (e.g. bun run
+          test:coverage). Runs in working-directory.
+        required: true
+        type: string
+      coverage:
+        description: "Whether the custom command produces coverage output"
+        required: false
+        type: boolean
+        default: false
+      upload-pages-coverage-html:
+        description: "Upload flat HTML coverage artifact for Model B Pages bundling"
+        required: false
+        type: boolean
+        default: false
+      pages-coverage-artifact-name:
+        description: "Artifact name for flat Node HTML coverage upload"
+        required: false
+        type: string
+        default: "coverage-html"
+      pages-coverage-upload-on:
+        description: "When to upload flat Node HTML coverage (v1: push-main only)"
+        required: false
+        type: string
+        default: "push-main"
+      pages-coverage-source-subpath:
+        description: >-
+          Coverage HTML directory relative to working-directory for flat Pages
+          artifact staging
+        required: false
+        type: string
+        default: "coverage"
+      working-directory:
+        description: "Working directory for running tests"
+        required: false
+        type: string
+        default: "."
+      package-manager:
+        description: "Package manager for dependency install: npm, bun, pnpm"
+        required: false
+        type: string
+        default: "npm"
+      pre-test-command:
+        description: "Optional command to run after dependency install and before tests"
+        required: false
+        type: string
+        default: ""
+      publish-test-summary:
+        description: >-
+          Publish or update the test summary comment on the pull request for this workflow run (rich
+          coverage table per matrix cell when coverage is enabled)
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for upserting this workflow's test summary comment"
+        required: false
+        type: string
+        default: "node-coverage-report"
+      job-name:
+        description: "GitHub check name for the test job"
+        required: false
+        type: string
+        default: "Node.js Tests"
+      coverage-summary-file:
+        description: >-
+          Coverage summary path relative to working-directory for the coverage test summary
+          comments (Istanbul JSON)
+        required: false
+        type: string
+        default: "coverage/coverage-summary.json"
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "quality"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Timeout for test jobs in minutes"
+        required: false
+        type: number
+        default: 60
+
+    outputs:
+      passed:
+        description: "Whether every matrix test leg succeeded"
+        value: ${{ jobs.aggregate-tests.outputs.passed == 'true' }}
+      pages-coverage-artifact-name:
+        description: "Resolved flat HTML coverage artifact name"
+        value: ${{ inputs.pages-coverage-artifact-name }}
+      pages-coverage-uploaded:
+        description: "Whether flat HTML coverage artifact was uploaded this run"
+        value: ${{ jobs.pages-coverage-status.outputs.pages-coverage-uploaded || 'false' }}
+
+jobs:
+  prepare:
+    name: Prepare Node Matrix
+    runs-on: ${{ inputs.runner-image }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      pages-coverage-node-version: ${{ steps.matrix.outputs.pages-coverage-node-version }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+
+      - name: Validate compat/coverage contract
+        shell: bash
+        env:
+          MULTI_VERSIONS: ${{ inputs.node-versions }}
+          COVERAGE: ${{ inputs.coverage }}
+          PUBLISH_TEST_SUMMARY: ${{ inputs.publish-test-summary }}
+          PLATFORM: Node.js custom
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
+
+      - name: Generate Node.js matrix
+        id: matrix
+        shell: bash
+        env:
+          MATRIX_KEY: node-version
+          MATRIX_LABEL: Node.js
+          DEFAULT_VERSION: ${{ inputs.node-version || '20' }}
+          VERSIONS_INPUT: ${{ inputs.node-versions }}
+          FIRST_VERSION_OUTPUT: pages-coverage-node-version
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
+
+  test:
+    name: ${{ inputs.job-name }}
+    needs: prepare
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    outputs:
+      passed: ${{ steps.record.outputs.passed }}
+      pages-upload-outcome: ${{ steps.record-pages-upload-outcome.outputs.outcome }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
+
+      - name: Setup Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Setup Bun
+        if: inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@0e279bb959325dab635dd2c09392533439d90093 # v6.0.8
+
+      - name: Get bun cache directory
+        if: inputs.package-manager == 'bun'
+        id: bun-cache
+        shell: bash
+        env:
+          STEP: bun-cache
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-node.sh
+
+      - name: Cache bun dependencies
+        if: inputs.package-manager == 'bun'
+        id: cache
+        uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+        with:
+          path: |
+            ${{ steps.bun-cache.outputs.dir }}
+            ${{ inputs.working-directory }}/node_modules
+          key: bun-${{ runner.os }}-${{ matrix.node-version }}-${{ hashFiles('**/bun.lock', '**/bun.lockb') }}
+          restore-keys: |
+            bun-${{ runner.os }}-${{ matrix.node-version }}-
+            bun-${{ runner.os }}-
+
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          FROZEN_LOCKFILE: "true"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
+
+      - name: Run pre-test command
+        if: inputs.pre-test-command != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.pre-test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Run custom test command
+        id: custom-run
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+
+      - name: Stage coverage for test summary
+        if: >-
+          always()
+          && inputs.coverage
+          && inputs.publish-test-summary
+          && inputs.node-versions == ''
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          COVERAGE_SUMMARY_FILE: ${{ inputs.coverage-summary-file }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-coverage-test-summary.sh
+
+      - name: Upload coverage for test summary
+        if: >-
+          always()
+          && inputs.coverage
+          && inputs.publish-test-summary
+          && inputs.node-versions == ''
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: node-coverage
+          path: node-coverage-staged/
+          retention-days: 7
+          if-no-files-found: ignore
+
+      - name: Evaluate pages coverage upload gate
+        id: pages-upload-gate
+        if: always() && inputs.upload-pages-coverage-html && inputs.coverage
+        shell: bash
+        env:
+          PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
+
+      - name: Stage pages coverage HTML
+        id: stage-pages-coverage
+        if: >-
+          always()
+          && inputs.upload-pages-coverage-html
+          && inputs.coverage
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        shell: bash
+        env:
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          PAGES_COVERAGE_SOURCE_SUBPATH: ${{ inputs.pages-coverage-source-subpath }}
+          PAGES_COVERAGE_STAGING_DIR: ${{ inputs.pages-coverage-artifact-name }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-pages-coverage.sh
+
+      - name: Upload pages coverage HTML artifact
+        id: pages-upload
+        if: >-
+          always()
+          && inputs.upload-pages-coverage-html
+          && inputs.coverage
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+          && steps.pages-upload-gate.outputs.should-upload == 'true'
+          && steps.stage-pages-coverage.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.pages-coverage-artifact-name }}
+          path: ${{ inputs.pages-coverage-artifact-name }}/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Record pages upload outcome
+        if: >-
+          always()
+          && matrix.node-version == needs.prepare.outputs.pages-coverage-node-version
+        id: record-pages-upload-outcome
+        shell: bash
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-upload-outcome.sh
+
+      - name: Fail on custom test command errors
+        if: steps.custom-run.outcome == 'failure'
+        run: exit 1
+
+      - name: Record custom test result
+        if: always()
+        id: record
+        shell: bash
+        run: |
+          if [[ "${{ job.status }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  aggregate-tests:
+    name: Aggregate Node.js Results
+    needs:
+      - prepare
+      - test
+    if: >-
+      always()
+      && needs.prepare.result == 'success'
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ${{ inputs.runner-image }}
+    permissions:
+      contents: read
+    outputs:
+      passed: ${{ steps.aggregate.outputs.passed }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+      - name: Aggregate matrix custom test results
+        id: aggregate
+        shell: bash
+        run: |
+          if [[ "${{ needs.test.result }}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  pages-coverage-status:
+    name: Pages coverage upload status
+    needs:
+      - prepare
+      - test
+    if: >-
+      always()
+      && inputs.upload-pages-coverage-html
+      && inputs.coverage
+    runs-on: ${{ inputs.runner-image }}
+    permissions:
+      contents: read
+    outputs:
+      pages-coverage-uploaded: ${{ steps.record.outputs.uploaded }}
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+
+      - name: Download pages coverage artifact
+        id: download-pages-coverage
+        continue-on-error: true
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.pages-coverage-artifact-name }}
+          path: pages-coverage-html
+
+      - name: Record pages coverage upload status
+        id: record
+        shell: bash
+        env:
+          UPLOAD_PAGES_COVERAGE_HTML: ${{ inputs.upload-pages-coverage-html }}
+          COVERAGE: ${{ inputs.coverage }}
+          PAGES_COVERAGE_ARTIFACT_DIR: pages-coverage-html
+          PAGES_UPLOAD_OUTCOME: ${{ needs.test.outputs.pages-upload-outcome }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/record-pages-coverage-upload-status.sh
+
+  publish-test-summary:
+    needs: aggregate-tests
+    if: >-
+      always()
+      && needs.aggregate-tests.result != 'skipped'
+      && inputs.publish-test-summary
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      test-suite-name: ${{ inputs.job-name }}
+      comment-marker: ${{ inputs.comment-marker }}
+      job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
+      rich-coverage-comment: ${{ inputs.coverage }}
+      coverage-artifact-name: ${{ inputs.coverage && 'node-coverage' || '' }}
+      coverage-file: >-
+        ${{ inputs.working-directory == '.' && inputs.coverage-summary-file ||
+        format('{0}/{1}', inputs.working-directory, inputs.coverage-summary-file) }}
+      coverage-format: istanbul
+      tooling-ref: ${{ inputs.tooling-ref }}

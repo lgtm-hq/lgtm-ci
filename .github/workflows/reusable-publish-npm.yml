@@ -5,7 +5,9 @@ on:
   workflow_call:
     inputs:
       node-version:
-        description: "Node.js version"
+        description: >-
+          Deprecated no-op: publishing uses the runner's Node runtime. Kept
+          only so existing callers passing it do not break; ignored.
         required: false
         type: string
         default: "22"
@@ -43,17 +45,40 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "npm-publish"
       job-name:
         description: "GitHub check name for the publish job"
         required: false
         type: string
         default: "Publish to npm"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
 
     outputs:
       published:
@@ -74,6 +99,7 @@ jobs:
     name: ${{ inputs.job-name }}
     # CRITICAL: Must use GitHub-hosted runner for provenance attestation
     runs-on: ubuntu-latest
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       id-token: write
@@ -86,30 +112,40 @@ jobs:
       tarball: ${{ steps.npm.outputs.tarball }}
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-          persist-credentials: false
+
       - name: Publish to npm
         id: npm
         uses: ./.lgtm-ci-tooling/.github/actions/publish-npm
         with:
-          node-version: ${{ inputs.node-version }}
           dist-tag: ${{ inputs.dist-tag }}
           provenance: ${{ inputs.provenance }}
           access: ${{ inputs.access }}

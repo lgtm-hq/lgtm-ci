@@ -8,19 +8,40 @@
 
 # Prevent multiple sourcing
 [[ -n "${_LGTM_CI_TESTING_COVERAGE_MERGE_LOADED:-}" ]] && return 0
-readonly _LGTM_CI_TESTING_COVERAGE_MERGE_LOADED=1
 
 # Get directory of this script for sourcing dependencies
-_LGTM_CI_TESTING_COV_MERGE_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." && pwd)"
+_LGTM_CI_TESTING_COV_MERGE_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/.." && pwd)" || {
+	echo "merge.sh: cannot resolve coverage modules directory" >&2
+	return 1
+}
 
-# Source detect.sh for format detection
+# Source detect.sh for format detection (required)
+[[ -f "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh" ]] || {
+	echo "merge.sh: missing required module detect.sh in $_LGTM_CI_TESTING_COV_MERGE_DIR" >&2
+	return 1
+}
 # shellcheck source=../detect.sh
-[[ -f "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh" ]] && source "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh"
+source "$_LGTM_CI_TESTING_COV_MERGE_DIR/detect.sh" || return 1
 
-# Source actions.sh for logging (if available)
-_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/../.." && pwd)"
-# shellcheck source=../../actions.sh
-[[ -f "$_LGTM_CI_LIB_DIR/actions.sh" ]] && source "$_LGTM_CI_LIB_DIR/actions.sh"
+# Source log.sh for logging when the lib tree is present. merge.sh only needs
+# log_warn, so it depends on the minimal log module rather than the heavy
+# actions.sh aggregator (which also pulls in the unrelated github/sbom/installer
+# trees). This keeps a coverage-only copy loadable when those trees are absent
+# or broken, while still failing explicitly if log.sh itself is present but
+# broken. If log.sh is missing entirely, fall back to a local log_warn.
+_LGTM_CI_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")/../.." && pwd)" || {
+	echo "merge.sh: cannot resolve lib directory" >&2
+	return 1
+}
+if [[ -f "$_LGTM_CI_LIB_DIR/log.sh" ]]; then
+	# shellcheck source=../../log.sh
+	source "$_LGTM_CI_LIB_DIR/log.sh" || return 1
+fi
+if ! declare -f log_warn &>/dev/null; then
+	log_warn() { echo "[WARN] $*" >&2; }
+fi
+
+readonly _LGTM_CI_TESTING_COVERAGE_MERGE_LOADED=1
 
 # Merge multiple LCOV files into one
 # Usage: merge_lcov_files "output.lcov" "file1.lcov" "file2.lcov" ...

@@ -118,16 +118,100 @@ Setup Rust toolchain with cargo caching.
 
 ## Security Actions
 
-### harden-runner
+### checkout-and-harden
 
-Security hardening using [StepSecurity](https://stepsecurity.io).
+Shared reusable-workflow preamble (#379): checks out lgtm-ci tooling into
+`.lgtm-ci-tooling/`, resolves the egress allowlist, and hardens the runner in one
+step. Requires a prior bootstrap sparse checkout of
+`.github/actions/checkout-and-harden` (the composite lives in lgtm-ci).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
+- name: Checkout lgtm-ci tooling
+  uses: actions/checkout@<pin>
   with:
-    egress-policy: "audit" # or 'block' to enforce allowlist
+    repository: lgtm-hq/lgtm-ci
+    path: .lgtm-ci-tooling
+    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+    sparse-checkout: |
+      .github/actions/checkout-and-harden
+    sparse-checkout-cone-mode: true
+    persist-credentials: false
+
+- name: Checkout and harden
+  id: egress
+  uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+  with:
+    tooling-ref: ${{ inputs.tooling-ref }}
+    egress-preset: quality
+    sparse-checkout-extra: |
+      scripts/ci/
+```
+
+**Inputs:** `tooling-ref`, `egress-policy` (default `block`), `egress-preset`,
+`allowed-endpoints`, `allowed-endpoints-mode` (default `replace`),
+`sparse-checkout-extra`, `persist-credentials` (default `false`).
+
+**Outputs:** `allowed-endpoints` (resolved allowlist), `scripts-dir` (absolute
+path to `.lgtm-ci-tooling/scripts`).
+
+### resolve-egress-allowlist
+
+Resolves `allowed-endpoints` from explicit lists or `egress-preset` names. Run
+**before** `harden-runner` — as a prior workflow step, or as the preceding sibling
+step inside `checkout-and-harden` — so the resolved allowlist is available when
+the harden step's inputs are evaluated.
+
+```yaml
+- name: Checkout lgtm-ci tooling
+  uses: actions/checkout@<pin>
+  with:
+    repository: lgtm-hq/lgtm-ci
+    path: .lgtm-ci-tooling
+    ref: <sha>
+    sparse-checkout: |
+      .github/actions/harden-runner
+      .github/actions/resolve-egress-allowlist
+    sparse-checkout-cone-mode: true
+
+- name: Resolve egress allowlist
+  id: egress
+  uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+  with:
+    egress-policy: block
+    egress-preset: quality
+    allowed-endpoints: |
+      private.registry.example:443
+    allowed-endpoints-mode: append # default: replace
+
+- uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+  with:
+    egress-policy: block
+    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+```
+
+`allowed-endpoints-mode`: `replace` drops the preset when `allowed-endpoints` is
+non-empty; `append` merges preset + extras with deduplication.
+
+Presets are defined in `scripts/ci/lib/egress/presets.sh` and bundled under
+`.github/actions/harden-runner/lib/`.
+
+### harden-runner
+
+Security hardening using [StepSecurity](https://stepsecurity.io). Pass
+**resolved** `allowed-endpoints` from a prior `resolve-egress-allowlist` step.
+
+```yaml
+- uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+  with:
+    egress-policy: block # default; use audit to log only
+    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
     disable-sudo: "false" # optional
 ```
+
+**Reusable workflows** checkout lgtm-ci into `.lgtm-ci-tooling` before egress steps.
+Consumers do **not** copy `harden-runner` or `resolve-egress-allowlist` into their
+repo. Do not use caller-local `./.github/actions/...` in cross-repo reusables, and
+do not use `${{ }}` in remote action `@ref` segments inside `uses:`.
 
 **Features:**
 
@@ -346,7 +430,7 @@ Verify Sigstore/Cosign signatures on artifacts.
 
 ### post-pr-comment
 
-Create or update PR comments with upsert behavior using unique markers.
+Create or update PR summaries and reports with upsert behavior using unique markers.
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@main
@@ -370,34 +454,6 @@ Create or update PR comments with upsert behavior using unique markers.
 - `comment-id` - ID of the created/updated comment
 - `comment-url` - URL of the comment
 - `action-taken` - "created", "updated", "deleted", or "skipped"
-
----
-
-### semantic-pr-title
-
-Validate PR title follows conventional commit format.
-
-```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/semantic-pr-title@main
-  with:
-    types: "feat,fix,docs,chore" # optional, allowed types
-    require-scope: "false" # optional
-    max-length: "72" # optional
-```
-
-**Features:**
-
-- Validates conventional commit format (`type(scope): description`)
-- Configurable allowed types and scopes
-- Length validation
-- Extracts type, scope, and description
-
-**Outputs:**
-
-- `valid` - Whether the title is valid
-- `type` - Extracted commit type
-- `scope` - Extracted scope
-- `description` - Extracted description
 
 ---
 
@@ -768,7 +824,8 @@ Generate coverage badge SVG/JSON for README display.
 
 ### publish-test-results
 
-Publish test results and coverage to GitHub Pages.
+Publish test results and coverage to GitHub Pages via official OIDC deploy
+actions.
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@main
@@ -776,9 +833,9 @@ Publish test results and coverage to GitHub Pages.
     results-path: "test-results/" # optional
     coverage-path: "coverage/" # optional
     badge-path: "coverage/badge.svg" # optional
-    target-branch: "gh-pages" # optional
     target-dir: "." # optional
-    keep-history: "false" # optional
+    merge-existing-site: "false" # optional Model A multi-publisher merge
+    base-site-path: "" # optional local site tree instead of HTTP mirror
 ```
 
 **Outputs:**
@@ -787,14 +844,20 @@ Publish test results and coverage to GitHub Pages.
 
 **Features:**
 
-- Deploys to gh-pages branch
-- Optional historical report retention
-- Generates index.html for coverage reports
+- Stages coverage, badges, and test HTML under `target-dir`
+- Optional `merge-existing-site` preserves sibling subtrees when multiple Model A
+  publishers deploy to the same Pages site (see `docs/pages-publishing.md`)
+- Deploys with `actions/configure-pages`, `upload-pages-artifact`, `deploy-pages`
+- Generates index.html for coverage reports when missing
 
-**Required Permissions:**
+**Required Permissions (caller job):**
 
-- `contents: write` - For gh-pages deployment
-- `pages: write` - For GitHub Pages
+- `contents: read`
+- `pages: write`
+- `id-token: write`
+
+See [docs/pages-publishing.md](../../docs/pages-publishing.md) for concurrency and
+multi-publisher limits.
 
 ---
 
@@ -832,6 +895,44 @@ Prepare and upload content for GitHub Pages deployment using OIDC.
 
 - `pages: write` - For GitHub Pages deployment
 - `id-token: write` - For OIDC authentication
+
+---
+
+### bundle-workflow-artifacts
+
+Download HTML report artifacts from other workflow runs into a site tree before
+Pages deployment (Model B).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/bundle-workflow-artifacts@main
+  with:
+    commit-sha: ${{ github.sha }}
+    site-root: apps/site/dist
+    bundle-manifest: examples/bundle-manifest-turbo-themes.json
+    fallback-ref: main
+    strict: "false"
+```
+
+**Inputs:**
+
+- `commit-sha` - Commit SHA to resolve workflow runs (default: `github.sha`)
+- `site-root` - Site directory to copy bundled reports into (default: `dist`)
+- `bundle-manifest` - Inline JSON or path to `.json`/`.yaml`/`.yml` manifest
+- `fallback-ref` - Optional branch ref for fallback lookup (for example `main`)
+- `strict` - Fail when any manifest entry cannot be resolved (default: `false`)
+
+**Outputs:**
+
+- `files-bundled` - Number of files copied from downloaded artifacts
+- `bundles-applied` - Number of manifest entries successfully applied
+- `bundle-warnings` - Number of manifest entries that logged warnings
+
+**Required Permissions:**
+
+- `actions: read` - Resolve and download artifacts from other workflow runs
+
+See [pages-publishing.md](../../docs/pages-publishing.md) for Model A vs B and
+manifest schema.
 
 ---
 
@@ -889,6 +990,54 @@ Build and push Docker images with multi-platform support.
 ---
 
 ## Quality Actions
+
+### detect-changes
+
+Maps changed paths to named filters so conditional jobs **always run and
+early-exit green** when their paths didn't change. This is the
+required-check-safe replacement for `on.<event>.paths` filters, which
+deadlock required checks (a check that never reports blocks the PR and
+times out merge-queue entries). Resolves the diff range from
+`pull_request`, `merge_group`, and `push` contexts; an unresolvable base
+fails open (all filters report changed).
+
+```yaml
+jobs:
+  changes:
+    runs-on: ubuntu-latest
+    outputs:
+      changes: ${{ steps.detect.outputs.changes }}
+    steps:
+      - uses: actions/checkout@<sha> # vX.Y.Z
+        with:
+          fetch-depth: 0
+      - uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@<sha> # vX.Y.Z
+        id: detect
+        with:
+          filters: |
+            examples=examples/* packages/*
+            docs=docs/* *.md
+
+  validate-examples:
+    needs: changes
+    runs-on: ubuntu-latest
+    steps:
+      # Each job runs in a fresh workspace — checkout again here.
+      - uses: actions/checkout@<sha> # vX.Y.Z
+        if: fromJSON(needs.changes.outputs.changes).examples
+      - name: Validate examples
+        if: fromJSON(needs.changes.outputs.changes).examples
+        run: bash scripts/ci/validate-examples.sh
+      - name: Skip (no example changes)
+        if: ${{ !fromJSON(needs.changes.outputs.changes).examples }}
+        run: echo "No example changes; validation not required."
+```
+
+**Outputs:** `changes` (JSON object of filter name → boolean),
+`any-changed`. Keep the downstream job name static — it is the required
+check's identity.
+
+---
 
 ### run-quality
 
@@ -1032,29 +1181,54 @@ Create a GitHub release with changelog and optional assets.
 
 ## Publishing Actions
 
-### publish-pypi
+### build-python-package
 
-Build and publish Python packages to PyPI using OIDC trusted publishing.
+Build Python sdist/wheel and validate with twine. Does not upload to PyPI.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/publish-pypi@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@main
   with:
-    validate: "true" # optional, run twine check
-    test-pypi: "false" # optional, publish to TestPyPI
-    dry-run: "false" # optional, build only
-    working-directory: "." # optional
+    validate: "true"
+    working-directory: "."
 ```
 
-**Outputs:**
+**Outputs:** `version`, `package-name`
 
-- `published` - Whether the package was published
-- `version` - Package version
-- `package-name` - Package name
+---
 
-**Requirements:**
+### prepare-pypi-upload
 
-- `id-token: write` permission for OIDC authentication
-- Configure trusted publisher in PyPI project settings
+Download a workflow artifact, validate distributions, and expose metadata for a
+caller-level `pypa/gh-action-pypi-publish` step. Use only in a job defined in
+the **caller** repository workflow (see
+[python-release-publish.md](../../docs/python-release-publish.md)).
+
+```yaml
+- name: Prepare PyPI upload
+  id: prepare
+  uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@main
+  with:
+    artifact-name: python-dist
+    tooling-ref: "<sha>"
+    python-version: "3.12"
+
+- name: Upload to PyPI
+  uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+  with:
+    repository-url: https://upload.pypi.org/legacy/
+    packages-dir: ${{ steps.prepare.outputs.dist-path }}
+```
+
+**Outputs:** `dist-path`, `validated`, `package-name`, `package-version`
+
+**Requirements:** `contents: read`, `id-token: write`, `attestations: write` on the
+job; `environment: pypi`; PyPI trusted publisher matches the caller workflow file.
+
+When `validate: true` (default), distribution validation runs with
+`VALIDATE_STRICT=true` — the step fails if twine check cannot run (via twine or
+`uv run --with twine`).
+
+Do **not** nest `pypa/gh-action-pypi-publish` inside lgtm-ci composites.
 
 ---
 
@@ -1065,7 +1239,6 @@ Build and publish Node.js packages to npm with provenance attestation.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/publish-npm@main
   with:
-    node-version: "22" # optional
     dist-tag: "latest" # optional, npm dist-tag
     provenance: "true" # optional, enable provenance attestation
     access: "public" # optional, package access level
@@ -1114,41 +1287,52 @@ Build and publish Ruby gems to RubyGems using OIDC trusted publishing.
 
 ---
 
-### update-homebrew
+### trigger-homebrew-update
 
-Update a Homebrew formula with a new version from PyPI.
+Dispatch a Homebrew formula update to a tap repository via
+`repository_dispatch`. Use this for org products publishing to
+[lgtm-hq/homebrew-tap](https://github.com/lgtm-hq/homebrew-tap) after PyPI and
+GitHub Release jobs complete.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/update-homebrew@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@main
   with:
-    tap-repository: "owner/homebrew-tap" # required
-    formula: "mypackage" # required
-    package-name: "my-pypi-package" # required
-    version: "1.2.3" # required
-    wait-for-availability: "true" # optional
-    max-wait-minutes: "10" # optional
-    test-pypi: "false" # optional
-    push: "true" # optional
-    create-pr: "false" # optional
+    formula: winnow
+    version: "1.2.3"
+    token: ${{ secrets.HOMEBREW_TAP_DISPATCH_TOKEN }}
+    tap-repository: lgtm-hq/homebrew-tap # optional, this is the default
+    pypi-package: winnow # optional, defaults to formula
+    binary-arm64-sha: "" # optional
+    binary-x86-sha: "" # optional
 ```
+
+**Inputs:**
+
+- `formula` — Homebrew formula name (required)
+- `version` — Release version (required)
+- `token` — Token for `repository_dispatch` on the tap repository (required).
+  Classic PAT: `repo` scope (or `public_repo` for public repos). Fine-grained
+  token: `contents: write` and `metadata: read` on the tap repository.
+- `tap-repository` — Tap repository `owner/repo` (default: `lgtm-hq/homebrew-tap`)
+- `pypi-package` — PyPI package name (default: same as `formula`)
+- `binary-arm64-sha` — SHA256 of the macOS arm64 release asset (optional)
+- `binary-x86-sha` — SHA256 of the macOS x86_64 release asset (optional)
 
 **Outputs:**
 
-- `updated` - Whether the formula was updated
-- `commit-sha` - Commit SHA of the update
-- `pr-url` - Pull request URL (if create-pr is true)
+- `dispatched` — Whether the dispatch event was sent (`true`/`false`)
+- `tap-repository` — Tap repository that received the dispatch
 
 **Requirements:**
 
-- Repository write access for pushing to tap (via `GITHUB_TOKEN` or PAT)
-- `contents: write` permission when used in workflows
+- Caller job should `needs: [pypi-upload, github-release]` (and any binary build
+  job when using `binary-*-sha` inputs)
+- `HOMEBREW_TAP_DISPATCH_TOKEN` (or equivalent) with `repository_dispatch`
+  access to the tap repository (Classic PAT: `repo` or `public_repo`; fine-grained:
+  `contents: write` and `metadata: read`)
 
-**Features:**
-
-- Waits for package availability on PyPI
-- Downloads and calculates SHA256 automatically
-- Creates or updates existing formulas
-- Supports direct push or PR workflow
+See [python-release-publish.md](../../docs/python-release-publish.md) for payload
+schema and PyPI-only vs binary+PyPI examples.
 
 ---
 
@@ -1206,6 +1390,14 @@ Wait for a package to be available on a registry.
 
 ## Usage Example
 
+Caller-owned workflow: pin each action to a **commit SHA** (not a branch). Check out
+lgtm-ci into `.lgtm-ci-tooling`, resolve egress in a step **before** `harden-runner`,
+then pass `steps.egress.outputs['allowed-endpoints']` into harden-runner (see
+[resolve-egress-allowlist](#resolve-egress-allowlist) above).
+
+Prefer [reusable workflows](#reusable-workflows) when you want drop-in jobs without
+copying `.github/actions/harden-runner` or `resolve-egress-allowlist` into your repo.
+
 ```yaml
 name: CI
 
@@ -1218,18 +1410,36 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      # Security hardening (should be first)
-      - uses: lgtm-hq/lgtm-ci/.github/actions/harden-runner@main
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          egress-policy: audit
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: <sha> # vX.Y.Z
+          sparse-checkout: |
+            .github/actions/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
 
-      # Secure checkout (replaces actions/checkout)
-      - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: block
+          egress-preset: github-tooling
 
-      # Environment setup
-      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main
+      - uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: block
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
-      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
+      - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@<sha> # vX.Y.Z
+
+      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@<sha> # vX.Y.Z
+
+      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@<sha> # vX.Y.Z
         with:
           python-version: "3.12"
 
@@ -1240,7 +1450,9 @@ jobs:
 ## Reusable Workflows
 
 Reusable workflows provide complete CI/CD pipelines that can be called from other
-workflows.
+workflows. They load egress composites from an internal `.lgtm-ci-tooling` checkout —
+callers only pin the workflow `@sha` and optional `tooling-ref`; see
+[docs/reusable-workflows.md](../../docs/reusable-workflows.md).
 
 ### reusable-test-python.yml
 
@@ -1256,7 +1468,6 @@ jobs:
       coverage: true
       coverage-threshold: 80
       upload-coverage: true
-      publish-results: false
 ```
 
 **Inputs:**
@@ -1267,7 +1478,6 @@ jobs:
 - `coverage-format` - Format: xml, json, lcov (default: 'json')
 - `coverage-threshold` - Minimum coverage % (default: 0)
 - `upload-coverage` - Upload as artifact (default: false)
-- `publish-results` - Publish to GitHub Pages (default: false)
 
 **Outputs:**
 
@@ -1279,13 +1489,16 @@ jobs:
 
 ### reusable-test-node.yml
 
-Complete Node.js testing workflow with vitest and optional coverage.
+Node.js Vitest testing workflow with optional coverage and PR summaries and reports. Custom
+package scripts (for example `bun run test:coverage`) use
+`reusable-test-node-custom.yml` instead.
 
 ```yaml
 jobs:
   test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@main
     with:
+      job-name: "Web Unit Tests"
       node-version: "20"
       coverage: true
       coverage-threshold: 80
@@ -1294,19 +1507,93 @@ jobs:
 
 **Inputs:**
 
+- `job-name` - GitHub check name for the Vitest job (default: `Node.js Tests`)
 - `node-version` - Node.js version (default: '20')
 - `test-path` - Path to tests (default: '.')
 - `coverage` - Collect coverage (default: false)
 - `coverage-format` - Format: json, lcov, html (default: 'json')
 - `coverage-threshold` - Minimum coverage % (default: 0)
 - `upload-coverage` - Upload as artifact (default: false)
-- `publish-results` - Publish to GitHub Pages (default: false)
 
 **Outputs:**
 
 - `tests-passed`, `tests-failed`, `tests-total`
 - `coverage-percent`
 - `passed` - Whether all tests passed
+
+---
+
+### reusable-test-node-custom.yml
+
+Node.js testing via a caller-provided shell command (after dependency install).
+Use when Vitest is not the test runner or when a package script owns coverage.
+
+```yaml
+jobs:
+  web-coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node-custom.yml@main
+    with:
+      job-name: "Web Coverage"
+      test-command: bun run test:coverage
+      package-manager: bun
+      coverage: true
+      publish-test-summary: true
+```
+
+**Inputs:**
+
+- `test-command` - **Required.** Shell command run in `working-directory`
+- `job-name` - GitHub check name (default: `Node.js Tests`)
+- `node-version`, `node-versions`, `package-manager`, `pre-test-command`
+- Pages coverage HTML inputs (same as Vitest workflow)
+
+**Outputs:**
+
+- `passed` - Whether the custom command succeeded
+- `pages-coverage-artifact-name`, `pages-coverage-uploaded`
+
+---
+
+### reusable-required-check.yml
+
+Org ruleset gate: asserts an upstream reusable job succeeded (and optional
+outputs) under a caller-controlled `job-name`. Replaces consumer-local shim
+`runs-on` jobs. See `docs/workflow-contract.md` (Org ruleset check names).
+
+The gate reports its check as `{caller_job_id} / {job-name}` (below:
+`lintro-code-quality / 🛠️ Lintro Code Quality`), and org rulesets must
+require that exact prefixed context. The registry of org rulesets and the
+required context names per consumer repo lives in `docs/org-rulesets.md`,
+alongside the export/sync tooling under `scripts/ci/org/`.
+
+```yaml
+lintro-code-quality:
+  needs: dogfooding-lint
+  if: always()
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@main
+  permissions:
+    contents: read
+  with:
+    job-name: "🛠️ Lintro Code Quality"
+    upstream-result: ${{ needs.dogfooding-lint.result }}
+    status-output: ${{ needs.dogfooding-lint.outputs.status }}
+```
+
+**Inputs:**
+
+- `job-name` - **Required.** GitHub check name for this gate
+- `upstream-result` - **Required.** Upstream `needs.*.result`
+- `passed-output` - When set, must be the string `true`
+- `status-output` / `status-expected` - Optional status string gate (default
+  expected `passed`)
+- `draft-pr-skip` - Skip gate on draft PRs (default: false)
+- `tooling-ref`, `egress-policy`, `allowed-endpoints`, `runner-image`,
+  `timeout-minutes`
+
+**Outputs:**
+
+- `exit-code` - `0` or `1`
+- `status` - `passed` or `failed`
 
 ---
 
@@ -1388,25 +1675,48 @@ jobs:
 
 ### reusable-deploy-pages.yml
 
-Deploy static content to GitHub Pages with OIDC authentication.
+Deploy-only GitHub Pages publisher with OIDC authentication. The caller builds
+the site and uploads the Pages artifact (`actions/upload-pages-artifact`) in a
+prior job; this workflow deploys that named artifact. For build+deploy in one
+workflow, use `reusable-deploy-site-with-reports.yml`.
 
 ```yaml
 jobs:
+  build-site:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@<sha> # v6.x
+        with:
+          persist-credentials: false
+      # ... build the site into ./dist ...
+      - uses: actions/upload-pages-artifact@<sha> # v4.x
+        with:
+          name: github-pages
+          path: dist
+
   deploy:
+    needs: build-site
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-pages.yml@main
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     with:
-      source-path: "dist"
-      build-command: "bun run build"
-      environment: "github-pages"
+      artifact-name: github-pages
 ```
 
 **Inputs:**
 
-- `source-path` - Path to static content (default: 'dist')
-- `build-command` - Optional build command
-- `node-version` - Node.js version for build (default: '20')
+- `artifact-name` - Name of the Pages artifact from the build job (default:
+  'github-pages')
 - `environment` - GitHub environment name (default: 'github-pages')
-- `artifact-name` - Pages artifact name (default: 'github-pages')
+- `runner-image` - Runner image label (default: 'ubuntu-24.04')
+- `tooling-ref` - Git ref for lgtm-ci tooling checkout
+- `egress-policy`, `egress-preset` (default: 'github-pages'),
+  `allowed-endpoints`, `allowed-endpoints-mode` - harden-runner egress contract
+- `timeout-minutes` - Job timeout (default: 10)
 
 **Outputs:**
 
@@ -1414,15 +1724,77 @@ jobs:
 
 **Features:**
 
-- Two-job workflow (build + deploy) for proper separation
+- Deploy-only: build tooling stays in the caller, so any static site deploys
+  regardless of how it was produced
 - OIDC authentication (no secrets required)
 - Configurable GitHub environment for deployment protection
-- Concurrency control to prevent parallel deployments
+- `concurrency: { group: pages, cancel-in-progress: false }` serializes deploys
+- harden-runner with the `github-pages` egress preset by default
 
 **Permissions Required:**
 
 - `pages: write` - For GitHub Pages deployment
 - `id-token: write` - For OIDC authentication
+
+---
+
+### reusable-deploy-site-with-reports.yml
+
+Build a static site, bundle HTML report artifacts from other workflows via a
+manifest, and deploy once to GitHub Pages (Model B).
+
+```yaml
+jobs:
+  deploy:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-deploy-site-with-reports.yml@main
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: read
+    with:
+      site-root: apps/site/dist
+      build-command: bun run build
+      package-manager: bun
+      bundle-manifest: examples/bundle-manifest-turbo-themes.json
+      commit-sha: ${{ github.event.workflow_run.head_sha }}
+      fallback-ref: main
+```
+
+**Inputs:**
+
+- `site-root` - Deploy root (default: `dist`)
+- `build-command` - Optional site build command
+- `bundle-manifest` - Inline JSON or path to manifest in caller repo
+- `bundle-after-build` - Run bundle after build (default: `true`)
+- `commit-sha` - SHA for checkout and artifact resolution (default: `github.sha`)
+- `fallback-ref` - Optional branch for fallback artifact lookup (default: strict)
+- `strict-bundle` - Fail when any manifest entry is missing (default: `false`)
+- `node-version`, `package-manager`, `working-directory`, `frozen-lockfile` -
+  Build-step tooling controls (this workflow builds; `reusable-deploy-pages` is
+  deploy-only)
+- `tooling-ref`, `egress-policy`, `allowed-endpoints`, `runner-image`,
+  `timeout-minutes`, `artifact-name`, `environment` - Standard contract
+
+**Outputs:**
+
+- `page-url` - URL of the deployed site
+
+**Features:**
+
+- Manifest-driven cross-workflow artifact download (no repo-local API scripts)
+- Optional `main` (or other branch) fallback per caller configuration
+- Two-job workflow (build + deploy) with official OIDC Pages actions
+- Shared `pages-${{ github.repository }}-${{ github.ref }}` concurrency
+
+**Permissions Required (caller):**
+
+- `contents: read` - Checkout repository
+- `pages: write` - GitHub Pages deployment
+- `id-token: write` - OIDC authentication
+- `actions: read` - Download artifacts from other workflow runs (build job)
+
+See [pages-publishing.md](../../docs/pages-publishing.md) for Model A vs B.
 
 ---
 
@@ -1479,6 +1851,14 @@ jobs:
   script run on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. Script
   owns the `docker run` invocation — full control over flags, env, network,
   tmpfs, etc. Mutually exclusive with `smoke-test` (default: '')
+- `health-check-cmd` - Optional command run on the runner against the published
+  localhost port before publish (e.g. `curl -f http://127.0.0.1:8080/health`).
+  Gates push/merge on success. Requires `health-check-port`. Skipped when empty
+  (default: '')
+- `health-check-port` - Container port published on `127.0.0.1`; required when
+  `health-check-cmd` is set (default: '')
+- `health-check-timeout` - Max wait for the port to accept connections (default:
+  `30s`)
 - `tooling-ref` - Git ref for the lgtm-ci tooling checkout. Defaults to the
   reusable workflow commit (the workflow's own pinned commit). Override to pin
   a specific tag or SHA (default: '')
@@ -1509,6 +1889,16 @@ image. `smoke-test` is a convenience for trivial checks like `--version`;
 reach for `smoke-test-script` when you need `-e`, `--network`, `--read-only`,
 or any other `docker run` flag. Validation is performed in the `classify`
 job, so setting both fails fast before any build runs.
+
+**Detached-container health checks:**
+
+Set `health-check-cmd` to validate a running service before publish. The
+workflow starts a detached container from the built image, waits for
+`health-check-port` on `127.0.0.1`, runs the command on the runner (so
+distroless images work without curl/wget inside the container), and tears
+down with logs on failure. On the split push path, a per-platform
+`health-check-per-platform` job gates manifest merge; on the single build
+path, publish runs only after the local health check passes.
 
 **Migration from vendored scripts:**
 
@@ -1560,54 +1950,46 @@ jobs:
 - `pages-url` - GitHub Pages URL
 - `passed` - Whether coverage meets threshold
 
-**Permissions Required:**
+**Permissions Required (publish job):**
 
-- `contents: write` - For gh-pages deployment
-- `pages: write` - For GitHub Pages
-- `id-token: write` - For pages deployment
+- `contents: read`
+- `pages: write`
+- `id-token: write`
 
 ---
 
-### reusable-publish-pypi.yml
+### reusable-build-python-dist.yml
 
-Publish Python packages to PyPI using OIDC trusted publishing.
+Build Python distribution and upload a workflow artifact. Pair with a caller job
+using `prepare-pypi-upload` and caller-level `pypa/gh-action-pypi-publish`. See
+[docs/python-release-publish.md](../../docs/python-release-publish.md).
+
+**Outputs:** `version`, `package-name`
+
+---
+
+### reusable-github-release.yml
+
+Download a workflow artifact and create a GitHub Release with attached assets
+via `gh release create` (`scripts/ci/release/create-github-release.sh`).
 
 ```yaml
 jobs:
-  publish:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-pypi.yml@main
+  github-release:
+    needs: publish
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@main
+    permissions:
+      contents: write
     with:
-      python-version: "3.12"
-      validate: true
-      test-pypi: false
-      dry-run: false
-      update-homebrew: false
-      homebrew-tap: "owner/homebrew-tap"
-      homebrew-formula: "mypackage"
+      artifact-name: python-dist
+      generate-release-notes: true
 ```
 
-**Inputs:**
-
-- `python-version` - Python version for building (default: '3.12')
-- `validate` - Run twine check before publishing (default: true)
-- `test-pypi` - Publish to TestPyPI instead of PyPI (default: false)
-- `update-homebrew` - Update Homebrew formula after publishing (default: false)
-- `homebrew-tap` - Homebrew tap repository (owner/repo) (default: '')
-- `homebrew-formula` - Homebrew formula name (default: '')
-- `dry-run` - Build only, do not publish (default: false)
-- `working-directory` - Working directory containing the package (default: '.')
-
-**Outputs:**
-
-- `published` - Whether the package was published
-- `version` - Published package version
-- `package-name` - Published package name
+**Outputs:** `release-url`, `release-id`
 
 **Permissions Required:**
 
-- `contents: read` - For checkout
-- `id-token: write` - For OIDC authentication
-- `attestations: write` - For build provenance
+- `contents: write` - Create release and upload assets
 
 ---
 
@@ -1686,46 +2068,6 @@ jobs:
 
 - `contents: read` - For checkout
 - `id-token: write` - For OIDC authentication
-
----
-
-### reusable-publish-homebrew.yml
-
-Update Homebrew formula with new version from PyPI.
-
-```yaml
-jobs:
-  homebrew:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-homebrew.yml@main
-    with:
-      tap-repository: "owner/homebrew-tap"
-      formula: "mypackage"
-      package-name: "my-pypi-package"
-      version: "1.2.3"
-      wait-for-availability: true
-      create-pr: false
-```
-
-**Inputs:**
-
-- `tap-repository` - Homebrew tap repository (owner/repo) - required
-- `formula` - Formula name - required
-- `package-name` - PyPI package name - required
-- `version` - Version to update to - required
-- `wait-for-availability` - Wait for package on PyPI (default: true)
-- `max-wait-minutes` - Maximum wait time in minutes (default: 10)
-- `test-pypi` - Use TestPyPI instead of PyPI (default: false)
-- `create-pr` - Create PR instead of direct push (default: false)
-
-**Outputs:**
-
-- `updated` - Whether the formula was updated
-- `commit-sha` - Commit SHA of the update
-- `pr-url` - Pull request URL (if create-pr is true)
-
-**Permissions Required:**
-
-- `contents: write` - For pushing to tap repository
 
 ---
 

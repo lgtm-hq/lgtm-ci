@@ -1,0 +1,602 @@
+# SPDX-License-Identifier: MIT
+---
+name: Reusable Rust Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      rust-toolchain:
+        description: "Rust toolchain for single-version runs"
+        required: false
+        type: string
+        default: ""
+      rust-toolchains:
+        description: "Comma-separated Rust toolchains for a compat test matrix"
+        required: false
+        type: string
+        default: ""
+      toolchain:
+        description: "Deprecated alias for rust-toolchain"
+        required: false
+        type: string
+        default: "stable"
+      features:
+        description: "Feature flags for cargo (e.g., --all-features)"
+        required: false
+        type: string
+        default: "--all-features"
+      workspace:
+        description: "Run tests with --workspace"
+        required: false
+        type: boolean
+        default: true
+      extra-args:
+        description: "Additional arguments passed to cargo nextest"
+        required: false
+        type: string
+        default: ""
+      coverage:
+        description: >-
+          When true, run cargo llvm-cov nextest once (tests + LCOV). When false,
+          run cargo nextest only. Never runs both in the same workflow.
+        required: false
+        type: boolean
+        default: false
+      coverage-threshold:
+        description: "Minimum line coverage percentage to pass (coverage mode only)"
+        required: false
+        type: number
+        default: 0
+      setup-script:
+        description: "Optional override for nextest/coverage toolchain setup script"
+        required: false
+        type: string
+        default: ""
+      test-script:
+        description: "Optional override for the test run script"
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: "Working directory for Rust tests"
+        required: false
+        type: string
+        default: "."
+      upload-pages-coverage-html:
+        description: "Upload flat HTML coverage artifact for Model B Pages bundling"
+        required: false
+        type: boolean
+        default: false
+      pages-coverage-artifact-name:
+        description: "Artifact name for flat Rust HTML coverage upload"
+        required: false
+        type: string
+        default: "rust-coverage-html"
+      pages-coverage-upload-on:
+        description: "When to upload flat Rust HTML coverage (v1: push-main only)"
+        required: false
+        type: string
+        default: "push-main"
+      publish-test-summary:
+        description: >-
+          Publish or update the test summary comment on the pull request for this workflow run (rich
+          coverage table when coverage is enabled, otherwise test pass/fail totals)
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Upsert marker for the Rust test summary comment"
+        required: false
+        type: string
+        default: "rust-test-results"
+      job-name:
+        description: "GitHub check name for the Rust test job"
+        required: false
+        type: string
+        default: "Rust Tests"
+      tooling-ref:
+        description: "Git ref for lgtm-ci tooling and composite actions"
+        required: false
+        type: string
+        default: ""
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "quality"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 45
+
+    outputs:
+      tests-passed:
+        description: "Number of tests passed"
+        value: >-
+          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.tests-passed ||
+          jobs.test.outputs.tests-passed }}
+      tests-failed:
+        description: "Number of tests failed"
+        value: ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.tests-failed ||
+          jobs.test.outputs.tests-failed }}
+      tests-total:
+        description: "Total number of tests executed (passed + failed)"
+        value: >-
+          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.tests-total ||
+          jobs.test.outputs.tests-total }}
+      coverage-percent:
+        description: "Line coverage percentage when coverage mode ran"
+        value: >-
+          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.coverage-percent ||
+          jobs.test.outputs.coverage-percent }}
+      passed:
+        description: "Whether the Rust test job passed"
+        value: >-
+          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.passed ||
+          jobs.test.outputs.passed }}
+      pages-coverage-artifact-name:
+        description: "Resolved flat HTML coverage artifact name"
+        value: ${{ jobs.test.outputs.pages-coverage-artifact-name }}
+      pages-coverage-uploaded:
+        description: "Whether flat HTML coverage artifact was uploaded this run"
+        value: ${{ jobs.test.outputs.pages-coverage-uploaded }}
+
+jobs:
+  prepare:
+    name: Prepare Rust Matrix
+    runs-on: ${{ inputs.runner-image }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-tooling
+          allowed-endpoints: ""
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+
+      - name: Validate compat/coverage contract
+        shell: bash
+        env:
+          MULTI_VERSIONS: ${{ inputs.rust-toolchains }}
+          COVERAGE: ${{ inputs.coverage }}
+          PUBLISH_TEST_SUMMARY: ${{ inputs.publish-test-summary }}
+          PLATFORM: Rust
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
+
+      - name: Generate Rust toolchain matrix
+        id: matrix
+        shell: bash
+        env:
+          MATRIX_KEY: rust-toolchain
+          MATRIX_LABEL: Rust toolchain
+          DEFAULT_VERSION: >-
+            ${{ inputs.rust-toolchain != '' && inputs.rust-toolchain ||
+            inputs.toolchain || 'stable' }}
+          VERSIONS_INPUT: ${{ inputs.rust-toolchains }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
+
+  test:
+    name: ${{ inputs.job-name }}
+    needs: prepare
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+    outputs:
+      tests-passed: ${{ steps.parse.outputs.tests-passed }}
+      tests-failed: ${{ steps.parse.outputs.tests-failed }}
+      tests-total: ${{ steps.parse.outputs.tests-total }}
+      coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
+      passed: ${{ steps.record-passed.outputs.passed }}
+      pages-coverage-artifact-name: ${{ inputs.pages-coverage-artifact-name }}
+      pages-coverage-uploaded: ${{ steps.record-pages-upload.outputs.uploaded }}
+    concurrency:
+      group: >-
+        rust-test-${{ inputs.job-name }}-${{ matrix.rust-toolchain }}-${{ github.ref }}
+      cancel-in-progress: true
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
+
+      - name: Setup Rust
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          toolchain: ${{ matrix.rust-toolchain }}
+
+      - name: Setup nextest toolchain
+        shell: bash
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.setup-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/setup-rust-nextest.sh
+          INSTALL_COVERAGE_TOOLS: ${{ inputs.coverage }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
+
+      - name: Run Rust tests (nextest)
+        id: run-nextest
+        if: ${{ !inputs.coverage }}
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.test-script }}
+          DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-nextest.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Run Rust tests with coverage (llvm-cov nextest)
+        id: run-coverage
+        if: inputs.coverage
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.test-script }}
+          DEFAULT_SCRIPT_PATH: >-
+            .lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-nextest-coverage.sh
+          WORKSPACE: ${{ inputs.workspace }}
+          FEATURES: ${{ inputs.features }}
+          EXTRA_ARGS: ${{ inputs.extra-args }}
+        run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
+        continue-on-error: true
+
+      - name: Parse test results
+        id: parse
+        if: always()
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          JUNIT_FILE: target/nextest/ci/junit.xml
+          LCOV_FILE: rust-coverage.lcov
+          COVERAGE_ENABLED: ${{ inputs.coverage }}
+        run: >-
+          bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-rust-test-results.sh"
+
+      - name: Upload LCOV for test summary
+        if: >-
+          always()
+          && inputs.coverage
+          && inputs.publish-test-summary
+          && inputs.rust-toolchains == ''
+          && github.event_name == 'pull_request'
+          && github.event.pull_request.head.repo.fork == false
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-coverage-lcov
+          path: ${{ inputs.working-directory }}/rust-coverage.lcov
+          if-no-files-found: ignore
+
+      - name: Check coverage threshold
+        id: coverage-gate
+        if: inputs.coverage && inputs.coverage-threshold > 0
+        continue-on-error: true
+        uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
+        with:
+          coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
+          threshold: ${{ inputs.coverage-threshold }}
+
+      - name: Write matrix test summary
+        if: always()
+        shell: bash
+        env:
+          MATRIX_KEY: rust-toolchain
+          MATRIX_VALUE: ${{ matrix.rust-toolchain }}
+          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
+          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
+          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
+          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
+          PASSED: >-
+            ${{
+              (
+                (!inputs.coverage && steps.run-nextest.outcome == 'success')
+                || (inputs.coverage && steps.run-coverage.outcome == 'success')
+              )
+              && (
+                steps.coverage-gate.outcome == 'success'
+                || steps.coverage-gate.outcome == 'skipped'
+              )
+            }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
+
+      - name: Upload matrix test summary
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: rust-results-${{ matrix.rust-toolchain }}
+          path: rust-result-${{ matrix.rust-toolchain }}/summary.json
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Generate Rust coverage HTML
+        if: >-
+          inputs.coverage
+          && inputs.upload-pages-coverage-html
+          && steps.run-coverage.outcome == 'success'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RUST_COVERAGE_HTML_DIR: ${{ inputs.pages-coverage-artifact-name }}
+        run: >-
+          bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage-html.sh"
+
+      - name: Evaluate pages coverage upload gate
+        id: pages-upload-gate
+        if: inputs.coverage && inputs.upload-pages-coverage-html
+        shell: bash
+        env:
+          PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
+
+      - name: Upload pages coverage HTML artifact
+        id: pages-upload
+        if: >-
+          inputs.coverage
+          && inputs.upload-pages-coverage-html
+          && steps.run-coverage.outcome == 'success'
+          && steps.pages-upload-gate.outputs.should-upload == 'true'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.pages-coverage-artifact-name }}
+          path: ${{ inputs.working-directory }}/${{ inputs.pages-coverage-artifact-name }}/
+          retention-days: 7
+          if-no-files-found: error
+
+      - name: Fail on test errors
+        if: >-
+          (!inputs.coverage && steps.run-nextest.outcome == 'failure')
+          || (inputs.coverage && steps.run-coverage.outcome == 'failure')
+        shell: bash
+        run: exit 1
+
+      - name: Fail on coverage threshold
+        if: steps.coverage-gate.outcome == 'failure'
+        shell: bash
+        run: exit 1
+
+      - name: Record pages coverage upload result
+        if: always()
+        id: record-pages-upload
+        shell: bash
+        env:
+          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
+        run: |
+          if [[ "${PAGES_UPLOAD_OUTCOME}" == "success" ]]; then
+            echo "uploaded=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "uploaded=false" >>"$GITHUB_OUTPUT"
+          fi
+
+      - name: Record job passed output
+        if: always()
+        id: record-passed
+        shell: bash
+        env:
+          JOB_STATUS: ${{ job.status }}
+        run: |
+          if [[ "${JOB_STATUS}" == "success" ]]; then
+            echo "passed=true" >>"$GITHUB_OUTPUT"
+          else
+            echo "passed=false" >>"$GITHUB_OUTPUT"
+          fi
+
+  aggregate:
+    name: Aggregate Rust Results
+    needs:
+      - prepare
+      - test
+    if: >-
+      always()
+      && needs.prepare.result == 'success'
+      && inputs.rust-toolchains != ''
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    runs-on: ${{ inputs.runner-image }}
+    permissions:
+      contents: read
+    outputs:
+      tests-passed: ${{ steps.aggregate.outputs.tests-passed }}
+      tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
+      tests-total: ${{ steps.aggregate.outputs.tests-total }}
+      coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
+      passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-tooling
+          allowed-endpoints: ""
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+
+      - name: Download matrix test summaries
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: rust-results-*
+          path: rust-results
+          merge-multiple: false
+
+      - name: Aggregate matrix test summaries
+        id: aggregate
+        shell: bash
+        env:
+          RESULTS_DIR: rust-results
+          MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
+
+  publish-test-summary:
+    needs:
+      - test
+      - aggregate
+    if: >-
+      always()
+      && (
+        needs.aggregate.result == 'success'
+        || needs.aggregate.result == 'skipped'
+      )
+      && (
+        needs.test.result == 'success'
+        || needs.test.result == 'failure'
+      )
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && inputs.publish-test-summary
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      test-suite-name: ${{ inputs.job-name }}
+      comment-marker: ${{ inputs.comment-marker }}
+      tests-passed: >-
+        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.tests-passed ||
+        needs.test.outputs.tests-passed }}
+      tests-failed: >-
+        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.tests-failed ||
+        needs.test.outputs.tests-failed }}
+      tests-total: >-
+        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.tests-total ||
+        needs.test.outputs.tests-total }}
+      coverage-percent: >-
+        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.coverage-percent ||
+        needs.test.outputs.coverage-percent }}
+      coverage-threshold: ${{ inputs.coverage-threshold }}
+      job-result: >-
+        ${{ inputs.rust-toolchains != '' &&
+        (needs.aggregate.outputs.passed == 'true' && 'success' || 'failure') ||
+        needs.test.result }}
+      rich-coverage-comment: ${{ inputs.coverage }}
+      coverage-artifact-name: ${{ inputs.coverage && 'rust-coverage-lcov' || '' }}
+      coverage-file: rust-coverage.lcov
+      coverage-format: lcov
+      tooling-ref: ${{ inputs.tooling-ref }}

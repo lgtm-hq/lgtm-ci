@@ -1,0 +1,63 @@
+---
+name: "Bundle Workflow Artifacts"
+description: "Download CI workflow artifacts into a GitHub Pages site tree via manifest"
+author: "lgtm-hq"
+
+inputs:
+  commit-sha:
+    description: "Commit SHA used to resolve workflow runs"
+    required: false
+    default: ""
+  site-root:
+    description: "Site directory to copy bundled reports into"
+    required: false
+    default: "dist"
+  bundle-manifest:
+    description: "Inline JSON manifest or path to a .json/.yaml/.yml manifest file"
+    required: true
+  fallback-ref:
+    description: "Optional branch ref for fallback workflow lookup (e.g. main)"
+    required: false
+    default: ""
+  strict:
+    description: "Fail when any manifest entry cannot be resolved"
+    required: false
+    default: "false"
+
+outputs:
+  files-bundled:
+    description: "Number of files copied from downloaded artifacts"
+    value: ${{ steps.bundle.outputs.files-bundled }}
+  bundles-applied:
+    description: "Number of manifest entries successfully applied"
+    value: ${{ steps.bundle.outputs.bundles-applied }}
+  bundle-warnings:
+    description: "Number of manifest entries that logged warnings"
+    value: ${{ steps.bundle.outputs.bundle-warnings }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+
+    - name: Bundle workflow artifacts
+      id: bundle
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+        COMMIT_SHA: >-
+          ${{ inputs.commit-sha != '' && inputs.commit-sha || github.sha }}
+        SITE_ROOT: ${{ inputs.site-root }}
+        BUNDLE_MANIFEST: ${{ inputs.bundle-manifest }}
+        FALLBACK_REF: ${{ inputs.fallback-ref }}
+        STRICT: ${{ inputs.strict }}
+        GITHUB_REPOSITORY: ${{ github.repository }}
+      run: $SCRIPTS_DIR/ci/actions/bundle-workflow-artifacts.sh
+
+branding:
+  icon: "package"
+  color: "blue"

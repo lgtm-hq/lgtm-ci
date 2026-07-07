@@ -6,6 +6,7 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  merge_group:
 
 permissions:
   contents: read
@@ -13,12 +14,25 @@ permissions:
 
 jobs:
   quality:
-    uses: ./.github/workflows/reusable-quality.yml
+    uses: ./.github/workflows/reusable-quality-lint.yml
     with:
       tooling-ref: ${{ github.sha }}
     permissions:
       contents: read
       packages: read
+
+  publish-quality-summary:
+    needs: quality
+    if: >-
+      !cancelled()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: ./.github/workflows/reusable-publish-quality-summary.yml
+    with:
+      exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: ${{ github.sha }}
+    permissions:
+      contents: read
       pull-requests: write
 
   shell-tests:
@@ -33,3 +47,14 @@ jobs:
       coverage-threshold: 84
       upload-coverage: true
       tooling-ref: ${{ github.sha }}
+
+  file-breakdown:
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+    uses: ./.github/workflows/reusable-publish-file-breakdown.yml
+    with:
+      tooling-ref: ${{ github.sha }}
+    permissions:
+      contents: read
+      pull-requests: write

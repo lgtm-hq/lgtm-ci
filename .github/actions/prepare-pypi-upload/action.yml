@@ -1,0 +1,111 @@
+---
+name: "Prepare Python distribution for PyPI upload"
+description: >-
+  Download a workflow artifact, optionally validate with twine, and expose dist
+  metadata for a caller-level pypa/gh-action-pypi-publish step. Run only from a
+  job in the caller repository workflow (not from a cross-repo reusable
+  workflow) with environment and id-token: write set on that job.
+author: "lgtm-hq"
+inputs:
+  artifact-name:
+    description: "Workflow artifact containing dist/"
+    required: false
+    default: "python-dist"
+  working-directory:
+    description: "Directory where dist/ is downloaded"
+    required: false
+    default: "."
+  validate:
+    description: "Run twine check before uploading"
+    required: false
+    default: "true"
+  python-version:
+    description: "Python version for twine validation (setup-python)"
+    required: false
+    default: "3.12"
+  tooling-ref:
+    description: >-
+      lgtm-ci ref for setup-python (defaults to the ref of this action)
+    required: false
+    default: ""
+
+outputs:
+  dist-path:
+    description: "Directory containing distribution files (for packages-dir)"
+    value: ${{ inputs.working-directory }}/dist
+  validated:
+    description: >-
+      `true` when twine check passed, `skipped` when validate is disabled;
+      validation failures abort the action before this output is set
+    value: ${{ steps.set-validated.outputs.validated }}
+  package-name:
+    description: "Package name extracted from dist/ or pyproject.toml"
+    value: ${{ steps.extract-metadata.outputs.name }}
+  package-version:
+    description: "Package version extracted from dist/ or pyproject.toml"
+    value: ${{ steps.extract-metadata.outputs.version }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Checkout lgtm-ci tooling
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: lgtm-hq/lgtm-ci
+        path: .lgtm-ci-tooling
+        ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.action_ref }}
+        sparse-checkout: |
+          .github/actions/
+          scripts/ci/
+        sparse-checkout-cone-mode: true
+        persist-credentials: false
+
+    - name: Resolve scripts directory
+      shell: bash
+      run: echo "SCRIPTS_DIR=${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts" >> "$GITHUB_ENV"
+
+    - name: Download Python distribution
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ inputs.working-directory }}/dist
+
+    - name: Setup Python
+      uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+      with:
+        python-version: ${{ inputs.python-version }}
+        working-directory: ${{ inputs.working-directory }}
+        install-dependencies: "false"
+
+    - name: Validate distribution
+      if: inputs.validate == 'true'
+      shell: bash
+      env:
+        STEP: validate-dist
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        VALIDATE_STRICT: "true"
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+    - name: Set validated output
+      id: set-validated
+      shell: bash
+      env:
+        VALIDATE_INPUT: ${{ inputs.validate }}
+      run: |
+        if [[ "$VALIDATE_INPUT" == "true" ]]; then
+          echo "validated=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "validated=skipped" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Extract package metadata
+      id: extract-metadata
+      shell: bash
+      env:
+        STEP: extract-dist-metadata
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
+
+branding:
+  icon: "package"
+  color: "blue"

@@ -30,14 +30,11 @@ prepare)
 		exit 1
 	fi
 
-	# Calculate digest if not provided
-	if [[ -z "$SUBJECT_DIGEST" ]]; then
-		if [[ -f "$SUBJECT_PATH" ]]; then
-			SUBJECT_DIGEST="sha256:$(sha256sum "$SUBJECT_PATH" | cut -d' ' -f1)"
-			log_info "Calculated digest: $SUBJECT_DIGEST"
-		else
-			log_warn "Cannot calculate digest for non-file subject"
-		fi
+	USE_DIGEST=false
+	if [[ -n "$SUBJECT_DIGEST" ]]; then
+		USE_DIGEST=true
+	elif [[ ! -f "$SUBJECT_PATH" ]]; then
+		log_warn "Non-file subject; passing subject-path to attest-build-provenance"
 	fi
 
 	# Determine subject name if not provided
@@ -47,12 +44,19 @@ prepare)
 
 	log_info "Subject: $SUBJECT_NAME"
 	log_info "Path: $SUBJECT_PATH"
-	log_info "Digest: ${SUBJECT_DIGEST:-not calculated}"
+	if [[ "$USE_DIGEST" == "true" ]]; then
+		log_info "Digest: $SUBJECT_DIGEST"
+	else
+		log_info "Attestation input: subject-path (digest computed by attest-build-provenance)"
+	fi
 
-	# Set outputs for the attestation action
-	set_github_output "subject-path" "$SUBJECT_PATH"
+	# actions/attest-build-provenance v4+ accepts only one subject parameter.
 	set_github_output "subject-name" "$SUBJECT_NAME"
-	[[ -n "$SUBJECT_DIGEST" ]] && set_github_output "subject-digest" "$SUBJECT_DIGEST"
+	if [[ "$USE_DIGEST" == "true" ]]; then
+		set_github_output "subject-digest" "$SUBJECT_DIGEST"
+	else
+		set_github_output "subject-path" "$SUBJECT_PATH"
+	fi
 	;;
 
 summary)

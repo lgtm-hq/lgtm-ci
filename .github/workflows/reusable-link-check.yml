@@ -20,7 +20,10 @@ on:
         type: string
         default: ""
       check-external:
-        description: "Check external HTTP(S) links"
+        description: >-
+          Check external HTTP(S) links. With egress-policy block, set
+          allowed-endpoints for target sites (egress-preset github-tooling is
+          GitHub-only).
         required: false
         type: boolean
         default: true
@@ -34,8 +37,8 @@ on:
         required: false
         type: boolean
         default: true
-      comment-on-pr:
-        description: "Post a PR comment with broken link report"
+      publish-link-check-report:
+        description: "Publish broken-link report on the pull request"
         required: false
         type: boolean
         default: false
@@ -54,51 +57,89 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
       job-name:
         description: "GitHub check name for the link check job"
         required: false
         type: string
         default: "Link Check"
       comment-marker:
-        description: "PR comment marker for link check reports"
+        description: "Upsert marker for the link-check report comment"
         required: false
         type: string
         default: "lychee-report"
 
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 15
+
 jobs:
   link-check:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Checkout repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
 
       - name: Build Lychee arguments
         id: args
@@ -122,7 +163,7 @@ jobs:
       - name: Upload link report
         if: >-
           always()
-          && inputs.comment-on-pr
+          && inputs.publish-link-check-report
           && hashFiles('lychee-report.md') != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -131,71 +172,23 @@ jobs:
           retention-days: 1
           if-no-files-found: ignore
 
-  comment-pr:
-    name: ${{ inputs.job-name }} Comment
+  publish-link-check-report:
+    name: Publish link-check report
     needs: link-check
     if: >-
       always()
-      && inputs.comment-on-pr
+      && inputs.publish-link-check-report
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-    runs-on: ubuntu-latest
+    uses: ./.github/workflows/reusable-publish-artifact-report.yml
     permissions:
       contents: read
       pull-requests: write
-
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Download link report
-        id: download
-        continue-on-error: true
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: lychee-report
-          path: .
-
-      - name: Warn on missing report
-        if: steps.download.outcome != 'success'
-        shell: bash
-        run: echo "::warning::lychee-report artifact not found — link check may not have produced output"
-
-      - name: Read comment from file
-        id: read
-        if: steps.download.outcome == 'success' && hashFiles('lychee-report.md') != ''
-        shell: bash
-        env:
-          STEP: read-file
-          COMMENT_FILE: lychee-report.md
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
-
-      - name: Post PR comment
-        if: steps.download.outcome == 'success' && steps.read.outputs.file_provided == 'true'
-        shell: bash
-        env:
-          STEP: post
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_PULL_REQUEST_HEAD_REPO_FULL_NAME: ${{ github.event.pull_request.head.repo.full_name }}
-          MARKER: ${{ inputs.comment-marker }}
-          MODE: upsert
-          DELETE_ON_EMPTY: "false"
-          FILE_PROVIDED: ${{ steps.read.outputs.file_provided }}
-          BODY_FROM_FILE: ${{ steps.read.outputs.body }}
-          BODY_FROM_INPUT: ""
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
+    with:
+      artifact-name: lychee-report
+      report-file: lychee-report.md
+      marker: ${{ inputs.comment-marker }}
+      job-name: Publish link-check report
+      missing-artifact-warning: >-
+        lychee-report artifact not found — link check may not have produced output
+      tooling-ref: ${{ inputs.tooling-ref }}

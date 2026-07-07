@@ -12,7 +12,8 @@
 #   PRERELEASE - Mark as prerelease (default: false)
 #   GENERATE_NOTES - Use GitHub's auto-generated notes (default: false)
 #   FILES - Space-separated list of files to attach
-#   REPO - Repository in owner/repo format (default: from git remote)
+#   FILE_PATTERNS - Newline-separated glob patterns (used by reusable workflows)
+#   REPO - Repository in owner/repo format (default: GITHUB_REPOSITORY or git remote)
 
 set -euo pipefail
 
@@ -26,6 +27,8 @@ source "$LIB_DIR/log.sh"
 source "$LIB_DIR/github.sh"
 # shellcheck source=../lib/release.sh
 source "$LIB_DIR/release.sh"
+# shellcheck source=../lib/release/assets.sh
+source "$LIB_DIR/release/assets.sh"
 
 : "${TAG:?TAG is required}"
 : "${TITLE:=$TAG}"
@@ -34,6 +37,7 @@ source "$LIB_DIR/release.sh"
 : "${PRERELEASE:=false}"
 : "${GENERATE_NOTES:=false}"
 : "${FILES:=}"
+: "${FILE_PATTERNS:=}"
 : "${REPO:=}"
 
 # Check for gh CLI
@@ -44,12 +48,16 @@ fi
 
 # Get repo from git remote if not specified
 if [[ -z "$REPO" ]]; then
-	REMOTE_URL=$(git remote get-url origin 2>/dev/null || echo "")
-	if [[ "$REMOTE_URL" =~ github\.com[:/]([^/]+/[^/]+) ]]; then
-		REPO="${BASH_REMATCH[1]}"
-		REPO="${REPO%.git}"
-	else
-		log_error "Could not determine repository from git remote"
+	if [[ -n "${GITHUB_REPOSITORY:-}" ]]; then
+		REPO="$GITHUB_REPOSITORY"
+	elif REMOTE_URL=$(git remote get-url origin 2>/dev/null); then
+		if [[ "$REMOTE_URL" =~ github\.com[:/]([^/]+/[^/]+) ]]; then
+			REPO="${BASH_REMATCH[1]}"
+			REPO="${REPO%.git}"
+		fi
+	fi
+	if [[ -z "$REPO" ]]; then
+		log_error "Could not determine repository; set REPO or GITHUB_REPOSITORY"
 		exit 1
 	fi
 fi
@@ -81,8 +89,18 @@ else
 fi
 
 # Add files if specified
-if [[ -n "$FILES" ]]; then
-	# shellcheck disable=SC2086 # Word splitting intended for FILES
+if [[ -n "$FILE_PATTERNS" ]]; then
+	release_collect_asset_files "$FILE_PATTERNS"
+	count=${#RELEASE_ASSET_FILES[@]}
+	if ((count == 0)); then
+		log_error "No release assets matched FILE_PATTERNS"
+		exit 1
+	fi
+	for file in "${RELEASE_ASSET_FILES[@]}"; do
+		GH_ARGS+=("$file")
+	done
+elif [[ -n "$FILES" ]]; then
+	# shellcheck disable=SC2086 # Word splitting intended for space-separated FILES
 	for file in $FILES; do
 		if [[ -f "$file" ]]; then
 			GH_ARGS+=("$file")

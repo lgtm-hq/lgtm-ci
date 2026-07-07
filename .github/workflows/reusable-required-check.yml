@@ -1,0 +1,145 @@
+---
+name: Reusable Required Check Gate
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check run name reported for this gate job"
+        required: true
+        type: string
+      upstream-result:
+        description: "Result of the upstream job (e.g. needs.test.result)"
+        required: true
+        type: string
+      passed-output:
+        description: >-
+          When non-empty, must be the string true (e.g. needs.test.outputs.passed)
+        required: false
+        type: string
+        default: ""
+      status-output:
+        description: >-
+          When non-empty, must equal status-expected (e.g. needs.quality.outputs.status)
+        required: false
+        type: string
+        default: ""
+      status-expected:
+        description: "Expected status-output value when status-output is set"
+        required: false
+        type: string
+        default: "passed"
+      draft-pr-skip:
+        description: "Skip this gate on draft pull requests"
+        required: false
+        type: boolean
+        default: false
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 5
+
+    outputs:
+      exit-code:
+        description: "0 when the gate passed, 1 when it failed"
+        value: ${{ jobs.gate.outputs.exit-code }}
+      status:
+        description: "passed or failed"
+        value: ${{ jobs.gate.outputs.status }}
+
+jobs:
+  gate:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      always()
+      && (
+        !inputs.draft-pr-skip
+        || github.event_name != 'pull_request'
+        || github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    outputs:
+      exit-code: ${{ steps.gate.outputs.exit-code }}
+      status: ${{ steps.gate.outputs.status }}
+
+    steps:
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+
+      - name: Assert required check
+        id: gate
+        shell: bash
+        env:
+          UPSTREAM_RESULT: ${{ inputs.upstream-result }}
+          PASSED_OUTPUT: ${{ inputs.passed-output }}
+          STATUS_OUTPUT: ${{ inputs.status-output }}
+          STATUS_EXPECTED: ${{ inputs.status-expected }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/assert-required-check.sh

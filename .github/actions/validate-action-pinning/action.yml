@@ -1,17 +1,22 @@
 ---
 name: "Validate Action Pinning"
-description: "Ensure all GitHub Actions references are pinned to commit SHAs"
+description: >-
+  Ensure GitHub Actions references use SHA pins with Renovate version comments
 author: "lgtm-hq"
-
 inputs:
   enforce:
-    description: "Fail if non-pinned actions are found"
+    description: "Fail if pinning policy violations are found"
     required: false
     default: "true"
+  allow-tag-exceptions:
+    description: >-
+      Comma-separated full action names allowed to use tag refs when no SHA is
+      available (e.g., some-org/action-without-shas)
+    required: false
+    default: ""
   allow-org-versions:
     description: >-
-      Comma-separated org/repo prefixes allowed to use version tags
-      (e.g., lgtm-hq/lgtm-ci)
+      Deprecated alias for allow-tag-exceptions. Prefer allow-tag-exceptions.
     required: false
     default: ""
   scan-paths:
@@ -20,11 +25,31 @@ inputs:
       (default: .github/workflows .github/actions)
     required: false
     default: ".github/workflows .github/actions"
+  verify-tags:
+    description: >-
+      Verify Renovate version comments resolve to the pinned SHA via GitHub API
+    required: false
+    default: "false"
+  audit-transitive:
+    description: >-
+      Warn when pinned composite actions reference nested actions by mutable tag
+    required: false
+    default: "false"
+  gh-token:
+    description: >-
+      GitHub token used by gh for verify-tags / audit-transitive API
+      resolution (e.g. a PAT able to resolve private or cross-org actions).
+      Falls back to a caller-set GH_TOKEN env var, then the workflow token.
+    required: false
+    default: ""
 
 outputs:
   offenders:
-    description: "Count of non-pinned action references found"
+    description: "Count of pinning policy violations found"
     value: ${{ steps.validate.outputs.offenders }}
+  warnings:
+    description: "Count of transitive audit and tag-resolution warnings"
+    value: ${{ steps.validate.outputs.warnings }}
 
 runs:
   using: "composite"
@@ -32,16 +57,23 @@ runs:
     - name: Resolve scripts directory
       shell: bash
       run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
     - name: Validate action pinning
       id: validate
       shell: bash
       env:
+        # gh api needs a token for verify-tags / audit-transitive resolution.
+        # Precedence: explicit gh-token input, caller-set GH_TOKEN env var,
+        # then the workflow token.
+        GH_TOKEN: ${{ inputs['gh-token'] || env.GH_TOKEN || github.token }}
         INPUT_ENFORCE: ${{ inputs.enforce }}
+        INPUT_ALLOW_TAG_EXCEPTIONS: ${{ inputs['allow-tag-exceptions'] }}
         INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}
         INPUT_SCAN_PATHS: ${{ inputs['scan-paths'] }}
+        INPUT_VERIFY_TAGS: ${{ inputs['verify-tags'] }}
+        INPUT_AUDIT_TRANSITIVE: ${{ inputs['audit-transitive'] }}
       run: $SCRIPTS_DIR/ci/actions/validate-action-pinning.sh
 
 branding:

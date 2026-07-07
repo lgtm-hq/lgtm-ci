@@ -49,8 +49,8 @@ runs:
     - name: Resolve scripts directory
       shell: bash
       run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
     - name: Detect PR number
       id: pr
@@ -58,14 +58,13 @@ runs:
       env:
         STEP: pr-number
         GH_TOKEN: ${{ github.token }}
-        GITHUB_TOKEN: ${{ github.token }}
         INPUT_PR_NUMBER: ${{ inputs.pr-number }}
         EVENT_NAME: ${{ github.event_name }}
         EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
         EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
       run: $SCRIPTS_DIR/ci/actions/post-pr-comment.sh
 
-    - name: Read comment from file
+    - name: Load test summary body
       id: read
       if: inputs.file != ''
       shell: bash
@@ -80,7 +79,6 @@ runs:
       env:
         STEP: post
         GH_TOKEN: ${{ github.token }}
-        GITHUB_TOKEN: ${{ github.token }}
         GITHUB_REPOSITORY: ${{ github.repository }}
         PR_NUMBER: ${{ steps.pr.outputs.number }}
         MARKER: ${{ inputs.marker }}

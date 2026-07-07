@@ -44,13 +44,15 @@ on:
         required: false
         type: string
         default: "."
-      post-pr-comment:
-        description: "Post or update a shell test summary comment on pull requests"
+      publish-test-summary:
+        description: >-
+          Publish or update the test summary comment on the pull request for this workflow run (test
+          pass/fail totals; rich coverage not yet supported for kcov)
         required: false
         type: boolean
         default: true
       comment-marker:
-        description: "Unique marker for the shell test PR comment"
+        description: "Upsert marker for the shell test summary comment"
         required: false
         type: string
         default: "shell-test-results"
@@ -68,12 +70,12 @@ on:
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: "ubuntu-24.04"
       draft-pr-skip:
         description: "Skip jobs on draft pull requests"
         required: false
         type: boolean
-        default: false
+        default: true
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -83,12 +85,29 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
 
     outputs:
       tests-passed:
@@ -130,12 +149,6 @@ jobs:
         && steps.results.outputs.tests-ran == 'true' }}
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -149,10 +162,22 @@ jobs:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Install BATS and helpers
         shell: bash
         env:
@@ -242,18 +267,18 @@ jobs:
           retention-days: 7
           if-no-files-found: ignore
 
-  comment-pr:
+  publish-test-summary:
     needs: test
     if: >-
       always()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
-      && inputs.post-pr-comment
+      && inputs.publish-test-summary
       && (
         !inputs.draft-pr-skip ||
         github.event.pull_request.draft == false
       )
-    uses: ./.github/workflows/reusable-test-pr-comment.yml
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
     permissions:
       contents: read
       pull-requests: write
@@ -267,5 +292,3 @@ jobs:
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.test.result }}
       tooling-ref: ${{ inputs.tooling-ref }}
-      egress-policy: ${{ inputs.egress-policy }}
-      allowed-endpoints: ${{ inputs.allowed-endpoints }}

@@ -1,0 +1,107 @@
+---
+name: "Checkout and harden"
+description: >-
+  Shared reusable-workflow preamble: sparse-checkout lgtm-ci tooling into
+  .lgtm-ci-tooling, resolve the egress allowlist, and harden the runner.
+  The repository checkout stays a separate workflow step before this action;
+  a bootstrap sparse checkout of .github/actions/checkout-and-harden must
+  precede it because the composite lives in lgtm-ci.
+author: "lgtm-hq"
+
+inputs:
+  tooling-ref:
+    description: >-
+      Git ref for the lgtm-ci tooling checkout. Empty falls back to
+      github.workflow_sha so the tooling matches the reusable workflow ref.
+    required: false
+    default: ""
+  egress-policy:
+    description: "Egress policy: audit (log) or block (enforce allowlist)"
+    required: false
+    default: "block"
+  egress-preset:
+    description: >-
+      Named baseline allowlist for block policy (github-minimal, github-pages,
+      github-tooling, docker, playwright, pypi, rubygems, npm-publish, quality,
+      osv-scanner, rust-release, sbom, scorecard)
+    required: false
+    default: ""
+  allowed-endpoints:
+    description: >-
+      Host:port list (multiline). replace mode: overrides preset when
+      non-empty; append mode: merged with preset (deduped)
+    required: false
+    default: ""
+  allowed-endpoints-mode:
+    description: "replace (override preset) or append (merge with preset, deduped)"
+    required: false
+    default: "replace"
+  sparse-checkout-extra:
+    description: >-
+      Additional sparse-checkout paths (multiline) appended to the base egress
+      tooling paths, e.g. scripts/ci/ or extra .github/actions/ composites.
+    required: false
+    default: ""
+  persist-credentials:
+    description: "Persist credentials on the tooling checkout"
+    required: false
+    default: "false"
+
+outputs:
+  allowed-endpoints:
+    description: "Resolved allowlist passed to step-security/harden-runner"
+    value: ${{ steps.egress.outputs['allowed-endpoints'] }}
+  scripts-dir:
+    description: "Absolute path to the checked-out lgtm-ci scripts directory"
+    value: ${{ steps.paths.outputs['scripts-dir'] }}
+
+runs:
+  using: "composite"
+  steps:
+    # Re-checkout tooling with the full sparse set. The bootstrap workflow
+    # checkout only materialises this action's directory; this step adds the
+    # egress composites (and any sparse-checkout-extra paths) at the same ref.
+    - name: Checkout lgtm-ci tooling
+      # Pinned to SHA for supply chain security
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: lgtm-hq/lgtm-ci
+        path: .lgtm-ci-tooling
+        ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+        sparse-checkout: |
+          .github/actions/checkout-and-harden
+          .github/actions/harden-runner
+          .github/actions/resolve-egress-allowlist
+          ${{ inputs.sparse-checkout-extra }}
+        sparse-checkout-cone-mode: true
+        persist-credentials: ${{ inputs.persist-credentials }}
+
+    # Sibling ordering matters: resolve must complete before the harden step
+    # evaluates its inputs. The runner skips `pre` for workspace-local actions
+    # (warning: "`pre` execution is not supported for local action"), so
+    # step-security inputs are evaluated when the step itself runs — identical
+    # timing to the previous workflow-level resolve -> harden pattern.
+    - name: Resolve egress allowlist
+      id: egress
+      uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+      with:
+        egress-policy: ${{ inputs.egress-policy }}
+        egress-preset: ${{ inputs.egress-preset }}
+        allowed-endpoints: ${{ inputs.allowed-endpoints }}
+        allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
+    - name: Harden runner
+      uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+      with:
+        egress-policy: ${{ inputs.egress-policy }}
+        allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+    - name: Resolve scripts directory
+      id: paths
+      shell: bash
+      run: |
+        echo "scripts-dir=${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts" >>"${GITHUB_OUTPUT}"
+
+branding:
+  icon: "shield"
+  color: "blue"

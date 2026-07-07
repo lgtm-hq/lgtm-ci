@@ -87,6 +87,55 @@ teardown() {
 }
 
 # =============================================================================
+# get_github_pages_wget_cut_dirs tests
+# =============================================================================
+
+@test "get_github_pages_wget_cut_dirs: returns 0 for user pages root URL" {
+	run bash -c '
+		source "$LIB_DIR/github/format.sh"
+		get_github_pages_wget_cut_dirs "https://alice.github.io/"
+	'
+	assert_success
+	assert_output "0"
+}
+
+@test "get_github_pages_wget_cut_dirs: returns 1 for project pages root URL" {
+	run bash -c '
+		source "$LIB_DIR/github/format.sh"
+		get_github_pages_wget_cut_dirs "https://my-org.github.io/my-repo/"
+	'
+	assert_success
+	assert_output "1"
+}
+
+@test "get_github_pages_wget_cut_dirs: matches get_github_pages_url site roots" {
+	run bash -c '
+		export GITHUB_REPOSITORY="alice/alice.github.io"
+		source "$LIB_DIR/github/format.sh"
+		get_github_pages_wget_cut_dirs "$(get_github_pages_url "")"
+	'
+	assert_success
+	assert_output "0"
+
+	run bash -c '
+		export GITHUB_REPOSITORY="my-org/my-repo"
+		source "$LIB_DIR/github/format.sh"
+		get_github_pages_wget_cut_dirs "$(get_github_pages_url "")"
+	'
+	assert_success
+	assert_output "1"
+}
+
+@test "get_github_pages_wget_cut_dirs: fails for invalid URL" {
+	run bash -c '
+		source "$LIB_DIR/github/format.sh"
+		get_github_pages_wget_cut_dirs "not-a-url"
+	'
+	assert_failure
+	assert_output ""
+}
+
+# =============================================================================
 # score_emoji tests
 # =============================================================================
 
@@ -285,6 +334,11 @@ teardown() {
 
 @test "github/format.sh: exports get_github_pages_url function" {
 	run bash -c 'source "$LIB_DIR/github/format.sh" && bash -c "type get_github_pages_url"'
+	assert_success
+}
+
+@test "github/format.sh: exports get_github_pages_wget_cut_dirs function" {
+	run bash -c 'source "$LIB_DIR/github/format.sh" && bash -c "type get_github_pages_wget_cut_dirs"'
 	assert_success
 }
 

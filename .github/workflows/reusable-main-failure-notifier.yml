@@ -1,0 +1,134 @@
+---
+name: Reusable - Main Failure Notifier
+
+# Surfaces main-branch workflow failures as deduplicated GitHub issues so
+# they stay visible without a human watching Actions between auto-merges.
+# Call from a failure-gated job in any main-branch workflow:
+#
+#   notify-failure:
+#     needs: [build]
+#     if: failure() && github.ref == 'refs/heads/main'
+#     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@<sha>
+#     with:
+#       workflow-key: docker-publish
+#     permissions:
+#       actions: read
+#       contents: read
+#       issues: write
+#
+# Same dedup'd-issue mechanism as the release workflows (one open issue per
+# workflow key + branch; repeat failures comment on it). Companion convention:
+# main red = disarm pending auto-merges until a fix-forward PR lands.
+
+"on":
+  workflow_call:
+    inputs:
+      workflow-key:
+        description: >-
+          Stable key namespacing the dedup marker and issue title
+          (e.g. docker-publish, pages-deploy, dogfood-lint)
+        required: true
+        type: string
+      failure-issue-labels:
+        description: Comma-separated labels for auto-opened failure issues
+        required: false
+        type: string
+        default: "bug,ci,automation"
+      failure-target-branch:
+        description: >-
+          Branch name for failure notifications. Empty uses the repository
+          default branch.
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: Runner image for the notifier job
+        required: false
+        type: string
+        default: ubuntu-24.04
+      timeout-minutes:
+        description: Timeout for the notifier job
+        required: false
+        type: number
+        default: 10
+      egress-policy:
+        description: Egress policy for harden-runner (audit or block)
+        required: false
+        type: string
+        default: block
+      tooling-ref:
+        description: >-
+          lgtm-ci ref for tooling checkout. Empty uses the calling workflow's
+          pinned SHA.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Report main workflow failure
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      # Read workflow/job metadata to generate failure context
+      actions: read
+      # Read repository context for issue body
+      contents: read
+      # Create or update failure notification issues
+      issues: write
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+
+      - name: Harden runner
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+
+      - name: Write failure trigger summary
+        shell: bash
+        env:
+          WORKFLOW_KEY: ${{ inputs.workflow-key }}
+          FAILURE_HEADING_LABEL: Main Workflow
+          PRIMARY_JOB_FAILED: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          write_trigger_summary
+
+      - name: Notify main workflow failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_KEY: ${{ inputs.workflow-key }}
+          FAILURE_MARKER_PREFIX: main-workflow-failure
+          FAILURE_TITLE_PREFIX: "fix(ci): main workflow failed:"
+          # yamllint disable-line rule:line-length
+          FAILURE_SUMMARY_TEXT: "A main-branch workflow failed after merge. This issue keeps post-merge failures visible outside the Actions history; with auto-merge there is no human watching main between merges. Convention: while this issue is open, disarm pending auto-merges (gh pr merge --disable-auto) until a fix-forward PR lands."
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+          FAILURE_TARGET_BRANCH: ${{ inputs.failure-target-branch }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          notify_failure

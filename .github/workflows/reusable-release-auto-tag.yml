@@ -5,10 +5,30 @@ name: "Reusable: Release Auto Tag"
   workflow_call:
     inputs:
       version:
-        description: "Version override (e.g., 1.2.3). Leave empty for commit-based detection."
+        description: >-
+          Version override (e.g., 1.2.3). Leave empty to detect from the
+          configured version-source (commit or cargo).
         required: false
         type: string
         default: ""
+      version-source:
+        description: >-
+          Version detection source: commit (default) reads chore(release): from
+          HEAD; cargo reads [package] or [workspace.package] from version-file
+        required: false
+        type: string
+        default: "commit"
+      version-file:
+        description: "Cargo.toml path when version-source is cargo"
+        required: false
+        type: string
+        default: "Cargo.toml"
+      skip-if-unchanged:
+        description: >-
+          Skip tagging when the resolved version matches the latest tag version
+        required: false
+        type: boolean
+        default: false
       tag-prefix:
         description: "Prefix for the release tag"
         required: false
@@ -31,12 +51,29 @@ name: "Reusable: Release Auto Tag"
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
       job-name:
         description: "GitHub check name for the release job"
         required: false
@@ -46,12 +83,31 @@ name: "Reusable: Release Auto Tag"
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-latest"
+        default: "ubuntu-24.04"
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
         type: number
         default: 20
+      report-failures:
+        description: >-
+          When true, open or update a deduplicated GitHub issue when the release
+          job fails on the target branch
+        required: false
+        type: boolean
+        default: true
+      failure-issue-labels:
+        description: Comma-separated labels for auto-opened release failure issues
+        required: false
+        type: string
+        default: "bug,ci,release,automation,infrastructure"
+      failure-target-branch:
+        description: >-
+          Branch name for failure notifications. Empty uses the repository default
+          branch.
+        required: false
+        type: string
+        default: ""
 
     secrets:
       RELEASE_APP_ID:
@@ -76,11 +132,39 @@ jobs:
       contents: write
 
     steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci egress tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - name: Create GitHub App installation token
         id: app-token
@@ -115,12 +199,16 @@ jobs:
           fi
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
           ref: ${{ steps.tooling.outputs.ref }}
-          sparse-checkout: scripts/ci/
+          sparse-checkout: |
+            scripts/ci/
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
@@ -130,21 +218,49 @@ jobs:
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
 
-      - name: Extract version from commit
+      - name: Resolve version
         # yamllint disable-line rule:line-length
         if: steps.guard.outputs.is-release-commit == 'true' || inputs.version != ''
         id: version
         shell: bash
         env:
+          VERSION_SOURCE: >-
+            ${{ inputs.version != '' && 'commit' || inputs.version-source }}
+          VERSION_FILE: ${{ inputs.version-file }}
           COMMIT_MESSAGE: >-
             ${{ inputs.version != ''
                 && format('chore(release): version {0}', inputs.version)
                 || '' }}
-        run: .lgtm-ci-tooling/scripts/ci/release/extract-version-from-commit.sh
+        run: .lgtm-ci-tooling/scripts/ci/release/resolve-auto-tag-version.sh
+
+      - name: Detect previous tag version
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          inputs.skip-if-unchanged
+        id: previous-version
+        shell: bash
+        env:
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: .lgtm-ci-tooling/scripts/ci/release/detect-previous-tag-version.sh
+
+      - name: Check version unchanged
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          inputs.skip-if-unchanged
+        id: unchanged
+        shell: bash
+        env:
+          CURRENT_VERSION: ${{ steps.version.outputs.version }}
+          PREVIOUS_VERSION: ${{ steps.previous-version.outputs.version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: .lgtm-ci-tooling/scripts/ci/release/check-version-unchanged.sh
 
       - name: Configure git with app token
         # yamllint disable-line rule:line-length
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         shell: bash
         env:
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -152,7 +268,10 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/configure-git-remote.sh
 
       - name: Create release tag
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         id: tag
         shell: bash
         env:
@@ -162,7 +281,11 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/create-tag.sh
 
       - name: Create GitHub release
-        if: steps.version.outputs.found == 'true' && inputs.create-release
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true') &&
+          inputs.create-release
         id: github-release
         shell: bash
         env:
@@ -171,7 +294,10 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
 
       - name: Update floating tag
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         shell: bash
         env:
           TAG: ${{ steps.tag.outputs.tag-name }}
@@ -180,7 +306,10 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/update-floating-tag.sh
 
       - name: Release summary
-        if: steps.version.outputs.found == 'true'
+        if: >-
+          steps.version.outputs.found == 'true' &&
+          (inputs.skip-if-unchanged != true ||
+          steps.unchanged.outputs.should-tag == 'true')
         shell: bash
         env:
           SUMMARY_TYPE: release
@@ -191,8 +320,83 @@ jobs:
 
       - name: Skip summary
         # yamllint disable-line rule:line-length
-        if: always() && steps.version.outputs.found != 'true'
+        if: >-
+          always() &&
+          (
+            steps.version.outputs.found != 'true' ||
+            (inputs.skip-if-unchanged &&
+            steps.unchanged.outputs.should-tag == 'false')
+          )
         shell: bash
         env:
           IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
+          VERSION_FOUND: ${{ steps.version.outputs.found }}
+          VERSION_UNCHANGED: ${{ steps.unchanged.outputs.unchanged }}
+          TAG_EXISTS: ${{ steps.unchanged.outputs.tag-exists }}
         run: .lgtm-ci-tooling/scripts/ci/release/write-skip-summary.sh
+
+  report-release-failure:
+    name: Report release automation failure
+    needs: [auto-tag]
+    if: >-
+      always() &&
+      inputs.report-failures &&
+      needs.auto-tag.result == 'failure'
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    permissions:
+      # Read workflow/job metadata to generate failure context
+      actions: read
+      # Read repository context for issue body
+      contents: read
+      # Create or update failure notification issues
+      issues: write
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Resolve egress allowlist
+        id: egress-failure
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ steps.egress-failure.outputs['allowed-endpoints'] }}
+
+      - name: Write failure trigger summary
+        shell: bash
+        env:
+          RELEASE_WORKFLOW_KEY: release-auto-tag
+          PRIMARY_JOB_FAILED: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          write_trigger_summary
+
+      - name: Notify release failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_WORKFLOW_KEY: release-auto-tag
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+          FAILURE_TARGET_BRANCH: ${{ inputs.failure-target-branch }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          notify_failure

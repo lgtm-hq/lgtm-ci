@@ -75,6 +75,48 @@ __all__ = ["__version__"]
 EOF
 }
 
+create_uv_lock() {
+	# Minimal uv.lock with the own package plus one registry dependency,
+	# matching the structure uv generates (PEP 503 normalized names).
+	local dir="$1" pkg="$2" version="${3:-1.0.0}"
+	cat >"$dir/uv.lock" <<EOF
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "$pkg"
+version = "$version"
+source = { editable = "." }
+
+[[package]]
+name = "requests"
+version = "2.32.3"
+source = { registry = "https://pypi.org/simple" }
+EOF
+}
+
+create_uv_mock() {
+	# Mock 'uv' that records its calls and emulates 'uv lock' by
+	# rewriting the own-package version in uv.lock (reads NEXT_VERSION
+	# from the environment, like the real invocation would resolve it
+	# from pyproject.toml).
+	local pkg="$1"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	local calls_file="${BATS_TEST_TMPDIR}/mock_calls_uv"
+	: >"$calls_file"
+	cat >"$mock_bin/uv" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >>'$calls_file'
+python3 '$ECOSYSTEMS_DIR/update-uv-lock-version.py' uv.lock '$pkg' "\$NEXT_VERSION"
+EOF
+	chmod +x "$mock_bin/uv"
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
+}
+
 create_version_rb() {
 	local dir="$1" gem="$2" version="${3:-1.0.0}"
 	local gem_path="${gem//-//}"
@@ -181,30 +223,43 @@ run_ecosystem() {
 		run bash -c "cd '$dir' && '$ECOSYSTEMS_DIR/$script' 2>&1"
 }
 
-run_ecosystem_no_bundle() {
-	# Run an ecosystem script with 'bundle' hidden from PATH via a shim
-	# directory that symlinks every other binary. This preserves access
-	# to jq/sed/awk/etc. while making 'command -v bundle' fail.
-	local script="$1"
-	local dir="$2"
-	local version="${3:-9.8.7}"
+run_ecosystem_without_cmd() {
+	# Run an ecosystem script with a named command hidden from PATH via a
+	# shim directory that wraps every other binary. This preserves
+	# access to jq/sed/awk/etc. while making 'command -v <cmd>' fail.
+	# Exec wrappers are used instead of symlinks so interpreters that
+	# derive context from their executable path (e.g. Python venvs
+	# locating pyvenv.cfg) keep working through the shim.
+	local hidden_cmd="$1"
+	local script="$2"
+	local dir="$3"
+	local version="${4:-9.8.7}"
+	local config="${5:-"{}"}"
 	local shim_dir="${BATS_TEST_TMPDIR}/shim_bin_$$"
 	mkdir -p "$shim_dir"
 	local d f name
 	while IFS= read -r d; do
 		[[ -d "$d" ]] || continue
 		for f in "$d"/*; do
-			[[ -e "$f" ]] || continue
+			[[ -x "$f" && ! -d "$f" ]] || continue
 			name=$(basename "$f")
-			[[ "$name" == "bundle" ]] && continue
+			[[ "$name" == "$hidden_cmd" ]] && continue
 			[[ -e "$shim_dir/$name" ]] && continue
-			ln -sf "$f" "$shim_dir/$name"
+			# Absolute interpreter path: shebangs cannot point at
+			# another script, and /usr/bin/env would resolve bash
+			# through this same shim.
+			printf '#!%s\nexec "%s" "$@"\n' "$BASH" "$f" >"$shim_dir/$name"
+			chmod +x "$shim_dir/$name"
 		done
 	done < <(echo "$PATH" | tr ':' '\n')
 	NEXT_VERSION="$version" \
-		ECOSYSTEM_CONFIG_JSON='{}' \
+		ECOSYSTEM_CONFIG_JSON="$config" \
 		PATH="$shim_dir" \
 		run bash -c "cd '$dir' && '$ECOSYSTEMS_DIR/$script' 2>&1"
+}
+
+run_ecosystem_no_bundle() {
+	run_ecosystem_without_cmd "bundle" "$@"
 }
 
 run_runner() {
@@ -304,7 +359,7 @@ run_runner() {
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -320,7 +375,7 @@ run_runner() {
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/test_pkg/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -335,7 +390,7 @@ run_runner() {
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_app/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_app/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -356,7 +411,27 @@ EOF
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/src/my_app/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/src/my_app/__init__.py")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: verifies __init__.py after update when file has leading docstring" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "0.64.2" "lintro"
+	mkdir -p "$BATS_TEST_TMPDIR/lintro"
+	cat >"$BATS_TEST_TMPDIR/lintro/__init__.py" <<EOF
+"""Lintro - A unified CLI core for code formatting, linting, and quality assurance."""
+
+__version__ = "0.64.2"
+EOF
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/lintro/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -372,7 +447,7 @@ EOF
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_success
 
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_cool_pkg/__init__.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/my_cool_pkg/__init__.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 
@@ -428,11 +503,11 @@ EOF
 	[[ "$ACTUAL" == "9.8.7" ]]
 
 	# Verify the override init file was updated
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/version_info.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/version_info.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 
 	# Verify the auto-discoverable decoy was NOT touched
-	DECOY=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/turbo_themes/__init__.py")
+	DECOY=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/turbo_themes/__init__.py")
 	[[ "$DECOY" == "0.0.0" ]]
 }
 
@@ -440,6 +515,218 @@ EOF
 	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
 	assert_failure
 	assert_line --partial "not found"
+}
+
+@test "python: re-locks uv.lock via uv lock when present" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
+	create_uv_lock "$BATS_TEST_TMPDIR" "test-pkg" "1.0.0"
+	create_uv_mock "test-pkg"
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	assert_line --partial "Re-locking"
+
+	# uv was invoked with 'lock' (no --upgrade)
+	grep -qx "lock" "$BATS_TEST_TMPDIR/mock_calls_uv"
+
+	# Own package re-locked; dependency untouched
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
+	[[ "$ACTUAL" == "9.8.7" ]]
+	DEP=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "requests")
+	[[ "$DEP" == "2.32.3" ]]
+}
+
+@test "python: updates uv.lock via tomlkit fallback when uv unavailable" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
+	create_uv_lock "$BATS_TEST_TMPDIR" "test-pkg" "1.0.0"
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	assert_line --partial "tomlkit fallback"
+
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
+	[[ "$ACTUAL" == "9.8.7" ]]
+	DEP=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "requests")
+	[[ "$DEP" == "2.32.3" ]]
+}
+
+@test "python: normalizes package name for uv.lock lookup (PEP 503)" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# pyproject has a mixed-case, dotted/underscored name; uv.lock
+	# records the normalized form (lowercase, [-_.] runs to a dash)
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "My_Cool.Pkg"
+	create_uv_lock "$BATS_TEST_TMPDIR" "my-cool-pkg" "1.0.0"
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "my-cool-pkg")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: skips uv.lock re-lock when absent" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test_pkg"
+	create_init_py "$BATS_TEST_TMPDIR" "test_pkg" "1.0.0"
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	assert_line --partial "No uv.lock found"
+
+	# pyproject.toml still updated
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-pyproject-field.py" "$BATS_TEST_TMPDIR/pyproject.toml" version)
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: falls back to tomlkit when uv lock fails" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
+	create_uv_lock "$BATS_TEST_TMPDIR" "test-pkg" "1.0.0"
+	# uv exists but fails (e.g. blocked egress on hardened runners)
+	mock_command "uv" "error: network unreachable" 1
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+	assert_line --partial "uv lock failed"
+
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
+	[[ "$ACTUAL" == "9.8.7" ]]
+}
+
+@test "python: finds workspace-root uv.lock for subdirectory pyproject" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# uv workspace layout: member pyproject in a subdirectory, single
+	# lockfile at the workspace root.
+	mkdir -p "$BATS_TEST_TMPDIR/pkg"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/pkg" "1.0.0" "test-pkg"
+	cat >"$BATS_TEST_TMPDIR/uv.lock" <<EOF
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "test-pkg"
+version = "1.0.0"
+source = { editable = "pkg" }
+
+[[package]]
+name = "requests"
+version = "2.32.3"
+source = { registry = "https://pypi.org/simple" }
+EOF
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR" \
+		"9.8.7" '{"pyproject": "pkg/pyproject.toml"}'
+	assert_success
+	assert_line --partial "tomlkit fallback"
+
+	ACTUAL=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "test-pkg")
+	[[ "$ACTUAL" == "9.8.7" ]]
+	DEP=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "requests")
+	[[ "$DEP" == "2.32.3" ]]
+}
+
+@test "python: ignores unrelated parent uv.lock when project is not a member" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	# Root uv.lock belongs to a different project; pkg/ is NOT a
+	# workspace member, so the walk must not touch the root lockfile.
+	mkdir -p "$BATS_TEST_TMPDIR/pkg"
+	create_pyproject_toml "$BATS_TEST_TMPDIR/pkg" "1.0.0" "test-pkg"
+	create_uv_lock "$BATS_TEST_TMPDIR" "other-proj" "1.0.0"
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR" \
+		"9.8.7" '{"pyproject": "pkg/pyproject.toml"}'
+	assert_success
+	assert_line --partial "not a local package there"
+	assert_line --partial "No uv.lock found"
+
+	# Unrelated root lockfile untouched
+	OTHER=$(python3 "$ECOSYSTEMS_DIR/read-uv-lock-version.py" "$BATS_TEST_TMPDIR/uv.lock" "other-proj")
+	[[ "$OTHER" == "1.0.0" ]]
+}
+
+@test "python: uv.lock fallback updates local entry, not same-name registry entry" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
+	# Same-name registry entry listed BEFORE the local project entry:
+	# the fallback must update the local (path-sourced) entry only.
+	# Uses a path source here; editable sources are covered by the
+	# other uv.lock tests via create_uv_lock.
+	cat >"$BATS_TEST_TMPDIR/uv.lock" <<EOF
+version = 1
+revision = 3
+requires-python = ">=3.11"
+
+[[package]]
+name = "test-pkg"
+version = "0.0.1"
+source = { registry = "https://pypi.org/simple" }
+
+[[package]]
+name = "test-pkg"
+version = "1.0.0"
+source = { path = "." }
+EOF
+
+	run_ecosystem_without_cmd "uv" "python.sh" "$BATS_TEST_TMPDIR"
+	assert_success
+
+	# Local (editable) entry re-locked; registry entry untouched
+	python3 - "$BATS_TEST_TMPDIR/uv.lock" <<'PY'
+import sys
+import tomllib
+
+with open(sys.argv[1], "rb") as f:
+    data = tomllib.load(f)
+versions = {}
+for pkg in data["package"]:
+    source = pkg.get("source", {})
+    kind = "registry" if "registry" in source else "local"
+    versions[kind] = pkg["version"]
+assert versions["local"] == "9.8.7", versions
+assert versions["registry"] == "0.0.1", versions
+PY
+}
+
+@test "python: fails when uv lock does not update own-package version" {
+	if ! python3 -c 'import tomlkit' 2>/dev/null; then
+		skip "tomlkit not available"
+	fi
+
+	create_pyproject_toml "$BATS_TEST_TMPDIR" "1.0.0" "test-pkg"
+	create_uv_lock "$BATS_TEST_TMPDIR" "test-pkg" "1.0.0"
+	# No-op uv: 'uv lock' succeeds but leaves uv.lock unchanged
+	mock_command "uv" ""
+
+	run_ecosystem "python.sh" "$BATS_TEST_TMPDIR"
+	assert_failure
+	assert_line --partial "uv.lock verification failed"
 }
 
 # =============================================================================
@@ -665,7 +952,7 @@ EOF
 	[[ "$ACTUAL" == "9.8.7" ]]
 
 	# Verify the custom init file was updated
-	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/.*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/ver.py")
+	ACTUAL=$(awk '/^__version__[[:space:]]*=/ { gsub(/^__version__[[:space:]]*=[[:space:]]*["'"'"']/, ""); gsub(/["'"'"'].*/, ""); print; exit }' "$BATS_TEST_TMPDIR/custom/lib/ver.py")
 	[[ "$ACTUAL" == "9.8.7" ]]
 }
 

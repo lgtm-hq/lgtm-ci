@@ -9,7 +9,9 @@
 #   CODEOWNERS_PATH - Path to CODEOWNERS file
 #
 # Optional environment variables:
-#   PR_AUTHOR_TYPE  - GitHub user type (e.g. "User", "Bot")
+#   PR_AUTHOR_TYPE           - GitHub user type (e.g. "User", "Bot")
+#   REQUEST_CODEOWNER_REVIEW - When "true", request review even on release-bump PRs
+#                              (used by the release workflow; pr-auto-assign omits this)
 
 set -euo pipefail
 
@@ -74,6 +76,9 @@ gh pr edit "$PR_NUMBER" --add-assignee "$selected"
 if [[ "${PR_AUTHOR_TYPE:-}" == "Bot" ]]; then
 	if [[ "$selected" == "$PR_AUTHOR" ]]; then
 		echo "Bot-authored PR detected, but selected CODEOWNER is the PR author ($selected); skipping review request"
+	elif [[ "${REQUEST_CODEOWNER_REVIEW:-}" != "true" ]] &&
+		gh pr view "$PR_NUMBER" --json labels --jq '.labels[].name' | grep -qx 'release-bump'; then
+		echo "Release-bump PR — review request handled by release workflow; skipping"
 	else
 		echo "Bot-authored PR detected, requesting review from $selected"
 		gh pr edit "$PR_NUMBER" --add-reviewer "$selected"

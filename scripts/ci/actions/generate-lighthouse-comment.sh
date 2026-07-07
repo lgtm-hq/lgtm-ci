@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Generate formatted PR comment from Lighthouse CI results
+# Purpose: Generate Lighthouse audit summary markdown from CI results
 #
 # Required environment variables:
 #   RESULTS_PATH - Path to Lighthouse results JSON file or directory

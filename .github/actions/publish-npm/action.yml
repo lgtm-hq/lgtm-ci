@@ -4,10 +4,6 @@ description: "Build and publish Node.js package to npm with provenance"
 author: "lgtm-hq"
 
 inputs:
-  node-version:
-    description: "Node.js version"
-    required: false
-    default: "22"
   dist-tag:
     description: "npm dist-tag (latest, beta, next, etc.)"
     required: false
@@ -49,8 +45,8 @@ runs:
     - name: Resolve scripts directory
       shell: bash
       run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
     - name: Validate package
       id: validate

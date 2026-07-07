@@ -1,0 +1,29 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Maintenance - Registry Health Check
+
+'on':
+  schedule:
+    - cron: '0 2 * * 1'
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: registry-health-check
+  cancel-in-progress: false
+
+jobs:
+  registry-health:
+    uses: ./.github/workflows/reusable-registry-health-check.yml
+    with:
+      tooling-ref: ${{ github.sha }}
+      open-issue-on-failure: true
+    permissions:
+      # Read repository and lgtm-ci tooling for health checks
+      contents: read
+      # Create issues on digest verification failures
+      issues: write
+      # Verify container image manifests
+      packages: read

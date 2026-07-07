@@ -16,10 +16,11 @@ jobs:
     uses: ./.github/workflows/reusable-release-version-pr.yml
     with:
       max-bump: minor
-      ecosystems: python
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
     permissions:
       contents: write
       pull-requests: write
+      actions: read
+      issues: write

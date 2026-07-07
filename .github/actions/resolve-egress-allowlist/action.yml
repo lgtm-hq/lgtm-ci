@@ -1,0 +1,52 @@
+---
+name: "Resolve egress allowlist"
+description: >-
+  Resolve allowed-endpoints for step-security/harden-runner. Run as a workflow
+  step before lgtm-hq/lgtm-ci harden-runner so the inner pre-hook receives
+  endpoints (composite step outputs are not available at pre-hook time).
+author: "lgtm-hq"
+inputs:
+  egress-policy:
+    description: "Egress policy: audit (log) or block (enforce allowlist)"
+    required: false
+    default: "block"
+  egress-preset:
+    description: >-
+      Named baseline allowlist for block policy (github-minimal, github-pages,
+      github-tooling, docker, playwright, pypi, rubygems, npm-publish, quality,
+      osv-scanner, rust-release, sbom, scorecard, ai-review)
+    required: false
+    default: ""
+  allowed-endpoints:
+    description: >-
+      Host:port list (multiline). replace mode: overrides preset when non-empty;
+      append mode: merged with preset (deduped)
+    required: false
+    default: ""
+  allowed-endpoints-mode:
+    description: "replace (override preset) or append (merge with preset, deduped)"
+    required: false
+    default: "replace"
+
+outputs:
+  allowed-endpoints:
+    description: "Resolved allowlist for step-security/harden-runner"
+    value: ${{ steps.resolve.outputs['allowed-endpoints'] }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve egress allowlist
+      id: resolve
+      shell: bash
+      env:
+        EGRESS_POLICY: ${{ inputs['egress-policy'] }}
+        EGRESS_PRESET: ${{ inputs['egress-preset'] }}
+        ALLOWED_ENDPOINTS: ${{ inputs['allowed-endpoints'] }}
+        ALLOWED_ENDPOINTS_MODE: ${{ inputs['allowed-endpoints-mode'] }}
+      run: >-
+        bash "${{ github.action_path }}/../harden-runner/resolve-egress-endpoints.sh"
+
+branding:
+  icon: "list"
+  color: "blue"

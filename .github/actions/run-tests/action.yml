@@ -8,10 +8,6 @@ inputs:
     description: "Test runner to use: pytest, vitest, playwright, auto"
     required: false
     default: "auto"
-  config-file:
-    description: "Path to test configuration file"
-    required: false
-    default: ""
   coverage:
     description: "Whether to collect coverage (true/false)"
     required: false
@@ -58,8 +54,8 @@ runs:
     - name: Resolve scripts directory
       shell: bash
       run: |
-        echo "SCRIPTS_DIR=${GITHUB_ACTION_PATH//\\//}/../../../scripts" \
-          >> "$GITHUB_ENV"
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
     - name: Detect test runner
       id: detect

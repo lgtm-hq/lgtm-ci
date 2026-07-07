@@ -69,6 +69,11 @@ on:
         required: false
         type: string
         default: ""
+      target:
+        description: "Docker build target stage (e.g. 'full', 'base')"
+        required: false
+        type: string
+        default: ""
       runner-map:
         description: >-
           JSON object mapping platform to runner label.
@@ -99,6 +104,32 @@ on:
         required: false
         type: string
         default: ""
+      health-check-cmd:
+        description: >-
+          Optional command run on the runner against the published localhost
+          port before publish, e.g. `curl -f http://127.0.0.1:8080/health`.
+          Starts a detached container, waits for `health-check-port`, runs the
+          command on the runner (not inside the image), then tears down. Requires
+          `health-check-port`. When set with `push: true`, publish is gated on
+          success. Skipped when empty (preserves current behavior).
+        required: false
+        type: string
+        default: ""
+      health-check-port:
+        description: >-
+          Container port to publish on 127.0.0.1 and wait for before running
+          `health-check-cmd` on the runner. Required when `health-check-cmd`
+          is set.
+        required: false
+        type: string
+        default: ""
+      health-check-timeout:
+        description: >-
+          Max wait time for `health-check-port` to accept connections before
+          running `health-check-cmd` (e.g. 30s).
+        required: false
+        type: string
+        default: "30s"
       validate-on-pr:
         description: >-
           When true AND push is false, use the split per-platform path (native
@@ -150,12 +181,35 @@ on:
         description: "harden-runner egress policy (audit or block)"
         required: false
         type: string
-        default: "audit"
+        default: "block"
       allowed-endpoints:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
         default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "docker"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 60
 
     outputs:
       tags:
@@ -180,63 +234,43 @@ jobs:
   classify:
     name: Classify Platforms
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
     outputs:
       use-split: ${{ steps.classify.outputs.use-split }}
       matrix: ${{ steps.classify.outputs.matrix }}
-      tooling-ref: ${{ steps.tooling.outputs.ref }}
-      tooling-repository: ${{ steps.tooling.outputs.repository }}
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      - name: Resolve tooling ref
-        id: tooling
-        shell: bash
-        env:
-          TOOLING_REF: ${{ inputs.tooling-ref }}
-          JOB_CONTEXT: ${{ toJson(job) }}
-        run: |
-          python3 - <<'PY'
-          import json
-          import os
-          import sys
-
-          try:
-              job_context = json.loads(os.environ["JOB_CONTEXT"])
-              workflow_sha = job_context["workflow_sha"]
-              workflow_repository = job_context["workflow_repository"]
-              github_output = os.environ["GITHUB_OUTPUT"]
-          except KeyError as exc:
-              print(f"Missing required workflow context key: {exc}", file=sys.stderr)
-              sys.exit(1)
-          except json.JSONDecodeError as exc:
-              print(f"Invalid JOB_CONTEXT JSON: {exc}", file=sys.stderr)
-              sys.exit(1)
-
-          tooling_ref = os.environ.get("TOOLING_REF", "")
-          ref = tooling_ref if tooling_ref else workflow_sha
-
-          with open(github_output, "a", encoding="utf-8") as output:
-              output.write(f"ref={ref}\n")
-              output.write(f"repository={workflow_repository}\n")
-          PY
-
-      - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ steps.tooling.outputs.repository }}
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ steps.tooling.outputs.ref }}
-          sparse-checkout: scripts/ci/
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Classify platforms
         id: classify
         shell: bash
@@ -248,6 +282,9 @@ jobs:
           RUNNER_MAP: ${{ inputs.runner-map }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Single-platform builds, or multi-platform when push is disabled (QEMU fallback)
@@ -256,6 +293,7 @@ jobs:
     needs: classify
     if: ${{ needs.classify.outputs.use-split == 'false' }}
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write
@@ -268,12 +306,6 @@ jobs:
       digest: ${{ steps.metadata.outputs.digest }}
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -281,15 +313,28 @@ jobs:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
+          repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Setup QEMU
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
@@ -361,11 +406,14 @@ jobs:
           context: ${{ inputs.context }}
           file: ${{ inputs.file }}
           platforms: ${{ inputs.platforms }}
-          push: ${{ inputs.push }}
-          load: ${{ inputs.push == false && (inputs.validate-on-pr || inputs.scan) }}
+          push: ${{ inputs.push && inputs.health-check-cmd == '' }}
+          load: >-
+            ${{ inputs.health-check-cmd != '' ||
+              (inputs.push == false && (inputs.validate-on-pr || inputs.scan)) }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
           # yamllint disable rule:line-length
           cache-from: |
             ${{ inputs.no-cache == false && 'type=gha' || '' }}
@@ -374,16 +422,65 @@ jobs:
             ${{ inputs.no-cache == false && 'type=gha,mode=max' || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0},mode=max', inputs.cache-registry-ref) || '' }}
           # yamllint enable rule:line-length
-          provenance: ${{ inputs.provenance && inputs.push }}
-          sbom: ${{ inputs.sbom && inputs.push }}
+          provenance: ${{ inputs.provenance && inputs.push && inputs.health-check-cmd == '' }}
+          sbom: ${{ inputs.sbom && inputs.push && inputs.health-check-cmd == '' }}
+
+      - name: Resolve local image for health check
+        if: inputs.health-check-cmd != ''
+        id: local-health-check-image
+        shell: bash
+        env:
+          STEP: resolve-local-health-check-image
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Health check
+        if: inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: health-check-local
+          IMAGE: ${{ steps.local-health-check-image.outputs.image }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Install Syft
+        if: inputs.push && inputs.sbom && inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: install
+        run: .lgtm-ci-tooling/scripts/ci/actions/generate-sbom.sh
+
+      - name: Generate SBOM for attestation
+        if: inputs.push && inputs.sbom && inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: generate
+          TARGET: ${{ steps.local-health-check-image.outputs.image }}
+          TARGET_TYPE: image
+          FORMAT: spdx-json
+          OUTPUT_FILE: sbom.spdx.json
+        run: .lgtm-ci-tooling/scripts/ci/actions/generate-sbom.sh
+
+      - name: Push image after health check
+        if: inputs.push && inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: push
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Extract digest
         id: metadata
         if: inputs.push || inputs.validate-on-pr
         shell: bash
         env:
-          STEP: set-output-digest
+          STEP: ${{ inputs.push && inputs.health-check-cmd != '' && 'metadata' || 'set-output-digest' }}
           DIGEST: ${{ steps.build.outputs.digest }}
+          BUILT_TAGS: ${{ steps.meta.outputs.tags }}
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Resolve local image for scan
@@ -419,7 +516,17 @@ jobs:
         uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
         with:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
-          subject-digest: ${{ steps.build.outputs.digest }}
+          subject-digest: ${{ steps.metadata.outputs.digest }}
+          push-to-registry: true
+
+      - name: Generate SBOM attestation
+        if: inputs.push && inputs.sbom && inputs.health-check-cmd != ''
+        # Pinned to SHA for supply chain security
+        uses: actions/attest@59d89421af93a897026c735860bf21b6eb4f7b26 # v4.1.0
+        with:
+          subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          subject-digest: ${{ steps.metadata.outputs.digest }}
+          sbom-path: sbom.spdx.json
           push-to-registry: true
 
       - name: Install Cosign
@@ -431,7 +538,7 @@ jobs:
         shell: bash
         env:
           STEP: sign-image
-          DIGEST: ${{ steps.build.outputs.digest }}
+          DIGEST: ${{ steps.metadata.outputs.digest }}
           REGISTRY: ${{ inputs.registry }}
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
@@ -449,12 +556,13 @@ jobs:
           DIGEST: ${{ steps.metadata.outputs.digest || '' }}
           COSIGN_SIGNED: ${{ inputs.cosign-sign && inputs.push }}
           SCAN_ENABLED: ${{ inputs.scan }}
+          HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   # Per-platform native build leg (multi-arch split path).
   # One matrix entry per platform; runner and QEMU config resolved by classify.
   build-per-platform:
-    name: Build ${{ matrix.platform }}
+    name: Docker build per platform
     needs: classify
     if: ${{ needs.classify.outputs.use-split == 'true' }}
     strategy:
@@ -462,18 +570,13 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write
       security-events: write
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -481,15 +584,28 @@ jobs:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
+          repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -553,7 +669,9 @@ jobs:
           file: ${{ inputs.file }}
           platforms: ${{ matrix.platform }}
           push: ${{ inputs.push }}
-          load: ${{ inputs.push == false && (inputs.validate-on-pr || inputs.scan) }}
+          load: >-
+            ${{ inputs.push == false && (inputs.health-check-cmd != '' ||
+              inputs.validate-on-pr || inputs.scan) }}
           # yamllint disable rule:line-length
           tags: >-
             ${{ inputs.push
@@ -561,6 +679,7 @@ jobs:
               || format('{0}/{1}:validate-{2}', inputs.registry, inputs.image-name || github.repository, matrix.slug) }}
           labels: ${{ steps.meta.outputs.labels }}
           build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
           cache-from: |
             ${{ inputs.no-cache == false && format('type=gha,scope={0}', matrix.slug) || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}-{1}', inputs.cache-registry-ref, matrix.slug) || '' }}
@@ -593,6 +712,22 @@ jobs:
           PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Health check (${{ matrix.platform }})
+        if: >-
+          inputs.validate-on-pr && inputs.push == false &&
+          inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: health-check-local
+          IMAGE: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          PLATFORM: ${{ matrix.platform }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
       - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
@@ -635,7 +770,7 @@ jobs:
   #   - smoke-test (shorthand): `docker run --rm --platform <p> <image> <cmd>`
   #   - smoke-test-script: caller-owned script with env IMAGE/PLATFORM/REGISTRY
   verify-per-platform:
-    name: Verify ${{ matrix.platform }}
+    name: Docker verify per platform
     needs: [classify, build-per-platform]
     if: >-
       needs.classify.outputs.use-split == 'true' &&
@@ -646,34 +781,41 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.classify.outputs.matrix) }}
     runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: read
 
     steps:
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository (for smoke-test-script)
-        if: inputs.smoke-test-script != ''
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
+          repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -726,18 +868,123 @@ jobs:
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
+  # Optional per-platform detached-container health check (push path only).
+  # Gates manifest merge on runtime validation of each staging image.
+  health-check-per-platform:
+    name: Docker health check per platform
+    needs: [classify, build-per-platform, verify-per-platform]
+    if: >-
+      always() &&
+      needs.classify.outputs.use-split == 'true' &&
+      inputs.push &&
+      inputs.health-check-cmd != '' &&
+      needs.build-per-platform.result == 'success' &&
+      (needs.verify-per-platform.result == 'success' ||
+       needs.verify-per-platform.result == 'skipped')
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.classify.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # contents: read — sparse-checkout lgtm-ci tooling scripts for build-docker.sh.
+    # packages: read — pull per-platform staging images by digest before merge.
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Setup QEMU
+        if: ${{ matrix.qemu }}
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-qemu-action@ce360397dd3f832beb865e1373c09c0e9f86d70a # v4.0.0
+
+      - name: Validate registry
+        if: inputs.push
+        shell: bash
+        env:
+          STEP: validate
+          REGISTRY: ${{ inputs.registry }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/docker-login.sh
+
+      - name: Login to GHCR
+        if: inputs.push && inputs.registry == 'ghcr.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ github.token }}
+
+      - name: Login to Docker Hub
+        if: inputs.push && inputs.registry == 'docker.io'
+        # Pinned to SHA for supply chain security
+        uses: docker/login-action@650006c6eb7dba73a995cc03b0b2d7f5ca915bee # v4.2.0
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Download staging digest
+        if: inputs.push
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: staging-digest-${{ matrix.slug }}
+          path: ${{ runner.temp }}/staging-digest
+
+      - name: Health check (${{ matrix.platform }})
+        shell: bash
+        env:
+          STEP: health-check
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
+          PLATFORM: ${{ matrix.platform }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
   # Assemble multi-arch manifest from per-platform staging images
   merge:
     name: Merge Manifests
-    needs: [classify, build-per-platform, verify-per-platform]
+    needs: [classify, build-per-platform, verify-per-platform, health-check-per-platform]
     if: >-
       always() &&
       inputs.push &&
       needs.classify.outputs.use-split == 'true' &&
       needs.build-per-platform.result == 'success' &&
       (needs.verify-per-platform.result == 'success' ||
-       needs.verify-per-platform.result == 'skipped')
+       needs.verify-per-platform.result == 'skipped') &&
+      (needs.health-check-per-platform.result == 'success' ||
+       needs.health-check-per-platform.result == 'skipped')
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       packages: write
@@ -749,22 +996,35 @@ jobs:
       digest: ${{ steps.metadata.outputs.digest }}
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
 
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@d7f5e7f509e45cec5c76c4d5afdd7de93d0b3df5 # v4.1.0
@@ -889,38 +1149,53 @@ jobs:
           DIGEST: ${{ steps.metadata.outputs.digest || '' }}
           COSIGN_SIGNED: ${{ inputs.cosign-sign && inputs.push }}
           SCAN_ENABLED: ${{ inputs.scan }}
+          HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
           MATRIX: ${{ needs.classify.outputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
   summary-validate:
     name: Validation Summary
-    needs: [classify, build-per-platform, verify-per-platform]
+    needs: [classify, build-per-platform, verify-per-platform, health-check-per-platform]
     if: >-
       always() &&
       needs.classify.outputs.use-split == 'true' &&
       inputs.validate-on-pr &&
       inputs.push == false
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
 
     steps:
-      - name: Harden runner
+      - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-      - name: Checkout lgtm-ci tooling
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          repository: ${{ needs.classify.outputs.tooling-repository }}
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ needs.classify.outputs.tooling-ref }}
-          sparse-checkout: scripts/ci/
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
 
       - name: Build summary
         if: always()
@@ -933,6 +1208,7 @@ jobs:
           PUSH: ${{ inputs.push }}
           SCAN_ENABLED: ${{ inputs.scan }}
           VALIDATE_ON_PR: true
+          HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
           MATRIX: ${{ needs.classify.outputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
@@ -948,11 +1224,34 @@ jobs:
         (needs.classify.outputs.use-split == 'true' && needs.merge.result == 'success')
       )
     runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
       security-events: write
 
     steps:
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+
       - name: Run Trivy vulnerability scanner
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
