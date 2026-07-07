@@ -5,7 +5,7 @@
 load "../../../helpers/common"
 load "../../../helpers/mocks"
 
-FIXTURE_RELATIVE="json/org_ruleset_checks_py_lintro.json"
+FIXTURE_RELATIVE="json/org_ruleset_example.json"
 
 setup() {
 	setup_temp_dir
@@ -23,7 +23,7 @@ teardown() {
 	run bash "$SCRIPT" "$FIXTURE"
 	assert_success
 	assert_output --partial "Dry run"
-	assert_output --partial "orgs/lgtm-hq/rulesets/16132640"
+	assert_output --partial "orgs/lgtm-hq/rulesets/9999999"
 	assert_output --partial "--apply"
 }
 
@@ -35,15 +35,15 @@ teardown() {
 	refute_output --partial '"updated_at"'
 	refute_output --partial '"_links"'
 	refute_output --partial '"source_type"'
-	refute_output --partial '"id": 16132640'
+	refute_output --partial '"id": 9999999'
 }
 
 @test "sync-ruleset: dry run preserves required status check contexts" {
 	run bash "$SCRIPT" "$FIXTURE"
 	assert_success
-	assert_output --partial "test-suite-coverage / 🧪 Test Suite & Coverage"
-	assert_output --partial "lintro-code-quality / 🛠️ Lintro Code Quality"
-	assert_output --partial "🔐 Security Audit"
+	assert_output --partial "tests / Example Tests"
+	assert_output --partial "quality / Example Quality"
+	assert_output --partial "🔐 Example Security Audit"
 }
 
 @test "sync-ruleset: dry run does not invoke gh" {
@@ -57,7 +57,7 @@ teardown() {
 @test "sync-ruleset: reads payload from stdin with -" {
 	run bash -c "cat '$FIXTURE' | bash '$SCRIPT' -"
 	assert_success
-	assert_output --partial "orgs/lgtm-hq/rulesets/16132640"
+	assert_output --partial "orgs/lgtm-hq/rulesets/9999999"
 }
 
 @test "sync-ruleset: --id overrides the payload ruleset id" {
@@ -69,7 +69,7 @@ teardown() {
 @test "sync-ruleset: LGTM_ORG overrides the target organization" {
 	LGTM_ORG="other-org" run bash "$SCRIPT" "$FIXTURE"
 	assert_success
-	assert_output --partial "orgs/other-org/rulesets/16132640"
+	assert_output --partial "orgs/other-org/rulesets/9999999"
 }
 
 @test "sync-ruleset: resolves id from ruleset_id when id is absent" {
@@ -82,45 +82,45 @@ teardown() {
 
 @test "sync-ruleset: --apply PUTs the sanitized payload via gh" {
 	mock_command_multi "gh" '
-	"api orgs/lgtm-hq/rulesets/16132640 --jq .name")
-		echo "checks-py-lintro"
+	"api orgs/lgtm-hq/rulesets/9999999 --jq .name")
+		echo "checks-example"
 		;;
 	*)
 		echo "$@" >>"'"${BATS_TEST_TMPDIR}"'/mock_calls_gh"
 		;;'
 	run bash "$SCRIPT" --apply "$FIXTURE"
 	assert_success
-	assert_output --partial "Updated ruleset 16132640"
+	assert_output --partial "Updated ruleset 9999999"
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_gh"
-	assert_output --partial "api --method PUT orgs/lgtm-hq/rulesets/16132640 --input -"
+	assert_output --partial "api --method PUT orgs/lgtm-hq/rulesets/9999999 --input -"
 }
 
 @test "sync-ruleset: --apply fails when the identity check GET fails" {
 	mock_command "gh" "" 1
 	run bash "$SCRIPT" --apply "$FIXTURE"
 	assert_failure
-	assert_output --partial "Failed to fetch live ruleset orgs/lgtm-hq/rulesets/16132640"
+	assert_output --partial "Failed to fetch live ruleset orgs/lgtm-hq/rulesets/9999999"
 }
 
 @test "sync-ruleset: --apply refuses when live ruleset name mismatches payload" {
-	mock_command "gh" "checks-rustume"
+	mock_command "gh" "checks-mismatch"
 	run bash "$SCRIPT" --apply "$FIXTURE"
 	assert_failure
 	assert_output --partial "Ruleset identity mismatch"
-	assert_output --partial "checks-rustume"
+	assert_output --partial "checks-mismatch"
 }
 
 @test "sync-ruleset: --apply fails when the PUT returns an error" {
 	mock_command_multi "gh" '
-	"api orgs/lgtm-hq/rulesets/16132640 --jq .name")
-		echo "checks-py-lintro"
+	"api orgs/lgtm-hq/rulesets/9999999 --jq .name")
+		echo "checks-example"
 		;;
 	*)
 		exit 1
 		;;'
 	run bash "$SCRIPT" --apply "$FIXTURE"
 	assert_failure
-	assert_output --partial "Failed to update orgs/lgtm-hq/rulesets/16132640"
+	assert_output --partial "Failed to update orgs/lgtm-hq/rulesets/9999999"
 }
 
 @test "sync-ruleset: fails on missing payload file" {
