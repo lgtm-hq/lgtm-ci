@@ -44,6 +44,22 @@ on:
         required: false
         type: string
         default: ""
+      source-ref:
+        description: >-
+          Git ref to check out for the build context (app source), independent
+          of tooling-ref. Empty uses the triggering ref. Set for historical
+          backfills (e.g. build an old tag's source from a main dispatch).
+        required: false
+        type: string
+        default: ""
+      tag-latest:
+        description: >-
+          Also apply the 'latest' tag when version is set. Set false for
+          historical backfills so republishing an old version does not move
+          'latest' backward.
+        required: false
+        type: boolean
+        default: true
       push:
         description: "Push image to registry"
         required: false
@@ -246,6 +262,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
@@ -310,6 +328,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
@@ -394,7 +414,7 @@ jobs:
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest }}
             ${{ steps.extra-tags.outputs.tags }}
           # yamllint enable rule:line-length
 
@@ -581,6 +601,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
@@ -657,7 +679,7 @@ jobs:
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest }}
           # yamllint enable rule:line-length
 
       - name: Build and push (${{ matrix.platform }})
@@ -791,6 +813,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
@@ -1000,6 +1024,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
@@ -1079,7 +1105,7 @@ jobs:
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
             type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=latest,enable=${{ inputs.version != '' }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest }}
             ${{ steps.extra-tags.outputs.tags }}
           # yamllint enable rule:line-length
 
@@ -1178,6 +1204,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling

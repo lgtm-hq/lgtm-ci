@@ -137,3 +137,41 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	run grep -F 'Delete staging manifests' "$WORKFLOW"
 	assert_failure
 }
+
+@test "reusable-docker: exposes source-ref and tag-latest inputs" {
+	run grep -E '^      source-ref:$' "$WORKFLOW"
+	assert_success
+	run grep -E '^      tag-latest:$' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: app-source checkouts honor source-ref" {
+	# Every app-source 'Checkout repository' uses source-ref (build context);
+	# the count must match the number of app-source checkout steps.
+	local checkouts refs
+	checkouts=$(grep -cE '^      - name: Checkout repository' "$WORKFLOW")
+	refs=$(grep -cF "ref: \${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}" "$WORKFLOW")
+	[ "$checkouts" -eq "$refs" ]
+	[ "$refs" -ge 6 ]
+}
+
+@test "reusable-docker: tooling checkout stays on tooling-ref, not source-ref" {
+	# The lgtm-ci tooling checkout must not be repointed by source-ref.
+	run awk '
+		/name: Checkout lgtm-ci tooling/ { in_tool = 1 }
+		in_tool && /inputs\.source-ref/ { bad = 1; exit }
+		in_tool && /^      - name:/ && !/Checkout lgtm-ci tooling/ { in_tool = 0 }
+		END { exit bad }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: tag-latest gates the raw latest tag" {
+	# The raw 'latest' tag must be gated on tag-latest in every metadata block.
+	run grep -c "type=raw,value=latest,enable=\${{ inputs.version != '' && inputs.tag-latest }}" "$WORKFLOW"
+	assert_success
+	[ "$output" -ge 2 ]
+	# No ungated raw-latest remains.
+	run grep -E "type=raw,value=latest,enable=\\\$\{\{ inputs.version != '' \}\}" "$WORKFLOW"
+	assert_failure
+}
