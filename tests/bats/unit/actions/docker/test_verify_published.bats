@@ -20,6 +20,9 @@ setup() {
 	export MATRIX='[{"platform":"linux/amd64","slug":"amd64"},{"platform":"linux/arm64","slug":"arm64"}]'
 	export TARGET_TAGS=$'ghcr.io/org/repo:1.0.0\nghcr.io/org/repo:latest'
 	export INDEX_FILE="${BATS_TEST_TMPDIR}/index.json"
+	# Keep retry loops instant in unit tests.
+	export VERIFY_ATTEMPTS=1
+	export VERIFY_DELAY=0
 }
 
 teardown() {
@@ -74,6 +77,31 @@ EOF
 	assert_failure
 	assert_output --partial "does not resolve in registry"
 	assert_output --partial "incomplete"
+}
+
+@test "verify-published: retries absorb read-after-write lag then succeed" {
+	_write_index <<EOF
+{"manifests":[
+  {"digest":"${AMD64_DIGEST}","platform":{"os":"linux","architecture":"amd64"}}
+]}
+EOF
+	export MATRIX='[{"platform":"linux/amd64","slug":"amd64"}]'
+	export VERIFY_ATTEMPTS=3
+	export VERIFY_DELAY=0
+	# Child resolves only on the 2nd inspect attempt (transient 404 first).
+	mock_command_multi "docker" '
+		*imagetools\ inspect\ --raw*) cat "$INDEX_FILE";;
+		*imagetools\ inspect\ *@*)
+			n_file="${BATS_TEST_TMPDIR}/child_attempts"
+			n=$(( $(cat "$n_file" 2>/dev/null || echo 0) + 1 ))
+			echo "$n" > "$n_file"
+			[ "$n" -ge 2 ] && exit 0 || exit 1;;
+		*) exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "all platform children resolve"
 }
 
 @test "verify-published: matches variant platforms (linux/arm/v7)" {

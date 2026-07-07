@@ -45,10 +45,36 @@ fi
 
 log_info "Verifying published manifest: ${ref}"
 
-# Pull the index manifest back from the registry (authoritative — not a local image).
+# Registry reads are not guaranteed read-after-write consistent, so a manifest
+# can lag its push briefly. Retry registry inspects before failing — a genuine
+# dangling child never resolves, so retries only absorb propagation delay.
+VERIFY_ATTEMPTS="${VERIFY_ATTEMPTS:-5}"
+VERIFY_DELAY="${VERIFY_DELAY:-3}"
+
+# _inspect_ref <ref> — succeed if the ref resolves in the registry (with retry).
+_inspect_ref() {
+	local target="$1" i
+	for ((i = 1; i <= VERIFY_ATTEMPTS; i++)); do
+		if docker buildx imagetools inspect "$target" >/dev/null 2>&1; then
+			return 0
+		fi
+		[[ "$i" -lt "$VERIFY_ATTEMPTS" ]] && sleep "$VERIFY_DELAY"
+	done
+	return 1
+}
+
+# Pull the index manifest back from the registry (authoritative — not a local
+# image), retrying to absorb read-after-write lag.
 index_json=""
 inspect_err="$(mktemp)"
-if ! index_json=$(docker buildx imagetools inspect --raw "$ref" 2>"$inspect_err"); then
+for ((attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt++)); do
+	if index_json=$(docker buildx imagetools inspect --raw "$ref" 2>"$inspect_err"); then
+		break
+	fi
+	index_json=""
+	[[ "$attempt" -lt "$VERIFY_ATTEMPTS" ]] && sleep "$VERIFY_DELAY"
+done
+if [[ -z "$index_json" ]]; then
 	die "Published manifest not resolvable in registry: ${ref}: $(cat "$inspect_err")"
 fi
 rm -f "$inspect_err"
@@ -87,8 +113,9 @@ while IFS= read -r platform; do
 		continue
 	fi
 
-	# Registry pull-back by digest: a dangling child 404s here.
-	if docker buildx imagetools inspect "${REGISTRY}/${IMAGE_NAME}@${digest}" >/dev/null 2>&1; then
+	# Registry pull-back by digest: a dangling child never resolves (even after
+	# retries); a lagging-but-present child resolves once propagation catches up.
+	if _inspect_ref "${REGISTRY}/${IMAGE_NAME}@${digest}"; then
 		log_success "Child manifest resolves: ${platform} -> ${digest}"
 	else
 		log_error "Child manifest for ${platform} does not resolve in registry (dangling): ${digest}"
