@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.47.0] - 2026-07-07
+
+### Added
+
+- **workflows**: add reusable main-failure notifier (#426) (b7a10dc)
+- **actions**: add detect-changes for required-check-safe conditional workflows (#425) (d6c8c3b)
+- **ci**: add merge_group triggers for merge queue support (#423) (4071c9b)
+- **workflows**: add reusable-ai-review for org-wide AI code review (#418) (4a1a0f0)
+- **workflows**: add PR file breakdown comment reusable workflow (#403) (402d720)
+- **network**: enforce TLS floor and add opt-in cert pinning to downloads (#402) (a481956)
+- **workflows**: make reusable-deploy-pages a hardened deploy-only workflow (#414) (b3d77af)
+- **workflows**: add reusable-publish-artifact-preview for artifact download links (#413) (fde7561)
+- **workflows**: add timeout-minutes input to remaining reusables (#393) (f1dfc16)
+- **security**: enable verify-tags in own action-pinning validation (#385) (6a43077)
+
 - **quality**: script-to-BATS-test coverage ratchet (#370):
   `scripts/ci/quality/validate-script-test-coverage.sh` requires every
   `scripts/ci` entrypoint (excluding `lib/`) to be referenced by a BATS test,
@@ -27,6 +52,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `allowed-endpoints` and `scripts-dir` (#379)
 
 ### Changed
+
+- **release**: document consumer upgrade path for KAC-aligned changelog generator (#401) (5dee3eb)
+- **onboarding**: add consumer onboarding guide (#400) (17483d2)
+- **examples**: add consumer starter workflows (#391) (39849b9)
+- **security**: document self-gating limitation and repo hygiene (#387) (232d999)
+- **tests**: replace real org-ruleset fixture with synthetic data (#428) (887c2cd)
+- **actions**: create shared checkout-and-harden composite action (#411) (f5def99)
+- **lib**: make aggregators fail explicitly on missing modules (#406) (7bb3b2f)
+- **quality**: add script-to-BATS-test ratchet and first test tranche (#409) (c206017)
+- **org**: document ruleset check paths and add sync tooling (no committed JSON) (#404) (d2455f7)
+- **docker**: split build-docker.sh into per-step scripts (#392) (0463233)
+- **scripts**: parameterize near-duplicate language-family scripts (#396) (501268f)
+- **catalog**: remove dead inputs, unreferenced actions, and dead scripts (#394) (65e571c)
+- **log**: remove legacy un-namespaced color constant aliases (#390) (5b9d39a)
 
 - **workflows**: **BREAKING** — `reusable-deploy-pages.yml` is now a hardened
   **deploy-only** workflow (#410). The caller builds the site and runs
@@ -88,11 +127,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ci**: unblock path-filtered required check + repair detect-changes action (#432) (0d5757e)
+- **workflows**: report semantic-title check on merge_group events (#430) (c199d68)
+- **release**: re-lock uv.lock after version bump in release-version-pr (#378) (6a6a520)
+- **security**: fail scan-vulnerabilities on missing or unparseable grype results (#388) (84a5db2)
+- **supply-chain**: pin anchore and cargo-binstall installer downloads (#384) (f0616af)
+- **release**: peel annotated tag when updating floating tag (#386) (bd25337)
+- **deps**: cover all lintro digest pins in renovate custom manager (#389) (b19d43a)
 - **actions**: BSD/macOS-incompatible `\s` regex escapes in the
   name-extraction pipelines of `publish-npm.sh`, `publish-gem.sh`, and
   `validate-package.sh` replaced with POSIX `[[:space:]]` (#370)
-
-### Security
 
 ## [0.46.0] - 2026-06-20
 
@@ -1230,7 +1274,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.46.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.47.0...HEAD
+[0.47.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.2...v0.46.0
 [0.45.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.1...v0.45.2
 [0.45.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.0...v0.45.1
