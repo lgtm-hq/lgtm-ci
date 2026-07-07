@@ -27,10 +27,12 @@ source "$SCRIPT_DIR/../../lib/docker.sh"
 : "${MATRIX:?MATRIX is required}"
 : "${TARGET_TAGS:?TARGET_TAGS is required}"
 
-# Resolve the ref to inspect: first non-empty target tag.
+# Resolve the ref to inspect: first non-empty target tag. Trim in pure shell
+# (image refs contain no whitespace; avoids xargs quote/backslash surprises).
 ref=""
 while IFS= read -r tag; do
-	tag=$(echo "$tag" | xargs)
+	tag="${tag#"${tag%%[![:space:]]*}"}"
+	tag="${tag%"${tag##*[![:space:]]}"}"
 	if [[ -n "$tag" ]]; then
 		ref="$tag"
 		break
@@ -45,9 +47,11 @@ log_info "Verifying published manifest: ${ref}"
 
 # Pull the index manifest back from the registry (authoritative — not a local image).
 index_json=""
-if ! index_json=$(docker buildx imagetools inspect --raw "$ref" 2>/dev/null); then
-	die "Published manifest not resolvable in registry: ${ref}"
+inspect_err="$(mktemp)"
+if ! index_json=$(docker buildx imagetools inspect --raw "$ref" 2>"$inspect_err"); then
+	die "Published manifest not resolvable in registry: ${ref}: $(cat "$inspect_err")"
 fi
+rm -f "$inspect_err"
 
 # A complete multi-arch publish is an image index / manifest list with children.
 child_count=$(echo "$index_json" | jq '(.manifests // []) | length')
