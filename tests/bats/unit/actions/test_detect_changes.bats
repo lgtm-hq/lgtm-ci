@@ -153,3 +153,9 @@ run_detect() {
 	run get_github_output "changes"
 	assert_output '{"tests":true,"docs":false}'
 }
+
+@test "detect-changes: script is executable (action invokes it directly)" {
+	# The composite action runs "$SCRIPTS_DIR/ci/actions/detect-changes.sh"
+	# with no bash prefix, so a missing execute bit fails at runtime (126).
+	[[ -x "${PROJECT_ROOT}/${SCRIPT}" ]]
+}

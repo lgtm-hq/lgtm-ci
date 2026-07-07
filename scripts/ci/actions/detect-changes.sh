@@ -40,7 +40,7 @@ elif [[ -z "$BASE_SHA" ]]; then
 	echo "detect-changes: BASE_SHA is empty; failing open (all filters true)" >&2
 	fail_open=1
 	changed=""
-elif ! changed="$(git diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>/dev/null)"; then
+elif ! changed="$(git -c core.quotePath=false diff --name-only "${BASE_SHA}...${HEAD_SHA}" 2>/dev/null)"; then
 	# Unreachable base (shallow clone, force-push): fail open, same rationale.
 	echo "detect-changes: cannot diff ${BASE_SHA}...${HEAD_SHA}; failing open (all filters true)" >&2
 	fail_open=1
