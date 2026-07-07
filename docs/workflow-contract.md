@@ -1036,7 +1036,7 @@ starter examples (`examples/ci-*.yml`) include `merge_group:` by default.
 | `reusable-test-node-custom.yml`        | Tests run; PR summary comment on PR only       |
 | `reusable-test-rust-build.yml`         | Safe to run — no PR context required           |
 | `reusable-coverage.yml`                | Coverage runs; PR comment on PR only           |
-| `reusable-semantic-pr-title.yml`       | Skips on `merge_group` — title validated on PR |
+| `reusable-semantic-pr-title.yml`       | No-op on `merge_group` — title validated on PR |
 
 Test reusables gate their draft-PR skip on `github.event_name ==
 'pull_request'`, so work jobs always run in the merge queue; PR summary
@@ -1045,8 +1045,14 @@ comments are gated on `pull_request` events in workflow conditions and in
 the split `publish-quality-summary` pattern) already carry a
 `github.event_name == 'pull_request'` guard and skip in the queue.
 
-Semantic title validation is intentionally skipped in the merge queue because
-`amannn/action-semantic-pull-request` requires pull request context.
+Semantic title validation is intentionally a no-op in the merge queue because
+`amannn/action-semantic-pull-request` requires pull request context. The job
+itself still runs (finishing in seconds with every step skipped): a job with a
+dynamic `name:` that is skipped at job level reports its check under the raw
+expression text (`semantic-title / inputs.job-name`), so the required context
+would never arrive and queue entries would time out. Required checks produced
+by reusables with configurable job names must therefore never carry job-level
+event skips — skip at step level instead.
 
 Callers need `pull-requests: write` when `post-failure-comment` is enabled
 (default). With `post-failure-comment: false`, `pull-requests: read` suffices.
