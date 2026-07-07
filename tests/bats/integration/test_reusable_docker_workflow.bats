@@ -181,4 +181,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	# No ungated raw-latest remains.
 	run grep -E "type=raw,value=latest,enable=\\\$\{\{ inputs.version != '' \}\}" "$WORKFLOW"
 	assert_failure
+	# metadata-action's auto-latest is disabled in every block, so latest is
+	# controlled solely by the gated raw entry (backfills never move latest).
+	local metablocks flavor
+	metablocks=$(grep -c 'uses: docker/metadata-action@' "$WORKFLOW")
+	flavor=$(grep -c 'latest=false' "$WORKFLOW")
+	[ "$flavor" -eq "$metablocks" ]
 }

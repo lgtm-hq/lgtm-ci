@@ -406,6 +406,10 @@ jobs:
         with:
           images: |
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          # Disable metadata-action's auto 'latest': the tag is controlled only
+          # by the gated raw entry below, so backfills never move latest.
+          flavor: |
+            latest=false
           # yamllint disable rule:line-length
           tags: |
             type=sha,prefix=sha-
@@ -671,6 +675,10 @@ jobs:
         with:
           images: |
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          # Disable metadata-action's auto 'latest': the tag is controlled only
+          # by the gated raw entry below, so backfills never move latest.
+          flavor: |
+            latest=false
           # yamllint disable rule:line-length
           tags: |
             type=sha,prefix=sha-
@@ -1097,6 +1105,10 @@ jobs:
         with:
           images: |
             ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          # Disable metadata-action's auto 'latest': the tag is controlled only
+          # by the gated raw entry below, so backfills never move latest.
+          flavor: |
+            latest=false
           # yamllint disable rule:line-length
           tags: |
             type=sha,prefix=sha-
