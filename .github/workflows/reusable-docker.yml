@@ -1102,6 +1102,19 @@ jobs:
           BUILT_TAGS: ${{ steps.meta.outputs.tags }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
+      # Non-skippable gate: pull the published index back from the registry and
+      # assert every platform child manifest resolves. A dangling index (child
+      # manifests 404) fails the release here instead of publishing as green.
+      - name: Verify published manifest
+        shell: bash
+        env:
+          STEP: verify-published
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          MATRIX: ${{ needs.classify.outputs.matrix }}
+          TARGET_TAGS: ${{ steps.meta.outputs.tags }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
       - name: Generate artifact attestation
         if: inputs.provenance
         # Pinned to SHA for supply chain security
@@ -1125,16 +1138,10 @@ jobs:
           IMAGE_NAME: ${{ inputs.image-name || github.repository }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
 
-      - name: Delete staging manifests
-        if: always() && inputs.registry == 'ghcr.io'
-        shell: bash
-        env:
-          STEP: cleanup-staging
-          GH_TOKEN: ${{ github.token }}
-          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          MATRIX: ${{ needs.classify.outputs.matrix }}
-        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+      # NOTE: per-platform staging images (build-<run_id>-<slug> tags) are the
+      # merged index's child manifests — deleting them by digest orphans the
+      # index (children 404). They are intentionally retained; safe periodic
+      # pruning of stale build-* tags is tracked separately.
 
       - name: Build summary
         if: always()
