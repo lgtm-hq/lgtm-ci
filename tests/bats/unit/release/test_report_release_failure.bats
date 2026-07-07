@@ -319,3 +319,137 @@ EOF
 	assert_failure
 	assert_output --partial "GH_TOKEN is required"
 }
+
+@test "report-release-failure: WORKFLOW_KEY takes precedence over RELEASE_WORKFLOW_KEY" {
+	export WORKFLOW_KEY=docker-publish
+
+	run bash "$SCRIPT" write_trigger_summary
+	assert_success
+	run grep -F "docker-publish" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "report-release-failure: WORKFLOW_KEY alone satisfies the key requirement" {
+	unset RELEASE_WORKFLOW_KEY
+	export WORKFLOW_KEY=pages-deploy
+
+	run bash "$SCRIPT" write_trigger_summary
+	assert_success
+	run grep -F "pages-deploy" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "report-release-failure: fails without WORKFLOW_KEY or RELEASE_WORKFLOW_KEY" {
+	unset RELEASE_WORKFLOW_KEY
+
+	run bash "$SCRIPT" write_trigger_summary
+	assert_failure
+	assert_output --partial "WORKFLOW_KEY (or RELEASE_WORKFLOW_KEY) is required"
+}
+
+@test "report-release-failure: notify_failure fails without a workflow key" {
+	unset RELEASE_WORKFLOW_KEY
+	mock_command_multi "gh" '
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_failure
+	assert_output --partial "WORKFLOW_KEY (or RELEASE_WORKFLOW_KEY) is required"
+}
+
+@test "report-release-failure: FAILURE_HEADING_LABEL customizes summary heading" {
+	export FAILURE_HEADING_LABEL="Main Workflow"
+	export PRIMARY_JOB_FAILED=true
+
+	run bash "$SCRIPT" write_trigger_summary
+	assert_success
+	run grep -F "## Main Workflow Failure" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "report-release-failure: custom marker and title prefixes namespace the issue" {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${BATS_TEST_TMPDIR}/mock_calls_gh'
+case "\$*" in
+	*repo*view*)
+		echo "main"
+		;;
+	*issue*list*)
+		echo ""
+		;;
+	*label*view*)
+		exit 0
+		;;
+	*issue*create*)
+		echo "https://github.com/lgtm-hq/lgtm-ci/issues/43"
+		exit 0
+		;;
+	*run*view*)
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+	export WORKFLOW_KEY=docker-publish
+	export FAILURE_MARKER_PREFIX=main-workflow-failure
+	export FAILURE_TITLE_PREFIX="fix(ci): main workflow failed:"
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	run grep -F 'main-workflow-failure:docker-publish:main' \
+		"${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_success
+	run grep -F 'fix(ci): main workflow failed: main (docker-publish)' \
+		"${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_success
+}
+
+@test "report-release-failure: FAILURE_SUMMARY_TEXT overrides the issue summary" {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*repo*view*)
+		echo "main"
+		;;
+	*issue*list*)
+		echo ""
+		;;
+	*label*view*)
+		exit 0
+		;;
+	*issue*create*)
+		while [[ \$# -gt 0 ]]; do
+			if [[ "\$1" == "--body-file" && -n "\${2:-}" ]]; then
+				cp "\$2" '${BATS_TEST_TMPDIR}/issue-body.md'
+			fi
+			shift
+		done
+		echo "https://github.com/lgtm-hq/lgtm-ci/issues/44"
+		exit 0
+		;;
+	*run*view*)
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+	export FAILURE_SUMMARY_TEXT="Custom failure summary sentence."
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	[[ -f "${BATS_TEST_TMPDIR}/issue-body.md" ]]
+	run grep -F "Custom failure summary sentence." "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+}

@@ -1,16 +1,30 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Surface reusable release workflow failures via step summary and issues
+# Purpose: Surface workflow failures via step summary and deduplicated issues.
+# Originally release-specific; now parameterized so any main-branch workflow
+# (via reusable-main-failure-notifier.yml) can use the same mechanism.
 #
 # Subcommands:
-#   write_trigger_summary — append release trigger context to $GITHUB_STEP_SUMMARY
+#   write_trigger_summary — append trigger context to $GITHUB_STEP_SUMMARY
 #   notify_failure        — create or comment on a deduplicated GitHub issue
 #
-# Required environment variables (notify_failure):
-#   GH_TOKEN            — GitHub token with issues: write
-#   GITHUB_REPOSITORY   — Target repository (owner/name)
-#   RELEASE_WORKFLOW_KEY — Stable workflow key for marker namespacing
-#                          (e.g. release-version-pr, release-auto-tag)
+# Required environment variables:
+#   WORKFLOW_KEY        — Stable workflow key for marker namespacing
+#                         (e.g. release-version-pr, docker-publish).
+#                         RELEASE_WORKFLOW_KEY is honored as a fallback.
+#                         Required by both subcommands.
+#   GH_TOKEN            — GitHub token with issues: write (notify_failure only)
+#   GITHUB_REPOSITORY   — Target repository (owner/name) (notify_failure only)
+#
+# Optional parameterization (defaults preserve the release wording so existing
+# callers and open dedup'd issues keep working):
+#   FAILURE_MARKER_PREFIX — dedup marker/tracking-key prefix
+#                           (default: release-automation-failure)
+#   FAILURE_TITLE_PREFIX  — issue title prefix
+#                           (default: "fix(release): release automation failed on")
+#   FAILURE_SUMMARY_TEXT  — first body sentence (default: release wording)
+#   FAILURE_HEADING_LABEL — step-summary heading label
+#                           (default: "Release Automation")
 
 set -euo pipefail
 
@@ -63,12 +77,20 @@ upstream_run_url() {
 }
 
 workflow_key() {
-	echo "${RELEASE_WORKFLOW_KEY:?RELEASE_WORKFLOW_KEY is required}"
+	if [[ -n "${WORKFLOW_KEY:-}" ]]; then
+		echo "$WORKFLOW_KEY"
+	else
+		echo "${RELEASE_WORKFLOW_KEY:?WORKFLOW_KEY (or RELEASE_WORKFLOW_KEY) is required}"
+	fi
+}
+
+marker_prefix() {
+	echo "${FAILURE_MARKER_PREFIX:-release-automation-failure}"
 }
 
 marker_key() {
 	local branch="${1:-$(release_branch)}"
-	echo "release-automation-failure:$(workflow_key):${branch}"
+	echo "$(marker_prefix):$(workflow_key):${branch}"
 }
 
 issue_marker() {
@@ -78,8 +100,8 @@ issue_marker() {
 
 failure_issue_title() {
 	local target_branch="${1:?target_branch is required}"
-	printf 'fix(release): release automation failed on %s (%s)' \
-		"$target_branch" "$(workflow_key)"
+	local prefix="${FAILURE_TITLE_PREFIX:-fix(release): release automation failed on}"
+	printf '%s %s (%s)' "$prefix" "$target_branch" "$(workflow_key)"
 }
 
 resolve_target_branch() {
@@ -102,12 +124,17 @@ write_trigger_summary() {
 	local sha
 	local current_run_url
 	local upstream_url
-	local heading="## Release Automation Context"
+	local heading_label="${FAILURE_HEADING_LABEL:-Release Automation}"
+	local heading="## ${heading_label} Context"
 
 	if [[ -z "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		log_error "GITHUB_STEP_SUMMARY is required"
 		exit 1
 	fi
+
+	# Validate up front: later uses run in command substitutions, where the
+	# :? expansion would kill only the subshell and the script would exit 0.
+	workflow_key >/dev/null
 
 	branch="$(release_branch)"
 	sha="$(release_sha)"
@@ -115,7 +142,7 @@ write_trigger_summary() {
 	upstream_url="$(upstream_run_url)"
 
 	if [[ "${PRIMARY_JOB_FAILED:-false}" == "true" ]]; then
-		heading="## Release Automation Failure"
+		heading="## ${heading_label} Failure"
 	fi
 
 	add_github_summary "$heading"
@@ -185,7 +212,7 @@ $marker
 
 ## Summary
 
-Release automation failed on \`${target_branch}\`. This issue keeps post-merge release failures visible outside the Actions history.
+${FAILURE_SUMMARY_TEXT:-Release automation failed on \`${target_branch}\`. This issue keeps post-merge release failures visible outside the Actions history.}
 
 ## Failure Context
 
@@ -364,6 +391,10 @@ notify_failure() {
 		log_error "gh CLI is required to report release automation failures"
 		exit 1
 	fi
+
+	# Validate up front: later uses run in command substitutions, where the
+	# :? expansion would kill only the subshell and the script would exit 0.
+	workflow_key >/dev/null
 
 	branch="$(release_branch)"
 	target_branch="$(resolve_target_branch)"
