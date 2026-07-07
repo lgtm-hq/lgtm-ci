@@ -4,18 +4,15 @@
 name: Quality Check - Action Pinning Validation
 
 'on':
+  # No path filter: this is a required check, so it must always run and report.
+  # A path-filtered required check never reports on PRs that miss the filter,
+  # which deadlocks them (and merge-queue entries). The validation is cheap
+  # (~1 min); the detect-changes early-exit pattern is reserved for the
+  # expensive path-filtered workflows.
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - '.github/workflows/**'
-      - '.github/actions/**'
-      - 'scripts/ci/actions/validate-action-pinning.sh'
   push:
     branches: [main]
-    paths:
-      - '.github/workflows/**'
-      - '.github/actions/**'
-      - 'scripts/ci/actions/validate-action-pinning.sh'
   merge_group:
   workflow_dispatch:
 

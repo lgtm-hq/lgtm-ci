@@ -364,6 +364,32 @@ trigger context to the job step summary, then creates or updates a deduplicated
 GitHub issue with failed step details. Set `report-failures: false` to disable
 both actions. See [workflow-contract.md](workflow-contract.md) for inputs.
 
+### Main failure notifier
+
+`reusable-main-failure-notifier.yml` generalizes the same dedup'd-issue
+mechanism for **any** main-branch workflow (docker publish, Pages deploy,
+dogfood lint, …) — with auto-merge and merge queue landing PRs unattended,
+nobody is watching main between merges. Call it from a failure-gated job:
+
+```yaml
+notify-failure:
+  needs: [build]
+  if: failure() && github.ref == 'refs/heads/main'
+  # yamllint disable-line rule:line-length
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-main-failure-notifier.yml@<sha> # vX.Y.Z
+  with:
+    workflow-key: docker-publish # stable key: one open issue per key+branch
+  permissions:
+    actions: read
+    contents: read
+    issues: write
+```
+
+Repeat failures comment on the existing open issue instead of filing new
+ones (tracking key `main-workflow-failure:<key>:<branch>`). Companion
+convention: while such an issue is open, treat main as red — disarm pending
+auto-merges (`gh pr merge --disable-auto`) until a fix-forward PR lands.
+
 `report-failures` defaults to `true`. GitHub rejects a reusable-workflow call at
 startup when the caller job does not grant every permission the reusable
 workflow declares. Grant at least `actions: read` and `issues: write` on the

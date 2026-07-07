@@ -98,7 +98,12 @@ jobs:
     name: ${{ inputs.job-name }}
     runs-on: ubuntu-latest
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    if: github.event_name != 'merge_group'
+    # Do NOT skip this job on merge_group: GitHub cannot evaluate the dynamic
+    # name of a skipped job, so its check would report as "inputs.job-name"
+    # and the required context would never arrive (queue timeout). Instead the
+    # job always runs and every PR-dependent step no-ops on merge_group — the
+    # job succeeds in seconds and satisfies the required check (the title was
+    # already validated on the pull_request event).
     permissions:
       contents: read
       # post-pr-comment upserts failure comments on the pull request
@@ -106,12 +111,14 @@ jobs:
 
     steps:
       - name: Checkout repository
+        if: github.event_name != 'merge_group'
         # Pinned to SHA for supply chain security
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
 
       - name: Checkout lgtm-ci tooling
+        if: github.event_name != 'merge_group'
         # yamllint disable-line rule:line-length
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -125,6 +132,7 @@ jobs:
 
       - name: Checkout and harden
         id: egress
+        if: github.event_name != 'merge_group'
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           tooling-ref: ${{ inputs.tooling-ref }}
@@ -138,6 +146,7 @@ jobs:
 
       - name: Prepare semantic PR lists
         id: prepare
+        if: github.event_name != 'merge_group'
         env:
           TYPES_INPUT: ${{ inputs.types }}
           SCOPES_INPUT: ${{ inputs.scopes }}
@@ -157,6 +166,7 @@ jobs:
 
       - name: Validate semantic PR title
         id: semantic
+        if: github.event_name != 'merge_group'
         continue-on-error: true
         uses: amannn/action-semantic-pull-request@48f256284bd46cdaab1048c3721360e808335d50 # v6.1.1
         env:
