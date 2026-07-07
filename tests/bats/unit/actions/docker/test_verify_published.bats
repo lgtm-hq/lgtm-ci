@@ -76,6 +76,21 @@ EOF
 	assert_output --partial "incomplete"
 }
 
+@test "verify-published: matches variant platforms (linux/arm/v7)" {
+	export MATRIX='[{"platform":"linux/arm/v7","slug":"armv7"}]'
+	export TARGET_TAGS="ghcr.io/org/repo:1.0.0"
+	_write_index <<EOF
+{"manifests":[
+  {"digest":"${ARM64_DIGEST}","platform":{"os":"linux","architecture":"arm","variant":"v7"}}
+]}
+EOF
+	_mock_docker "${ARM64_DIGEST}"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "all platform children resolve"
+}
+
 @test "verify-published: fails when index is missing a platform child" {
 	_write_index <<EOF
 {"manifests":[

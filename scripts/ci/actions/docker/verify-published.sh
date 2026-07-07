@@ -65,13 +65,20 @@ fi
 missing=0
 while IFS= read -r platform; do
 	[[ -z "$platform" ]] && continue
+	# platform is os/arch or os/arch/variant (e.g. linux/amd64, linux/arm/v7).
+	# OCI stores the variant separately (architecture: "arm", variant: "v7").
 	os="${platform%%/*}"
-	arch="${platform#*/}"
+	rest="${platform#*/}"
+	arch="${rest%%/*}"
+	variant=""
+	[[ "$rest" == */* ]] && variant="${rest#*/}"
 
 	digest=$(echo "$index_json" | jq -r \
-		--arg os "$os" --arg arch "$arch" \
+		--arg os "$os" --arg arch "$arch" --arg variant "$variant" \
 		'(.manifests // [])[]
-		 | select(.platform.os == $os and .platform.architecture == $arch)
+		 | select(.platform.os == $os
+		          and .platform.architecture == $arch
+		          and ((.platform.variant // "") == $variant))
 		 | .digest' | head -1)
 
 	if [[ -z "$digest" || "$digest" == "null" ]]; then
