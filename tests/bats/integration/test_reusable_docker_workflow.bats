@@ -119,12 +119,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	# a dangling index (children 404) must fail the release, not publish green.
 	run grep -F 'STEP: verify-published' "$WORKFLOW"
 	assert_success
-	# The verify step must not carry an if: guard that could skip it.
+	# Scope to the merge-manifests job: the verify step must live there (the
+	# multi-arch publish path) and carry no if: guard that could skip it.
 	run awk '
-		/name: Verify published manifest/ { in_step = 1; next }
+		/^  merge:/ { in_job = 1 }
+		in_job && /^  [a-z].*:$/ && $0 !~ /^  merge:/ { in_job = 0 }
+		in_job && /name: Verify published manifest/ { in_step = 1; found = 1; next }
 		in_step && /^        if:/ { bad = 1; exit }
-		in_step && /^      - name:/ { exit }
-		END { exit bad }
+		in_step && /^      - name:/ { in_step = 0 }
+		END { exit (bad || !found) }
 	' "$WORKFLOW"
 	assert_success
 }
@@ -166,11 +169,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	assert_success
 }
 
-@test "reusable-docker: tag-latest gates the raw latest tag" {
-	# The raw 'latest' tag must be gated on tag-latest in every metadata block.
-	run grep -c "type=raw,value=latest,enable=\${{ inputs.version != '' && inputs.tag-latest }}" "$WORKFLOW"
-	assert_success
-	[ "$output" -ge 2 ]
+@test "reusable-docker: tag-latest gates the raw latest tag in every metadata block" {
+	# Every metadata-action block that emits raw-latest must gate it on
+	# tag-latest — assert the gated count equals the raw-latest count so a
+	# block silently dropping the gate fails the test.
+	local raw gated
+	raw=$(grep -cF 'type=raw,value=latest' "$WORKFLOW")
+	gated=$(grep -cF "type=raw,value=latest,enable=\${{ inputs.version != '' && inputs.tag-latest }}" "$WORKFLOW")
+	[ "$raw" -eq "$gated" ]
+	[ "$gated" -ge 2 ]
 	# No ungated raw-latest remains.
 	run grep -E "type=raw,value=latest,enable=\\\$\{\{ inputs.version != '' \}\}" "$WORKFLOW"
 	assert_failure

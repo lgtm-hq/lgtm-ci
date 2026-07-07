@@ -168,3 +168,22 @@ EOF
 	assert_failure
 	assert_output --partial "MATRIX is required"
 }
+
+@test "verify-published: fails closed on malformed MATRIX" {
+	# A bad matrix must fail the gate, not pass vacuously (zero-iteration loop).
+	export MATRIX='not-json'
+	_mock_docker "${AMD64_DIGEST}"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "MATRIX must be a non-empty JSON array"
+}
+
+@test "verify-published: fails closed on empty MATRIX array" {
+	export MATRIX='[]'
+	_mock_docker "${AMD64_DIGEST}"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "MATRIX must be a non-empty JSON array"
+}
