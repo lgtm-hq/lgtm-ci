@@ -65,8 +65,20 @@ _inspect_ref() {
 
 # Pull the index manifest back from the registry (authoritative — not a local
 # image), retrying to absorb read-after-write lag.
+# Parse the expected platforms up front and fail CLOSED on a malformed MATRIX:
+# a bad matrix must never let the loop run zero times and pass vacuously (this
+# is a release gate).
+if ! echo "$MATRIX" | jq -e 'type == "array" and length > 0' >/dev/null 2>&1; then
+	die "MATRIX must be a non-empty JSON array of platform objects: ${MATRIX}"
+fi
+mapfile -t expected_platforms < <(echo "$MATRIX" | jq -r '.[].platform // empty')
+if [[ "${#expected_platforms[@]}" -eq 0 ]]; then
+	die "MATRIX entries expose no .platform values: ${MATRIX}"
+fi
+
 index_json=""
 inspect_err="$(mktemp)"
+trap 'rm -f "$inspect_err"' EXIT
 for ((attempt = 1; attempt <= VERIFY_ATTEMPTS; attempt++)); do
 	if index_json=$(docker buildx imagetools inspect --raw "$ref" 2>"$inspect_err"); then
 		break
@@ -77,7 +89,6 @@ done
 if [[ -z "$index_json" ]]; then
 	die "Published manifest not resolvable in registry: ${ref}: $(cat "$inspect_err")"
 fi
-rm -f "$inspect_err"
 
 # A complete multi-arch publish is an image index / manifest list with children.
 child_count=$(echo "$index_json" | jq '(.manifests // []) | length')
@@ -89,7 +100,7 @@ fi
 # the registry. Iterating expected platforms (not the index's own list) catches
 # both missing children and children that 404 when pulled by digest.
 missing=0
-while IFS= read -r platform; do
+for platform in "${expected_platforms[@]}"; do
 	[[ -z "$platform" ]] && continue
 	# platform is os/arch or os/arch/variant (e.g. linux/amd64, linux/arm/v7).
 	# OCI stores the variant separately (architecture: "arm", variant: "v7").
@@ -121,7 +132,7 @@ while IFS= read -r platform; do
 		log_error "Child manifest for ${platform} does not resolve in registry (dangling): ${digest}"
 		missing=$((missing + 1))
 	fi
-done < <(echo "$MATRIX" | jq -r '.[].platform')
+done
 
 if [[ "$missing" -gt 0 ]]; then
 	die "Published image ${ref} is incomplete: ${missing} platform child manifest(s) missing or unresolvable"

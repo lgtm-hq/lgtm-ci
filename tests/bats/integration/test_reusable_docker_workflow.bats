@@ -119,12 +119,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	# a dangling index (children 404) must fail the release, not publish green.
 	run grep -F 'STEP: verify-published' "$WORKFLOW"
 	assert_success
-	# The verify step must not carry an if: guard that could skip it.
+	# Scope to the merge-manifests job: the verify step must live there (the
+	# multi-arch publish path) and carry no if: guard that could skip it.
 	run awk '
-		/name: Verify published manifest/ { in_step = 1; next }
+		/^  merge:/ { in_job = 1 }
+		in_job && /^  [a-z].*:$/ && $0 !~ /^  merge:/ { in_job = 0 }
+		in_job && /name: Verify published manifest/ { in_step = 1; found = 1; next }
 		in_step && /^        if:/ { bad = 1; exit }
-		in_step && /^      - name:/ { exit }
-		END { exit bad }
+		in_step && /^      - name:/ { in_step = 0 }
+		END { exit (bad || !found) }
 	' "$WORKFLOW"
 	assert_success
 }
@@ -136,4 +139,52 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	assert_failure
 	run grep -F 'Delete staging manifests' "$WORKFLOW"
 	assert_failure
+}
+
+@test "reusable-docker: exposes source-ref and tag-latest inputs" {
+	run grep -E '^      source-ref:$' "$WORKFLOW"
+	assert_success
+	run grep -E '^      tag-latest:$' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: app-source checkouts honor source-ref" {
+	# Every app-source 'Checkout repository' uses source-ref (build context);
+	# the count must match the number of app-source checkout steps.
+	local checkouts refs
+	checkouts=$(grep -cE '^      - name: Checkout repository' "$WORKFLOW")
+	refs=$(grep -cF "ref: \${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}" "$WORKFLOW")
+	[ "$checkouts" -eq "$refs" ]
+	[ "$refs" -ge 6 ]
+}
+
+@test "reusable-docker: tooling checkout stays on tooling-ref, not source-ref" {
+	# The lgtm-ci tooling checkout must not be repointed by source-ref.
+	run awk '
+		/name: Checkout lgtm-ci tooling/ { in_tool = 1 }
+		in_tool && /inputs\.source-ref/ { bad = 1; exit }
+		in_tool && /^      - name:/ && !/Checkout lgtm-ci tooling/ { in_tool = 0 }
+		END { exit bad }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: tag-latest gates the raw latest tag in every metadata block" {
+	# Every metadata-action block that emits raw-latest must gate it on
+	# tag-latest — assert the gated count equals the raw-latest count so a
+	# block silently dropping the gate fails the test.
+	local raw gated
+	raw=$(grep -cF 'type=raw,value=latest' "$WORKFLOW")
+	gated=$(grep -cF "type=raw,value=latest,enable=\${{ inputs.version != '' && inputs.tag-latest }}" "$WORKFLOW")
+	[ "$raw" -eq "$gated" ]
+	[ "$gated" -ge 2 ]
+	# No ungated raw-latest remains.
+	run grep -E "type=raw,value=latest,enable=\\\$\{\{ inputs.version != '' \}\}" "$WORKFLOW"
+	assert_failure
+	# metadata-action's auto-latest is disabled in every block, so latest is
+	# controlled solely by the gated raw entry (backfills never move latest).
+	local metablocks flavor
+	metablocks=$(grep -c 'uses: docker/metadata-action@' "$WORKFLOW")
+	flavor=$(grep -c 'latest=false' "$WORKFLOW")
+	[ "$flavor" -eq "$metablocks" ]
 }
