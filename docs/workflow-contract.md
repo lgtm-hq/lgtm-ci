@@ -1054,6 +1054,32 @@ would never arrive and queue entries would time out. Required checks produced
 by reusables with configurable job names must therefore never carry job-level
 event skips — skip at step level instead.
 
+## Required-check-safe conditional workflows
+
+`on.<event>.paths` filters must not be used on workflows that produce
+**required checks**: when the paths don't match, the workflow never runs,
+the check never reports, and the PR deadlocks (docs-only PRs block forever;
+merge-queue entries time out). Paired no-op shim workflows are also
+discouraged — duplicated job names and path filters drift apart silently.
+
+Instead, drop the `paths:` filter, always run the workflow (including on
+`merge_group`), and early-exit green via the `detect-changes` action:
+
+1. A `changes` job runs `lgtm-hq/lgtm-ci/.github/actions/detect-changes`
+   (checkout with `fetch-depth: 0` first) and exposes its `changes` output.
+2. Downstream jobs keep their **static job name** (the required check's
+   identity) and gate their steps on
+   `fromJSON(needs.changes.outputs.changes).<filter>`, running a cheap
+   "skipped" step (~seconds) when the filter didn't match.
+
+The action resolves the diff base from `pull_request`
+(`event.pull_request.base.sha`), `merge_group` (`event.merge_group.base_sha`),
+and `push` (`event.before`); when no base is resolvable it **fails open** and
+reports every filter as changed, so a required check runs its full job rather
+than silently early-exiting. See `.github/actions/README.md`
+("detect-changes") for a complete caller example, and homebrew-tap's
+`validate-homebrew-formula.yml` for the pattern's prior art.
+
 Callers need `pull-requests: write` when `post-failure-comment` is enabled
 (default). With `post-failure-comment: false`, `pull-requests: read` suffices.
 Tooling is loaded from `lgtm-ci` via `prepare-semantic-pr-lists.sh` (supports
