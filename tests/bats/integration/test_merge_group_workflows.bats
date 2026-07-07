@@ -22,9 +22,11 @@ load "../../helpers/common"
 @test "reusable-semantic-pr-title: no-ops merge_group at step level" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-semantic-pr-title.yml"
 
+	# Exact count: a new PR-dependent step must add its guard (count goes up,
+	# bump this deliberately); a dropped guard lowers it. Both directions fail.
 	run grep -cE "if: github.event_name != 'merge_group'" "$workflow"
 	assert_success
-	[[ "$output" -ge 5 ]]
+	[[ "$output" -eq 5 ]]
 }
 
 @test "reusable-semantic-pr-title: job itself must not skip on merge_group" {
