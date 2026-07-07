@@ -113,3 +113,27 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	run grep -F 'uses: actions/attest@' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-docker: merge-manifests runs a non-skippable verify-published gate" {
+	# The published index must be pulled back from the registry and verified;
+	# a dangling index (children 404) must fail the release, not publish green.
+	run grep -F 'STEP: verify-published' "$WORKFLOW"
+	assert_success
+	# The verify step must not carry an if: guard that could skip it.
+	run awk '
+		/name: Verify published manifest/ { in_step = 1; next }
+		in_step && /^        if:/ { bad = 1; exit }
+		in_step && /^      - name:/ { exit }
+		END { exit bad }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: does not delete staging manifests (they are index children)" {
+	# Deleting the per-platform staging manifests orphans the merged index
+	# (children 404). The destructive cleanup-staging step must be gone.
+	run grep -F 'STEP: cleanup-staging' "$WORKFLOW"
+	assert_failure
+	run grep -F 'Delete staging manifests' "$WORKFLOW"
+	assert_failure
+}

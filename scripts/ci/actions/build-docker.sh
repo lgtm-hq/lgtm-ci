@@ -7,7 +7,7 @@
 #          set-output-digest, classify, record-digest, smoke-test, smoke-test-local,
 #          health-check, health-check-local, resolve-local-health-check-image,
 #          resolve-local-scan-image, sign-image,
-#          merge-manifests, cleanup-staging
+#          merge-manifests, verify-published
 #
 # Each step's environment variable contract is documented in the corresponding
 # scripts/ci/actions/docker/<step>.sh script. The smoke-test and
@@ -25,7 +25,7 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 case "$STEP" in
 setup | build | push | metadata | parse-tags | set-output-digest | classify | \
 	record-digest | resolve-local-health-check-image | resolve-local-scan-image | \
-	health-check | health-check-local | merge-manifests | cleanup-staging | \
+	health-check | health-check-local | merge-manifests | verify-published | \
 	sign-image | summary)
 	# shellcheck disable=SC1090
 	source "$SCRIPT_DIR/docker/${STEP}.sh"
