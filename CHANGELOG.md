@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.47.1] - 2026-07-07
+
+### Changed
+
+- add SECURITY.md and .gitattributes (#150) (d26317e)
+- **deps**: update actions/attest to v4.1.1 (#237) (1a9ca31)
+- **deps**: update digest (#358) (127a2fe)
+- **deps**: update actions/cache to v6.1.0 (major) (major) (#359) (39c4afc)
+
+### Fixed
+
+- **docker**: stop orphaning multi-arch index children; verify publish (#434) (5396861)
+
 ## [0.47.0] - 2026-07-07
 
 ### Added
@@ -1274,7 +1287,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.47.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.47.1...HEAD
+[0.47.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.47.0...v0.47.1
 [0.47.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.46.0...v0.47.0
 [0.46.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.2...v0.46.0
 [0.45.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.45.1...v0.45.2
