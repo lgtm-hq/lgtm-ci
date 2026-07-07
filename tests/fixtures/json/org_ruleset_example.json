@@ -1,9 +1,9 @@
 {
-  "id": 16132640,
-  "name": "checks-py-lintro",
+  "id": 9999999,
+  "name": "checks-example",
   "target": "branch",
   "source_type": "Organization",
-  "source": "lgtm-hq",
+  "source": "example-org",
   "enforcement": "active",
   "conditions": {
     "ref_name": {
@@ -12,7 +12,7 @@
     },
     "repository_name": {
       "exclude": [],
-      "include": ["py-lintro"],
+      "include": ["example-repo"],
       "protected": false
     }
   },
@@ -23,16 +23,16 @@
         "strict_required_status_checks_policy": true,
         "do_not_enforce_on_create": false,
         "required_status_checks": [
-          { "context": "test-suite-coverage / 🧪 Test Suite & Coverage" },
-          { "context": "🔐 Security Audit" },
-          { "context": "lintro-code-quality / 🛠️ Lintro Code Quality" }
+          { "context": "tests / Example Tests" },
+          { "context": "🔐 Example Security Audit" },
+          { "context": "quality / Example Quality" }
         ]
       }
     }
   ],
   "node_id": "RRS_TESTFIXTURE0000000000",
-  "created_at": "2026-05-08T11:55:38.677+02:00",
-  "updated_at": "2026-06-20T17:13:02.093+02:00",
+  "created_at": "2026-01-01T00:00:00.000+00:00",
+  "updated_at": "2026-01-02T00:00:00.000+00:00",
   "bypass_actors": [
     {
       "actor_id": null,
@@ -42,10 +42,10 @@
   ],
   "_links": {
     "self": {
-      "href": "https://api.github.com/orgs/lgtm-hq/rulesets/16132640"
+      "href": "https://api.github.com/orgs/example-org/rulesets/9999999"
     },
     "html": {
-      "href": "http://github.com/organizations/lgtm-hq/settings/rules/16132640"
+      "href": "http://github.com/organizations/example-org/settings/rules/9999999"
     }
   }
 }
