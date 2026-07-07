@@ -45,7 +45,7 @@
       "href": "https://api.github.com/orgs/example-org/rulesets/9999999"
     },
     "html": {
-      "href": "http://github.com/organizations/example-org/settings/rules/9999999"
+      "href": "https://github.com/organizations/example-org/settings/rules/9999999"
     }
   }
 }
