@@ -62,6 +62,101 @@ teardown() {
 }
 
 # =============================================================================
+# Line-wrapping tests (issue #417)
+# =============================================================================
+
+# Longest line in the given multi-line text
+_max_line_length() {
+	awk '{ if (length($0) > m) m = length($0) } END { print m + 0 }'
+}
+
+@test "wrap_changelog_line: short line is returned unchanged" {
+	run bash -c 'source "$LIB_DIR/release/changelog.sh" && wrap_changelog_line "- short entry (abc1234)"'
+	assert_success
+	assert_output "- short entry (abc1234)"
+}
+
+@test "wrap_changelog_line: long line wraps to <= 88 columns" {
+	local long="- **release**: add source-ref and tag-latest inputs for historical backfill of previously unreleased Docker multi-arch images (abc1234)"
+	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && wrap_changelog_line '$long'"
+	assert_success
+	local max
+	max=$(printf '%s\n' "$output" | _max_line_length)
+	[ "$max" -le 88 ]
+}
+
+@test "wrap_changelog_line: continuation lines use two-space indent" {
+	local long="- **release**: add source-ref and tag-latest inputs for historical backfill of previously unreleased Docker multi-arch images (abc1234)"
+	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && wrap_changelog_line '$long'"
+	assert_success
+	# First line keeps the list marker; the continuation is indented two spaces
+	assert_line --index 0 "- **release**: add source-ref and tag-latest inputs for historical backfill of"
+	assert_line --index 1 "  previously unreleased Docker multi-arch images (abc1234)"
+}
+
+@test "wrap_changelog_line: unbreakable long token overflows onto its own line" {
+	local url="https://example.com/really/long/path/that/keeps/going/and/going/and/going/way/past/eighty/eight/columns/xyz"
+	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && wrap_changelog_line '- **deps**: ${url} (ccc3333)'"
+	assert_success
+	# The token is not split; it appears intact on its own indented line
+	assert_output --partial "  ${url}"
+}
+
+@test "wrap_changelog_line: wrapping is idempotent for already-short input" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog.sh"
+		first=$(wrap_changelog_line "- short entry (abc1234)")
+		second=$(wrap_changelog_line "$first")
+		[ "$first" = "$second" ] && echo ok'
+	assert_success
+	assert_output "ok"
+}
+
+@test "wrap_changelog_line: honors CHANGELOG_LINE_LENGTH override" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog.sh"
+		CHANGELOG_LINE_LENGTH=40 wrap_changelog_line "- one two three four five six seven eight nine ten"'
+	assert_success
+	local max
+	max=$(printf '%s\n' "$output" | _max_line_length)
+	[ "$max" -le 40 ]
+}
+
+@test "format_commit_entry: long full entry wraps to <= 88 columns" {
+	local desc="add source-ref and tag-latest inputs for historical backfill of previously unreleased Docker multi-arch images"
+	run bash -c "source \"\$LIB_DIR/release/changelog.sh\" && format_commit_entry 'abc1234567' 'feat' 'release' '$desc' 'full'"
+	assert_success
+	local max
+	max=$(printf '%s\n' "$output" | _max_line_length)
+	[ "$max" -le 88 ]
+	assert_output --partial "- **release**:"
+	assert_output --partial "(abc1234)"
+}
+
+@test "generate_changelog: all emitted lines are <= 88 columns for long titles" {
+	tag_mock_repo "v1.0.0"
+	add_commit "feat(release): add source-ref and tag-latest inputs for historical backfill of previously unreleased Docker multi-arch images"
+	add_commit "fix: resolve a crash that happened when the configuration file contained a deeply nested structure with many keys"
+
+	run bash -c "cd \"$MOCK_GIT_REPO\" && source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog \"v1.0.0\" \"HEAD\" \"1.1.0\""
+	assert_success
+	local max
+	max=$(printf '%s\n' "$output" | _max_line_length)
+	[ "$max" -le 88 ]
+}
+
+@test "generate_changelog: short titles remain on a single line" {
+	tag_mock_repo "v1.0.0"
+	add_commit "feat: add search"
+
+	run bash -c "cd \"$MOCK_GIT_REPO\" && source \"\$LIB_DIR/release/changelog.sh\" && generate_changelog \"v1.0.0\" \"HEAD\" \"1.1.0\""
+	assert_success
+	# Short entry is not wrapped: the whole bullet stays on one line
+	assert_output --partial "- add search"
+	refute_output --partial $'\n  '
+}
+
+# =============================================================================
 # generate_changelog_section tests
 # =============================================================================
 
