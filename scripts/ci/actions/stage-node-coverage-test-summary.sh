@@ -6,11 +6,16 @@ set -euo pipefail
 
 : "${WORKING_DIRECTORY:=.}"
 : "${COVERAGE_SUMMARY_FILE:?COVERAGE_SUMMARY_FILE is required}"
+: "${COVERAGE:=false}"
 
 source_file="${WORKING_DIRECTORY}/${COVERAGE_SUMMARY_FILE}"
 
 if [[ ! -f "$source_file" ]]; then
-	echo "Coverage summary missing (${source_file}), skipping staging"
+	if [[ "$COVERAGE" == "true" ]]; then
+		echo "::error::Coverage was requested (coverage: true) but the coverage summary file is missing: ${source_file}. Ensure the test command writes ${COVERAGE_SUMMARY_FILE} under ${WORKING_DIRECTORY}." >&2
+		exit 1
+	fi
+	echo "::notice::Coverage not requested and coverage summary file absent (${source_file}); skipping coverage staging."
 	exit 0
 fi
 
