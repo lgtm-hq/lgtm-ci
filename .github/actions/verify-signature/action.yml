@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Verify Signature"
 description: "Verify Sigstore/Cosign signatures on artifacts"

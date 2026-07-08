@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Run Tests"
 description: "Generic test runner that delegates to language-specific runners"

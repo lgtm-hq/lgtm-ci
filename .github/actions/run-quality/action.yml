@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Lintro Quality Checks"
 description: "Run lintro via full ghcr.io/lgtm-hq/py-lintro image (all bundled tools)"
