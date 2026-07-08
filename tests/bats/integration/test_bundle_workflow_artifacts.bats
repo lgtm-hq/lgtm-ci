@@ -39,12 +39,14 @@ load "../../helpers/common"
 	assert_success
 }
 
-@test "reusable-deploy-site-with-reports: build job has actions read permission" {
+@test "reusable-deploy-site-with-reports: build job has actions permission" {
+	# actions: write (implies read) so it can both resolve/download workflow
+	# artifacts for bundling and prune stale same-run Pages artifacts (#415).
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-deploy-site-with-reports.yml"
 	run awk '
 		/^  build:/ { in_build = 1 }
 		/^  deploy:/ { in_build = 0 }
-		in_build && /actions: read/ { actions = 1 }
+		in_build && /actions: (read|write)/ { actions = 1 }
 		in_build && /contents: read/ { contents = 1 }
 		END { exit !(actions && contents) }
 	' "$workflow"
