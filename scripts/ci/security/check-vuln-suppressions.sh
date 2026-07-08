@@ -2,7 +2,9 @@
 # SPDX-License-Identifier: MIT
 #
 # check-vuln-suppressions.sh — Detect stale or expired vulnerability
-# suppressions in .osv-scanner.toml and open a cleanup PR removing them.
+# suppressions in .osv-scanner.toml. Stale entries (vulnerability resolved)
+# are auto-removed via a cleanup PR; expired entries (past ignoreUntil) are
+# left untouched and flagged for manual review with a non-zero exit.
 #
 # Usage:
 #   check-vuln-suppressions.sh
@@ -23,8 +25,9 @@ Detect stale or expired vulnerability suppressions in .osv-scanner.toml.
 
 Runs osv-scanner recursively without suppressions to scan all
 supported lockfiles and see which suppressed vulnerabilities are still
-present. Opens a PR removing entries that are stale (vuln resolved) or
-expired (past ignoreUntil).
+present. Opens a PR removing entries that are stale (vuln resolved).
+Expired entries (past ignoreUntil) are left untouched and flagged for
+manual review, causing a non-zero exit.
 
 Requires GH_TOKEN for PR management.
 EOF
@@ -76,23 +79,32 @@ CLASSIFICATION_JSON=$(echo "$PROBE_OUTPUT" | python3 "$SCRIPTS_DIR/classify-supp
 STALE_IDS=()
 EXPIRED_IDS=()
 ACTIVE_IDS=()
-while IFS= read -r line; do
-	category="${line%%:*}"
-	vid="${line#*:}"
+declare -A EXPIRED_UNTIL=()
+while IFS=$'\t' read -r category vid until; do
 	case "$category" in
 	STALE) STALE_IDS+=("$vid") ;;
-	EXPIRED) EXPIRED_IDS+=("$vid") ;;
+	EXPIRED)
+		EXPIRED_IDS+=("$vid")
+		EXPIRED_UNTIL["$vid"]="$until"
+		;;
 	ACTIVE) ACTIVE_IDS+=("$vid") ;;
 	esac
 done < <(echo "$CLASSIFICATION_JSON" | python3 -c "
 import json, sys
 d = json.load(sys.stdin)
-for k in ('stale', 'expired', 'active'):
-    for i in d.get(k, []):
-        print(f'{k.upper()}:{i}')
+details = d.get('expired_until', {})
+for i in d.get('stale', []):
+    print(f'STALE\t{i}\t')
+for i in d.get('active', []):
+    print(f'ACTIVE\t{i}\t')
+for i in d.get('expired', []):
+    print(f'EXPIRED\t{i}\t{details.get(i, \"\")}')
 ")
 
-REMOVE_IDS=("${STALE_IDS[@]+"${STALE_IDS[@]}"}" "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}")
+# Only stale suppressions are auto-removed. Expired entries are left untouched
+# and flagged for manual review (see issue #377): expiry means the timebox
+# lapsed and a human must re-evaluate, not that the vulnerability is gone.
+REMOVE_IDS=("${STALE_IDS[@]+"${STALE_IDS[@]}"}")
 
 for id in "${ACTIVE_IDS[@]+"${ACTIVE_IDS[@]}"}"; do
 	log_success "Active: $id"
@@ -100,17 +112,45 @@ done
 for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
 	log_warning "Stale: $id"
 done
-for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
-	log_warning "Expired: $id"
-done
+
+# Emit expired suppressions to the log and job summary. Callers exit non-zero
+# after invoking this so expired entries are surfaced as a failing check.
+flag_expired_suppressions() {
+	log_error "Expired suppression(s) require manual review (left untouched in $OSV_TOML):"
+	local summary
+	summary="## Expired vulnerability suppressions require manual review
+
+The following suppressions in \`${OSV_TOML}\` are past their \`ignoreUntil\` date
+and were **left untouched**. Expiry means the timebox lapsed, not that the
+vulnerability is resolved. Re-evaluate each entry and either remediate the
+vulnerability or renew the suppression with a new \`ignoreUntil\`.
+
+| ID | ignoreUntil | Required action |
+| --- | --- | --- |
+"
+	local id until
+	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
+		until="${EXPIRED_UNTIL[$id]:-unknown}"
+		log_error "  - ${id} (ignoreUntil ${until}) — remediate the vulnerability or renew the suppression"
+		summary="${summary}| \`${id}\` | ${until} | Remediate the vulnerability or renew the suppression |
+"
+	done
+	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
+		printf '%s\n' "$summary" >>"$GITHUB_STEP_SUMMARY"
+	fi
+}
 
 if [[ ${#REMOVE_IDS[@]} -eq 0 ]]; then
+	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+		flag_expired_suppressions
+		exit 1
+	fi
 	log_success "All suppressions are active. Nothing to do."
 	exit 0
 fi
 
-# Check for an existing cleanup PR. If one exists and the current run found
-# new expired suppressions, fail instead of silently masking them.
+# Check for an existing cleanup PR. Stale removal for one is already pending,
+# so skip re-opening it, but still flag any expired entries for manual review.
 PR_LIST_OUTPUT=""
 PR_LIST_EXIT=0
 PR_LIST_OUTPUT=$(
@@ -123,11 +163,11 @@ if [[ "$PR_LIST_EXIT" -ne 0 ]]; then
 	exit 1
 fi
 if [[ -n "$PR_LIST_OUTPUT" ]]; then
+	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping stale removal."
 	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-		log_error "Cleanup PR #${PR_LIST_OUTPUT} already open, but new expired suppressions found. Manual review required."
+		flag_expired_suppressions
 		exit 1
 	fi
-	log_info "Cleanup PR #${PR_LIST_OUTPUT} already open. Skipping."
 	exit 0
 fi
 
@@ -152,12 +192,7 @@ if ! git diff --quiet; then
 		STALE_LIST="${STALE_LIST}- \`${id}\` (stale — vulnerability resolved)
 "
 	done
-	EXPIRED_LIST=""
-	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
-		EXPIRED_LIST="${EXPIRED_LIST}- \`${id}\` (expired — past ignoreUntil date)
-"
-	done
-	REMOVED_LIST="${STALE_LIST}${EXPIRED_LIST}"
+	REMOVED_LIST="${STALE_LIST}"
 
 	BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
 	configure_git_ci_user
@@ -181,17 +216,12 @@ EOF
 	fi
 
 	PR_BODY="## Summary
-- Remove stale/expired vulnerability suppressions that are no longer needed
+- Remove stale vulnerability suppressions whose vulnerability is resolved
 "
 	if [[ -n "$STALE_LIST" ]]; then
 		PR_BODY="${PR_BODY}
 ### Removed (stale)
 ${STALE_LIST}"
-	fi
-	if [[ -n "$EXPIRED_LIST" ]]; then
-		PR_BODY="${PR_BODY}
-### Removed (expired)
-${EXPIRED_LIST}"
 	fi
 	PR_BODY="${PR_BODY}
 ## Test plan
@@ -223,14 +253,13 @@ ${EXPIRED_LIST}"
 	fi
 
 	log_success "Cleanup PR created on branch $BRANCH"
-
-	# Expired suppressions may indicate still-active vulnerabilities
-	# past their ignoreUntil date. Fail the workflow so the team
-	# reviews the PR before the next scan.
-	if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
-		log_error "Expired suppression(s) removed; review the cleanup PR before merging"
-		exit 1
-	fi
 else
 	log_info "No file changes needed."
+fi
+
+# Expired suppressions are left untouched. Flag them and fail the workflow so
+# the team re-evaluates each one, independent of any stale cleanup PR above.
+if [[ ${#EXPIRED_IDS[@]} -gt 0 ]]; then
+	flag_expired_suppressions
+	exit 1
 fi
