@@ -1016,8 +1016,10 @@ everyone uses.
 ### Vulnerability suppression check (osv-scanner)
 
 `reusable-vuln-suppression-check.yml` installs `osv-scanner` directly (no Docker),
-probes the repository without suppressions, and opens a cleanup PR when entries are
-stale (vulnerability resolved upstream) or expired (past `ignoreUntil`).
+probes the repository without suppressions, and opens a cleanup PR removing
+suppressions that are stale (vulnerability resolved upstream). Expired entries
+(past `ignoreUntil`) are left untouched and flagged for manual review, failing
+the job so a human re-evaluates each one.
 
 | Input                    | Default                 | Notes                                      |
 | ------------------------ | ----------------------- | ------------------------------------------ |
