@@ -29,6 +29,20 @@ load "../../helpers/common"
 	assert_success
 }
 
+@test "validate-action-pinning action: verify-tags defaults to true" {
+	local action="${PROJECT_ROOT}/.github/actions/validate-action-pinning/action.yml"
+
+	run bash -c "grep -A9 '^  verify-tags:' '$action' | grep -E 'default:[[:space:]]*\"true\"'"
+	assert_success
+}
+
+@test "reusable-validate-action-pinning: verify-tags input defaults to true" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-validate-action-pinning.yml"
+
+	run bash -c "grep -A8 '^      verify-tags:' '$workflow' | grep -E 'default:[[:space:]]*true'"
+	assert_success
+}
+
 @test "dependency-review workflow: calls reusable dependency review" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/dependency-review.yml"
 

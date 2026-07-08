@@ -24,10 +24,13 @@ on:
         default: ".github/workflows .github/actions"
       verify-tags:
         description: >-
-          Verify Renovate version comments resolve to the pinned SHA via GitHub API
+          Verify Renovate version comments resolve to the pinned SHA via GitHub
+          API. Defaults to true so a lying `sha # vX.Y.Z` comment fails
+          validation. Offline/air-gapped or token-restricted callers can set
+          this to false to opt out of API tag resolution.
         required: false
         type: boolean
-        default: false
+        default: true
       audit-transitive:
         description: >-
           Warn when pinned composite actions reference nested actions by mutable tag
