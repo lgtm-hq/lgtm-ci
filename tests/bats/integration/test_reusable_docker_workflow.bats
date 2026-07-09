@@ -235,3 +235,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 		"$WORKFLOW"
 	assert_failure
 }
+
+@test "reusable-docker: exact-tags ignores additional tags" {
+	local parse_steps gated_extra_tags extra_tag_blocks
+	extra_tag_blocks=$(grep -cF -- "- name: Parse additional tags" "$WORKFLOW")
+	parse_steps=$(grep -cF "if: inputs.tags != '' && !inputs.exact-tags" "$WORKFLOW")
+	gated_extra_tags=$(grep -cF "\${{ !inputs.exact-tags && steps.extra-tags.outputs.tags || '' }}" "$WORKFLOW")
+	[ "$parse_steps" -eq "$extra_tag_blocks" ]
+	[ "$gated_extra_tags" -eq "$extra_tag_blocks" ]
+	[ "$extra_tag_blocks" -ge 2 ]
+}
