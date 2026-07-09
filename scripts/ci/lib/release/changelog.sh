@@ -18,7 +18,7 @@ source "$SCRIPT_DIR/analyze.sh"
 # generated CHANGELOG.md lines pass consumer lint without a formatting pass.
 : "${CHANGELOG_LINE_LENGTH:=88}"
 
-# Wrap a single-line markdown list item to <= CHANGELOG_LINE_LENGTH columns.
+# Wrap a markdown list item to <= CHANGELOG_LINE_LENGTH columns.
 #
 # Uses greedy word wrapping with a two-space continuation indent, producing
 # output byte-identical to prettier's `proseWrap: always` and accepted by
@@ -32,8 +32,9 @@ wrap_changelog_line() {
 	local width="${CHANGELOG_LINE_LENGTH:-88}"
 	local indent="  "
 
+	local flattened="${line//$'\n'/ }"
 	local -a words=()
-	read -ra words <<<"$line"
+	read -ra words <<<"$flattened"
 
 	local out="" current="" word
 	for word in "${words[@]}"; do

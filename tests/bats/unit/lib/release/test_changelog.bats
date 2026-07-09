@@ -112,6 +112,18 @@ _max_line_length() {
 	assert_output "ok"
 }
 
+@test "wrap_changelog_line: wrapping is idempotent for already-wrapped input" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog.sh"
+		long="- **release**: add source-ref and tag-latest inputs for historical backfill of previously unreleased Docker multi-arch images (abc1234)"
+		first=$(wrap_changelog_line "$long")
+		second=$(wrap_changelog_line "$first")
+		line_count=$(printf "%s\n" "$first" | wc -l | tr -d " ")
+		[ "$line_count" -gt 1 ] && [ "$first" = "$second" ] && echo ok'
+	assert_success
+	assert_output "ok"
+}
+
 @test "wrap_changelog_line: honors CHANGELOG_LINE_LENGTH override" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog.sh"
