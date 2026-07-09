@@ -49,6 +49,17 @@ teardown() {
 	assert_success
 }
 
+@test "stage-node-coverage-test-summary: fails when coverage flag omitted" {
+	run env -u COVERAGE \
+		WORKING_DIRECTORY=apps/web \
+		COVERAGE_SUMMARY_FILE=coverage/coverage-summary.json \
+		bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "COVERAGE is required"
+	run test ! -e node-coverage-staged
+	assert_success
+}
+
 @test "stage-node-coverage-test-summary: never zero-falls-back on missing summary" {
 	WORKING_DIRECTORY=apps/web \
 		COVERAGE_SUMMARY_FILE=coverage/coverage-summary.json \

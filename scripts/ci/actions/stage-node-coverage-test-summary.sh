@@ -6,7 +6,7 @@ set -euo pipefail
 
 : "${WORKING_DIRECTORY:=.}"
 : "${COVERAGE_SUMMARY_FILE:?COVERAGE_SUMMARY_FILE is required}"
-: "${COVERAGE:=false}"
+: "${COVERAGE:?COVERAGE is required (true or false)}"
 
 source_file="${WORKING_DIRECTORY}/${COVERAGE_SUMMARY_FILE}"
 
