@@ -503,6 +503,7 @@ jobs:
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
+            scripts/ci/
             .github/actions/docker-auth
 
       - name: Docker registry auth
