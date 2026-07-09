@@ -1,0 +1,43 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Maintenance - Prune Build Staging Tags
+
+'on':
+  schedule:
+    # Weekly, Mondays 03:00 UTC (after the registry health check at 02:00).
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      package-name:
+        description: "GHCR package whose build-* staging tags to prune"
+        required: false
+        type: string
+        default: "py-lintro"
+      dry-run:
+        description: "Log only, no deletions"
+        required: false
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: prune-build-staging-tags
+  cancel-in-progress: false
+
+jobs:
+  prune-staging:
+    uses: ./.github/workflows/reusable-prune-build-staging-tags.yml
+    with:
+      package-name: ${{ inputs.package-name || 'py-lintro' }}
+      # Scheduled runs never delete; deletion requires an explicit dispatch.
+      dry-run: ${{ github.event_name != 'workflow_dispatch' || inputs.dry-run }}
+      tooling-ref: ${{ github.sha }}
+    permissions:
+      # Read repository and lgtm-ci tooling for the pruner scripts
+      contents: read
+      # Delete stale build-* staging package versions
+      packages: write
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}

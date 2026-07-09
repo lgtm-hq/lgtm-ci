@@ -1108,6 +1108,62 @@ jobs:
     secrets: inherit
 ```
 
+### Prune build staging tags
+
+`reusable-prune-build-staging-tags.yml` prunes the per-platform
+`build-<run_id>-<slug>` staging tags that the multi-arch publish retains (the
+release index's own children — see #433/#434). It deletes a staging tag only
+when **both** hold: the tag is older than `threshold-days` (and not among the
+`keep-recent` newest), **and** its manifest digest is **not** referenced by any
+current tagged, non-build image index. That referenced-digest set is collected
+from every live release index (children, subjects, cosign/SLSA referrers); when
+collection is incomplete the entire prune is skipped (fail-closed), so a
+transient registry error can never orphan a live index. Dry-run is the default.
+
+| Input | Default | Notes |
+| --- | --- | --- |
+| `package-name` | — | Required GHCR package name |
+| `threshold-days` | `30` | Min staging-tag age before deletion |
+| `keep-recent` | `0` | Keep N most recent staging tags |
+| `protect-referenced` | `true` | Skip when refs incomplete (#433 gate) |
+| `dry-run` | `true` | Log only, no deletions |
+| `egress-policy` | `block` | `audit` or `block` |
+| `egress-preset` | `docker` | API + GHCR registry hosts |
+| `allowed-endpoints` | `""` | Custom endpoints |
+| `allowed-endpoints-mode` | `replace` | `replace` or `append` |
+| `tooling-ref` | `""` | lgtm-ci tooling git ref |
+| `runner-image` | `ubuntu-24.04` | Runner image label |
+
+Grant `contents: read` and `packages: write` on the caller job. Forward a token
+with `packages:write` via `secrets.token`. Scheduled callers should stay in
+dry-run and delete only on an explicit `workflow_dispatch`.
+
+```yaml
+'on':
+  schedule:
+    - cron: '0 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        type: boolean
+        default: true
+
+permissions: {}
+
+jobs:
+  prune-staging:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-prune-build-staging-tags.yml@<sha>
+    permissions:
+      contents: read
+      packages: write
+    with:
+      package-name: my-image
+      # Never delete on the scheduled path.
+      dry-run: ${{ github.event_name != 'workflow_dispatch' || inputs.dry-run }}
+    secrets:
+      token: ${{ secrets.GITHUB_TOKEN }}
+```
+
 ### Documentation site quality
 
 `reusable-site-quality.yml` runs Astro (or similar) docs build, lychee link

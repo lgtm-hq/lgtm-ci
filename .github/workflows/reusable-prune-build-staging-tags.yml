@@ -1,0 +1,137 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Reusable Prune Build Staging Tags
+
+on:
+  workflow_call:
+    inputs:
+      package-name:
+        description: "GHCR package name whose build-* staging tags to prune"
+        required: true
+        type: string
+      threshold-days:
+        description: "Minimum staging-tag age in days before deletion"
+        required: false
+        type: number
+        default: 30
+      keep-recent:
+        description: "Always keep N most recent staging tags regardless of age"
+        required: false
+        type: number
+        default: 0
+      protect-referenced:
+        description: >-
+          Collect digests referenced by tagged non-build indexes and skip prune
+          when collection is incomplete (safety gate against #433)
+        required: false
+        type: boolean
+        default: true
+      dry-run:
+        description: "Log only, no deletions (default on the scheduled path)"
+        required: false
+        type: boolean
+        default: true
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "docker"
+
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
+    secrets:
+      token:
+        description: "GitHub token with packages:write scope"
+        required: true
+
+jobs:
+  prune-staging:
+    name: Prune Build Staging Tags
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      packages: write
+    concurrency:
+      group: prune-build-staging-${{ github.repository_owner }}-${{ inputs.package-name }}
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+
+      - name: Prune build-* staging tags
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.token }}
+          PACKAGE_NAME: ${{ inputs.package-name }}
+          GITHUB_ORG: ${{ github.repository_owner }}
+          THRESHOLD_DAYS: ${{ inputs.threshold-days }}
+          KEEP_RECENT: ${{ inputs.keep-recent }}
+          PROTECT_REFERENCED: ${{ inputs.protect-referenced }}
+          DRY_RUN: ${{ inputs.dry-run }}
+        run: .lgtm-ci-tooling/scripts/ci/maintenance/prune-build-staging-tags.sh
