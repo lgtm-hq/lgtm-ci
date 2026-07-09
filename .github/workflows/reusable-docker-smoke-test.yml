@@ -1,0 +1,210 @@
+---
+name: Reusable Docker Smoke Test
+
+# Focused, independently callable image-validation reusable: pull a published
+# image by immutable digest and run a smoke test (a bare command inside the
+# image or a caller-owned script) and/or a detached-container health check
+# against it. Shares the same docker/smoke-test.sh and docker/health-check.sh
+# helpers the multi-platform verify gate uses. All shared shell scripts resolve
+# from lgtm-ci via a cross-repo checkout into .lgtm-ci-tooling.
+
+on:
+  workflow_call:
+    inputs:
+      registry:
+        description: "Container registry URL"
+        required: false
+        type: string
+        default: "ghcr.io"
+      image-name:
+        description: "Image name (default: github.repository)"
+        required: false
+        type: string
+        default: ""
+      digest:
+        description: >-
+          Immutable image digest to validate (sha256:...). The image is pulled
+          by digest to avoid TOCTOU against floating tags.
+        required: true
+        type: string
+      platform:
+        description: "Target platform to validate (e.g. linux/amd64)"
+        required: false
+        type: string
+        default: "linux/amd64"
+      smoke-test:
+        description: >-
+          Shorthand command + args run as `docker run --rm --platform <p>
+          <image@digest> <smoke-test>`. Word-split. Mutually exclusive with
+          smoke-test-script.
+        required: false
+        type: string
+        default: ""
+      smoke-test-script:
+        description: >-
+          Path (relative to checkout root) to a caller-owned script executed on
+          the runner with env IMAGE, PLATFORM, REGISTRY. Mutually exclusive with
+          smoke-test.
+        required: false
+        type: string
+        default: ""
+      health-check-cmd:
+        description: >-
+          Optional command run on the runner against the image's published
+          localhost port. Requires health-check-port. Skipped when empty.
+        required: false
+        type: string
+        default: ""
+      health-check-port:
+        description: "Container port to publish for the health check."
+        required: false
+        type: string
+        default: ""
+      health-check-timeout:
+        description: "Max wait for health-check-port to accept connections."
+        required: false
+        type: string
+        default: "30s"
+      source-ref:
+        description: >-
+          Git ref to check out for smoke-test-script resolution, independent of
+          tooling-ref. Empty uses the triggering ref.
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: "Runner image for the validation job"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      tooling-ref:
+        # yamllint disable-line rule:line-length
+        description: "Git ref for lgtm-ci tooling checkout. Defaults to the reusable workflow commit."
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block.
+        required: false
+        type: string
+        default: "docker"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 30
+
+    secrets:
+      DOCKERHUB_USERNAME:
+        required: false
+        description: "Docker Hub username (for docker.io registry)"
+      DOCKERHUB_TOKEN:
+        required: false
+        description: "Docker Hub token (for docker.io registry)"
+
+jobs:
+  smoke-test:
+    name: Docker Smoke Test
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      packages: read
+
+    steps:
+      - name: Checkout repository (for smoke-test-script)
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
+          persist-credentials: false
+
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+            .github/actions/docker-auth
+      - name: Setup QEMU
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+
+      - name: Docker registry auth
+        uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
+        with:
+          registry: ${{ inputs.registry }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Record digest
+        shell: bash
+        env:
+          STEP: record-digest
+          DIGEST: ${{ inputs.digest }}
+          DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Smoke test (${{ inputs.platform }})
+        if: inputs.smoke-test != '' || inputs.smoke-test-script != ''
+        shell: bash
+        env:
+          STEP: smoke-test
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
+          PLATFORM: ${{ inputs.platform }}
+          SMOKE_TEST: ${{ inputs.smoke-test }}
+          SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+
+      - name: Health check (${{ inputs.platform }})
+        if: inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: health-check
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
+          PLATFORM: ${{ inputs.platform }}
+          HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
+          HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
+          HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh

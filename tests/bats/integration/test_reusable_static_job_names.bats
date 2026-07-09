@@ -111,7 +111,7 @@ YAML
 }
 
 @test "reusable-docker: per-platform jobs use static names" {
-	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
 	run grep -F 'name: Docker build per platform' "$workflow"
 	assert_success
 	run grep -F 'name: Docker verify per platform' "$workflow"
