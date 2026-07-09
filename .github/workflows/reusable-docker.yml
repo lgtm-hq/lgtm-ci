@@ -60,6 +60,15 @@ on:
         required: false
         type: boolean
         default: true
+      exact-tags:
+        description: >-
+          Publish ONLY the pinned version tag (and its immutable by-digest
+          sha), suppressing major/minor/latest/branch/sha-<ref> floating tags.
+          For historical backfills so republishing an old version never drags
+          shared floating tags backward.
+        required: false
+        type: boolean
+        default: false
       push:
         description: "Push image to registry"
         required: false
@@ -392,7 +401,7 @@ jobs:
 
       - name: Parse additional tags
         id: extra-tags
-        if: inputs.tags != ''
+        if: inputs.tags != '' && !inputs.exact-tags
         shell: bash
         env:
           STEP: parse-tags
@@ -410,16 +419,19 @@ jobs:
           # by the gated raw entry below, so backfills never move latest.
           flavor: |
             latest=false
+          # exact-tags (backfill): suppress every floating tag (sha-<ref>,
+          # branch, pr, major, minor, latest); publish only the pinned version
+          # tag (its immutable by-digest sha is inherent to the pushed image).
           # yamllint disable rule:line-length
           tags: |
-            type=sha,prefix=sha-
-            type=ref,event=branch
-            type=ref,event=pr
+            type=sha,prefix=sha-,enable=${{ !inputs.exact-tags }}
+            type=ref,event=branch,enable=${{ !inputs.exact-tags }}
+            type=ref,event=pr,enable=${{ !inputs.exact-tags }}
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest }}
-            ${{ steps.extra-tags.outputs.tags }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest && !inputs.exact-tags }}
+            ${{ !inputs.exact-tags && steps.extra-tags.outputs.tags || '' }}
           # yamllint enable rule:line-length
 
       - name: Build and push
@@ -679,15 +691,18 @@ jobs:
           # by the gated raw entry below, so backfills never move latest.
           flavor: |
             latest=false
+          # exact-tags (backfill): suppress every floating tag (sha-<ref>,
+          # branch, pr, major, minor, latest); publish only the pinned version
+          # tag (its immutable by-digest sha is inherent to the pushed image).
           # yamllint disable rule:line-length
           tags: |
-            type=sha,prefix=sha-
-            type=ref,event=branch
-            type=ref,event=pr
+            type=sha,prefix=sha-,enable=${{ !inputs.exact-tags }}
+            type=ref,event=branch,enable=${{ !inputs.exact-tags }}
+            type=ref,event=pr,enable=${{ !inputs.exact-tags }}
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest && !inputs.exact-tags }}
           # yamllint enable rule:line-length
 
       - name: Build and push (${{ matrix.platform }})
@@ -1091,7 +1106,7 @@ jobs:
 
       - name: Parse additional tags
         id: extra-tags
-        if: inputs.tags != ''
+        if: inputs.tags != '' && !inputs.exact-tags
         shell: bash
         env:
           STEP: parse-tags
@@ -1109,16 +1124,19 @@ jobs:
           # by the gated raw entry below, so backfills never move latest.
           flavor: |
             latest=false
+          # exact-tags (backfill): suppress every floating tag (sha-<ref>,
+          # branch, pr, major, minor, latest); publish only the pinned version
+          # tag (its immutable by-digest sha is inherent to the pushed image).
           # yamllint disable rule:line-length
           tags: |
-            type=sha,prefix=sha-
-            type=ref,event=branch
-            type=ref,event=pr
+            type=sha,prefix=sha-,enable=${{ !inputs.exact-tags }}
+            type=ref,event=branch,enable=${{ !inputs.exact-tags }}
+            type=ref,event=pr,enable=${{ !inputs.exact-tags }}
             type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
-            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest }}
-            ${{ steps.extra-tags.outputs.tags }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest && !inputs.exact-tags }}
+            ${{ !inputs.exact-tags && steps.extra-tags.outputs.tags || '' }}
           # yamllint enable rule:line-length
 
       - name: Create multi-arch manifest

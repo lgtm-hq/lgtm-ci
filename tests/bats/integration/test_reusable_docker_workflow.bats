@@ -175,7 +175,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	# block silently dropping the gate fails the test.
 	local raw gated
 	raw=$(grep -cF 'type=raw,value=latest' "$WORKFLOW")
-	gated=$(grep -cF "type=raw,value=latest,enable=\${{ inputs.version != '' && inputs.tag-latest }}" "$WORKFLOW")
+	gated=$(grep -cF "type=raw,value=latest,enable=\${{ inputs.version != '' && inputs.tag-latest && !inputs.exact-tags }}" "$WORKFLOW")
 	[ "$raw" -eq "$gated" ]
 	[ "$gated" -ge 2 ]
 	# No ungated raw-latest remains.
@@ -187,4 +187,61 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 	metablocks=$(grep -c 'uses: docker/metadata-action@' "$WORKFLOW")
 	flavor=$(grep -c 'latest=false' "$WORKFLOW")
 	[ "$flavor" -eq "$metablocks" ]
+}
+
+@test "reusable-docker: exposes exact-tags backfill input" {
+	run grep -E '^      exact-tags:$' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-docker: exact-tags suppresses sha/branch/pr tags in every metadata block" {
+	# Backfill mode must drop the mutable ref/sha floating tags from every
+	# metadata-action block (build, build-per-platform, merge). Each entry must
+	# carry the exact-tags gate exactly once per block.
+	local blocks count entry
+	blocks=$(grep -c 'uses: docker/metadata-action@' "$WORKFLOW")
+	[ "$blocks" -ge 3 ]
+	for entry in 'type=sha,prefix=sha-' 'type=ref,event=branch' 'type=ref,event=pr'; do
+		count=$(grep -cF "${entry},enable=\${{ !inputs.exact-tags }}" "$WORKFLOW")
+		[ "$count" -eq "$blocks" ]
+	done
+}
+
+@test "reusable-docker: exact-tags suppresses semver major and minor tags in every metadata block" {
+	local blocks major minor
+	blocks=$(grep -c 'uses: docker/metadata-action@' "$WORKFLOW")
+	major=$(grep -cF \
+		"type=semver,pattern={{major}},value=\${{ inputs.version }},enable=\${{ inputs.version != '' && !inputs.exact-tags }}" \
+		"$WORKFLOW")
+	minor=$(grep -cF \
+		"type=semver,pattern={{major}}.{{minor}},value=\${{ inputs.version }},enable=\${{ inputs.version != '' && !inputs.exact-tags }}" \
+		"$WORKFLOW")
+	[ "$major" -eq "$blocks" ]
+	[ "$minor" -eq "$blocks" ]
+}
+
+@test "reusable-docker: exact-tags keeps the pinned version tag in every metadata block" {
+	# The version tag is the one tag a backfill must still publish; its enable
+	# gate stays on version presence only, never on exact-tags.
+	local blocks version
+	blocks=$(grep -c 'uses: docker/metadata-action@' "$WORKFLOW")
+	version=$(grep -cF \
+		"type=semver,pattern={{version}},value=\${{ inputs.version }},enable=\${{ inputs.version != '' }}" \
+		"$WORKFLOW")
+	[ "$version" -eq "$blocks" ]
+	# The version entry must not gain an exact-tags gate.
+	run grep -F \
+		"type=semver,pattern={{version}},value=\${{ inputs.version }},enable=\${{ inputs.version != '' && !inputs.exact-tags }}" \
+		"$WORKFLOW"
+	assert_failure
+}
+
+@test "reusable-docker: exact-tags ignores additional tags" {
+	local parse_steps gated_extra_tags extra_tag_blocks
+	extra_tag_blocks=$(grep -cF -- "- name: Parse additional tags" "$WORKFLOW")
+	parse_steps=$(grep -cF "if: inputs.tags != '' && !inputs.exact-tags" "$WORKFLOW")
+	gated_extra_tags=$(grep -cF "\${{ !inputs.exact-tags && steps.extra-tags.outputs.tags || '' }}" "$WORKFLOW")
+	[ "$parse_steps" -eq "$extra_tag_blocks" ]
+	[ "$gated_extra_tags" -eq "$extra_tag_blocks" ]
+	[ "$extra_tag_blocks" -ge 2 ]
 }
