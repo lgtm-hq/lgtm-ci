@@ -52,6 +52,15 @@ runs:
         SOURCE_PATH: ${{ inputs.source-path }}
       run: $SCRIPTS_DIR/ci/actions/deploy-pages.sh
 
+    - name: Delete stale Pages artifacts from prior run attempts
+      # Self-heal `gh run rerun --failed`: remove any same-run github-pages
+      # artifact so deploy-pages sees exactly one at deploy time (#415).
+      shell: bash
+      env:
+        ARTIFACT_NAME: ${{ inputs.artifact-name }}
+        GH_TOKEN: ${{ github.token }}
+      run: $SCRIPTS_DIR/ci/actions/delete-run-pages-artifacts.sh
+
     - name: Upload Pages artifact
       id: upload
       # Pinned to SHA for supply chain security

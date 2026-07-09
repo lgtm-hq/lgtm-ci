@@ -165,7 +165,8 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
-      actions: read # resolve and download workflow artifacts for bundling
+      # write (not read) so delete-run-pages-artifacts.sh can self-heal reruns (#415)
+      actions: write # resolve/download workflow artifacts for bundling + prune stale Pages artifacts
 
     steps:
       - name: Checkout repository

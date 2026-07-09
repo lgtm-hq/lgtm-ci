@@ -87,6 +87,7 @@ jobs:
       contents: read
       pages: write
       id-token: write
+      actions: write # delete stale same-run Pages artifacts on rerun (#415)
 
     steps:
       - name: Checkout repository

@@ -73,7 +73,7 @@ permissions:
   contents: read
   pages: write
   id-token: write
-  actions: read # required to download workflow artifacts
+  actions: write # download workflow artifacts + prune stale same-run Pages artifacts on rerun
 
 jobs:
   deploy:
@@ -135,10 +135,17 @@ permissions:
   contents: read
   pages: write
   id-token: write
+  actions: write # delete stale same-run Pages artifacts so reruns self-heal
 ```
 
-Model B build jobs also require `actions: read` on the caller workflow so the
-bundle step can resolve and download artifacts from other workflow runs.
+`actions: write` lets the publish path delete any pre-existing `github-pages`
+artifact on the current run before uploading a fresh one. Without it, re-running
+a failed Pages deploy uploads a second artifact and `actions/deploy-pages`
+hard-fails with "Artifact count is 2", so the run can never self-heal (#415).
+
+Model B build jobs also require `actions: write` on the caller workflow: the
+bundle step reads artifacts from other workflow runs (read) and the upload step
+prunes stale same-run Pages artifacts (write).
 
 Do **not** grant `contents: write` for Pages publish; branch-push deploy is no
 longer used.
