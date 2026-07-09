@@ -11,6 +11,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.48.3] - 2026-07-09
+
+### Changed
+
+- restructure documentation - split excessive README into organized docs (#453)
+  (5d7b407)
+
 - **security**: default `verify-tags` to `true` in the
   `validate-action-pinning` action and `reusable-validate-action-pinning.yml`
   workflow (#369). A lying `sha # vX.Y.Z` comment whose SHA does not resolve to
@@ -22,13 +37,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Callers that already relied on the API being reachable need no change; tag
   resolution failures are reported as warnings, not hard failures.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
-### Security
+- **release**: wrap generated changelog lines to 88 columns (#452) (e9e4246)
 
 ## [0.48.2] - 2026-07-09
 
@@ -1316,7 +1327,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.3...HEAD
+[0.48.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.2...v0.48.3
 [0.48.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.1...v0.48.2
 [0.48.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.0...v0.48.1
 [0.48.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.47.1...v0.48.0
