@@ -7,12 +7,19 @@ maintenance. Full inputs/outputs/examples:
 ## Docker
 
 `reusable-docker.yml` builds and pushes multi-platform images with
-provenance/SBOM attestations and optional Trivy scanning. Callers only pin
-the workflow — no vendored `scripts/ci` tree required; `docker-login` and
-tag-metadata logic are inlined in the workflow. Supports native
-per-platform split builds (`runner-map`) with an optional per-platform
-smoke-test or detached-container health check gating the final manifest
-merge. See [Docker workflow inputs](../reusable-workflows.md#docker-workflow-inputs)
+provenance/SBOM attestations and optional Trivy scanning. Since #381 it is
+a thin orchestrator: a `classify` job resolves the strategy and delegates
+to `reusable-docker-build.yml` (single-platform / QEMU path) or
+`reusable-docker-multiplatform.yml` (runner-map matrix + manifest merge +
+signing); `reusable-docker-smoke-test.yml` validates an already published
+image by digest. Existing callers keep working unchanged — see the
+[migration path](../workflow-contract.md#docker-workflow-family-and-migration-path).
+Callers only pin the workflow — no vendored `scripts/ci` tree required;
+registry logins use the shared `docker-auth` composite resolved from the
+lgtm-ci tooling checkout. Supports native per-platform split builds
+(`runner-map`) with an optional per-platform smoke-test or
+detached-container health check gating the final manifest merge. See
+[Docker workflow inputs](../reusable-workflows.md#docker-workflow-inputs)
 for caller examples (push, PR validation, health checks).
 
 ```yaml
@@ -50,7 +57,8 @@ Docker Hub pushes additionally need `DOCKERHUB_USERNAME` /
 `DOCKERHUB_TOKEN` secrets. Caller repos that previously vendored
 `scripts/ci/actions/build-docker.sh`, `scripts/ci/lib/**`, or
 `docker-login`/`docker-metadata` composites can delete those copies — the
-workflow resolves all tooling from the lgtm-ci checkout.
+workflows resolve all tooling (scripts and the `docker-auth` composite)
+from the lgtm-ci checkout.
 
 ## GitHub Pages
 

@@ -46,14 +46,26 @@ TIMEOUT_MINUTES_EXCEPTIONS: set[str] = set()
 # their own literal cap. Currently no job needs an exemption.
 TIMEOUT_PER_JOB_EXCEPTIONS: set[str] = set()
 
-DOCKER_FILE = "reusable-docker.yml"
-DOCKER_INTERNAL_JOBS = {
-    "classify",
-    "build",
-    "merge",
-    "summary-validate",
-    "scan",
+# Docker family (#381): reusable-docker.yml is the thin orchestrator
+# (classify + nested workflow calls); the focused reusables own the
+# build/merge jobs. Internal coordinator jobs are pinned to ubuntu-24.04
+# and are not caller-pinnable; per-platform matrix jobs use the
+# runner-map-resolved ${{ matrix.runner }} expression.
+DOCKER_FAMILY: dict[str, set[str]] = {
+    "reusable-docker.yml": {"classify"},
+    "reusable-docker-build.yml": {"build", "scan"},
+    "reusable-docker-multiplatform.yml": {
+        "build-per-platform",
+        "verify-per-platform",
+        "health-check-per-platform",
+        "merge",
+        "summary-validate",
+        "scan",
+    },
 }
+# Only the orchestrator exposes runner-map; the multiplatform reusable
+# receives the already-resolved matrix from the classify job.
+DOCKER_RUNNER_MAP_FILES = {"reusable-docker.yml"}
 DOCKER_MATRIX_RUNS_ON = {"${{ matrix.runner }}"}
 RUNNER_IMAGE_RUNS_ON = "${{ inputs.runner-image }}"
 
@@ -171,13 +183,13 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
             f"{rel}: job {job_id} runs-on without timeout-minutes",
         )
 
-    if rel == DOCKER_FILE:
-        if not has_runner_map_input(content):
+    if rel in DOCKER_FAMILY:
+        if rel in DOCKER_RUNNER_MAP_FILES and not has_runner_map_input(content):
             violations.append(f"{rel}: missing runner-map input")
         for job_id, runs_on in jobs.items():
             if runs_on in DOCKER_MATRIX_RUNS_ON:
                 continue
-            if job_id in DOCKER_INTERNAL_JOBS:
+            if job_id in DOCKER_FAMILY[rel]:
                 if runs_on != "ubuntu-24.04":
                     violations.append(
                         f"{rel}: job {job_id} must use ubuntu-24.04 coordinator runner "

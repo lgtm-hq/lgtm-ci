@@ -1,0 +1,63 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: "Docker registry auth"
+description: >-
+  Validate the target registry and log in to GHCR or a secondary registry
+  (Docker Hub). Consolidates the validate + login step sequence duplicated
+  across the reusable-docker workflow family. Resolves the shared login
+  helper from the lgtm-ci tooling checkout via GITHUB_ACTION_PATH, so the
+  action works both in-repo and under a cross-repo .lgtm-ci-tooling checkout.
+author: "lgtm-hq"
+
+inputs:
+  registry:
+    description: "Container registry URL (ghcr.io or docker.io)"
+    required: true
+  dockerhub-username:
+    description: "Docker Hub username (required when registry is docker.io)"
+    required: false
+    default: ""
+  dockerhub-token:
+    description: "Docker Hub token (required when registry is docker.io)"
+    required: false
+    default: ""
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+
+    - name: Validate registry
+      shell: bash
+      env:
+        STEP: validate
+        REGISTRY: ${{ inputs.registry }}
+        DOCKERHUB_USERNAME: ${{ inputs.dockerhub-username }}
+        DOCKERHUB_TOKEN: ${{ inputs.dockerhub-token }}
+      run: $SCRIPTS_DIR/ci/actions/docker-login.sh
+
+    - name: Login to GHCR
+      if: inputs.registry == 'ghcr.io'
+      # Pinned to SHA for supply chain security
+      uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+      with:
+        registry: ghcr.io
+        username: ${{ github.actor }}
+        password: ${{ github.token }}
+
+    - name: Login to Docker Hub
+      if: inputs.registry == 'docker.io'
+      # Pinned to SHA for supply chain security
+      uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
+      with:
+        username: ${{ inputs.dockerhub-username }}
+        password: ${{ inputs.dockerhub-token }}
+
+branding:
+  icon: "lock"
+  color: "blue"
