@@ -6,8 +6,9 @@ creation. See
 migration and [reusable-workflows.md](../reusable-workflows.md#release) for
 the two-stage release model these actions back.
 
-Release actions typically need `contents: write` (creating tags/releases)
-and `packages: write` (uploading assets to GitHub Packages).
+Release actions typically need `contents: write` for creating tags/releases
+and uploading GitHub Release assets. `packages: write` is only needed for
+GitHub Packages publishing such as GHCR.
 
 ## calculate-version
 

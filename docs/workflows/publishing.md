@@ -40,8 +40,10 @@ Publish Node.js packages to npm with provenance attestation.
 jobs:
   publish:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm.yml@main
-    secrets:
-      NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
     with:
       node-version: "22"
       dist-tag: "latest"
@@ -55,8 +57,9 @@ jobs:
 (default false), `working-directory` (default '.').
 
 **Outputs:** `published`, `version`, `package-name`, `tarball`. Requires
-`contents: read`, `id-token: write`, `attestations: write`; must run on
-GitHub-hosted runners for npm provenance.
+`contents: read`, `id-token: write`, `attestations: write`; declares no
+`workflow_call` secrets and must run on GitHub-hosted runners for npm
+provenance.
 
 ### reusable-publish-gem.yml
 

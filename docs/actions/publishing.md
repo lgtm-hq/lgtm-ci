@@ -60,8 +60,8 @@ Build and publish Node.js packages to npm with provenance attestation.
 ```
 
 **Outputs:** `published`, `version`, `package-name`, `tarball`. Requires
-`id-token: write` and a GitHub-hosted runner for provenance; `NPM_TOKEN`
-secret for authentication.
+`id-token: write` and a GitHub-hosted runner for provenance;
+`NODE_AUTH_TOKEN` for authentication.
 
 ## publish-gem
 
