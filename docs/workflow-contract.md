@@ -77,9 +77,45 @@ pin OS reproducibility (for example `ubuntu-24.04`). Defaults are
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
 `{"linux/arm64":"ubuntu-24.04-arm"}`). Platforms not in the map default to
-`ubuntu-24.04` with QEMU. Orchestration jobs inside `reusable-docker.yml`
-(`classify`, `merge`, summaries) stay on fixed `ubuntu-24.04` coordinators and
-are not caller-pinnable.
+`ubuntu-24.04` with QEMU. Coordinator jobs inside the Docker workflow family
+(`classify`, `merge`, summaries, scan) stay on fixed `ubuntu-24.04`
+coordinators and are not caller-pinnable.
+
+#### Docker workflow family and migration path
+
+Since #381 `reusable-docker.yml` is a thin orchestrator: its `classify` job
+resolves the build strategy from `platforms`/`push`/`validate-on-pr` and
+`runner-map`, then delegates to the focused reusables. Existing callers keep
+working unchanged.
+
+<!-- markdownlint-disable MD013 -->
+
+| Workflow                            | Responsibility                                                         | `runner-map`?                      |
+| ----------------------------------- | ---------------------------------------------------------------------- | ---------------------------------- |
+| `reusable-docker.yml`               | Orchestrator: classify + delegate (backwards-compatible entry point)   | Yes (resolved by `classify`)       |
+| `reusable-docker-build.yml`         | Single-platform or QEMU multi-platform build + scan (non-split path)   | No (fixed `ubuntu-24.04` + QEMU)   |
+| `reusable-docker-multiplatform.yml` | Per-platform matrix build + smoke/health gates + manifest merge + sign | No (takes classify `matrix` input) |
+| `reusable-docker-smoke-test.yml`    | Standalone validation of a published image by immutable digest         | No (`runner-image` input)          |
+
+<!-- markdownlint-enable MD013 -->
+
+Migration: callers that only ever hit one path can pin the focused reusable
+directly and skip the classify hop — single-platform (or QEMU) consumers call
+`reusable-docker-build.yml`; multi-arch consumers that already know their
+platform split call `reusable-docker-multiplatform.yml` and pass the matrix
+JSON themselves (an array of
+`{"platform": ..., "slug": ..., "runner": ..., "qemu": ...}` entries, the
+same shape `classify` emits). Post-publish image validation is available
+standalone via `reusable-docker-smoke-test.yml`. The staging-tag scheme
+(`build-<run_id>-<slug>` children of the release index) is part of the
+contract and must not change; the GHCR staging pruner depends on it.
+
+Nested job names: when called through the orchestrator, GitHub prefixes check
+names with the delegating job (for example
+`<caller-job> / Docker build / Build and Push` or
+`<caller-job> / Docker multi-platform / Merge Manifests`). Update branch
+protection / merge-queue required checks accordingly when upgrading across
+the #381 split.
 
 #### Runner pinning exceptions
 

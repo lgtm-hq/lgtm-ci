@@ -25,7 +25,8 @@ Full documentation lives in [docs/actions/](../../docs/actions/README.md):
 - [Publishing and deployment](../../docs/actions/publishing.md) —
   `build-python-package`, `prepare-pypi-upload`, `publish-npm`,
   `publish-gem`, `trigger-homebrew-update`, `validate-package`,
-  `wait-for-package`, `build-docker`, `docker-login`, `deploy-pages`,
+  `wait-for-package`, `build-docker`, `docker-login`, `docker-auth`,
+  `deploy-pages`,
   `bundle-workflow-artifacts`
 - [Release](../../docs/actions/release.md) — `calculate-version`,
   `generate-changelog`, `create-release-tag`, `create-github-release`

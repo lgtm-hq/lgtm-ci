@@ -157,6 +157,26 @@ Login to GHCR or Docker Hub based on the `registry` input.
 
 Used internally by `build-docker` and `reusable-docker.yml`.
 
+## docker-auth
+
+Validate the target registry, then log in to GHCR or Docker Hub (#381).
+Replaces the validate + login step sequence previously duplicated across
+the reusable-docker workflow family. Designed for the cross-repo
+`.lgtm-ci-tooling` checkout: add `.github/actions/docker-auth` to
+`sparse-checkout-extra` on `checkout-and-harden`, then:
+
+```yaml
+- name: Docker registry auth
+  uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
+  with:
+    registry: ghcr.io # or docker.io
+    dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }} # docker.io only
+    dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }} # docker.io only
+```
+
+Fails fast on unsupported registries or missing Docker Hub credentials.
+GHCR login uses `github.actor` + `github.token` (no extra secrets).
+
 ## deploy-pages
 
 Prepare and upload content for GitHub Pages deployment using OIDC.

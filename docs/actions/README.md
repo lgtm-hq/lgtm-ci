@@ -54,6 +54,7 @@ want a drop-in job without wiring these composites by hand.
 | `wait-for-package` | [publishing](publishing.md#wait-for-package) | Package availability polling |
 | `build-docker` | [publishing](publishing.md#build-docker) | Docker image building |
 | `docker-login` | [publishing](publishing.md#docker-login) | GHCR/Docker Hub login |
+| `docker-auth` | [publishing](publishing.md#docker-auth) | Registry validate + login for the docker workflow family |
 | `deploy-pages` | [publishing](publishing.md#deploy-pages) | GitHub Pages deployment (OIDC) |
 | `bundle-workflow-artifacts` | [publishing](publishing.md#bundle-workflow-artifacts) | Bundle report artifacts before Pages deploy |
 | `calculate-version` | [release](release.md#calculate-version) | Semantic version calculation |
