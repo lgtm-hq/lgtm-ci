@@ -13,6 +13,44 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=./analyze.sh
 source "$SCRIPT_DIR/analyze.sh"
 
+# Column budget for wrapping generated changelog list items. Defaults to the
+# strictest consumer gate (markdownlint MD013 / prettier printWidth = 88) so
+# generated CHANGELOG.md lines pass consumer lint without a formatting pass.
+: "${CHANGELOG_LINE_LENGTH:=88}"
+
+# Wrap a markdown list item to <= CHANGELOG_LINE_LENGTH columns.
+#
+# Uses greedy word wrapping with a two-space continuation indent, producing
+# output byte-identical to prettier's `proseWrap: always` and accepted by
+# markdownlint MD013. Words break only on existing whitespace; a single token
+# longer than the limit (e.g. a URL or SHA) overflows onto its own line, which
+# MD013 tolerates rather than being split.
+#
+# Usage: wrap_changelog_line "- **scope**: long description (abc1234)"
+wrap_changelog_line() {
+	local line="${1:-}"
+	local width="${CHANGELOG_LINE_LENGTH:-88}"
+	local indent="  "
+
+	local flattened="${line//$'\n'/ }"
+	local -a words=()
+	read -ra words <<<"$flattened"
+
+	local out="" current="" word
+	for word in "${words[@]}"; do
+		if [[ -z "$current" ]]; then
+			current="$word"
+		elif ((${#current} + 1 + ${#word} <= width)); then
+			current+=" $word"
+		else
+			out+="${current}"$'\n'
+			current="${indent}${word}"
+		fi
+	done
+
+	printf '%s' "${out}${current}"
+}
+
 # Format a single commit entry for changelog
 # Usage: format_commit_entry "abc1234" "feat" "auth" "add login" "full"
 format_commit_entry() {
@@ -23,29 +61,32 @@ format_commit_entry() {
 	local format="${5:-full}"
 
 	local short_sha="${sha:0:7}"
+	local entry
 
 	case "$format" in
 	full)
 		if [[ -n "$scope" ]]; then
-			echo "- **${scope}**: ${description} (${short_sha})"
+			entry="- **${scope}**: ${description} (${short_sha})"
 		else
-			echo "- ${description} (${short_sha})"
+			entry="- ${description} (${short_sha})"
 		fi
 		;;
 	simple)
-		echo "- ${description}"
+		entry="- ${description}"
 		;;
 	with-type)
 		if [[ -n "$scope" ]]; then
-			echo "- ${type}(${scope}): ${description}"
+			entry="- ${type}(${scope}): ${description}"
 		else
-			echo "- ${type}: ${description}"
+			entry="- ${type}: ${description}"
 		fi
 		;;
 	*)
-		echo "- ${description} (${short_sha})"
+		entry="- ${description} (${short_sha})"
 		;;
 	esac
+
+	wrap_changelog_line "$entry"
 }
 
 # Generate changelog section from commits
