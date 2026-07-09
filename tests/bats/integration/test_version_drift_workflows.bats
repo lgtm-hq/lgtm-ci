@@ -39,7 +39,7 @@ load "../../helpers/common"
 @test "reusable-validate-action-pinning: verify-tags input defaults to true" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-validate-action-pinning.yml"
 
-	run bash -c "grep -A8 '^      verify-tags:' '$workflow' | grep -E 'default:[[:space:]]*true'"
+	run bash -c "grep -A12 '^      verify-tags:' '$workflow' | grep -E 'default:[[:space:]]*true'"
 	assert_success
 }
 
