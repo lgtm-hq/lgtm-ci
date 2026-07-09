@@ -89,6 +89,13 @@ _artifacts() {
 	assert_output --partial "GITHUB_RUN_ID is required"
 }
 
+@test "delete-run-pages-artifacts: fails when GH_TOKEN is unset" {
+	_mock_gh "$(_artifacts)"
+	run bash -c 'unset GH_TOKEN; bash "$SCRIPT" 2>&1'
+	assert_failure
+	assert_output --partial "GH_TOKEN is required"
+}
+
 # =============================================================================
 # Zero pre-existing artifacts
 # =============================================================================

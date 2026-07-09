@@ -24,6 +24,7 @@ set -euo pipefail
 : "${ARTIFACT_NAME:=github-pages}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 : "${GITHUB_RUN_ID:?GITHUB_RUN_ID is required}"
+: "${GH_TOKEN:?GH_TOKEN is required}"
 : "${DRY_RUN:=false}"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
