@@ -95,13 +95,14 @@ No files changed.
 EOF
 		)"
 	else
-		local status_line group_rows detail_rows
+		local status_line
 		status_line=$(jq -r \
 			'group_by(.status) | map("\(length) \(.[0].status)") | join(", ")' \
 			"$PR_FILES_JSON")
 
 		# Group by top-level directory; files at the repo root group as (root)
-		group_rows=$(jq -r '
+		local -a all_group_rows=()
+		mapfile -t all_group_rows < <(jq -r '
 			def esc: gsub("[\r\n]"; " ") | gsub("\\|"; "\\|") | gsub("`"; "");
 			map(. + {
 				group: (if (.filename | test("/"))
@@ -113,6 +114,7 @@ EOF
 			| .[]
 			| "| `\(.[0].group | esc)` | \(length) | +\(map(.additions) | add // 0) | -\(map(.deletions) | add // 0) |"
 		' "$PR_FILES_JSON")
+		local total_groups=${#all_group_rows[@]}
 
 		# Render each candidate detail row (bounded by the row cap) as a single
 		# neutralized line so rows can be dropped one-by-one to fit the budget.
@@ -128,8 +130,21 @@ EOF
 		# hidden, the note explains why: <size_forced> distinguishes the byte
 		# budget from the plain row cap.
 		assemble_body() {
-			local shown="$1" size_forced="$2"
-			local detail_rows="" details_summary="Changed files" truncation_note=""
+			local shown="$1" size_forced="$2" shown_groups="$3" group_size_forced="$4"
+			local group_rows="" detail_rows="" details_summary="Changed files" truncation_note=""
+			if ((shown_groups > 0)); then
+				printf -v group_rows '%s\n' "${all_group_rows[@]:0:shown_groups}"
+				group_rows=${group_rows%$'\n'}
+			fi
+			if ((shown_groups < total_groups)); then
+				local remaining_groups=$((total_groups - shown_groups))
+				local group_reason="not shown"
+				if ((group_size_forced)); then
+					group_reason="dropped to keep this comment within GitHub's size limit"
+				fi
+				group_rows+=$'\n'"| _${remaining_groups} area(s) ${group_reason}_ | — | — | — |"
+				group_rows=${group_rows#$'\n'}
+			fi
 			if ((shown > 0)); then
 				printf -v detail_rows '%s\n' "${all_rows[@]:0:shown}"
 				detail_rows=${detail_rows%$'\n'}
@@ -173,13 +188,14 @@ EOF
 
 		# Start with the row-capped view, then shrink to satisfy the byte budget.
 		local shown=$candidate_rows
-		body="$(assemble_body "$shown" 0)"
+		local shown_groups=$total_groups
+		body="$(assemble_body "$shown" 0 "$shown_groups" 0)"
 		if (($(printf '%s' "$body" | wc -c) > body_byte_budget)); then
 			# Binary search for the largest row count whose body fits the budget.
 			local lo=0 hi=$((candidate_rows - 1)) best=0 mid trial
 			while ((lo <= hi)); do
 				mid=$(((lo + hi) / 2))
-				trial="$(assemble_body "$mid" 1)"
+				trial="$(assemble_body "$mid" 1 "$shown_groups" 0)"
 				if (($(printf '%s' "$trial" | wc -c) <= body_byte_budget)); then
 					best=$mid
 					lo=$((mid + 1))
@@ -188,8 +204,29 @@ EOF
 				fi
 			done
 			shown=$best
-			body="$(assemble_body "$shown" 1)"
+			body="$(assemble_body "$shown" 1 "$shown_groups" 0)"
+			if (($(printf '%s' "$body" | wc -c) > body_byte_budget)); then
+				# With zero detail rows, very many unique top-level groups can still
+				# exceed the budget. Drop area rows as the final shrink target.
+				lo=0
+				hi=$total_groups
+				best=0
+				shown=0
+				while ((lo <= hi)); do
+					mid=$(((lo + hi) / 2))
+					trial="$(assemble_body "$shown" 1 "$mid" 1)"
+					if (($(printf '%s' "$trial" | wc -c) <= body_byte_budget)); then
+						best=$mid
+						lo=$((mid + 1))
+					else
+						hi=$((mid - 1))
+					fi
+				done
+				shown_groups=$best
+				body="$(assemble_body "$shown" 1 "$shown_groups" 1)"
+			fi
 		fi
+		unset -f assemble_body
 	fi
 
 	if [[ -n "${COMMENT_OUTPUT:-}" ]]; then
