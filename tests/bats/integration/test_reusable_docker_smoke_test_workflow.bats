@@ -58,6 +58,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-smoke-test.yml"
 	assert_failure
 }
 
+@test "reusable-docker-smoke-test: QEMU setup skips native linux/amd64" {
+	run awk '
+		/name: Setup QEMU/ { in_step = 1 }
+		in_step && /if: \$\{\{ inputs\.platform != .linux\/amd64. \}\}/ { has_if = 1 }
+		in_step && /uses: docker\/setup-qemu-action@/ { has_uses = 1 }
+		in_step && /^      - name:/ && !/Setup QEMU/ { in_step = 0 }
+		END { exit !(has_if && has_uses) }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-docker-smoke-test: read-only permissions" {
 	run grep -E '^      packages: write$' "$WORKFLOW"
 	assert_failure

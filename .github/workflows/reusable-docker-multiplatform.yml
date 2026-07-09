@@ -838,8 +838,10 @@ jobs:
       needs.merge.result == 'success'
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    # packages: read — pull the merged image by digest for Trivy.
     permissions:
       contents: read
+      packages: read
       security-events: write
 
     steps:
@@ -864,6 +866,15 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/docker-auth
+
+      - name: Docker registry auth
+        uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
+        with:
+          registry: ${{ inputs.registry }}
+          dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
+          dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Run Trivy vulnerability scanner
         # Pinned to SHA for supply chain security

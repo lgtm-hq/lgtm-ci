@@ -120,9 +120,23 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
 	assert_success
 }
 
+@test "reusable-docker-multiplatform: scan job authenticates before Trivy pull" {
+	run awk '
+		/^  scan:/ { in_job = 1 }
+		in_job && /^  [a-z]/ { if (!/^  scan:/) in_job = 0 }
+		in_job && /sparse-checkout-extra:/ { saw_extra = 1 }
+		in_job && /\.github\/actions\/docker-auth/ { saw_sparse = 1 }
+		in_job && /name: Docker registry auth/ { saw_auth = 1 }
+		in_job && /uses: \.\/\.lgtm-ci-tooling\/\.github\/actions\/docker-auth/ { saw_uses = 1 }
+		in_job && /packages: read/ { saw_packages = 1 }
+		END { exit !(saw_extra && saw_sparse && saw_auth && saw_uses && saw_packages) }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-docker-multiplatform: registry logins use the docker-auth composite" {
 	run grep -cF 'uses: ./.lgtm-ci-tooling/.github/actions/docker-auth' "$WORKFLOW"
 	assert_success
-	# build-per-platform, verify-per-platform, health-check-per-platform, merge.
-	assert_output "4"
+	# build-per-platform, verify-per-platform, health-check-per-platform, merge, scan.
+	assert_output "5"
 }
