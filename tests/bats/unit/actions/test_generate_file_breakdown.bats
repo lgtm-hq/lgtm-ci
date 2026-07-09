@@ -140,6 +140,70 @@ EOF
 	refute_output --partial '| `README.md` |'
 }
 
+@test "generate-file-breakdown: byte-caps body for many long-path files" {
+	# Worst case: 500 files under a long monorepo path. The 500-row cap alone
+	# would render a body past GitHub's ~65,536-char limit, so the byte budget
+	# must drop rows and note that they were dropped for size.
+	local prefix="services/platform/backend/internal/very/deeply/nested/module"
+	jq -n --arg p "$prefix" '
+		[range(0; 500) | {
+			filename: ($p + "/component-\(.)/handler_implementation_file_\(.).go"),
+			status: "modified",
+			additions: 12,
+			deletions: 7
+		}]
+	' >"${BATS_TEST_TMPDIR}/files.json"
+
+	run env \
+		STEP="generate" \
+		MAX_ROWS="500" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		COMMENT_OUTPUT="${BATS_TEST_TMPDIR}/comment.md" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+
+	# Rendered body must stay under GitHub's comment-body limit.
+	local size
+	size=$(wc -c <"${BATS_TEST_TMPDIR}/comment.md")
+	assert [ "$size" -lt 65536 ]
+
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "500 file(s) changed"
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" \
+		"dropped to keep this comment within GitHub's size limit"
+	# Fixed sections must survive the truncation.
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "| Area | Files |"
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "View full build details"
+}
+
+@test "generate-file-breakdown: byte-caps area rows when details are already hidden" {
+	jq -n '
+		[range(0; 5000) | {
+			filename: ("service-component-with-a-very-long-unique-area-name-\(.)/handler.go"),
+			status: "modified",
+			additions: 1,
+			deletions: 1
+		}]
+	' >"${BATS_TEST_TMPDIR}/files.json"
+
+	run env \
+		STEP="generate" \
+		MAX_ROWS="500" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		COMMENT_OUTPUT="${BATS_TEST_TMPDIR}/comment.md" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+
+	local size
+	size=$(wc -c <"${BATS_TEST_TMPDIR}/comment.md")
+	assert [ "$size" -lt 65536 ]
+
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "5000 file(s) changed"
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" \
+		"area(s) dropped to keep this comment within GitHub's size limit"
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" \
+		"5000 more file(s) not shown (dropped to keep this comment within GitHub's size limit)."
+}
+
 @test "generate-file-breakdown: escapes pipes and strips backticks in paths" {
 	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
 [{"filename": "weird|name`x.txt", "status": "added", "additions": 1, "deletions": 0}]

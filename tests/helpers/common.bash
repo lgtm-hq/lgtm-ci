@@ -342,6 +342,13 @@ if ! _load_bats_library "assert"; then
 			return 1
 		fi
 	}
+
+	assert() {
+		if ! "$@"; then
+			echo "# Expected command to succeed: $*" >&2
+			return 1
+		fi
+	}
 fi
 
 # Load bats-file (provides file assertion functions)
