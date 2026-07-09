@@ -11,6 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.49.0] - 2026-07-09
+
+### Added
+
+- **quality**: enforce per-job timeout-minutes with documented exception list (#460)
+  (8e5cd1b)
+- **docker**: add exact-tags backfill mode to reusable-docker (#449) (3574276)
+
+### Changed
+
+- restructure documentation - split excessive README into organized docs (#453)
+  (5d7b407)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#463) (0f17d22)
+- **workflows**: split reusable-docker.yml into focused workflows (#461) (8104b09)
+- **deps**: update lycheeverse/lychee-action to v2.9.0 (minor) (#462) (3312cb7)
+
 - **security**: default `verify-tags` to `true` in the
   `validate-action-pinning` action and `reusable-validate-action-pinning.yml`
   workflow (#369). A lying `sha # vX.Y.Z` comment whose SHA does not resolve to
@@ -22,13 +46,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Callers that already relied on the API being reachable need no change; tag
   resolution failures are reported as warnings, not hard failures.
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
-### Security
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#458) (34dd9ee)
+- **workflows**: fail or skip on missing node-custom coverage summary (#444) (4f3852e)
+- **actions**: byte-cap file-breakdown comment against GitHub size limit (#450)
+  (6193843)
+- **pages**: delete stale same-run Pages artifacts before upload (#451) (af2b2bb)
+- **release**: wrap generated changelog lines to 88 columns (#452) (e9e4246)
 
 ## [0.48.2] - 2026-07-09
 
@@ -1316,7 +1341,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.49.0...HEAD
+[0.49.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.2...v0.49.0
 [0.48.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.1...v0.48.2
 [0.48.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.0...v0.48.1
 [0.48.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.47.1...v0.48.0
