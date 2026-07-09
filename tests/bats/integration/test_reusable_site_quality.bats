@@ -63,7 +63,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-site-quality.yml"
 }
 
 @test "reusable-site-quality: lychee-action uses pinned SHA" {
-	run grep -F 'lycheeverse/lychee-action@8646ba30535128ac92d33dfc9133794bfdd9b411 # v2.8.0' \
+	run grep -F 'lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0' \
 		"$WORKFLOW"
 	assert_success
 }
