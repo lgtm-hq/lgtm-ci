@@ -838,6 +838,19 @@ Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.
 Bare SHA pins without version comments are invisible to Renovate and are blocked
 by design.
 
+### Tag verification (`verify-tags`)
+
+`verify-tags` defaults to **true**: each `sha # vX.Y.Z` pin is checked by
+resolving the commented tag through the GitHub API and comparing it to the
+pinned SHA. A comment that resolves to a different SHA (a lying pin) fails
+validation; a tag that cannot be resolved is reported as a warning, not a hard
+failure. This requires a `GH_TOKEN` for API access — the action falls back
+through the explicit `gh-token` input, a caller-set `GH_TOKEN` env var, then the
+workflow token.
+
+Offline/air-gapped runners, or environments where the GitHub API is
+unreachable, opt out with `verify-tags: false`.
+
 ### Composite actions calling sibling lgtm-ci actions
 
 Composite `action.yml` files must not call sibling lgtm-ci actions with a remote

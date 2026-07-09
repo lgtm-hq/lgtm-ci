@@ -11,6 +11,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **security**: default `verify-tags` to `true` in the
+  `validate-action-pinning` action and `reusable-validate-action-pinning.yml`
+  workflow (#369). A lying `sha # vX.Y.Z` comment whose SHA does not resolve to
+  the commented tag now fails validation by default instead of passing silently.
+
+  **Migration**: consumers who cannot reach the GitHub API at scan time
+  (offline/air-gapped runners, or token-restricted environments where `gh api`
+  tag resolution is unavailable) must opt out by passing `verify-tags: false`.
+  Callers that already relied on the API being reachable need no change; tag
+  resolution failures are reported as warnings, not hard failures.
+
 ### Deprecated
 
 ### Removed
