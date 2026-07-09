@@ -1,0 +1,237 @@
+# Security actions
+
+Hardening, egress control, pinning validation, and supply-chain
+attestation/signing. See [workflow-contract.md](../workflow-contract.md) for
+the full egress preset table and permission requirements.
+
+## checkout-and-harden
+
+Shared reusable-workflow preamble (#379): checks out lgtm-ci tooling into
+`.lgtm-ci-tooling/`, resolves the egress allowlist, and hardens the runner in
+one step. Requires a prior bootstrap sparse checkout of
+`.github/actions/checkout-and-harden` (the composite lives in lgtm-ci).
+
+```yaml
+- name: Checkout lgtm-ci tooling
+  uses: actions/checkout@<pin>
+  with:
+    repository: lgtm-hq/lgtm-ci
+    path: .lgtm-ci-tooling
+    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+    sparse-checkout: |
+      .github/actions/checkout-and-harden
+    sparse-checkout-cone-mode: true
+    persist-credentials: false
+
+- name: Checkout and harden
+  id: egress
+  uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+  with:
+    tooling-ref: ${{ inputs.tooling-ref }}
+    egress-preset: quality
+    sparse-checkout-extra: |
+      scripts/ci/
+```
+
+**Inputs:** `tooling-ref`, `egress-policy` (default `block`), `egress-preset`,
+`allowed-endpoints`, `allowed-endpoints-mode` (default `replace`),
+`sparse-checkout-extra`, `persist-credentials` (default `false`).
+
+**Outputs:** `allowed-endpoints` (resolved allowlist), `scripts-dir` (absolute
+path to `.lgtm-ci-tooling/scripts`).
+
+## resolve-egress-allowlist
+
+Resolves `allowed-endpoints` from explicit lists or `egress-preset` names. Run
+**before** `harden-runner`.
+
+```yaml
+- name: Resolve egress allowlist
+  id: egress
+  uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+  with:
+    egress-policy: block
+    egress-preset: quality
+    allowed-endpoints: |
+      private.registry.example:443
+    allowed-endpoints-mode: append # default: replace
+```
+
+`replace` drops the preset when `allowed-endpoints` is non-empty; `append`
+merges preset + extras with deduplication. Presets are defined in
+`scripts/ci/lib/egress/presets.sh`.
+
+## harden-runner
+
+Security hardening using [StepSecurity](https://stepsecurity.io). Pass
+**resolved** `allowed-endpoints` from a prior `resolve-egress-allowlist` step.
+
+```yaml
+- uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+  with:
+    egress-policy: block # default; use audit to log only
+    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+    disable-sudo: "false" # optional
+```
+
+Reusable workflows check out lgtm-ci into `.lgtm-ci-tooling` before egress
+steps — consumers do not copy `harden-runner` or `resolve-egress-allowlist`
+into their repo. Do not use caller-local `./.github/actions/...` in
+cross-repo reusables, and do not use `${{ }}` in remote action `@ref`
+segments inside `uses:`.
+
+## secure-checkout
+
+Security-hardened repository checkout.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
+  with:
+    persist-credentials: "false" # default: false (secure)
+    fetch-depth: "1" # default: 1 (shallow clone)
+```
+
+**Outputs:** `ref`, `commit`.
+
+## egress-audit
+
+Network egress configuration and reporting scaffolding.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/egress-audit@main
+  with:
+    mode: "audit" # 'audit', 'report', or 'block'
+    report-format: "summary" # 'summary', 'json', or 'none'
+```
+
+Pre-configured allowlist for common package registries (GitHub, npm, PyPI,
+Crates.io, RubyGems); generates a GitHub Step Summary report.
+
+## validate-runner-policy
+
+Enforces a tiered egress policy (`strict`, `hardened`, `permissive`) before
+`harden-runner` and outputs whether egress enforcement should run on the
+current leg.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/validate-runner-policy@main
+  with:
+    tier: "strict"
+    egress-policy: "block"
+    runner-environment: ${{ runner.environment }}
+    runner-os: ${{ runner.os }}
+```
+
+**Outputs:** `enforce-egress`, `effective-policy`, `tier-warning`. See
+[workflow-contract.md](../workflow-contract.md#runner-policy-tiers) for tier
+semantics.
+
+## validate-action-pinning
+
+Ensures GitHub Actions references use SHA pins with Renovate version
+comments.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/validate-action-pinning@main
+  with:
+    enforce: "true" # optional, default: true
+    allow-tag-exceptions: "" # optional, comma-separated action names
+    scan-paths: ".github/workflows .github/actions" # optional
+    verify-tags: "true" # optional
+```
+
+Used by `reusable-validate-action-pinning.yml`. See
+[workflow-contract.md](../workflow-contract.md#action-pinning-policy).
+
+## Supply chain: SBOM, attestation, signing
+
+### generate-sbom
+
+Generate an SBOM using [Syft](https://github.com/anchore/syft).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@main
+  with:
+    target: "." # optional, default: current directory
+    target-type: "dir" # 'dir', 'image', or 'file'
+    format: "cyclonedx-json" # cyclonedx-json, spdx-json, cyclonedx-xml, spdx-tag-value
+    upload-artifact: "true" # optional
+```
+
+**Outputs:** `sbom-file`, `sbom-format`.
+
+### scan-vulnerabilities
+
+Scan for vulnerabilities using [Grype](https://github.com/anchore/grype).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@main
+  with:
+    target: "sbom.cdx.json" # SBOM file, image, or directory
+    target-type: "sbom" # 'sbom', 'image', or 'dir'
+    fail-on: "high" # 'critical', 'high', 'medium', 'low', or ''
+    upload-sarif: "true" # upload to GitHub Security tab
+```
+
+**Outputs:** `vulnerabilities-found`, `critical-count`, `high-count`,
+`medium-count`, `low-count`, `sarif-file`.
+
+### attest-build
+
+Create build attestations via
+[actions/attest-build-provenance](https://github.com/actions/attest-build-provenance).
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/attest-build@main
+  with:
+    subject-path: "dist/myapp.tar.gz"
+    subject-name: "myapp" # optional
+    push-to-registry: "false"
+```
+
+**Outputs:** `attestation-id`, `attestation-url`, `bundle-path`. Requires
+`id-token: write` and `attestations: write`.
+
+### verify-attestation
+
+Verify build attestations using `gh attestation verify`.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/verify-attestation@main
+  with:
+    target: "dist/myapp.tar.gz"
+    target-type: "file" # 'file' or 'image'
+```
+
+**Outputs:** `verified`, `signer-identity`.
+
+### sign-artifact
+
+Sign release artifacts with Sigstore/Cosign keyless signing.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/sign-artifact@main
+  with:
+    files: "dist/*.tar.gz"
+    upload-signatures: "true"
+    upload-to-release: "false"
+```
+
+**Outputs:** `signatures`, `certificate`, `signatures-dir`, `signed-count`.
+Requires `id-token: write` (and `contents: write` when uploading to a
+release).
+
+### verify-signature
+
+Verify Sigstore/Cosign signatures.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/verify-signature@main
+  with:
+    file: "dist/myapp.tar.gz"
+    signature: "dist/myapp.tar.gz.sig"
+    certificate: "dist/myapp.tar.gz.pem"
+    certificate-identity: "https://github.com/owner/repo/.github/workflows/release.yml@refs/tags/v1.0.0"
+```
+
+**Outputs:** `verified`.
