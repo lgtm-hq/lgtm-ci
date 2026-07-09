@@ -179,6 +179,122 @@ YAML
 	assert_output --partial "timeout-minutes input is never applied to a job"
 }
 
+@test "validate-runner-contract: flags runs-on job without job-level timeout-minutes" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<'YAML'
+---
+name: Uncapped job bad example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  test:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+  aggregate:
+    runs-on: ${{ inputs.runner-image }}
+    steps:
+      - run: echo aggregate
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "job aggregate runs-on without timeout-minutes"
+}
+
+@test "validate-runner-contract: honors TIMEOUT_PER_JOB_EXCEPTIONS bypass" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local validator_copy="${BATS_TEST_TMPDIR}/validate-runner-contract.sh"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<'YAML'
+---
+name: Uncapped job bad example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  test:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+  aggregate:
+    runs-on: ${{ inputs.runner-image }}
+    steps:
+      - run: echo aggregate
+YAML
+
+	# Patch a throwaway copy of the validator so the exception key format is
+	# exercised without mutating the repo-owned empty set.
+	cp "${VALIDATOR}" "${validator_copy}"
+	python3 - "${validator_copy}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+old = "TIMEOUT_PER_JOB_EXCEPTIONS: set[str] = set()"
+new = (
+    "TIMEOUT_PER_JOB_EXCEPTIONS: set[str] = {\n"
+    '    "reusable-uncapped-job-bad.yml:aggregate",\n'
+    "}"
+)
+if old not in text:
+    raise SystemExit("TIMEOUT_PER_JOB_EXCEPTIONS declaration not found")
+path.write_text(text.replace(old, new, 1))
+PY
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${validator_copy}"
+	assert_success
+}
+
+@test "validate-runner-contract: accepts job with independent literal timeout cap" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-literal-cap-good.yml" <<'YAML'
+---
+name: Literal cap good example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  test:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+  report-failure:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    steps:
+      - run: echo report
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_success
+}
+
 @test "validate-runner-contract: allows documented action-only exception" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"

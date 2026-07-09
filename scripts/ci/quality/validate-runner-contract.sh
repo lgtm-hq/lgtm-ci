@@ -39,6 +39,13 @@ RUNNER_PINNING_EXCEPTIONS = {
 # timeout-minutes input requirement. Currently every reusable exposes it.
 TIMEOUT_MINUTES_EXCEPTIONS: set[str] = set()
 
+# Per-job exemptions from the requirement that every runs-on job declares
+# timeout-minutes (literal or input-wired). Entries are "<file>.yml:<job-id>"
+# and MUST be documented in docs/workflow-contract.md "Job timeouts". The
+# 10-min failure-reporter legs are NOT listed here: they satisfy the rule with
+# their own literal cap. Currently no job needs an exemption.
+TIMEOUT_PER_JOB_EXCEPTIONS: set[str] = set()
+
 DOCKER_FILE = "reusable-docker.yml"
 DOCKER_INTERNAL_JOBS = {
     "classify",
@@ -51,25 +58,49 @@ DOCKER_MATRIX_RUNS_ON = {"${{ matrix.runner }}"}
 RUNNER_IMAGE_RUNS_ON = "${{ inputs.runner-image }}"
 
 
-def parse_jobs(content: str) -> dict[str, str]:
-    """Return job id -> runs-on expression for each job in the workflow."""
+def iter_job_blocks(content: str) -> list[tuple[str, str]]:
+    """Return (job id, job body) pairs for each job in the workflow."""
     jobs_match = re.search(r"^jobs:\n", content, re.M)
     if not jobs_match:
-        return {}
+        return []
 
     jobs_section = content[jobs_match.end() :]
+    return [
+        (match.group(1), match.group(2))
+        for match in re.finditer(
+            r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)",
+            jobs_section,
+            re.M | re.S,
+        )
+    ]
+
+
+def parse_jobs(content: str) -> dict[str, str]:
+    """Return job id -> runs-on expression for each runs-on job."""
     jobs: dict[str, str] = {}
-    for match in re.finditer(
-        r"^  ([\w-]+):\n(.*?)(?=^  [\w-]+:\n|\Z)",
-        jobs_section,
-        re.M | re.S,
-    ):
-        job_id = match.group(1)
-        block = match.group(2)
+    for job_id, block in iter_job_blocks(content):
         runs_match = re.search(r"^    runs-on: (.+)$", block, re.M)
         if runs_match:
             jobs[job_id] = runs_match.group(1).strip()
     return jobs
+
+
+def jobs_missing_timeout(content: str, rel: str) -> list[str]:
+    """Return runs-on job ids lacking a job-level timeout-minutes.
+
+    A job satisfies the contract with either a literal ``timeout-minutes:``
+    or one wired to ``${{ inputs.timeout-minutes }}``. Jobs listed in
+    TIMEOUT_PER_JOB_EXCEPTIONS are skipped.
+    """
+    missing: list[str] = []
+    for job_id, block in iter_job_blocks(content):
+        if not re.search(r"^    runs-on: ", block, re.M):
+            continue
+        if f"{rel}:{job_id}" in TIMEOUT_PER_JOB_EXCEPTIONS:
+            continue
+        if not re.search(r"^    timeout-minutes:", block, re.M):
+            missing.append(job_id)
+    return missing
 
 
 def has_runner_image_input(content: str) -> bool:
@@ -134,6 +165,11 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
                 violations.append(
                     f"{rel}: timeout-minutes input is never applied to a job",
                 )
+
+    for job_id in jobs_missing_timeout(content, rel):
+        violations.append(
+            f"{rel}: job {job_id} runs-on without timeout-minutes",
+        )
 
     if rel == DOCKER_FILE:
         if not has_runner_map_input(content):

@@ -106,15 +106,28 @@ caller examples including `runner-map`.
 ### Job timeouts
 
 Every reusable exposes a `timeout-minutes` input (type: number) wired to
-`timeout-minutes:` on its jobs so callers can bound runtime. Defaults are
-sized per workflow (small API wrappers 5–10, builds/tests 15–60; scan-style
-workflows such as CodeQL and Scorecard get larger defaults). Jobs that
-compose another reusable via `uses:` rely on the called workflow's own
+`timeout-minutes:` on its primary job so callers can bound runtime. Defaults
+are sized per workflow (small API wrappers 5–10, builds/tests 15–60;
+scan-style workflows such as CodeQL and Scorecard get larger defaults). Jobs
+that compose another reusable via `uses:` rely on the called workflow's own
 `timeout-minutes` default instead.
 
-There are currently no exceptions; the same
-`scripts/ci/quality/validate-runner-contract.sh` script enforces the input's
-presence and maintains the exception list should one become necessary.
+Beyond the caller-facing input, **every job with `runs-on` must declare a
+`timeout-minutes`** — either wired to `${{ inputs.timeout-minutes }}` (the
+main workload) or a literal cap. Lightweight coordinator legs (matrix
+`prepare`/`setup`, result `aggregate`/`merge`/`publish`, and pages-status
+jobs) and the failure-reporter legs keep an **independent literal cap**
+(`timeout-minutes: 10`): the caller's `timeout-minutes` bounds the main test
+job, and lowering it must not silently uncap — or, for reporters, cancel —
+these short-running legs. Only jobs that hand off to another reusable via
+`uses:` are exempt, because they carry no `runs-on` of their own.
+
+`scripts/ci/quality/validate-runner-contract.sh` enforces both the input's
+presence and the per-job cap. It maintains two exception mechanisms mirroring
+the runner-image exceptions: `TIMEOUT_MINUTES_EXCEPTIONS` (file-level, exempt
+from exposing the input) and `TIMEOUT_PER_JOB_EXCEPTIONS` (job-level, keyed by
+`<file>.yml:<job-id>`, exempt from the per-job cap). Both are currently empty;
+add an entry here with justification before adding one to the script.
 
 #### Egress policy exceptions
 

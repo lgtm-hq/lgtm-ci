@@ -123,6 +123,9 @@ jobs:
   setup:
     name: Setup Matrix
     runs-on: ${{ inputs.runner-image }}
+    # Independent short cap: the caller's timeout-minutes bounds the main
+    # test job; this coordinator leg keeps its own fixed cap.
+    timeout-minutes: 10
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
@@ -266,6 +269,9 @@ jobs:
     needs: test
     if: always() && inputs.upload-report
     runs-on: ${{ inputs.runner-image }}
+    # Independent short cap: the caller's timeout-minutes bounds the main
+    # test job; this coordinator leg keeps its own fixed cap.
+    timeout-minutes: 10
     permissions:
       contents: read
 
@@ -335,6 +341,9 @@ jobs:
     needs: merge
     if: inputs.publish-results && !cancelled()
     runs-on: ${{ inputs.runner-image }}
+    # Independent short cap: the caller's timeout-minutes bounds the main
+    # test job; this coordinator leg keeps its own fixed cap.
+    timeout-minutes: 10
     concurrency:
       group: pages-${{ github.repository }}-${{ github.ref }}
       cancel-in-progress: false
