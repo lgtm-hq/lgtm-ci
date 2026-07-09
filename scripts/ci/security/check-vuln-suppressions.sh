@@ -80,12 +80,12 @@ STALE_IDS=()
 EXPIRED_IDS=()
 ACTIVE_IDS=()
 declare -A EXPIRED_UNTIL=()
-while IFS=$'\t' read -r category vid until; do
+while IFS=$'\t' read -r category vid expire_date; do
 	case "$category" in
 	STALE) STALE_IDS+=("$vid") ;;
 	EXPIRED)
 		EXPIRED_IDS+=("$vid")
-		EXPIRED_UNTIL["$vid"]="$until"
+		EXPIRED_UNTIL["$vid"]="$expire_date"
 		;;
 	ACTIVE) ACTIVE_IDS+=("$vid") ;;
 	esac
@@ -128,11 +128,11 @@ vulnerability or renew the suppression with a new \`ignoreUntil\`.
 | ID | ignoreUntil | Required action |
 | --- | --- | --- |
 "
-	local id until
+	local id expire_date
 	for id in "${EXPIRED_IDS[@]+"${EXPIRED_IDS[@]}"}"; do
-		until="${EXPIRED_UNTIL[$id]:-unknown}"
-		log_error "  - ${id} (ignoreUntil ${until}) — remediate the vulnerability or renew the suppression"
-		summary="${summary}| \`${id}\` | ${until} | Remediate the vulnerability or renew the suppression |
+		expire_date="${EXPIRED_UNTIL[$id]:-unknown}"
+		log_error "  - ${id} (ignoreUntil ${expire_date}) — remediate the vulnerability or renew the suppression"
+		summary="${summary}| \`${id}\` | ${expire_date} | Remediate the vulnerability or renew the suppression |
 "
 	done
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
