@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Publish Test Results"
 description: "Publish test results and coverage to GitHub Pages"

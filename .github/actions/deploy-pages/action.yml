@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Deploy to GitHub Pages"
 description: "Prepare and upload content for GitHub Pages deployment"

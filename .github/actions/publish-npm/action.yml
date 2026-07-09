@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Publish to npm"
 description: "Build and publish Node.js package to npm with provenance"

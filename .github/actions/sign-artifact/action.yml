@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Sign Artifact"
 description: "Sign release artifacts with Sigstore/Cosign keyless signing"

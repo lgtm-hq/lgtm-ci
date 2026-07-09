@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
 ---
 name: "Publish to RubyGems"
 description: "Build and publish Ruby gem to RubyGems using OIDC trusted publishing"

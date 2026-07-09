@@ -902,6 +902,77 @@ tooling checkout need egress for `codeload.github.com`, `astral.sh`, and
 events. Do not invoke it from plain `push` workflows unless you accept the job
 being skipped.
 
+### Licensing: "Unknown License" on lgtm-ci composite actions
+
+Consumers pinning `lgtm-hq/lgtm-ci/.github/actions/*@<sha>` may see
+**License: Null / Unknown** for those rows in GitHub Dependency Review and
+OpenSSF Scorecard's license check, even though this repository is **MIT**
+(`LICENSE` at the repo root). This is a known GitHub platform limitation, not
+a missing license:
+
+- The `action.yml` metadata schema (`name`, `author`, `description`, `inputs`,
+  `outputs`, `runs`, `branding`) has **no license/SPDX field**. There is
+  nothing for a composite action to declare that GitHub's dependency graph
+  will read.
+- GitHub's `actions` ecosystem in the dependency graph does not currently
+  inherit the referencing repository's `LICENSE` for cross-repo composite
+  action paths (`owner/repo/path@ref`), so `dependency-review-action` and
+  Scorecard report the license as unknown regardless of the upstream repo's
+  actual license.
+
+Every `action.yml` under `.github/actions/` carries an
+`SPDX-License-Identifier: MIT` header comment for humans and license-scanning
+tools that read files directly; it does not change what GitHub's dependency
+graph reports, since the field isn't part of the schema GitHub parses.
+
+**Consumer workaround:** pass `allow-dependencies-licenses` through
+`reusable-dependency-review.yml` with the PURLs of the lgtm-ci composites you
+consume, pinned to the tag/SHA you use. The dependency-review-action matches
+`allow-dependencies-licenses` entries on namespace/name only (version is
+ignored), so a single PURL per action covers every ref you pin to it. Slashes
+in the composite subpath are percent-encoded (`%2F`):
+
+<!-- markdownlint-disable MD013 -- long PURL examples -->
+
+```yaml
+jobs:
+  dependency-review:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@<sha> # vX.Y.Z
+    with:
+      allow-dependencies-licenses: >-
+        pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fharden-runner,
+        pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcheckout-and-harden,
+        pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsecure-checkout,
+        pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-rust,
+        pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcreate-github-release
+```
+
+<!-- markdownlint-enable MD013 -->
+
+Canonical PURLs for common composites (swap the trailing action name for any
+other directory under `.github/actions/`):
+
+<!-- markdownlint-disable MD013 -- wide PURL reference table -->
+
+| Composite               | PURL (namespace/name)                                            |
+| ------------------------ | ----------------------------------------------------------------- |
+| `harden-runner`          | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fharden-runner` |
+| `checkout-and-harden`    | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcheckout-and-harden` |
+| `secure-checkout`        | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsecure-checkout` |
+| `setup-rust`             | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-rust` |
+| `setup-python`           | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-python` |
+| `setup-node`             | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fsetup-node` |
+| `create-github-release`  | `pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fcreate-github-release` |
+
+<!-- markdownlint-enable MD013 -->
+
+For OpenSSF Scorecard, there is no equivalent per-dependency allowlist for the
+license check today; document the expected "Unknown" result for lgtm-ci
+composite rows rather than treating it as a regression. Re-check this section
+if GitHub ships license enrichment for the `actions` ecosystem or adds a
+`license` field to the action metadata schema — at that point the
+`allow-dependencies-licenses` workaround and this note can be retired.
+
 ## Security audit (osv-scanner)
 
 `reusable-security-audit.yml` centralizes the lintro Docker + osv-scanner audit

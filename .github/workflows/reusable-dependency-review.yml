@@ -19,6 +19,15 @@ on:
         required: false
         type: string
         default: ""
+      allow-dependencies-licenses:
+        description: >-
+          Comma-separated PURLs exempted from license checks regardless of
+          allow-licenses/deny-licenses (e.g. lgtm-ci composite actions that
+          report Unknown license in the actions ecosystem — see
+          docs/workflow-contract.md#dependency-review for canonical PURLs).
+        required: false
+        type: string
+        default: ""
 
       tooling-ref:
         description: >-
@@ -111,3 +120,4 @@ jobs:
           fail-on-severity: ${{ inputs.fail-on-severity }}
           deny-licenses: ${{ inputs.deny-licenses }}
           allow-licenses: ${{ inputs.allow-licenses }}
+          allow-dependencies-licenses: ${{ inputs.allow-dependencies-licenses }}
