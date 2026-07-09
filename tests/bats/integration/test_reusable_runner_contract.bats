@@ -179,6 +179,70 @@ YAML
 	assert_output --partial "timeout-minutes input is never applied to a job"
 }
 
+@test "validate-runner-contract: flags runs-on job without job-level timeout-minutes" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<'YAML'
+---
+name: Uncapped job bad example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  test:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+  aggregate:
+    runs-on: ${{ inputs.runner-image }}
+    steps:
+      - run: echo aggregate
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "job aggregate runs-on without timeout-minutes"
+}
+
+@test "validate-runner-contract: accepts job with independent literal timeout cap" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-literal-cap-good.yml" <<'YAML'
+---
+name: Literal cap good example
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  test:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+  report-failure:
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    steps:
+      - run: echo report
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_success
+}
+
 @test "validate-runner-contract: allows documented action-only exception" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"

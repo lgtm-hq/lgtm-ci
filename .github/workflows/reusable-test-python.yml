@@ -156,6 +156,9 @@ jobs:
   prepare:
     name: Prepare Python Matrix
     runs-on: ${{ inputs.runner-image }}
+    # Independent short cap: the caller's timeout-minutes bounds the main
+    # test job; this coordinator leg keeps its own fixed cap.
+    timeout-minutes: 10
     if: >-
       !inputs.draft-pr-skip ||
       github.event_name != 'pull_request' ||
@@ -429,6 +432,9 @@ jobs:
         github.event.pull_request.draft == false
       )
     runs-on: ${{ inputs.runner-image }}
+    # Independent short cap: the caller's timeout-minutes bounds the main
+    # test job; this coordinator leg keeps its own fixed cap.
+    timeout-minutes: 10
     permissions:
       actions: write # upload-artifact/merge re-uploads merged python-coverage (artifact write)
       contents: read
