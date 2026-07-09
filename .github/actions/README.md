@@ -1061,7 +1061,7 @@ jobs:
       - uses: lgtm-hq/lgtm-ci/.github/actions/run-quality@main
         with:
           # Pin digest in production (default matches this repo’s CI pin)
-          lintro-image: ghcr.io/lgtm-hq/py-lintro@sha256:21fdb887b00cf3ef3017eb7463e53e68a9c71b90012df657923331375a71ac2f
+          lintro-image: ghcr.io/lgtm-hq/py-lintro@sha256:fe329ed5f455f10cbc53107a0c1d183fed17a0b2401ceec25f78e9b8070ff7cc
           tools: "" # optional, comma-separated list (empty = all)
           mode: "check" # 'check' or 'format'
           fail-on-error: "true" # optional

@@ -291,7 +291,7 @@ image** so every bundled tool is available. Mirror CI locally:
 
 ```bash
 export STEP=check
-export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:21fdb887b00cf3ef3017eb7463e53e68a9c71b90012df657923331375a71ac2f'
+export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:fe329ed5f455f10cbc53107a0c1d183fed17a0b2401ceec25f78e9b8070ff7cc'
 bash scripts/ci/quality/run-lintro-docker.sh
 ```
 
