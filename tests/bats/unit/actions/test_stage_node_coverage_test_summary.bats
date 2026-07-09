@@ -55,7 +55,7 @@ teardown() {
 		COVERAGE_SUMMARY_FILE=coverage/coverage-summary.json \
 		bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "COVERAGE is required"
+	assert_output --partial "::error::COVERAGE is required"
 	run test ! -e node-coverage-staged
 	assert_success
 }

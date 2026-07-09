@@ -6,7 +6,10 @@ set -euo pipefail
 
 : "${WORKING_DIRECTORY:=.}"
 : "${COVERAGE_SUMMARY_FILE:?COVERAGE_SUMMARY_FILE is required}"
-: "${COVERAGE:?COVERAGE is required (true or false)}"
+if [[ -z "${COVERAGE:-}" ]]; then
+	echo "::error::COVERAGE is required (true or false)."
+	exit 1
+fi
 
 source_file="${WORKING_DIRECTORY}/${COVERAGE_SUMMARY_FILE}"
 
