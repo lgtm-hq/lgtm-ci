@@ -24,24 +24,10 @@ and shell utilities.
 
 New repository? Follow the task-ordered consumer guide in
 [docs/onboarding.md](docs/onboarding.md) — starter example selection, release
-GitHub App secrets, egress audit→block flow, and release-SHA pinning.
-
-### Using a Composite Action
-
-```yaml
-jobs:
-  build:
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1
-        with:
-          python-version: "3.13"
-          node-version: "22"
-```
-
-### Using a Reusable Workflow
+GitHub App secrets, egress audit→block flow, and release-SHA pinning. For
+the three consumption models (composite actions, reusable workflows, shell
+libraries) and the pinning model, see
+[docs/getting-started.md](docs/getting-started.md).
 
 ```yaml
 jobs:
@@ -50,259 +36,46 @@ jobs:
       contents: read
       packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality-lint
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
-
-  publish-quality-summary:
-    needs: quality
-    if: >-
-      !cancelled()
-      && github.event_name == 'pull_request'
-      && github.event.pull_request.head.repo.fork == false
-    permissions:
-      contents: read
-      pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@v1
-    with:
-      exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
 
-Reusable workflows share a standard contract (`tooling-ref`, `egress-policy`,
-`job-name`, permissions by mode). See [docs/workflow-contract.md](docs/workflow-contract.md).
-
-You do **not** need to copy `.github/actions/harden-runner` or
-`resolve-egress-allowlist` into your repository — reusables fetch them from lgtm-ci
-via `.lgtm-ci-tooling` (see [docs/reusable-workflows.md](docs/reusable-workflows.md) and
-[examples/README.md](examples/README.md)).
-
-### Using Shell Libraries
-
-```yaml
-steps:
-  - uses: actions/checkout@v4
-    with:
-      repository: lgtm-hq/lgtm-ci
-      path: .lgtm-ci
-      sparse-checkout: scripts/ci/lib
-
-  - name: Use utilities
-    run: |
-      source .lgtm-ci/scripts/ci/lib/log.sh
-      log_info "Starting build..."
-```
+Reusable workflows share a standard contract (`tooling-ref`,
+`egress-policy`, `job-name`, permissions by mode). See
+[docs/workflow-contract.md](docs/workflow-contract.md). You do **not** need
+to copy `.github/actions/harden-runner` or `resolve-egress-allowlist` into
+your repository — reusables fetch them from lgtm-ci internally.
 
 ## 📦 Components
 
-### Composite Actions
+Full documentation: [docs/README.md](docs/README.md).
 
-#### Environment Setup
+<!-- markdownlint-disable MD013 -- component index table -->
 
-| Action         | Description                                     |
-| -------------- | ----------------------------------------------- |
-| `setup-env`    | Unified Python/Node/Ruby/Rust environment setup |
-| `setup-python` | Python + uv setup with caching                  |
-| `setup-node`   | Node.js + Bun setup with Playwright caching     |
-| `setup-ruby`   | Ruby + Bundler setup                            |
-| `setup-rust`   | Rust toolchain setup                            |
-
-#### Security & Hardening
-
-| Action                     | Description                                        |
-| -------------------------- | -------------------------------------------------- |
-| `resolve-egress-allowlist` | Resolve egress presets/endpoints before hardening  |
-| `harden-runner`            | StepSecurity hardening with resolved allowlist     |
-| `secure-checkout`          | Hardened git checkout                              |
-| `scan-vulnerabilities`     | Vulnerability scanning                             |
-| `egress-audit`             | Network egress monitoring and reporting            |
-
-#### Quality & Testing
-
-| Action              | Description                              |
-| ------------------- | ---------------------------------------- |
-| `run-quality`       | Lintro via full py-lintro Docker image   |
-| `run-tests`         | Generic test runner                      |
-| `run-vitest`        | Vitest test execution                    |
-| `run-pytest`        | Pytest test execution                    |
-| `run-playwright`    | Playwright E2E test execution            |
-| `run-lighthouse`    | Lighthouse performance audits            |
-
-#### Reporting & Comments
-
-<!-- markdownlint-disable MD013 -- action catalog table; descriptions exceed default line length -->
-
-| Action                        | Description                                              |
-| ----------------------------- | -------------------------------------------------------- |
-| `post-pr-comment`             | Marker-based PR comment transport (any summary/report)   |
-| `generate-coverage-badge`     | Coverage badge generation                                |
-| `generate-coverage-comment`   | Coverage test summary markdown                           |
-| `generate-playwright-comment` | E2E test result comments                                 |
-| `generate-lighthouse-comment` | Performance metric comments                              |
-| `publish-test-results`        | Test result publishing                                   |
-| `check-coverage-threshold`    | Coverage threshold validation                            |
-| `collect-coverage`            | Coverage data collection                                 |
-| `merge-playwright-reports`    | Playwright report merging                                |
+| Area | Index | Highlights |
+| ---- | ----- | ---------- |
+| Composite actions (40+) | [docs/actions/](docs/actions/README.md) | Setup, security/egress, testing, coverage, publishing, release, PR comments |
+| Reusable workflows (47+) | [docs/workflows/](docs/workflows/README.md) | Quality lint, per-language tests, Docker, Pages, release automation, security audit |
+| Shell libraries | [docs/libraries/](docs/libraries/README.md) | Logging, GitHub Actions helpers, installers, release/changelog, coverage parsing |
 
 <!-- markdownlint-enable MD013 -->
 
-#### Build & Release
-
-| Action                  | Description                     |
-| ----------------------- | ------------------------------- |
-| `build-docker`          | Docker image building           |
-| `attest-build`          | Build attestation with Sigstore |
-| `sign-artifact`         | Artifact signing                |
-| `verify-attestation`    | Attestation verification        |
-| `verify-signature`      | Signature verification          |
-| `calculate-version`     | Semantic version calculation    |
-| `create-release-tag`    | Release tag creation            |
-| `create-github-release` | GitHub release creation         |
-| `generate-changelog`    | Changelog generation            |
-| `generate-sbom`         | SBOM generation with CycloneDX  |
-
-#### Publishing & Deployment
-
-| Action                    | Description                                                  |
-| ------------------------- | ------------------------------------------------------------ |
-| `publish-npm`             | npm package publishing                                       |
-| `build-python-package`    | Build Python sdist/wheel                                     |
-| `prepare-pypi-upload`     | Download, validate, and expose dist metadata for PyPI upload |
-| `publish-gem`             | RubyGems publishing                                          |
-| `trigger-homebrew-update` | Dispatch Homebrew formula updates to homebrew-tap            |
-| `validate-package`        | Package validation                                           |
-| `wait-for-package`        | Package availability polling                                 |
-| `deploy-pages`            | GitHub Pages deployment                                      |
-
-### Reusable Workflows
-
-<!-- markdownlint-disable MD013 MD060 -- workflow catalog table; long workflow names exceed column width -->
-
-| Workflow                               | Description                                  |
-| -------------------------------------- | -------------------------------------------- |
-| `reusable-quality-lint.yml`            | Lintro via full py-lintro Docker image       |
-| `reusable-publish-quality-summary.yml` | Publish lintro quality summary               |
-| `reusable-sbom.yml`                    | SBOM generation with Cosign signing          |
-| `reusable-release-version-pr.yml`      | Release version PR with changelog            |
-| `reusable-release-auto-tag.yml`        | Tag + GitHub release on merge                |
-| `reusable-build-python-dist.yml`       | Build Python dist artifact                   |
-| `reusable-github-release.yml`          | GitHub Release with artifact assets          |
-| `reusable-publish-npm.yml`             | npm publishing                               |
-| `reusable-publish-gem.yml`             | RubyGems publishing                          |
-| `reusable-deploy-pages.yml`            | GitHub Pages deploy-only (caller builds)     |
-| `reusable-docker.yml`                  | Docker build and publish                     |
-| `reusable-coverage.yml`                | Test coverage collection                     |
-| `reusable-test-python.yml`             | Python tests with optional test summaries    |
-| `reusable-test-node.yml`               | Node.js Vitest tests with optional summaries |
-| `reusable-test-node-custom.yml`        | Node.js custom test command workflow         |
-| `reusable-test-shell.yml`              | BATS shell tests with optional summaries     |
-| `reusable-publish-test-summary.yml`    | Publish test summary for test/coverage runs  |
-| `reusable-publish-artifact-report.yml` | Publish markdown report from artifact        |
-| `reusable-test-e2e.yml`                | E2E testing with Playwright                  |
-| `reusable-test-e2e-matrix.yml`         | Matrix E2E testing                           |
-| `reusable-pr-auto-assign.yml`          | PR auto-assignment                           |
-| `reusable-pr-labeler.yml`              | PR auto-labeling                             |
-| `reusable-validate.yml`                | Generic repo validation script runner        |
-| `reusable-codeql.yml`                  | CodeQL security analysis                     |
-| `reusable-dependency-review.yml`       | Dependency review gate                       |
-| `reusable-security-audit.yml`          | lintro/osv-scanner audit + comment artifact    |
-| `reusable-publish-security-audit-comment.yml` | Publish security audit PR comment     |
-| `reusable-vuln-suppression-check.yml`  | Weekly stale OSV suppression cleanup + auto-PR   |
-| `reusable-site-quality.yml`            | Docs site build, lychee, and site tests        |
-| `reusable-scorecards.yml`              | OpenSSF Scorecard analysis                   |
-| `reusable-semantic-pr-title.yml`       | Conventional PR title validation + comments  |
-| `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation         |
-| `reusable-link-check.yml`              | Markdown and HTML link checking              |
-
-<!-- markdownlint-enable MD013 -->
-
-Test workflows are self-contained for consumers: they check out lgtm-ci
-tooling internally, run the configured test suite, and post/update the
-standard summary comment when callers grant `pull-requests: write`.
-
-### Shell Libraries
-
-Located in `scripts/ci/lib/`:
-
-| Library        | Description                                        |
-| -------------- | -------------------------------------------------- |
-| `log.sh`       | Colored logging with levels and GitHub annotations |
-| `platform.sh`  | OS and architecture detection                      |
-| `fs.sh`        | File system utilities                              |
-| `git.sh`       | Git helper functions                               |
-| `github.sh`    | GitHub API and Actions integration                 |
-| `network.sh`   | Download, checksum, and retry utilities            |
-| `installer.sh` | Tool installation framework                        |
-| `docker.sh`    | Docker build and push utilities                    |
-| `publish.sh`   | Package publishing utilities                       |
-| `release.sh`   | Release management                                 |
-| `sbom.sh`      | SBOM generation utilities                          |
-| `testing.sh`   | Test execution utilities                           |
-| `actions.sh`   | GitHub Actions helper functions                    |
+Caller starter examples live in [examples/](examples/README.md).
 
 ## 📌 Versioning
 
 lgtm-ci uses [semantic versioning](https://semver.org/) with
-[conventional commits](https://www.conventionalcommits.org/) for automated releases.
-
-| Ref       | Example                                                  | Description          |
-| --------- | -------------------------------------------------------- | -------------------- |
-| `@v1`     | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1`     | All v1.x.x updates   |
-| `@v1.2.3` | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1.2.3` | Pinned exact version |
-| `@main`   | `uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main`   | Latest, not for prod |
-
-Releases are automated and PR-gated. Pushes to `main` with releasable
-commits (`feat:`, `fix:`, etc.) trigger a release PR for human review;
-merging that PR creates the tagged release and updates the floating
-major version tag. See [Two-stage release model](#two-stage-release-model)
-below for how the two workflows fit together.
-
-### Two-stage release model
-
-Release automation is split across two reusable workflows that work together:
-
-1. **`reusable-release-version-pr.yml`** — Runs on pushes to `main`. When
-   releasable commits land, it opens (or updates) a release PR that bumps
-   version files and updates `CHANGELOG.md`. This PR is the human-review
-   gate before a release happens.
-2. **`reusable-release-auto-tag.yml`** — Runs after the release PR merges
-   (it triggers on `CHANGELOG.md` changes). It extracts the version from
-   the release commit, creates an annotated tag, publishes a GitHub
-   release, and updates the floating major version tag.
-
-```text
-push to main
-  ↓
-version-pr workflow → opens "chore(release): version X.Y.Z" PR
-  ↓
-PR merged
-  ↓
-auto-tag workflow → creates tag + GitHub release
-```
-
-Consumers typically wire up **both** workflows. The version-pr caller
-runs on every push; the auto-tag caller runs only on pushes that touch
-`CHANGELOG.md` (i.e., the release PR merge). See
-[`.github/workflows/release-version-pr.yml`](.github/workflows/release-version-pr.yml)
-and
-[`.github/workflows/release-auto-tag.yml`](.github/workflows/release-auto-tag.yml)
-for working examples.
+[conventional commits](https://www.conventionalcommits.org/) for automated
+releases. Pin `@v1` (floating major), `@v1.2.3`, or — for production — the
+release commit SHA with a `# vX.Y.Z` comment. Releases are automated and
+PR-gated via the two-stage model (`reusable-release-version-pr.yml` opens
+the release PR; `reusable-release-auto-tag.yml` tags on merge). See
+[docs/getting-started.md](docs/getting-started.md#pinning).
 
 ## 🔨 Development
 
-CI and `reusable-quality-lint.yml` run **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro`
-image** so every bundled tool is available. Mirror CI locally:
-
-```bash
-export STEP=check
-export LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:21fdb887b00cf3ef3017eb7463e53e68a9c71b90012df657923331375a71ac2f'
-bash scripts/ci/quality/run-lintro-docker.sh
-```
-
-Quick iteration without Docker (optional tools may SKIP — same as `lint-check.sh`):
-
-```bash
-git clone https://github.com/lgtm-hq/lgtm-ci.git
-cd lgtm-ci
-uv sync --dev
-STEP=check bash scripts/ci/quality/lint-check.sh
-```
+CI runs **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro` image** so
+every bundled tool is available. See
+[docs/README.md](docs/README.md#development) for the local commands that
+mirror CI.
 
 ## 🤝 Community
 
