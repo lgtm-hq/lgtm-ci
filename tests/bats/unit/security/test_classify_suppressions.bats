@@ -57,6 +57,7 @@ EOF
 	assert_output --partial '"active": ["GHSA-active-1111"]'
 	assert_output --partial '"stale": ["GHSA-stale-2222"]'
 	assert_output --partial '"expired": ["GHSA-expired-3333"]'
+	assert_output --partial '"expired_until": {"GHSA-expired-3333": "2020-01-01"}'
 }
 
 @test "classify-suppressions: honors CONFIG_PATH override" {

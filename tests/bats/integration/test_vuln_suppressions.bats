@@ -201,7 +201,7 @@ EOF
 	[[ "$calls" != *"--label"* ]]
 }
 
-@test "vuln-suppressions: removes expired suppressions via cleanup PR and exits 1" {
+@test "vuln-suppressions: flags expired-only for review without a PR and exits 1" {
 	setup_suppression_repo
 	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
 [[IgnoredVulns]]
@@ -220,13 +220,20 @@ EOF
 
 	run_check_script
 	assert_failure
-	assert_output --partial "Cleanup PR created"
-	assert_output --partial "Expired suppression(s) removed"
+	assert_output --partial "Expired suppression(s) require manual review"
+	assert_output --partial "GHSA-expired-3333 (ignoreUntil 2020-01-01)"
+	refute_output --partial "Cleanup PR created"
 
-	[[ ! -f "$MOCK_GIT_REPO/.osv-scanner.toml" ]] || ! grep -q 'GHSA-expired-3333' "$MOCK_GIT_REPO/.osv-scanner.toml"
+	# Expired entry is left untouched in the TOML.
+	grep -q 'GHSA-expired-3333' "$MOCK_GIT_REPO/.osv-scanner.toml"
+
+	# No cleanup PR is opened for an expired-only run.
+	local calls
+	calls=$(cat "$BATS_TEST_TMPDIR/mock_calls_gh")
+	[[ "$calls" != *"pr create"* ]]
 }
 
-@test "vuln-suppressions: removes stale and expired in one cleanup PR and exits 1" {
+@test "vuln-suppressions: removes only stale in cleanup PR, retains expired, exits 1" {
 	setup_suppression_repo
 	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
 [[IgnoredVulns]]
@@ -245,18 +252,18 @@ EOF
 		git commit -q --amend --no-edit
 	)
 
-	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-expired-3333"}]}]}]}'
 	mock_gh_for_cleanup_pr "https://github.com/test-org/test-repo/pull/44"
 
 	run_check_script
 	assert_failure
 	assert_output --partial "Cleanup PR created"
-	assert_output --partial "Expired suppression(s) removed"
+	assert_output --partial "Expired suppression(s) require manual review"
 
-	[[ ! -f "$MOCK_GIT_REPO/.osv-scanner.toml" ]] || {
-		! grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml" &&
-			! grep -q 'GHSA-expired-3333' "$MOCK_GIT_REPO/.osv-scanner.toml"
-	}
+	# Stale entry removed, expired entry retained.
+	run grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml"
+	assert_failure
+	grep -q 'GHSA-expired-3333' "$MOCK_GIT_REPO/.osv-scanner.toml"
 }
 
 @test "vuln-suppressions: skips when cleanup PR already open for stale-only" {
@@ -284,9 +291,14 @@ EOF
 	assert_output --partial "Cleanup PR #99 already open"
 }
 
-@test "vuln-suppressions: fails when cleanup PR open but new expired found" {
+@test "vuln-suppressions: flags expired for review even when a cleanup PR is open" {
 	setup_suppression_repo
 	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+ignoreUntil = 2099-12-31
+reason = "resolved upstream"
+
 [[IgnoredVulns]]
 id = "GHSA-expired-4444"
 ignoreUntil = 2020-01-01
@@ -306,5 +318,11 @@ EOF
 
 	run_check_script
 	assert_failure
-	assert_output --partial "new expired suppressions found"
+	assert_output --partial "Cleanup PR #99 already open"
+	assert_output --partial "Expired suppression(s) require manual review"
+	assert_output --partial "GHSA-expired-4444 (ignoreUntil 2020-01-01)"
+
+	# Nothing removed when a cleanup PR is already open.
+	grep -q 'GHSA-stale-2222' "$MOCK_GIT_REPO/.osv-scanner.toml"
+	grep -q 'GHSA-expired-4444' "$MOCK_GIT_REPO/.osv-scanner.toml"
 }

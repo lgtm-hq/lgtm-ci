@@ -941,7 +941,9 @@ Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
 suppression cleanup pattern used by Rustume, py-lintro, and turbo-themes. The job
 installs `osv-scanner` directly (no Docker), runs
 `scripts/ci/security/check-vuln-suppressions.sh`, and may open a cleanup PR
-removing stale and expired entries.
+removing stale entries (vulnerability resolved). Expired entries (past
+`ignoreUntil`) are left untouched and flagged for manual review with a
+non-zero exit.
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 

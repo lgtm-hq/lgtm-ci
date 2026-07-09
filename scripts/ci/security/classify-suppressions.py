@@ -5,7 +5,12 @@
 Standalone version — does not depend on the lintro Python package.
 Reads osv-scanner probe output from stdin and the suppression TOML from
 CONFIG_PATH (default: .osv-scanner.toml). Outputs a JSON object with stale,
-expired, and active ID arrays.
+expired, and active ID arrays plus an ``expired_until`` map of expired ID to
+its ISO ``ignoreUntil`` date.
+
+Stale and expired are distinct outcomes: stale means the vulnerability is no
+longer present (safe to auto-remove), while expired means the suppression
+timebox lapsed and a human must re-evaluate it (flag, do not remove).
 
 Usage:
     osv-scanner scan --recursive --format json --config /dev/null . \
@@ -26,7 +31,7 @@ import os
 import sys
 import tomllib
 import traceback
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
 
@@ -38,6 +43,23 @@ class SuppressionEntry:
     id: str
     ignore_until: date | None
     reason: str
+
+
+@dataclass(frozen=True)
+class Classification:
+    """Result of classifying suppressions into their handling categories.
+
+    Attributes:
+        active: IDs whose vulnerability is still present and not expired.
+        stale: IDs whose vulnerability is resolved (safe to auto-remove).
+        expired: IDs past their ignoreUntil date (flag for manual review).
+        expired_until: Map of expired ID to its ISO ignoreUntil date.
+    """
+
+    active: list[str]
+    stale: list[str]
+    expired: list[str]
+    expired_until: dict[str, str]
 
 
 def parse_suppressions(toml_path: Path) -> list[SuppressionEntry]:
@@ -107,20 +129,39 @@ def classify(
     entries: list[SuppressionEntry],
     probe_ids: set[str],
     today: date | None = None,
-) -> dict[str, list[str]]:
-    """Classify suppressions as active, stale, or expired."""
+) -> Classification:
+    """Classify suppressions as active, stale, or expired.
+
+    Args:
+        entries: Parsed [[IgnoredVulns]] entries.
+        probe_ids: Vulnerability IDs still present in the unsuppressed scan.
+        today: Reference date for expiry checks (defaults to today).
+
+    Returns:
+        A Classification splitting IDs into active, stale, and expired, with an
+        expired_until map from each expired ID to its ISO ignoreUntil date.
+    """
     if today is None:
         today = date.today()
 
-    result: dict[str, list[str]] = {"active": [], "stale": [], "expired": []}
+    active: list[str] = []
+    stale: list[str] = []
+    expired: list[str] = []
+    expired_until: dict[str, str] = {}
     for entry in entries:
         if entry.ignore_until is not None and today > entry.ignore_until:
-            result["expired"].append(entry.id)
+            expired.append(entry.id)
+            expired_until[entry.id] = entry.ignore_until.isoformat()
         elif entry.id in probe_ids:
-            result["active"].append(entry.id)
+            active.append(entry.id)
         else:
-            result["stale"].append(entry.id)
-    return result
+            stale.append(entry.id)
+    return Classification(
+        active=active,
+        stale=stale,
+        expired=expired,
+        expired_until=expired_until,
+    )
 
 
 def main() -> None:
@@ -139,7 +180,7 @@ def main() -> None:
 
     probe_ids = parse_probe_vuln_ids(probe_output)
     result = classify(entries, probe_ids)
-    print(json.dumps(result))
+    print(json.dumps(asdict(result)))
 
 
 if __name__ == "__main__":
