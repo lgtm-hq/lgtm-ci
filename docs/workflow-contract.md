@@ -1221,13 +1221,15 @@ Instead, drop the `paths:` filter, always run the workflow (including on
    `fromJSON(needs.changes.outputs.changes).<filter>`, running a cheap
    "skipped" step (~seconds) when the filter didn't match.
 
-The action resolves the diff base from `pull_request`
-(`event.pull_request.base.sha`), `merge_group` (`event.merge_group.base_sha`),
-and `push` (`event.before`); when no base is resolvable it **fails open** and
-reports every filter as changed, so a required check runs its full job rather
-than silently early-exiting. See `.github/actions/README.md`
-("detect-changes") for a complete caller example, and homebrew-tap's
-`validate-homebrew-formula.yml` for the pattern's prior art.
+`detect-changes` is a thin SHA-pinned wrapper around `dorny/paths-filter`
+(v4.0.2+), which supports `merge_group` natively. The wrapper resolves the
+diff base from `pull_request` (`event.pull_request.base.sha`), `merge_group`
+(`event.merge_group.base_sha`), and `push` (`event.before`); when no base is
+resolvable it **fails open** and reports every filter as changed, so a
+required check runs its full job rather than silently early-exiting. Filters
+are dorny YAML (see [detect-changes](actions/testing.md#detect-changes)).
+Prior art for the caller pattern: homebrew-tap's
+`validate-homebrew-formula.yml`.
 
 Callers need `pull-requests: write` when `post-failure-comment` is enabled
 (default). With `post-failure-comment: false`, `pull-requests: read` suffices.

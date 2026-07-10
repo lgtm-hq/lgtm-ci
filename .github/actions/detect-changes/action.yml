@@ -5,16 +5,18 @@ name: "Detect Changes"
 description: >-
   Map changed paths to named filters so conditional jobs always run and
   early-exit green when their paths didn't change (required-check-safe
-  replacement for on.<event>.paths). Resolves the diff range from
-  pull_request, merge_group, and push contexts.
+  replacement for on.<event>.paths). Thin SHA-pinned wrapper around
+  dorny/paths-filter with fail-open when the diff base is missing or
+  unresolvable. Resolves the diff range from pull_request, merge_group,
+  and push contexts.
 author: "lgtm-hq"
 
 inputs:
   filters:
     description: >-
-      One filter per line: `name=pattern [pattern...]`. Patterns are
-      bash-style globs matched against full repo-relative paths; `*`
-      crosses directory separators.
+      Dorny YAML filters (inline document or path to a filters file).
+      Example: `frontend:\n  - 'packages/frontend/**'`. Legacy
+      `name=glob …` line format is not accepted; see docs/actions/testing.md.
     required: true
   base:
     description: >-
@@ -23,17 +25,19 @@ inputs:
     required: false
     default: ""
   head:
-    description: "Head SHA override (default: event head or HEAD)"
+    description: >-
+      Head SHA override passed to dorny as `ref` (default: event head or
+      github.sha). Ignored by dorny on pull_request events.
     required: false
     default: ""
 
 outputs:
   changes:
     description: 'JSON object mapping each filter name to true/false'
-    value: ${{ steps.detect.outputs.changes }}
+    value: ${{ steps.result.outputs.changes }}
   any-changed:
     description: "Whether any filter matched"
-    value: ${{ steps.detect.outputs.any-changed }}
+    value: ${{ steps.result.outputs.any-changed }}
 
 runs:
   using: "composite"
@@ -44,15 +48,37 @@ runs:
         SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
         echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
-    - name: Detect changed paths
-      id: detect
+    - name: Resolve fail-open and filter names
+      id: resolve
       shell: bash
       env:
+        STEP: resolve
         FILTERS: ${{ inputs.filters }}
+        EVENT_NAME: ${{ github.event_name }}
         # yamllint disable rule:line-length
         BASE_SHA: ${{ inputs.base || github.event.pull_request.base.sha || github.event.merge_group.base_sha || github.event.before }}
         HEAD_SHA: ${{ inputs.head || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
         # yamllint enable rule:line-length
+      run: "$SCRIPTS_DIR/ci/actions/detect-changes.sh"
+
+    - name: Filter changed paths
+      id: filter
+      if: steps.resolve.outputs.fail-open != 'true'
+      # Pinned to SHA for supply chain security (dorny/paths-filter v4.0.2)
+      uses: dorny/paths-filter@7b450fff21473bca461d4b92ce414b9d0420d706 # v4.0.2
+      with:
+        filters: ${{ inputs.filters }}
+        base: ${{ steps.resolve.outputs.base }}
+        ref: ${{ steps.resolve.outputs.ref }}
+
+    - name: Map filter outputs
+      id: result
+      shell: bash
+      env:
+        STEP: map
+        FAIL_OPEN: ${{ steps.resolve.outputs.fail-open }}
+        FILTER_NAMES: ${{ steps.resolve.outputs.filter-names }}
+        DORNY_CHANGES: ${{ steps.filter.outputs.changes }}
       run: "$SCRIPTS_DIR/ci/actions/detect-changes.sh"
 
 branding:

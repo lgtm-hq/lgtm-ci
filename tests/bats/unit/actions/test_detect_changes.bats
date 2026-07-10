@@ -1,12 +1,14 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Tests for scripts/ci/actions/detect-changes.sh
+# Purpose: Tests for scripts/ci/actions/detect-changes.sh (dorny wrapper helpers)
 
 load "../../../helpers/common"
 load "../../../helpers/mocks"
 load "../../../helpers/github_env"
 
 SCRIPT="scripts/ci/actions/detect-changes.sh"
+
+YAML_FILTERS=$'tests:\n  - \'tests/**\'\ndocs:\n  - \'docs/**\'\n  - \'*.md\''
 
 setup() {
 	setup_temp_dir
@@ -22,102 +24,56 @@ run_detect() {
 	run env "$@" bash "${PROJECT_ROOT}/${SCRIPT}"
 }
 
-@test "detect-changes: fails without FILTERS" {
-	run env -u FILTERS bash "${PROJECT_ROOT}/${SCRIPT}"
+@test "detect-changes: fails without STEP" {
+	run env -u STEP FILTERS="$YAML_FILTERS" bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_failure
+	assert_output --partial "STEP is required"
+}
+
+@test "detect-changes: fails without FILTERS on resolve" {
+	run env -u FILTERS STEP=resolve bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_failure
 	assert_output --partial "FILTERS is required"
 }
 
-@test "detect-changes: fails on invalid filter line" {
-	run_detect FILTERS="no-equals-sign" CHANGED_FILES="a.txt"
+@test "detect-changes: resolve rejects legacy line format" {
+	run_detect STEP=resolve FILTERS="tests=tests/* src/*" BASE_SHA="abc"
 	assert_failure
-	assert_output --partial "invalid filter line"
+	assert_output --partial "legacy line format"
+	assert_output --partial "dorny YAML"
 }
 
-@test "detect-changes: fails on JSON-unsafe filter name" {
-	run_detect FILTERS='bad"name=tests/*' CHANGED_FILES="a.txt"
+@test "detect-changes: resolve fails on empty filter list" {
+	run_detect STEP=resolve FILTERS=$'\n  \n' BASE_SHA="abc"
 	assert_failure
-	assert_output --partial "invalid filter name"
+	assert_output --partial "no filter names"
 }
 
-@test "detect-changes: fails on empty filter list" {
-	run_detect FILTERS=$'\n  \n' CHANGED_FILES="a.txt"
-	assert_failure
-	assert_output --partial "no filter lines"
-}
-
-@test "detect-changes: matching filter reports true" {
-	run_detect \
-		FILTERS="tests=tests/* src/*" \
-		CHANGED_FILES=$'tests/unit/a_test.rs'
+@test "detect-changes: resolve extracts YAML filter names" {
+	run_detect STEP=resolve FILTERS="$YAML_FILTERS" BASE_SHA="abc123" HEAD_SHA="def456" \
+		EVENT_NAME=pull_request
 	assert_success
-	run get_github_output "changes"
-	assert_output '{"tests":true}'
-	run get_github_output "any-changed"
-	assert_output "true"
-}
-
-@test "detect-changes: non-matching filter reports false" {
-	run_detect \
-		FILTERS="tests=tests/* src/*" \
-		CHANGED_FILES=$'docs/readme.md'
-	assert_success
-	run get_github_output "changes"
-	assert_output '{"tests":false}'
-	run get_github_output "any-changed"
+	run get_github_output "filter-names"
+	assert_output $'tests\ndocs'
+	run get_github_output "fail-open"
 	assert_output "false"
+	run get_github_output "base"
+	assert_output "abc123"
+	run get_github_output "ref"
+	assert_output "def456"
 }
 
-@test "detect-changes: multiple filters evaluated independently" {
-	run_detect \
-		FILTERS=$'tests=tests/* src/*\ndocs=docs/* *.md' \
-		CHANGED_FILES=$'docs/guide.md\nsrc/main.rs'
+@test "detect-changes: resolve empty base fails open" {
+	run_detect STEP=resolve FILTERS="$YAML_FILTERS" BASE_SHA="" EVENT_NAME=push
 	assert_success
-	run get_github_output "changes"
-	assert_output '{"tests":true,"docs":true}'
-}
-
-@test "detect-changes: glob star crosses directory separators" {
-	run_detect \
-		FILTERS="examples=examples/*" \
-		CHANGED_FILES=$'examples/react/src/App.tsx'
-	assert_success
-	run get_github_output "changes"
-	assert_output '{"examples":true}'
-}
-
-@test "detect-changes: comments and blank filter lines are ignored" {
-	run_detect \
-		FILTERS=$'# tests below\n  # indented comment\n\ntests=tests/*' \
-		CHANGED_FILES=$'tests/a.rs'
-	assert_success
-	run get_github_output "changes"
-	assert_output '{"tests":true}'
-}
-
-@test "detect-changes: set-but-empty CHANGED_FILES means no changes" {
-	run_detect \
-		FILTERS=$'tests=tests/*\ndocs=docs/*' \
-		CHANGED_FILES=""
-	assert_success
-	run get_github_output "changes"
-	assert_output '{"tests":false,"docs":false}'
-	run get_github_output "any-changed"
-	assert_output "false"
-}
-
-@test "detect-changes: empty base fails open (all filters true)" {
-	run_detect \
-		FILTERS=$'tests=tests/*\ndocs=docs/*' \
-		BASE_SHA=""
-	assert_success
-	run get_github_output "changes"
-	assert_output '{"tests":true,"docs":true}'
-	run get_github_output "any-changed"
+	assert_output --partial "BASE_SHA is empty; failing open"
+	run get_github_output "fail-open"
 	assert_output "true"
+	run get_github_output "filter-names"
+	assert_output $'tests\ndocs'
 }
 
-@test "detect-changes: unreachable base fails open" {
+@test "detect-changes: resolve unreachable base fails open on push" {
 	cd "$BATS_TEST_TMPDIR"
 	git init -q repo
 	cd repo
@@ -125,15 +81,40 @@ run_detect() {
 	git config user.name "Test"
 	git commit -q --allow-empty -m init
 	run env \
-		FILTERS="tests=tests/*" \
+		STEP=resolve \
+		FILTERS="$YAML_FILTERS" \
 		BASE_SHA="0000000000000000000000000000000000000001" \
+		EVENT_NAME=push \
 		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
-	run get_github_output "changes"
-	assert_output '{"tests":true}'
+	assert_output --partial "cannot resolve base"
+	run get_github_output "fail-open"
+	assert_output "true"
 }
 
-@test "detect-changes: computes diff from git when no seam provided" {
+@test "detect-changes: resolve null before-SHA stays closed for dorny first-push" {
+	# GitHub sends the null SHA as event.before on the first push of a branch.
+	# Dorny handles that natively; the wrapper must not fail-open and skip it.
+	run_detect STEP=resolve FILTERS="$YAML_FILTERS" \
+		BASE_SHA="0000000000000000000000000000000000000000" \
+		EVENT_NAME=push
+	assert_success
+	run get_github_output "fail-open"
+	assert_output "false"
+	run get_github_output "base"
+	assert_output "0000000000000000000000000000000000000000"
+}
+
+@test "detect-changes: resolve skips git reachability check on pull_request" {
+	run_detect STEP=resolve FILTERS="$YAML_FILTERS" \
+		BASE_SHA="0000000000000000000000000000000000000001" \
+		EVENT_NAME=pull_request
+	assert_success
+	run get_github_output "fail-open"
+	assert_output "false"
+}
+
+@test "detect-changes: resolve reachable base stays closed on push" {
 	cd "$BATS_TEST_TMPDIR"
 	git init -q repo
 	cd repo
@@ -141,17 +122,91 @@ run_detect() {
 	git config user.name "Test"
 	git commit -q --allow-empty -m init
 	base="$(git rev-parse HEAD)"
-	mkdir -p tests
-	echo "x" >tests/a.rs
-	git add tests/a.rs
-	git commit -q -m "add test"
 	run env \
-		FILTERS=$'tests=tests/*\ndocs=docs/*' \
+		STEP=resolve \
+		FILTERS="$YAML_FILTERS" \
 		BASE_SHA="$base" \
+		EVENT_NAME=push \
 		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	run get_github_output "fail-open"
+	assert_output "false"
+}
+
+@test "detect-changes: map fail-open reports all filters true" {
+	run_detect STEP=map FAIL_OPEN=true FILTER_NAMES=$'tests\ndocs'
+	assert_success
+	assert_output --partial "fail-open active"
+	run get_github_output "changes"
+	assert_output '{"tests":true,"docs":true}'
+	run get_github_output "any-changed"
+	assert_output "true"
+}
+
+@test "detect-changes: map converts dorny changes array to object" {
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'tests\ndocs' \
+		DORNY_CHANGES='["tests"]'
 	assert_success
 	run get_github_output "changes"
 	assert_output '{"tests":true,"docs":false}'
+	run get_github_output "any-changed"
+	assert_output "true"
+}
+
+@test "detect-changes: map with no dorny matches reports all false" {
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'tests\ndocs' \
+		DORNY_CHANGES='[]'
+	assert_success
+	run get_github_output "changes"
+	assert_output '{"tests":false,"docs":false}'
+	run get_github_output "any-changed"
+	assert_output "false"
+}
+
+@test "detect-changes: map treats missing DORNY_CHANGES as empty array" {
+	run env -u DORNY_CHANGES STEP=map FAIL_OPEN=false FILTER_NAMES="tests" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	run get_github_output "changes"
+	assert_output '{"tests":false}'
+	run get_github_output "any-changed"
+	assert_output "false"
+}
+
+
+@test "detect-changes: resolve extracts dotted and quoted YAML filter names" {
+	local filters=$'frontend.app:\n  - \'packages/frontend/**\'\n"api/v2":\n  - \'packages/api/**\'\n\'docs-site\':\n  - \'docs/**\''
+	run_detect STEP=resolve FILTERS="$filters" BASE_SHA="abc123" HEAD_SHA="def456" \
+		EVENT_NAME=pull_request
+	assert_success
+	run get_github_output "filter-names"
+	assert_output $'frontend.app\napi/v2\ndocs-site'
+}
+
+@test "detect-changes: map preserves dotted filter names in changes JSON" {
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'frontend.app\napi/v2' \
+		DORNY_CHANGES='["frontend.app"]'
+	assert_success
+	run get_github_output "changes"
+	assert_output '{"frontend.app":true,"api/v2":false}'
+	run get_github_output "any-changed"
+	assert_output "true"
+}
+
+
+@test "detect-changes: resolve and map preserve filter names with spaces" {
+	local filters=$'"frontend app":\n  - \'packages/frontend/**\'\ndocs:\n  - \'docs/**\''
+	run_detect STEP=resolve FILTERS="$filters" BASE_SHA="abc123" HEAD_SHA="def456" \
+		EVENT_NAME=pull_request
+	assert_success
+	run get_github_output "filter-names"
+	assert_output $'frontend app\ndocs'
+
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'frontend app\ndocs' \
+		DORNY_CHANGES='["frontend app"]'
+	assert_success
+	run get_github_output "changes"
+	assert_output '{"frontend app":true,"docs":false}'
 }
 
 @test "detect-changes: script is executable (action invokes it directly)" {

@@ -13,9 +13,9 @@ Full documentation lives in [docs/actions/](../../docs/actions/README.md):
   `egress-audit`, `validate-runner-policy`, `validate-action-pinning`,
   `generate-sbom`, `scan-vulnerabilities`, `attest-build`,
   `verify-attestation`, `sign-artifact`, `verify-signature`
-- [Testing and quality](../../docs/actions/testing.md) — `detect-changes`,
-  `run-quality`, `run-tests`, `run-pytest`, `run-vitest`,
-  `run-playwright`, `merge-playwright-reports`
+- [Testing and quality](../../docs/actions/testing.md) — `detect-changes`
+  (dorny/paths-filter wrapper, fail-open), `run-quality`, `run-tests`,
+  `run-pytest`, `run-vitest`, `run-playwright`, `merge-playwright-reports`
 - [Coverage](../../docs/actions/coverage.md) — `collect-coverage`,
   `check-coverage-threshold`, `generate-coverage-badge`,
   `publish-test-results`
