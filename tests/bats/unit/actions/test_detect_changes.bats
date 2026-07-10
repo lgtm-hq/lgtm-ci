@@ -92,6 +92,19 @@ run_detect() {
 	assert_output "true"
 }
 
+@test "detect-changes: resolve null before-SHA stays closed for dorny first-push" {
+	# GitHub sends the null SHA as event.before on the first push of a branch.
+	# Dorny handles that natively; the wrapper must not fail-open and skip it.
+	run_detect STEP=resolve FILTERS="$YAML_FILTERS" \
+		BASE_SHA="0000000000000000000000000000000000000000" \
+		EVENT_NAME=push
+	assert_success
+	run get_github_output "fail-open"
+	assert_output "false"
+	run get_github_output "base"
+	assert_output "0000000000000000000000000000000000000000"
+}
+
 @test "detect-changes: resolve skips git reachability check on pull_request" {
 	run_detect STEP=resolve FILTERS="$YAML_FILTERS" \
 		BASE_SHA="0000000000000000000000000000000000000001" \

@@ -71,8 +71,9 @@ write_changes_outputs() {
 
 load_filters_text() {
 	local filters="$1"
-	# Reject legacy `name=glob …` before dorny-style path detection: a
-	# single-line value without ':' would otherwise be treated as a file path.
+	# Pass legacy `name=glob …` through unchanged so extract_filter_names can
+	# detect and reject it with a migration hint. Without this early-return a
+	# single-line value without ':' would be treated as a file path below.
 	if [[ "$filters" != *$'\n'* && "$filters" == *=* && "$filters" != *:* ]]; then
 		printf '%s' "$filters"
 		return 0
@@ -149,6 +150,10 @@ extract_filter_names() {
 base_is_resolvable() {
 	local base="$1"
 	[[ -n "$base" ]] || return 1
+	# GitHub uses the null SHA as event.before on the first push of a branch.
+	# Dorny handles that case natively (compare to default branch / list all
+	# files as added); treat it as resolvable so we do not fail-open and skip
+	# dorny.
 	[[ "$base" == "$NULL_SHA" ]] && return 0
 	git cat-file -e "${base}^{commit}" 2>/dev/null
 }
