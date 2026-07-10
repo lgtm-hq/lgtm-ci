@@ -51,6 +51,22 @@ _npm_version_ge() {
 	return 0
 }
 
+# Remove setup-node registry _authToken lines so OIDC trusted publishing can run.
+_strip_npmrc_auth_tokens() {
+	local npmrc tmp
+	for npmrc in "${NPM_CONFIG_USERCONFIG:-}" "${HOME}/.npmrc" ".npmrc"; do
+		[[ -n "$npmrc" && -f "$npmrc" ]] || continue
+		if grep -q '_authToken' "$npmrc"; then
+			tmp="$(mktemp)"
+			# Drop authToken entries only; keep registry / always-auth lines.
+			# grep -v exits 1 when every line matched (file becomes empty) — tolerate that.
+			grep -v '_authToken' "$npmrc" >"$tmp" || true
+			mv "$tmp" "$npmrc"
+			log_info "Stripped _authToken from ${npmrc} for OIDC trusted publishing"
+		fi
+	done
+}
+
 case "$STEP" in
 validate)
 	log_info "Validating package.json..."
@@ -171,6 +187,10 @@ publish)
 		local_auth_mode="token"
 		log_info "Publishing to npm with legacy NODE_AUTH_TOKEN auth..."
 	else
+		# setup-node with registry-url writes //registry…/:_authToken=${NODE_AUTH_TOKEN}
+		# into the user npmrc. Leaving that entry with an empty token makes npm
+		# treat token auth as configured and skip OIDC trusted publishing.
+		_strip_npmrc_auth_tokens
 		log_info "Publishing to npm with OIDC trusted publishing..."
 		log_info "Require Node 24+ (npm ≥ 11.5.1). Do not run: npm install -g npm"
 	fi

@@ -110,6 +110,33 @@ EOF
 	assert_output --partial "OIDC trusted publishing"
 }
 
+@test "publish-npm: OIDC strips setup-node _authToken from npmrc" {
+	write_package_json
+	mock_command_multi "npm" '
+		--version) echo "11.5.1";;
+		*) exit 0;;
+	'
+
+	npmrc_dir="${BATS_TEST_TMPDIR}/npmrc-home"
+	mkdir -p "$npmrc_dir"
+	cat >"${npmrc_dir}/.npmrc" <<'EOF'
+registry=https://registry.npmjs.org/
+//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+always-auth=true
+EOF
+
+	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" PROVENANCE="false" \
+		HOME="$npmrc_dir" \
+		run env -u NODE_AUTH_TOKEN bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "OIDC trusted publishing"
+	assert_output --partial "Stripped _authToken"
+	run grep -c '_authToken' "${npmrc_dir}/.npmrc" || true
+	assert_equal 0 "$output"
+	run grep -F 'always-auth=true' "${npmrc_dir}/.npmrc"
+	assert_success
+}
+
 @test "publish-npm: publish runs npm publish without provenance" {
 	write_package_json
 	mock_command_record "npm" ""

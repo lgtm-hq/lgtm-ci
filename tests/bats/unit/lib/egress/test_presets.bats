@@ -83,6 +83,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints npm-publish"
 	assert_success
 	assert_output --partial 'actions.githubusercontent.com:443'
+	assert_output --partial 'token.actions.githubusercontent.com:443'
 	assert_output --partial 'raw.githubusercontent.com:443'
 	assert_output --partial 'registry.npmjs.org:443'
 	assert_output --partial 'fulcio.sigstore.dev:443'
