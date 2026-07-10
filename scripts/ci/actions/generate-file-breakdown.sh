@@ -42,7 +42,9 @@ if not isinstance(data, dict) or "categories" not in data:
 cats = []
 for name, patterns in data["categories"].items():
     if isinstance(patterns, list):
-        cats.append({"name": name, "patterns": [str(p) for p in patterns]})
+        # yaml.safe_load may yield bool/int/None keys (true:, 123:, null:);
+        # coerce so jq gsub and markdown rendering always see strings.
+        cats.append({"name": str(name), "patterns": [str(p) for p in patterns]})
 json.dump(cats, sys.stdout)
 ' <"$config_path" 2>/dev/null || true
 }

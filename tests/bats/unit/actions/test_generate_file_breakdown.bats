@@ -445,6 +445,26 @@ YAML
 	assert_output --partial '| Implementation | 4 |'
 }
 
+@test "generate-file-breakdown: coerces non-string YAML category keys" {
+	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
+
+	# Unquoted true: becomes bool True under yaml.safe_load — must still render.
+	cat >"${BATS_TEST_TMPDIR}/config.yml" <<'YAML'
+categories:
+  true:
+    - "\\.sh$"
+YAML
+
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/config.yml" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| True | 2 |'
+}
+
 @test "generate-file-breakdown: falls back to defaults when config is absent" {
 	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
 	run env \
