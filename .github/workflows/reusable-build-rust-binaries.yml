@@ -150,11 +150,16 @@ jobs:
       version: ${{ steps.version.outputs.version }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -166,7 +171,6 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Validate runner policy
         id: policy
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
@@ -175,39 +179,27 @@ jobs:
           egress-policy: ${{ inputs.egress-policy }}
           runner-environment: ${{ runner.environment }}
           runner-os: ${{ runner.os }}
-
       - name: Resolve egress allowlist
         id: egress
-        if: steps.policy.outputs['enforce-egress'] == 'true'
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-
-      - name: Harden runner
-        if: steps.policy.outputs['enforce-egress'] == 'true'
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Setup Rust
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
-
       - name: Install musl toolchain
         if: contains(matrix.target, 'musl')
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y musl-tools
-
       - name: Install cross
         if: matrix.cross
         shell: bash
         run: cargo install cross --locked --version 0.2.5
-
       - name: Build release binaries
         shell: bash
         env:
@@ -217,7 +209,6 @@ jobs:
           RAW_SCRIPT_PATH: ${{ inputs.build-script }}
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/release/build-rust-binary.sh
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
-
       - name: Read Cargo version
         id: version
         shell: bash
@@ -225,7 +216,6 @@ jobs:
           VERSION_FILE: ${{ inputs.version-file }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/read-cargo-version.sh
-
       - name: Package release binaries
         shell: bash
         env:
@@ -237,14 +227,12 @@ jobs:
           RAW_SCRIPT_PATH: ${{ inputs.package-script }}
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/release/package-rust-binary.sh
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
-
       - name: Attest build provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1
         with:
           subject-path: |
             *.tar.gz
             *.zip
-
       - name: Upload binaries
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

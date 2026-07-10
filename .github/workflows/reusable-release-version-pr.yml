@@ -168,12 +168,17 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci egress tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -186,7 +191,6 @@ jobs:
             .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Resolve egress allowlist
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
@@ -195,13 +199,6 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Create GitHub App installation token
         id: app-token
         # yamllint disable-line rule:line-length
@@ -210,7 +207,6 @@ jobs:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-
       - name: Checkout repository
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -218,7 +214,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -234,7 +229,6 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
-
       - name: Guard release commit
         id: guard
         shell: bash
@@ -242,7 +236,6 @@ jobs:
           SKIP_PATTERNS: ${{ inputs.skip-patterns }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
-
       - name: Check existing version PR
         if: steps.guard.outputs.is-release-commit == 'false'
         id: check-pr
@@ -251,7 +244,6 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/check-existing-version-pr.sh
-
       - name: Calculate next version
         # yamllint disable-line rule:line-length
         if: >-
@@ -263,7 +255,6 @@ jobs:
           MAX_BUMP: ${{ inputs.max-bump }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/calculate-version.sh
-
       - name: Generate changelog
         # yamllint disable-line rule:line-length
         if: >-
@@ -276,7 +267,6 @@ jobs:
           FORMAT: full
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
-
       - name: Update CHANGELOG.md
         # yamllint disable-line rule:line-length
         if: >-
@@ -291,7 +281,6 @@ jobs:
           PUSH: "false"
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh
-
       - name: Setup Rust toolchain
         # yamllint disable-line rule:line-length
         if: >-
@@ -303,7 +292,6 @@ jobs:
         uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: stable
-
       - name: Run ecosystem version updaters
         # yamllint disable-line rule:line-length
         if: >-
@@ -318,7 +306,6 @@ jobs:
           ECOSYSTEM_CONFIG: ${{ inputs.ecosystem-config }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
-
       - name: Validate version update script
         # yamllint disable-line rule:line-length
         if: >-
@@ -331,7 +318,6 @@ jobs:
         env:
           RAW_SCRIPT_PATH: ${{ inputs.version-update-script }}
         run: .lgtm-ci-tooling/scripts/ci/release/validate-version-update-script.sh
-
       - name: Run repo-specific version update script
         # yamllint disable-line rule:line-length
         if: >-
@@ -344,7 +330,6 @@ jobs:
           NEXT_VERSION: ${{ steps.version.outputs.next-version }}
           SCRIPT_PATH: ${{ steps.validate-script.outputs.resolved }}
         run: .lgtm-ci-tooling/scripts/ci/release/run-version-update-script.sh
-
       - name: Check for version file changes
         # yamllint disable-line rule:line-length
         if: >-
@@ -359,7 +344,6 @@ jobs:
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh
-
       - name: Remove tooling checkout before PR creation
         # yamllint disable-line rule:line-length
         if: >-
@@ -369,7 +353,6 @@ jobs:
           && steps.changes.outputs.has-pr-changes == 'true'
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
-
       - name: Create or update version PR
         # yamllint disable-line rule:line-length
         if: >-
@@ -420,7 +403,6 @@ jobs:
             chore(release): version ${{
             steps.version.outputs.next-version }}
           labels: ${{ inputs.pr-labels }}
-
       - name: Restore tooling for post-PR steps
         if: always()
         # yamllint disable-line rule:line-length
@@ -437,7 +419,6 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
-
       - name: Get PR author
         # yamllint disable-line rule:line-length
         if: >-
@@ -451,7 +432,6 @@ jobs:
         run: |
           author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
           echo "author=${author}" >> "${GITHUB_OUTPUT}"
-
       - name: Request CODEOWNER review
         # yamllint disable-line rule:line-length
         if: >-
@@ -466,7 +446,6 @@ jobs:
           CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
           REQUEST_CODEOWNER_REVIEW: "true"
         run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh
-
       - name: Enable auto-merge
         # yamllint disable-line rule:line-length
         if: >-
@@ -483,7 +462,6 @@ jobs:
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/enable-auto-merge.sh
-
       - name: Write summary
         if: always()
         shell: bash
@@ -499,7 +477,6 @@ jobs:
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
-
   report-release-failure:
     name: Report release automation failure
     needs: [version-pr]
@@ -520,6 +497,17 @@ jobs:
       issues: write
 
     steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: |
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -533,26 +521,12 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Resolve egress allowlist
         id: egress-failure
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: github-minimal
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: |
-            github.com:443
-            api.github.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-            pipelines.actions.githubusercontent.com:443
-
       - name: Write failure trigger summary
         shell: bash
         env:
@@ -561,7 +535,6 @@ jobs:
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
           write_trigger_summary
-
       - name: Notify release failure
         shell: bash
         env:

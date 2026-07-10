@@ -50,17 +50,17 @@ jobs:
   ${key}:
     runs-on: ubuntu-24.04
     steps:
+      - name: Harden runner
+        uses: ${HARDEN_PIN}
+        with:
+          egress-policy: block
+          allowed-endpoints: \${{ inputs.allowed-endpoints }}
 ${bootstrap:+$bootstrap
 }      - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           egress-policy: block
-      - name: Harden runner
-        uses: ${HARDEN_PIN}
-        with:
-          egress-policy: block
-          allowed-endpoints: \${{ inputs.allowed-endpoints }}
 EOF
 }
 
@@ -117,16 +117,16 @@ jobs:
     deploy:
         runs-on: ubuntu-24.04
         steps:
-            - name: Checkout and harden
-              id: egress
-              uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-              with:
-                  egress-policy: block
             - name: Harden runner
               uses: ${HARDEN_PIN}
               with:
                   egress-policy: block
                   allowed-endpoints: \${{ inputs.allowed-endpoints }}
+            - name: Checkout and harden
+              id: egress
+              uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+              with:
+                  egress-policy: block
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_failure
@@ -158,6 +158,11 @@ jobs:
     deploy:
         runs-on: ubuntu-24.04
         steps:
+            - name: Harden runner
+              uses: ${HARDEN_PIN}
+              with:
+                  egress-policy: block
+                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
             - name: Checkout lgtm-ci tooling
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
@@ -170,11 +175,6 @@ jobs:
               uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
               with:
                   egress-policy: block
-            - name: Harden runner
-              uses: ${HARDEN_PIN}
-              with:
-                  egress-policy: block
-                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_success

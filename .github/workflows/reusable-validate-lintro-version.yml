@@ -122,11 +122,16 @@ jobs:
       packages: read
 
     steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -140,7 +145,6 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Bootstrap lgtm-ci tooling when required scripts are missing
         id: tooling-bootstrap
         if: inputs.tooling-ref-fallback != ''
@@ -148,7 +152,6 @@ jobs:
         env:
           BOOTSTRAP_SCRIPT: ${{ inputs.tooling-bootstrap-script }}
         run: bash "$BOOTSTRAP_SCRIPT"
-
       - name: Checkout lgtm-ci tooling (fallback)
         if: >-
           inputs.tooling-ref-fallback != '' &&
@@ -165,7 +168,6 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Resolve egress allowlist
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
@@ -174,28 +176,18 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-
       - name: Resolve lintro image reference
         id: lintro-image
         shell: bash
         env:
           INPUT_LINTRO_IMAGE: ${{ inputs.lintro-image }}
         run: .lgtm-ci-tooling/scripts/ci/quality/resolve-lintro-image.sh
-
       - name: Validate lintro version consistency
         shell: bash
         env:

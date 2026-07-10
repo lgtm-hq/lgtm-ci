@@ -140,12 +140,17 @@ jobs:
       attestation-url: ${{ steps.attest.outputs.attestation-url || 'not-run' }}
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -157,7 +162,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -170,13 +174,6 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Generate SBOM
         id: generate
         uses: ./.lgtm-ci-tooling/.github/actions/generate-sbom
@@ -186,7 +183,6 @@ jobs:
           format: ${{ inputs.sbom-format }}
           upload-artifact: "true"
           artifact-name: ${{ inputs.artifact-name }}
-
       - name: Scan vulnerabilities
         id: scan
         if: inputs.scan-vulnerabilities
@@ -196,7 +192,6 @@ jobs:
           target-type: sbom
           fail-on: ${{ inputs.fail-on-severity }}
           upload-sarif: ${{ inputs.upload-sarif }}
-
       - name: Create attestation
         id: attest
         if: inputs.create-attestation && github.event_name != 'pull_request'

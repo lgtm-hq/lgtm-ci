@@ -75,12 +75,17 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -92,7 +97,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -104,14 +108,6 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Download linting report
         id: download
         # Pinned to SHA for supply chain security
@@ -120,12 +116,10 @@ jobs:
         with:
           name: linting-report
           path: ${{ inputs.working-directory }}
-
       - name: Warn on missing artifact
         if: steps.download.outcome != 'success'
         shell: bash
         run: echo "::warning::Linting report artifact not found — quality job may have failed before producing output"
-
       - name: Generate quality summary
         if: steps.download.outcome == 'success'
         shell: bash
@@ -137,7 +131,6 @@ jobs:
           GITHUB_SERVER_URL: ${{ github.server_url }}
           COMMENT_OUTPUT: quality-summary.md
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-lintro-comment.sh
-
       - name: Detect PR number
         if: steps.download.outcome == 'success'
         id: pr
@@ -150,7 +143,6 @@ jobs:
           EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
           EVENT_ISSUE_NUMBER: ${{ github.event.issue.number }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
-
       - name: Load quality summary body
         if: steps.download.outcome == 'success'
         id: read
@@ -159,7 +151,6 @@ jobs:
           STEP: read-file
           COMMENT_FILE: quality-summary.md
         run: bash .lgtm-ci-tooling/scripts/ci/actions/post-pr-comment.sh
-
       - name: Publish quality summary
         if: >-
           steps.download.outcome == 'success'

@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **security**: run `step-security/harden-runner` as the first job step so its
+  `main` applies the allowlist before checkout (`pre` alone left a stub policy
+  that blocked github.com)
 - **security**: restore egress enforcement on GitHub-hosted runners — nesting
   step-security inside the `.lgtm-ci-tooling` local composite skipped `pre`,
   leaving `egress-policy: block` inert and emitting

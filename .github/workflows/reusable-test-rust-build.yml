@@ -116,12 +116,17 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -133,7 +138,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -146,24 +150,14 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Setup Rust
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
-
       - name: Build workspace
         shell: bash
         env:
           RAW_SCRIPT_PATH: ${{ inputs.build-script }}
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/build-workspace.sh
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
-
       - name: Record build result
         if: always()
         id: record

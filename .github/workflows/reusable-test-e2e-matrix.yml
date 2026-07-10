@@ -142,44 +142,6 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Checkout for scripts
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-          sparse-checkout: scripts/ci
-
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Checkout and harden
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-        with:
-          tooling-ref: ${{ inputs.tooling-ref }}
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: github-tooling
-          allowed-endpoints: ""
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-          sparse-checkout-extra: |
-            .github/actions/
-            scripts/ci/
-
       - name: Harden runner
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -193,6 +155,40 @@ jobs:
             raw.githubusercontent.com:443
             uploads.github.com:443
             pipelines.actions.githubusercontent.com:443
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout for scripts
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-tooling
+          allowed-endpoints: ""
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
       - name: Generate matrix
         id: matrix
         shell: bash
@@ -202,7 +198,6 @@ jobs:
           BROWSERS: ${{ inputs.browsers }}
           SHARDS: ${{ inputs.shards }}
         run: .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
-
   test:
     # Static name per issue #168; GitHub appends matrix (suite/browser) to each leg.
     name: E2E tests
@@ -217,12 +212,17 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -234,7 +234,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -247,13 +246,6 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Cache Playwright browsers
         # Pinned to SHA for supply chain security
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
@@ -263,7 +255,6 @@ jobs:
             '**/package-lock.json') }}
           restore-keys: |
             playwright-${{ matrix.browser }}-
-
       - name: Build shard config
         id: shard
         shell: bash
@@ -272,7 +263,6 @@ jobs:
           TOTAL_SHARDS: ${{ matrix.total_shards }}
           SHARD: ${{ matrix.shard }}
         run: .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
-
       - name: Run Playwright
         id: test
         uses: ./.lgtm-ci-tooling/.github/actions/run-playwright
@@ -283,7 +273,6 @@ jobs:
           shard: ${{ steps.shard.outputs.config }}
           extra-args: --grep ${{ inputs.tag-prefix }}${{ matrix.suite }}
           working-directory: ${{ inputs.working-directory }}
-
       - name: Upload report
         if: inputs.upload-report && always()
         # Pinned to SHA for supply chain security
@@ -296,7 +285,6 @@ jobs:
             ${{ inputs.working-directory }}/blob-report/
           retention-days: 30
           if-no-files-found: ignore
-
   merge:
     name: Merge Reports
     needs: test
@@ -313,37 +301,6 @@ jobs:
       total-failed: ${{ steps.merge.outputs.total-failed }}
 
     steps:
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Checkout and harden
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-        with:
-          tooling-ref: ${{ inputs.tooling-ref }}
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: github-tooling
-          allowed-endpoints: ""
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-          sparse-checkout-extra: |
-            .github/actions/
-            scripts/ci/
-
       - name: Harden runner
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -357,6 +314,34 @@ jobs:
             raw.githubusercontent.com:443
             uploads.github.com:443
             pipelines.actions.githubusercontent.com:443
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-tooling
+          allowed-endpoints: ""
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
       - name: Download all reports
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -364,7 +349,6 @@ jobs:
           pattern: playwright-*
           path: playwright-reports
           merge-multiple: true
-
       - name: Merge reports
         id: merge
         uses: ./.lgtm-ci-tooling/.github/actions/merge-playwright-reports
@@ -373,7 +357,6 @@ jobs:
           output-dir: merged-report
           # Map 'blob' reporter to 'html' for merging (blob is intermediate format)
           report-format: ${{ inputs.reporter == 'blob' && 'html' || inputs.reporter }}
-
       - name: Upload merged report
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -382,7 +365,6 @@ jobs:
           path: merged-report
           retention-days: 30
           if-no-files-found: ignore
-
   publish:
     name: Publish Results
     needs: merge
@@ -407,12 +389,17 @@ jobs:
       pages-url: ${{ steps.publish.outputs.pages-url }}
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -424,7 +411,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -437,20 +423,12 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Download merged report
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: playwright-merged-report
           path: merged-report
-
       - name: Publish to GitHub Pages
         id: publish
         uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results

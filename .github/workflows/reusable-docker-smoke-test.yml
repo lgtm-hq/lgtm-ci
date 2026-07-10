@@ -146,6 +146,12 @@ jobs:
       packages: read
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository (for smoke-test-script)
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -153,7 +159,6 @@ jobs:
           # source-ref = build-context (app source); tooling-ref stays separate
           ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -165,7 +170,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -178,26 +182,17 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Setup QEMU
         # Default runner is amd64; skip QEMU for the native linux/amd64 default.
         if: ${{ inputs.platform != 'linux/amd64' }}
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-
       - name: Docker registry auth
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
         with:
           registry: ${{ inputs.registry }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Record digest
         shell: bash
         env:
@@ -205,7 +200,6 @@ jobs:
           DIGEST: ${{ inputs.digest }}
           DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Smoke test (${{ inputs.platform }})
         if: inputs.smoke-test != '' || inputs.smoke-test-script != ''
         shell: bash
@@ -218,7 +212,6 @@ jobs:
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Health check (${{ inputs.platform }})
         if: inputs.health-check-cmd != ''
         shell: bash

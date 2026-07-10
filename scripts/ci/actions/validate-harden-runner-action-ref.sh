@@ -102,12 +102,8 @@ _check_job_egress_order() {
 				next
 			}
 			$0 ~ /^[[:space:]]+uses:[[:space:]]+step-security\/harden-runner@/ {
-				if (cah_line == 0 && (resolve_line == 0 || resolve_line >= NR)) {
-					report("resolve-egress-allowlist or checkout-and-harden must appear before step-security/harden-runner (harden at line " NR ")")
-				}
-				if (cah_line == 0 && (tooling_line == 0 || tooling_line >= NR)) {
-					report("Checkout lgtm-ci tooling must precede step-security/harden-runner (harden at line " NR ")")
-				}
+				# Harden may be first (required) while tooling/cah come later for
+				# scripts-dir resolution; do not require cah/resolve before harden.
 				resolve_line = 0
 				cah_line = 0
 				next
@@ -238,41 +234,83 @@ _check_checkout_and_harden() {
 	fi
 }
 
-_check_cah_followed_by_step_security() {
+_check_harden_is_first_step() {
 	local workflow="$1"
 	local wf_name="${workflow##*/}"
 
+	# step-security/harden-runner pre installs a stub policy at job start; its
+	# main step must run before any network (checkout). Require it as the first
+	# step in every job that hardens.
 	while IFS= read -r msg; do
 		[[ -z "$msg" ]] && continue
 		echo "$msg" >&2
 		violations=$((violations + 1))
 	done < <(
 		awk -v wf="$wf_name" '
-			/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
-				pending = 1
-				cah_line = NR
+			BEGIN {
+				in_jobs = 0
+				in_steps = 0
+				job_indent = -1
+				step_count = 0
+				first_is_harden = 0
+				job_has_harden = 0
+				job_name = ""
+			}
+			function flush_job() {
+				if (job_has_harden && step_count > 0 && !first_is_harden) {
+					print wf ": job '" job_name "' must start with step-security/harden-runner (pre installs agent; main must run before checkout)"
+				}
+				in_steps = 0
+				step_count = 0
+				first_is_harden = 0
+				job_has_harden = 0
+			}
+			/^jobs:/ { in_jobs = 1; next }
+			!in_jobs { next }
+			{
+				if ($0 ~ /^ +(["\047][^"\047]*["\047]|[a-zA-Z_][a-zA-Z0-9_-]*): *$/) {
+					lead = $0
+					sub(/[^ ].*$/, "", lead)
+					if (job_indent < 0) { job_indent = length(lead) }
+					if (length(lead) == job_indent) {
+						flush_job()
+						job_name = $0
+						sub(/^ +/, "", job_name)
+						sub(/: *$/, "", job_name)
+						next
+					}
+				}
+			}
+			/^[[:space:]]+steps:[[:space:]]*$/ {
+				in_steps = 1
+				step_count = 0
+				first_is_harden = 0
+				job_has_harden = 0
 				next
 			}
-			pending && /^[[:space:]]+- name:/ {
-				if ($0 ~ /Harden [Rr]unner/) {
-					expect_uses = 1
-					next
-				}
-				print wf ": checkout-and-harden at line " cah_line " must be followed by a Harden runner step using step-security/harden-runner"
-				pending = 0
-				expect_uses = 0
+			in_steps && /^[[:space:]]+- name:/ {
+				step_count++
+				next
 			}
-			pending && expect_uses && /^[[:space:]]+uses:/ {
-				if ($0 !~ /step-security\/harden-runner@/) {
-					print wf ": Harden runner after checkout-and-harden (line " cah_line ") must use step-security/harden-runner@<pinned SHA>"
+			in_steps && /^[[:space:]]+- uses:/ {
+				step_count++
+				if (step_count == 1 && $0 ~ /step-security\/harden-runner@/) {
+					first_is_harden = 1
+					job_has_harden = 1
 				}
-				pending = 0
-				expect_uses = 0
+				next
 			}
+			in_steps && /^[[:space:]]+uses:[[:space:]]+step-security\/harden-runner@/ {
+				job_has_harden = 1
+				if (step_count == 1) {
+					first_is_harden = 1
+				}
+				next
+			}
+			END { flush_job() }
 		' "$workflow"
 	)
 }
-
 while IFS= read -r -d '' file; do
 	line_num=0
 	while IFS= read -r line || [[ -n "$line" ]]; do
@@ -303,7 +341,7 @@ while IFS= read -r -d '' workflow; do
 	[[ -f "$workflow" ]] || continue
 	wf_name="${workflow##*/}"
 	_check_checkout_and_harden "$workflow"
-	_check_cah_followed_by_step_security "$workflow"
+	_check_harden_is_first_step "$workflow"
 
 	if ! grep -qE "$ANY_STEP_SECURITY_HARDEN_RE" "$workflow"; then
 		# Some reusables may not harden (none today); skip only if they also

@@ -98,11 +98,16 @@ jobs:
       packages: read
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -114,7 +119,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -126,28 +130,18 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-
       - name: Verify pinned container image digests
         id: health
         shell: bash
         env:
           INPUT_SCAN_PATHS: ${{ inputs.scan-paths }}
         run: .lgtm-ci-tooling/scripts/ci/maintenance/registry-health-check.sh
-
   open-registry-health-issue:
     name: Open Registry Health Issue
     needs: registry-health
@@ -163,29 +157,6 @@ jobs:
       issues: write
 
     steps:
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Checkout and harden
-        id: egress-issue
-        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-        with:
-          tooling-ref: ${{ inputs.tooling-ref }}
-          # Issue job: GitHub API only; do not inherit docker preset
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: github-minimal
-          sparse-checkout-extra: |
-            scripts/ci/
-
       - name: Harden runner
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -197,7 +168,27 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
-
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress-issue
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          # Issue job: GitHub API only; do not inherit docker preset
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Open issue for unreachable digests
         shell: bash
         env:

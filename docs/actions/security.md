@@ -7,9 +7,10 @@ the full egress preset table and permission requirements.
 ## checkout-and-harden
 
 Shared reusable-workflow preamble (#379): checks out lgtm-ci tooling into
-`.lgtm-ci-tooling/`, resolves the egress allowlist, and hardens the runner in
-one step. Requires a prior bootstrap sparse checkout of
-`.github/actions/checkout-and-harden` (the composite lives in lgtm-ci).
+`.lgtm-ci-tooling/` and resolves the egress allowlist (callers invoke
+`step-security/harden-runner` as the first workflow step). Requires a prior
+bootstrap sparse checkout of `.github/actions/checkout-and-harden` (the
+composite lives in lgtm-ci).
 
 ```yaml
 - name: Checkout lgtm-ci tooling
@@ -74,8 +75,12 @@ allowlists from **workflow inputs** (reusables bake the default preset into
 `allowed-endpoints`) or a **literal** `host:port` block — never from
 `steps.*.outputs` (those are empty at `pre` time and block all egress).
 
+Make this the **first step** in the job so the action `main` step applies the
+allowlist before checkout or other network I/O. `pre` alone is not enough.
+
 ```yaml
-- uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+- name: Harden runner
+  uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
   with:
     egress-policy: block # default; use audit to log only
     allowed-endpoints: ${{ inputs.allowed-endpoints }}

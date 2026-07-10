@@ -137,12 +137,17 @@ jobs:
       passed: ${{ steps.threshold.outputs.passed }}
 
     steps:
+      - name: Harden runner
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -154,7 +159,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -167,13 +171,6 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-
-      - name: Harden runner
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Download coverage artifacts
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -181,7 +178,6 @@ jobs:
           pattern: "*-coverage"
           path: coverage-artifacts
           merge-multiple: true
-
       - name: Collect coverage
         id: collect
         uses: ./.lgtm-ci-tooling/.github/actions/collect-coverage
@@ -190,14 +186,12 @@ jobs:
           input-format: ${{ inputs.format }}
           output-format: json
           working-directory: ${{ inputs.working-directory }}
-
       - name: Check coverage threshold
         id: threshold
         uses: ./.lgtm-ci-tooling/.github/actions/check-coverage-threshold
         with:
           coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
           threshold: ${{ inputs.threshold }}
-
       - name: Generate badge
         id: badge
         if: inputs.generate-badge
@@ -207,7 +201,6 @@ jobs:
           format: svg
           output-path: coverage/badge.svg
           working-directory: ${{ inputs.working-directory }}
-
       - name: Upload coverage report
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -218,7 +211,6 @@ jobs:
             ${{ inputs.working-directory }}/coverage/
           retention-days: 30
           if-no-files-found: ignore
-
   publish:
     name: Publish Coverage
     needs: coverage
@@ -241,37 +233,6 @@ jobs:
       pages-url: ${{ steps.publish.outputs.pages-url }}
 
     steps:
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          persist-credentials: false
-
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Checkout and harden
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-        with:
-          tooling-ref: ${{ inputs.tooling-ref }}
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: github-pages
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-          sparse-checkout-extra: |
-            .github/actions/
-            scripts/ci/
-
       - name: Harden runner
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -285,13 +246,40 @@ jobs:
             objects.githubusercontent.com:443
             release-assets.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-pages
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
       - name: Download coverage report
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           name: coverage-report
           path: coverage-report
-
       - name: Publish to GitHub Pages
         id: publish
         uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
@@ -303,7 +291,6 @@ jobs:
             ${{ inputs.working-directory == '.' && 'coverage-report/coverage' ||
             format('coverage-report/{0}/coverage', inputs.working-directory) }}
           target-dir: coverage
-
   publish-test-summary:
     name: Publish test summary
     needs: coverage

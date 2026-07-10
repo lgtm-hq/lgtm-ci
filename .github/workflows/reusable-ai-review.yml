@@ -142,11 +142,16 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Harden runner
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -161,7 +166,6 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Resolve egress allowlist
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
@@ -170,17 +174,8 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
       - name: Set up uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
-
       - name: Preflight guards
         id: preflight
         shell: bash
@@ -215,7 +210,6 @@ jobs:
           RUN_FILE: ${{ runner.temp }}/ai-review-run.json
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
         run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
-
       - name: Fetch existing comment state
         id: fetch-state
         if: >-
@@ -230,7 +224,6 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           STATE_FILE: ${{ runner.temp }}/ai-review-state.json
         run: .lgtm-ci-tooling/scripts/ci/actions/render-ai-review-comment.sh
-
       - name: Render comment body
         id: render
         if: >-
@@ -247,7 +240,6 @@ jobs:
             || steps.preflight.outputs.skip-reason }}
           OUTPUT_FILE: ${{ runner.temp }}/ai-review-comment.md
         run: .lgtm-ci-tooling/scripts/ci/actions/render-ai-review-comment.sh
-
       - name: Post sticky review comment
         if: >-
           inputs.post &&
