@@ -86,6 +86,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'raw.githubusercontent.com:443'
 	assert_output --partial 'registry.npmjs.org:443'
 	assert_output --partial 'fulcio.sigstore.dev:443'
+	assert_output --partial 'oauth2.sigstore.dev:443'
 }
 
 @test "egress preset scorecard includes Scorecard API hosts" {

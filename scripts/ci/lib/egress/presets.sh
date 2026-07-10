@@ -113,6 +113,7 @@ egress_preset_endpoints() {
 		;;
 	npm-publish)
 		# npm publish + Sigstore attestation (reusable-publish-npm.yml).
+		# oauth2.sigstore.dev is required for OIDC trusted publishing.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -123,7 +124,8 @@ egress_preset_endpoints() {
 			registry.npmjs.org:443 \
 			fulcio.sigstore.dev:443 \
 			rekor.sigstore.dev:443 \
-			tuf-repo-cdn.sigstore.dev:443
+			tuf-repo-cdn.sigstore.dev:443 \
+			oauth2.sigstore.dev:443
 		;;
 	quality)
 		# Docker-based lintro chk (py-lintro docker-ci dogfooding lint; py-lintro#939).

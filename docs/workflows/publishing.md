@@ -34,7 +34,8 @@ preset) and uploads them to the release — see
 
 ### reusable-publish-npm.yml
 
-Publish Node.js packages to npm with provenance attestation.
+Publish Node.js packages to npm using **OIDC trusted publishing** (preferred)
+or an optional legacy `npm-token` / `NODE_AUTH_TOKEN`.
 
 ```yaml
 jobs:
@@ -45,21 +46,43 @@ jobs:
       id-token: write
       attestations: write
     with:
-      node-version: "22"
+      node-version: "24"
       dist-tag: "latest"
       provenance: true
       access: "public"
       dry-run: false
 ```
 
-**Inputs:** `node-version` (default '22'), `dist-tag` (default 'latest'),
+#### Trusted publishing recipe
+
+1. On [npmjs.com](https://www.npmjs.com/), add a trusted publisher for the
+   package: GitHub org/user, repository, the **caller** workflow filename
+   (not `reusable-publish-npm.yml`), and allow the `npm publish` action
+   (required for publishers created after 2026-05-20).
+2. Grant `id-token: write` (and `attestations: write` when attesting the
+   tarball). No long-lived npm token is required.
+3. Use **Node 24** (default). Trusted publishing needs npm ≥ 11.5.1; Node 24
+   ships a compatible npm. **Never** run `npm install -g npm` / in-place
+   self-upgrade — it corrupts the Actions toolcache and breaks
+   `npm publish --provenance` (missing sigstore).
+4. Provenance is **automatic** under trusted publishing. The workflow still
+   passes `--provenance` when `provenance: true` as explicit intent.
+5. Egress preset `npm-publish` includes Sigstore OIDC
+   (`oauth2.sigstore.dev:443`). See
+   [workflow-contract.md](../workflow-contract.md#egress-presets).
+
+Legacy token path: pass `secrets.npm-token` (maps to `NODE_AUTH_TOKEN`)
+only for callers that have not migrated to trusted publishing.
+
+**Inputs:** `node-version` (default '24'), `dist-tag` (default 'latest'),
 `provenance` (default true), `access` (default 'public'), `dry-run`
 (default false), `working-directory` (default '.').
 
+**Secrets:** `npm-token` (optional, legacy).
+
 **Outputs:** `published`, `version`, `package-name`, `tarball`. Requires
-`contents: read`, `id-token: write`, `attestations: write`; declares no
-`workflow_call` secrets and must run on GitHub-hosted runners for npm
-provenance.
+`contents: read`, `id-token: write`, `attestations: write`; must run on
+GitHub-hosted runners for npm provenance / trusted publishing.
 
 ### reusable-publish-gem.yml
 
