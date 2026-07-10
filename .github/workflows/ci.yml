@@ -58,3 +58,15 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+
+  notify-failure:
+    needs: [quality, shell-tests]
+    if: failure() && github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/reusable-main-failure-notifier.yml
+    with:
+      workflow-key: ci
+      tooling-ref: ${{ github.sha }}
+    permissions:
+      actions: read
+      contents: read
+      issues: write
