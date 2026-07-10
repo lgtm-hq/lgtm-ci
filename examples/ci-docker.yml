@@ -33,7 +33,7 @@ jobs:
     with:
       tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
       file: Dockerfile
-      push: ${{ github.event_name != 'pull_request' }}
+      push: ${{ github.event_name == 'push' }}
       # Split per-platform validation on PRs without QEMU overhead
       validate-on-pr: ${{ github.event_name == 'pull_request' }}
       # Native arm64 runner instead of QEMU (contract: "Runner pinning")
