@@ -169,6 +169,7 @@ jobs:
 
     steps:
       - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
@@ -498,6 +499,7 @@ jobs:
 
     steps:
       - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:

@@ -31,10 +31,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
 	# Harden must be first (pre/main before checkout). Gate with runner context
 	# instead of steps.policy outputs (those do not exist at step 1).
 	run awk '
-		/- name: Harden runner/ { harden = NR }
-		harden && /if: runner\.os == .Linux. \|\| runner\.environment == .self-hosted./ { gated = 1 }
+		/- name: Harden runner/ { harden = NR; next }
+		harden && !gated && /^[[:space:]]+if: runner\.os == .Linux. \|\| runner\.environment == .self-hosted./ { gated = 1 }
+		harden && /^[[:space:]]+- name:/ { harden = 0 }
 		/- name: Validate runner policy/ { policy = 1 }
-		END { exit !(harden > 0 && gated && policy) }
+		END { exit !(gated && policy) }
 	' "$WORKFLOW"
 	assert_success
 	run egress_tooling_checkout_order_ok "$WORKFLOW"
