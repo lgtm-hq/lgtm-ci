@@ -8,7 +8,15 @@
 #   DIST_TAG: npm dist-tag (default: latest)
 #   PROVENANCE: Enable provenance attestation (default: true)
 #   ACCESS: Package access level (default: public)
-#   NODE_AUTH_TOKEN: npm authentication token
+#   NODE_AUTH_TOKEN: Optional legacy npm token. When unset, publish uses
+#     OIDC trusted publishing (requires id-token: write and npm ≥ 11.5.1).
+#
+# Policy:
+#   - Prefer Node 24+ (bundled npm ≥ 11.5.1) for trusted publishing.
+#   - Never run `npm install -g npm` / in-place self-upgrade: it corrupts the
+#     Actions toolcache and breaks `npm publish --provenance` (missing sigstore).
+#   - Under trusted publishing, provenance is automatic; --provenance is still
+#     passed when PROVENANCE=true as explicit intent.
 set -euo pipefail
 
 : "${STEP:?STEP is required}"
@@ -20,6 +28,44 @@ source "$SCRIPT_DIR/../lib/publish.sh"
 
 # Change to working directory
 cd "$WORKING_DIRECTORY"
+
+# Compare dotted numeric versions (major.minor.patch...). Returns 0 if $1 >= $2.
+_npm_version_ge() {
+	local IFS=.
+	# shellcheck disable=SC2206 # intentional word-split on dotted versions
+	local -a left=($1) right=($2)
+	local i max=${#left[@]}
+	if [[ ${#right[@]} -gt $max ]]; then
+		max=${#right[@]}
+	fi
+	for ((i = 0; i < max; i++)); do
+		local l=${left[i]:-0}
+		local r=${right[i]:-0}
+		if ((l > r)); then
+			return 0
+		fi
+		if ((l < r)); then
+			return 1
+		fi
+	done
+	return 0
+}
+
+# Remove setup-node registry _authToken lines so OIDC trusted publishing can run.
+_strip_npmrc_auth_tokens() {
+	local npmrc tmp
+	for npmrc in "${NPM_CONFIG_USERCONFIG:-}" "${HOME}/.npmrc" ".npmrc"; do
+		[[ -n "$npmrc" && -f "$npmrc" ]] || continue
+		if grep -q '_authToken' "$npmrc"; then
+			tmp="$(mktemp)"
+			# Drop authToken entries only; keep registry / always-auth lines.
+			# grep -v exits 1 when every line matched (file becomes empty) — tolerate that.
+			grep -v '_authToken' "$npmrc" >"$tmp" || true
+			mv "$tmp" "$npmrc"
+			log_info "Stripped _authToken from ${npmrc} for OIDC trusted publishing"
+		fi
+	done
+}
 
 case "$STEP" in
 validate)
@@ -129,11 +175,34 @@ publish)
 	: "${PROVENANCE:=true}"
 	: "${ACCESS:=public}"
 
+	# Empty NODE_AUTH_TOKEN (e.g. from setup-node registry-url placeholder)
+	# must be cleared so npm initiates OIDC trusted publishing instead of
+	# treating an empty classic token as configured auth.
 	if [[ -z "${NODE_AUTH_TOKEN:-}" ]]; then
-		die "NODE_AUTH_TOKEN is required for publishing"
+		unset NODE_AUTH_TOKEN
 	fi
 
-	log_info "Publishing to npm..."
+	local_auth_mode="oidc"
+	if [[ -n "${NODE_AUTH_TOKEN:-}" ]]; then
+		local_auth_mode="token"
+		log_info "Publishing to npm with legacy NODE_AUTH_TOKEN auth..."
+	else
+		# setup-node with registry-url writes //registry…/:_authToken=${NODE_AUTH_TOKEN}
+		# into the user npmrc. Leaving that entry with an empty token makes npm
+		# treat token auth as configured and skip OIDC trusted publishing.
+		_strip_npmrc_auth_tokens
+		log_info "Publishing to npm with OIDC trusted publishing..."
+		log_info "Require Node 24+ (npm ≥ 11.5.1). Do not run: npm install -g npm"
+	fi
+
+	npm_version=$(npm --version)
+
+	if [[ "$local_auth_mode" == "oidc" ]]; then
+		# Trusted publishing requires npm 11.5.1+ (Node 24 recommended).
+		if ! _npm_version_ge "$npm_version" "11.5.1"; then
+			die "OIDC trusted publishing requires npm 11.5.1+ (found: $npm_version). Use Node 24 via setup-node; do not run npm install -g npm."
+		fi
+	fi
 
 	# Build publish command
 	publish_args=(
@@ -142,13 +211,13 @@ publish)
 	)
 
 	if [[ "$PROVENANCE" == "true" ]]; then
-		# npm provenance requires npm 9.5.0+
-		npm_version=$(npm --version)
-		npm_major="${npm_version%%.*}"
-		npm_rest="${npm_version#*.}"
-		npm_minor="${npm_rest%%.*}"
-		if [[ "$npm_major" -lt 9 ]] || { [[ "$npm_major" -eq 9 ]] && [[ "$npm_minor" -lt 5 ]]; }; then
-			die "npm 9.5.0+ required for provenance support (found: $npm_version)"
+		# Token path: provenance needs npm 9.5.0+.
+		# OIDC path: already gated at 11.5.1+ above; provenance is automatic
+		# under trusted publishing, but --provenance remains explicit intent.
+		if [[ "$local_auth_mode" == "token" ]]; then
+			if ! _npm_version_ge "$npm_version" "9.5.0"; then
+				die "npm 9.5.0+ required for provenance support (found: $npm_version)"
+			fi
 		fi
 		publish_args+=("--provenance")
 	fi

@@ -69,12 +69,72 @@ EOF
 	assert_output --partial "validation failed"
 }
 
-@test "publish-npm: publish fails without NODE_AUTH_TOKEN" {
+@test "publish-npm: publish uses OIDC when NODE_AUTH_TOKEN unset" {
 	write_package_json
+	mock_command_multi "npm" '
+		--version) echo "11.5.1";;
+		*) exit 0;;
+	'
 
-	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" run bash "${PROJECT_ROOT}/${SCRIPT}"
+	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" PROVENANCE="false" \
+		run env -u NODE_AUTH_TOKEN bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "OIDC trusted publishing"
+	assert_output --partial "Published successfully"
+}
+
+@test "publish-npm: OIDC publish rejects npm below 11.5.1" {
+	write_package_json
+	mock_command_multi "npm" '
+		--version) echo "10.9.2";;
+		*) exit 0;;
+	'
+
+	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" \
+		run env -u NODE_AUTH_TOKEN bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_failure
-	assert_output --partial "NODE_AUTH_TOKEN is required"
+	assert_output --partial "OIDC trusted publishing requires npm 11.5.1+"
+}
+
+@test "publish-npm: empty NODE_AUTH_TOKEN uses OIDC path" {
+	write_package_json
+	mock_command_multi "npm" '
+		--version) echo "11.6.0";;
+		*) exit 0;;
+	'
+
+	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" NODE_AUTH_TOKEN="" \
+		PROVENANCE="false" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "OIDC trusted publishing"
+}
+
+@test "publish-npm: OIDC strips setup-node _authToken from npmrc" {
+	write_package_json
+	mock_command_multi "npm" '
+		--version) echo "11.5.1";;
+		*) exit 0;;
+	'
+
+	npmrc_dir="${BATS_TEST_TMPDIR}/npmrc-home"
+	mkdir -p "$npmrc_dir"
+	cat >"${npmrc_dir}/.npmrc" <<'EOF'
+registry=https://registry.npmjs.org/
+//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
+always-auth=true
+EOF
+
+	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" PROVENANCE="false" \
+		HOME="$npmrc_dir" \
+		run env -u NODE_AUTH_TOKEN bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "OIDC trusted publishing"
+	assert_output --partial "Stripped _authToken"
+	run grep -c '_authToken' "${npmrc_dir}/.npmrc" || true
+	assert_equal 0 "$output"
+	run grep -F 'always-auth=true' "${npmrc_dir}/.npmrc"
+	assert_success
 }
 
 @test "publish-npm: publish runs npm publish without provenance" {
@@ -85,6 +145,7 @@ EOF
 		PROVENANCE="false" DIST_TAG="next" ACCESS="restricted" \
 		run bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
+	assert_output --partial "legacy NODE_AUTH_TOKEN"
 	assert_output --partial "Published successfully"
 
 	grep -qF -- "publish --tag next --access restricted" "${BATS_TEST_TMPDIR}/mock_calls_npm"
@@ -104,6 +165,21 @@ EOF
 	assert_success
 	assert_output --partial "npm publish"
 	assert_output --partial "provenance"
+}
+
+@test "publish-npm: OIDC publish adds --provenance as explicit intent" {
+	write_package_json
+	: >"${BATS_TEST_TMPDIR}/mock_calls_npm"
+	mock_command_multi "npm" '
+		--version) echo "11.5.1";;
+		*) echo "$*" >> "'"${BATS_TEST_TMPDIR}"'/mock_calls_npm"; exit 0;;
+	'
+
+	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" PROVENANCE="true" \
+		run env -u NODE_AUTH_TOKEN bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "OIDC trusted publishing"
+	grep -qF -- "--provenance" "${BATS_TEST_TMPDIR}/mock_calls_npm"
 }
 
 @test "publish-npm: publish rejects provenance on old npm" {

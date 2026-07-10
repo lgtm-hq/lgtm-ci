@@ -2,7 +2,9 @@
 # For license details, see the repository root LICENSE file.
 ---
 name: "Publish to npm"
-description: "Build and publish Node.js package to npm with provenance"
+description: >-
+  Build and publish Node.js package to npm via OIDC trusted publishing
+  (optional legacy NODE_AUTH_TOKEN)
 author: "lgtm-hq"
 
 inputs:
@@ -11,7 +13,9 @@ inputs:
     required: false
     default: "latest"
   provenance:
-    description: "Enable npm provenance attestation (requires id-token: write)"
+    description: >-
+      Pass --provenance on publish (explicit intent). Under OIDC trusted
+      publishing provenance is also automatic; keep true unless dry-run.
     required: false
     default: "true"
   access:
@@ -26,6 +30,13 @@ inputs:
     description: "Working directory containing the package"
     required: false
     default: "."
+  npm-token:
+    description: >-
+      Optional legacy npm token (NODE_AUTH_TOKEN). Omit for OIDC trusted
+      publishing. Prefer trusted publishing with Node 24+; never run
+      `npm install -g npm` to self-upgrade.
+    required: false
+    default: ""
 
 outputs:
   published:
@@ -76,6 +87,7 @@ runs:
         DIST_TAG: ${{ inputs.dist-tag }}
         PROVENANCE: ${{ inputs.provenance }}
         ACCESS: ${{ inputs.access }}
+        NODE_AUTH_TOKEN: ${{ inputs.npm-token }}
       run: $SCRIPTS_DIR/ci/actions/publish-npm.sh
 
     - name: Generate summary
