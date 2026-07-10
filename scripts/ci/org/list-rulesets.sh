@@ -40,7 +40,7 @@ while [[ $# -gt 0 ]]; do
 	esac
 done
 
-for tool in gh jq; do
+for tool in gh jq column; do
 	if ! command -v "$tool" >/dev/null 2>&1; then
 		log_error "Required tool not found: ${tool}"
 		exit 1
@@ -54,7 +54,7 @@ if [[ "$QUIET" != "true" ]]; then
 	log_info "Fetching rulesets for ${LGTM_ORG}"
 fi
 
-if ! payload="$(gh api "$ENDPOINT")"; then
+if ! payload="$(gh api --paginate "${ENDPOINT}?per_page=100" | jq -s 'add // []')"; then
 	log_error "Failed to fetch ${ENDPOINT} (check gh auth and org permissions)"
 	exit 1
 fi
