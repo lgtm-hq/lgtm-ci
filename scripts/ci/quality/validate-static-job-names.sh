@@ -15,14 +15,45 @@ if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 	exit 1
 fi
 
+# Documented exceptions: workflow:job-id pairs intentionally allowed to combine
+# an expression-based name: with a job-level if:. Each entry MUST have team
+# sign-off and a rationale in docs/workflow-contract.md.
+#
+# Draft-PR skip pattern (always runs on non-PR events; callers document the
+# check is not required on drafts):
+#   reusable-test-node.yml:test-vitest
+#   reusable-site-quality.yml:site-build-link
+#   reusable-site-quality.yml:site-test
+#   reusable-test-python.yml:test
+#   reusable-test-node-custom.yml:test
+#   reusable-test-shell.yml:test
+#   reusable-rust-test.yml:test
+#   reusable-test-e2e.yml:test
+#   reusable-test-rust-build.yml:build
+#
+# Event-gated (check is not required so skip does not block merge):
+#   reusable-dependency-review.yml:dependency-review
+#
+# Uses always() — never actually skips; conditional-success gate:
+#   reusable-required-check.yml:gate
+STATIC_JOB_NAME_EXCEPTIONS="${STATIC_JOB_NAME_EXCEPTIONS-reusable-dependency-review.yml:dependency-review reusable-required-check.yml:gate reusable-test-e2e.yml:test reusable-test-rust-build.yml:build reusable-test-node.yml:test-vitest reusable-site-quality.yml:site-build-link reusable-site-quality.yml:site-test reusable-test-python.yml:test reusable-test-node-custom.yml:test reusable-test-shell.yml:test reusable-rust-test.yml:test}"
+
 violations=0
 
 while IFS= read -r -d '' workflow; do
+	rel_file="${workflow#"${WORKFLOWS_DIR%/}/"}"
 	awk_output="$(
-		awk -v file="${workflow#"${WORKFLOWS_DIR%/}/"}" '
+		awk -v file="${rel_file}" -v exceptions="${STATIC_JOB_NAME_EXCEPTIONS}" '
+		BEGIN {
+			n = split(exceptions, arr, " ")
+			for (i = 1; i <= n; i++) {
+				if (arr[i] != "") exempt[arr[i]] = 1
+			}
+		}
 		function flush_job() {
-			if (in_job && has_if && name ~ /\$\{\{|format\(/) {
-				if (name ~ /matrix\./ || name ~ /format\(/ || name ~ /&&.*\|\|/) {
+			if (in_job && has_if && name ~ /\$\{\{/) {
+				key = file ":" job_id
+				if (!(key in exempt)) {
 					printf("%s:%d: job %s uses dynamic job.name with if:\n  %s\n", file, name_line, job_id, name)
 					violations++
 				}

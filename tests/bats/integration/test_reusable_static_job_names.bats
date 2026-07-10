@@ -130,3 +130,85 @@ YAML
 	' "$workflow"
 	assert_success
 }
+
+@test "validate-static-job-names: flags inputs-based name with job-level event skip (#429 shape)" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-inputs-skip-bad.yml" <<'YAML'
+---
+name: Inputs-based name with event skip
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        type: string
+        default: My check
+      run-on-push:
+        type: boolean
+        default: true
+jobs:
+  check:
+    name: ${{ inputs.job-name }}
+    if: ${{ inputs.run-on-push }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" STATIC_JOB_NAME_EXCEPTIONS="" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "dynamic job.name"
+}
+
+@test "validate-static-job-names: static name with job-level if passes" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-static-if-good.yml" <<'YAML'
+---
+name: Static name with conditional
+on:
+  workflow_call:
+    inputs:
+      enabled:
+        type: boolean
+        default: true
+jobs:
+  lint:
+    name: Lint checks
+    if: ${{ inputs.enabled }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" STATIC_JOB_NAME_EXCEPTIONS="" run "${VALIDATOR}"
+	assert_success
+	assert_output --partial "OK:"
+}
+
+@test "validate-static-job-names: exception mechanism skips documented jobs" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	cat >"${workflows_dir}/reusable-excepted.yml" <<'YAML'
+---
+name: Excepted workflow
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        type: string
+      enabled:
+        type: boolean
+jobs:
+  my-job:
+    name: ${{ inputs.job-name }}
+    if: ${{ inputs.enabled }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+YAML
+
+	WORKFLOWS_DIR="${workflows_dir}" STATIC_JOB_NAME_EXCEPTIONS="reusable-excepted.yml:my-job" run "${VALIDATOR}"
+	assert_success
+	assert_output --partial "OK:"
+}
