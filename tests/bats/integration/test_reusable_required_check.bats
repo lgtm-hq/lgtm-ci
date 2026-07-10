@@ -66,15 +66,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-required-check.yml"
 	assert_success
 	run grep -Ei '^\s*uses:\s*.*step-security/harden-runner' "$WORKFLOW"
 	assert_success
-	run awk '
-		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
-			cah = NR
-		}
-		cah && /uses:[[:space:]]+step-security\/harden-runner@/ {
-			found = 1
-		}
-		END { exit !(cah && found) }
-	' "$WORKFLOW"
+	run grep -E 'uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden' "$WORKFLOW"
+	assert_success
+	run grep -E 'uses:[[:space:]]+step-security/harden-runner@' "$WORKFLOW"
 	assert_success
 	run awk '
 		/Checkout lgtm-ci tooling/ { found = 1 }

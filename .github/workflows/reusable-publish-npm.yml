@@ -57,6 +57,7 @@ on:
           github.com:443
           api.github.com:443
           actions.githubusercontent.com:443
+          token.actions.githubusercontent.com:443
           codeload.github.com:443
           objects.githubusercontent.com:443
           raw.githubusercontent.com:443
@@ -64,6 +65,7 @@ on:
           fulcio.sigstore.dev:443
           rekor.sigstore.dev:443
           tuf-repo-cdn.sigstore.dev:443
+          oauth2.sigstore.dev:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
