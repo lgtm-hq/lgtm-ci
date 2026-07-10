@@ -9,9 +9,64 @@
 #     Required env: PR_FILES_JSON (input path)
 #     Optional env: COMMENT_OUTPUT (write to file; stdout when unset),
 #       MAX_ROWS (detail rows cap, default 50),
+#       FILE_BREAKDOWN_CONFIG (category config path; default .github/file-breakdown.yml),
 #       GITHUB_RUN_ID, GITHUB_REPOSITORY, GITHUB_SERVER_URL (build link)
 
 set -euo pipefail
+
+# Default category definitions for file classification.
+# Order matters: first match wins. "Implementation" is the catch-all (must be last).
+DEFAULT_CATEGORIES='[
+  {"name":"CI-CD","patterns":["^\\.github/","^\\.gitlab-ci","^\\.circleci/","^Jenkinsfile$","^\\.travis\\.yml$"]},
+  {"name":"Tests","patterns":["(^|/)tests?/","(^|/)__tests__/","(^|/)spec/","(^|/)test_[^/]+$","_test\\.[^/]+$","\\.test\\.[^/]+$","_spec\\.[^/]+$","\\.spec\\.[^/]+$","(^|/)conftest\\.py$"]},
+  {"name":"Docs","patterns":["\\.md$","\\.rst$","\\.txt$","^docs?/","^LICENSE","^CHANGELOG","^CONTRIBUTING","^AUTHORS"]},
+  {"name":"Images","patterns":["\\.png$","\\.jpe?g$","\\.gif$","\\.svg$","\\.ico$","\\.webp$","\\.bmp$"]},
+  {"name":"Config","patterns":["\\.ya?ml$","\\.toml$","\\.ini$","\\.cfg$","\\.conf$","\\.json$","(^|/)\\.env","(^|/)Makefile$","(^|/)Dockerfile","(^|/)\\.editorconfig$","(^|/)\\.gitignore$","\\.lock$"]},
+  {"name":"Implementation","patterns":["."]}
+]'
+
+# Parse an optional YAML category config and print a JSON array.
+# Prints nothing when the file is absent or unparseable.
+load_category_config() {
+	local config_path="${FILE_BREAKDOWN_CONFIG:-.github/file-breakdown.yml}"
+	[[ -f "$config_path" ]] || return 0
+	python3 -c '
+import json, sys
+try:
+    import yaml
+except ImportError:
+    sys.exit(0)
+data = yaml.safe_load(sys.stdin)
+if not isinstance(data, dict) or "categories" not in data:
+    sys.exit(0)
+cats = []
+for name, patterns in data["categories"].items():
+    if isinstance(patterns, list):
+        cats.append({"name": name, "patterns": [str(p) for p in patterns]})
+json.dump(cats, sys.stdout)
+' <"$config_path" 2>/dev/null || true
+}
+
+# Merge user-defined categories with defaults.  User categories override
+# same-named defaults; new categories are inserted before the catch-all.
+merge_categories() {
+	local user_json="$1"
+	if [[ -z "$user_json" ]]; then
+		printf '%s' "$DEFAULT_CATEGORIES"
+		return
+	fi
+	jq -n --argjson defaults "$DEFAULT_CATEGORIES" --argjson user "$user_json" '
+		($user | map({key: .name, value: .}) | from_entries) as $umap |
+		($defaults | last) as $catchall |
+		($defaults[:-1] | map(
+			if $umap[.name] then $umap[.name] else . end
+		)) as $merged |
+		($user | map(
+			select(.name as $n | $defaults | map(.name) | index($n) | not)
+		)) as $new |
+		$merged + $new + [$catchall]
+	'
+}
 
 # =============================================================================
 # Step: fetch - Retrieve changed files for a PR as a single JSON array
@@ -70,6 +125,9 @@ step_generate() {
 	# cannot push a worst-case long-path PR past the limit and fail publish.
 	local body_byte_budget=60000
 
+	local categories_json
+	categories_json="$(merge_categories "$(load_category_config)")"
+
 	local repo build_url
 	repo="${GITHUB_REPOSITORY:-unknown/unknown}"
 	build_url="${GITHUB_SERVER_URL:-https://github.com}/${repo}/actions/runs/${GITHUB_RUN_ID:-0}"
@@ -100,19 +158,31 @@ EOF
 			'group_by(.status) | map("\(length) \(.[0].status)") | join(", ")' \
 			"$PR_FILES_JSON")
 
-		# Group by top-level directory; files at the repo root group as (root)
+		# Classify files into semantic categories and build summary rows
+		# with a Unicode distribution bar per category.
 		local -a all_group_rows=()
-		mapfile -t all_group_rows < <(jq -r '
-			def esc: gsub("[\r\n]"; " ") | gsub("\\|"; "\\|") | gsub("`"; "");
-			map(. + {
-				group: (if (.filename | test("/"))
-					then (.filename | split("/")[0] + "/")
-					else "(root)" end)
-			})
-			| group_by(.group)
-			| sort_by(-length, .[0].group)
-			| .[]
-			| "| `\(.[0].group | esc)` | \(length) | +\(map(.additions) | add // 0) | -\(map(.deletions) | add // 0) |"
+		mapfile -t all_group_rows < <(jq -r --argjson cats "$categories_json" '
+			def classify:
+				.filename as $f |
+				(first(
+					$cats[] | select(.patterns | any(. as $p | $f | test($p)))
+				).name) // "Other";
+			def bar($pct):
+				(($pct / 5 | round) | if . > 20 then 20 elif . < 0 then 0 else . end) as $blocks |
+				(20 - $blocks) as $eblocks |
+				([range($blocks)] | map("\u2588") | join("")) as $full |
+				([range($eblocks)] | map("\u2591") | join("")) as $empty |
+				"\($full)\($empty) \($pct)%";
+			length as $total |
+			map(. + {category: classify}) |
+			group_by(.category) |
+			sort_by(-(.|length), .[0].category) |
+			.[] |
+			(length) as $count |
+			(map(.additions) | add // 0) as $add |
+			(map(.deletions) | add // 0) as $del |
+			(if $total > 0 then ($count * 100 / $total | floor) else 0 end) as $pct |
+			"| \(.[0].category) | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
 		' "$PR_FILES_JSON")
 		local total_groups=${#all_group_rows[@]}
 
@@ -142,7 +212,7 @@ EOF
 				if ((group_size_forced)); then
 					group_reason="dropped to keep this comment within GitHub's size limit"
 				fi
-				group_rows+=$'\n'"| _${remaining_groups} area(s) ${group_reason}_ | — | — | — |"
+				group_rows+=$'\n'"| _${remaining_groups} category(ies) ${group_reason}_ | — | — | — | — |"
 				group_rows=${group_rows#$'\n'}
 			fi
 			if ((shown > 0)); then
@@ -164,8 +234,8 @@ EOF
 
 **${total_files} file(s) changed** (+${total_add} / -${total_del}) — ${status_line}
 
-| Area | Files | Additions | Deletions |
-| --- | ---: | ---: | ---: |
+| Category | Files | Additions | Deletions | Distribution |
+| --- | ---: | ---: | ---: | --- |
 ${group_rows}
 
 <details>
@@ -206,8 +276,8 @@ EOF
 			shown=$best
 			body="$(assemble_body "$shown" 1 "$shown_groups" 0)"
 			if (($(printf '%s' "$body" | wc -c) > body_byte_budget)); then
-				# With zero detail rows, very many unique top-level groups can still
-				# exceed the budget. Drop area rows as the final shrink target.
+				# With zero detail rows, very many categories can still exceed
+				# the budget. Drop category rows as the final shrink target.
 				lo=0
 				hi=$total_groups
 				best=0
