@@ -31,7 +31,7 @@ run_detect() {
 }
 
 @test "detect-changes: fails without FILTERS on resolve" {
-	run_detect STEP=resolve
+	run env -u FILTERS STEP=resolve bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_failure
 	assert_output --partial "FILTERS is required"
 }
@@ -151,7 +151,8 @@ run_detect() {
 }
 
 @test "detect-changes: map treats missing DORNY_CHANGES as empty array" {
-	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES="tests"
+	run env -u DORNY_CHANGES STEP=map FAIL_OPEN=false FILTER_NAMES="tests" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
 	run get_github_output "changes"
 	assert_output '{"tests":false}'
