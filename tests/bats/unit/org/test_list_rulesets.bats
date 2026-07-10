@@ -52,7 +52,7 @@ mock_gh_with_fixture() {
 	run bash "$SCRIPT" -q
 	assert_success
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_gh"
-	assert_output --partial "api orgs/lgtm-hq/rulesets"
+	assert_output --partial "api --paginate orgs/lgtm-hq/rulesets?per_page=100"
 }
 
 @test "list-rulesets: LGTM_ORG overrides the organization" {
@@ -60,7 +60,7 @@ mock_gh_with_fixture() {
 	LGTM_ORG="other-org" run bash "$SCRIPT" -q
 	assert_success
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_gh"
-	assert_output --partial "api orgs/other-org/rulesets"
+	assert_output --partial "api --paginate orgs/other-org/rulesets?per_page=100"
 }
 
 @test "list-rulesets: logs info when not quiet" {
