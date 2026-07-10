@@ -31,6 +31,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-sbom.yml"
 	run awk '
 		/^  sbom:/ { in_job = 1; scan = 0 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  sbom:/ { in_job = 0; scan = 0 }
+		in_job && scan && /^[[:space:]]+- name:/ { scan = 0 }
 		in_job && /- name: Scan vulnerabilities/ { scan = 1 }
 		in_job && scan && /fail-on: \$\{\{ inputs\.fail-on-severity \}\}/ { found = 1; exit }
 		END { exit !found }
@@ -42,6 +43,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-sbom.yml"
 	run awk '
 		/^  sbom:/ { in_job = 1; scan = 0 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  sbom:/ { in_job = 0; scan = 0 }
+		in_job && scan && /^[[:space:]]+- name:/ { scan = 0 }
 		in_job && /- name: Scan vulnerabilities/ { scan = 1 }
 		in_job && scan && /if: inputs\.scan-vulnerabilities/ { found = 1; exit }
 		END { exit !found }
