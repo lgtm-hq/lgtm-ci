@@ -45,7 +45,8 @@
         "/^tests/bats/integration/test_reusable_tooling_sparse_checkout\\.bats$/",
         "/^docs/actions/security\\.md$/",
         "/^docs/actions/README\\.md$/",
-        "/^docs/workflow-contract\\.md$/"
+        "/^docs/workflow-contract\\.md$/",
+        "/^examples/publish-python-release\\.yml$/"
       ],
       "matchStrings": [
         "step-security/harden-runner@(?<currentDigest>[a-f0-9]{40}) # v(?<currentValue>\\d+\\.\\d+\\.\\d+)",
