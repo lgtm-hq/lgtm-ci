@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.50.3] - 2026-07-10
+
+### Changed
+
+- **workflows**: migrate reusable-ai-review to checkout-and-harden composite (#486)
+  (59c8ebd)
+
+### Fixed
+
+- **ci**: address unresolved bot review feedback from PRs #385, #391, #423 (#487)
+  (1ca24c5)
+
 ## [0.50.2] - 2026-07-10
 
 ### Fixed
@@ -1399,7 +1411,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.3...HEAD
+[0.50.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.2...v0.50.3
 [0.50.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.1...v0.50.2
 [0.50.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.0...v0.50.1
 [0.50.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.49.0...v0.50.0
