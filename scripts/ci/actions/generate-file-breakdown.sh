@@ -55,7 +55,8 @@ merge_categories() {
 		printf '%s' "$DEFAULT_CATEGORIES"
 		return
 	fi
-	jq -n --argjson defaults "$DEFAULT_CATEGORIES" --argjson user "$user_json" '
+	jq -n --argjson defaults "$DEFAULT_CATEGORIES" '
+		input as $user |
 		($user | map({key: .name, value: .}) | from_entries) as $umap |
 		($defaults | last) as $catchall |
 		($defaults[:-1] | map(
@@ -65,7 +66,7 @@ merge_categories() {
 			select(.name as $n | $defaults | map(.name) | index($n) | not)
 		)) as $new |
 		$merged + $new + [$catchall]
-	'
+	' <<<"$user_json"
 }
 
 # =============================================================================
@@ -165,7 +166,7 @@ EOF
 			def classify:
 				.filename as $f |
 				(first(
-					$cats[] | select(.patterns | any(. as $p | $f | test($p)))
+					$cats[] | select(.patterns | any(. as $p | try ($f | test($p)) catch false))
 				).name) // "Other";
 			def bar($pct):
 				(($pct / 5 | round) | if . > 20 then 20 elif . < 0 then 0 else . end) as $blocks |
@@ -182,7 +183,7 @@ EOF
 			(map(.additions) | add // 0) as $add |
 			(map(.deletions) | add // 0) as $del |
 			(if $total > 0 then ($count * 100 / $total | floor) else 0 end) as $pct |
-			"| \(.[0].category) | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
+			"| \(.[0].category | gsub("\\|"; "\\|")) | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
 		' "$PR_FILES_JSON")
 		local total_groups=${#all_group_rows[@]}
 
