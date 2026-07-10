@@ -35,6 +35,26 @@
       "matchStrings": [
         "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\n\\s*default: \"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
       ]
+    },
+    {
+      "customType": "regex",
+      "description": "Track pinned step-security/harden-runner SHAs outside workflows",
+      "managerFilePatterns": [
+        "/^scripts/ci/actions/validate-harden-runner-action-ref\\.sh$/",
+        "/^tests/bats/integration/test_harden_runner_action_ref\\.bats$/",
+        "/^tests/bats/integration/test_reusable_tooling_sparse_checkout\\.bats$/",
+        "/^docs/actions/security\\.md$/",
+        "/^docs/actions/README\\.md$/",
+        "/^docs/workflow-contract\\.md$/"
+      ],
+      "matchStrings": [
+        "step-security/harden-runner@(?<currentDigest>[a-f0-9]{40}) # v(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "HARDEN_SHA='(?<currentDigest>[a-f0-9]{40})' # v(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "step-security/harden-runner",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ],
   "packageRules": [
@@ -48,6 +68,12 @@
       "matchDatasources": ["docker"],
       "matchPackageNames": ["ghcr.io/lgtm-hq/py-lintro"],
       "pinDigests": true
+    },
+    {
+      "description": "Group harden-runner SHA pins so workflow and non-workflow copies update together",
+      "groupName": "step-security/harden-runner",
+      "matchPackageNames": ["step-security/harden-runner"],
+      "automerge": false
     }
   ]
 }
