@@ -235,7 +235,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-        # yamllint disable-line rule:line-length
+          # yamllint disable-line rule:line-length
           allowed-endpoints: ${{ inputs.allowed-endpoints-build != '' && inputs.allowed-endpoints-build || inputs.allowed-endpoints }}
       - name: Setup Node.js
         if: inputs.build-command != '' && inputs.package-manager != ''
@@ -348,7 +348,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-        # yamllint disable-line rule:line-length
+          # yamllint disable-line rule:line-length
           allowed-endpoints: ${{ inputs.allowed-endpoints-deploy != '' && inputs.allowed-endpoints-deploy || inputs.allowed-endpoints }}
       - name: Deploy to GitHub Pages
         id: deployment

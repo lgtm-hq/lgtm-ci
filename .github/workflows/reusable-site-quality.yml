@@ -474,7 +474,7 @@ jobs:
           egress-preset: >-
             ${{ inputs.test-egress-preset != '' && inputs.test-egress-preset
             || inputs.egress-preset }}
-        # yamllint disable-line rule:line-length
+          # yamllint disable-line rule:line-length
           allowed-endpoints: ${{ inputs.test-allowed-endpoints != '' && inputs.test-allowed-endpoints || inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
@@ -486,7 +486,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-        # yamllint disable-line rule:line-length
+          # yamllint disable-line rule:line-length
           allowed-endpoints: ${{ inputs.test-allowed-endpoints != '' && inputs.test-allowed-endpoints || inputs.allowed-endpoints }}
 
       - name: Setup Python and uv
