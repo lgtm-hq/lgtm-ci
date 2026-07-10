@@ -184,7 +184,7 @@ EOF
 			(map(.additions) | add // 0) as $add |
 			(map(.deletions) | add // 0) as $del |
 			(if $total > 0 then ($count * 100 / $total | floor) else 0 end) as $pct |
-			"| \(.[0].category | gsub("\\|"; "\\|")) | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
+			"| \(.[0].category | gsub("[\\r\\n]"; " ") | gsub("\\|"; "\\|")) | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
 		')
 		local total_groups=${#all_group_rows[@]}
 
