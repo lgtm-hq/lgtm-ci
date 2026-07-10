@@ -42,8 +42,10 @@ path to `.lgtm-ci-tooling/scripts`).
 
 ## resolve-egress-allowlist
 
-Resolves `allowed-endpoints` from explicit lists or `egress-preset` names. Run
-**before** `harden-runner`.
+Resolves `allowed-endpoints` from explicit lists or `egress-preset` names.
+Useful for validating/merging lists; **do not** feed its step output into
+`step-security/harden-runner` (the action `pre` hook runs at job start and
+cannot see step outputs — use workflow inputs or literals instead).
 
 ```yaml
 - name: Resolve egress allowlist
@@ -65,23 +67,27 @@ merges preset + extras with deduplication. Presets are defined in
 
 Security hardening using [StepSecurity](https://stepsecurity.io). Invoke
 `step-security/harden-runner` as a **direct** workflow step (pinned SHA) so its
-`pre` hook installs the egress agent (#412/#420). Pass **resolved**
-`allowed-endpoints` from a prior `resolve-egress-allowlist` or
-`checkout-and-harden` step.
+`pre` hook installs the egress agent.
+
+The `pre` hook runs at **job start**, before any step outputs exist. Pass
+allowlists from **workflow inputs** (reusables bake the default preset into
+`allowed-endpoints`) or a **literal** `host:port` block — never from
+`steps.*.outputs` (those are empty at `pre` time and block all egress).
 
 ```yaml
 - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
   with:
     egress-policy: block # default; use audit to log only
-    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+    allowed-endpoints: ${{ inputs.allowed-endpoints }}
     disable-sudo: "false" # optional
 ```
 
 Reusable workflows check out lgtm-ci into `.lgtm-ci-tooling` for allowlist
 resolution — consumers do not copy `resolve-egress-allowlist` into their repo.
-Do not nest step-security inside a local composite, do not use caller-local
-`./.github/actions/harden-runner` (retired), and do not use `${{ }}` in remote
-action `@ref` segments inside `uses:`.
+Do not nest step-security inside a local composite (GitHub skips nested
+`pre`/`post`). Do not use `${{ }}` in remote action `@ref` segments inside
+`uses:`. Support scripts for allowlist resolution live under
+`.github/actions/harden-runner/` (`lib/`, `resolve-egress-endpoints.sh`).
 
 ## secure-checkout
 

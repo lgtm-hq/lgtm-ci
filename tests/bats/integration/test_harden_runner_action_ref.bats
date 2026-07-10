@@ -60,7 +60,7 @@ ${bootstrap:+$bootstrap
         uses: ${HARDEN_PIN}
         with:
           egress-policy: block
-          allowed-endpoints: \${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: \${{ inputs.allowed-endpoints }}
 EOF
 }
 
@@ -126,7 +126,7 @@ jobs:
               uses: ${HARDEN_PIN}
               with:
                   egress-policy: block
-                  allowed-endpoints: \${{ steps.egress.outputs['allowed-endpoints'] }}
+                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_failure
@@ -174,7 +174,7 @@ jobs:
               uses: ${HARDEN_PIN}
               with:
                   egress-policy: block
-                  allowed-endpoints: \${{ steps.egress.outputs['allowed-endpoints'] }}
+                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_success

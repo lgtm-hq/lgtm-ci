@@ -66,7 +66,7 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	assert_success
 }
 
-@test "checkout-and-harden: does not nest step-security/harden-runner (#412)" {
+@test "checkout-and-harden: does not nest step-security/harden-runner " {
 	run grep -E 'step-security/harden-runner|/\.github/actions/harden-runner' "$ACTION"
 	# Sparse path mention of harden-runner directory is required for resolve sibling;
 	# the composite must not *invoke* the local harden-runner action or step-security.
@@ -89,7 +89,7 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	assert_success
 }
 
-@test "checkout-and-harden: documents direct step-security follow-up (#412/#420)" {
+@test "checkout-and-harden: documents direct step-security follow-up " {
 	run grep -F 'step-security/harden-runner@' "$ACTION"
 	assert_success
 }

@@ -86,8 +86,18 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: |
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          pypi.org:443
+          files.pythonhosted.org:443
+          test.pypi.org:443
+          upload.pypi.org:443
+          upload.test.pypi.org:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -204,7 +214,14 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: |
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
 
       - name: Validate compat/coverage contract
         shell: bash
@@ -285,7 +302,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Install uv
         uses: astral-sh/setup-uv@11f9893b081a58869d3b5fccaea48c9e9e46f990 # v8.3.2
         with:
@@ -495,7 +512,14 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: |
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
 
       - name: Download matrix test summaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

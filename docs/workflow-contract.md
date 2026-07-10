@@ -439,17 +439,16 @@ Do not add per-consumer `job-name` aliases inside work reusables.
 
 Egress **enforcement** requires a **direct** remote
 `step-security/harden-runner@<pinned SHA>` workflow step. GitHub skips `pre`/`post`
-hooks for workspace-local actions and for actions nested inside local composites,
-and step-security installs its monitoring agent only in `pre` (v2.20.0). Nesting
-step-security inside `.lgtm-ci-tooling/.github/actions/harden-runner` left
-`egress-policy: block` inert and emitted
-`` `pre` execution is not supported for local action `` (#412, #420).
+hooks for workspace-local actions and for actions nested inside composites, and
+step-security installs its monitoring agent only in `pre` (v2.20.0).
 
-Allowlist **resolution** still uses lgtm-ci composites from a sparse checkout into
-`.lgtm-ci-tooling/`. Cross-repo callers must not vendor
-`resolve-egress-allowlist`. The local `.github/actions/harden-runner` composite is
-**retired** (fails closed); its directory still ships `resolve-egress-endpoints.sh`
-and `lib/` for the sibling resolve action.
+`allowed-endpoints` must come from workflow **inputs** or literals available at
+job start — not `steps.*.outputs` (empty when `pre` runs).
+
+Allowlist **resolution** helpers (`resolve-egress-allowlist`, plus support files
+under `.github/actions/harden-runner/`) still ship via sparse checkout into
+`.lgtm-ci-tooling/` when needed; cross-repo callers must not vendor those
+composites. Hardening itself is always the remote step-security action.
 
 Do **not** use `lgtm-hq/lgtm-ci/.github/actions/...@\${{ }}` in `steps[*].uses` —
 GitHub does not allow expressions in action `@ref` segments
@@ -491,14 +490,16 @@ check out tooling and resolve the allowlist, then call step-security directly:
   uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
   with:
     egress-policy: ${{ inputs.egress-policy }}
-    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+    # inputs.allowed-endpoints (not step outputs): harden-runner pre runs at job start
+    allowed-endpoints: ${{ inputs.allowed-endpoints }}
 ```
 
 Workflows that cannot use the composite keep the explicit tooling checkout →
-`resolve-egress-allowlist` → `step-security/harden-runner` sequence: the release
-workflows' two-phase checkouts (`reusable-release-auto-tag`,
-`reusable-release-version-pr`), the tiered Rust workflows where
-`validate-runner-policy` must run between checkout and resolve
+`resolve-egress-allowlist` → `step-security/harden-runner` sequence for tooling
+layout, but still pass allowlists via **inputs or literals** (the action `pre`
+hook cannot see step outputs): the release workflows' two-phase checkouts
+(`reusable-release-auto-tag`, `reusable-release-version-pr`), the tiered Rust
+workflows where `validate-runner-policy` must run between checkout and resolve
 (`reusable-build-rust-binaries`, `reusable-publish-rust-release`), and the
 bootstrap/fallback flow in `reusable-validate-lintro-version`.
 
@@ -516,7 +517,7 @@ bootstrap/fallback flow in `reusable-validate-lintro-version`.
   uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
   with:
     egress-policy: ${{ inputs.egress-policy }}
-    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+    allowed-endpoints: ${{ inputs.allowed-endpoints }}
 ```
 
 Pin the reusable workflow `uses:` line to a commit SHA in production and pass the
@@ -548,9 +549,8 @@ The resolve script bundle under `.github/actions/harden-runner/` is
 **self-contained** (`lib/egress/`). Canonical preset definitions live in
 `scripts/ci/lib/egress/presets.sh`; release maintainers run
 `scripts/ci/actions/sync-harden-runner-bundle.sh` before tagging.
-`resolve-egress-allowlist` (or `checkout-and-harden`) must run **before** the
-direct `step-security/harden-runner` step so the allowlist is available when
-`pre` installs the agent.
+Reusable workflows bake the default preset into the `allowed-endpoints` input
+so harden-runner `pre` receives a non-empty allowlist at job start.
 
 Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
 
@@ -604,7 +604,7 @@ step when `enforce-egress` is `true`.
   uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
   with:
     egress-policy: block
-    allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+    allowed-endpoints: ${{ inputs.allowed-endpoints }}
 ```
 
 ### Rust release contract

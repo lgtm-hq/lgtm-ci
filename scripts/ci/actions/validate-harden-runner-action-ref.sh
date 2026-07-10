@@ -140,8 +140,14 @@ _check_harden_with_blocks() {
 			echo "${wf_name}:${line_num}: pass egress-preset to resolve-egress-allowlist / checkout-and-harden, not step-security/harden-runner" >&2
 			violations=$((violations + 1))
 		fi
-		if ! grep -qE "allowed-endpoints:[[:space:]]+\\\$\{\{[[:space:]]*steps\.[A-Za-z0-9_-]+\.outputs\['allowed-endpoints'\]" <<<"$block"; then
-			echo "${wf_name}:${line_num}: step-security/harden-runner must use steps.<id>.outputs['allowed-endpoints']" >&2
+		# harden-runner's pre hook runs at job start, before any step outputs
+		# exist. Allowlists must come from workflow inputs or a literal block.
+		if ! grep -qE "allowed-endpoints:[[:space:]]+(\\\$\{\{[[:space:]]*inputs\.|\\|)" <<<"$block"; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner must use inputs.* or a literal allowed-endpoints (not step outputs; pre runs at job start)" >&2
+			violations=$((violations + 1))
+		fi
+		if grep -qE "allowed-endpoints:[[:space:]]+\\\$\{\{[[:space:]]*steps\." <<<"$block"; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner must not use steps.*.outputs for allowed-endpoints (empty at pre/job-start)" >&2
 			violations=$((violations + 1))
 		fi
 	done < <(grep -nE "$ANY_STEP_SECURITY_HARDEN_RE" "$workflow" | cut -d: -f1)
@@ -281,7 +287,7 @@ while IFS= read -r -d '' file; do
 			violations=$((violations + 1))
 		fi
 		if [[ "$line" =~ $TOOLING_HARDEN_RE ]] || [[ "$line" =~ $IN_REPO_HARDEN_RE ]]; then
-			echo "$file:$line_num: local harden-runner composite is retired; use step-security/harden-runner@${HARDEN_SHA}" >&2
+			echo "$file:$line_num: do not use local harden-runner action path; use step-security/harden-runner@${HARDEN_SHA}" >&2
 			echo "  $line" >&2
 			violations=$((violations + 1))
 		fi
@@ -329,16 +335,22 @@ _check_release_two_phase_sparse "$WORKFLOWS_DIR/reusable-release-version-pr.yml"
 
 renovate="$WORKFLOWS_DIR/renovate.yml"
 if [[ -f "$renovate" ]]; then
-	if ! grep -qE "$IN_REPO_RESOLVE_RE" "$renovate"; then
-		echo "renovate.yml: missing ./.github/actions/resolve-egress-allowlist step" >&2
-		violations=$((violations + 1))
-	fi
+	# Renovate inlines allowlist endpoints for harden-runner pre (job-start);
+	# resolve-egress-allowlist is optional when endpoints are literal.
 	if ! grep -qE "$STEP_SECURITY_HARDEN_RE" "$renovate"; then
 		echo "renovate.yml: missing step-security/harden-runner@${HARDEN_SHA}" >&2
 		violations=$((violations + 1))
 	fi
+	if ! grep -qE 'allowed-endpoints:[[:space:]]+\|' "$renovate"; then
+		echo "renovate.yml: harden-runner must use a literal allowed-endpoints block (pre runs at job start)" >&2
+		violations=$((violations + 1))
+	fi
 	if grep -qE "$TOOLING_HARDEN_RE|$IN_REPO_HARDEN_RE" "$renovate"; then
-		echo "renovate.yml: local harden-runner composite is retired; use step-security/harden-runner@${HARDEN_SHA}" >&2
+		echo "renovate.yml: do not use local harden-runner action path; use step-security/harden-runner@${HARDEN_SHA}" >&2
+		violations=$((violations + 1))
+	fi
+	if grep -qE "allowed-endpoints:[[:space:]]+\\\$\{\{[[:space:]]*steps\\." "$renovate"; then
+		echo "renovate.yml: harden-runner must not use steps.*.outputs for allowed-endpoints" >&2
 		violations=$((violations + 1))
 	fi
 fi

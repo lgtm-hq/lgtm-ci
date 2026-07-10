@@ -192,7 +192,22 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
+        default: |
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          release-assets.githubusercontent.com:443
+          github-releases.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          ghcr.io:443
+          pkg-containers.githubusercontent.com:443
+          docker.io:443
+          registry-1.docker.io:443
+          auth.docker.io:443
+          production.cloudflare.docker.com:443
+          production.cloudfront.docker.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -284,7 +299,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -485,7 +500,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -574,7 +589,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -672,7 +687,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
@@ -846,7 +861,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Build summary
         if: always()
@@ -910,7 +925,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Docker registry auth
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth

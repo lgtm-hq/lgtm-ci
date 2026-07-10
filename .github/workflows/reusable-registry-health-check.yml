@@ -35,7 +35,22 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
+        default: |
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          release-assets.githubusercontent.com:443
+          github-releases.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          ghcr.io:443
+          pkg-containers.githubusercontent.com:443
+          docker.io:443
+          registry-1.docker.io:443
+          auth.docker.io:443
+          production.cloudflare.docker.com:443
+          production.cloudfront.docker.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -117,7 +132,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
@@ -176,7 +191,12 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress-issue.outputs['allowed-endpoints'] }}
+          allowed-endpoints: |
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
 
       - name: Open issue for unreachable digests
         shell: bash
