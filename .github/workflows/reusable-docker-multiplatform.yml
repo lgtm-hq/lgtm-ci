@@ -192,7 +192,22 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          release-assets.githubusercontent.com:443
+          github-releases.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          ghcr.io:443
+          pkg-containers.githubusercontent.com:443
+          docker.io:443
+          registry-1.docker.io:443
+          auth.docker.io:443
+          production.cloudflare.docker.com:443
+          production.cloudfront.docker.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -246,6 +261,13 @@ jobs:
       security-events: write
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -253,7 +275,6 @@ jobs:
           # source-ref = build-context (app source); tooling-ref stays separate
           ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -265,7 +286,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -282,11 +302,9 @@ jobs:
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-
       - name: Docker registry auth
         if: inputs.push
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
@@ -294,7 +312,6 @@ jobs:
           registry: ${{ inputs.registry }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Extract metadata
         id: meta
         # Pinned to SHA for supply chain security
@@ -319,7 +336,6 @@ jobs:
             type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
             type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest && !inputs.exact-tags }}
           # yamllint enable rule:line-length
-
       - name: Build and push (${{ matrix.platform }})
         id: build
         # Pinned to SHA for supply chain security
@@ -349,7 +365,6 @@ jobs:
           # yamllint enable rule:line-length
           provenance: false
           sbom: ${{ inputs.sbom && inputs.push }}
-
       - name: Record staging digest
         shell: bash
         env:
@@ -357,7 +372,6 @@ jobs:
           DIGEST: ${{ steps.build.outputs.digest }}
           DIGEST_FILE: ${{ runner.temp }}/staging-digest/digest.txt
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Smoke test (${{ matrix.platform }})
         if: >-
           inputs.validate-on-pr && inputs.push == false &&
@@ -373,7 +387,6 @@ jobs:
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Health check (${{ matrix.platform }})
         if: >-
           inputs.validate-on-pr && inputs.push == false &&
@@ -389,7 +402,6 @@ jobs:
           HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
           HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
         if: inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
@@ -402,7 +414,6 @@ jobs:
           output: "trivy-results-${{ matrix.slug }}.sarif"
           severity: "CRITICAL,HIGH"
           exit-code: ${{ inputs.scan-exit-code }}
-
       - name: Upload Trivy scan results (${{ matrix.platform }})
         if: always() && inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
@@ -410,7 +421,6 @@ jobs:
         with:
           sarif_file: "trivy-results-${{ matrix.slug }}.sarif"
           category: "trivy-${{ matrix.slug }}"
-
       - name: Upload staging digest
         if: inputs.push
         # Pinned to SHA for supply chain security
@@ -420,7 +430,6 @@ jobs:
           path: ${{ runner.temp }}/staging-digest/digest.txt
           if-no-files-found: error
           retention-days: 1
-
   # Optional per-platform smoke test gate (push path only). Runs against each
   # staging image on its native runner before manifest merge.
   verify-per-platform:
@@ -440,6 +449,13 @@ jobs:
       packages: read
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository (for smoke-test-script)
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -447,7 +463,6 @@ jobs:
           # source-ref = build-context (app source); tooling-ref stays separate
           ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -459,7 +474,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -476,7 +490,6 @@ jobs:
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-
       - name: Docker registry auth
         if: inputs.push
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
@@ -484,7 +497,6 @@ jobs:
           registry: ${{ inputs.registry }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Download staging digest
         if: inputs.push
         # Pinned to SHA for supply chain security
@@ -492,7 +504,6 @@ jobs:
         with:
           name: staging-digest-${{ matrix.slug }}
           path: ${{ runner.temp }}/staging-digest
-
       - name: Smoke test (${{ matrix.platform }})
         shell: bash
         env:
@@ -504,7 +515,6 @@ jobs:
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
   # Optional per-platform detached-container health check (push path only).
   # Gates manifest merge on runtime validation of each staging image.
   health-check-per-platform:
@@ -530,6 +540,13 @@ jobs:
       packages: read
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -541,7 +558,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -558,7 +574,6 @@ jobs:
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
-
       - name: Docker registry auth
         if: inputs.push
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
@@ -566,7 +581,6 @@ jobs:
           registry: ${{ inputs.registry }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Download staging digest
         if: inputs.push
         # Pinned to SHA for supply chain security
@@ -574,7 +588,6 @@ jobs:
         with:
           name: staging-digest-${{ matrix.slug }}
           path: ${{ runner.temp }}/staging-digest
-
       - name: Health check (${{ matrix.platform }})
         shell: bash
         env:
@@ -587,7 +600,6 @@ jobs:
           HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
           HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
   # Assemble multi-arch manifest from per-platform staging images
   merge:
     name: Merge Manifests
@@ -613,6 +625,13 @@ jobs:
       digest: ${{ steps.metadata.outputs.digest }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -620,7 +639,6 @@ jobs:
           # source-ref = build-context (app source); tooling-ref stays separate
           ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -632,7 +650,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -648,14 +665,12 @@ jobs:
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
         uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
-
       - name: Docker registry auth
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
         with:
           registry: ${{ inputs.registry }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Parse additional tags
         id: extra-tags
         if: inputs.tags != '' && !inputs.exact-tags
@@ -664,7 +679,6 @@ jobs:
           STEP: parse-tags
           INPUT_TAGS: ${{ inputs.tags }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Extract metadata
         id: meta
         # Pinned to SHA for supply chain security
@@ -690,7 +704,6 @@ jobs:
             type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest && !inputs.exact-tags }}
             ${{ !inputs.exact-tags && steps.extra-tags.outputs.tags || '' }}
           # yamllint enable rule:line-length
-
       - name: Create multi-arch manifest
         shell: bash
         env:
@@ -701,7 +714,6 @@ jobs:
           RUN_ID: ${{ github.run_id }}
           TARGET_TAGS: ${{ steps.meta.outputs.tags }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Extract digest
         id: metadata
         shell: bash
@@ -722,7 +734,6 @@ jobs:
           MATRIX: ${{ inputs.matrix }}
           TARGET_TAGS: ${{ steps.meta.outputs.tags }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
       - name: Generate artifact attestation
         if: inputs.provenance
         # Pinned to SHA for supply chain security
@@ -731,11 +742,9 @@ jobs:
           subject-name: ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
           subject-digest: ${{ steps.metadata.outputs.digest }}
           push-to-registry: true
-
       - name: Install Cosign
         if: inputs.cosign-sign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
-
       - name: Sign image
         if: inputs.cosign-sign
         shell: bash
@@ -750,7 +759,6 @@ jobs:
       # merged index's child manifests — deleting them by digest orphans the
       # index (children 404). They are intentionally retained; safe periodic
       # pruning of stale build-* tags is tracked separately.
-
       - name: Build summary
         if: always()
         shell: bash
@@ -767,7 +775,6 @@ jobs:
           HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
           MATRIX: ${{ inputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
   summary-validate:
     name: Validation Summary
     needs: [build-per-platform, verify-per-platform, health-check-per-platform]
@@ -781,6 +788,13 @@ jobs:
       contents: read
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -788,7 +802,6 @@ jobs:
           # source-ref = build-context (app source); tooling-ref stays separate
           ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -800,7 +813,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -812,7 +824,6 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/
-
       - name: Build summary
         if: always()
         shell: bash
@@ -827,7 +838,6 @@ jobs:
           HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
           MATRIX: ${{ inputs.matrix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-
   scan:
     name: Vulnerability Scan
     needs: merge
@@ -845,6 +855,13 @@ jobs:
       security-events: write
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -856,7 +873,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -869,14 +885,12 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
-
       - name: Docker registry auth
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
         with:
           registry: ${{ inputs.registry }}
           dockerhub-username: ${{ secrets.DOCKERHUB_USERNAME }}
           dockerhub-token: ${{ secrets.DOCKERHUB_TOKEN }}
-
       - name: Run Trivy vulnerability scanner
         # Pinned to SHA for supply chain security
         uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
@@ -888,7 +902,6 @@ jobs:
           output: "trivy-results.sarif"
           severity: "CRITICAL,HIGH"
           exit-code: ${{ inputs.scan-exit-code }}
-
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0

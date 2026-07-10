@@ -53,8 +53,14 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          uploads.github.com:443
+          pipelines.actions.githubusercontent.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -94,6 +100,13 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -105,7 +118,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -117,7 +129,6 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/actions/
-
       - name: Generate CodeQL matrix
         id: matrix
         shell: bash
@@ -126,7 +137,6 @@ jobs:
           BUILD_MODE: ${{ inputs.build-mode }}
           LANGUAGE_BUILD_MODES: ${{ inputs.language-build-modes }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-codeql-matrix.sh
-
   codeql:
     name: ${{ inputs.job-name }}
     needs: setup
@@ -141,11 +151,17 @@ jobs:
       matrix: ${{ fromJson(needs.setup.outputs.matrix) }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -157,7 +173,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -167,20 +182,17 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-
       - name: Initialize CodeQL
         if: inputs.config-file == '' && matrix.language != ''
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
-
       - name: Initialize CodeQL with auto-detected languages
         if: inputs.config-file == '' && matrix.language == ''
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:
           build-mode: ${{ matrix.build-mode }}
-
       - name: Initialize CodeQL with config
         if: inputs.config-file != ''
         uses: github/codeql-action/init@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
@@ -188,11 +200,9 @@ jobs:
           languages: ${{ matrix.language != '' && matrix.language || inputs.languages }}
           build-mode: ${{ matrix.build-mode }}
           config-file: ${{ inputs.config-file }}
-
       - name: Autobuild
         if: matrix.build-mode == 'autobuild'
         uses: github/codeql-action/autobuild@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
-
       - name: Analyze
         uses: github/codeql-action/analyze@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
         with:

@@ -534,9 +534,10 @@ assert_readonly_var() {
 	fi
 }
 
-# Assert repository → tooling → resolve → harden step order (#279 egress contract).
-# Also accepts the checkout-and-harden composite form (#379): repository →
-# bootstrap tooling checkout → Checkout and harden.
+# Assert harden → repository → tooling → resolve/cah step order (#412 egress
+# contract). Harden must be first so step-security main applies the allowlist
+# before checkout. Also accepts the checkout-and-harden composite form (#379)
+# after the tooling bootstrap.
 # Usage: egress_tooling_checkout_order_ok "$workflow" [job-name]
 egress_tooling_checkout_order_ok() {
 	local workflow="$1"
@@ -566,14 +567,21 @@ egress_tooling_checkout_order_ok() {
 		active_job() && in_steps && /^      - name: Resolve egress allowlist/ { resolve = NR }
 		active_job() && in_steps && /^      - name: Harden runner/ { harden = NR }
 		END {
-			if (cah > 0 && harden == 0 && resolve == 0) {
+			if (harden > 0) {
+				ok = (harden > 0 && repo > 0 && tooling > 0 && harden < repo && repo < tooling)
+				if (cah > 0) {
+					ok = ok && tooling < cah
+				}
+				if (resolve > 0) {
+					ok = ok && tooling < resolve
+				}
+				exit !ok
+			}
+			# Legacy: no direct harden step (cah embeds harden).
+			if (cah > 0) {
 				exit !(repo > 0 && tooling > 0 && repo < tooling && tooling < cah)
 			}
-			ok = (repo > 0 && tooling > 0 && harden > 0 && repo < tooling && tooling < harden)
-			if (resolve > 0) {
-				ok = ok && tooling < resolve && resolve < harden
-			}
-			exit !ok
+			exit 1
 		}
 	' "$workflow"
 }

@@ -48,8 +48,38 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          release-assets.githubusercontent.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          github-releases.githubusercontent.com:443
+          ghcr.io:443
+          pkg-containers.githubusercontent.com:443
+          docker.io:443
+          registry-1.docker.io:443
+          auth.docker.io:443
+          production.cloudflare.docker.com:443
+          production.cloudfront.docker.com:443
+          pypi.org:443
+          files.pythonhosted.org:443
+          static.rust-lang.org:443
+          bun.sh:443
+          astral.sh:443
+          releases.astral.sh:443
+          sh.rustup.rs:443
+          deb.debian.org:80
+          registry.npmjs.org:443
+          crates.io:443
+          static.crates.io:443
+          index.crates.io:443
+          semgrep.dev:443
+          metrics.semgrep.dev:443
+          api.osv.dev:443
+          api.deps.dev:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -114,12 +144,18 @@ jobs:
       LINTRO_IMAGE: ${{ inputs.lintro-image }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -131,7 +167,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -143,14 +178,12 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/
-
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@af1e73f918a031802d376d3c8bbc3fe56130a9b0 # v4.4.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ github.token }}
-
       - name: Run lintro quality checks
         id: quality
         shell: bash
@@ -162,7 +195,6 @@ jobs:
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
           MAP_HOST_USER: "true"
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
-
       - name: Upload linting report
         if: inputs.upload-report && always()
         # Pinned to SHA for supply chain security

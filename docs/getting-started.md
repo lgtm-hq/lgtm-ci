@@ -21,8 +21,8 @@ jobs:
 ```
 
 See the [actions index](actions/README.md) for the full catalog and a
-hardened end-to-end example (egress resolve → harden-runner → checkout →
-setup → test).
+hardened end-to-end example (egress resolve → direct
+`step-security/harden-runner` → checkout → setup → test).
 
 ## Using a reusable workflow
 

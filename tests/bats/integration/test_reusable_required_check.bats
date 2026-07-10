@@ -65,7 +65,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-required-check.yml"
 	run egress_tooling_checkout_order_ok "$WORKFLOW" "gate"
 	assert_success
 	run grep -Ei '^\s*uses:\s*.*step-security/harden-runner' "$WORKFLOW"
-	assert_failure
+	assert_success
+	run grep -E 'uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden' "$WORKFLOW"
+	assert_success
+	run grep -E 'uses:[[:space:]]+step-security/harden-runner@' "$WORKFLOW"
+	assert_success
 	run awk '
 		/Checkout lgtm-ci tooling/ { found = 1 }
 		END { exit !found }

@@ -66,19 +66,31 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	assert_success
 }
 
-@test "checkout-and-harden: resolve step runs before harden step" {
+@test "checkout-and-harden: does not nest step-security/harden-runner " {
+	run grep -E 'step-security/harden-runner|/\.github/actions/harden-runner' "$ACTION"
+	# Sparse path mention of harden-runner directory is required for resolve sibling;
+	# the composite must not *invoke* the local harden-runner action or step-security.
 	run awk '
-		/uses: \.\/\.lgtm-ci-tooling\/\.github\/actions\/resolve-egress-allowlist/ { resolve = NR }
-		/uses: \.\/\.lgtm-ci-tooling\/\.github\/actions\/harden-runner/ { harden = NR }
-		END { exit !(resolve && harden && resolve < harden) }
+		/uses:[[:space:]]+step-security\/harden-runner/ { bad = 1 }
+		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/harden-runner/ { bad = 1 }
+		END { exit bad }
 	' "$ACTION"
 	assert_success
 }
 
-@test "checkout-and-harden: harden step consumes the resolve sibling output" {
+@test "checkout-and-harden: resolve step runs and exposes allowed-endpoints" {
 	run grep -F \
-		"allowed-endpoints: \${{ steps.egress.outputs['allowed-endpoints'] }}" \
+		"uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist" \
 		"$ACTION"
+	assert_success
+	run grep -F \
+		"value: \${{ steps.egress.outputs['allowed-endpoints'] }}" \
+		"$ACTION"
+	assert_success
+}
+
+@test "checkout-and-harden: documents direct step-security follow-up " {
+	run grep -F 'step-security/harden-runner@' "$ACTION"
 	assert_success
 }
 

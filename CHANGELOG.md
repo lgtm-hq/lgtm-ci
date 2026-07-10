@@ -11,11 +11,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **security**: invoke `step-security/harden-runner@v2.20.0` as a direct workflow
+  step in all hardened reusables so the action `pre` hook installs the egress
+  agent (#412, #420)
+- **security**: bake default egress-preset endpoints into each reusable's
+  `allowed-endpoints` input so harden-runner `pre` (job start) receives a
+  non-empty allowlist (#412, #420)
+
 ### Deprecated
 
 ### Removed
 
+- **security**: remove the local `.github/actions/harden-runner` composite
+  `action.yml` (directory keeps `resolve-egress-endpoints.sh` + `lib/` for
+  resolve-egress-allowlist) (#412, #420)
+
 ### Fixed
+
+- **security**: allow Ubuntu apt mirrors on shell-test jobs so kcov install
+  works under real harden-runner block policy
+- **security**: pass harden-runner allowlists as space-separated endpoints
+  (YAML `>` folded scalars); newline-separated `|` lists were ignored by the
+  agent, leaving only a stub `github.com` policy
+- **security**: run `step-security/harden-runner` as the first job step so its
+  `main` applies the allowlist before checkout (`pre` alone left a stub policy
+  that blocked github.com)
+- **security**: restore egress enforcement on GitHub-hosted runners — nesting
+  step-security inside the `.lgtm-ci-tooling` local composite skipped `pre`,
+  leaving `egress-policy: block` inert and emitting
+  "`pre` execution is not supported" (#412, #420)
+- **security**: feed `step-security/harden-runner` allowlists from workflow
+  inputs (or literals), not `steps.*.outputs` — the action `pre` hook runs at
+  job start before step outputs exist, so output-based allowlists were empty
+  and blocked all egress including `github.com` (#412, #420)
 
 ### Security
 

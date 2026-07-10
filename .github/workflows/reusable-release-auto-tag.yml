@@ -56,8 +56,14 @@ name: "Reusable: Release Auto Tag"
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          uploads.github.com:443
+          pipelines.actions.githubusercontent.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -132,12 +138,18 @@ jobs:
       contents: write
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci egress tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -150,7 +162,6 @@ jobs:
             .github/actions/resolve-egress-allowlist
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Resolve egress allowlist
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
@@ -159,13 +170,6 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
-
       - name: Create GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -173,14 +177,12 @@ jobs:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
-
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
-
       - name: Resolve tooling ref
         id: tooling
         shell: bash
@@ -197,7 +199,6 @@ jobs:
           else
             echo "ref=${{ github.workflow_sha }}" >> "$GITHUB_OUTPUT"
           fi
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -212,12 +213,10 @@ jobs:
           sparse-checkout-cone-mode: true
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
-
       - name: Guard release commit
         id: guard
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
-
       - name: Resolve version
         # yamllint disable-line rule:line-length
         if: steps.guard.outputs.is-release-commit == 'true' || inputs.version != ''
@@ -232,7 +231,6 @@ jobs:
                 && format('chore(release): version {0}', inputs.version)
                 || '' }}
         run: .lgtm-ci-tooling/scripts/ci/release/resolve-auto-tag-version.sh
-
       - name: Detect previous tag version
         if: >-
           steps.version.outputs.found == 'true' &&
@@ -242,7 +240,6 @@ jobs:
         env:
           TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: .lgtm-ci-tooling/scripts/ci/release/detect-previous-tag-version.sh
-
       - name: Check version unchanged
         if: >-
           steps.version.outputs.found == 'true' &&
@@ -254,7 +251,6 @@ jobs:
           PREVIOUS_VERSION: ${{ steps.previous-version.outputs.version }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: .lgtm-ci-tooling/scripts/ci/release/check-version-unchanged.sh
-
       - name: Configure git with app token
         # yamllint disable-line rule:line-length
         if: >-
@@ -266,7 +262,6 @@ jobs:
           GH_APP_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPOSITORY: ${{ github.repository }}
         run: .lgtm-ci-tooling/scripts/ci/release/configure-git-remote.sh
-
       - name: Create release tag
         if: >-
           steps.version.outputs.found == 'true' &&
@@ -279,7 +274,6 @@ jobs:
           TAG_PREFIX: ${{ inputs.tag-prefix }}
           PUSH: "true"
         run: .lgtm-ci-tooling/scripts/ci/release/create-tag.sh
-
       - name: Create GitHub release
         if: >-
           steps.version.outputs.found == 'true' &&
@@ -292,7 +286,6 @@ jobs:
           TAG: ${{ steps.tag.outputs.tag-name }}
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
         run: .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
-
       - name: Update floating tag
         if: >-
           steps.version.outputs.found == 'true' &&
@@ -304,7 +297,6 @@ jobs:
           TAG_PREFIX: ${{ inputs.tag-prefix }}
           PUSH: "true"
         run: .lgtm-ci-tooling/scripts/ci/release/update-floating-tag.sh
-
       - name: Release summary
         if: >-
           steps.version.outputs.found == 'true' &&
@@ -317,7 +309,6 @@ jobs:
           TAG_NAME: ${{ steps.tag.outputs.tag-name }}
           RELEASE_URL: ${{ steps.github-release.outputs.release-url }}
         run: .lgtm-ci-tooling/scripts/ci/release/write-release-summary.sh
-
       - name: Skip summary
         # yamllint disable-line rule:line-length
         if: >-
@@ -334,7 +325,6 @@ jobs:
           VERSION_UNCHANGED: ${{ steps.unchanged.outputs.unchanged }}
           TAG_EXISTS: ${{ steps.unchanged.outputs.tag-exists }}
         run: .lgtm-ci-tooling/scripts/ci/release/write-skip-summary.sh
-
   report-release-failure:
     name: Report release automation failure
     needs: [auto-tag]
@@ -353,6 +343,18 @@ jobs:
       issues: write
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -366,21 +368,12 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Resolve egress allowlist
         id: egress-failure
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: github-minimal
-
-      - name: Harden runner
-        # yamllint disable-line rule:line-length
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ steps.egress-failure.outputs['allowed-endpoints'] }}
-
       - name: Write failure trigger summary
         shell: bash
         env:
@@ -389,7 +382,6 @@ jobs:
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
           write_trigger_summary
-
       - name: Notify release failure
         shell: bash
         env:

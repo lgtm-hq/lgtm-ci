@@ -34,8 +34,14 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          actions.githubusercontent.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          release-assets.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -95,11 +101,17 @@ jobs:
       actions: write # delete stale same-run Pages artifacts on rerun (#415)
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -111,7 +123,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -124,7 +135,6 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-
       - name: Download coverage
         if: inputs.upload-coverage
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -132,7 +142,6 @@ jobs:
           pattern: node-coverage-*
           path: node-coverage-artifacts
           merge-multiple: false
-
       - name: Merge coverage report
         if: inputs.upload-coverage
         shell: bash
@@ -141,7 +150,6 @@ jobs:
           OUTPUT_DIR: coverage-report
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/merge-node-coverage.sh
-
       - name: Generate badge
         if: inputs.upload-coverage
         uses: ./.lgtm-ci-tooling/.github/actions/generate-coverage-badge
@@ -151,7 +159,6 @@ jobs:
           output-path: >-
             ${{ inputs.working-directory == '.' && 'coverage-report/badge.svg' ||
             format('coverage-report/{0}/badge.svg', inputs.working-directory) }}
-
       - name: Publish to GitHub Pages
         if: inputs.upload-coverage
         id: publish

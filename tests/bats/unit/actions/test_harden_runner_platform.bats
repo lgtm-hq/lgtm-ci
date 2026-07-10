@@ -1,26 +1,19 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Platform guard tests for harden-runner composite pre-step
+# Purpose: Contract tests for harden-runner support files used by resolve-egress-allowlist
 
 load "../../../helpers/common"
 
 ACTION="${PROJECT_ROOT}/.github/actions/harden-runner/action.yml"
 
-@test "harden-runner: agent pre-step is guarded for Linux only" {
-	run awk '
-		/- name: Ensure agent state for post cleanup/ { found = 1 }
-		found && /^      if: runner\.os == .Linux./ { linux_guard = 1; exit }
-		END { exit !linux_guard }
-	' "$ACTION"
-	assert_success
+@test "harden-runner: no local composite action.yml (invoke step-security directly)" {
+	[[ ! -f "$ACTION" ]]
 }
 
-@test "harden-runner: pre-step still uses /home/agent path on Linux" {
-	run grep -F '/home/agent' "$ACTION"
-	assert_success
-}
-
-@test "harden-runner: documents validate-runner-policy prerequisite" {
-	run grep -F 'validate-runner-policy' "$ACTION"
+@test "harden-runner: still ships resolve-egress-endpoints.sh for sibling resolve" {
+	[ -x "${PROJECT_ROOT}/.github/actions/harden-runner/resolve-egress-endpoints.sh" ]
+	run grep -F \
+		'../harden-runner/resolve-egress-endpoints.sh' \
+		"${PROJECT_ROOT}/.github/actions/resolve-egress-allowlist/action.yml"
 	assert_success
 }

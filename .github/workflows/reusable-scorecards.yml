@@ -47,8 +47,17 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          gcr.io:443
+          api.osv.dev:443
+          api.scorecard.dev:443
+          api.securityscorecards.dev:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -88,11 +97,17 @@ jobs:
       id-token: write
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -104,7 +119,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -114,7 +128,6 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-
       - name: Run OpenSSF Scorecard
         uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
         with:
@@ -122,7 +135,6 @@ jobs:
           results_format: ${{ inputs.results-format }}
           results_file: ${{ inputs.results-file }}
           publish_results: ${{ inputs.publish-results }}
-
       - name: Upload SARIF
         if: inputs.upload-sarif && inputs.results-format == 'sarif'
         uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0

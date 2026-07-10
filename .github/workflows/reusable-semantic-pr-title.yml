@@ -63,8 +63,12 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -110,13 +114,19 @@ jobs:
       pull-requests: write
 
     steps:
+      - name: Harden runner
+        if: github.event_name != 'merge_group'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         if: github.event_name != 'merge_group'
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         if: github.event_name != 'merge_group'
         # yamllint disable-line rule:line-length
@@ -129,7 +139,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         if: github.event_name != 'merge_group'
@@ -143,7 +152,6 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/post-pr-comment
             scripts/ci/
-
       - name: Prepare semantic PR lists
         id: prepare
         if: github.event_name != 'merge_group'
@@ -151,7 +159,6 @@ jobs:
           TYPES_INPUT: ${{ inputs.types }}
           SCOPES_INPUT: ${{ inputs.scopes }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/prepare-semantic-pr-lists.sh
-
       - name: Validate PR title length
         id: length
         if: >-
@@ -163,7 +170,6 @@ jobs:
           TITLE: ${{ github.event.pull_request.title }}
           MAX_LENGTH: ${{ inputs.max-length }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-pr-title-length.sh
-
       - name: Validate semantic PR title
         id: semantic
         if: github.event_name != 'merge_group'
@@ -175,7 +181,6 @@ jobs:
           types: ${{ steps.prepare.outputs.types }}
           scopes: ${{ steps.prepare.outputs.scopes }}
           requireScope: ${{ inputs.require-scope }}
-
       - name: Format semantic PR title failure comment
         id: failure-comment
         if: >-
@@ -194,7 +199,6 @@ jobs:
           COMMENT_FILE: semantic-pr-title-failure.md
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/format-semantic-pr-title-failure-comment.sh
-
       - name: Post semantic PR title failure comment
         if: >-
           always()
@@ -210,7 +214,6 @@ jobs:
         with:
           file: semantic-pr-title-failure.md
           marker: ${{ inputs.comment-marker }}
-
       - name: Clear semantic PR title failure comment
         if: >-
           always()
@@ -228,7 +231,6 @@ jobs:
         with:
           marker: ${{ inputs.comment-marker }}
           delete-on-empty: "true"
-
       - name: Fail on invalid PR title
         if: >-
           always()

@@ -4,10 +4,12 @@
 name: "Checkout and harden"
 description: >-
   Shared reusable-workflow preamble: sparse-checkout lgtm-ci tooling into
-  .lgtm-ci-tooling, resolve the egress allowlist, and harden the runner.
-  The repository checkout stays a separate workflow step before this action;
-  a bootstrap sparse checkout of .github/actions/checkout-and-harden must
-  precede it because the composite lives in lgtm-ci.
+  .lgtm-ci-tooling and resolve the egress allowlist. Callers must invoke
+  step-security/harden-runner@<pinned SHA> as the next workflow step so the
+  action's pre hook installs the egress agent (#412/#420). The repository
+  checkout stays a separate workflow step before this action; a bootstrap
+  sparse checkout of .github/actions/checkout-and-harden must precede it
+  because the composite lives in lgtm-ci.
 author: "lgtm-hq"
 
 inputs:
@@ -51,7 +53,7 @@ inputs:
 
 outputs:
   allowed-endpoints:
-    description: "Resolved allowlist passed to step-security/harden-runner"
+    description: "Resolved allowlist for the following step-security/harden-runner step"
     value: ${{ steps.egress.outputs['allowed-endpoints'] }}
   scripts-dir:
     description: "Absolute path to the checked-out lgtm-ci scripts directory"
@@ -63,6 +65,8 @@ runs:
     # Re-checkout tooling with the full sparse set. The bootstrap workflow
     # checkout only materialises this action's directory; this step adds the
     # egress composites (and any sparse-checkout-extra paths) at the same ref.
+    # harden-runner/ remains in the sparse set because resolve-egress-allowlist
+    # loads resolve-egress-endpoints.sh from that sibling directory.
     - name: Checkout lgtm-ci tooling
       # Pinned to SHA for supply chain security
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -78,11 +82,6 @@ runs:
         sparse-checkout-cone-mode: true
         persist-credentials: ${{ inputs.persist-credentials }}
 
-    # Sibling ordering matters: resolve must complete before the harden step
-    # evaluates its inputs. The runner skips `pre` for workspace-local actions
-    # (warning: "`pre` execution is not supported for local action"), so
-    # step-security inputs are evaluated when the step itself runs — identical
-    # timing to the previous workflow-level resolve -> harden pattern.
     - name: Resolve egress allowlist
       id: egress
       uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
@@ -91,12 +90,6 @@ runs:
         egress-preset: ${{ inputs.egress-preset }}
         allowed-endpoints: ${{ inputs.allowed-endpoints }}
         allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-
-    - name: Harden runner
-      uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-      with:
-        egress-policy: ${{ inputs.egress-policy }}
-        allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
     - name: Resolve scripts directory
       id: paths

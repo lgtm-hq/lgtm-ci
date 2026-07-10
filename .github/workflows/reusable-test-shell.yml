@@ -90,8 +90,18 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          uploads.github.com:443
+          pipelines.actions.githubusercontent.com:443
+          archive.ubuntu.com:80
+          azure.archive.ubuntu.com:80
+          security.ubuntu.com:80
+          security.ubuntu.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -149,12 +159,18 @@ jobs:
         && steps.results.outputs.tests-ran == 'true' }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -166,7 +182,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -184,14 +199,12 @@ jobs:
           STEP: install-bats
           BATS_VERSION: ${{ inputs.bats-version }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
-
       - name: Install kcov for coverage
         if: inputs.coverage
         shell: bash
         env:
           STEP: install-kcov
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
-
       - name: Run BATS tests
         if: ${{ !inputs.coverage }}
         id: test
@@ -203,7 +216,6 @@ jobs:
           TEST_FILTER: ${{ inputs.test-filter }}
           PARALLEL: ${{ inputs.parallel }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
-
       - name: Run BATS tests with coverage
         if: ${{ inputs.coverage }}
         id: coverage-run
@@ -216,7 +228,6 @@ jobs:
           PARALLEL: ${{ inputs.parallel }}
           COVERAGE_DIR: coverage-report
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
-
       - name: Parse test results
         id: results
         if: always()
@@ -225,7 +236,6 @@ jobs:
         env:
           STEP: parse-results
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
-
       - name: Parse coverage results
         id: coverage
         if: inputs.coverage && always()
@@ -235,7 +245,6 @@ jobs:
           STEP: parse-coverage
           COVERAGE_DIR: coverage-report
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
-
       - name: Check coverage threshold
         if: inputs.coverage && inputs.coverage-threshold > 0
         shell: bash
@@ -244,7 +253,6 @@ jobs:
           COVERAGE_PERCENT: ${{ steps.coverage.outputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
-
       - name: Upload test results
         if: always()
         # Pinned to SHA for supply chain security
@@ -255,7 +263,6 @@ jobs:
             ${{ inputs.working-directory }}/bats-output.tap
           retention-days: 7
           if-no-files-found: ignore
-
       - name: Upload coverage report
         if: ${{ always() && inputs.upload-coverage && inputs.coverage }}
         # Pinned to SHA for supply chain security
@@ -266,7 +273,6 @@ jobs:
             ${{ inputs.working-directory }}/coverage-report
           retention-days: 7
           if-no-files-found: ignore
-
   publish-test-summary:
     needs: test
     if: >-

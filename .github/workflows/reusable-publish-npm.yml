@@ -53,8 +53,19 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          actions.githubusercontent.com:443
+          token.actions.githubusercontent.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          registry.npmjs.org:443
+          fulcio.sigstore.dev:443
+          rekor.sigstore.dev:443
+          tuf-repo-cdn.sigstore.dev:443
+          oauth2.sigstore.dev:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -122,11 +133,17 @@ jobs:
       tarball: ${{ steps.npm.outputs.tarball }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -138,7 +155,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -160,7 +176,6 @@ jobs:
         with:
           node-version: ${{ inputs.node-version }}
           registry-url: https://registry.npmjs.org
-
       - name: Publish to npm
         id: npm
         uses: ./.lgtm-ci-tooling/.github/actions/publish-npm
@@ -171,7 +186,6 @@ jobs:
           dry-run: ${{ inputs.dry-run }}
           working-directory: ${{ inputs.working-directory }}
           npm-token: ${{ secrets.npm-token }}
-
       - name: Attest build provenance
         if: inputs.dry-run == false && inputs.provenance
         uses: actions/attest-build-provenance@0f67c3f4856b2e3261c31976d6725780e5e4c373 # v4.1.1

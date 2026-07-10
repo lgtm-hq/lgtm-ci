@@ -113,8 +113,38 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: ""
-
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          release-assets.githubusercontent.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          github-releases.githubusercontent.com:443
+          ghcr.io:443
+          pkg-containers.githubusercontent.com:443
+          docker.io:443
+          registry-1.docker.io:443
+          auth.docker.io:443
+          production.cloudflare.docker.com:443
+          production.cloudfront.docker.com:443
+          pypi.org:443
+          files.pythonhosted.org:443
+          static.rust-lang.org:443
+          bun.sh:443
+          astral.sh:443
+          releases.astral.sh:443
+          sh.rustup.rs:443
+          deb.debian.org:80
+          registry.npmjs.org:443
+          crates.io:443
+          static.crates.io:443
+          index.crates.io:443
+          semgrep.dev:443
+          metrics.semgrep.dev:443
+          api.osv.dev:443
+          api.deps.dev:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -191,12 +221,25 @@ jobs:
       matrix: ${{ steps.matrix.outputs.matrix }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -208,7 +251,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -220,7 +262,6 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/
-
       - name: Validate compat/coverage contract
         shell: bash
         env:
@@ -230,7 +271,6 @@ jobs:
           PLATFORM: Rust
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
-
       - name: Generate Rust toolchain matrix
         id: matrix
         shell: bash
@@ -242,7 +282,6 @@ jobs:
             inputs.toolchain || 'stable' }}
           VERSIONS_INPUT: ${{ inputs.rust-toolchains }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
-
   test:
     name: ${{ inputs.job-name }}
     needs: prepare
@@ -271,12 +310,18 @@ jobs:
       cancel-in-progress: true
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -288,7 +333,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -301,12 +345,10 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
-
       - name: Setup Rust
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
         with:
           toolchain: ${{ matrix.rust-toolchain }}
-
       - name: Setup nextest toolchain
         shell: bash
         env:
@@ -314,7 +356,6 @@ jobs:
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/testing/rust/setup-rust-nextest.sh
           INSTALL_COVERAGE_TOOLS: ${{ inputs.coverage }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh
-
       - name: Run Rust tests (nextest)
         id: run-nextest
         if: ${{ !inputs.coverage }}
@@ -328,7 +369,6 @@ jobs:
           EXTRA_ARGS: ${{ inputs.extra-args }}
         run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
         continue-on-error: true
-
       - name: Run Rust tests with coverage (llvm-cov nextest)
         id: run-coverage
         if: inputs.coverage
@@ -343,7 +383,6 @@ jobs:
           EXTRA_ARGS: ${{ inputs.extra-args }}
         run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
         continue-on-error: true
-
       - name: Parse test results
         id: parse
         if: always()
@@ -355,7 +394,6 @@ jobs:
           COVERAGE_ENABLED: ${{ inputs.coverage }}
         run: >-
           bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-rust-test-results.sh"
-
       - name: Upload LCOV for test summary
         if: >-
           always()
@@ -369,7 +407,6 @@ jobs:
           name: rust-coverage-lcov
           path: ${{ inputs.working-directory }}/rust-coverage.lcov
           if-no-files-found: ignore
-
       - name: Check coverage threshold
         id: coverage-gate
         if: inputs.coverage && inputs.coverage-threshold > 0
@@ -378,7 +415,6 @@ jobs:
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
-
       - name: Write matrix test summary
         if: always()
         shell: bash
@@ -401,7 +437,6 @@ jobs:
               )
             }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
-
       - name: Upload matrix test summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -410,7 +445,6 @@ jobs:
           path: rust-result-${{ matrix.rust-toolchain }}/summary.json
           retention-days: 7
           if-no-files-found: error
-
       - name: Generate Rust coverage HTML
         if: >-
           inputs.coverage
@@ -422,7 +456,6 @@ jobs:
           RUST_COVERAGE_HTML_DIR: ${{ inputs.pages-coverage-artifact-name }}
         run: >-
           bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/run-rust-coverage-html.sh"
-
       - name: Evaluate pages coverage upload gate
         id: pages-upload-gate
         if: inputs.coverage && inputs.upload-pages-coverage-html
@@ -430,7 +463,6 @@ jobs:
         env:
           PAGES_COVERAGE_UPLOAD_ON: ${{ inputs.pages-coverage-upload-on }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/pages-coverage-upload-gate.sh
-
       - name: Upload pages coverage HTML artifact
         id: pages-upload
         if: >-
@@ -444,19 +476,16 @@ jobs:
           path: ${{ inputs.working-directory }}/${{ inputs.pages-coverage-artifact-name }}/
           retention-days: 7
           if-no-files-found: error
-
       - name: Fail on test errors
         if: >-
           (!inputs.coverage && steps.run-nextest.outcome == 'failure')
           || (inputs.coverage && steps.run-coverage.outcome == 'failure')
         shell: bash
         run: exit 1
-
       - name: Fail on coverage threshold
         if: steps.coverage-gate.outcome == 'failure'
         shell: bash
         run: exit 1
-
       - name: Record pages coverage upload result
         if: always()
         id: record-pages-upload
@@ -469,7 +498,6 @@ jobs:
           else
             echo "uploaded=false" >>"$GITHUB_OUTPUT"
           fi
-
       - name: Record job passed output
         if: always()
         id: record-passed
@@ -482,7 +510,6 @@ jobs:
           else
             echo "passed=false" >>"$GITHUB_OUTPUT"
           fi
-
   aggregate:
     name: Aggregate Rust Results
     needs:
@@ -511,12 +538,25 @@ jobs:
       passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
 
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            uploads.github.com:443
+            pipelines.actions.githubusercontent.com:443
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
           persist-credentials: false
-
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -528,7 +568,6 @@ jobs:
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
           persist-credentials: false
-
       - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -540,14 +579,12 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/
-
       - name: Download matrix test summaries
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
           pattern: rust-results-*
           path: rust-results
           merge-multiple: false
-
       - name: Aggregate matrix test summaries
         id: aggregate
         shell: bash
@@ -555,7 +592,6 @@ jobs:
           RESULTS_DIR: rust-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
-
   publish-test-summary:
     needs:
       - test

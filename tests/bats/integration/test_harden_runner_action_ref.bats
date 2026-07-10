@@ -5,8 +5,9 @@
 load "../../helpers/common"
 
 VALIDATE="${PROJECT_ROOT}/scripts/ci/actions/validate-harden-runner-action-ref.sh"
+HARDEN_PIN='step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0'
 
-@test "validate-harden-runner-action-ref: all reusables use .lgtm-ci-tooling egress composites" {
+@test "validate-harden-runner-action-ref: all reusables use direct step-security/harden-runner" {
 	run bash "$VALIDATE"
 	assert_success
 }
@@ -49,6 +50,11 @@ jobs:
   ${key}:
     runs-on: ubuntu-24.04
     steps:
+      - name: Harden runner
+        uses: ${HARDEN_PIN}
+        with:
+          egress-policy: block
+          allowed-endpoints: \${{ inputs.allowed-endpoints }}
 ${bootstrap:+$bootstrap
 }      - name: Checkout and harden
         id: egress
@@ -91,7 +97,7 @@ EOF
 @test "validate-harden-runner-action-ref: flags a 4-space-indented job that skips its bootstrap" {
 	local dir="$BATS_TEST_TMPDIR/wf"
 	mkdir -p "$dir"
-	cat >"$dir/reusable-fixture.yml" <<'EOF'
+	cat >"$dir/reusable-fixture.yml" <<EOF
 name: Fixture
 on:
   workflow_call:
@@ -111,6 +117,11 @@ jobs:
     deploy:
         runs-on: ubuntu-24.04
         steps:
+            - name: Harden runner
+              uses: ${HARDEN_PIN}
+              with:
+                  egress-policy: block
+                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
             - name: Checkout and harden
               id: egress
               uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
@@ -127,7 +138,7 @@ EOF
 @test "validate-harden-runner-action-ref: accepts a 4-space-indented job that bootstraps its own checkout" {
 	local dir="$BATS_TEST_TMPDIR/wf"
 	mkdir -p "$dir"
-	cat >"$dir/reusable-fixture.yml" <<'EOF'
+	cat >"$dir/reusable-fixture.yml" <<EOF
 name: Fixture
 on:
   workflow_call:
@@ -147,6 +158,11 @@ jobs:
     deploy:
         runs-on: ubuntu-24.04
         steps:
+            - name: Harden runner
+              uses: ${HARDEN_PIN}
+              with:
+                  egress-policy: block
+                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
             - name: Checkout lgtm-ci tooling
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:

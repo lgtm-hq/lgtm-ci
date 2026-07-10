@@ -46,11 +46,14 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-file-breakdown.yml"
 	assert_success
 	run grep -F '.github/actions/post-pr-comment' "$WORKFLOW"
 	assert_success
-	# The four-step harden preamble is gone (folded into the composite).
+	# Local harden-runner / resolve steps stay inside checkout-and-harden;
+	# enforcement is a following direct step-security/harden-runner step.
 	run grep -F '.github/actions/harden-runner' "$WORKFLOW"
 	assert_failure
 	run grep -F '.github/actions/resolve-egress-allowlist' "$WORKFLOW"
 	assert_failure
+	run grep -E 'uses:[[:space:]]+step-security/harden-runner@' "$WORKFLOW"
+	assert_success
 }
 
 @test "publish-file-breakdown: defaults to github-minimal egress preset" {

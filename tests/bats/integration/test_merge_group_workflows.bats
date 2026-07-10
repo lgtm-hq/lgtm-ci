@@ -26,7 +26,7 @@ load "../../helpers/common"
 	# bump this deliberately); a dropped guard lowers it. Both directions fail.
 	run grep -cE "if: github.event_name != 'merge_group'" "$workflow"
 	assert_success
-	[[ "$output" -eq 5 ]]
+	[[ "$output" -eq 6 ]]
 }
 
 @test "reusable-semantic-pr-title: job itself must not skip on merge_group" {

@@ -16,9 +16,9 @@ want a drop-in job without wiring these composites by hand.
 | `setup-node` | [setup](setup.md#setup-node) | Node.js + Bun setup with caching |
 | `setup-rust` | [setup](setup.md#setup-rust) | Rust toolchain setup with cargo caching |
 | `setup-ruby` | [setup](setup.md#setup-ruby) | Ruby + Bundler setup with gem caching |
-| `checkout-and-harden` | [security](security.md#checkout-and-harden) | Combined tooling checkout + egress resolve + harden |
+| `checkout-and-harden` | [security](security.md#checkout-and-harden) | Tooling checkout + egress allowlist resolve |
 | `resolve-egress-allowlist` | [security](security.md#resolve-egress-allowlist) | Resolve egress presets/endpoints before hardening |
-| `harden-runner` | [security](security.md#harden-runner) | StepSecurity hardening with resolved allowlist |
+| `harden-runner/` | [security](security.md#harden-runner) | Support files for allowlist resolve (`lib/`, `resolve-egress-endpoints.sh`); invoke `step-security/harden-runner` directly |
 | `secure-checkout` | [security](security.md#secure-checkout) | Hardened git checkout |
 | `egress-audit` | [security](security.md#egress-audit) | Network egress monitoring and reporting |
 | `validate-runner-policy` | [security](security.md#validate-runner-policy) | Tiered egress policy enforcement |
@@ -67,10 +67,9 @@ want a drop-in job without wiring these composites by hand.
 ## Usage example
 
 Caller-owned workflow: pin each action to a **commit SHA** (not a branch).
-Check out lgtm-ci into `.lgtm-ci-tooling`, resolve egress in a step
-**before** `harden-runner`, then pass
-`steps.egress.outputs['allowed-endpoints']` into harden-runner (see
-[resolve-egress-allowlist](security.md#resolve-egress-allowlist)).
+Invoke `step-security/harden-runner` as a **direct** step with an allowlist from
+**inputs or literals** (available at job start). Do not pass
+`steps.*.outputs` into harden-runner — `pre` runs before step outputs exist.
 
 ```yaml
 name: CI
@@ -84,30 +83,19 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: |
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            raw.githubusercontent.com:443
+            pypi.org:443
+            files.pythonhosted.org:443
+
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-
-      - name: Checkout lgtm-ci tooling
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: <sha> # vX.Y.Z
-          sparse-checkout: |
-            .github/actions/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-
-      - name: Resolve egress allowlist
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: block
-          egress-preset: github-tooling
-
-      - uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
-        with:
-          egress-policy: block
-          allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
 
       - uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@<sha> # vX.Y.Z
       - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@<sha> # vX.Y.Z
