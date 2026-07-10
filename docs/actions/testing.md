@@ -8,8 +8,15 @@ per-language test workflows, see [workflows/testing.md](../workflows/testing.md)
 Maps changed paths to named filters so conditional jobs **always run and
 early-exit green** when their paths didn't change — the required-check-safe
 replacement for `on.<event>.paths` filters, which deadlock required checks.
-Resolves the diff range from `pull_request`, `merge_group`, and `push`
-contexts; an unresolvable base fails open (all filters report changed).
+
+Thin SHA-pinned wrapper around
+[`dorny/paths-filter`](https://github.com/dorny/paths-filter) (v4.0.2+), which
+resolves `pull_request`, `merge_group`, and `push` diffs (including merge-queue
+`base`/`ref` defaults). The wrapper keeps the org contract: public outputs stay
+`changes` (JSON name→bool) + `any-changed`, and an empty or unresolvable base
+**fails open** (all filters true, logged) so required checks run full jobs
+instead of silently early-exiting. Checkout with `fetch-depth: 0` so dorny's git
+mode has history.
 
 ```yaml
 jobs:
@@ -25,9 +32,19 @@ jobs:
         id: detect
         with:
           filters: |
-            examples=examples/* packages/*
-            docs=docs/* *.md
+            examples:
+              - 'examples/**'
+              - 'packages/**'
+            docs:
+              - 'docs/**'
+              - '*.md'
 ```
+
+**Filters:** dorny-native YAML (inline or path to a filters file). Picomatch
+globs — use `**` to cross directories. Legacy `name=glob …` line format from the
+pre-dorny action is rejected; migrate to the YAML shape above (e.g.
+`examples=examples/* packages/*` → `examples:` with `- 'examples/**'` /
+`- 'packages/**'`).
 
 **Outputs:** `changes` (JSON object of filter name → boolean), `any-changed`.
 Keep the downstream job name static — it is the required check's identity.

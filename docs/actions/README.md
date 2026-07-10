@@ -29,7 +29,7 @@ want a drop-in job without wiring these composites by hand.
 | `verify-attestation` | [security](security.md#verify-attestation) | Attestation verification |
 | `sign-artifact` | [security](security.md#sign-artifact) | Artifact signing (Cosign) |
 | `verify-signature` | [security](security.md#verify-signature) | Signature verification |
-| `detect-changes` | [testing](testing.md#detect-changes) | Path-filter change detection (required-check-safe) |
+| `detect-changes` | [testing](testing.md#detect-changes) | dorny/paths-filter wrapper (required-check-safe, fail-open) |
 | `run-quality` | [testing](testing.md#run-quality) | Lintro via full py-lintro Docker image |
 | `run-tests` | [testing](testing.md#run-tests) | Generic test runner (auto-detect) |
 | `run-pytest` | [testing](testing.md#run-pytest) | Pytest execution |
