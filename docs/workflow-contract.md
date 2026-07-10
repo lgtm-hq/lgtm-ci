@@ -130,7 +130,7 @@ These reusables intentionally omit `runner-image`:
 | `reusable-scorecards.yml`            | Action-only wrapper                                    |
 | `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
 | `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
-| `reusable-publish-npm.yml`           | Hardcoded for npm provenance attestation               |
+| `reusable-publish-npm.yml`           | OIDC trusted publishing + npm provenance; Node 24      |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->
@@ -697,7 +697,7 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 | `playwright`     | Playwright E2E + browser CDN downloads                               |
 | `pypi`           | PyPI/TestPyPI publish and availability checks                        |
 | `rubygems`       | RubyGems publish                                                     |
-| `npm-publish`    | npm publish + Sigstore attestation                                   |
+| `npm-publish`    | npm OIDC trusted publish + Sigstore (`oauth2.sigstore.dev`)          |
 | `quality`        | Docker `lintro chk` (default on quality lint)                        |
 | `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
 | `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
@@ -832,6 +832,20 @@ allowed-endpoints: >
 
 See [python-release-publish.md](python-release-publish.md) for trusted
 publishing requirements.
+
+### npm publish (OIDC trusted publishing)
+
+Prefer the preset (canonical list in `scripts/ci/lib/egress/presets.sh`):
+
+```yaml
+egress-policy: block
+egress-preset: npm-publish
+```
+
+Includes `registry.npmjs.org:443`, Sigstore hosts, and
+`oauth2.sigstore.dev:443` for OIDC trusted publishing. Use Node 24 via
+`setup-node`; never `npm install -g npm`. See
+[workflows/publishing.md](workflows/publishing.md#reusable-publish-npmyml).
 
 ### GitHub Release (artifact upload)
 

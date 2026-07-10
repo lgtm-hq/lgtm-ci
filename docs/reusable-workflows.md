@@ -477,7 +477,19 @@ jobs:
       contents: read
       id-token: write
       attestations: write
+    with:
+      node-version: "24"
+      # Prefer OIDC trusted publishing (no secrets). Optional legacy:
+      # secrets: { npm-token: ${{ secrets.NPM_TOKEN }} }
+```
 
+Configure an npm trusted publisher for the **caller** workflow filename and
+allow the `npm publish` action. Use Node 24 (default); never
+`npm install -g npm`. Full recipe:
+[workflows/publishing.md](workflows/publishing.md#reusable-publish-npmyml).
+
+```yaml
+jobs:
   pypi-build:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@<sha>
     permissions:
