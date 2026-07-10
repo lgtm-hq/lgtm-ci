@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   if (#488) (8093712)
 - **ci**: wire main-failure-notifier into ci.yml (#489) (0f7413f)
 
+## [0.50.3] - 2026-07-10
+
 ### Changed
 
 - **workflows**: migrate reusable-ai-review to checkout-and-harden composite (#486)
@@ -1419,7 +1421,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Foundation structure and core shell libraries ([#1])
 
 [Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.51.0...HEAD
-[0.51.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.2...v0.51.0
+[0.51.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.3...v0.51.0
+[0.50.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.2...v0.50.3
 [0.50.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.1...v0.50.2
 [0.50.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.0...v0.50.1
 [0.50.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.49.0...v0.50.0
