@@ -1,61 +1,27 @@
 # SPDX-License-Identifier: MIT
 # For license details, see the repository root LICENSE file.
 ---
-name: "Harden Runner"
-description: "Security hardening for GitHub Actions runners using StepSecurity"
+name: "Harden Runner (retired)"
+description: >-
+  RETIRED (#412/#420). Do not use this local composite. GitHub skips pre/post
+  hooks for workspace-local actions, so nesting step-security/harden-runner
+  here left egress enforcement inert. Invoke
+  step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920
+  (v2.20.0) as a direct workflow step after resolve-egress-allowlist (or after
+  checkout-and-harden). This directory still ships resolve-egress-endpoints.sh
+  and lib/ for the sibling resolve-egress-allowlist composite.
 author: "lgtm-hq"
-
-inputs:
-  # Default block is intentional (see CHANGELOG: reusable workflows #268). Callers
-  # that need audit-only must set egress-policy: audit explicitly.
-  egress-policy:
-    description: "Egress policy: audit (log) or block (enforce allowlist)"
-    required: false
-    default: "block"
-  allowed-endpoints:
-    description: >-
-      Allowed endpoints when egress-policy is block. Use
-      ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist in a prior workflow
-      step when
-      applying egress-preset or merging presets with caller overrides.
-    required: false
-    default: ""
-  disable-sudo:
-    description: "Disable sudo access for the runner"
-    required: false
-    default: "false"
-  disable-telemetry:
-    description: "Disable StepSecurity telemetry"
-    required: false
-    default: "false"
-
-outputs:
-  harden-runner-agent-log:
-    description: "Path to the harden-runner agent log"
-    value: ${{ steps.harden.outputs['harden-runner-agent-log'] }}
 
 runs:
   using: "composite"
   steps:
-    # Create agent state before harden-runner; uses sudo while disable-sudo is still off.
-    # Linux-only: StepSecurity agent requires /home/agent (unavailable on Windows/macOS).
-    # Call validate-runner-policy first and skip this action when enforce-egress is false.
-    - name: Ensure agent state for post cleanup
-      if: runner.os == 'Linux'
+    - name: Refuse retired local harden-runner composite
       shell: bash
       run: |
-        sudo mkdir -p /home/agent
-        echo '{"event":"post","status":"skipped"}' | sudo tee /home/agent/post_event.json >/dev/null
-
-    - name: Harden Runner
-      id: harden
-      # Pinned to SHA for supply chain security
-      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-      with:
-        egress-policy: ${{ inputs['egress-policy'] }}
-        allowed-endpoints: ${{ inputs['allowed-endpoints'] }}
-        disable-sudo: ${{ inputs['disable-sudo'] }}
-        disable-telemetry: ${{ inputs['disable-telemetry'] }}
+        echo "::error::Local .github/actions/harden-runner is retired (#412/#420)."
+        echo "Invoke step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0"
+        echo "as a direct workflow step after resolve-egress-allowlist / checkout-and-harden."
+        exit 1
 
 branding:
   icon: "shield"

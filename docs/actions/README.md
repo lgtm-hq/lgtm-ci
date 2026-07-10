@@ -104,7 +104,7 @@ jobs:
           egress-policy: block
           egress-preset: github-tooling
 
-      - uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+      - uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: block
           allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}

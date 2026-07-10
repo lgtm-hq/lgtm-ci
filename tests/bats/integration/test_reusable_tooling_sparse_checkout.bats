@@ -86,7 +86,10 @@ jobs:
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
       - name: Harden runner
-        uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: block
+          allowed-endpoints: github.com:443
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" ACTIONS_DIR="${actions_dir}" run "${VALIDATOR}"

@@ -5,8 +5,9 @@
 load "../../helpers/common"
 
 VALIDATE="${PROJECT_ROOT}/scripts/ci/actions/validate-harden-runner-action-ref.sh"
+HARDEN_PIN='step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0'
 
-@test "validate-harden-runner-action-ref: all reusables use .lgtm-ci-tooling egress composites" {
+@test "validate-harden-runner-action-ref: all reusables use direct step-security/harden-runner" {
 	run bash "$VALIDATE"
 	assert_success
 }
@@ -55,6 +56,11 @@ ${bootstrap:+$bootstrap
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           egress-policy: block
+      - name: Harden runner
+        uses: ${HARDEN_PIN}
+        with:
+          egress-policy: block
+          allowed-endpoints: \${{ steps.egress.outputs['allowed-endpoints'] }}
 EOF
 }
 
@@ -91,7 +97,7 @@ EOF
 @test "validate-harden-runner-action-ref: flags a 4-space-indented job that skips its bootstrap" {
 	local dir="$BATS_TEST_TMPDIR/wf"
 	mkdir -p "$dir"
-	cat >"$dir/reusable-fixture.yml" <<'EOF'
+	cat >"$dir/reusable-fixture.yml" <<EOF
 name: Fixture
 on:
   workflow_call:
@@ -116,6 +122,11 @@ jobs:
               uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
               with:
                   egress-policy: block
+            - name: Harden runner
+              uses: ${HARDEN_PIN}
+              with:
+                  egress-policy: block
+                  allowed-endpoints: \${{ steps.egress.outputs['allowed-endpoints'] }}
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_failure
@@ -127,7 +138,7 @@ EOF
 @test "validate-harden-runner-action-ref: accepts a 4-space-indented job that bootstraps its own checkout" {
 	local dir="$BATS_TEST_TMPDIR/wf"
 	mkdir -p "$dir"
-	cat >"$dir/reusable-fixture.yml" <<'EOF'
+	cat >"$dir/reusable-fixture.yml" <<EOF
 name: Fixture
 on:
   workflow_call:
@@ -159,6 +170,11 @@ jobs:
               uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
               with:
                   egress-policy: block
+            - name: Harden runner
+              uses: ${HARDEN_PIN}
+              with:
+                  egress-policy: block
+                  allowed-endpoints: \${{ steps.egress.outputs['allowed-endpoints'] }}
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_success

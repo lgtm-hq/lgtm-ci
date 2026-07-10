@@ -109,7 +109,8 @@ composites for them. See
 
 Consumers do **not** need to vendor `.github/actions/harden-runner` or
 `resolve-egress-allowlist` — reusables sparse-checkout lgtm-ci into
-`.lgtm-ci-tooling/` internally.
+`.lgtm-ci-tooling/` for allowlist resolution and invoke
+`step-security/harden-runner` directly.
 
 Caller examples live under [examples/](../../examples/) (see
 [examples/README.md](../../examples/README.md)); the task-ordered setup

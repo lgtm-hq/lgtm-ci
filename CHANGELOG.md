@@ -11,11 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **security**: invoke `step-security/harden-runner@v2.20.0` as a direct workflow
+  step in all hardened reusables; retire the local harden-runner composite wrapper
+  so the action `pre` hook installs the egress agent (#412, #420)
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **security**: restore egress enforcement on GitHub-hosted runners — nesting
+  step-security inside the `.lgtm-ci-tooling` local composite skipped `pre`,
+  leaving `egress-policy: block` inert and emitting
+  "`pre` execution is not supported" (#412, #420)
 
 ### Security
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Ensure reusables load egress composites via .lgtm-ci-tooling checkout (#279)
+# Purpose: Ensure reusables invoke step-security/harden-runner directly (#412/#420)
 #
 # Usage:
 #   bash scripts/ci/actions/validate-harden-runner-action-ref.sh
@@ -9,17 +9,20 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
-HARDEN_ACTION="$REPO_ROOT/.github/actions/harden-runner/action.yml"
 # Overridable so tests can point the validator at a fixture directory. The
 # release/renovate-specific checks below tolerate missing files, so a fixture
 # dir containing only reusable-*.yml is safe.
 WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 
+HARDEN_SHA='bf7454d06d71f1098171f2acdf0cd4708d7b5920'
+STEP_SECURITY_HARDEN_RE="^[[:space:]]+uses:[[:space:]]+step-security/harden-runner@${HARDEN_SHA}([[:space:]]+#.*)?[[:space:]]*$"
 TOOLING_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 TOOLING_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/harden-runner[[:space:]]*$'
 IN_REPO_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 IN_REPO_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/harden-runner[[:space:]]*$'
 REMOTE_EGRESS_RE='lgtm-hq/lgtm-ci/\.github/actions/(harden-runner|resolve-egress-allowlist)@'
+TOOLING_CAH_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden[[:space:]]*$'
+ANY_STEP_SECURITY_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+step-security/harden-runner@'
 
 violations=0
 
@@ -44,6 +47,7 @@ _check_job_egress_order() {
 				in_jobs = 0
 				tooling_line = 0
 				resolve_line = 0
+				cah_line = 0
 				job_indent = -1
 			}
 			/^jobs:/ {
@@ -68,6 +72,7 @@ _check_job_egress_order() {
 					if (length(lead) == job_indent) {
 						tooling_line = 0
 						resolve_line = 0
+						cah_line = 0
 						next
 					}
 				}
@@ -77,9 +82,16 @@ _check_job_egress_order() {
 				next
 			}
 			$0 ~ /^[[:space:]]+- name: Checkout lgtm-ci tooling/ {
-				if (resolve_line == 0) {
+				if (resolve_line == 0 && cah_line == 0) {
 					tooling_line = NR
 				}
+				next
+			}
+			$0 ~ /^[[:space:]]+uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
+				if (tooling_line == 0 || tooling_line >= NR) {
+					report("Checkout lgtm-ci tooling must precede checkout-and-harden (checkout-and-harden at line " NR ")")
+				}
+				cah_line = NR
 				next
 			}
 			$0 ~ /^[[:space:]]+uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/resolve-egress-allowlist/ {
@@ -89,14 +101,15 @@ _check_job_egress_order() {
 				resolve_line = NR
 				next
 			}
-			$0 ~ /^[[:space:]]+uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/harden-runner/ {
-				if (resolve_line == 0 || resolve_line >= NR) {
-					report("resolve-egress-allowlist must appear before harden-runner (harden-runner at line " NR ")")
+			$0 ~ /^[[:space:]]+uses:[[:space:]]+step-security\/harden-runner@/ {
+				if (cah_line == 0 && (resolve_line == 0 || resolve_line >= NR)) {
+					report("resolve-egress-allowlist or checkout-and-harden must appear before step-security/harden-runner (harden at line " NR ")")
 				}
-				if (tooling_line == 0 || tooling_line >= NR) {
-					report("Checkout lgtm-ci tooling must precede harden-runner (harden-runner at line " NR ")")
+				if (cah_line == 0 && (tooling_line == 0 || tooling_line >= NR)) {
+					report("Checkout lgtm-ci tooling must precede step-security/harden-runner (harden at line " NR ")")
 				}
 				resolve_line = 0
+				cah_line = 0
 				next
 			}
 		' "$workflow"
@@ -124,10 +137,14 @@ _check_harden_with_blocks() {
 			' "$workflow"
 		)"
 		if grep -qE 'egress-preset:' <<<"$block"; then
-			echo "${wf_name}:${line_num}: pass egress-preset to resolve-egress-allowlist, not harden-runner" >&2
+			echo "${wf_name}:${line_num}: pass egress-preset to resolve-egress-allowlist / checkout-and-harden, not step-security/harden-runner" >&2
 			violations=$((violations + 1))
 		fi
-	done < <(grep -nE "$TOOLING_HARDEN_RE" "$workflow" | cut -d: -f1)
+		if ! grep -qE "allowed-endpoints:[[:space:]]+\\\$\{\{[[:space:]]*steps\.[A-Za-z0-9_-]+\.outputs\['allowed-endpoints'\]" <<<"$block"; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner must use steps.<id>.outputs['allowed-endpoints']" >&2
+			violations=$((violations + 1))
+		fi
+	done < <(grep -nE "$ANY_STEP_SECURITY_HARDEN_RE" "$workflow" | cut -d: -f1)
 }
 
 _check_release_two_phase_sparse() {
@@ -170,39 +187,6 @@ _check_release_two_phase_sparse() {
 		' "$workflow"
 	)
 }
-
-while IFS= read -r -d '' file; do
-	line_num=0
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		line_num=$((line_num + 1))
-		if [[ "$line" =~ $REMOTE_EGRESS_RE ]]; then
-			echo "$file:$line_num: do not use remote lgtm-hq/lgtm-ci egress action refs (use .lgtm-ci-tooling checkout)" >&2
-			echo "  $line" >&2
-			violations=$((violations + 1))
-		fi
-		if [[ "$line" == *".lgtm-ci-egress"* ]]; then
-			echo "$file:$line_num: remove .lgtm-ci-egress workaround" >&2
-			violations=$((violations + 1))
-		fi
-	done <"$file"
-done < <(find "$WORKFLOWS_DIR" \( -name 'reusable-*.yml' -o -name 'renovate.yml' \) -print0)
-
-if grep -qE "steps\.resolve\.outputs\['allowed-endpoints'\]" "$HARDEN_ACTION"; then
-	echo "harden-runner/action.yml: must pass inputs['allowed-endpoints'] (pre-hook cannot read composite step outputs)" >&2
-	violations=$((violations + 1))
-fi
-
-if ! grep -qE 'allowed-endpoints:[[:space:]]+\$\{\{[[:space:]]+inputs\[.allowed-endpoints.\]' "$HARDEN_ACTION"; then
-	echo "harden-runner/action.yml: must forward allowed-endpoints from inputs['allowed-endpoints']" >&2
-	violations=$((violations + 1))
-fi
-
-if grep -qE "^\s+egress-preset:" "$HARDEN_ACTION"; then
-	echo "harden-runner/action.yml: egress-preset belongs on resolve-egress-allowlist, not harden-runner" >&2
-	violations=$((violations + 1))
-fi
-
-TOOLING_CAH_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden[[:space:]]*$'
 
 _check_checkout_and_harden() {
 	local workflow="$1"
@@ -248,28 +232,93 @@ _check_checkout_and_harden() {
 	fi
 }
 
+_check_cah_followed_by_step_security() {
+	local workflow="$1"
+	local wf_name="${workflow##*/}"
+
+	while IFS= read -r msg; do
+		[[ -z "$msg" ]] && continue
+		echo "$msg" >&2
+		violations=$((violations + 1))
+	done < <(
+		awk -v wf="$wf_name" '
+			/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
+				pending = 1
+				cah_line = NR
+				next
+			}
+			pending && /^[[:space:]]+- name:/ {
+				if ($0 ~ /Harden [Rr]unner/) {
+					expect_uses = 1
+					next
+				}
+				print wf ": checkout-and-harden at line " cah_line " must be followed by a Harden runner step using step-security/harden-runner"
+				pending = 0
+				expect_uses = 0
+			}
+			pending && expect_uses && /^[[:space:]]+uses:/ {
+				if ($0 !~ /step-security\/harden-runner@/) {
+					print wf ": Harden runner after checkout-and-harden (line " cah_line ") must use step-security/harden-runner@<pinned SHA>"
+				}
+				pending = 0
+				expect_uses = 0
+			}
+		' "$workflow"
+	)
+}
+
+while IFS= read -r -d '' file; do
+	line_num=0
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line_num=$((line_num + 1))
+		if [[ "$line" =~ $REMOTE_EGRESS_RE ]]; then
+			echo "$file:$line_num: do not use remote lgtm-hq/lgtm-ci egress action refs (use .lgtm-ci-tooling checkout + direct step-security/harden-runner)" >&2
+			echo "  $line" >&2
+			violations=$((violations + 1))
+		fi
+		if [[ "$line" == *".lgtm-ci-egress"* ]]; then
+			echo "$file:$line_num: remove .lgtm-ci-egress workaround" >&2
+			violations=$((violations + 1))
+		fi
+		if [[ "$line" =~ $TOOLING_HARDEN_RE ]] || [[ "$line" =~ $IN_REPO_HARDEN_RE ]]; then
+			echo "$file:$line_num: local harden-runner composite is retired; use step-security/harden-runner@${HARDEN_SHA}" >&2
+			echo "  $line" >&2
+			violations=$((violations + 1))
+		fi
+		if [[ "$line" =~ $ANY_STEP_SECURITY_HARDEN_RE ]] && ! [[ "$line" =~ $STEP_SECURITY_HARDEN_RE ]]; then
+			echo "$file:$line_num: step-security/harden-runner must be pinned to ${HARDEN_SHA} # v2.20.0" >&2
+			echo "  $line" >&2
+			violations=$((violations + 1))
+		fi
+	done <"$file"
+done < <(find "$WORKFLOWS_DIR" \( -name 'reusable-*.yml' -o -name 'renovate.yml' \) -print0)
+
 while IFS= read -r -d '' workflow; do
 	[[ -f "$workflow" ]] || continue
 	wf_name="${workflow##*/}"
 	_check_checkout_and_harden "$workflow"
-	if ! grep -qE "$TOOLING_HARDEN_RE" "$workflow"; then
+	_check_cah_followed_by_step_security "$workflow"
+
+	if ! grep -qE "$ANY_STEP_SECURITY_HARDEN_RE" "$workflow"; then
+		# Some reusables may not harden (none today); skip only if they also
+		# lack checkout-and-harden / resolve-egress.
+		if grep -qE "$TOOLING_CAH_RE|$TOOLING_RESOLVE_RE" "$workflow"; then
+			echo "${wf_name}: resolves egress but missing step-security/harden-runner@${HARDEN_SHA}" >&2
+			violations=$((violations + 1))
+		fi
 		continue
 	fi
-	if ! grep -qE "$TOOLING_RESOLVE_RE" "$workflow"; then
-		echo "${wf_name}: uses harden-runner but missing resolve-egress-allowlist step" >&2
-		violations=$((violations + 1))
-	fi
-	if ! grep -qF "steps.egress.outputs['allowed-endpoints']" "$workflow"; then
-		echo "${wf_name}: harden-runner must use steps.egress.outputs['allowed-endpoints']" >&2
-		violations=$((violations + 1))
-	fi
-	if ! grep -qE 'Checkout lgtm-ci (egress )?tooling' "$workflow"; then
-		echo "${wf_name}: missing Checkout lgtm-ci tooling step before egress composites" >&2
-		violations=$((violations + 1))
-	fi
+
 	if grep -qE "$IN_REPO_RESOLVE_RE" "$workflow" || grep -qE "$IN_REPO_HARDEN_RE" "$workflow"; then
 		echo "${wf_name}: caller-local ./.github/actions egress paths are forbidden in reusables" >&2
 		violations=$((violations + 1))
+	fi
+	if ! grep -qE 'Checkout lgtm-ci (egress )?tooling' "$workflow" && ! grep -qE "$TOOLING_CAH_RE" "$workflow"; then
+		# Direct resolve pattern still needs tooling checkout.
+		if grep -qE "$TOOLING_RESOLVE_RE" "$workflow"; then
+			echo "${wf_name}: missing Checkout lgtm-ci tooling step before egress resolve" >&2
+			violations=$((violations + 1))
+		fi
 	fi
 	_check_job_egress_order "$workflow"
 	_check_harden_with_blocks "$workflow"
@@ -284,12 +333,12 @@ if [[ -f "$renovate" ]]; then
 		echo "renovate.yml: missing ./.github/actions/resolve-egress-allowlist step" >&2
 		violations=$((violations + 1))
 	fi
-	if ! grep -qE "$IN_REPO_HARDEN_RE" "$renovate"; then
-		echo "renovate.yml: missing ./.github/actions/harden-runner step" >&2
+	if ! grep -qE "$STEP_SECURITY_HARDEN_RE" "$renovate"; then
+		echo "renovate.yml: missing step-security/harden-runner@${HARDEN_SHA}" >&2
 		violations=$((violations + 1))
 	fi
-	if grep -qE "$TOOLING_HARDEN_RE" "$renovate"; then
-		echo "renovate.yml: must use in-repo ./.github/actions (runs in lgtm-ci)" >&2
+	if grep -qE "$TOOLING_HARDEN_RE|$IN_REPO_HARDEN_RE" "$renovate"; then
+		echo "renovate.yml: local harden-runner composite is retired; use step-security/harden-runner@${HARDEN_SHA}" >&2
 		violations=$((violations + 1))
 	fi
 fi
@@ -298,4 +347,4 @@ if [[ $violations -gt 0 ]]; then
 	exit 1
 fi
 
-echo "All reusables use .lgtm-ci-tooling egress composites; renovate uses in-repo paths"
+echo "All reusables use direct step-security/harden-runner@${HARDEN_SHA}; renovate matches"

@@ -63,22 +63,25 @@ merges preset + extras with deduplication. Presets are defined in
 
 ## harden-runner
 
-Security hardening using [StepSecurity](https://stepsecurity.io). Pass
-**resolved** `allowed-endpoints` from a prior `resolve-egress-allowlist` step.
+Security hardening using [StepSecurity](https://stepsecurity.io). Invoke
+`step-security/harden-runner` as a **direct** workflow step (pinned SHA) so its
+`pre` hook installs the egress agent (#412/#420). Pass **resolved**
+`allowed-endpoints` from a prior `resolve-egress-allowlist` or
+`checkout-and-harden` step.
 
 ```yaml
-- uses: ./.lgtm-ci-tooling/.github/actions/harden-runner
+- uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
   with:
     egress-policy: block # default; use audit to log only
     allowed-endpoints: ${{ steps.egress.outputs['allowed-endpoints'] }}
     disable-sudo: "false" # optional
 ```
 
-Reusable workflows check out lgtm-ci into `.lgtm-ci-tooling` before egress
-steps — consumers do not copy `harden-runner` or `resolve-egress-allowlist`
-into their repo. Do not use caller-local `./.github/actions/...` in
-cross-repo reusables, and do not use `${{ }}` in remote action `@ref`
-segments inside `uses:`.
+Reusable workflows check out lgtm-ci into `.lgtm-ci-tooling` for allowlist
+resolution — consumers do not copy `resolve-egress-allowlist` into their repo.
+Do not nest step-security inside a local composite, do not use caller-local
+`./.github/actions/harden-runner` (retired), and do not use `${{ }}` in remote
+action `@ref` segments inside `uses:`.
 
 ## secure-checkout
 
