@@ -22,6 +22,15 @@ load "../../helpers/common"
 	assert_success
 }
 
+@test "reusable-validate-action-pinning: accepts gh-token secret and forwards to action" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-validate-action-pinning.yml"
+
+	run grep -F 'gh-token:' "$workflow"
+	assert_success
+	run grep -F 'gh-token: ${{ secrets.gh-token }}' "$workflow"
+	assert_success
+}
+
 @test "validate-action-pinning action: wires GH_TOKEN for verify-tags API resolution" {
 	local action="${PROJECT_ROOT}/.github/actions/validate-action-pinning/action.yml"
 

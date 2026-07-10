@@ -3,6 +3,14 @@ name: Reusable Validate Action Pinning
 
 on:
   workflow_call:
+    secrets:
+      gh-token:
+        description: >-
+          GitHub token forwarded to the composite action for verify-tags /
+          audit-transitive API resolution (e.g. a PAT able to resolve private
+          or cross-org actions). Optional — falls back to GH_TOKEN env var,
+          then the workflow token.
+        required: false
     inputs:
       fail-on-error:
         description: "Fail if non-pinned actions are found"
@@ -140,3 +148,4 @@ jobs:
           scan-paths: ${{ inputs.scan-paths }}
           verify-tags: ${{ inputs.verify-tags }}
           audit-transitive: ${{ inputs.audit-transitive }}
+          gh-token: ${{ secrets.gh-token }}
