@@ -1,0 +1,42 @@
+[
+  {
+    "id": 16132640,
+    "name": "checks-py-lintro",
+    "target": "branch",
+    "source_type": "Organization",
+    "source": "lgtm-hq",
+    "enforcement": "active",
+    "node_id": "RRS_lADOLEx45M8AAAABJg",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": ["~DEFAULT_BRANCH"]
+      },
+      "repository_name": {
+        "exclude": [],
+        "include": ["py-lintro"],
+        "protected": false
+      }
+    }
+  },
+  {
+    "id": 16132643,
+    "name": "checks-rustume",
+    "target": "branch",
+    "source_type": "Organization",
+    "source": "lgtm-hq",
+    "enforcement": "evaluate",
+    "node_id": "RRS_lADOLEx45M8AAAABJh",
+    "conditions": {
+      "ref_name": {
+        "exclude": [],
+        "include": ["~DEFAULT_BRANCH"]
+      },
+      "repository_name": {
+        "exclude": [],
+        "include": ["Rustume"],
+        "protected": false
+      }
+    }
+  }
+]

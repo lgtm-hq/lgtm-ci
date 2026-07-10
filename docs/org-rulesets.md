@@ -43,10 +43,13 @@ update this table in the same PR that updates the live ruleset.
 ## Tooling
 
 Operator scripts live under `scripts/ci/org/`. They require org-admin `gh`
-auth and honor `LGTM_ORG` (default `lgtm-hq`). Workflow: export → edit
-locally → dry-run sync → apply.
+auth and honor `LGTM_ORG` (default `lgtm-hq`). Workflow: **discover → export
+→ edit locally → dry-run sync → apply**.
 
 ```bash
+# Discover: list all org rulesets (id, name, enforcement, target repos)
+scripts/ci/org/list-rulesets.sh
+
 # Fetch a live ruleset (read-only; stdout by default, -o for a local file)
 scripts/ci/org/export-ruleset.sh checks-py-lintro 16132640 -o /tmp/ruleset.json
 
@@ -56,6 +59,10 @@ scripts/ci/org/sync-ruleset.sh /tmp/ruleset.json
 # Apply the change to the live org ruleset
 scripts/ci/org/sync-ruleset.sh --apply /tmp/ruleset.json
 ```
+
+`list-rulesets.sh` prints a compact table of ruleset id, name, enforcement
+level, and target repositories — use it to find the id before exporting.
+Pass `-q` to suppress informational log lines.
 
 `sync-ruleset.sh` strips read-only fields (`id`, `node_id`, `source`,
 `created_at`, `_links`, …) before the PUT and is a dry run unless `--apply`
