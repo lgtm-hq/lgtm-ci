@@ -23,9 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **sbom**: default fail-on-severity to critical in reusable-sbom (#498) (a27008f)
 - **deps**: track harden-runner SHA pins outside workflows via Renovate (#496) (e9fdfc6)
-- **release**: remove dead create-version-pr.sh and its BATS suite (#495) (5f0f307)
 - **workflows**: **BREAKING** — `reusable-sbom.yml` now defaults
   `fail-on-severity` to `critical` instead of `""` (#480). Consumers that relied
   on advisory-only scans (generate + scan without failing the job) must opt out
