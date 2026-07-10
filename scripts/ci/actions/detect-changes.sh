@@ -89,6 +89,26 @@ load_filters_text() {
 	printf '%s' "$filters"
 }
 
+# Match a top-level dorny YAML filter key on an unindented line.
+# Supports unquoted names (letters/digits/_/-/.) and single-/double-quoted
+# names (e.g. "api/v2", 'frontend.app').
+parse_top_level_filter_key() {
+	local line="$1"
+	if [[ "$line" =~ ^\"([^\"]+)\":([[:space:]]|$) ]]; then
+		printf '%s\n' "${BASH_REMATCH[1]}"
+		return 0
+	fi
+	if [[ "$line" =~ ^\'([^\']+)\':([[:space:]]|$) ]]; then
+		printf '%s\n' "${BASH_REMATCH[1]}"
+		return 0
+	fi
+	if [[ "$line" =~ ^([A-Za-z0-9_][A-Za-z0-9_.-]*):([[:space:]]|$) ]]; then
+		printf '%s\n' "${BASH_REMATCH[1]}"
+		return 0
+	fi
+	return 1
+}
+
 looks_like_legacy_line_format() {
 	local filters="$1"
 	local line trimmed
@@ -102,7 +122,7 @@ looks_like_legacy_line_format() {
 			saw_legacy=1
 			continue
 		fi
-		if [[ "$line" =~ ^[A-Za-z0-9_-]+:([[:space:]]|$) ]]; then
+		if parse_top_level_filter_key "$line" >/dev/null; then
 			saw_yaml_key=1
 		fi
 	done <<<"$filters"
@@ -127,9 +147,9 @@ extract_filter_names() {
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		trimmed="${line#"${line%%[![:space:]]*}"}"
 		[[ -z "$trimmed" || "$trimmed" == \#* ]] && continue
-		# Top-level dorny filter keys are unindented `name:` entries.
-		if [[ "$line" =~ ^([A-Za-z0-9_-]+):([[:space:]]|$) ]]; then
-			name="${BASH_REMATCH[1]}"
+		# Top-level dorny filter keys are unindented `name:` entries
+		# (unquoted with ._- or quoted for special characters).
+		if name="$(parse_top_level_filter_key "$line")"; then
 			names+=("$name")
 			continue
 		fi

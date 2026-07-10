@@ -173,6 +173,26 @@ run_detect() {
 	assert_output "false"
 }
 
+
+@test "detect-changes: resolve extracts dotted and quoted YAML filter names" {
+	local filters=$'frontend.app:\n  - \'packages/frontend/**\'\n"api/v2":\n  - \'packages/api/**\'\n\'docs-site\':\n  - \'docs/**\''
+	run_detect STEP=resolve FILTERS="$filters" BASE_SHA="abc123" HEAD_SHA="def456" \
+		EVENT_NAME=pull_request
+	assert_success
+	run get_github_output "filter-names"
+	assert_output "frontend.app api/v2 docs-site"
+}
+
+@test "detect-changes: map preserves dotted filter names in changes JSON" {
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES="frontend.app api/v2" \
+		DORNY_CHANGES='["frontend.app"]'
+	assert_success
+	run get_github_output "changes"
+	assert_output '{"frontend.app":true,"api/v2":false}'
+	run get_github_output "any-changed"
+	assert_output "true"
+}
+
 @test "detect-changes: script is executable (action invokes it directly)" {
 	# The composite action runs "$SCRIPTS_DIR/ci/actions/detect-changes.sh"
 	# with no bash prefix, so a missing execute bit fails at runtime (126).
