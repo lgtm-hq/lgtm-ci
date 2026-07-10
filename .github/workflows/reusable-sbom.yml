@@ -25,10 +25,12 @@ on:
         type: boolean
         default: true
       fail-on-severity:
-        description: "Fail on vulnerability severity: critical, high, medium, low, none"
+        description: >-
+          Fail on vulnerability severity: critical, high, medium, low, none.
+          Empty string disables the gate (advisory-only).
         required: false
         type: string
-        default: ""
+        default: "critical"
       upload-sarif:
         description: "Upload vulnerability SARIF to GitHub Security"
         required: false

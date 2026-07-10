@@ -885,6 +885,18 @@ egress-preset: sbom
 Covers GitHub, Anchore (Syft/Grype), Sigstore attestation hosts. Canonical list:
 `scripts/ci/lib/egress/presets.sh` (preset name `sbom`).
 
+`reusable-sbom.yml` defaults `fail-on-severity` to `critical` (breaking as of
+issue #480). The Grype gate fails the job when findings meet or exceed that
+threshold. Callers that need the previous advisory-only posture must pass
+`fail-on-severity: ""` (or `none`):
+
+```yaml
+sbom:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+  with:
+    fail-on-severity: "" # advisory-only; default is critical
+```
+
 ## Action pinning policy
 
 Org repos must pin GitHub Actions to **commit SHAs only** and add a trailing

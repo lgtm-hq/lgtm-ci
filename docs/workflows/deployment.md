@@ -107,7 +107,12 @@ job). Manifest schema and `workflow_run` caller patterns:
 
 ## Supply chain
 
-`reusable-sbom.yml` generates an SBOM with Cosign signing.
+`reusable-sbom.yml` generates an SBOM (Syft), optionally scans it with Grype, and
+can create a Sigstore attestation. `fail-on-severity` defaults to `critical` —
+the job fails when Grype finds vulnerabilities at that severity or higher. Opt
+out of the gate with `fail-on-severity: ""` (or `none`) for advisory-only scans.
+See [workflow-contract.md](../workflow-contract.md#sbom--attestation) and
+[reusable-workflows.md](../reusable-workflows.md#sbom-reusable-sbomyml).
 
 ### Rust release binaries
 

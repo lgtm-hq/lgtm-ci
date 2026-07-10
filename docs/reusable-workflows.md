@@ -814,6 +814,37 @@ receives full SBOM and provenance attestations.
 
 All inputs are opt-in; existing callers keep current behavior without changes.
 
+### SBOM (`reusable-sbom.yml`)
+
+Generates an SBOM with Syft, optionally scans it with Grype, and can create a
+Sigstore attestation. Used by release layouts such as
+[python-release-publish.md](python-release-publish.md).
+
+| Input                  | Default      | Description                                      |
+| ---------------------- | ------------ | ------------------------------------------------ |
+| `scan-vulnerabilities` | `true`       | Run Grype against the generated SBOM             |
+| `fail-on-severity`     | `"critical"` | Fail when findings meet this severity or higher  |
+| `upload-sarif`         | `false`      | Upload Grype SARIF to GitHub Security            |
+| `create-attestation`   | `false`      | Create a Sigstore attestation for the SBOM       |
+| `egress-preset`        | `sbom`       | Harden-runner allowlist preset (workflow-contract) |
+
+**Breaking (#480):** `fail-on-severity` previously defaulted to `""` (advisory
+only). Callers that must keep advisory-only behavior should pass
+`fail-on-severity: ""` or `none`.
+
+```yaml
+sbom:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+  permissions:
+    contents: read
+    security-events: write
+    id-token: write
+    attestations: write
+  with:
+    # default fail-on-severity is critical; opt out for advisory-only:
+    # fail-on-severity: ""
+```
+
 ## PR Automation And Security
 
 ### Semantic PR title

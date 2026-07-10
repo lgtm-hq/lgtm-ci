@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **workflows**: **BREAKING** — `reusable-sbom.yml` now defaults
+  `fail-on-severity` to `critical` instead of `""` (#480). Consumers that relied
+  on advisory-only scans (generate + scan without failing the job) must opt out
+  explicitly with `fail-on-severity: ""` (or `none`). Coordinate consumer repos
+  before adopting a release that includes this change.
+
 ### Deprecated
 
 ### Removed
