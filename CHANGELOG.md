@@ -15,6 +15,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **release**: remove dead `create-version-pr.sh` monolith and its BATS suite (#481)
+
 ### Fixed
 
 ### Security
