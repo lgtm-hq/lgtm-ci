@@ -11,21 +11,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.52.0] - 2026-07-10
+
+### Changed
+
+- **sbom**: default fail-on-severity to critical in reusable-sbom (#498) (a27008f)
+- **deps**: track harden-runner SHA pins outside workflows via Renovate (#496) (e9fdfc6)
+- **release**: remove dead create-version-pr.sh and its BATS suite (#495) (5f0f307)
 - **workflows**: **BREAKING** — `reusable-sbom.yml` now defaults
   `fail-on-severity` to `critical` instead of `""` (#480). Consumers that relied
   on advisory-only scans (generate + scan without failing the job) must opt out
   explicitly with `fail-on-severity: ""` (or `none`). Coordinate consumer repos
   before adopting a release that includes this change.
 
-### Deprecated
-
 ### Removed
 
 - **release**: remove dead `create-version-pr.sh` monolith and its BATS suite (#481)
-
-### Fixed
-
-### Security
 
 ## [0.51.0] - 2026-07-10
 
@@ -1428,7 +1437,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.51.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.0...HEAD
+[0.52.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.3...v0.51.0
 [0.50.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.2...v0.50.3
 [0.50.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.1...v0.50.2
