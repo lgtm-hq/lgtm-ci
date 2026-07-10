@@ -162,7 +162,8 @@ EOF
 		# Classify files into semantic categories and build summary rows
 		# with a Unicode distribution bar per category.
 		local -a all_group_rows=()
-		mapfile -t all_group_rows < <(jq -r --argjson cats "$categories_json" '
+		mapfile -t all_group_rows < <(printf '%s' "$categories_json" | jq -r --slurpfile files "$PR_FILES_JSON" '
+			. as $cats | $files[0] |
 			def classify:
 				.filename as $f |
 				(first(
@@ -184,7 +185,7 @@ EOF
 			(map(.deletions) | add // 0) as $del |
 			(if $total > 0 then ($count * 100 / $total | floor) else 0 end) as $pct |
 			"| \(.[0].category | gsub("\\|"; "\\|")) | \($count) | +\($add) | -\($del) | \(bar($pct)) |"
-		' "$PR_FILES_JSON")
+		')
 		local total_groups=${#all_group_rows[@]}
 
 		# Render each candidate detail row (bounded by the row cap) as a single
