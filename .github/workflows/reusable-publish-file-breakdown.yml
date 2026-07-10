@@ -55,6 +55,13 @@ on:
         required: false
         type: string
         default: "github-minimal"
+      config-path:
+        description: >-
+          Path to category config file relative to repo root
+          (default: .github/file-breakdown.yml)
+        required: false
+        type: string
+        default: ""
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
@@ -141,6 +148,7 @@ jobs:
           PR_FILES_JSON: pr-files.json
           MAX_ROWS: ${{ inputs.max-rows }}
           COMMENT_OUTPUT: file-breakdown.md
+          FILE_BREAKDOWN_CONFIG: ${{ inputs.config-path }}
           GITHUB_RUN_ID: ${{ github.run_id }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}

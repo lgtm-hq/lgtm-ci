@@ -30,6 +30,20 @@ write_mixed_fixture() {
 EOF
 }
 
+write_all_categories_fixture() {
+	local file="$1"
+	cat >"$file" <<'EOF'
+[
+  {"filename": ".github/workflows/ci.yml", "status": "modified", "additions": 3, "deletions": 1},
+  {"filename": "src/main.py", "status": "modified", "additions": 20, "deletions": 5},
+  {"filename": "tests/test_main.py", "status": "added", "additions": 15, "deletions": 0},
+  {"filename": "README.md", "status": "modified", "additions": 2, "deletions": 1},
+  {"filename": "logo.png", "status": "added", "additions": 0, "deletions": 0},
+  {"filename": "pyproject.toml", "status": "modified", "additions": 1, "deletions": 1}
+]
+EOF
+}
+
 # =============================================================================
 # STEP=generate - validation
 # =============================================================================
@@ -90,16 +104,16 @@ EOF
 	assert_output --partial "PR File Breakdown"
 }
 
-@test "generate-file-breakdown: groups files by top-level directory" {
+@test "generate-file-breakdown: classifies files into semantic categories" {
 	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
 	run env \
 		STEP="generate" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
 		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
-	assert_output --partial '| `scripts/` | 2 | +40 | -2 |'
-	assert_output --partial '| `docs/` | 1 | +5 | -5 |'
-	assert_output --partial '| `(root)` | 1 | +0 | -40 |'
+	assert_output --partial '| Implementation | 2 | +40 | -2 |'
+	assert_output --partial '| Docs | 2 | +5 | -45 |'
+	refute_output --partial '| `scripts/` |'
 }
 
 @test "generate-file-breakdown: reports totals and status counts" {
@@ -171,14 +185,30 @@ EOF
 	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" \
 		"dropped to keep this comment within GitHub's size limit"
 	# Fixed sections must survive the truncation.
-	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "| Area | Files |"
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "| Category | Files |"
 	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "View full build details"
 }
 
-@test "generate-file-breakdown: byte-caps area rows when details are already hidden" {
+@test "generate-file-breakdown: byte-caps category rows when details are already hidden" {
+	# Requires python3 + PyYAML — config with many categories triggers
+	# the category-row byte-cap path.
+	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
+
+	# Generate config with 5000 unique categories
+	python3 -c '
+import sys
+sys.stdout.write("categories:\n")
+for i in range(5000):
+    name = "service-component-with-a-very-long-unique-category-name-" + str(i)
+    sys.stdout.write("  " + name + ":\n")
+    sys.stdout.write("    - \"^unique-svc-dir-" + str(i) + "/\"\n")
+sys.stdout.write("  Uncategorized:\n")
+sys.stdout.write("    - \".\"\n")
+' >"${BATS_TEST_TMPDIR}/config.yml"
+
 	jq -n '
 		[range(0; 5000) | {
-			filename: ("service-component-with-a-very-long-unique-area-name-\(.)/handler.go"),
+			filename: ("unique-svc-dir-\(.)/handler.go"),
 			status: "modified",
 			additions: 1,
 			deletions: 1
@@ -189,6 +219,7 @@ EOF
 		STEP="generate" \
 		MAX_ROWS="500" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/config.yml" \
 		COMMENT_OUTPUT="${BATS_TEST_TMPDIR}/comment.md" \
 		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
@@ -199,7 +230,7 @@ EOF
 
 	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" "5000 file(s) changed"
 	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" \
-		"area(s) dropped to keep this comment within GitHub's size limit"
+		"category(ies) dropped to keep this comment within GitHub's size limit"
 	assert_file_contains_literal "${BATS_TEST_TMPDIR}/comment.md" \
 		"5000 more file(s) not shown (dropped to keep this comment within GitHub's size limit)."
 }
@@ -280,6 +311,184 @@ EOF
 		bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_success
 	assert_output --partial "<summary>Changed files</summary>"
+}
+
+# =============================================================================
+# STEP=generate - category classification
+# =============================================================================
+
+@test "generate-file-breakdown: classifies all six default categories" {
+	write_all_categories_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| CI-CD | 1 |'
+	assert_output --partial '| Implementation | 1 |'
+	assert_output --partial '| Tests | 1 |'
+	assert_output --partial '| Docs | 1 |'
+	assert_output --partial '| Images | 1 |'
+	assert_output --partial '| Config | 1 |'
+}
+
+@test "generate-file-breakdown: CI-CD category takes priority over Config for .github files" {
+	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
+[
+  {"filename": ".github/workflows/ci.yml", "status": "modified", "additions": 1, "deletions": 1},
+  {"filename": "config.yml", "status": "modified", "additions": 2, "deletions": 0}
+]
+EOF
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| CI-CD | 1 |'
+	assert_output --partial '| Config | 1 |'
+}
+
+@test "generate-file-breakdown: test patterns match various conventions" {
+	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
+[
+  {"filename": "tests/test_main.py", "status": "added", "additions": 10, "deletions": 0},
+  {"filename": "src/handler_test.go", "status": "added", "additions": 5, "deletions": 0},
+  {"filename": "app/models.spec.ts", "status": "added", "additions": 8, "deletions": 0},
+  {"filename": "__tests__/Button.test.jsx", "status": "added", "additions": 6, "deletions": 0}
+]
+EOF
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| Tests | 4 |'
+	refute_output --partial '| Implementation |'
+}
+
+# =============================================================================
+# STEP=generate - distribution bar
+# =============================================================================
+
+@test "generate-file-breakdown: renders distribution bar per category" {
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| Distribution |'
+	# Both categories have 2/4 files = 50% → 10 full blocks + 10 empty blocks
+	assert_output --partial '██████████░░░░░░░░░░ 50%'
+}
+
+@test "generate-file-breakdown: bar shows 100% for single category" {
+	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
+[
+  {"filename": "src/a.py", "status": "added", "additions": 10, "deletions": 0},
+  {"filename": "src/b.py", "status": "added", "additions": 5, "deletions": 0}
+]
+EOF
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '████████████████████ 100%'
+}
+
+# =============================================================================
+# STEP=generate - config override
+# =============================================================================
+
+@test "generate-file-breakdown: extends categories via config file" {
+	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
+
+	cat >"${BATS_TEST_TMPDIR}/config.yml" <<'YAML'
+categories:
+  Shell-Scripts:
+    - "\\.sh$"
+YAML
+
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/config.yml" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	# .sh files now match Shell-Scripts (inserted before catch-all)
+	assert_output --partial '| Shell-Scripts | 2 |'
+	assert_output --partial '| Docs | 2 |'
+	refute_output --partial '| Implementation |'
+}
+
+@test "generate-file-breakdown: overrides default category patterns via config" {
+	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
+
+	# Override Docs to only match .rst files
+	cat >"${BATS_TEST_TMPDIR}/config.yml" <<'YAML'
+categories:
+  Docs:
+    - "\\.rst$"
+YAML
+
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/config.yml" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	# No .rst files → Docs category absent; .md files fall to Implementation
+	refute_output --partial '| Docs |'
+	assert_output --partial '| Implementation | 4 |'
+}
+
+@test "generate-file-breakdown: coerces non-string YAML category keys" {
+	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
+
+	# Unquoted true: becomes bool True under yaml.safe_load — must still render.
+	cat >"${BATS_TEST_TMPDIR}/config.yml" <<'YAML'
+categories:
+  true:
+    - "\\.sh$"
+YAML
+
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/config.yml" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| True | 2 |'
+}
+
+@test "generate-file-breakdown: falls back to defaults when config is absent" {
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/nonexistent.yml" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| Implementation | 2 |'
+	assert_output --partial '| Docs | 2 |'
+}
+
+@test "generate-file-breakdown: falls back to defaults on invalid config" {
+	printf 'not: [valid: yaml: {{' >"${BATS_TEST_TMPDIR}/bad.yml"
+
+	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
+	run env \
+		STEP="generate" \
+		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
+		FILE_BREAKDOWN_CONFIG="${BATS_TEST_TMPDIR}/bad.yml" \
+		bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial '| Implementation | 2 |'
+	assert_output --partial '| Docs | 2 |'
 }
 
 # =============================================================================
