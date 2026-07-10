@@ -98,6 +98,10 @@ on:
           raw.githubusercontent.com:443
           uploads.github.com:443
           pipelines.actions.githubusercontent.com:443
+          archive.ubuntu.com:80
+          azure.archive.ubuntu.com:80
+          security.ubuntu.com:80
+          security.ubuntu.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:

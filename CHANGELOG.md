@@ -28,6 +28,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **security**: allow Ubuntu apt mirrors on shell-test jobs so kcov install
+  works under real harden-runner block policy
 - **security**: pass harden-runner allowlists as space-separated endpoints
   (YAML `>` folded scalars); newline-separated `|` lists were ignored by the
   agent, leaving only a stub `github.com` policy
