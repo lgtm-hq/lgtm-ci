@@ -113,11 +113,13 @@ egress_preset_endpoints() {
 		;;
 	npm-publish)
 		# npm publish + Sigstore attestation (reusable-publish-npm.yml).
-		# oauth2.sigstore.dev is required for OIDC trusted publishing.
+		# oauth2.sigstore.dev + token.actions.githubusercontent.com are required
+		# for OIDC trusted publishing / provenance token exchange.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
 			actions.githubusercontent.com:443 \
+			token.actions.githubusercontent.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
