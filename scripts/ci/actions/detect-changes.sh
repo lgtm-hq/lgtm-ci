@@ -20,7 +20,7 @@
 #   EVENT_NAME      github.event_name (resolve). PR events skip git reachability
 #                   checks because dorny uses the Pulls API.
 #   FAIL_OPEN       "true"/"false" (map).
-#   FILTER_NAMES    Space-separated filter names (map).
+#   FILTER_NAMES    Newline-separated filter names (map).
 #   DORNY_CHANGES   Dorny `changes` JSON array of matched names (map; optional).
 
 set -euo pipefail
@@ -218,7 +218,9 @@ resolve_step() {
 
 	{
 		echo "fail-open=${fail_open}"
-		echo "filter-names=${names[*]}"
+		echo "filter-names<<EOF"
+		printf '%s\n' "${names[@]}"
+		echo "EOF"
 		echo "base=${base_sha}"
 		echo "ref=${head_sha}"
 	} >>"$GITHUB_OUTPUT"
@@ -229,8 +231,12 @@ map_step() {
 	FAIL_OPEN="${FAIL_OPEN:-false}"
 
 	local -a names=()
-	# shellcheck disable=SC2206
-	names=($FILTER_NAMES)
+	local name
+	# Newline-separated so dorny keys with spaces survive the handoff.
+	while IFS= read -r name || [[ -n "$name" ]]; do
+		[[ -z "$name" ]] && continue
+		names+=("$name")
+	done <<<"$FILTER_NAMES"
 
 	if [[ "$FAIL_OPEN" == "true" ]]; then
 		echo "detect-changes: fail-open active; reporting all filters true" >&2

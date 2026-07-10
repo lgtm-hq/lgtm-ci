@@ -54,7 +54,7 @@ run_detect() {
 		EVENT_NAME=pull_request
 	assert_success
 	run get_github_output "filter-names"
-	assert_output "tests docs"
+	assert_output $'tests\ndocs'
 	run get_github_output "fail-open"
 	assert_output "false"
 	run get_github_output "base"
@@ -70,7 +70,7 @@ run_detect() {
 	run get_github_output "fail-open"
 	assert_output "true"
 	run get_github_output "filter-names"
-	assert_output "tests docs"
+	assert_output $'tests\ndocs'
 }
 
 @test "detect-changes: resolve unreachable base fails open on push" {
@@ -134,7 +134,7 @@ run_detect() {
 }
 
 @test "detect-changes: map fail-open reports all filters true" {
-	run_detect STEP=map FAIL_OPEN=true FILTER_NAMES="tests docs"
+	run_detect STEP=map FAIL_OPEN=true FILTER_NAMES=$'tests\ndocs'
 	assert_success
 	assert_output --partial "fail-open active"
 	run get_github_output "changes"
@@ -144,7 +144,7 @@ run_detect() {
 }
 
 @test "detect-changes: map converts dorny changes array to object" {
-	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES="tests docs" \
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'tests\ndocs' \
 		DORNY_CHANGES='["tests"]'
 	assert_success
 	run get_github_output "changes"
@@ -154,7 +154,7 @@ run_detect() {
 }
 
 @test "detect-changes: map with no dorny matches reports all false" {
-	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES="tests docs" \
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'tests\ndocs' \
 		DORNY_CHANGES='[]'
 	assert_success
 	run get_github_output "changes"
@@ -180,17 +180,33 @@ run_detect() {
 		EVENT_NAME=pull_request
 	assert_success
 	run get_github_output "filter-names"
-	assert_output "frontend.app api/v2 docs-site"
+	assert_output $'frontend.app\napi/v2\ndocs-site'
 }
 
 @test "detect-changes: map preserves dotted filter names in changes JSON" {
-	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES="frontend.app api/v2" \
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'frontend.app\napi/v2' \
 		DORNY_CHANGES='["frontend.app"]'
 	assert_success
 	run get_github_output "changes"
 	assert_output '{"frontend.app":true,"api/v2":false}'
 	run get_github_output "any-changed"
 	assert_output "true"
+}
+
+
+@test "detect-changes: resolve and map preserve filter names with spaces" {
+	local filters=$'"frontend app":\n  - \'packages/frontend/**\'\ndocs:\n  - \'docs/**\''
+	run_detect STEP=resolve FILTERS="$filters" BASE_SHA="abc123" HEAD_SHA="def456" \
+		EVENT_NAME=pull_request
+	assert_success
+	run get_github_output "filter-names"
+	assert_output $'frontend app\ndocs'
+
+	run_detect STEP=map FAIL_OPEN=false FILTER_NAMES=$'frontend app\ndocs' \
+		DORNY_CHANGES='["frontend app"]'
+	assert_success
+	run get_github_output "changes"
+	assert_output '{"frontend app":true,"docs":false}'
 }
 
 @test "detect-changes: script is executable (action invokes it directly)" {
