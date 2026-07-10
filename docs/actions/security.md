@@ -75,6 +75,9 @@ allowlists from **workflow inputs** (reusables bake the default preset into
 `allowed-endpoints`) or a **literal** `host:port` block — never from
 `steps.*.outputs` (those are empty at `pre` time and block all egress).
 
+Use YAML `>` (folded) for literal lists so endpoints are space-separated;
+harden-runner does not apply newline-separated `|` lists.
+
 Make this the **first step** in the job so the action `main` step applies the
 allowlist before checkout or other network I/O. `pre` alone is not enough.
 

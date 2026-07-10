@@ -113,7 +113,7 @@ on:
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: |
+        default: >
           github.com:443
           api.github.com:443
           codeload.github.com:443
@@ -226,7 +226,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: |
+          allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443
@@ -541,7 +541,7 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: |
+          allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443

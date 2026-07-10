@@ -23,7 +23,7 @@ jobs:
       egress-policy: block
       egress-preset: scorecard
       allowed-endpoints-mode: replace
-      allowed-endpoints: |
+      allowed-endpoints: >
         github.com:443
         api.github.com:443
         codeload.github.com:443

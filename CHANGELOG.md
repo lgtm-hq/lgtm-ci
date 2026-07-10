@@ -28,6 +28,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **security**: pass harden-runner allowlists as space-separated endpoints
+  (YAML `>` folded scalars); newline-separated `|` lists were ignored by the
+  agent, leaving only a stub `github.com` policy
 - **security**: run `step-security/harden-runner` as the first job step so its
   `main` applies the allowlist before checkout (`pre` alone left a stub policy
   that blocked github.com)

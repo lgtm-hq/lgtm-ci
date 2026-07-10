@@ -138,8 +138,8 @@ _check_harden_with_blocks() {
 		fi
 		# harden-runner's pre hook runs at job start, before any step outputs
 		# exist. Allowlists must come from workflow inputs or a literal block.
-		if ! grep -qE "allowed-endpoints:[[:space:]]+(\\\$\{\{[[:space:]]*inputs\.|\\|)" <<<"$block"; then
-			echo "${wf_name}:${line_num}: step-security/harden-runner must use inputs.* or a literal allowed-endpoints (not step outputs; pre runs at job start)" >&2
+		if ! grep -qE "allowed-endpoints:[[:space:]]+(\\\$\{\{[[:space:]]*inputs\.|\||>)" <<<"$block"; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner must use inputs.* or a literal allowed-endpoints (| or >) (not step outputs; pre runs at job start)" >&2
 			violations=$((violations + 1))
 		fi
 		if grep -qE "allowed-endpoints:[[:space:]]+\\\$\{\{[[:space:]]*steps\." <<<"$block"; then
@@ -379,8 +379,8 @@ if [[ -f "$renovate" ]]; then
 		echo "renovate.yml: missing step-security/harden-runner@${HARDEN_SHA}" >&2
 		violations=$((violations + 1))
 	fi
-	if ! grep -qE 'allowed-endpoints:[[:space:]]+\|' "$renovate"; then
-		echo "renovate.yml: harden-runner must use a literal allowed-endpoints block (pre runs at job start)" >&2
+	if ! grep -qE 'allowed-endpoints:[[:space:]]+[|>]' "$renovate"; then
+		echo "renovate.yml: harden-runner must use a literal allowed-endpoints block (| or >; pre runs at job start)" >&2
 		violations=$((violations + 1))
 	fi
 	if grep -qE "$TOOLING_HARDEN_RE|$IN_REPO_HARDEN_RE" "$renovate"; then

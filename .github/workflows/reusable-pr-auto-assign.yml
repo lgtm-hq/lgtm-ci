@@ -31,7 +31,7 @@ name: Reusable PR Auto Assign
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
-        default: |
+        default: >
           github.com:443
           api.github.com:443
           codeload.github.com:443
