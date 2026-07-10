@@ -19,6 +19,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.51.0] - 2026-07-10
+
+### Added
+
+- **org**: add list-rulesets.sh discovery helper (#490) (3281354)
+- **quality**: extend validate-static-job-names to flag any expression-based name with
+  if (#488) (8093712)
+- **ci**: wire main-failure-notifier into ci.yml (#489) (0f7413f)
+
 ## [0.50.3] - 2026-07-10
 
 ### Changed
@@ -1411,7 +1420,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.51.0...HEAD
+[0.51.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.3...v0.51.0
 [0.50.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.2...v0.50.3
 [0.50.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.1...v0.50.2
 [0.50.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.0...v0.50.1
