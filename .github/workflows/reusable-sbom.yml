@@ -131,7 +131,9 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
-      contents: read
+      # write: attach CycloneDX SBOM to the GitHub Release asset list
+      # (anchore/sbom-action defaults upload-release-assets on release events)
+      contents: write
       security-events: write
       id-token: write
       attestations: write
