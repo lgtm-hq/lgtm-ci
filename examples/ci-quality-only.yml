@@ -30,6 +30,6 @@ jobs:
       packages: read
     with:
       tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
-      job-name: "Lintro Quality Checks"
+      job-name: "🛠️ Lintro Code Quality"
       egress-policy: block
       egress-preset: quality

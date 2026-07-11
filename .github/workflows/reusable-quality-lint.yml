@@ -8,7 +8,7 @@ on:
         description: "GitHub check run name reported for this job"
         required: false
         type: string
-        default: "Lintro Quality Checks"
+        default: "🛠️ Lintro Code Quality"
       tools:
         description: "Comma-separated lintro --tools list (empty = all tools)"
         required: false
