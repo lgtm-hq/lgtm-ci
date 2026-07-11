@@ -60,17 +60,6 @@
   ],
   "packageRules": [
     {
-      "description": "Group lintro Docker image + PyPI pin so they update together",
-      "groupName": "lintro",
-      "matchPackageNames": ["ghcr.io/lgtm-hq/py-lintro", "lintro"],
-      "automerge": false
-    },
-    {
-      "matchDatasources": ["docker"],
-      "matchPackageNames": ["ghcr.io/lgtm-hq/py-lintro"],
-      "pinDigests": true
-    },
-    {
       "description": "Group harden-runner SHA pins so workflow and non-workflow copies update together",
       "groupName": "step-security/harden-runner",
       "matchPackageNames": ["step-security/harden-runner"],
