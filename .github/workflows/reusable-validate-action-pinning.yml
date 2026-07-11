@@ -12,6 +12,11 @@ on:
           then the workflow token.
         required: false
     inputs:
+      job-name:
+        description: "GitHub check name for the validation job"
+        required: false
+        type: string
+        default: "Validate Action Pinning"
       fail-on-error:
         description: "Fail if non-pinned actions are found"
         required: false
@@ -99,7 +104,7 @@ on:
 
 jobs:
   action-pinning:
-    name: Validate Action Pinning
+    name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:

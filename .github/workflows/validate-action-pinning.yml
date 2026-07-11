@@ -26,6 +26,7 @@ jobs:
   validate:
     uses: ./.github/workflows/reusable-validate-action-pinning.yml
     with:
+      job-name: "📌 Validate Action Pinning"
       fail-on-error: true
       verify-tags: true
       audit-transitive: true
