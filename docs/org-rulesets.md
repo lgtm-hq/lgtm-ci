@@ -28,17 +28,26 @@ for the caller-side YAML pattern.
 | ------- | --------- | ----- | ----------------- |
 | `checks-py-lintro` | `16132640` | `py-lintro` | `test-suite-coverage / 🧪 Test Suite & Coverage`, `lintro-code-quality / 🛠️ Lintro Code Quality`, `🔐 Security Audit` |
 | `checks-rustume` | `16132643` | `Rustume` | `quality / 🛠️ Lintro Code Quality & Analysis`, `rust-build / 🔨 Build Check`, `rust-coverage / 🦀 Rust Coverage`, `web-coverage / 🌐 Web Coverage`, `🔐 Security Audit` |
+| `checks-turbo-themes` | `16132642` | `turbo-themes` | `Socket Security: Pull Request Alerts`, `♿ E2E Accessibility Tests`, `semantic-title / ✅ Validate Conventional Commits`, `🎭 E2E Tests`, `🏗️ Build & Quality Checks (20)`, `🏗️ Build & Quality Checks (22)`, `sbom / SBOM & Supply Chain`, `📦 Validate Examples`, `quality / 🔍 Code Quality & Linting`, `codeql / 🔍 CodeQL Security Analysis`, `security-audit / 🔐 Security Audit`, `🔥 E2E Smoke Tests` |
+| `checks-holy-grail` | `16132645` | `holy-grail` | `Analyze GitHub Actions`, `Analyze JavaScript/TypeScript`, `Build & Test`, `Check SHA Pinning`, `E2E Tests`, `Socket Security: Pull Request Alerts`, `Validate PR Title`, `quality / Lintro Quality Checks`, `🔐 Security Audit` |
 
 <!-- markdownlint-enable MD013 -->
 
-Both rows follow the prefixed-path pattern: every `uses:` gate context is
-`{caller_job_id} / {job-name}`, and only inline jobs (`🔐 Security Audit`)
-appear unprefixed. Consumer repos must keep caller job ids stable — renaming
-a caller job id changes the reported check path and breaks the ruleset gate
-(checks stay **Expected** while Actions shows green under the new name).
+All rows follow the prefixed-path pattern: every `uses:` gate context is
+`{caller_job_id} / {job-name}`, and only inline jobs (`🔐 Security Audit`,
+holy-grail's hand-rolled workflow jobs) appear unprefixed. Consumer repos
+must keep caller job ids stable — renaming a caller job id changes the
+reported check path and breaks the ruleset gate (checks stay **Expected**
+while Actions shows green under the new name).
 
-When migrating additional rulesets (for example `checks-turbo-themes`),
-update this table in the same PR that updates the live ruleset.
+Never require an **app-generated code-scanning summary check** (for example
+the bare `CodeQL` context from the github-advanced-security app) in a repo
+that uses a merge queue: the app only produces it on `pull_request` commits,
+never merge-group commits, so every queue entry times out and is silently
+ejected (holy-grail, 2026-07-11). Require the workflow-job contexts instead.
+
+When migrating additional rulesets, update this table in the same PR that
+updates the live ruleset.
 
 ## Tooling
 
