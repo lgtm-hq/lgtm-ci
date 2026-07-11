@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.52.2] - 2026-07-11
+
+### Fixed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#502) (e1c75fa)
+
 ## [0.52.1] - 2026-07-11
 
 ### Changed
@@ -1445,7 +1451,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.2...HEAD
+[0.52.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.1...v0.52.2
 [0.52.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.0...v0.52.1
 [0.52.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.51.0...v0.52.0
 [0.51.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.50.3...v0.51.0
