@@ -75,10 +75,10 @@ build_targets() {
 	done
 }
 
+# --output is set via lychee-action `output:` input (v2.9+ rejects both).
 args=(
 	"--no-progress"
 	"--format" "markdown"
-	"--output" "lychee-report.md"
 	"--timeout" "$TIMEOUT"
 	"--max-retries" "3"
 	"--accept" "200..=204"
