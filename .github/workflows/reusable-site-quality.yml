@@ -184,6 +184,7 @@ on:
           codeload.github.com:443
           objects.githubusercontent.com:443
           raw.githubusercontent.com:443
+          release-assets.githubusercontent.com:443
           uploads.github.com:443
           pipelines.actions.githubusercontent.com:443
       allowed-endpoints-mode:
