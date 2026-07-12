@@ -62,7 +62,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-scorecards.yml"
 	assert_success
 }
 
-@test "reusable-scorecards: resolve egress before harden-runner composite" {
-	run egress_tooling_checkout_order_ok "$WORKFLOW" scorecards
+@test "reusable-scorecards: scorecard job uses only publish-allowlisted actions" {
+	# ossf/scorecard-action publish path forbids any step besides checkout,
+	# upload-artifact, upload-sarif, scorecard-action, harden-runner (#518).
+	run awk '
+		/^  scorecards:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  scorecards:/ { in_job = 0 }
+		in_job && /^        uses: / {
+			ok = /uses: (actions\/checkout|actions\/upload-artifact|github\/codeql-action\/upload-sarif|ossf\/scorecard-action|step-security\/harden-runner)@/
+			if (!ok) { print "unallowed: " $0; bad = 1 }
+		}
+		END { exit bad }
+	' "$WORKFLOW"
 	assert_success
 }
