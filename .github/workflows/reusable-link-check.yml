@@ -167,6 +167,8 @@ jobs:
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:
           args: ${{ steps.args.outputs.args }}
+          # lychee-action v2.9+ errors if --output is also in args.
+          output: lychee-report.md
           token: ${{ github.token }}
           fail: ${{ inputs.fail-on-error }}
       - name: Upload link report
