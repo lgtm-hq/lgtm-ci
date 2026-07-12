@@ -345,6 +345,36 @@ jobs:
         # yamllint disable-line rule:line-length
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh
+      - name: Check version PR merge queue
+        # Skip branch updates when the target version PR is already queued.
+        # Queued branches cannot be updated by create-pull-request (#528).
+        # Runs before tooling removal so the detection script is still present.
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+        id: mq-check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.check-pr.outputs.pr-number }}
+          # yamllint disable-line rule:line-length
+          BRANCH: ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}
+          REPO: ${{ github.repository }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-version-pr-merge-queue.sh
+      - name: Notice skipped queued version PR update
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.mq-check.outputs.skip-branch-update == 'true'
+        shell: bash
+        env:
+          PR_NUMBER: ${{ steps.mq-check.outputs.pr-number }}
+          REASON: ${{ steps.mq-check.outputs.reason }}
+        run: |
+          echo "::notice::Skipping version PR branch update (reason=${REASON}, pr=${PR_NUMBER:-none})"
       - name: Remove tooling checkout before PR creation
         # yamllint disable-line rule:line-length
         if: >-
@@ -352,6 +382,7 @@ jobs:
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
           && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
       - name: Create or update version PR
@@ -361,6 +392,7 @@ jobs:
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
           && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
         id: create-pr
         # yamllint disable-line rule:line-length
         uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8

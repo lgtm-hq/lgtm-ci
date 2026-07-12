@@ -102,6 +102,20 @@ load "../../helpers/common"
 	assert_success
 }
 
+@test "reusable-release-version-pr: gates create-pull-request on merge-queue skip" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
+
+	run grep -F "check-version-pr-merge-queue.sh" "$workflow"
+	assert_success
+	run awk '
+		/- name: Create or update version PR/ { in_step = 1 }
+		in_step && /skip-branch-update != '\''true'\''/ { found = 1; exit }
+		in_step && /^      - name:/ && $0 !~ /Create or update version PR/ { in_step = 0 }
+		END { exit !found }
+	' "$workflow"
+	assert_success
+}
+
 @test "reusable-release-version-pr: wires CHANGELOG-only expect flag when ecosystems empty" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
 
