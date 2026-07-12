@@ -221,7 +221,7 @@ When a repository must keep **separate** Model A publish jobs (for example pytho
 then node on the same ref), enable merge on each job after the first:
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@v0.23.0
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@<sha>
   with:
     target-dir: vitest
     coverage-path: coverage/
