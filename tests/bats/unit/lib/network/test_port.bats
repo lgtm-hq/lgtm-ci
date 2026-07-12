@@ -116,7 +116,7 @@ teardown() {
 		source "$LIB_DIR/network/port.sh"
 		declare -F wait_for_port_listen >/dev/null || { echo "wait_for_port_listen missing" >&2; exit 1; }
 		holder="$(mktemp)"
-		python3 - "$holder" <<'"'"'PY'"'"'
+		python3 - "$holder" <<'"'"'PY'"'"' &
 import socket, sys, time
 path = sys.argv[1]
 s = socket.socket()
@@ -151,7 +151,7 @@ PY
 		source "$LIB_DIR/network/port.sh"
 		declare -F wait_for_port_listen >/dev/null || { echo "wait_for_port_listen missing" >&2; exit 1; }
 		holder="$(mktemp)"
-		python3 - "$holder" <<'"'"'PY'"'"'
+		python3 - "$holder" <<'"'"'PY'"'"' &
 import socket, sys, time
 path = sys.argv[1]
 s = socket.socket()
