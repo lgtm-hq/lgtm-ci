@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.52.4] - 2026-07-12
+
+### Changed
+
+- **org**: full ruleset registry after emoji canon rollout (#519) (92a7ec2)
+- **org**: register checks-turbo-themes and checks-holy-grail rulesets (#513) (173379f)
+- **ci**: adopt canonical emoji check names (#516) (506e239)
+- **renovate**: drop rules superseded by org preset (#508) (24147c0)
+
+### Fixed
+
+- **workflows**: drop composites from scorecards job for publish allowlist (#535)
+  (b9bc7b1)
+- **egress**: add release-assets CDN to github-tooling preset (#534) (4c77593)
+- **workflows**: always run lintro-version check on PRs (#536) (da20db0)
+- **deps**: update lintro (#509) (26663e8)
+
 ## [0.52.3] - 2026-07-11
 
 ### Fixed
@@ -1457,7 +1474,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.4...HEAD
+[0.52.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.3...v0.52.4
 [0.52.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.2...v0.52.3
 [0.52.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.1...v0.52.2
 [0.52.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.0...v0.52.1
