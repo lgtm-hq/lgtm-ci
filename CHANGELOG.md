@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.52.7] - 2026-07-12
+
+### Changed
+
+- **pages**: replace stale publish-test-results v0.23.0 pin (#543) (7fa7c61)
+- **changelog**: move verify-tags default flip to v0.48.2 (#542) (f8eaa28)
+
+### Fixed
+
+- **test**: harden port flake and registry empty-name assertions (#544) (f4b9751)
+
 ## [0.52.6] - 2026-07-12
 
 ### Fixed
@@ -1496,7 +1507,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.6...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.7...HEAD
+[0.52.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.6...v0.52.7
 [0.52.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.5...v0.52.6
 [0.52.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.4...v0.52.5
 [0.52.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.3...v0.52.4
