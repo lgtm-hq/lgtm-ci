@@ -46,6 +46,20 @@ on:
         required: false
         type: string
         default: "sbom"
+      upload-release-assets:
+        description: >-
+          When true, run a dedicated contents:write job that attaches the SBOM
+          artifact to the GitHub Release. Generation itself stays contents:read.
+        required: false
+        type: boolean
+        default: false
+      release-tag:
+        description: >-
+          Release tag for asset upload when upload-release-assets is true.
+          Defaults to github.ref_name when empty.
+        required: false
+        type: string
+        default: ""
 
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
@@ -131,9 +145,9 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
-      # write: attach CycloneDX SBOM to the GitHub Release asset list
-      # (anchore/sbom-action defaults upload-release-assets on release events)
-      contents: write
+      # Generation/scan/attest only need read for contents. Release asset upload
+      # is isolated in upload-release-assets (contents: write) — see #532.
+      contents: read
       security-events: write
       id-token: write
       attestations: write
@@ -188,6 +202,9 @@ jobs:
           format: ${{ inputs.sbom-format }}
           upload-artifact: "true"
           artifact-name: ${{ inputs.artifact-name }}
+          # Never let anchore attach release assets here — that needs
+          # contents:write and belongs in upload-release-assets (#532).
+          upload-release-assets: "false"
       - name: Scan vulnerabilities
         id: scan
         if: inputs.scan-vulnerabilities
@@ -203,3 +220,41 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/attest-build
         with:
           subject-path: ${{ steps.generate.outputs.sbom-file }}
+
+  upload-release-assets:
+    name: Upload SBOM release assets
+    needs: [sbom]
+    if: inputs.upload-release-assets
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Download SBOM artifact
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: sbom-artifact
+      - name: Upload SBOM to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          mapfile -t files < <(find sbom-artifact -type f ! -name '.*' | sort)
+          if [[ ${#files[@]} -eq 0 ]]; then
+            echo "::error::No SBOM files found in downloaded artifact '${{ inputs.artifact-name }}'"
+            exit 1
+          fi
+          gh release upload "$RELEASE_TAG" "${files[@]}" --clobber
+          echo "Uploaded ${#files[@]} SBOM file(s) to release ${RELEASE_TAG}"

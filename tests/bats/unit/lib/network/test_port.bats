@@ -110,14 +110,75 @@ teardown() {
 }
 
 @test "wait_for_port_listen: fails when no listener is bound" {
-	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49994 1 0.1'
-	assert_failure
+	# Hold an exclusive bind WITHOUT listen() so nothing else can steal the port,
+	# while nc/tcp probes still fail (no accepting listener).
+	run bash -c '
+		source "$LIB_DIR/network/port.sh"
+		declare -F wait_for_port_listen >/dev/null || { echo "wait_for_port_listen missing" >&2; exit 1; }
+		holder="$(mktemp)"
+		python3 - "$holder" <<'"'"'PY'"'"' &
+import socket, sys, time
+path = sys.argv[1]
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+port = s.getsockname()[1]
+open(path, "w", encoding="utf-8").write(str(port))
+time.sleep(60)
+PY
+		py_pid=$!
+		trap "kill ${py_pid} 2>/dev/null || true; rm -f ${holder}" EXIT
+		for _ in $(seq 1 50); do
+			[[ -s "$holder" ]] && break
+			sleep 0.05
+		done
+		port="$(cat "$holder")"
+		out="$(wait_for_port_listen "${port}" 1 0.1 2>&1)" && {
+			echo "unexpected listen success on bound-but-not-listening port ${port}" >&2
+			echo "$out" >&2
+			exit 1
+		}
+		printf "%s\n" "$out"
+		case "$out" in
+			*"Port ${port} not ready after"*) ;;
+			*) echo "missing timeout diagnostic: $out" >&2; exit 1 ;;
+		esac
+	'
+	assert_success
 }
 
 @test "wait_for_port_listen: logs waiting message" {
-	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49993 1 0.1 2>&1'
-	assert_failure
-	assert_output --partial "Waiting for port 49993 to accept connections"
+	run bash -c '
+		source "$LIB_DIR/network/port.sh"
+		declare -F wait_for_port_listen >/dev/null || { echo "wait_for_port_listen missing" >&2; exit 1; }
+		holder="$(mktemp)"
+		python3 - "$holder" <<'"'"'PY'"'"' &
+import socket, sys, time
+path = sys.argv[1]
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+port = s.getsockname()[1]
+open(path, "w", encoding="utf-8").write(str(port))
+time.sleep(60)
+PY
+		py_pid=$!
+		trap "kill ${py_pid} 2>/dev/null || true; rm -f ${holder}" EXIT
+		for _ in $(seq 1 50); do
+			[[ -s "$holder" ]] && break
+			sleep 0.05
+		done
+		port="$(cat "$holder")"
+		out="$(wait_for_port_listen "${port}" 1 0.1 2>&1)" || true
+		printf "%s\n" "$out"
+		case "$out" in
+			*"Waiting for port ${port} to accept connections"*) ;;
+			*) echo "missing waiting log: $out" >&2; exit 1 ;;
+		esac
+		case "$out" in
+			*"Port ${port} not ready after"*) ;;
+			*) echo "missing timeout diagnostic: $out" >&2; exit 1 ;;
+		esac
+	'
+	assert_success
 }
 
 # =============================================================================
