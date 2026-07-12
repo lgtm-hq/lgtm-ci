@@ -49,6 +49,9 @@ teardown() {
 @test "check_pypi_availability: requires package name" {
 	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_pypi_availability "" "1.0.0" 2>&1'
 	assert_failure
+	assert_output --partial "Package name required"
+	# Guard against vacuous exit-127 (function missing in subshell)
+	refute_output --partial "command not found"
 }
 
 # =============================================================================
@@ -72,6 +75,8 @@ teardown() {
 @test "check_npm_availability: requires package name" {
 	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_npm_availability "" "1.0.0" 2>&1'
 	assert_failure
+	assert_output --partial "Package name required"
+	refute_output --partial "command not found"
 }
 
 # =============================================================================
@@ -109,6 +114,8 @@ teardown() {
 @test "check_rubygems_availability: requires gem name" {
 	run bash -c 'source "$LIB_DIR/publish/registry.sh" && check_rubygems_availability "" "1.0.0" 2>&1'
 	assert_failure
+	assert_output --partial "Gem name required"
+	refute_output --partial "command not found"
 }
 
 # =============================================================================

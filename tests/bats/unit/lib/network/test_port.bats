@@ -110,14 +110,25 @@ teardown() {
 }
 
 @test "wait_for_port_listen: fails when no listener is bound" {
-	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49994 1 0.1'
+	# Bind then close so the chosen port is known-free (avoids collision flake).
+	run bash -c '
+		python3 -c "import socket; s=socket.socket(); s.bind((\"127.0.0.1\", 0)); print(s.getsockname()[1]); s.close()"
+	'
+	assert_success
+	free_port="$output"
+	run bash -c "source \"$LIB_DIR/network/port.sh\" && wait_for_port_listen ${free_port} 1 0.1"
 	assert_failure
 }
 
 @test "wait_for_port_listen: logs waiting message" {
-	run bash -c 'source "$LIB_DIR/network/port.sh" && wait_for_port_listen 49993 1 0.1 2>&1'
+	run bash -c '
+		python3 -c "import socket; s=socket.socket(); s.bind((\"127.0.0.1\", 0)); print(s.getsockname()[1]); s.close()"
+	'
+	assert_success
+	free_port="$output"
+	run bash -c "source \"$LIB_DIR/network/port.sh\" && wait_for_port_listen ${free_port} 1 0.1 2>&1"
 	assert_failure
-	assert_output --partial "Waiting for port 49993 to accept connections"
+	assert_output --partial "Waiting for port ${free_port} to accept connections"
 }
 
 # =============================================================================
