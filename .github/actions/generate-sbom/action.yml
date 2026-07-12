@@ -30,6 +30,12 @@ inputs:
     description: "Name for the uploaded artifact"
     required: false
     default: "sbom"
+  upload-release-assets:
+    description: >-
+      Upload SBOM to the GitHub Release via anchore/sbom-action. Prefer false and
+      a dedicated contents:write job (reusable-sbom upload-release-assets).
+    required: false
+    default: "false"
 
 outputs:
   sbom-file:
@@ -63,6 +69,7 @@ runs:
         output-file: ${{ inputs.output-file }}
         upload-artifact: ${{ inputs.upload-artifact }}
         artifact-name: ${{ inputs.artifact-name }}
+        upload-release-assets: ${{ inputs.upload-release-assets }}
 
     - name: Generate summary
       if: inputs.output-file != ''
