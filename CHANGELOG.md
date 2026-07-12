@@ -183,7 +183,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#463) (0f17d22)
 - **workflows**: split reusable-docker.yml into focused workflows (#461) (8104b09)
 - **deps**: update lycheeverse/lychee-action to v2.9.0 (minor) (#462) (3312cb7)
-- **security**: verify-tags default flip (#369) — moved to v0.48.2 (misattributed)
+_Note: The `verify-tags` default flip entry was moved to v0.48.2 because it was previously misattributed here._
 
 ### Fixed
 
