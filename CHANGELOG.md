@@ -184,6 +184,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: split reusable-docker.yml into focused workflows (#461) (8104b09)
 - **deps**: update lycheeverse/lychee-action to v2.9.0 (minor) (#462) (3312cb7)
 
+### Fixed
+
+- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#458) (34dd9ee)
+- **workflows**: fail or skip on missing node-custom coverage summary (#444) (4f3852e)
+- **actions**: byte-cap file-breakdown comment against GitHub size limit (#450)
+  (6193843)
+- **pages**: delete stale same-run Pages artifacts before upload (#451) (af2b2bb)
+- **release**: wrap generated changelog lines to 88 columns (#452) (e9e4246)
+
+## [0.48.2] - 2026-07-09
+
+### Changed
+
 - **security**: default `verify-tags` to `true` in the
   `validate-action-pinning` action and `reusable-validate-action-pinning.yml`
   workflow (#369). A lying `sha # vX.Y.Z` comment whose SHA does not resolve to
@@ -195,16 +208,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Callers that already relied on the API being reachable need no change; tag
   resolution failures are reported as warnings, not hard failures.
 
-### Fixed
-
-- **deps**: update ghcr.io/lgtm-hq/py-lintro digest (#458) (34dd9ee)
-- **workflows**: fail or skip on missing node-custom coverage summary (#444) (4f3852e)
-- **actions**: byte-cap file-breakdown comment against GitHub size limit (#450)
-  (6193843)
-- **pages**: delete stale same-run Pages artifacts before upload (#451) (af2b2bb)
-- **release**: wrap generated changelog lines to 88 columns (#452) (e9e4246)
-
-## [0.48.2] - 2026-07-09
+  Note: this breaking default flip shipped in tag v0.48.2 (compare
+  [v0.48.1...v0.48.2](https://github.com/lgtm-hq/lgtm-ci/compare/v0.48.1...v0.48.2))
+  despite originally being listed under Unreleased / later misattributed to v0.49.0.
 
 ### Fixed
 
