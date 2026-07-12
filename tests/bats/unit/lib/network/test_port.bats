@@ -110,18 +110,38 @@ teardown() {
 }
 
 @test "wait_for_port_listen: fails when no listener is bound" {
-	# Probe-and-retry: bind/close to pick a free port, then assert listen wait fails.
-	# Retry a few times if another process steals the port in the tiny gap.
+	# Hold an exclusive bind WITHOUT listen() so nothing else can steal the port,
+	# while nc/tcp probes still fail (no accepting listener).
 	run bash -c '
 		source "$LIB_DIR/network/port.sh"
-		for _ in 1 2 3 4 5; do
-			port="$(python3 -c "import socket; s=socket.socket(); s.bind((\"127.0.0.1\", 0)); print(s.getsockname()[1]); s.close()")"
-			if ! wait_for_port_listen "${port}" 1 0.1; then
-				exit 0
-			fi
+		declare -F wait_for_port_listen >/dev/null || { echo "wait_for_port_listen missing" >&2; exit 1; }
+		holder="$(mktemp)"
+		python3 - "$holder" <<'"'"'PY'"'"'
+import socket, sys, time
+path = sys.argv[1]
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+port = s.getsockname()[1]
+open(path, "w", encoding="utf-8").write(str(port))
+time.sleep(60)
+PY
+		py_pid=$!
+		trap "kill ${py_pid} 2>/dev/null || true; rm -f ${holder}" EXIT
+		for _ in $(seq 1 50); do
+			[[ -s "$holder" ]] && break
+			sleep 0.05
 		done
-		echo "failed to find an unbound port after retries" >&2
-		exit 1
+		port="$(cat "$holder")"
+		out="$(wait_for_port_listen "${port}" 1 0.1 2>&1)" && {
+			echo "unexpected listen success on bound-but-not-listening port ${port}" >&2
+			echo "$out" >&2
+			exit 1
+		}
+		printf "%s\n" "$out"
+		case "$out" in
+			*"Port ${port} not ready after"*) ;;
+			*) echo "missing timeout diagnostic: $out" >&2; exit 1 ;;
+		esac
 	'
 	assert_success
 }
@@ -129,19 +149,36 @@ teardown() {
 @test "wait_for_port_listen: logs waiting message" {
 	run bash -c '
 		source "$LIB_DIR/network/port.sh"
-		for _ in 1 2 3 4 5; do
-			port="$(python3 -c "import socket; s=socket.socket(); s.bind((\"127.0.0.1\", 0)); print(s.getsockname()[1]); s.close()")"
-			out="$(wait_for_port_listen "${port}" 1 0.1 2>&1)" || {
-				printf "%s\n" "$out"
-				exit 0
-			}
+		declare -F wait_for_port_listen >/dev/null || { echo "wait_for_port_listen missing" >&2; exit 1; }
+		holder="$(mktemp)"
+		python3 - "$holder" <<'"'"'PY'"'"'
+import socket, sys, time
+path = sys.argv[1]
+s = socket.socket()
+s.bind(("127.0.0.1", 0))
+port = s.getsockname()[1]
+open(path, "w", encoding="utf-8").write(str(port))
+time.sleep(60)
+PY
+		py_pid=$!
+		trap "kill ${py_pid} 2>/dev/null || true; rm -f ${holder}" EXIT
+		for _ in $(seq 1 50); do
+			[[ -s "$holder" ]] && break
+			sleep 0.05
 		done
-		echo "failed to find an unbound port after retries" >&2
-		exit 1
+		port="$(cat "$holder")"
+		out="$(wait_for_port_listen "${port}" 1 0.1 2>&1)" || true
+		printf "%s\n" "$out"
+		case "$out" in
+			*"Waiting for port ${port} to accept connections"*) ;;
+			*) echo "missing waiting log: $out" >&2; exit 1 ;;
+		esac
+		case "$out" in
+			*"Port ${port} not ready after"*) ;;
+			*) echo "missing timeout diagnostic: $out" >&2; exit 1 ;;
+		esac
 	'
 	assert_success
-	assert_output --partial "Waiting for port"
-	assert_output --partial "to accept connections"
 }
 
 # =============================================================================
