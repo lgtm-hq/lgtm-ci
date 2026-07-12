@@ -26,12 +26,16 @@ egress_preset_endpoints() {
 			pipelines.actions.githubusercontent.com:443
 		;;
 	github-tooling)
+		# release-assets.githubusercontent.com: GitHub release-asset CDN — actions
+		# that download release binaries (e.g. codeql-action CLI bundle) redirect
+		# here; absent it, toolcache misses fail under block policy (#517).
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
 			codeload.github.com:443 \
 			objects.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
+			release-assets.githubusercontent.com:443 \
 			uploads.github.com:443 \
 			pipelines.actions.githubusercontent.com:443
 		;;
@@ -202,7 +206,6 @@ egress_preset_endpoints() {
 		# Direct osv-scanner binary install + scan (reusable-vuln-suppression-check).
 		egress_preset_endpoints github-tooling
 		printf '%s\n' \
-			release-assets.githubusercontent.com:443 \
 			api.osv.dev:443 \
 			api.deps.dev:443
 		;;
@@ -213,7 +216,6 @@ egress_preset_endpoints() {
 		# from it — its omission previously broke py-lintro's dogfood workflow).
 		egress_preset_endpoints github-tooling
 		printf '%s\n' \
-			release-assets.githubusercontent.com:443 \
 			pypi.org:443 \
 			files.pythonhosted.org:443 \
 			astral.sh:443 \

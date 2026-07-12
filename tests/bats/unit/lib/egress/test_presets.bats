@@ -23,6 +23,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'uploads.github.com:443'
 }
 
+@test "egress preset github-tooling includes release-assets CDN for release-binary downloads" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints github-tooling"
+	assert_success
+	assert_output --partial 'release-assets.githubusercontent.com:443'
+}
+
 @test "egress preset github-pages includes OIDC and release asset hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints github-pages"
 	assert_success

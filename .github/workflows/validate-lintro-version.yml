@@ -4,17 +4,12 @@
 name: Quality Check - Lintro Version Sync
 
 'on':
+  # No pull_request path filter: "validate / Validate Lintro Version" is a
+  # required check, and a path-filtered required check never reports on PRs
+  # that miss the filter, deadlocking them at merge-queue entry (see
+  # validate-action-pinning.yml for the same pattern).
   pull_request:
     types: [opened, synchronize, reopened, ready_for_review]
-    paths:
-      - 'pyproject.toml'
-      - '.github/workflows/reusable-quality-lint.yml'
-      - '.github/workflows/reusable-validate-lintro-version.yml'
-      - '.github/workflows/validate-lintro-version.yml'
-      - '.github/actions/run-quality/action.yml'
-      - 'scripts/ci/quality/check-lintro-tooling-bootstrap.sh'
-      - 'scripts/ci/quality/resolve-lintro-image.sh'
-      - 'scripts/ci/quality/validate-lintro-version.sh'
   merge_group:
   push:
     branches: [main]
