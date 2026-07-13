@@ -97,6 +97,32 @@ EOF
 	assert_output --partial "::error::Likely blocked egress: static.rust-lang.org"
 }
 
+@test "summarize-blocked-egress: explicit non-443 port is preserved" {
+	cat >"$BUILD_LOG" <<'EOF'
+#4 [base 2/3] RUN apk add --no-cache --repository http://mirror.internal:8080/alpine/v3.20/main curl
+#4 5.104 ERROR: http://mirror.internal:8080/alpine/v3.20/main: temporary error (try again later)
+EOF
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::error::Likely blocked egress: mirror.internal:8080"
+	assert_output --partial "add mirror.internal:8080 to allowed-endpoints"
+	[[ "$output" != *"mirror.internal:443"* ]]
+}
+
+@test "summarize-blocked-egress: plain-http URL without port defaults to 80" {
+	cat >"$BUILD_LOG" <<'EOF'
+#4 [base 2/3] RUN wget http://legacy-mirror.example/pkg.tar.gz
+#4 30.001 wget: can't connect to remote host: Connection timed out
+#4 30.001 wget: http://legacy-mirror.example/pkg.tar.gz: Connection timed out
+EOF
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::error::Likely blocked egress: legacy-mirror.example:80"
+	assert_output --partial "add legacy-mirror.example:80 to allowed-endpoints"
+}
+
 @test "summarize-blocked-egress: clean log emits nothing and exits 0" {
 	cat >"$BUILD_LOG" <<'EOF'
 #10 [full 4/9] COPY . .

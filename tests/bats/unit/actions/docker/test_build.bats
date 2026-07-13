@@ -20,7 +20,8 @@ setup() {
 	export PLATFORMS="linux/amd64,linux/arm64"
 	export PUSH="false"
 	export LOAD="false"
-	unset TAGS VERSION BUILD_ARGS LABELS CACHE_FROM CACHE_TO || true
+	export RUNNER_TEMP="$BATS_TEST_TMPDIR"
+	unset TAGS VERSION BUILD_ARGS LABELS CACHE_FROM CACHE_TO BUILD_LOG || true
 }
 
 teardown() {
@@ -39,6 +40,7 @@ _mock_docker_buildx() {
 	cat >"${mock_bin}/docker" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >> '${calls_file}'
+echo "mock-docker-build-output"
 exit ${exit_code}
 EOF
 	chmod +x "${mock_bin}/docker"
@@ -141,6 +143,42 @@ EOF
 	assert_equal "$status" "7"
 	assert_github_output "exit-code" "7"
 	assert_output --partial "Build failed with exit code: 7"
+}
+
+@test "build.sh: tees build output to BUILD_LOG" {
+	_mock_docker_buildx
+	export BUILD_LOG="${BATS_TEST_TMPDIR}/docker-build.log"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_github_output "exit-code" "0"
+	run grep -F -- "mock-docker-build-output" "$BUILD_LOG"
+	assert_success
+}
+
+@test "build.sh: tee failure does not mask build success" {
+	_mock_docker_buildx
+	# Point BUILD_LOG at an existing directory so tee itself fails while
+	# the (mocked) build succeeds — the build result must still win.
+	export BUILD_LOG="${BATS_TEST_TMPDIR}/logdir"
+	mkdir -p "$BUILD_LOG"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_github_output "exit-code" "0"
+	assert_output --partial "Build completed successfully"
+}
+
+@test "build.sh: build failure exit code survives the tee" {
+	_mock_docker_buildx 5
+	export BUILD_LOG="${BATS_TEST_TMPDIR}/docker-build.log"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_equal "$status" "5"
+	assert_github_output "exit-code" "5"
+	run grep -F -- "mock-docker-build-output" "$BUILD_LOG"
+	assert_success
 }
 
 @test "build.sh: applies cache-from and cache-to" {

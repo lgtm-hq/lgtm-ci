@@ -65,22 +65,31 @@ if [[ -z "$matched_lines" ]]; then
 	exit 0
 fi
 
-# Extract candidate hosts near the matches: URLs, resolver errors, and Go
-# dial/lookup errors all name the endpoint the build was trying to reach.
-hosts=$(
+# Extract candidate endpoints (host:port) near the matches: URLs, resolver
+# errors, and Go dial/lookup errors all name the endpoint the build was
+# trying to reach. Preserve an explicit port when the log names one; default
+# to 443 (or 80 for plain-http URLs) only when it does not.
+endpoints=$(
 	{
-		grep -oiE 'https?://[a-z0-9.-]+' <<<"$matched_lines" | sed -E 's#https?://##I'
-		sed -nE 's/.*[Cc]ould not resolve host:? ([A-Za-z0-9.-]+).*/\1/p' <<<"$matched_lines"
-		sed -nE 's/.*lookup ([A-Za-z0-9.-]+)( on [0-9.:]+)?:.*/\1/p' <<<"$matched_lines"
-		sed -nE 's/.*dial tcp:? (lookup )?([A-Za-z0-9.-]+)(:[0-9]+)?:.*/\2/p' <<<"$matched_lines"
-		sed -nE 's/.*[Ff]ailed to connect to ([A-Za-z0-9.-]+)( port [0-9]+)?.*/\1/p' <<<"$matched_lines"
+		# URLs: keep an explicit port; default 443 for https, 80 for http
+		grep -oiE 'https?://[a-z0-9.-]+(:[0-9]+)?' <<<"$matched_lines" |
+			sed -E \
+				-e 's#^[Hh][Tt][Tt][Pp][Ss]://([A-Za-z0-9.-]+)$#\1:443#' \
+				-e 's#^[Hh][Tt][Tt][Pp]://([A-Za-z0-9.-]+)$#\1:80#' \
+				-e 's#^[Hh][Tt][Tt][Pp][Ss]?://##'
+		# Resolver/lookup errors carry no port — assume 443
+		sed -nE 's/.*[Cc]ould not resolve host:? ([A-Za-z0-9.-]+).*/\1:443/p' <<<"$matched_lines"
+		sed -nE 's/.*dial tcp: lookup ([A-Za-z0-9.-]+)( on [0-9.:]+)?:.*/\1:443/p' <<<"$matched_lines"
+		# Go dial errors and curl connect errors name the port — keep it
+		sed -nE 's/.*dial tcp ([A-Za-z0-9.-]+):([0-9]+):.*/\1:\2/p' <<<"$matched_lines"
+		sed -nE 's/.*[Ff]ailed to connect to ([A-Za-z0-9.-]+) port ([0-9]+).*/\1:\2/p' <<<"$matched_lines"
 	} | sed '/^$/d' | sort -u
 )
 
-if [[ -n "$hosts" ]]; then
-	while IFS= read -r host; do
-		echo "::error::Likely blocked egress: ${host} — if legitimate, add ${host}:443 to allowed-endpoints"
-	done <<<"$hosts"
+if [[ -n "$endpoints" ]]; then
+	while IFS= read -r endpoint; do
+		echo "::error::Likely blocked egress: ${endpoint} — if legitimate, add ${endpoint} to allowed-endpoints"
+	done <<<"$endpoints"
 else
 	echo "::error::Build log contains blocked-egress signatures but no host could be extracted — check the matched lines in the step summary and the harden-runner allowed-endpoints list"
 fi
@@ -90,12 +99,12 @@ add_github_summary "## 🚫 Possible blocked egress"
 add_github_summary ""
 add_github_summary "The failed build's log matches blocked-egress signatures. With harden-runner \`egress-policy: block\`, disallowed traffic is silently dropped: short-timeout clients (apk) fail fast with I/O errors, long-timeout clients (bun) hang until buildkit is killed."
 add_github_summary ""
-if [[ -n "$hosts" ]]; then
-	add_github_summary "**Likely blocked host(s):**"
+if [[ -n "$endpoints" ]]; then
+	add_github_summary "**Likely blocked endpoint(s):**"
 	add_github_summary ""
-	while IFS= read -r host; do
-		add_github_summary "- \`${host}\` — if legitimate, add \`${host}:443\` to \`allowed-endpoints\`"
-	done <<<"$hosts"
+	while IFS= read -r endpoint; do
+		add_github_summary "- \`${endpoint}\` — if legitimate, add \`${endpoint}\` to \`allowed-endpoints\`"
+	done <<<"$endpoints"
 	add_github_summary ""
 fi
 # shellcheck disable=SC2016 # literal markdown code-fence backticks, not expansion
