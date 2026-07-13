@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ci**: reusable auto-rerun of failed jobs on transient infra failure
+  signatures (lgtm-hq/Rustume#463)
 - **docker**: surface blocked-egress signatures on build failure — the reusable
   Docker build workflows now scan the failed build's log for blocked-egress
   signatures (DNS failures, apk I/O errors, i/o timeouts, buildkit rpc errors),
