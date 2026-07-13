@@ -15,11 +15,6 @@ on:
         required: false
         type: string
         default: ""
-      toolchain:
-        description: "Deprecated alias for rust-toolchain"
-        required: false
-        type: string
-        default: "stable"
       features:
         description: "Feature flags for cargo (e.g., --all-features)"
         required: false
@@ -279,7 +274,7 @@ jobs:
           MATRIX_LABEL: Rust toolchain
           DEFAULT_VERSION: >-
             ${{ inputs.rust-toolchain != '' && inputs.rust-toolchain ||
-            inputs.toolchain || 'stable' }}
+            'stable' }}
           VERSIONS_INPUT: ${{ inputs.rust-toolchains }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
   test:

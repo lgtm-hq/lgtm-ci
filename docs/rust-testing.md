@@ -41,8 +41,7 @@ never runs both uninstrumented nextest and llvm-cov in the same pipeline.
 
 Use `rust-toolchains` (comma-separated) for multi-toolchain compat checks
 (MSRV, stable, beta). Compat matrix runs require `coverage: false` and
-`publish-test-summary: false`. Use `rust-toolchain` (or deprecated `toolchain`)
-for single-toolchain coverage and PR comments.
+`publish-test-summary: false`. Use `rust-toolchain` for single-toolchain coverage and PR comments.
 
 ```yaml
 rust-compat:

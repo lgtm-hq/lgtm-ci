@@ -14,11 +14,6 @@ on:
         required: false
         type: string
         default: ""
-      lintro-tools:
-        description: "Deprecated alias for tools"
-        required: false
-        type: string
-        default: ""
       fail-on-error:
         description: "Fail workflow if linting errors found"
         required: false
@@ -190,7 +185,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           STEP: check
-          TOOLS: ${{ inputs.tools != '' && inputs.tools || inputs.lintro-tools }}
+          TOOLS: ${{ inputs.tools }}
           TOOL_OPTIONS: ${{ inputs.lintro-tool-options }}
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
           MAP_HOST_USER: "true"

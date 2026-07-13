@@ -5,7 +5,6 @@
 # Environment variables:
 #   INPUT_ENFORCE              - Fail if violations are found (true/false)
 #   INPUT_ALLOW_TAG_EXCEPTIONS - Comma-separated action names allowed to use tag refs
-#   INPUT_ALLOW_ORG_VERSIONS   - Deprecated alias for INPUT_ALLOW_TAG_EXCEPTIONS
 #   INPUT_SCAN_PATHS           - Space-separated paths to scan for workflow files
 #   INPUT_VERIFY_TAGS          - Verify Renovate version comments match pinned SHAs
 #   INPUT_AUDIT_TRANSITIVE     - Warn on mutable tag refs in nested composite actions
@@ -17,7 +16,6 @@ set -euo pipefail
 
 : "${INPUT_ENFORCE:=true}"
 : "${INPUT_ALLOW_TAG_EXCEPTIONS:=}"
-: "${INPUT_ALLOW_ORG_VERSIONS:=}"
 : "${INPUT_SCAN_PATHS:=.github/workflows .github/actions}"
 : "${INPUT_VERIFY_TAGS:=false}"
 : "${INPUT_AUDIT_TRANSITIVE:=false}"
@@ -37,9 +35,6 @@ readonly LGTM_CI_RELEASE_COMMIT_SHA='d3736367191ddaf56c41804d2dd5174732ed2d2b'
 TAG_EXCEPTIONS=()
 if [[ -n "$INPUT_ALLOW_TAG_EXCEPTIONS" ]]; then
 	IFS=',' read -ra TAG_EXCEPTIONS <<<"$INPUT_ALLOW_TAG_EXCEPTIONS"
-elif [[ -n "$INPUT_ALLOW_ORG_VERSIONS" ]]; then
-	log_warn "INPUT_ALLOW_ORG_VERSIONS is deprecated; use INPUT_ALLOW_TAG_EXCEPTIONS instead"
-	IFS=',' read -ra TAG_EXCEPTIONS <<<"$INPUT_ALLOW_ORG_VERSIONS"
 fi
 
 for i in "${!TAG_EXCEPTIONS[@]}"; do

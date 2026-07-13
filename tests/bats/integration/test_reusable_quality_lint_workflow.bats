@@ -52,3 +52,14 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-quality-lint: tools is canonical; lintro-tools alias removed" {
+	run grep -qE '^      tools:' "$WORKFLOW"
+	assert_success
+	run grep -qE '^      lintro-tools:' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.lintro-tools' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.tools' "$WORKFLOW"
+	assert_success
+}

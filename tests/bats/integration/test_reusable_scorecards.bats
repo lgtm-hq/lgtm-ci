@@ -76,3 +76,18 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-scorecards.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-scorecards: drops deprecated no-op tooling/egress inputs" {
+	run grep -qE '^      tooling-ref:' "$WORKFLOW"
+	assert_failure
+	run grep -qE '^      allowed-endpoints-mode:' "$WORKFLOW"
+	assert_failure
+	run grep -qE '^      egress-preset:' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.tooling-ref' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.allowed-endpoints-mode' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.egress-preset' "$WORKFLOW"
+	assert_failure
+}
