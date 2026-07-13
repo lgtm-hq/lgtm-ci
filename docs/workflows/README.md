@@ -61,6 +61,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-release-version-pr.yml` | Release version PR with changelog |
 | `reusable-release-auto-tag.yml` | Tag + GitHub release on merge |
 | `reusable-main-failure-notifier.yml` | Dedup'd issue on any main-branch workflow failure |
+| `reusable-auto-rerun-on-infra-failure.yml` | Re-run failed jobs once on transient infra outage signatures |
 | `reusable-publish-artifact-preview.yml` | Sticky PR comment linking a build artifact |
 | `reusable-publish-artifact-report.yml` | Publish markdown report from an artifact |
 | `reusable-publish-file-breakdown.yml` | PR changed-files breakdown comment |

@@ -19,6 +19,7 @@ Sample caller layouts for lgtm-hq repositories. Copy and adapt into your
 | [release-auto-tag.yml](release-auto-tag.yml)                                   | Tag + GitHub Release when the version PR merges                                |
 | [release-version-pr-changelog-only.yml](release-version-pr-changelog-only.yml) | Version PRs for repos with no package version files                            |
 | [publish-python-release.yml](publish-python-release.yml)                       | Publish to PyPI on tag (trusted publishing + attestation)                      |
+| [auto-rerun-on-infra-failure.yml](auto-rerun-on-infra-failure.yml)             | Re-run failed jobs once when logs match a transient infra outage               |
 
 <!-- markdownlint-enable MD013 -->
 

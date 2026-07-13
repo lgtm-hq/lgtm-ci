@@ -1,0 +1,145 @@
+---
+name: Reusable - Auto Re-run on Infra Failure
+
+# Re-runs the failed jobs of a completed workflow run when — and only when —
+# the failed-job logs match a known transient-infrastructure signature
+# (GitHub-side outages such as "Failed to resolve action download info").
+# RUN_ATTEMPT gating caps automation at max-reruns re-run(s) per run so a
+# persistent outage can never loop. Call from a workflow_run consumer gated
+# on a failed conclusion (see examples/auto-rerun-on-infra-failure.yml):
+#
+#   rerun:
+#     if: github.event.workflow_run.conclusion == 'failure'
+#     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@<sha>
+#     permissions:
+#       actions: write
+#       contents: read
+#     with:
+#       run-id: ${{ github.event.workflow_run.id }}
+#       run-attempt: ${{ github.event.workflow_run.run_attempt }}
+#       tooling-ref: <sha>
+
+"on":
+  workflow_call:
+    inputs:
+      run-id:
+        description: "Workflow run id to inspect and potentially re-run"
+        required: true
+        type: string
+      run-attempt:
+        description: "Attempt number of the failed run"
+        required: true
+        type: string
+      max-reruns:
+        description: "Maximum automatic re-runs per run"
+        required: false
+        type: string
+        default: "1"
+      signatures:
+        description: >-
+          Extra newline-separated failure-log signatures appended to the
+          built-in transient-infra defaults
+        required: false
+        type: string
+        default: ""
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker,
+          playwright, pypi, rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-minimal"
+
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 10
+
+permissions:
+  contents: read
+
+jobs:
+  rerun:
+    name: Re-run failed jobs on infra failure
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      # Re-run failed jobs and read failed-job logs
+      actions: write
+      # Read repository context for the tooling checkout
+      contents: read
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Re-run failed jobs on matched infra signature
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ inputs.run-id }}
+          RUN_ATTEMPT: ${{ inputs.run-attempt }}
+          MAX_RERUNS: ${{ inputs.max-reruns }}
+          SIGNATURES: ${{ inputs.signatures }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/rerun-on-infra-failure.sh

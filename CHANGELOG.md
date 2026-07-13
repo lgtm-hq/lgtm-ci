@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **ci**: reusable auto-rerun of failed jobs on transient infra failure
+  signatures (lgtm-hq/Rustume#463)
+
 ### Changed
 
 ### Deprecated
