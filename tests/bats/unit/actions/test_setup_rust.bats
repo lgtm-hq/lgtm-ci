@@ -136,6 +136,66 @@ EOF
 	assert_output --partial "Unsupported OS"
 }
 
+@test "setup-rust: binstall step installs windows-msvc zip under Git Bash" {
+	local mock_bin="${BATS_TEST_TMPDIR}/mock_bin"
+	mkdir -p "$mock_bin"
+
+	local calls_file="${BATS_TEST_TMPDIR}/mock_calls_curl"
+	: >"$calls_file"
+
+	# Build a real zip with a cargo-binstall.exe binary
+	local archive_dir="${BATS_TEST_TMPDIR}/archive_content"
+	mkdir -p "$archive_dir"
+	printf '#!/usr/bin/env bash\necho "cargo-binstall mock"\n' >"$archive_dir/cargo-binstall.exe"
+	chmod +x "$archive_dir/cargo-binstall.exe"
+	local archive_file="${BATS_TEST_TMPDIR}/cargo-binstall.zip"
+	(cd "$archive_dir" && zip -q "$archive_file" cargo-binstall.exe)
+
+	cat >"${mock_bin}/curl" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >>'${calls_file}'
+output_file=""
+while [[ \$# -gt 0 ]]; do
+    case "\$1" in
+        -o) output_file="\$2"; shift 2;;
+        *) shift;;
+    esac
+done
+if [[ -n "\$output_file" ]]; then
+    cp '${archive_file}' "\$output_file"
+fi
+exit 0
+EOF
+	chmod +x "${mock_bin}/curl"
+
+	# uname as reported by Git Bash on windows-latest runners
+	cat >"${mock_bin}/uname" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+    -m) echo "x86_64";;
+    *) echo "MINGW64_NT-10.0-26100";;
+esac
+EOF
+	chmod +x "${mock_bin}/uname"
+
+	run bash -c "
+		export PATH='${mock_bin}:/usr/bin:/bin'
+		export STEP=binstall
+		export CARGO_HOME='$CARGO_HOME'
+		bash '$SCRIPT' 2>&1
+	"
+	assert_success
+	assert_output --partial "Installing cargo-binstall"
+	assert_output --partial "installed to"
+	refute_output --partial "Unsupported OS"
+
+	# .exe binary installed to CARGO_HOME/bin
+	[[ -x "$CARGO_HOME/bin/cargo-binstall.exe" ]]
+
+	run cat "$calls_file"
+	assert_output --partial "cargo-binstall-x86_64-pc-windows-msvc.zip"
+}
+
 @test "setup-rust: pinned version carries a renovate comment" {
 	run bash -c "grep -B1 'CARGO_BINSTALL_VERSION=' '$SCRIPT' | head -2"
 	assert_success
