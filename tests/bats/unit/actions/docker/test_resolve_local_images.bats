@@ -60,3 +60,11 @@ teardown() {
 	assert_failure
 	assert_output --partial "No image tag available for local health check"
 }
+
+@test "resolve-local-health-check-image.sh: requires TAGS" {
+	unset TAGS || true
+
+	run bash "$HEALTH_SCRIPT"
+	assert_failure
+	assert_output --partial "TAGS is required"
+}
