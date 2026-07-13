@@ -40,6 +40,7 @@ binstall)
 
 		os=$(uname -s)
 		arch=$(uname -m)
+		binary="cargo-binstall"
 		case "$os" in
 		Linux)
 			case "$arch" in
@@ -55,6 +56,21 @@ binstall)
 		Darwin)
 			target="universal-apple-darwin"
 			ext="zip"
+			;;
+		MINGW* | MSYS* | CYGWIN*)
+			# windows-latest runners execute bash steps under Git Bash,
+			# where uname -s reports MINGW64_NT-<version> (or MSYS/CYGWIN
+			# variants).
+			case "$arch" in
+			x86_64) target="x86_64-pc-windows-msvc" ;;
+			aarch64 | arm64) target="aarch64-pc-windows-msvc" ;;
+			*)
+				echo "Unsupported architecture: $arch"
+				exit 1
+				;;
+			esac
+			ext="zip"
+			binary="cargo-binstall.exe"
 			;;
 		*)
 			echo "Unsupported OS: $os"
@@ -77,7 +93,7 @@ binstall)
 
 		install_dir="${CARGO_HOME:-$HOME/.cargo}/bin"
 		mkdir -p "$install_dir"
-		install -m 0755 "$tmpdir/cargo-binstall" "$install_dir/cargo-binstall"
+		install -m 0755 "$tmpdir/$binary" "$install_dir/$binary"
 		echo "cargo-binstall v${CARGO_BINSTALL_VERSION} installed to $install_dir"
 	else
 		echo "cargo-binstall already installed"
