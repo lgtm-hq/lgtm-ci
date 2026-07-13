@@ -58,4 +58,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	assert_success
 	run grep -qE '^      lintro-tools:' "$WORKFLOW"
 	assert_failure
+	run grep -qF 'inputs.lintro-tools' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.tools' "$WORKFLOW"
+	assert_success
 }

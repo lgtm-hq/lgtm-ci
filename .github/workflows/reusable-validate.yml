@@ -95,7 +95,7 @@ on:
 
 jobs:
   validate:
-    name: ${{ inputs.job-name }}
+    name: ${{ inputs.job-name != '' && inputs.job-name || 'Validation' }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -151,7 +151,7 @@ jobs:
         env:
           SCRIPT_PATH: ${{ inputs.script }}
           # yamllint disable-line rule:line-length
-          VALIDATION_NAME: ${{ inputs.job-name }}
+          VALIDATION_NAME: ${{ inputs.job-name != '' && inputs.job-name || 'Validation' }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           COMMENT_OUTPUT: validation-report.md
           OUTPUT_FILE: validation-output.txt

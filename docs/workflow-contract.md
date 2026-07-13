@@ -52,10 +52,15 @@ For these workflows:
 
 - Pin the reusable `uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-*.yml@<sha>`
   ref in production.
-- `tooling-ref` is **optional** and pins egress composites only — not CI
-  scripts. When omitted, reusables default to `github.workflow_sha` (the pinned
-  workflow SHA). Pass a matching `tooling-ref` only when testing unreleased
-  egress composite changes on a branch.
+- `tooling-ref` is **optional** on the action-only wrappers that still expose it
+  (labeler, dependency-review, semantic-pr-title, codeql) and pins egress
+  composites only — not CI scripts. When omitted, those reusables default to
+  `github.workflow_sha` (the pinned workflow SHA). Pass a matching `tooling-ref`
+  only when testing unreleased egress composite changes on a branch.
+- `reusable-scorecards.yml` does **not** accept `tooling-ref` (or
+  `egress-preset` / `allowed-endpoints-mode`): the scorecard publish allowlist
+  forbids lgtm-ci composites, so egress uses a static `allowed-endpoints`
+  default (#540).
 - Do **not** assume `tooling-ref` pins the third-party action inside the
   reusable; those actions are pinned by SHA inside the workflow YAML.
 

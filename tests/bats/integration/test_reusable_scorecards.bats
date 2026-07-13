@@ -84,4 +84,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-scorecards.yml"
 	assert_failure
 	run grep -qE '^      egress-preset:' "$WORKFLOW"
 	assert_failure
+	run grep -qF 'inputs.tooling-ref' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.allowed-endpoints-mode' "$WORKFLOW"
+	assert_failure
+	run grep -qF 'inputs.egress-preset' "$WORKFLOW"
+	assert_failure
 }
