@@ -26,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **release**: pin repository checkout in auto-tag and version-PR reusables to
+  the triggering commit — an unpinned checkout raced commits landing after the
+  trigger, making guard-release-commit skip legitimate release tags
+  (observed: lgtm-hq/Rustume v0.29.1 wedge)
+
 ### Security
 
 ## [0.53.1] - 2026-07-13
