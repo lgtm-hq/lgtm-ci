@@ -23,10 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **release**: version 0.53.1 (#558) (5a615b1)
 - **docker**: ratchet BATS coverage for step scripts (#555) (7db279c)
 
 ### Fixed
 
+- **deps**: update lintro (#559) (82b57ed)
 - **actions**: support Windows Git Bash in setup-rust binstall (#557) (8a82754)
 
 ## [0.53.0] - 2026-07-13
