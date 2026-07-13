@@ -34,13 +34,6 @@ on:
         required: false
         type: boolean
         default: true
-      publish-results:
-        description: >-
-          Deprecated: use a separate publish caller workflow instead. Ignored
-          by this workflow.
-        required: false
-        type: boolean
-        default: false
       extra-args:
         description: "Additional arguments to pass to Playwright"
         required: false

@@ -16,11 +16,6 @@ inputs:
       available (e.g., some-org/action-without-shas)
     required: false
     default: ""
-  allow-org-versions:
-    description: >-
-      Deprecated alias for allow-tag-exceptions. Prefer allow-tag-exceptions.
-    required: false
-    default: ""
   scan-paths:
     description: >-
       Paths to scan for workflow files
@@ -75,7 +70,6 @@ runs:
         GH_TOKEN: ${{ inputs['gh-token'] || env.GH_TOKEN || github.token }}
         INPUT_ENFORCE: ${{ inputs.enforce }}
         INPUT_ALLOW_TAG_EXCEPTIONS: ${{ inputs['allow-tag-exceptions'] }}
-        INPUT_ALLOW_ORG_VERSIONS: ${{ inputs['allow-org-versions'] }}
         INPUT_SCAN_PATHS: ${{ inputs['scan-paths'] }}
         INPUT_VERIFY_TAGS: ${{ inputs['verify-tags'] }}
         INPUT_AUDIT_TRANSITIVE: ${{ inputs['audit-transitive'] }}

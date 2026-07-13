@@ -15,7 +15,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **workflows**: hard-cut deprecated / kept-for-compat inputs (#540):
+  - `reusable-rust-test.yml` `toolchain` (use `rust-toolchain`)
+  - `reusable-quality-lint.yml` `lintro-tools` (use `tools`)
+  - `reusable-validate.yml` `name` (use `job-name`)
+  - `validate-action-pinning` `allow-org-versions` (use `allow-tag-exceptions`)
+  - `reusable-scorecards.yml` no-op `tooling-ref`, `allowed-endpoints-mode`,
+    `egress-preset`
+  - `reusable-test-e2e.yml` ignored `publish-results`
+- **workflows**: `reusable-docker.yml` is the supported Docker entry point
+  (compat-only framing dropped; focused reusables remain available)
+
 ### Fixed
+
+- **test**: isolate cargo-llvm-cov absence check from Homebrew PATH pollution
 
 ### Security
 

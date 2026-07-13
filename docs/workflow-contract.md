@@ -92,7 +92,7 @@ working unchanged.
 
 | Workflow                            | Responsibility                                                         | `runner-map`?                      |
 | ----------------------------------- | ---------------------------------------------------------------------- | ---------------------------------- |
-| `reusable-docker.yml`               | Orchestrator: classify + delegate (backwards-compatible entry point)   | Yes (resolved by `classify`)       |
+| `reusable-docker.yml`               | Orchestrator: classify + delegate (supported entry point)              | Yes (resolved by `classify`)       |
 | `reusable-docker-build.yml`         | Single-platform or QEMU multi-platform build + scan (non-split path)   | No (fixed `ubuntu-24.04` + QEMU)   |
 | `reusable-docker-multiplatform.yml` | Per-platform matrix build + smoke/health gates + manifest merge + sign | No (takes classify `matrix` input) |
 | `reusable-docker-smoke-test.yml`    | Standalone validation of a published image by immutable digest         | No (`runner-image` input)          |

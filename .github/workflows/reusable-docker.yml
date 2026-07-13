@@ -1,16 +1,15 @@
 ---
 name: Reusable Docker Build and Push
 
-# Thin orchestrator kept for backwards compatibility (#381). The classify job
-# resolves the build strategy, then delegates to the focused reusables:
+# Supported Docker entry-point orchestrator (#381). The classify job resolves
+# the build strategy, then delegates to the focused reusables:
 #   - reusable-docker-build.yml          (use-split=false: single-platform or
 #                                         QEMU multi-platform build+scan)
 #   - reusable-docker-multiplatform.yml  (use-split=true: runner-map matrix,
 #                                         manifest merge, signing)
-# Consumers may keep calling this workflow unchanged, or migrate to the
-# focused reusables directly — see docs/workflow-contract.md (runner-map
-# section) for the migration path. reusable-docker-smoke-test.yml is a
-# standalone image-validation reusable and is not called from here.
+# Callers may use this workflow, or call the focused reusables directly —
+# see docs/workflow-contract.md (runner-map section). reusable-docker-smoke-test.yml
+# is a standalone image-validation reusable and is not called from here.
 #
 # Caller repos only need to pin this workflow; all shared shell scripts are
 # resolved from lgtm-ci via a cross-repo checkout (same pattern as

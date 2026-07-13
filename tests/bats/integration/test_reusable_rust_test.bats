@@ -9,8 +9,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 @test "reusable-rust-test: exposes coverage flag and nextest inputs" {
 	run grep -qE '^      coverage:' "$WORKFLOW"
 	assert_success
-	run grep -qE '^      toolchain:' "$WORKFLOW"
+	run grep -qE '^      rust-toolchain:' "$WORKFLOW"
 	assert_success
+	run grep -qE '^      toolchain:' "$WORKFLOW"
+	assert_failure
 	run grep -q 'run-rust-nextest.sh' "$WORKFLOW"
 	assert_success
 	run grep -q 'run-rust-nextest-coverage.sh' "$WORKFLOW"

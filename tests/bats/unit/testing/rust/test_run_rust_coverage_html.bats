@@ -64,10 +64,12 @@ EOF
 }
 
 @test "run-rust-coverage-html: fails when cargo-llvm-cov is missing" {
-	local bash_dir
-	bash_dir="$(dirname "$(command -v bash)")"
+	# Absolute bash + coreutils PATH so Homebrew tools beside bash (including
+	# a real cargo-llvm-cov) cannot satisfy the check, while rm stays available.
+	local bash_path
+	bash_path="$(command -v bash)"
 
-	run env PATH="${bash_dir}" bash "$SCRIPT"
+	run env PATH="/bin:/usr/bin" "$bash_path" "$SCRIPT"
 	assert_failure
 	assert_output --partial "cargo-llvm-cov is required"
 }

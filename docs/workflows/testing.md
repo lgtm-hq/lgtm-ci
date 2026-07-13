@@ -83,8 +83,7 @@ jobs:
 **Inputs:** `node-version` (default '20'), `project` (Playwright project),
 `browsers` (chromium/firefox/webkit/all, default 'chromium'), `shard` (for
 example "1/3"), `reporter` (json/html/junit, default 'html'),
-`upload-report` (default true), `publish-results` (deprecated no-op,
-default false).
+`upload-report` (default true).
 
 **Outputs:** `tests-passed`, `tests-failed`, `passed`.
 
