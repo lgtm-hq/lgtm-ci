@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **docker**: surface blocked-egress signatures on build failure — the reusable
+  Docker build workflows now scan the failed build's log for blocked-egress
+  signatures (DNS failures, apk I/O errors, i/o timeouts, buildkit rpc errors),
+  emit `::error::` annotations naming the likely-blocked host, and write a
+  "Possible blocked egress" step-summary section (upstream half of
+  lgtm-hq/Rustume#459)
+
 ### Changed
 
 ### Deprecated

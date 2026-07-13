@@ -365,6 +365,13 @@ jobs:
           # yamllint enable rule:line-length
           provenance: false
           sbom: ${{ inputs.sbom && inputs.push }}
+      - name: Summarize blocked egress
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          STEP: summarize-blocked-egress
+          BUILD_LOG: ${{ runner.temp }}/docker-build.log
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
       - name: Record staging digest
         shell: bash
         env:
