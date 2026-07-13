@@ -33,6 +33,19 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	assert_success
 }
 
+@test "auto-rerun: bootstrap harden step pins literal github hosts" {
+	# The first harden-runner step must not depend on caller input: an empty
+	# allowed-endpoints would otherwise block the tooling checkout that
+	# resolves the egress preset.
+	run awk '
+		/step-security\/harden-runner@/ { in_harden = 1 }
+		in_harden && /allowed-endpoints: \$\{\{/ { bad = 1; exit }
+		in_harden && /api\.github\.com:443/ { found = 1; exit }
+		END { exit !(found && !bad) }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "auto-rerun: delegates to the rerun script with no inline shell" {
 	run grep -F "rerun-on-infra-failure.sh" "$WORKFLOW"
 	assert_success

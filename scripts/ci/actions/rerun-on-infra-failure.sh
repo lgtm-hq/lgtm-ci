@@ -27,6 +27,18 @@ set -euo pipefail
 : "${MAX_RERUNS:=1}"
 : "${SIGNATURES:=}"
 
+# RUN_ATTEMPT and MAX_RERUNS feed an arithmetic comparison; reject anything
+# that is not a non-negative integer up front so workflow-input typos fail
+# loudly instead of raising an arithmetic error under set -e.
+if [[ ! "$RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then
+	echo "::error::RUN_ATTEMPT must be a non-negative integer (got '${RUN_ATTEMPT}')"
+	exit 1
+fi
+if [[ ! "$MAX_RERUNS" =~ ^[0-9]+$ ]]; then
+	echo "::error::MAX_RERUNS must be a non-negative integer (got '${MAX_RERUNS}')"
+	exit 1
+fi
+
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"

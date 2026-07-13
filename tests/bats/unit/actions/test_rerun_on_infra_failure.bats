@@ -72,6 +72,33 @@ EOF
 	assert_output --partial "RUN_ATTEMPT is required"
 }
 
+@test "rerun-on-infra-failure: non-numeric RUN_ATTEMPT fails with a clear error" {
+	export RUN_ATTEMPT="not-a-number"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::RUN_ATTEMPT must be a non-negative integer (got 'not-a-number')"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: non-numeric MAX_RERUNS fails with a clear error" {
+	export MAX_RERUNS="one"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::MAX_RERUNS must be a non-negative integer (got 'one')"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: negative RUN_ATTEMPT fails validation" {
+	export RUN_ATTEMPT="-1"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "RUN_ATTEMPT must be a non-negative integer"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
 # =============================================================================
 # Default signatures trigger a rerun of failed jobs
 # =============================================================================

@@ -111,7 +111,16 @@ jobs:
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          # Literal GitHub bootstrap allowlist (same pattern as the main
+          # failure notifier): the tooling checkout and preset resolution run
+          # after this step, so an empty caller allowed-endpoints must not
+          # leave block-policy egress with an empty allowlist.
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
