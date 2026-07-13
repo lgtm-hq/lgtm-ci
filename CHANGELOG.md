@@ -9,6 +9,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.54.0] - 2026-07-13
+
+### Added
+
+- **docker**: surface blocked-egress signatures on build failure (#568) (b83bf56)
+- **ci**: reusable auto-rerun for transient infra failures (#569) (0731adc)
+
 - **ci**: reusable auto-rerun of failed jobs on transient infra failure
   signatures (lgtm-hq/Rustume#463)
 - **docker**: surface blocked-egress signatures on build failure — the reusable
@@ -18,20 +35,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   "Possible blocked egress" step-summary section (upstream half of
   lgtm-hq/Rustume#459)
 
-### Changed
-
-### Deprecated
-
-### Removed
-
 ### Fixed
 
+- **release**: pin repo checkout to triggering commit in release reusables (#572)
+  (3a60e5a)
+- **deps**: update lintro (#567) (22935de)
 - **release**: pin repository checkout in auto-tag and version-PR reusables to
   the triggering commit — an unpinned checkout raced commits landing after the
   trigger, making guard-release-commit skip legitimate release tags
   (observed: lgtm-hq/Rustume v0.29.1 wedge)
-
-### Security
 
 ## [0.53.1] - 2026-07-13
 
@@ -1571,7 +1583,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.0...HEAD
+[0.54.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.1...v0.54.0
 [0.53.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.0...v0.53.1
 [0.53.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.9...v0.53.0
 [0.52.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.8...v0.52.9
