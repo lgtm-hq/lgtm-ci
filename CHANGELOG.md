@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **release**: cut a version for the #551 deprecated-input hard-cut (conventional
+  `chore` alone does not bump)
+
 ### Deprecated
 
 ### Removed
