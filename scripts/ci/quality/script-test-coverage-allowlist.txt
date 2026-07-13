@@ -4,14 +4,6 @@
 actions/check-coverage-threshold.sh
 actions/collect-coverage.sh
 actions/deploy-pages.sh
-actions/docker/health-check-local.sh
-actions/docker/merge-manifests.sh
-actions/docker/metadata.sh
-actions/docker/push.sh
-actions/docker/resolve-local-health-check-image.sh
-actions/docker/resolve-local-scan-image.sh
-actions/docker/setup.sh
-actions/docker/sign-image.sh
 actions/generate-coverage-badge.sh
 actions/generate-lintro-comment.sh
 actions/generate-matrix.sh
