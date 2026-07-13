@@ -46,10 +46,14 @@ teardown() {
 
 @test "sign-image.sh: fails when cosign is missing" {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	local bash_path cmd
 	mkdir -p "$mock_bin"
-	export PATH="${mock_bin}:/usr/bin:/bin"
-
-	run bash "$SCRIPT"
+	bash_path="$(command -v bash)"
+	# Minimal PATH with coreutils but no cosign (may live under /usr/bin on some runners).
+	for cmd in dirname uname tr; do
+		ln -sf "$(command -v "$cmd")" "${mock_bin}/${cmd}"
+	done
+	run env PATH="${mock_bin}" "$bash_path" "$SCRIPT"
 	assert_failure
 	assert_output --partial "cosign not found"
 }
