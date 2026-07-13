@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.53.1] - 2026-07-13
+
+### Changed
+
+- **docker**: ratchet BATS coverage for step scripts (#555) (7db279c)
+
+### Fixed
+
+- **actions**: support Windows Git Bash in setup-rust binstall (#557) (8a82754)
+
 ## [0.53.0] - 2026-07-13
 
 ### Changed
@@ -1547,7 +1557,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.1...HEAD
+[0.53.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.0...v0.53.1
 [0.53.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.9...v0.53.0
 [0.52.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.8...v0.52.9
 [0.52.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.7...v0.52.8
