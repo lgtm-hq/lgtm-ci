@@ -33,7 +33,7 @@ source "$SCRIPT_DIR/../../lib/actions.sh"
 
 # Fallback: recover the latest build's log from buildx history (buildx >= 0.20)
 if [[ ! -s "$BUILD_LOG" ]] && command -v docker >/dev/null 2>&1; then
-	mkdir -p "$(dirname "$BUILD_LOG")"
+	mkdir -p "$(dirname "$BUILD_LOG")" || true
 	docker buildx history logs >"$BUILD_LOG" 2>/dev/null || true
 fi
 
