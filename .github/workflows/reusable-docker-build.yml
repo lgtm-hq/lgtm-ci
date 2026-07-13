@@ -344,6 +344,13 @@ jobs:
           # yamllint enable rule:line-length
           provenance: ${{ inputs.provenance && inputs.push && inputs.health-check-cmd == '' }}
           sbom: ${{ inputs.sbom && inputs.push && inputs.health-check-cmd == '' }}
+      - name: Summarize blocked egress
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          STEP: summarize-blocked-egress
+          BUILD_LOG: ${{ runner.temp }}/docker-build.log
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
       - name: Resolve local image for health check
         if: inputs.health-check-cmd != ''
         id: local-health-check-image

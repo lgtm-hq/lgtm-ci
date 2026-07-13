@@ -18,6 +18,9 @@
 #            Note: Values containing commas are not supported
 #   CACHE_FROM - Cache sources
 #   CACHE_TO - Cache destinations
+#   BUILD_LOG - File to tee the buildx output to, so a later failure step can
+#               scan it for blocked-egress signatures
+#               (default: $RUNNER_TEMP/docker-build.log)
 
 set -euo pipefail
 
@@ -41,6 +44,7 @@ source "$SCRIPT_DIR/../../lib/docker.sh"
 : "${LABELS:=}"
 : "${CACHE_FROM:=}"
 : "${CACHE_TO:=}"
+: "${BUILD_LOG:=${RUNNER_TEMP:-/tmp}/docker-build.log}"
 
 # Validate required inputs
 if [[ -z "$IMAGE_NAME" ]]; then
@@ -163,9 +167,15 @@ for arg in "${BUILD_CMD[@]}"; do
 done
 log_info "Running: ${safe_cmd[*]}"
 
-# Execute build
-exit_code=0
-"${BUILD_CMD[@]}" || exit_code=$?
+# Execute build, teeing output to BUILD_LOG so a failure step can scan it
+# for blocked-egress signatures. The log is best-effort diagnostics: take the
+# build's own exit code from PIPESTATUS[0] (not the pipeline status) so a tee
+# failure (e.g. unwritable BUILD_LOG) can never misreport the build result.
+mkdir -p "$(dirname "$BUILD_LOG")" 2>/dev/null || true
+set +e
+"${BUILD_CMD[@]}" 2>&1 | tee "$BUILD_LOG"
+exit_code=${PIPESTATUS[0]}
+set -e
 
 # Set outputs
 set_github_output "exit-code" "$exit_code"
