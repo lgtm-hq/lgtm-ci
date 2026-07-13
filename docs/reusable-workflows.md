@@ -396,6 +396,52 @@ workflow declares. Grant at least `actions: read` and `issues: write` on the
 caller job, or pass `report-failures: false` when upgrading from a release that
 did not include failure reporting.
 
+### Auto re-run on infra failure
+
+`reusable-auto-rerun-on-infra-failure.yml` re-runs the failed jobs of a
+completed workflow run when — and only when — the failed-job logs match a
+known transient-infrastructure signature. Built-in signatures:
+
+- `Failed to resolve action download info`
+- `The runner has received a shutdown signal`
+- `Error resolving allowed domain`
+- `lost communication with the server`
+
+Extend the list via the multiline `signatures` input (newline-separated,
+appended to the defaults). When no signature matches, the job writes a step
+summary and exits successfully without re-running — a real failure stays
+failed. `max-reruns` (default `1`) caps automation per run: attempts beyond
+the cap exit without re-running, so a persistent outage can never loop.
+
+Call it from a thin `workflow_run` consumer gated on a failed conclusion
+(see [examples/auto-rerun-on-infra-failure.yml](../examples/auto-rerun-on-infra-failure.yml)):
+
+```yaml
+"on":
+  workflow_run:
+    workflows: ["CI", "Deploy Pages", "Coverage"]
+    types: [completed]
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'failure'
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@<sha> # vX.Y.Z
+    permissions:
+      actions: write
+      contents: read
+    with:
+      tooling-ref: "<sha>" # vX.Y.Z
+      run-id: ${{ format('{0}', github.event.workflow_run.id) }}
+      run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
+```
+
+Caveats: `workflow_run` triggers only execute from the workflow definition on
+the **default branch**, so the caller file must land on main before it fires.
+`workflow_run.workflows` matches workflow `name:` values, not file names. The
+run id and attempt are numbers in the event payload; wrap them in `format()`
+so they arrive as the strings the inputs expect.
+
 Recommended caller `run-name` (reusable workflows cannot set this for you):
 
 ```yaml
