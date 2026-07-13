@@ -11,10 +11,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.53.0] - 2026-07-13
+
+### Changed
+
+- **api**: cut release for deprecated-input hard-cut (#553) (3fa2189)
+- **api**: remove deprecated compat inputs (#551) (9dafb17)
+- **deps**: update renovatebot/github-action action to v46.1.19 (patch) (#552) (4ca7bff)
+- **deps**: lock file maintenance (#550) (ad3641b)
 - **release**: cut a version for the #551 deprecated-input hard-cut (conventional
   `chore` alone does not bump)
-
-### Deprecated
 
 ### Removed
 
@@ -32,8 +46,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **test**: isolate cargo-llvm-cov absence check from Homebrew PATH pollution
-
-### Security
 
 ## [0.52.9] - 2026-07-12
 
@@ -1535,7 +1547,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.9...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.0...HEAD
+[0.53.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.9...v0.53.0
 [0.52.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.8...v0.52.9
 [0.52.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.7...v0.52.8
 [0.52.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.6...v0.52.7
