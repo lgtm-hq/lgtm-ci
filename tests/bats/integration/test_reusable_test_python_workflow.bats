@@ -94,3 +94,43 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-test-python: pipeline-skip guards prepare, test, aggregate, and summary jobs" {
+	run awk '
+		function job_if_has_pipeline_skip(job,    in_job, if_line, found) {
+			in_job = 0
+			found = 0
+			while ((getline line < FILENAME) > 0) {
+				if (line ~ "^  " job ":") {
+					in_job = 1
+					continue
+				}
+				if (in_job && line ~ /^  [a-zA-Z0-9_-]+:/) {
+					break
+				}
+				if (in_job && line ~ /^    if:/) {
+					if_line = line
+					while ((getline line < FILENAME) > 0 && line ~ /^      /) {
+						if_line = if_line line
+					}
+					if (if_line ~ /!inputs\.pipeline-skip/) {
+						found = 1
+					}
+					break
+				}
+			}
+			close(FILENAME)
+			return found
+		}
+		BEGIN {
+			FILENAME = ARGV[1]
+			if (!job_if_has_pipeline_skip("prepare") ||
+				!job_if_has_pipeline_skip("test") ||
+				!job_if_has_pipeline_skip("aggregate") ||
+				!job_if_has_pipeline_skip("publish-test-summary")) {
+				exit 1
+			}
+		}
+	' "$WORKFLOW"
+	assert_success
+}

@@ -129,6 +129,16 @@ on:
         required: false
         type: boolean
         default: true
+      pipeline-skip:
+        description: >-
+          Skip test jobs when the caller determined the diff is pipeline-irrelevant
+          (e.g. docs-only). Jobs skipped inside a running reusable still report
+          their required nested check contexts as skipped — unlike skipping the
+          reusable caller itself, which collapses nested contexts and deadlocks
+          merges (py-lintro#1359).
+        required: false
+        type: boolean
+        default: false
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -170,9 +180,12 @@ jobs:
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
     if: >-
-      !inputs.draft-pr-skip ||
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.draft == false
+      !inputs.pipeline-skip &&
+      (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     permissions:
       contents: read
     outputs:
@@ -244,9 +257,12 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
-      !inputs.draft-pr-skip ||
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.draft == false
+      !inputs.pipeline-skip &&
+      (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     permissions:
       contents: read
     strategy:
@@ -437,6 +453,7 @@ jobs:
       always()
       && needs.prepare.result == 'success'
       && inputs.python-versions != ''
+      && !inputs.pipeline-skip
       && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
@@ -537,8 +554,10 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
       && inputs.publish-test-summary
+      && !inputs.pipeline-skip
       && (
         !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
         github.event.pull_request.draft == false
       )
     uses: ./.github/workflows/reusable-publish-test-summary.yml
