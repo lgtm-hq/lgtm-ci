@@ -35,7 +35,7 @@ binstall)
 		# but no sha256 checksum files, so pinning the version + TLS is
 		# the integrity control here.
 		# renovate: datasource=github-releases depName=cargo-bins/cargo-binstall
-		CARGO_BINSTALL_VERSION="1.20.1"
+		CARGO_BINSTALL_VERSION="1.21.0"
 		echo "Installing cargo-binstall v${CARGO_BINSTALL_VERSION}..."
 
 		os=$(uname -s)
