@@ -21,7 +21,7 @@ teardown() {
 
 _write_pyproject() {
 	local version="$1"
-	sed "s/__VERSION__/${version}/g" \
+	sed "s|__VERSION__|${version}|g" \
 		"${FIXTURES_DIR}/python/pyproject-version.toml" >pyproject.toml
 }
 
