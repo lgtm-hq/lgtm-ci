@@ -172,7 +172,7 @@ jobs:
         # Node 24 ships npm ≥ 11.5.1 (required for OIDC trusted publishing).
         # Do not run `npm install -g npm`: in-place self-upgrade corrupts the
         # toolcache and breaks `npm publish --provenance` (missing sigstore).
-        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ inputs.node-version }}
           registry-url: https://registry.npmjs.org
