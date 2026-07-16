@@ -1,0 +1,3 @@
+[[IgnoredVulns]]
+id = "GHSA-xxxx-yyyy-zzzz"
+reason = "No fix available"
