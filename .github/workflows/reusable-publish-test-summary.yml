@@ -34,8 +34,9 @@ on:
         default: ""
       coverage-enabled:
         description: >-
-          Whether coverage was requested for this run (omit coverage sections
-          from the totals summary when false)
+          Whether coverage was requested for this run. When false (default),
+          omit coverage sections from the totals summary. Direct callers that
+          pass coverage-percent must set this to true or coverage will be omitted.
         required: false
         type: boolean
         default: false

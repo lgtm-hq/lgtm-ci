@@ -135,3 +135,20 @@ teardown() {
 	assert_output --partial "Status: ❌ FAILED"
 	assert_output --partial "Unable to retrieve coverage: coverage collection was skipped because tests failed."
 }
+
+@test "generate-test-summary: reports below-target coverage when under threshold" {
+	run env \
+		TESTS_PASSED="10" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="10" \
+		COVERAGE_ENABLED="true" \
+		COVERAGE_PERCENT="79" \
+		COVERAGE_THRESHOLD="80" \
+		JOB_RESULT="failure" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Below target (<80%)"
+	assert_output --partial "79%"
+	assert_output --partial "Code Coverage"
+}
