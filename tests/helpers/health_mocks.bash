@@ -48,5 +48,7 @@ exit 0
 EOF
 	chmod +x "${mock_bin}/nc"
 
-	export PATH="${mock_bin}:$PATH"
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
 }
