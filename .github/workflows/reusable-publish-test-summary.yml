@@ -32,6 +32,13 @@ on:
         required: false
         type: string
         default: ""
+      coverage-enabled:
+        description: >-
+          Whether coverage was requested for this run (omit coverage sections
+          from the totals summary when false)
+        required: false
+        type: boolean
+        default: false
       coverage-threshold:
         description: "Minimum coverage percentage threshold"
         required: false
@@ -215,6 +222,7 @@ jobs:
           TESTS_PASSED: ${{ inputs.tests-passed }}
           TESTS_FAILED: ${{ inputs.tests-failed }}
           TESTS_TOTAL: ${{ inputs.tests-total }}
+          COVERAGE_ENABLED: ${{ inputs.coverage-enabled }}
           COVERAGE_PERCENT: ${{ inputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
           JOB_RESULT: ${{ inputs.job-result }}

@@ -591,6 +591,7 @@ jobs:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
+      coverage-enabled: ${{ inputs.coverage }}
       rich-coverage-comment: ${{ inputs.coverage }}
       coverage-artifact-name: ${{ inputs.coverage && 'node-coverage' || '' }}
       coverage-file: >-

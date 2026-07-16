@@ -582,4 +582,5 @@ jobs:
       test-suite-name: ${{ inputs.test-job-name }}
       comment-marker: ${{ inputs.comment-marker }}
       job-result: ${{ needs.site-test.result }}
+      coverage-enabled: false
       tooling-ref: ${{ inputs.tooling-ref }}

@@ -216,6 +216,29 @@ _aggregate_requires_prepare_success() {
 	assert_success
 }
 
+@test "reusable-publish-test-summary: threads coverage-enabled into generator" {
+	run grep -q 'coverage-enabled:' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
+	assert_success
+	run grep -q 'COVERAGE_ENABLED: \${{ inputs.coverage-enabled }}' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
+	assert_success
+}
+
+@test "language test reusables: pass coverage-enabled from inputs.coverage" {
+	local workflow
+	for workflow in \
+		reusable-test-python.yml \
+		reusable-test-node.yml \
+		reusable-test-node-custom.yml \
+		reusable-rust-test.yml \
+		reusable-test-shell.yml; do
+		run grep -q 'coverage-enabled: \${{ inputs.coverage }}' \
+			"${PROJECT_ROOT}/.github/workflows/${workflow}"
+		assert_success
+	done
+}
+
 @test "reusable-publish-test-summary: tolerates missing coverage artifact" {
 	run grep -q 'id: download-coverage' \
 		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"

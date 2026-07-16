@@ -7,6 +7,7 @@
 #   TESTS_FAILED - Number of tests failed
 #   TESTS_TOTAL - Total number of tests
 #   TESTS_SKIPPED - Number of tests skipped (optional)
+#   COVERAGE_ENABLED - Whether coverage was requested (true|false; default false)
 #   COVERAGE_PERCENT - Coverage percentage (optional, numeric without %)
 #   COVERAGE_THRESHOLD - Coverage threshold (optional)
 #   JOB_RESULT - Job result (success/failure)
@@ -37,10 +38,17 @@ TESTS_PASSED="${TESTS_PASSED:-0}"
 TESTS_FAILED="${TESTS_FAILED:-0}"
 TESTS_TOTAL="${TESTS_TOTAL:-0}"
 TESTS_SKIPPED="${TESTS_SKIPPED:-0}"
+COVERAGE_ENABLED="${COVERAGE_ENABLED:-false}"
 COVERAGE_PERCENT="${COVERAGE_PERCENT:-}"
 COVERAGE_THRESHOLD="${COVERAGE_THRESHOLD:-0}"
 JOB_RESULT="${JOB_RESULT:-unknown}"
 TEST_SUITE_NAME="${TEST_SUITE_NAME:-Shell Tests}"
+
+# Normalize COVERAGE_ENABLED to true|false (GitHub boolean inputs are strings)
+case "${COVERAGE_ENABLED,,}" in
+true | 1 | yes) COVERAGE_ENABLED="true" ;;
+*) COVERAGE_ENABLED="false" ;;
+esac
 
 # Normalize numeric values to avoid arithmetic errors under set -euo pipefail
 sanitize_int() {
@@ -91,40 +99,42 @@ else
 	TEST_STATUS_TEXT="⚠️ Tests unknown"
 fi
 
-# Coverage status using shared library if available
+# Coverage status using shared library if available (only when coverage was requested)
 COVERAGE_STATUS="Coverage unavailable"
 COVERAGE_EMOJI="⚠️"
 COVERAGE_BELOW_THRESHOLD="false"
-if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
-	# Normalize coverage: strip decimals for comparison, defaulting to 0 if empty
-	COVERAGE_NUMERIC="$(sanitize_int "${COVERAGE_PERCENT%.*}")"
-	if [[ "$COVERAGE_THRESHOLD" -gt 0 ]]; then
-		# Use score_emoji from shared library if available
-		if declare -f score_emoji &>/dev/null; then
-			COVERAGE_EMOJI=$(score_emoji "$COVERAGE_NUMERIC" "$COVERAGE_THRESHOLD")
-		else
-			# Fallback emoji logic
-			if [[ "$COVERAGE_NUMERIC" -ge "$COVERAGE_THRESHOLD" ]]; then
-				COVERAGE_EMOJI="✅"
+if [[ "$COVERAGE_ENABLED" == "true" ]]; then
+	if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
+		# Normalize coverage: strip decimals for comparison, defaulting to 0 if empty
+		COVERAGE_NUMERIC="$(sanitize_int "${COVERAGE_PERCENT%.*}")"
+		if [[ "$COVERAGE_THRESHOLD" -gt 0 ]]; then
+			# Use score_emoji from shared library if available
+			if declare -f score_emoji &>/dev/null; then
+				COVERAGE_EMOJI=$(score_emoji "$COVERAGE_NUMERIC" "$COVERAGE_THRESHOLD")
 			else
-				COVERAGE_EMOJI="⚠️"
+				# Fallback emoji logic
+				if [[ "$COVERAGE_NUMERIC" -ge "$COVERAGE_THRESHOLD" ]]; then
+					COVERAGE_EMOJI="✅"
+				else
+					COVERAGE_EMOJI="⚠️"
+				fi
 			fi
-		fi
 
-		if [[ "$COVERAGE_NUMERIC" -ge "$COVERAGE_THRESHOLD" ]]; then
-			COVERAGE_STATUS="Target met (>=${COVERAGE_THRESHOLD}%)"
+			if [[ "$COVERAGE_NUMERIC" -ge "$COVERAGE_THRESHOLD" ]]; then
+				COVERAGE_STATUS="Target met (>=${COVERAGE_THRESHOLD}%)"
+			else
+				COVERAGE_STATUS="Below target (<${COVERAGE_THRESHOLD}%)"
+				COVERAGE_BELOW_THRESHOLD="true"
+			fi
 		else
-			COVERAGE_STATUS="Below target (<${COVERAGE_THRESHOLD}%)"
-			COVERAGE_BELOW_THRESHOLD="true"
+			COVERAGE_STATUS="Coverage recorded"
+			COVERAGE_EMOJI="ℹ️"
 		fi
+	elif [[ "$TESTS_FAILED" -gt 0 ]]; then
+		COVERAGE_STATUS="Unable to retrieve coverage: coverage collection was skipped because tests failed."
 	else
-		COVERAGE_STATUS="Coverage recorded"
-		COVERAGE_EMOJI="ℹ️"
+		COVERAGE_STATUS="Unable to retrieve coverage: coverage report was not generated."
 	fi
-elif [[ "$TESTS_FAILED" -gt 0 ]]; then
-	COVERAGE_STATUS="Unable to retrieve coverage: coverage collection was skipped because tests failed."
-else
-	COVERAGE_STATUS="Unable to retrieve coverage: coverage report was not generated."
 fi
 
 # Determine overall status based on JOB_RESULT first, then tests/coverage
@@ -187,30 +197,18 @@ else
 	PASS_RATE=0
 fi
 
-# Generate comment in py-lintro style
-COMMENT_BODY="$(
-	cat <<EOF
-## 🧪 ${TEST_SUITE_NAME} Report
-
-This PR has been analyzed using **lgtm-ci** - our reusable test workflow.
-
-### 📊 Status: ${STATUS_EMOJI} ${STATUS_TEXT}
-
-**Build:** ${TEST_STATUS_TEXT}
+COVERAGE_SECTION=""
+if [[ "$COVERAGE_ENABLED" == "true" ]]; then
+	COVERAGE_SECTION="$(
+		cat <<EOF
 
 **Coverage:** ${COVERAGE_EMOJI} ${COVERAGE_DISPLAY}
 
 **Status:** ${COVERAGE_STATUS}
-
-### 🧪 Test Results
-
-| Metric | Value |
-|--------|-------|
-| **Total Tests** | ${TESTS_TOTAL} |
-| **Passed** | ${TESTS_PASSED} ✅ |
-| **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
-| **Skipped** | ${TESTS_SKIPPED} |
-| **Pass Rate** | ${PASS_RATE}% |
+EOF
+	)"
+	COVERAGE_TABLE_SECTION="$(
+		cat <<EOF
 
 ### 📊 Code Coverage
 
@@ -223,6 +221,40 @@ This PR has been analyzed using **lgtm-ci** - our reusable test workflow.
 ### 📋 Coverage Details
 - **Generated:** $(date -u +%Y-%m-%d)
 ${COMMIT_LINE}
+EOF
+	)"
+else
+	COVERAGE_TABLE_SECTION="$(
+		cat <<EOF
+
+### 📋 Run Details
+- **Generated:** $(date -u +%Y-%m-%d)
+${COMMIT_LINE}
+EOF
+	)"
+fi
+
+# Generate comment in py-lintro style
+COMMENT_BODY="$(
+	cat <<EOF
+## 🧪 ${TEST_SUITE_NAME} Report
+
+This PR has been analyzed using **lgtm-ci** - our reusable test workflow.
+
+### 📊 Status: ${STATUS_EMOJI} ${STATUS_TEXT}
+
+**Build:** ${TEST_STATUS_TEXT}${COVERAGE_SECTION}
+
+### 🧪 Test Results
+
+| Metric | Value |
+|--------|-------|
+| **Total Tests** | ${TESTS_TOTAL} |
+| **Passed** | ${TESTS_PASSED} ✅ |
+| **Failed** | ${TESTS_FAILED} ${FAILED_EMOJI} |
+| **Skipped** | ${TESTS_SKIPPED} |
+| **Pass Rate** | ${PASS_RATE}% |
+${COVERAGE_TABLE_SECTION}
 ${BUILD_LINK_BLOCK}
 
 <sub>Generated by ${TEST_SUITE_NAME} workflow</sub>
