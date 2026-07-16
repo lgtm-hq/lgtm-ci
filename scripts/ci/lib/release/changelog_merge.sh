@@ -82,9 +82,9 @@ _normalize_changelog_bullet_key() {
 		return 0
 	}
 
-	# Comparison-only: lowercase, strip trailing (#N)/(sha), backticks, light
-	# stopwords (a/an/the/as), collapse whitespace. Stopwords help near-dupes
-	# where Unreleased restates a conventional commit with filler words.
+	# Comparison-only: lowercase, strip trailing (#N)/(sha), backticks, articles,
+	# and the filler phrase " as a ", then collapse whitespace. Do not strip bare
+	# "as" — it often carries role/format meaning (e.g. "export as CSV").
 	# SHA match avoids awk interval expressions ({n,m}) for POSIX portability.
 	printf '%s\n' "$line" | awk '
 		{
@@ -106,11 +106,12 @@ _normalize_changelog_bullet_key() {
 				break
 			}
 			gsub(/`/, "", line)
+			gsub(/ as a /, " ", line)
 			n = split(line, words, /[[:space:]]+/)
 			out = ""
 			for (i = 1; i <= n; i++) {
 				w = words[i]
-				if (w == "" || w == "a" || w == "an" || w == "the" || w == "as") {
+				if (w == "" || w == "a" || w == "an" || w == "the") {
 					continue
 				}
 				out = (out == "" ? w : out " " w)
@@ -169,7 +170,8 @@ _changelog_bullet_keys_duplicate() {
 # Merge generated (left) and Unreleased (right) section bodies, collapsing
 # duplicate "- " bullets. Prefers generated display text; keeps unique
 # Unreleased bullets; preserves generated-first order. Fail closed: non-bullets
-# and ambiguous lines are retained.
+# and ambiguous lines are retained. Blank lines from either side are dropped so
+# skipped duplicates do not leave orphaned separators.
 # Usage: _dedupe_changelog_section_bodies "$left" "$right"
 _dedupe_changelog_section_bodies() {
 	local left="${1:-}"
@@ -178,6 +180,7 @@ _dedupe_changelog_section_bodies() {
 	local line key existing_key is_dup output=""
 
 	while IFS= read -r line || [[ -n "$line" ]]; do
+		[[ -z "${line//[[:space:]]/}" ]] && continue
 		key=$(_normalize_changelog_bullet_key "$line")
 		if [[ -n "$key" ]]; then
 			generated_keys+=("$key")
@@ -189,6 +192,7 @@ _dedupe_changelog_section_bodies() {
 	done <<<"$left"
 
 	while IFS= read -r line || [[ -n "$line" ]]; do
+		[[ -z "${line//[[:space:]]/}" ]] && continue
 		key=$(_normalize_changelog_bullet_key "$line")
 		if [[ -n "$key" ]]; then
 			is_dup=false

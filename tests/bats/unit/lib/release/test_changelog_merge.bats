@@ -379,6 +379,65 @@ Second paragraph'
 	assert_output --partial "- **auth**: add OAuth2 provider login page and user profile sync (#11)"
 }
 
+@test "merge_changelog_sections: dedupes exact unscoped bullets after (#N)/sha strip" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Fixed
+
+- Fix typo in readme (#12) (abcdef0)" "### Fixed
+
+- Fix typo in readme (#13)"
+	'
+	assert_success
+	assert_output --partial "- Fix typo in readme (#12) (abcdef0)"
+	refute_output --partial "(#13)"
+}
+
+@test "merge_changelog_sections: keeps similar but distinct unscoped bullets" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Fixed
+
+- Fix typo in readme (#12) (abcdef0)" "### Fixed
+
+- Fix typo in contributing guide (#13)"
+	'
+	assert_success
+	assert_output --partial $'- Fix typo in readme (#12) (abcdef0)
+- Fix typo in contributing guide (#13)'
+}
+
+@test "merge_changelog_sections: keeps role-distinct as phrases after dropping as stopword" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Changed
+
+- **deploy**: run service as systemd (#20) (abcdef0)" "### Changed
+
+- **deploy**: run service as container (#21)"
+	'
+	assert_success
+	assert_output --partial "- **deploy**: run service as systemd (#20) (abcdef0)"
+	assert_output --partial "- **deploy**: run service as container (#21)"
+}
+
+@test "merge_changelog_sections: skips blank lines around deduped Unreleased bullets" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add vendor pin (#240) (3f672a5)" "### Added
+
+- **gateway**: add vendor pin (#239)
+
+- **skills**: note install path (#241)"
+	'
+	assert_success
+	assert_output --partial $'- **gateway**: add vendor pin (#240) (3f672a5)
+- **skills**: note install path (#241)'
+	refute_output --partial "(#239)"
+}
+
 @test "merge_changelog_sections: concatenates prose and breaking blocks" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"
