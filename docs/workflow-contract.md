@@ -709,11 +709,12 @@ whenever it is non-empty — even when `allowed-endpoints-mode: append` (append 
 affects the later, non-enforcing resolution step for tooling/checkout helpers).
 
 `step-security/harden-runner` splits `allowed-endpoints` on **spaces**. A
-newline-separated `|` literal block (the common multiline YAML style) is passed as a
-single bogus endpoint (string ending in `:0`), which blocks **all** egress — including
-`github.com:443` checkout. Prefer a folded scalar (`>-`) with space-separated
-`host:port` tokens, or use `egress-preset` / `allowed-endpoints-mode: append` with
-empty caller endpoints so the baked-in preset reaches pre-enforcement.
+newline-separated `|` literal block (the common multiline YAML style) is treated as
+a single unrecognised host:port token (the whole multiline string), which blocks
+**all** egress — including `github.com:443` checkout. Prefer a folded scalar (`>-`)
+with space-separated `host:port` tokens, or use `egress-preset` /
+`allowed-endpoints-mode: append` with empty caller endpoints so the baked-in preset
+reaches pre-enforcement.
 
 Upgrade incidents during org-wide v0.52.3 adoption
 ([#510](https://github.com/lgtm-hq/lgtm-ci/issues/510)):
@@ -723,10 +724,10 @@ Upgrade incidents during org-wide v0.52.3 adoption
 [turbo-themes#526](https://github.com/lgtm-hq/turbo-themes/pull/526),
 [py-lintro#1281](https://github.com/lgtm-hq/py-lintro/pull/1281).
 
-A future release may restore pre-enforcement normalization in
-[#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) so presets merge again before
-the harden-runner `pre` hook runs; until then, treat non-empty `allowed-endpoints`
-as the complete enforced allowlist.
+A future release may restore pre-enforcement normalization (tracked in the same
+[#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) thread) so presets merge again
+before the harden-runner `pre` hook runs; until then, treat non-empty
+`allowed-endpoints` as the complete enforced allowlist.
 
 The table below describes `resolve-egress-allowlist` / `allowed-endpoints-mode` only
 (not the pre-enforcement harden-runner step):
