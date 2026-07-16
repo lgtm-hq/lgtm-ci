@@ -316,6 +316,12 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
+| SBOM report           | `contents: read`, `security-events: write`,          | `reusable-sbom.yml` (`mode: report`)         |
+|                       | `id-token: write`, `attestations: write`             |                                              |
+| SBOM report + upload  | Report perms + `contents: write`                     | `reusable-sbom.yml`                          |
+|                       |                                                      | (`upload-release-assets: true`)              |
+| SBOM release assets   | `contents: write`, `id-token: write`                 | `reusable-sbom.yml`                          |
+|                       |                                                      | (`mode: release-assets`)                     |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -720,7 +726,7 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 | `npm-publish`    | npm OIDC trusted publish + Sigstore (`oauth2.sigstore.dev`)          |
 | `quality`        | Docker `lintro chk` (default on quality lint)                        |
 | `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
-| `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
+| `sbom`           | SBOM, Grype scan, Sigstore attestation/cosign, release upload        |
 | `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
 | `osv-scanner`    | GitHub tooling + release assets + OSV APIs                           |
 
@@ -887,8 +893,24 @@ egress-policy: block
 egress-preset: sbom
 ```
 
-Covers GitHub, Anchore (Syft/Grype), Sigstore attestation hosts. Canonical list:
-`scripts/ci/lib/egress/presets.sh` (preset name `sbom`).
+Covers GitHub, Anchore (Syft/Grype), Sigstore attestation/cosign hosts
+(`fulcio.sigstore.dev`, `rekor.sigstore.dev`, `oauth2.sigstore.dev`), and
+`uploads.github.com` for release-asset upload. Canonical list:
+`scripts/ci/lib/egress/presets.sh` (preset name `sbom`). With
+`allowed-endpoints-mode: replace`, a non-empty `allowed-endpoints` input
+overrides the preset — callers that pass a custom allowlist must include the
+full baseline (see #512).
+
+#### Permissions by mode (`reusable-sbom.yml`)
+
+<!-- markdownlint-disable MD013 -- SBOM mode permissions; columns exceed default line length -->
+
+| Mode | Job permissions | Notes |
+| ---- | --------------- | ----- |
+| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path; optional `upload-release-assets` job adds `contents: write` |
+| `release-assets` | `contents: write`, `id-token: write` | Multi-format generate + cosign sign + `gh release upload`; requires `release-tag` |
+
+<!-- markdownlint-enable MD013 -->
 
 `reusable-sbom.yml` defaults `fail-on-severity` to `critical` (breaking as of
 issue #480). The Grype gate fails the job when findings meet or exceed that
@@ -900,6 +922,21 @@ sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   with:
     fail-on-severity: "" # advisory-only; default is critical
+```
+
+Release-asset mode (multi-format + optional cosign, no Grype gate):
+
+```yaml
+sbom-release:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+  permissions:
+    contents: write
+    id-token: write
+  with:
+    mode: release-assets
+    release-tag: ${{ github.ref_name }}
+    formats: spdx-json,cyclonedx-json
+    sign: true
 ```
 
 ## Action pinning policy

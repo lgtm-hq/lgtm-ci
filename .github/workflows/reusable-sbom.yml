@@ -4,6 +4,13 @@ name: Reusable SBOM Workflow
 on:
   workflow_call:
     inputs:
+      mode:
+        description: >-
+          report: generate/scan/attest (default). release-assets: multi-format
+          SBOM + optional cosign sign + upload to the GitHub Release.
+        required: false
+        type: string
+        default: "report"
       target:
         description: "Target to generate SBOM for"
         required: false
@@ -15,12 +22,25 @@ on:
         type: string
         default: "dir"
       sbom-format:
-        description: "SBOM output format: cyclonedx-json, spdx-json"
+        description: "SBOM output format for report mode: cyclonedx-json, spdx-json"
         required: false
         type: string
         default: "cyclonedx-json"
+      formats:
+        description: >-
+          Comma-separated Syft formats for release-assets mode
+          (default: spdx-json,cyclonedx-json)
+        required: false
+        type: string
+        default: "spdx-json,cyclonedx-json"
+      sign:
+        description: >-
+          Cosign keyless (OIDC) sign SBOM files in release-assets mode
+        required: false
+        type: boolean
+        default: true
       scan-vulnerabilities:
-        description: "Scan SBOM for vulnerabilities"
+        description: "Scan SBOM for vulnerabilities (report mode)"
         required: false
         type: boolean
         default: true
@@ -48,15 +68,17 @@ on:
         default: "sbom"
       upload-release-assets:
         description: >-
-          When true, run a dedicated contents:write job that attaches the SBOM
-          artifact to the GitHub Release. Generation itself stays contents:read.
+          Report mode only: when true, run a dedicated contents:write job that
+          attaches the SBOM artifact to the GitHub Release. Generation itself
+          stays contents:read.
         required: false
         type: boolean
         default: false
       release-tag:
         description: >-
-          Release tag for asset upload when upload-release-assets is true.
-          Defaults to github.ref_name when empty.
+          Release tag for asset upload. Required when mode is release-assets.
+          In report mode with upload-release-assets, defaults to github.ref_name
+          when empty.
         required: false
         type: string
         default: ""
@@ -82,6 +104,7 @@ on:
           release-assets.githubusercontent.com:443
           objects.githubusercontent.com:443
           raw.githubusercontent.com:443
+          uploads.github.com:443
           anchore.io:443
           get.anchore.io:443
           toolbox-data.anchore.io:443
@@ -92,6 +115,7 @@ on:
           timestamp.sigstore.dev:443
           tuf-repo-cdn.sigstore.dev:443
           sigstore-tuf-root.storage.googleapis.com:443
+          oauth2.sigstore.dev:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -140,8 +164,42 @@ on:
         value: ${{ jobs.sbom.outputs.attestation-url }}
 
 jobs:
+  validate:
+    name: Validate SBOM inputs
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Validate mode inputs
+        shell: bash
+        env:
+          MODE: ${{ inputs.mode }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-sbom-mode.sh
+
   sbom:
     name: ${{ inputs.job-name }}
+    needs: [validate]
+    if: inputs.mode != 'release-assets'
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -223,8 +281,8 @@ jobs:
 
   upload-release-assets:
     name: Upload SBOM release assets
-    needs: [sbom]
-    if: inputs.upload-release-assets
+    needs: [validate, sbom]
+    if: inputs.mode != 'release-assets' && inputs.upload-release-assets
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
@@ -262,4 +320,85 @@ jobs:
           RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           ARTIFACT_NAME: ${{ inputs.artifact-name }}
           SBOM_ARTIFACT_DIR: sbom-artifact
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/upload-sbom-release-assets.sh
+
+  release-assets:
+    name: ${{ inputs.job-name }}
+    needs: [validate]
+    if: inputs.mode == 'release-assets'
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: write
+      id-token: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository at release tag
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ inputs.release-tag }}
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Install Syft
+        shell: bash
+        env:
+          STEP: install
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-sbom-release-assets.sh
+      - name: Generate multi-format SBOMs
+        id: generate
+        shell: bash
+        env:
+          STEP: generate
+          TARGET: ${{ inputs.target }}
+          TARGET_TYPE: ${{ inputs.target-type }}
+          FORMATS: ${{ inputs.formats }}
+          OUTPUT_DIR: sbom
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-sbom-release-assets.sh
+      - name: Install Cosign
+        if: inputs.sign
+        # Pinned to SHA for supply chain security
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign SBOM files
+        if: inputs.sign
+        shell: bash
+        env:
+          SIGN: ${{ inputs.sign }}
+          SBOM_DIR: sbom
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/sign-sbom-release-assets.sh
+      - name: Upload SBOM assets to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag }}
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          SBOM_ARTIFACT_DIR: sbom
         run: bash .lgtm-ci-tooling/scripts/ci/actions/upload-sbom-release-assets.sh
