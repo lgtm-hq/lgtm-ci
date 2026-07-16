@@ -137,7 +137,7 @@ run_coverage() {
 	grep -q 'beta.bats' "$BATS_CALLS"
 }
 
-@test "run-coverage: run-tests still honors PARALLEL --jobs" {
+@test "run-tests: still honors PARALLEL --jobs when not under kcov" {
 	run run_coverage \
 		STEP=run-tests \
 		TEST_PATH=tests \
