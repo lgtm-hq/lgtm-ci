@@ -9,8 +9,12 @@
 #   KCOV_VERSION - kcov version to install (for install-kcov step, default: v43)
 #   TEST_PATH - Path to test files (for run-tests/run-coverage steps)
 #   TEST_FILTER - Filter tests by name pattern (optional)
-#   PARALLEL - Number of parallel jobs (optional, must be a positive integer)
+#   PARALLEL - Number of parallel jobs (optional, must be a positive integer).
+#              Under run-coverage, PARALLEL > 1 is ignored (kcov + parallel BATS
+#              is deadlock-prone); non-coverage runs still honor it.
 #   COVERAGE_DIR - Directory for coverage output (for run-coverage step)
+#   KCOV_FILE_TIMEOUT_MINUTES - Per-file timeout for kcov/BATS under
+#              run-coverage (default: 5). Uses timeout(1); exit 124 on expiry.
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
 #   COVERAGE_THRESHOLD - Minimum coverage threshold (for check-threshold step)
 
@@ -174,6 +178,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	FILTER="${TEST_FILTER:-}"
 	PARALLEL="${PARALLEL:-1}"
 	COVERAGE_DIR="${COVERAGE_DIR:-coverage-report}"
+	FILE_TIMEOUT_MINUTES="${KCOV_FILE_TIMEOUT_MINUTES:-5}"
 
 	# Validate PARALLEL is a positive integer
 	if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
@@ -181,33 +186,110 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		PARALLEL=1
 	fi
 
+	# Validate per-file timeout is a positive integer (minutes)
+	if ! [[ "$FILE_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
+		echo "::warning::KCOV_FILE_TIMEOUT_MINUTES='$FILE_TIMEOUT_MINUTES' is not a valid positive integer, defaulting to 5"
+		FILE_TIMEOUT_MINUTES=5
+	fi
+
+	# kcov instruments via PS4/DEBUG trap; parallel BATS under kcov is a known
+	# deadlock-prone combination. Always serialize coverage runs.
+	if [[ "$PARALLEL" -gt 1 ]]; then
+		echo "::notice::Serializing BATS under kcov (PARALLEL=$PARALLEL ignored; kcov+parallel is deadlock-prone)"
+		PARALLEL=1
+	fi
+
+	if ! command -v timeout >/dev/null 2>&1; then
+		echo "::error::timeout(1) is required for run-coverage (install coreutils)"
+		exit 1
+	fi
+
 	mkdir -p "$COVERAGE_DIR"
 
-	# Build bats command with same flags as main test step
-	# Include --tap so parse-results can read bats-output.tap
-	BATS_ARGS=("--recursive" "--tap")
+	# Resolve .bats files so we can emit per-file timing and bound each bats
+	# invocation. One kcov process wraps a driver that runs files serially —
+	# avoids N× kcov startup while still naming the hanging file on timeout.
+	TEST_FILES=()
+	if [[ -f "$TEST_PATH" ]]; then
+		TEST_FILES=("$TEST_PATH")
+	elif [[ -d "$TEST_PATH" ]]; then
+		while IFS= read -r test_file; do
+			TEST_FILES+=("$test_file")
+		done < <(find "$TEST_PATH" -type f -name '*.bats' | LC_ALL=C sort)
+	else
+		echo "::error::TEST_PATH not found: $TEST_PATH"
+		exit 1
+	fi
 
+	if [[ ${#TEST_FILES[@]} -eq 0 ]]; then
+		echo "::error::No .bats files found under $TEST_PATH"
+		exit 1
+	fi
+
+	DRIVER="$(mktemp)"
+	# shellcheck disable=SC2064 # Expand DRIVER now; value is fixed for this run.
+	trap 'rm -f "$DRIVER"' EXIT
+
+	cat >"$DRIVER" <<'DRIVER_EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+
+FILTER="${COVERAGE_TEST_FILTER:-}"
+FILE_TIMEOUT_MINUTES="${KCOV_FILE_TIMEOUT_MINUTES:-5}"
+OVERALL_EXIT=0
+
+if [[ "$#" -lt 1 ]]; then
+	echo "::error::coverage driver received no test files"
+	exit 1
+fi
+
+for test_file in "$@"; do
+	BATS_ARGS=(--tap)
 	if [[ -n "$FILTER" ]]; then
-		BATS_ARGS+=("--filter" "$FILTER")
+		BATS_ARGS+=(--filter "$FILTER")
 	fi
 
-	if [[ "$PARALLEL" -gt 1 ]]; then
-		BATS_ARGS+=("--jobs" "$PARALLEL")
+	echo "coverage-start file=${test_file}"
+	start_ts="$(date +%s)"
+
+	timeout --signal=TERM "${FILE_TIMEOUT_MINUTES}m" \
+		bats "${BATS_ARGS[@]}" "$test_file"
+	bats_exit=$?
+
+	end_ts="$(date +%s)"
+	elapsed=$((end_ts - start_ts))
+	echo "coverage-finish file=${test_file} elapsed=${elapsed}s exit=${bats_exit}"
+
+	# GNU timeout exits 124 when the command times out.
+	if [[ "$bats_exit" -eq 124 ]]; then
+		echo "::error::kcov/BATS timed out after ${FILE_TIMEOUT_MINUTES}m for file: ${test_file}"
+		exit 124
 	fi
 
-	# Run kcov with bats
+	if [[ "$bats_exit" -ne 0 && "$OVERALL_EXIT" -eq 0 ]]; then
+		OVERALL_EXIT="$bats_exit"
+	fi
+done
+
+exit "$OVERALL_EXIT"
+DRIVER_EOF
+	chmod +x "$DRIVER"
+
+	export COVERAGE_TEST_FILTER="$FILTER"
+	export KCOV_FILE_TIMEOUT_MINUTES="$FILE_TIMEOUT_MINUTES"
+
 	# Note: kcov instruments bash scripts via PS4/DEBUG trap
 	# --bash-parse-files-in-dir: Pre-parse bash files for coverage mapping
 	# --include-path: Only report coverage for library files
 	# --exclude-pattern: Skip test infrastructure files
-	echo "Running coverage: kcov ... bats ${BATS_ARGS[*]} $TEST_PATH"
+	echo "Running coverage: kcov ... per-file bats (${#TEST_FILES[@]} files, timeout=${FILE_TIMEOUT_MINUTES}m/file, serial)"
 	kcov \
 		--cobertura \
 		--bash-parse-files-in-dir="$(pwd)/scripts/ci/lib" \
 		--include-path="$(pwd)/scripts/ci/lib" \
 		--exclude-pattern="/tests/,/tmp/,/bats-" \
 		"$COVERAGE_DIR" \
-		bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
+		bash "$DRIVER" "${TEST_FILES[@]}" 2>&1 | tee bats-output.tap
 	# Capture exit codes from both sides of the pipe
 	PIPE_STATUS=("${PIPESTATUS[@]}")
 	KCOV_EXIT=${PIPE_STATUS[0]:-0}
