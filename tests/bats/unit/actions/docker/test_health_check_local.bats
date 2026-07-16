@@ -5,6 +5,7 @@
 load "../../../../helpers/common"
 load "../../../../helpers/mocks"
 load "../../../../helpers/github_env"
+load "../../../../helpers/health_mocks"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/docker/health-check-local.sh"
 
@@ -24,39 +25,6 @@ teardown() {
 	restore_path
 	teardown_github_env
 	teardown_temp_dir
-}
-
-_install_health_mocks() {
-	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-	local docker_calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
-	mkdir -p "$mock_bin"
-	: >"$docker_calls"
-
-	cat >"${mock_bin}/docker" <<EOF
-#!/usr/bin/env bash
-echo "\$*" >> '${docker_calls}'
-case "\$1" in
-run) echo "cid-local"; exit 0 ;;
-logs|rm) exit 0 ;;
-*) exit 0 ;;
-esac
-EOF
-	chmod +x "${mock_bin}/docker"
-
-	cat >"${mock_bin}/timeout" <<'EOF'
-#!/usr/bin/env bash
-shift
-exec "$@"
-EOF
-	chmod +x "${mock_bin}/timeout"
-
-	cat >"${mock_bin}/nc" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-	chmod +x "${mock_bin}/nc"
-
-	export PATH="${mock_bin}:$PATH"
 }
 
 @test "health-check-local.sh: runs health check against local image" {
