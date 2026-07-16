@@ -14,8 +14,8 @@
 #              is deadlock-prone); non-coverage runs still honor it.
 #   COVERAGE_DIR - Directory for coverage output (for run-coverage step)
 #   KCOV_SUITE_TIMEOUT_MINUTES - Suite timeout for kcov/BATS under
-#              run-coverage (default: 40). Uses timeout(1); exit 124 on expiry.
-#              Kept below the coverage-run step timeout (45).
+#              run-coverage (default: 40). Uses timeout(1) with --kill-after;
+#              exit 124 on expiry. Kept below the coverage-run step timeout (45).
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
 #   COVERAGE_THRESHOLD - Minimum coverage threshold (for check-threshold step)
 
@@ -252,7 +252,9 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# --bash-parse-files-in-dir: Pre-parse bash files for coverage mapping
 	# --include-path: Only report coverage for library files
 	# --exclude-pattern: Skip test infrastructure files
-	timeout --signal=TERM "${SUITE_TIMEOUT_MINUTES}m" \
+	# --kill-after: if bats/kcov ignore SIGTERM, SIGKILL after grace so timeout(1)
+	# itself cannot hang waiting on an uninterruptible child (#556 / Greptile).
+	timeout --signal=TERM --kill-after=30s "${SUITE_TIMEOUT_MINUTES}m" \
 		kcov \
 		--cobertura \
 		--bash-parse-files-in-dir="${REPO_ROOT}/scripts/ci/lib" \

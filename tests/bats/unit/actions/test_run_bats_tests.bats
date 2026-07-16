@@ -44,15 +44,18 @@ exec "$@"
 EOF
 	chmod +x "${mock_bin}/kcov"
 
-	# timeout: honor --signal / duration; optional TIMEOUT_MOCK_EXIT=124
-	cat >"${mock_bin}/timeout" <<'EOF'
+	# timeout: honor --signal / --kill-after / duration; optional TIMEOUT_MOCK_EXIT=124
+	export TIMEOUT_CALLS="$BATS_TEST_TMPDIR/mock_calls_timeout"
+	: >"$TIMEOUT_CALLS"
+	cat >"${mock_bin}/timeout" <<EOF
 #!/usr/bin/env bash
-while [[ $# -gt 0 ]]; do
-	case "$1" in
-	--signal)
+printf '%s\n' "\$*" >>"${TIMEOUT_CALLS}"
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+	--signal|--kill-after)
 		shift 2
 		;;
-	--signal=*)
+	--signal=*|--kill-after=*)
 		shift
 		;;
 	*)
@@ -62,10 +65,10 @@ while [[ $# -gt 0 ]]; do
 done
 # duration (e.g. 40m)
 shift
-if [[ "${TIMEOUT_MOCK_EXIT:-}" == "124" ]]; then
+if [[ "\${TIMEOUT_MOCK_EXIT:-}" == "124" ]]; then
 	exit 124
 fi
-exec "$@"
+exec "\$@"
 EOF
 	chmod +x "${mock_bin}/timeout"
 
@@ -115,6 +118,18 @@ run_coverage() {
 
 	assert_failure 124
 	assert_output --partial "::error::kcov/BATS timed out after 3m"
+}
+
+@test "run-coverage: passes --kill-after to timeout(1)" {
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests/alpha.bats \
+		COVERAGE_DIR=coverage-report \
+		PARALLEL=1
+
+	assert_success
+	grep -q -- '--kill-after=30s' "$TIMEOUT_CALLS"
+	grep -q -- '--signal=TERM' "$TIMEOUT_CALLS"
 }
 
 @test "run-coverage: serializes under kcov when PARALLEL > 1" {
