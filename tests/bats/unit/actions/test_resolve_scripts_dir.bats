@@ -25,6 +25,32 @@ teardown() {
 	assert_success
 }
 
+@test "resolve-scripts-dir.sh: prefers git toplevel when available" {
+	local repo="${BATS_TEST_TMPDIR}/git-repo"
+	local action_dir="${repo}/.github/actions/example"
+	mkdir -p "${repo}/scripts" "$action_dir"
+	git -C "$repo" init >/dev/null
+	local expected
+	expected="$(cd "$action_dir" && git rev-parse --show-toplevel)/scripts"
+
+	run env GITHUB_ACTION_PATH="$action_dir" bash "$SCRIPT"
+	assert_success
+	run grep -q "^SCRIPTS_DIR=${expected}\$" "$GITHUB_ENV"
+	assert_success
+}
+
+@test "resolve-scripts-dir.sh: normalizes Windows-style backslashes" {
+	local repo="${BATS_TEST_TMPDIR}/win-repo"
+	local action_dir="${repo}/.github/actions/example"
+	mkdir -p "$action_dir"
+	local win_path="${action_dir//\//\\}"
+
+	run env GITHUB_ACTION_PATH="$win_path" bash "$SCRIPT"
+	assert_success
+	run grep -q "^SCRIPTS_DIR=${repo}/scripts\$" "$GITHUB_ENV"
+	assert_success
+}
+
 @test "resolve-scripts-dir.sh: fails without GITHUB_ACTION_PATH" {
 	run env -u GITHUB_ACTION_PATH bash "$SCRIPT"
 	assert_failure

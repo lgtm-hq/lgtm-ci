@@ -14,7 +14,7 @@ set -euo pipefail
 : "${GITHUB_ACTION_PATH:?GITHUB_ACTION_PATH is required}"
 : "${GITHUB_ENV:?GITHUB_ENV is required}"
 
-action_dir="${GITHUB_ACTION_PATH}"
+action_dir="${GITHUB_ACTION_PATH//\\//}"
 repo_root="$(
 	cd "${action_dir}" && git rev-parse --show-toplevel 2>/dev/null ||
 		echo "${action_dir%/.github/actions/*}"

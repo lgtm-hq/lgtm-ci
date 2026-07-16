@@ -118,3 +118,13 @@ EOF
 	assert_success
 	assert_file_contains "$GITHUB_OUTPUT" '^path=/tmp/image:tag$'
 }
+
+@test "scan-vulnerabilities resolve-target: fails when TARGET_TYPE unset" {
+	run env -u TARGET_TYPE \
+		STEP=resolve-target \
+		TARGET=/tmp/target \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/scan-vulnerabilities.sh"
+
+	assert_failure
+	assert_output --partial "TARGET_TYPE is required"
+}

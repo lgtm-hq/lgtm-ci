@@ -22,7 +22,7 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 case "$STEP" in
 resolve-target)
 	: "${TARGET:?TARGET is required}"
-	: "${TARGET_TYPE:=sbom}"
+	: "${TARGET_TYPE:?TARGET_TYPE is required}"
 	SBOM_FILE="${SBOM_FILE:-}"
 
 	if [[ -n "${SBOM_FILE}" && "${TARGET_TYPE}" == "sbom" ]]; then
