@@ -30,14 +30,14 @@ setup() {
 	export BATS_CALLS="$BATS_TEST_TMPDIR/mock_calls_bats"
 	: >"$BATS_CALLS"
 
-	# kcov: skip options/outdir and exec the wrapped command (bash DRIVER ...)
+	# kcov: skip options/outdir and exec the wrapped command (bats ...)
 	cat >"${mock_bin}/kcov" <<'EOF'
 #!/usr/bin/env bash
-while [[ $# -gt 0 && "$1" != "bash" ]]; do
+while [[ $# -gt 0 && "$1" != "bats" ]]; do
 	shift
 done
 if [[ $# -eq 0 ]]; then
-	echo "mock kcov: expected bash command" >&2
+	echo "mock kcov: expected bats command" >&2
 	exit 1
 fi
 exec "$@"

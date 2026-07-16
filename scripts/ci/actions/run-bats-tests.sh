@@ -210,9 +210,10 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# noise fails refute_output / exact-output assertions).
 	COVERAGE_DIR="$(cd "$COVERAGE_DIR" && pwd)"
 
-	# Resolve .bats files so we can emit per-file timing and bound each bats
-	# invocation. One kcov process wraps a driver that runs files serially —
-	# avoids N× kcov startup while still naming the hanging file on timeout.
+	# Resolve .bats files so we can emit per-file timing and bound each
+	# kcov+bats invocation. Each file gets its own kcov run into the same
+	# absolute outdir (kcov merges); wrapping bats via a driver under one
+	# kcov does not collect meaningful bash coverage.
 	TEST_FILES=()
 	if [[ -f "$TEST_PATH" ]]; then
 		TEST_FILES=("$TEST_PATH")
@@ -230,80 +231,60 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		exit 1
 	fi
 
-	DRIVER="$(mktemp)"
-	# shellcheck disable=SC2064 # Expand DRIVER now; value is fixed for this run.
-	trap 'rm -f "$DRIVER"' EXIT
-
-	cat >"$DRIVER" <<'DRIVER_EOF'
-#!/usr/bin/env bash
-set -uo pipefail
-
-FILTER="${COVERAGE_TEST_FILTER:-}"
-FILE_TIMEOUT_MINUTES="${KCOV_FILE_TIMEOUT_MINUTES:-5}"
-OVERALL_EXIT=0
-
-if [[ "$#" -lt 1 ]]; then
-	echo "::error::coverage driver received no test files"
-	exit 1
-fi
-
-for test_file in "$@"; do
-	BATS_ARGS=(--tap)
-	if [[ -n "$FILTER" ]]; then
-		BATS_ARGS+=(--filter "$FILTER")
-	fi
-
-	echo "coverage-start file=${test_file}"
-	start_ts="$(date +%s)"
-
-	timeout --signal=TERM "${FILE_TIMEOUT_MINUTES}m" \
-		bats "${BATS_ARGS[@]}" "$test_file"
-	bats_exit=$?
-
-	end_ts="$(date +%s)"
-	elapsed=$((end_ts - start_ts))
-	echo "coverage-finish file=${test_file} elapsed=${elapsed}s exit=${bats_exit}"
-
-	# GNU timeout exits 124 when the command times out.
-	if [[ "$bats_exit" -eq 124 ]]; then
-		echo "::error::kcov/BATS timed out after ${FILE_TIMEOUT_MINUTES}m for file: ${test_file}"
-		exit 124
-	fi
-
-	if [[ "$bats_exit" -ne 0 && "$OVERALL_EXIT" -eq 0 ]]; then
-		OVERALL_EXIT="$bats_exit"
-	fi
-done
-
-exit "$OVERALL_EXIT"
-DRIVER_EOF
-	chmod +x "$DRIVER"
-
-	export COVERAGE_TEST_FILTER="$FILTER"
-	export KCOV_FILE_TIMEOUT_MINUTES="$FILE_TIMEOUT_MINUTES"
+	: >bats-output.tap
+	EXIT_CODE=0
+	REPO_ROOT="$(pwd)"
+	PARSE_DIR_ARGS=(
+		--bash-parse-files-in-dir="${REPO_ROOT}/scripts/ci/lib"
+	)
 
 	# Note: kcov instruments bash scripts via PS4/DEBUG trap
 	# --bash-parse-files-in-dir: Pre-parse bash files for coverage mapping
 	# --include-path: Only report coverage for library files
 	# --exclude-pattern: Skip test infrastructure files
-	echo "Running coverage: kcov ... per-file bats (${#TEST_FILES[@]} files, timeout=${FILE_TIMEOUT_MINUTES}m/file, serial)"
-	kcov \
-		--cobertura \
-		--bash-parse-files-in-dir="$(pwd)/scripts/ci/lib" \
-		--include-path="$(pwd)/scripts/ci/lib" \
-		--exclude-pattern="/tests/,/tmp/,/bats-" \
-		"$COVERAGE_DIR" \
-		bash "$DRIVER" "${TEST_FILES[@]}" 2>&1 | tee bats-output.tap
-	# Capture exit codes from both sides of the pipe
-	PIPE_STATUS=("${PIPESTATUS[@]}")
-	KCOV_EXIT=${PIPE_STATUS[0]:-0}
-	TEE_EXIT=${PIPE_STATUS[1]:-0}
-	# Use first non-zero exit code (prefer kcov/bats failure over tee)
-	if [[ "$KCOV_EXIT" -ne 0 ]]; then
-		EXIT_CODE="$KCOV_EXIT"
-	else
-		EXIT_CODE="$TEE_EXIT"
-	fi
+	echo "Running coverage: per-file kcov+bats (${#TEST_FILES[@]} files, timeout=${FILE_TIMEOUT_MINUTES}m/file, serial)"
+
+	for test_file in "${TEST_FILES[@]}"; do
+		BATS_ARGS=(--tap)
+		if [[ -n "$FILTER" ]]; then
+			BATS_ARGS+=(--filter "$FILTER")
+		fi
+
+		echo "coverage-start file=${test_file}"
+		start_ts="$(date +%s)"
+
+		timeout --signal=TERM "${FILE_TIMEOUT_MINUTES}m" \
+			kcov \
+			--cobertura \
+			"${PARSE_DIR_ARGS[@]}" \
+			--include-path="${REPO_ROOT}/scripts/ci/lib" \
+			--exclude-pattern="/tests/,/tmp/,/bats-" \
+			"$COVERAGE_DIR" \
+			bats "${BATS_ARGS[@]}" "$test_file" 2>&1 | tee -a bats-output.tap
+		PIPE_STATUS=("${PIPESTATUS[@]}")
+		KCOV_EXIT=${PIPE_STATUS[0]:-0}
+		TEE_EXIT=${PIPE_STATUS[1]:-0}
+
+		# Only pay --bash-parse-files-in-dir cost once; later merges reuse maps.
+		PARSE_DIR_ARGS=()
+
+		end_ts="$(date +%s)"
+		elapsed=$((end_ts - start_ts))
+		echo "coverage-finish file=${test_file} elapsed=${elapsed}s exit=${KCOV_EXIT}"
+
+		# GNU timeout exits 124 when the command times out.
+		if [[ "$KCOV_EXIT" -eq 124 ]]; then
+			echo "::error::kcov/BATS timed out after ${FILE_TIMEOUT_MINUTES}m for file: ${test_file}"
+			EXIT_CODE=124
+			break
+		fi
+
+		if [[ "$KCOV_EXIT" -ne 0 && "$EXIT_CODE" -eq 0 ]]; then
+			EXIT_CODE="$KCOV_EXIT"
+		elif [[ "$TEE_EXIT" -ne 0 && "$EXIT_CODE" -eq 0 ]]; then
+			EXIT_CODE="$TEE_EXIT"
+		fi
+	done
 
 	echo "exit-code=$EXIT_CODE" >>"$GITHUB_OUTPUT"
 	echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
