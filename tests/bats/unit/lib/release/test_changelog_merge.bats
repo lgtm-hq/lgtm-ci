@@ -305,6 +305,66 @@ Second paragraph'
 - existing entry'
 }
 
+@test "merge_changelog_sections: dedupes bullets after stripping (#N) and sha suffixes" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)" "### Added
+
+- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#239)"
+	'
+	assert_success
+	assert_output --partial "### Added"
+	assert_output --partial "- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)"
+	refute_output --partial "(#239)"
+}
+
+@test "merge_changelog_sections: collapses near-duplicate Unreleased restatement" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)" "### Added
+
+- **gateway**: add \`JuliusBrussee/caveman\` as a SHA-pinned vendor catalog (#239)"
+	'
+	assert_success
+	assert_output --partial "- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)"
+	refute_output --partial "vendor catalog"
+	refute_output --partial "(#239)"
+}
+
+@test "merge_changelog_sections: retains unique Unreleased security note" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add vendor pin (#240) (3f672a5)" "### Security
+
+- Rotate API tokens after vendor catalog change"
+	'
+	assert_success
+	assert_output --partial "### Added"
+	assert_output --partial "- **gateway**: add vendor pin (#240) (3f672a5)"
+	assert_output --partial "### Security"
+	assert_output --partial "- Rotate API tokens after vendor catalog change"
+}
+
+@test "merge_changelog_sections: keeps two different Added bullets" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add caveman vendor (#240) (3f672a5)" "### Added
+
+- **skills**: document caveman install path (#241)"
+	'
+	assert_success
+	assert_output --partial $'- **gateway**: add caveman vendor (#240) (3f672a5)
+- **skills**: document caveman install path (#241)'
+}
+
 @test "merge_changelog_sections: concatenates prose and breaking blocks" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"

@@ -37,6 +37,18 @@ Generated version sections use only `Added`, `Changed`, and `Fixed`. The
 reset `[Unreleased]` template additionally includes the empty `Deprecated`,
 `Removed`, and `Security` sections for hand-written entries.
 
+## Unreleased entries
+
+Hand-written `[Unreleased]` bullets are merged into the matching Keep a
+Changelog sections of the new version block (generated commit lines first).
+Near-duplicates of generated conventional-commit bullets are collapsed —
+normalized comparison prefers the generated line and keeps Unreleased bullets
+that remain unique (security notes, migrations, and other curated detail).
+
+Prefer **not** restating conventional commits under `[Unreleased]`. Use
+Unreleased for context the commit subject does not carry. The merger still
+attempts to dedupe when contributors restate the same change.
+
 ## Historical entries
 
 Do **not** rewrite existing `Features` / `Bug Fixes` sections in a consumer
@@ -64,6 +76,8 @@ On the next release PR after bumping the pin:
       (no `### Features` / `### Bug Fixes` / `### Other Changes`)
 - [ ] Hand-written `[Unreleased]` entries were merged into the matching KAC
       sections of the new version block
+- [ ] Near-duplicate Unreleased bullets that restate generated commits were
+      collapsed (generated line kept)
 - [ ] `[Unreleased]` was reset with the empty KAC section skeleton
 - [ ] Markdown lint passes without manual heading edits
 
