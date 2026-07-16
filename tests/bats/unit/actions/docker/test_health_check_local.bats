@@ -1,6 +1,9 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Unit tests for scripts/ci/actions/docker/health-check-local.sh
+#
+# TAGS is resolved upstream by resolve-local-health-check-image.sh; unset-TAGS
+# failure coverage lives in test_resolve_local_images.bats.
 
 load "../../../../helpers/common"
 load "../../../../helpers/mocks"
@@ -68,6 +71,15 @@ EOF
 	run grep -F "run -d -p 127.0.0.1:8080:8080 ghcr.io/org/repo:local" \
 		"${BATS_TEST_TMPDIR}/mock_calls_docker"
 	assert_success
+}
+
+@test "health-check-local.sh: does not require TAGS" {
+	unset TAGS || true
+	_install_health_mocks
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Health check passed"
 }
 
 @test "health-check-local.sh: requires IMAGE" {
