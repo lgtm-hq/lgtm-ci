@@ -699,13 +699,46 @@ Reusable workflows default to `egress-policy: block` and
 `allowed-endpoints-mode: replace`. `resolve-egress-allowlist` expands presets via
 bundled `lib/egress/presets.sh` (synced from `scripts/ci/lib/egress/presets.sh`).
 
+### Pre-enforcement allowlist (harden-runner, since v0.50.0)
+
+Since [#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) (v0.50.0), reusables feed
+the caller's `allowed-endpoints` **verbatim** to the job-start
+`step-security/harden-runner` step, before `resolve-egress-allowlist` runs. That
+pre-enforcement value **replaces** the reusable's default GitHub/Ubuntu baseline
+whenever it is non-empty — even when `allowed-endpoints-mode: append` (append only
+affects the later, non-enforcing resolution step for tooling/checkout helpers).
+
+`step-security/harden-runner` splits `allowed-endpoints` on **spaces**. A
+newline-separated `|` literal block (the common multiline YAML style) is passed as a
+single bogus endpoint (string ending in `:0`), which blocks **all** egress — including
+`github.com:443` checkout. Prefer a folded scalar (`>-`) with space-separated
+`host:port` tokens, or use `egress-preset` / `allowed-endpoints-mode: append` with
+empty caller endpoints so the baked-in preset reaches pre-enforcement.
+
+Upgrade incidents during org-wide v0.52.3 adoption
+([#510](https://github.com/lgtm-hq/lgtm-ci/issues/510)):
+[homebrew-tap#126](https://github.com/lgtm-hq/homebrew-tap/pull/126),
+[podex#152](https://github.com/lgtm-hq/podex/pull/152),
+[Rustume#385](https://github.com/lgtm-hq/Rustume/pull/385),
+[turbo-themes#526](https://github.com/lgtm-hq/turbo-themes/pull/526),
+[py-lintro#1281](https://github.com/lgtm-hq/py-lintro/pull/1281).
+
+A future release may restore pre-enforcement normalization in
+[#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) so presets merge again before
+the harden-runner `pre` hook runs; until then, treat non-empty `allowed-endpoints`
+as the complete enforced allowlist.
+
+The table below describes `resolve-egress-allowlist` / `allowed-endpoints-mode` only
+(not the pre-enforcement harden-runner step):
+
 | Mode      | Behavior                                                                        |
 | --------- | ------------------------------------------------------------------------------- |
 | `replace` | Non-empty `allowed-endpoints` overrides `egress-preset`; empty uses preset only |
 | `append`  | Merges preset + `allowed-endpoints` (deduped, first-seen wins)                  |
 
 Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
-`allowed-endpoints` under `append` still means preset-only (same as omitting extras).
+`allowed-endpoints` under `append` still means preset-only (same as omitting extras)
+and is the safe way to inherit the reusable preset at pre-enforcement.
 `audit` mode is unchanged (no enforced allowlist).
 
 | Preset           | Use case                                                             |
@@ -733,6 +766,41 @@ egress-preset: quality
 `timeout-minutes: 45`.
 
 ## Egress block examples
+
+### Allowlist formatting
+
+**Wrong** — `|` block becomes one token; harden-runner blocks all egress:
+
+```yaml
+allowed-endpoints: |
+  github.com:443
+  api.github.com:443
+```
+
+**Right** — folded scalar (`>-`) yields space-separated hosts:
+
+```yaml
+allowed-endpoints: >-
+  github.com:443
+  api.github.com:443
+```
+
+**Right** — rely on preset (recommended when the reusable ships one):
+
+```yaml
+egress-preset: quality
+allowed-endpoints-mode: append
+allowed-endpoints: ''
+```
+
+Or add project-specific hosts without replacing the preset baseline:
+
+```yaml
+egress-preset: quality
+allowed-endpoints-mode: append
+allowed-endpoints: >-
+  ghcr.io:443
+```
 
 ### Node / Bun (web)
 
@@ -1201,6 +1269,18 @@ Callers using GitHub merge queue must add `merge_group:` triggers to every
 caller workflow that produces a required check, alongside `pull_request:` —
 otherwise queued PRs time out waiting for checks that never report. The
 starter examples (`examples/ci-*.yml`) include `merge_group:` by default.
+
+### App-level code-scanning checks
+
+Never require the github-advanced-security app's code-scanning **summary** context
+(`CodeQL` alone, without a caller-job prefix) in a ruleset when the repo uses a
+merge queue. The app produces that check only on `pull_request` commits, never on
+`merge_group` commits, so every queue entry times out and is silently ejected
+([holy-grail#143](https://github.com/lgtm-hq/holy-grail/pull/143), twice during
+v0.52.3 adoption). Require the workflow-job contexts instead — for example
+`codeql / 🔬 CodeQL Analysis` (the `{caller_job_id} / {job-name}` path your caller
+passes to `reusable-codeql.yml`). See [org-rulesets.md](org-rulesets.md)
+(Check-name contract).
 
 | Workflow                               | `merge_group` behavior                         |
 | -------------------------------------- | ---------------------------------------------- |
