@@ -98,7 +98,14 @@ generate)
 
 	mkdir -p "${OUTPUT_DIR}"
 
-	mapfile -t format_list < <(parse_sbom_format_list "${FORMATS}")
+	# Process substitution does not propagate non-zero exit under mapfile;
+	# capture first so invalid FORMATS fail the step.
+	_fmt_out="$(parse_sbom_format_list "${FORMATS}")" || exit 1
+	mapfile -t format_list <<<"${_fmt_out}"
+	if [[ ${#format_list[@]} -eq 0 ]]; then
+		echo "::error::No valid SBOM formats parsed from FORMATS" >&2
+		exit 1
+	fi
 
 	if ! validate_scan_target "${TARGET}" "${TARGET_TYPE}"; then
 		log_error "Invalid target for type ${TARGET_TYPE}: ${TARGET}"

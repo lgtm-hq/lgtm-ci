@@ -50,6 +50,22 @@ teardown() {
 	assert_output --partial "::error::formats must list at least one SBOM format"
 }
 
+@test "generate-sbom-release-assets: generate fails when FORMATS is invalid" {
+	local target_dir="${BATS_TEST_TMPDIR}/src"
+	mkdir -p "$target_dir"
+	printf 'ok\n' >"${target_dir}/file.txt"
+
+	run env \
+		STEP=generate \
+		TARGET="$target_dir" \
+		TARGET_TYPE=dir \
+		FORMATS="not-a-format" \
+		OUTPUT_DIR="${BATS_TEST_TMPDIR}/sbom" \
+		bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::Unsupported SBOM format: not-a-format"
+}
+
 @test "generate-sbom-release-assets: generate writes files and assembles upload paths" {
 	local target_dir="${BATS_TEST_TMPDIR}/src"
 	mkdir -p "$target_dir"
