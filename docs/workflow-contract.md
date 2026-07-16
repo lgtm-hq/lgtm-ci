@@ -315,6 +315,7 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
+| Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
 
 <!-- markdownlint-enable MD013 -->
@@ -1195,6 +1196,45 @@ Work jobs require only `contents: read`. Optional `publish-test-summary` delegat
 to `reusable-publish-test-summary.yml` (requires `pull-requests: write` on the
 caller publish job path). Outputs: `passed`, `build-passed`, `test-passed`.
 
+## Build artifact
+
+`reusable-build-artifact.yml` runs a caller-provided `build-command`, optionally a
+`post-build-test-command`, then uploads `artifact-path` for cross-job handoff
+(turbo-themes Build & Quality → Validate Examples; holy-grail Build & Test).
+
+Pass **exactly one** of `node-version` (single) or `node-version-matrix` (JSON
+array such as `'["20","22"]'`). Matrix legs keep a static inner `name:
+${{ inputs.job-name }}` so GitHub appends the version suffix. Required-check
+contexts therefore look like `{caller_job_id} / {job-name} ({node-version})`
+(for example `build / 🏗️ Build & Quality Checks (20)`). Plan org ruleset updates
+in lockstep with consumer migration.
+
+Single-version uploads use `artifact-name` verbatim. Matrix mode appends
+`-<node-version>` so parallel legs do not collide (`js-dist-20`, `js-dist-22`).
+Workflow outputs expose `artifact-name`, `artifact-id`, and `artifact-url` from
+the build job (matrix runs surface one completed leg — prefer the naming
+convention when downloading from multi-leg matrices).
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input                     | Default   | Notes                                              |
+| ------------------------- | --------- | -------------------------------------------------- |
+| `build-command`           | required  | e.g. `./scripts/build.sh --quick`, `bun run build` |
+| `artifact-name`           | required  | Base upload name; matrix appends `-<version>`      |
+| `artifact-path`           | required  | Relative to `working-directory`                     |
+| `node-version`            | empty     | XOR with `node-version-matrix`                     |
+| `node-version-matrix`     | empty     | JSON string array; XOR with `node-version`         |
+| `post-build-test-command` | empty     | Optional post-build test gate                      |
+| `retention-days`          | `7`       | Artifact retention                                 |
+| `working-directory`       | `.`       | Build / post-test cwd                              |
+| `job-name`                | `Build`   | Static inner check label                           |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
+`timeout-minutes`). Caller permissions: `contents: read` only. merge_group-safe
+(no PR-context requirements; no draft-PR job skip).
+
 ## Merge queue (`merge_group`)
 
 Callers using GitHub merge queue must add `merge_group:` triggers to every
@@ -1210,6 +1250,7 @@ starter examples (`examples/ci-*.yml`) include `merge_group:` by default.
 | `reusable-dependency-review.yml`       | Runs on `merge_group` (same as PR)             |
 | `reusable-security-audit.yml`          | Audit on `merge_group`; PR comment on PR only  |
 | `reusable-site-quality.yml`            | Safe to run — no PR context required           |
+| `reusable-build-artifact.yml`          | Safe to run — no PR context required           |
 | `reusable-docker.yml`                  | Safe to run — no PR context required           |
 | `reusable-test-shell.yml`              | Tests run; PR summary comment on PR only       |
 | `reusable-test-python.yml`             | Tests run; PR summary comment on PR only       |

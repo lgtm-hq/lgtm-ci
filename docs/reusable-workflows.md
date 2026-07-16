@@ -730,6 +730,75 @@ workflow does not download the artifact — it only links to it.
 
 ## Build, Coverage, And Supply Chain
 
+### Build artifact (`reusable-build-artifact.yml`)
+
+Generic Node build + artifact upload for cross-job handoff. Callers supply the
+build command; dependency install belongs in that command or a wrapper script.
+
+```yaml
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-artifact.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: <sha>
+      job-name: "🏗️ Build & Quality Checks"
+      build-command: ./scripts/build.sh --quick
+      node-version-matrix: '["20","22"]'
+      artifact-name: js-dist
+      artifact-path: dist
+      runner-image: ubuntu-24.04
+
+  validate-examples:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@<sha>
+        with:
+          # Matrix legs upload js-dist-20 / js-dist-22
+          name: js-dist-20
+          path: dist
+```
+
+Single-version (holy-grail style build + test):
+
+```yaml
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-artifact.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: <sha>
+      job-name: "🏗️ Build & Test"
+      build-command: bun run build
+      post-build-test-command: bun test
+      node-version: "22"
+      artifact-name: app-dist
+      artifact-path: dist
+```
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                     | Type   | Required | Default | Notes                                      |
+| ------------------------- | ------ | -------- | ------- | ------------------------------------------ |
+| `build-command`           | string | yes      | —       | Shell build command                        |
+| `artifact-name`           | string | yes      | —       | Upload name; matrix appends `-<version>`   |
+| `artifact-path`           | string | yes      | —       | Relative to `working-directory`            |
+| `node-version`            | string | xor      | `""`    | Single version; not with matrix            |
+| `node-version-matrix`     | string | xor      | `""`    | JSON array e.g. `'["20","22"]'`            |
+| `post-build-test-command` | string | no       | `""`    | Optional post-build test                   |
+| `retention-days`          | number | no       | `7`     | Artifact retention                         |
+| `working-directory`       | string | no       | `.`     | Build cwd                                  |
+| `job-name`                | string | no       | `Build` | Static inner name; GitHub adds matrix leg  |
+
+<!-- markdownlint-enable MD013 -->
+
+Outputs: `artifact-name`, `artifact-id`, `artifact-url`. Check contexts:
+`{caller_job_id} / {job-name} ({node-version})` for matrix legs. See
+[workflow-contract.md](workflow-contract.md#build-artifact).
+
 ### Push (publish to registry)
 
 ```yaml
