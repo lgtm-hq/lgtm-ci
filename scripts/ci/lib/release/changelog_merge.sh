@@ -85,6 +85,7 @@ _normalize_changelog_bullet_key() {
 	# Comparison-only: lowercase, strip trailing (#N)/(sha), backticks, light
 	# stopwords (a/an/the/as), collapse whitespace. Stopwords help near-dupes
 	# where Unreleased restates a conventional commit with filler words.
+	# SHA match avoids awk interval expressions ({n,m}) for POSIX portability.
 	printf '%s\n' "$line" | awk '
 		{
 			line = tolower($0)
@@ -93,9 +94,14 @@ _normalize_changelog_bullet_key() {
 					line = substr(line, 1, RSTART - 1)
 					continue
 				}
-				if (match(line, /[[:space:]]*\([0-9a-f]{7,40}\)[[:space:]]*$/)) {
-					line = substr(line, 1, RSTART - 1)
-					continue
+				if (match(line, /[[:space:]]*\([0-9a-f]+\)[[:space:]]*$/)) {
+					paren = substr(line, RSTART, RLENGTH)
+					gsub(/[^0-9a-f]/, "", paren)
+					hlen = length(paren)
+					if (hlen >= 7 && hlen <= 40) {
+						line = substr(line, 1, RSTART - 1)
+						continue
+					}
 				}
 				break
 			}
@@ -127,12 +133,15 @@ _changelog_bullet_scope_key() {
 }
 
 # Return 0 when candidate should be treated as a duplicate of existing.
-# Exact normalized match, or same **scope**: with one key containing the other.
+# Exact normalized match, or same **scope**: with one key containing the other
+# when the shorter key is at least 70% the length of the longer (avoids dropping
+# Unreleased bullets that substantially extend a generated line).
 # Usage: _changelog_bullet_keys_duplicate "$candidate_key" "$existing_key"
 _changelog_bullet_keys_duplicate() {
 	local candidate="${1:-}"
 	local existing="${2:-}"
 	local candidate_scope existing_scope
+	local shorter longer shorter_len longer_len
 
 	[[ -z "$candidate" || -z "$existing" ]] && return 1
 	[[ "$candidate" == "$existing" ]] && return 0
@@ -141,7 +150,20 @@ _changelog_bullet_keys_duplicate() {
 	existing_scope=$(_changelog_bullet_scope_key "$existing")
 	[[ -n "$candidate_scope" && "$candidate_scope" == "$existing_scope" ]] || return 1
 
-	[[ "$candidate" == *"$existing"* || "$existing" == *"$candidate"* ]]
+	if [[ ${#candidate} -le ${#existing} ]]; then
+		shorter="$candidate"
+		longer="$existing"
+	else
+		shorter="$existing"
+		longer="$candidate"
+	fi
+	[[ "$longer" == *"$shorter"* ]] || return 1
+
+	shorter_len=${#shorter}
+	longer_len=${#longer}
+	[[ "$longer_len" -gt 0 ]] || return 1
+	# Integer percent: require shorter >= 70% of longer.
+	[[ $((shorter_len * 100)) -ge $((longer_len * 70)) ]]
 }
 
 # Merge generated (left) and Unreleased (right) section bodies, collapsing

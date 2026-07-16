@@ -365,6 +365,20 @@ Second paragraph'
 - **skills**: document caveman install path (#241)'
 }
 
+@test "merge_changelog_sections: keeps same-scope Unreleased that substantially extends generated" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **auth**: add OAuth2 provider (#10) (abcdef0)" "### Added
+
+- **auth**: add OAuth2 provider login page and user profile sync (#11)"
+	'
+	assert_success
+	assert_output --partial "- **auth**: add OAuth2 provider (#10) (abcdef0)"
+	assert_output --partial "- **auth**: add OAuth2 provider login page and user profile sync (#11)"
+}
+
 @test "merge_changelog_sections: concatenates prose and breaking blocks" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"
