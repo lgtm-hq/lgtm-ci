@@ -137,6 +137,20 @@ run_coverage() {
 	grep -q 'beta.bats' "$BATS_CALLS"
 }
 
+@test "run-coverage: uses absolute COVERAGE_DIR for kcov outdir" {
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests/alpha.bats \
+		COVERAGE_DIR=coverage-report \
+		PARALLEL=1
+
+	assert_success
+	# kcov mock records nothing; driver success + github output path is absolute
+	run grep '^coverage-dir=' "$GITHUB_OUTPUT"
+	assert_success
+	[[ "$output" == coverage-dir=/* ]]
+}
+
 @test "run-tests: still honors PARALLEL --jobs when not under kcov" {
 	run run_coverage \
 		STEP=run-tests \

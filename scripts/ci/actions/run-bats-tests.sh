@@ -205,6 +205,10 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	fi
 
 	mkdir -p "$COVERAGE_DIR"
+	# kcov sets LD_PRELOAD to <outdir>/libkcov_sowrapper.so. Use an absolute
+	# outdir so chdir inside tests does not break preload resolution (stderr
+	# noise fails refute_output / exact-output assertions).
+	COVERAGE_DIR="$(cd "$COVERAGE_DIR" && pwd)"
 
 	# Resolve .bats files so we can emit per-file timing and bound each bats
 	# invocation. One kcov process wraps a driver that runs files serially —
