@@ -13,8 +13,9 @@
 #              Under run-coverage, PARALLEL > 1 is ignored (kcov + parallel BATS
 #              is deadlock-prone); non-coverage runs still honor it.
 #   COVERAGE_DIR - Directory for coverage output (for run-coverage step)
-#   KCOV_FILE_TIMEOUT_MINUTES - Per-file timeout for kcov/BATS under
-#              run-coverage (default: 5). Uses timeout(1); exit 124 on expiry.
+#   KCOV_SUITE_TIMEOUT_MINUTES - Suite timeout for kcov/BATS under
+#              run-coverage (default: 40). Uses timeout(1); exit 124 on expiry.
+#              Kept below the coverage-run step timeout (45).
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
 #   COVERAGE_THRESHOLD - Minimum coverage threshold (for check-threshold step)
 
@@ -178,7 +179,10 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	FILTER="${TEST_FILTER:-}"
 	PARALLEL="${PARALLEL:-1}"
 	COVERAGE_DIR="${COVERAGE_DIR:-coverage-report}"
-	FILE_TIMEOUT_MINUTES="${KCOV_FILE_TIMEOUT_MINUTES:-5}"
+	# Suite-level timeout (minutes). Must stay below the coverage-run step
+	# timeout (45) so timeout(1) fails the step with logs instead of a bare
+	# job/step cancellation. See #556.
+	SUITE_TIMEOUT_MINUTES="${KCOV_SUITE_TIMEOUT_MINUTES:-40}"
 
 	# Validate PARALLEL is a positive integer
 	if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
@@ -186,10 +190,10 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		PARALLEL=1
 	fi
 
-	# Validate per-file timeout is a positive integer (minutes)
-	if ! [[ "$FILE_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
-		echo "::warning::KCOV_FILE_TIMEOUT_MINUTES='$FILE_TIMEOUT_MINUTES' is not a valid positive integer, defaulting to 5"
-		FILE_TIMEOUT_MINUTES=5
+	# Validate suite timeout is a positive integer (minutes)
+	if ! [[ "$SUITE_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
+		echo "::warning::KCOV_SUITE_TIMEOUT_MINUTES='$SUITE_TIMEOUT_MINUTES' is not a valid positive integer, defaulting to 40"
+		SUITE_TIMEOUT_MINUTES=40
 	fi
 
 	# kcov instruments via PS4/DEBUG trap; parallel BATS under kcov is a known
@@ -210,10 +214,9 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# noise fails refute_output / exact-output assertions).
 	COVERAGE_DIR="$(cd "$COVERAGE_DIR" && pwd)"
 
-	# Resolve .bats files so we can emit per-file timing and bound each
-	# kcov+bats invocation. Each file gets its own kcov run into the same
-	# absolute outdir (kcov merges); wrapping bats via a driver under one
-	# kcov does not collect meaningful bash coverage.
+	# Resolve .bats files for diagnostics. Coverage itself must be a single
+	# kcov→bats process: per-file kcov invocations do not merge bash coverage
+	# with kcov v43 (empty cov.xml / 0% line-rate).
 	TEST_FILES=()
 	if [[ -f "$TEST_PATH" ]]; then
 		TEST_FILES=("$TEST_PATH")
@@ -231,60 +234,49 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		exit 1
 	fi
 
-	: >bats-output.tap
-	EXIT_CODE=0
+	for test_file in "${TEST_FILES[@]}"; do
+		echo "coverage-plan file=${test_file}"
+	done
+
+	BATS_ARGS=(--tap)
+	if [[ -n "$FILTER" ]]; then
+		BATS_ARGS+=(--filter "$FILTER")
+	fi
+	# Never pass --jobs under kcov (serialized above).
+
 	REPO_ROOT="$(pwd)"
-	PARSE_DIR_ARGS=(
-		--bash-parse-files-in-dir="${REPO_ROOT}/scripts/ci/lib"
-	)
+	echo "coverage-start suite files=${#TEST_FILES[@]} timeout=${SUITE_TIMEOUT_MINUTES}m"
+	start_ts="$(date +%s)"
 
 	# Note: kcov instruments bash scripts via PS4/DEBUG trap
 	# --bash-parse-files-in-dir: Pre-parse bash files for coverage mapping
 	# --include-path: Only report coverage for library files
 	# --exclude-pattern: Skip test infrastructure files
-	echo "Running coverage: per-file kcov+bats (${#TEST_FILES[@]} files, timeout=${FILE_TIMEOUT_MINUTES}m/file, serial)"
+	timeout --signal=TERM "${SUITE_TIMEOUT_MINUTES}m" \
+		kcov \
+		--cobertura \
+		--bash-parse-files-in-dir="${REPO_ROOT}/scripts/ci/lib" \
+		--include-path="${REPO_ROOT}/scripts/ci/lib" \
+		--exclude-pattern="/tests/,/tmp/,/bats-" \
+		"$COVERAGE_DIR" \
+		bats "${BATS_ARGS[@]}" "${TEST_FILES[@]}" 2>&1 | tee bats-output.tap
+	PIPE_STATUS=("${PIPESTATUS[@]}")
+	KCOV_EXIT=${PIPE_STATUS[0]:-0}
+	TEE_EXIT=${PIPE_STATUS[1]:-0}
 
-	for test_file in "${TEST_FILES[@]}"; do
-		BATS_ARGS=(--tap)
-		if [[ -n "$FILTER" ]]; then
-			BATS_ARGS+=(--filter "$FILTER")
-		fi
+	end_ts="$(date +%s)"
+	elapsed=$((end_ts - start_ts))
+	echo "coverage-finish suite elapsed=${elapsed}s exit=${KCOV_EXIT}"
 
-		echo "coverage-start file=${test_file}"
-		start_ts="$(date +%s)"
-
-		timeout --signal=TERM "${FILE_TIMEOUT_MINUTES}m" \
-			kcov \
-			--cobertura \
-			"${PARSE_DIR_ARGS[@]}" \
-			--include-path="${REPO_ROOT}/scripts/ci/lib" \
-			--exclude-pattern="/tests/,/tmp/,/bats-" \
-			"$COVERAGE_DIR" \
-			bats "${BATS_ARGS[@]}" "$test_file" 2>&1 | tee -a bats-output.tap
-		PIPE_STATUS=("${PIPESTATUS[@]}")
-		KCOV_EXIT=${PIPE_STATUS[0]:-0}
-		TEE_EXIT=${PIPE_STATUS[1]:-0}
-
-		# Only pay --bash-parse-files-in-dir cost once; later merges reuse maps.
-		PARSE_DIR_ARGS=()
-
-		end_ts="$(date +%s)"
-		elapsed=$((end_ts - start_ts))
-		echo "coverage-finish file=${test_file} elapsed=${elapsed}s exit=${KCOV_EXIT}"
-
-		# GNU timeout exits 124 when the command times out.
-		if [[ "$KCOV_EXIT" -eq 124 ]]; then
-			echo "::error::kcov/BATS timed out after ${FILE_TIMEOUT_MINUTES}m for file: ${test_file}"
-			EXIT_CODE=124
-			break
-		fi
-
-		if [[ "$KCOV_EXIT" -ne 0 && "$EXIT_CODE" -eq 0 ]]; then
-			EXIT_CODE="$KCOV_EXIT"
-		elif [[ "$TEE_EXIT" -ne 0 && "$EXIT_CODE" -eq 0 ]]; then
-			EXIT_CODE="$TEE_EXIT"
-		fi
-	done
+	# GNU timeout exits 124 when the command times out.
+	if [[ "$KCOV_EXIT" -eq 124 ]]; then
+		echo "::error::kcov/BATS timed out after ${SUITE_TIMEOUT_MINUTES}m (see last TAP lines / coverage-plan order for the hanging file)"
+		EXIT_CODE=124
+	elif [[ "$KCOV_EXIT" -ne 0 ]]; then
+		EXIT_CODE="$KCOV_EXIT"
+	else
+		EXIT_CODE="$TEE_EXIT"
+	fi
 
 	echo "exit-code=$EXIT_CODE" >>"$GITHUB_OUTPUT"
 	echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"

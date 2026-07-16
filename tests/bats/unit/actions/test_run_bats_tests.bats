@@ -60,7 +60,7 @@ while [[ $# -gt 0 ]]; do
 		;;
 	esac
 done
-# duration (e.g. 5m)
+# duration (e.g. 40m)
 shift
 if [[ "${TIMEOUT_MOCK_EXIT:-}" == "124" ]]; then
 	exit 124
@@ -89,7 +89,7 @@ run_coverage() {
 	)
 }
 
-@test "run-coverage: emits per-file coverage-start and coverage-finish timing lines" {
+@test "run-coverage: emits coverage-plan and suite timing lines" {
 	run run_coverage \
 		STEP=run-coverage \
 		TEST_PATH=tests \
@@ -97,24 +97,24 @@ run_coverage() {
 		PARALLEL=1
 
 	assert_success
-	assert_output --partial "coverage-start file=tests/alpha.bats"
-	assert_output --partial "coverage-finish file=tests/alpha.bats"
-	assert_output --partial "coverage-start file=tests/beta.bats"
-	assert_output --partial "coverage-finish file=tests/beta.bats"
+	assert_output --partial "coverage-plan file=tests/alpha.bats"
+	assert_output --partial "coverage-plan file=tests/beta.bats"
+	assert_output --partial "coverage-start suite files=2"
+	assert_output --partial "coverage-finish suite"
 	assert_output --partial "elapsed="
 }
 
-@test "run-coverage: timeout path emits ::error:: naming the file" {
+@test "run-coverage: timeout path emits ::error:: for the suite" {
 	run run_coverage \
 		STEP=run-coverage \
 		TEST_PATH=tests/alpha.bats \
 		COVERAGE_DIR=coverage-report \
 		PARALLEL=1 \
 		TIMEOUT_MOCK_EXIT=124 \
-		KCOV_FILE_TIMEOUT_MINUTES=3
+		KCOV_SUITE_TIMEOUT_MINUTES=3
 
 	assert_failure 124
-	assert_output --partial "::error::kcov/BATS timed out after 3m for file: tests/alpha.bats"
+	assert_output --partial "::error::kcov/BATS timed out after 3m"
 }
 
 @test "run-coverage: serializes under kcov when PARALLEL > 1" {
@@ -132,7 +132,7 @@ run_coverage() {
 		cat "$BATS_CALLS" >&2
 		return 1
 	fi
-	# both files still invoked
+	# both files still invoked in one bats call
 	grep -q 'alpha.bats' "$BATS_CALLS"
 	grep -q 'beta.bats' "$BATS_CALLS"
 }
@@ -145,7 +145,6 @@ run_coverage() {
 		PARALLEL=1
 
 	assert_success
-	# kcov mock records nothing; driver success + github output path is absolute
 	run grep '^coverage-dir=' "$GITHUB_OUTPUT"
 	assert_success
 	[[ "$output" == coverage-dir=/* ]]
