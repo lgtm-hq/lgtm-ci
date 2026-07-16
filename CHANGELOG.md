@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.54.1] - 2026-07-16
+
+### Changed
+
+- **deps**: update actions/setup-node action to v7.0.0 (major) (#574) (efa8cd3)
+- **deps**: update github-actions (#573) (011f59e)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.21.0 (minor) (#576)
+  (6e48c7c)
+
+### Fixed
+
+- **deps**: update lintro (#586) (a75e9f0)
+- **deps**: update lintro (#575) (2d1f9d0)
+
 ## [0.54.0] - 2026-07-13
 
 ### Added
@@ -1583,7 +1597,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.1...HEAD
+[0.54.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.0...v0.54.1
 [0.54.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.1...v0.54.0
 [0.53.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.0...v0.53.1
 [0.53.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.9...v0.53.0
