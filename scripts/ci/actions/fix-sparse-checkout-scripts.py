@@ -34,7 +34,7 @@ def fix_sparse_block(block: str) -> str:
 
     Returns:
         The block unchanged when ``scripts/ci/`` is already present, or
-        with ``scripts/ci/`` inserted after the first matching action path.
+        with ``scripts/ci/`` inserted after a supported action path.
     """
     if "scripts/ci/" in block or "scripts/ci/actions/" in block:
         return block
@@ -133,7 +133,8 @@ def main() -> int:
     ``scripts/ci/``.
 
     Returns:
-        Process exit code (always 0 on success).
+        0 always; raises on I/O errors propagated from ``Path.read_text``
+        or ``Path.write_text``.
     """
     updated = 0
     for path in sorted(WORKFLOWS.glob("reusable-*.yml")):
