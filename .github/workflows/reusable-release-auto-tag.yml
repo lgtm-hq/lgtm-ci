@@ -160,6 +160,7 @@ jobs:
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
+            scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
       - name: Resolve egress allowlist
@@ -170,6 +171,15 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Resolve tooling ref
+        id: tooling
+        shell: bash
+        env:
+          TOOLING_REF: ${{ inputs.tooling-ref }}
+          GH_REPO: ${{ github.repository }}
+          GH_SHA: ${{ github.sha }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: bash .lgtm-ci-tooling/scripts/ci/release/resolve-tooling-ref.sh
       - name: Create GitHub App installation token
         id: app-token
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
@@ -189,22 +199,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           token: ${{ steps.app-token.outputs.token }}
-      - name: Resolve tooling ref
-        id: tooling
-        shell: bash
-        env:
-          TOOLING_REF: ${{ inputs.tooling-ref }}
-          GH_REPO: ${{ github.repository }}
-          GH_SHA: ${{ github.sha }}
-        run: |
-          if [[ -n "$TOOLING_REF" ]]; then
-            # Explicit override from caller
-            echo "ref=$TOOLING_REF" >> "$GITHUB_OUTPUT"
-          elif [[ "$GH_REPO" == "lgtm-hq/lgtm-ci" ]]; then
-            echo "ref=$GH_SHA" >> "$GITHUB_OUTPUT"
-          else
-            echo "ref=${{ github.workflow_sha }}" >> "$GITHUB_OUTPUT"
-          fi
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
