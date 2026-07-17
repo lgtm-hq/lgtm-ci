@@ -1,0 +1,60 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: "Notify Slack"
+description: >-
+  Send a Slack notification via incoming webhook. Builds a Block Kit
+  payload with status-based colors and auto-injected workflow context
+  (repository, run URL, ref, actor). Delivery uses curl with retry and
+  backoff on transient failures; dry-run prints the payload instead.
+author: "lgtm-hq"
+
+inputs:
+  webhook-url:
+    description: "Slack incoming webhook URL (store as a secret)"
+    required: true
+  status:
+    description: "Notification status: success | failure | cancelled"
+    required: false
+    default: "success"
+  title:
+    description: "Notification title"
+    required: true
+  message:
+    description: "Notification body (Slack mrkdwn)"
+    required: false
+    default: ""
+  fields:
+    description: >-
+      Additional fields as a newline-separated KEY=VALUE (or simple YAML
+      KEY: VALUE) list, rendered as Block Kit section fields.
+    required: false
+    default: ""
+  dry-run:
+    description: "Print the payload instead of POSTing it"
+    required: false
+    default: "false"
+
+outputs:
+  delivered:
+    description: "Whether the notification was delivered (false in dry-run)"
+    value: ${{ steps.notify.outputs.delivered }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Send Slack notification
+      id: notify
+      shell: bash
+      env:
+        WEBHOOK_URL: ${{ inputs.webhook-url }}
+        STATUS: ${{ inputs.status }}
+        TITLE: ${{ inputs.title }}
+        MESSAGE: ${{ inputs.message }}
+        FIELDS: ${{ inputs.fields }}
+        DRY_RUN: ${{ inputs.dry-run }}
+      run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/notify-slack.sh"
+
+branding:
+  icon: "message-square"
+  color: "purple"
