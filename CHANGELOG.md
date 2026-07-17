@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.0] - 2026-07-17
+
+### Added
+
+- **actions**: add notify-slack and notify-discord composite actions (#618) (a147d05)
+
 ## [0.58.1] - 2026-07-17
 
 ### Fixed
@@ -1689,7 +1695,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.0...HEAD
+[0.59.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.1...v0.59.0
 [0.58.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.0...v0.58.1
 [0.58.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.57.1...v0.58.0
 [0.57.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.57.0...v0.57.1
