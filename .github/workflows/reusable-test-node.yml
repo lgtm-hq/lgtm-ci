@@ -739,6 +739,7 @@ jobs:
       tests-failed: ${{ needs.aggregate-tests.outputs.tests-failed }}
       tests-total: ${{ needs.aggregate-tests.outputs.tests-total }}
       coverage-percent: ${{ needs.aggregate-tests.outputs.coverage-percent }}
+      coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       rich-coverage-comment: ${{ inputs.coverage }}

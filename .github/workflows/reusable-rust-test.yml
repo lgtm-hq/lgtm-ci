@@ -619,6 +619,7 @@ jobs:
       coverage-percent: >-
         ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.coverage-percent ||
         needs.test.outputs.coverage-percent }}
+      coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: >-
         ${{ inputs.rust-toolchains != '' &&

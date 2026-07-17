@@ -18,6 +18,7 @@ teardown() {
 		TESTS_FAILED="0" \
 		TESTS_TOTAL="10" \
 		TESTS_SKIPPED="0" \
+		COVERAGE_ENABLED="true" \
 		COVERAGE_PERCENT="91" \
 		COVERAGE_THRESHOLD="80" \
 		JOB_RESULT="success" \
@@ -46,6 +47,7 @@ teardown() {
 		TESTS_PASSED="7" \
 		TESTS_FAILED="0" \
 		TESTS_TOTAL="7" \
+		COVERAGE_ENABLED="true" \
 		COVERAGE_PERCENT="88" \
 		COVERAGE_THRESHOLD="80" \
 		JOB_RESULT="success" \
@@ -63,10 +65,121 @@ teardown() {
 		TESTS_PASSED="0" \
 		TESTS_FAILED="0" \
 		TESTS_TOTAL="0" \
+		COVERAGE_ENABLED="false" \
 		JOB_RESULT="success" \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
 
 	assert_success
 	assert_output --partial "Status: ✅ PASSED"
 	refute_output --partial "UNKNOWN"
+}
+
+@test "generate-test-summary: omits coverage sections when coverage is disabled" {
+	run env \
+		TESTS_PASSED="108" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="108" \
+		COVERAGE_ENABLED="false" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Status: ✅ PASSED"
+	assert_output --partial "Test Results"
+	assert_output --partial "Run Details"
+	refute_output --partial "Unable to retrieve coverage"
+	refute_output --partial "Code Coverage"
+	refute_output --partial "Coverage Details"
+	refute_output --partial "**Coverage:**"
+	refute_output --partial "⚠️ N/A"
+}
+
+@test "generate-test-summary: defaults to omitting coverage when COVERAGE_ENABLED unset" {
+	run env \
+		TESTS_PASSED="5" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="5" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	refute_output --partial "Unable to retrieve coverage"
+	refute_output --partial "Code Coverage"
+}
+
+@test "generate-test-summary: warns when coverage enabled but percent missing" {
+	run env \
+		TESTS_PASSED="10" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="10" \
+		COVERAGE_ENABLED="true" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Unable to retrieve coverage: coverage report was not generated."
+	assert_output --partial "Code Coverage"
+	assert_output --partial "⚠️ N/A"
+}
+
+@test "generate-test-summary: reports skipped coverage when tests failed" {
+	run env \
+		TESTS_PASSED="8" \
+		TESTS_FAILED="2" \
+		TESTS_TOTAL="10" \
+		COVERAGE_ENABLED="true" \
+		JOB_RESULT="failure" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Status: ❌ FAILED"
+	assert_output --partial "Unable to retrieve coverage: coverage collection was skipped because tests failed."
+}
+
+@test "generate-test-summary: reports below-target coverage when under threshold" {
+	run env \
+		TESTS_PASSED="10" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="10" \
+		COVERAGE_ENABLED="true" \
+		COVERAGE_PERCENT="79" \
+		COVERAGE_THRESHOLD="80" \
+		JOB_RESULT="failure" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "Below target (<80%)"
+	assert_output --partial "79%"
+	assert_output --partial "Code Coverage"
+}
+
+@test "generate-test-summary: warns when percent set but coverage disabled" {
+	run env \
+		TESTS_PASSED="5" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="5" \
+		COVERAGE_ENABLED="false" \
+		COVERAGE_PERCENT="90" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "COVERAGE_PERCENT is set but COVERAGE_ENABLED=false"
+	refute_output --partial "Code Coverage"
+	refute_output --partial "**Coverage:**"
+}
+
+@test "generate-test-summary: blank line between Build and Coverage when enabled" {
+	run env \
+		TESTS_PASSED="10" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="10" \
+		COVERAGE_ENABLED="true" \
+		COVERAGE_PERCENT="91" \
+		COVERAGE_THRESHOLD="80" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --regexp $'\*\*Build:\*\* ✅ Tests passed\n\n\*\*Coverage:\*\*'
 }

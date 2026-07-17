@@ -219,12 +219,23 @@ and dedicated publish reusables. Transport (marker upsert) stays on
 When `publish-test-summary: true` on a language test reusable or
 `reusable-coverage`:
 
-- Coverage not collected: `generate-test-summary.sh` (pass/fail totals)
+- Coverage not requested (`coverage: false` / `coverage-enabled: false`):
+  `generate-test-summary.sh` posts pass/fail totals only — **no** Coverage /
+  Code Coverage / Coverage Details sections and **no** “Unable to retrieve
+  coverage…” warning (disabled coverage must not look like a broken run)
 - Coverage collected with a downloadable artifact (Rust LCOV, Python JSON when
   `upload-coverage: true`): `generate-coverage-comment` (rich table)
 - Coverage collected without an artifact (e.g. Python with `upload-coverage: false`):
-  `generate-test-summary.sh` (pass/fail totals with coverage percent)
-- Shell/kcov: totals only (rich table not yet supported)
+  `generate-test-summary.sh` (pass/fail totals with coverage percent; requires
+  `coverage-enabled: true`)
+- Coverage requested but the report/percent is missing: totals summary keeps the
+  warning-flavored “Unable to retrieve coverage…” UX
+- Shell/kcov: totals only (rich table not yet supported); with `coverage: false`
+  the coverage block is omitted like other languages
+
+Callers thread `inputs.coverage` (or `true` for `reusable-coverage`) into
+`reusable-publish-test-summary.yml` as `coverage-enabled`, which sets
+`COVERAGE_ENABLED` for `generate-test-summary.sh`.
 
 Rich coverage comments use `generate-coverage-comment` with an optional
 `test-suite-name` input. When set, the visible heading becomes
