@@ -202,6 +202,7 @@ if [[ "$COVERAGE_ENABLED" == "true" ]]; then
 	COVERAGE_SECTION="$(
 		cat <<EOF
 
+
 **Coverage:** ${COVERAGE_EMOJI} ${COVERAGE_DISPLAY}
 
 **Status:** ${COVERAGE_STATUS}
@@ -224,6 +225,15 @@ ${COMMIT_LINE}
 EOF
 	)"
 else
+	# Soft guard for direct callers that pass a percent without opting in
+	if [[ "$COVERAGE_PROVIDED" == "true" ]]; then
+		msg="COVERAGE_PERCENT is set but COVERAGE_ENABLED=false; coverage sections omitted. Pass coverage-enabled: true to include them."
+		if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+			echo "::warning::${msg}"
+		else
+			echo "WARNING: ${msg}" >&2
+		fi
+	fi
 	COVERAGE_TABLE_SECTION="$(
 		cat <<EOF
 

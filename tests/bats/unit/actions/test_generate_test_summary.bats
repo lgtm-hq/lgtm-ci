@@ -152,3 +152,34 @@ teardown() {
 	assert_output --partial "79%"
 	assert_output --partial "Code Coverage"
 }
+
+@test "generate-test-summary: warns when percent set but coverage disabled" {
+	run env \
+		TESTS_PASSED="5" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="5" \
+		COVERAGE_ENABLED="false" \
+		COVERAGE_PERCENT="90" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --partial "COVERAGE_PERCENT is set but COVERAGE_ENABLED=false"
+	refute_output --partial "Code Coverage"
+	refute_output --partial "**Coverage:**"
+}
+
+@test "generate-test-summary: blank line between Build and Coverage when enabled" {
+	run env \
+		TESTS_PASSED="10" \
+		TESTS_FAILED="0" \
+		TESTS_TOTAL="10" \
+		COVERAGE_ENABLED="true" \
+		COVERAGE_PERCENT="91" \
+		COVERAGE_THRESHOLD="80" \
+		JOB_RESULT="success" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-test-summary.sh"
+
+	assert_success
+	assert_output --regexp $'\*\*Build:\*\* ✅ Tests passed\n\n\*\*Coverage:\*\*'
+}
