@@ -57,6 +57,8 @@ want a drop-in job without wiring these composites by hand.
 | `docker-auth` | [publishing](publishing.md#docker-auth) | Registry validate + login for the docker workflow family |
 | `deploy-pages` | [publishing](publishing.md#deploy-pages) | GitHub Pages deployment (OIDC) |
 | `bundle-workflow-artifacts` | [publishing](publishing.md#bundle-workflow-artifacts) | Bundle report artifacts before Pages deploy |
+| `notify-slack` | [notifications](notifications.md#notify-slack) | Slack webhook notification (Block Kit, status colors) |
+| `notify-discord` | [notifications](notifications.md#notify-discord) | Discord webhook notification (embeds, status colors) |
 | `calculate-version` | [release](release.md#calculate-version) | Semantic version calculation |
 | `generate-changelog` | [release](release.md#generate-changelog) | Changelog generation |
 | `create-release-tag` | [release](release.md#create-release-tag) | Release tag creation |

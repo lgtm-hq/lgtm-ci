@@ -87,6 +87,13 @@ _source_tmp_lib() {
 	assert_output --partial "missing required module release/changelog.sh"
 }
 
+@test "notify.sh: fails loudly when a required module is missing" {
+	rm "$TMP_LIB_DIR/notify/payload.sh"
+	run _source_tmp_lib "notify.sh"
+	assert_failure
+	assert_output --partial "missing required module notify/payload.sh"
+}
+
 @test "actions.sh: fails loudly when a required library is missing" {
 	rm "$TMP_LIB_DIR/sbom.sh"
 	run _source_tmp_lib "actions.sh"
@@ -135,7 +142,7 @@ _source_tmp_lib() {
 	local smoke="$BATS_TEST_TMPDIR/aggregator_smoke.sh"
 	cat >"$smoke" <<'SMOKE'
 set -euo pipefail
-for lib in actions testing release docker publish network egress; do
+for lib in actions testing release docker publish network egress notify; do
 	source "$TMP_LIB_DIR/$lib.sh"
 done
 echo loaded
@@ -222,6 +229,10 @@ _assert_all_modules_required() {
 
 @test "release.sh: every required module is enforced" {
 	_assert_all_modules_required "release.sh"
+}
+
+@test "notify.sh: every required module is enforced" {
+	_assert_all_modules_required "notify.sh"
 }
 
 @test "actions.sh: every required library is enforced" {
