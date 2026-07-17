@@ -100,8 +100,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 		/^jobs:/ { done = 1 }
 		!done && /^    outputs:/ { in_outputs = 1 }
 		!done && in_outputs && /^      [a-z-]+:/ { total++ }
-		!done && in_outputs && /inputs\.pipeline-skip &&/ { guarded++ }
-		END { exit !(total == 5 && guarded == 5) }
+		!done && in_outputs && /inputs\.pipeline-skip && '\''0'\'' \|\|/ { zero++ }
+		!done && in_outputs && /inputs\.pipeline-skip && '\''true'\'' \|\|/ { green++ }
+		END { exit !(total == 5 && zero == 4 && green == 1) }
 	' "$WORKFLOW"
 	assert_success
 }
@@ -134,7 +135,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 					while ((getline line < FILENAME) > 0 && line ~ /^      /) {
 						if_line = if_line line
 					}
-					if (if_line ~ /!inputs\.pipeline-skip/) {
+					if (if_line ~ /!inputs\.pipeline-skip &&/ ||
+						if_line ~ /&&[ ]*!inputs\.pipeline-skip/) {
 						found = 1
 					}
 					break
