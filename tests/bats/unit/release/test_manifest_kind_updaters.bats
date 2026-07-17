@@ -130,6 +130,35 @@ EOF
 	assert_output --partial "no literal"
 }
 
+@test "gemspec: ignores commented .version lines" {
+	cat >demo.gemspec <<'EOF'
+Gem::Specification.new do |spec|
+  # spec.version = "9.9.9"
+  spec.version = "1.0.0"
+end
+EOF
+	run env NEXT_VERSION=1.1.0 MANIFEST_PATH=demo.gemspec bash "${ECOSYSTEMS_DIR}/gemspec.sh"
+	assert_success
+	run grep -F '# spec.version = "9.9.9"' demo.gemspec
+	assert_success
+	run grep -F 'spec.version = "1.1.0"' demo.gemspec
+	assert_success
+}
+
+@test "gemspec: rejects multiple literal .version assignments" {
+	cat >demo.gemspec <<'EOF'
+Gem::Specification.new do |spec|
+  spec.version = "1.0.0"
+end
+Gem::Specification.new do |spec|
+  spec.version = "2.0.0"
+end
+EOF
+	run env NEXT_VERSION=3.0.0 MANIFEST_PATH=demo.gemspec bash "${ECOSYSTEMS_DIR}/gemspec.sh"
+	assert_failure
+	assert_output --partial "expected exactly one"
+}
+
 # =============================================================================
 # pep621
 # =============================================================================

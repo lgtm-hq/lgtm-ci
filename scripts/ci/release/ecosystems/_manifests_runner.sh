@@ -13,16 +13,18 @@
 
 set -euo pipefail
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
-LIB_DIR="$SCRIPT_DIR/../../lib"
+ECOSYSTEMS_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+LIB_DIR="$ECOSYSTEMS_DIR/../../lib"
 
 # shellcheck source=../../lib/log.sh
 source "$LIB_DIR/log.sh"
+# shellcheck source=../../lib/release.sh
+source "$LIB_DIR/release.sh"
 
 : "${NEXT_VERSION:?NEXT_VERSION is required}"
 : "${MANIFESTS:?MANIFESTS is required}"
 
-if [[ ! "$NEXT_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+if ! validate_semver "$NEXT_VERSION"; then
 	log_error "NEXT_VERSION is not valid semver: $NEXT_VERSION"
 	exit 1
 fi
@@ -64,7 +66,7 @@ while IFS= read -r path; do
 		continue
 	fi
 
-	SCRIPT="$SCRIPT_DIR/${kind}.sh"
+	SCRIPT="$ECOSYSTEMS_DIR/${kind}.sh"
 	if [[ ! -f "$SCRIPT" ]]; then
 		log_error "[$path] Kind script missing: $SCRIPT"
 		FAILED=1
@@ -73,6 +75,9 @@ while IFS= read -r path; do
 
 	export MANIFEST_PATH="$path"
 	log_info "[$kind] Updating $path..."
+	# Intentionally continue after a kind failure so later manifests still run
+	# and all errors are reported; workspace may contain partial updates, but
+	# the step exits non-zero so no version PR is created (same as _runner.sh).
 	if "$SCRIPT"; then
 		log_success "[$kind] $path updated to $NEXT_VERSION"
 	else

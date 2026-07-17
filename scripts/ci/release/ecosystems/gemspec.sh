@@ -28,9 +28,19 @@ if [[ ! -f "$MANIFEST_PATH" ]]; then
 	exit 1
 fi
 
-# Literal string assignment only — skip constant references.
-if ! grep -qE '\.version[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' "$MANIFEST_PATH"; then
+# Collect active (non-comment) literal string version assignments.
+# Bash 3.2 compatible — no mapfile.
+LITERAL_COUNT=0
+while IFS= read -r _line; do
+	LITERAL_COUNT=$((LITERAL_COUNT + 1))
+done < <(grep -E '^[[:space:]]*[^#[:space:]].*\.version[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' "$MANIFEST_PATH" || true)
+
+if [[ "$LITERAL_COUNT" -eq 0 ]]; then
 	log_error "[gemspec] $MANIFEST_PATH has no literal .version = \"...\" assignment to update"
+	exit 1
+fi
+if [[ "$LITERAL_COUNT" -gt 1 ]]; then
+	log_error "[gemspec] $MANIFEST_PATH has $LITERAL_COUNT literal .version assignments; expected exactly one"
 	exit 1
 fi
 
@@ -39,11 +49,12 @@ log_info "[gemspec] Updating $MANIFEST_PATH → $NEXT_VERSION"
 # Escape for sed replacement (NEXT_VERSION is semver; still quote safely).
 ESC_VERSION=$(printf '%s' "$NEXT_VERSION" | sed 's/[&/\]/\\&/g')
 
+# Only rewrite non-comment lines that contain a literal .version assignment.
 write_file_atomic "$MANIFEST_PATH" \
-	sed -E "s/(\\.version[[:space:]]*=[[:space:]]*)[\"'][^\"']+[\"']/\\1\"${ESC_VERSION}\"/" \
+	sed -E "/^[[:space:]]*#/! s/(\\.version[[:space:]]*=[[:space:]]*)[\"'][^\"']+[\"']/\\1\"${ESC_VERSION}\"/" \
 	"$MANIFEST_PATH"
 
-ACTUAL=$(grep -E '\.version[[:space:]]*=' "$MANIFEST_PATH" | head -1 |
+ACTUAL=$(grep -E '^[[:space:]]*[^#[:space:]].*\.version[[:space:]]*=[[:space:]]*["'\''][^"'\'']+["'\'']' "$MANIFEST_PATH" | head -1 |
 	sed -E 's/.*\.version[[:space:]]*=[[:space:]]*["'\'']([^"'\'']+)["'\''].*/\1/')
 if [[ "$ACTUAL" != "$NEXT_VERSION" ]]; then
 	log_error "[gemspec] Verification failed: expected $NEXT_VERSION, got $ACTUAL"

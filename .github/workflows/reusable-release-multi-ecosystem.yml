@@ -9,7 +9,10 @@ name: "Reusable: Release Multi-Ecosystem Version PR"
         description: >-
           JSON object mapping file path → kind (npm|raw|gemspec|pep621).
           Example: {"package.json":"npm","VERSION":"raw",
-          "python/pyproject.toml":"pep621","my.gemspec":"gemspec"}
+          "python/pyproject.toml":"pep621","my.gemspec":"gemspec"}.
+          Kind pep621 installs tomlkit from PyPI when missing; under
+          egress-policy block, callers must allow pypi.org:443 and
+          files.pythonhosted.org:443 (or use egress-preset pypi / append).
         required: true
         type: string
       bump:
@@ -440,9 +443,10 @@ jobs:
 
             ### What happens when this PR is merged?
 
-            1. An annotated tag `${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}` will be created
-            2. A GitHub release will be published with the changelog
-            3. The floating major version tag will be updated
+            1. The updated version files and changelog land on the target branch
+            2. If a separate auto-tag workflow is configured, it can create
+               `${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}`,
+               publish the GitHub release, and move the floating major tag
 
             ---
 

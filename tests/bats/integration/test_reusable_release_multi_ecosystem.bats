@@ -99,8 +99,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-multi-ecosystem.yml
 
 @test "reusable-release-multi-ecosystem: removes tooling before PR creation" {
 	run awk '
-		/- name: Remove tooling checkout before PR creation/ { saw_remove = 1 }
-		saw_remove && /- name: Create or update version PR/ { saw_create = 1; exit }
+		/^  version-pr:/ { in_job = 1; next }
+		in_job && /^  [a-zA-Z0-9_-]+:/ { in_job = 0 }
+		in_job && /- name: Remove tooling checkout before PR creation/ { saw_remove = 1 }
+		in_job && saw_remove && /- name: Create or update version PR/ { saw_create = 1; exit }
 		END { exit !(saw_remove && saw_create) }
 	' "$WORKFLOW"
 	assert_success
