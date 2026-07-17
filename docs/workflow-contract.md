@@ -22,6 +22,7 @@ Where applicable, workflows accept:
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
 | `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)                |
 | `draft-pr-skip`                    | Skip PR jobs on draft pull requests (default `true` on test reusables) |
+| `pipeline-skip`                    | Skip test jobs on pipeline-irrelevant diffs (default `false`)          |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -286,6 +287,17 @@ All language test reusables (`reusable-rust-test`, `reusable-test-python`,
 `reusable-test-node`, `reusable-test-node-custom`, `reusable-test-shell`) default
 `draft-pr-skip: true` so draft PRs skip test and summary jobs unless callers set
 `draft-pr-skip: false`.
+
+### `pipeline-skip`
+
+`reusable-test-python` accepts `pipeline-skip` (default `false`). Callers that
+classify a pull request diff as pipeline-irrelevant (docs-only, verified
+version-bump PRs) set `pipeline-skip: true` so prepare/test/aggregate/summary
+jobs skip **inside** the running reusable. Those jobs still report their
+required nested check contexts as skipped — unlike skipping the reusable caller
+at the workflow level, which collapses nested contexts and deadlocks merges
+(py-lintro#1359). Pair with an always-green `reusable-required-check` gate in
+the caller when the org ruleset requires both nested and gate contexts.
 
 ## Permissions by mode
 
