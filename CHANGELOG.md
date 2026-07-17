@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.54.3] - 2026-07-17
+
+### Fixed
+
+- **ci**: pass COVERAGE env to node test summary staging step (#584) (016f2c2)
+
 ## [0.54.2] - 2026-07-17
 
 ### Changed
@@ -1619,7 +1625,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.3...HEAD
+[0.54.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.2...v0.54.3
 [0.54.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.1...v0.54.2
 [0.54.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.0...v0.54.1
 [0.54.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.1...v0.54.0
