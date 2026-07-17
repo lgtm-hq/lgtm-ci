@@ -1,0 +1,10 @@
+{
+  "suites": [
+    {
+      "tests": [
+        {"title": "test1", "status": "expected"},
+        {"title": "test2", "status": "timedOut"}
+      ]
+    }
+  ]
+}

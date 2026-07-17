@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- This is a comment -->
+<testsuite name="tests" tests="5" failures="1" errors="0" skipped="0">
+  <!-- Another comment -->
+  <testcase name="test1"/>
+</testsuite>

@@ -14,20 +14,7 @@ teardown() {
 
 @test "format-security-comment: formats clean scan with no vulnerabilities" {
 	local json_file="${BATS_TEST_TMPDIR}/osv-results.json"
-	cat >"$json_file" <<'EOF'
-{
-  "results": [
-    {
-      "tool": "osv_scanner",
-      "issues_count": 0,
-      "success": true,
-      "ai_metadata": {
-        "suppressions": []
-      }
-    }
-  ]
-}
-EOF
+	install_fixture "security/osv-results-clean.json" "$json_file"
 
 	run python3 "${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py" "$json_file"
 	assert_success
@@ -37,25 +24,7 @@ EOF
 
 @test "format-security-comment: formats vulnerability table" {
 	local json_file="${BATS_TEST_TMPDIR}/osv-results.json"
-	cat >"$json_file" <<'EOF'
-{
-  "results": [
-    {
-      "tool": "osv_scanner",
-      "issues_count": 1,
-      "issues": [
-        {
-          "message": "GHSA-xxxx-yyyy-zzzz in example-crate",
-          "file": "Cargo.lock"
-        }
-      ],
-      "ai_metadata": {
-        "suppressions": []
-      }
-    }
-  ]
-}
-EOF
+	install_fixture "security/osv-results-with-vuln.json" "$json_file"
 
 	run python3 "${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py" "$json_file"
 	assert_success
@@ -72,23 +41,9 @@ EOF
 
 @test "format-security-comment: reads TOML suppressions without ignoreUntil" {
 	local json_file="${BATS_TEST_TMPDIR}/osv-results.json"
-	cat >"$json_file" <<'EOF'
-{
-  "results": [
-    {
-      "tool": "osv_scanner",
-      "issues_count": 0,
-      "success": true
-    }
-  ]
-}
-EOF
+	install_fixture "security/osv-results-no-suppressions-meta.json" "$json_file"
 
-	cat >"${BATS_TEST_TMPDIR}/.osv-scanner.toml" <<'EOF'
-[[IgnoredVulns]]
-id = "GHSA-xxxx-yyyy-zzzz"
-reason = "No fix available"
-EOF
+	install_fixture "security/osv-scanner-no-ignore-until.toml" "${BATS_TEST_TMPDIR}/.osv-scanner.toml"
 
 	run bash -c "cd '${BATS_TEST_TMPDIR}' && python3 '${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py' osv-results.json"
 	assert_success
