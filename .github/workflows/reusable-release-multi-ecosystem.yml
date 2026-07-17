@@ -1,0 +1,599 @@
+---
+name: "Reusable: Release Multi-Ecosystem Version PR"
+
+"on":
+  workflow_call:
+    inputs:
+      manifests:
+        # yamllint disable-line rule:line-length
+        description: >-
+          JSON object mapping file path → kind (npm|raw|gemspec|pep621).
+          Example: {"package.json":"npm","VERSION":"raw",
+          "python/pyproject.toml":"pep621","my.gemspec":"gemspec"}
+        required: true
+        type: string
+      bump:
+        description: >-
+          Version resolution: auto-from-commits (conventional commits) or
+          explicit (use version input)
+        required: false
+        type: string
+        default: "auto-from-commits"
+      version:
+        description: >-
+          Explicit semver when bump=explicit (optional v prefix). Ignored for
+          auto-from-commits.
+        required: false
+        type: string
+        default: ""
+      prerelease-tag:
+        description: >-
+          Optional prerelease identifier appended as -<tag> (e.g. rc.1 →
+          1.2.3-rc.1). Empty skips.
+        required: false
+        type: string
+        default: ""
+      changelog:
+        description: "Generate and update CHANGELOG.md in the version PR"
+        required: false
+        type: boolean
+        default: true
+      job-name:
+        description: "GitHub check name for the version-PR job"
+        required: false
+        type: string
+        default: "Create Version PR"
+      max-bump:
+        description: "Maximum semver bump when bump=auto-from-commits"
+        required: false
+        type: string
+        default: "minor"
+      tag-prefix:
+        description: "Prefix for version tags"
+        required: false
+        type: string
+        default: "v"
+      pr-labels:
+        description: "Comma-separated labels for the version PR"
+        required: false
+        type: string
+        default: "release-bump"
+      codeowners-path:
+        description: "Path to CODEOWNERS file"
+        required: false
+        type: string
+        default: ".github/CODEOWNERS"
+      auto-merge:
+        description: "Enable auto-merge (squash) on the created PR"
+        required: false
+        type: boolean
+        default: false
+      auto-merge-patch-only:
+        description: >-
+          When auto-merge is true, only enable auto-merge for patch bumps
+        required: false
+        type: boolean
+        default: false
+      release-branch-prefix:
+        description: "Prefix for the release PR branch (e.g. release/)"
+        required: false
+        type: string
+        default: "release/"
+      version-update-script:
+        # yamllint disable-line rule:line-length
+        description: >-
+          Optional repo-specific script for additional version file updates
+          beyond manifests. Receives NEXT_VERSION. Runs after manifest
+          updaters, before PR creation.
+        required: false
+        type: string
+        default: ""
+      skip-patterns:
+        description: >-
+          Comma-separated commit title patterns that skip version PR creation.
+        required: false
+        type: string
+        default: "^chore\\(release\\):"
+      tooling-ref:
+        # yamllint disable-line rule:line-length
+        description: >-
+          Git ref for lgtm-ci tooling checkout. Defaults to
+          github.workflow_sha when unset.
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          uploads.github.com:443
+          pipelines.actions.githubusercontent.com:443
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "github-tooling"
+      report-failures:
+        description: >-
+          When true, open or update a deduplicated GitHub issue when the release
+          job fails on the target branch
+        required: false
+        type: boolean
+        default: true
+      failure-issue-labels:
+        description: Comma-separated labels for auto-opened release failure issues
+        required: false
+        type: string
+        default: "bug,ci,release,automation,infrastructure"
+      failure-target-branch:
+        description: >-
+          Branch name for failure notifications. Empty uses the repository default
+          branch.
+        required: false
+        type: string
+        default: ""
+
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 20
+
+    secrets:
+      RELEASE_APP_ID:
+        description: "GitHub App ID for creating release tokens"
+        required: true
+      RELEASE_APP_PRIVATE_KEY:
+        description: "GitHub App private key for creating release tokens"
+        required: true
+
+jobs:
+  version-pr:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    concurrency:
+      # Distinct from the caller's workflow-level group to avoid
+      # a self-deadlock when a same-repo caller also serializes on
+      # "release-version-pr-${repo}".
+      group: reusable-release-multi-ecosystem-${{ github.repository }}
+      cancel-in-progress: false
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci egress tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Create GitHub App installation token
+        id: app-token
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          # Pin to the triggering commit — same guard race as
+          # reusable-release-auto-tag.yml (see comment there).
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Guard release commit
+        id: guard
+        shell: bash
+        env:
+          SKIP_PATTERNS: ${{ inputs.skip-patterns }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
+      - name: Check existing version PR
+        if: steps.guard.outputs.is-release-commit == 'false'
+        id: check-pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-existing-version-pr.sh
+      - name: Resolve next version
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+        id: version
+        shell: bash
+        env:
+          BUMP_MODE: ${{ inputs.bump }}
+          EXPLICIT_VERSION: ${{ inputs.version }}
+          PRERELEASE_TAG: ${{ inputs.prerelease-tag }}
+          MAX_BUMP: ${{ inputs.max-bump }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/resolve-multi-ecosystem-version.sh
+      - name: Generate changelog
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.changelog
+        id: changelog
+        shell: bash
+        env:
+          FORMAT: full
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
+      - name: Update CHANGELOG.md
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.changelog
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.next-version }}
+          CHANGELOG_BODY: ${{ steps.changelog.outputs.changelog }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PUSH: "false"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh
+      - name: Run manifest version updaters
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          MANIFESTS: ${{ inputs.manifests }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/ecosystems/_manifests_runner.sh
+      - name: Validate version update script
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.version-update-script != ''
+        id: validate-script
+        shell: bash
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.version-update-script }}
+        run: .lgtm-ci-tooling/scripts/ci/release/validate-version-update-script.sh
+      - name: Run repo-specific version update script
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && inputs.version-update-script != ''
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          SCRIPT_PATH: ${{ steps.validate-script.outputs.resolved }}
+        run: .lgtm-ci-tooling/scripts/ci/release/run-version-update-script.sh
+      - name: Check for version file changes
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        id: changes
+        shell: bash
+        env:
+          EXPECT_VERSION_FILES: "true"
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-version-files-changed.sh
+      - name: Check version PR merge queue
+        # Skip branch updates when the target version PR is already queued.
+        # Queued branches cannot be updated by create-pull-request (#528).
+        # Runs before tooling removal so the detection script is still present.
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+        id: mq-check
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.check-pr.outputs.pr-number }}
+          # yamllint disable-line rule:line-length
+          BRANCH: ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}
+          REPO: ${{ github.repository }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-version-pr-merge-queue.sh
+      - name: Notice skipped queued version PR update
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.mq-check.outputs.skip-branch-update == 'true'
+        shell: bash
+        env:
+          PR_NUMBER: ${{ steps.mq-check.outputs.pr-number }}
+          REASON: ${{ steps.mq-check.outputs.reason }}
+        run: |
+          echo "::notice::Skipping version PR branch update (reason=${REASON}, pr=${PR_NUMBER:-none})"
+      - name: Remove tooling checkout before PR creation
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/release/remove-tooling-checkout.sh
+      - name: Create or update version PR
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+          && steps.changes.outputs.has-pr-changes == 'true'
+          && steps.mq-check.outputs.skip-branch-update != 'true'
+        id: create-pr
+        # yamllint disable-line rule:line-length
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          sign-commits: true
+          branch: >-
+            ${{ inputs.release-branch-prefix }}${{ inputs.tag-prefix }}${{
+            steps.version.outputs.next-version }}
+          base: ${{ github.event.repository.default_branch }}
+          delete-branch: true
+          # yamllint disable-line rule:line-length
+          title: >-
+            chore(release): version ${{
+            steps.version.outputs.next-version }}
+          body: |
+            ## Release ${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}
+
+            This PR was automatically created by the multi-ecosystem release workflow.
+
+            **Version bump:** `${{ steps.version.outputs.bump-type }}`
+            **New version:** `${{ steps.version.outputs.next-version }}`
+            **Manifests:** `${{ inputs.manifests }}`
+
+            ### Changelog
+
+            ${{ steps.changelog.outputs.changelog || '_Changelog generation disabled._' }}
+
+            ### What happens when this PR is merged?
+
+            1. An annotated tag `${{ inputs.tag-prefix }}${{ steps.version.outputs.next-version }}` will be created
+            2. A GitHub release will be published with the changelog
+            3. The floating major version tag will be updated
+
+            ---
+
+            > **Note**: Do not modify this PR manually. If changes are needed,
+            > close it and let the workflow create a new one after those changes
+            > land on the default branch.
+          # yamllint disable-line rule:line-length
+          commit-message: >-
+            chore(release): version ${{
+            steps.version.outputs.next-version }}
+          labels: ${{ inputs.pr-labels }}
+      - name: Restore tooling for post-PR steps
+        if: always()
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Get PR author
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        id: pr-author
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        run: |
+          author=$(gh pr view "$PR_NUMBER" --json author --jq '.author.login')
+          echo "author=${author}" >> "${GITHUB_OUTPUT}"
+      - name: Request CODEOWNER review
+        # yamllint disable-line rule:line-length
+        if: >-
+          steps.create-pr.outputs.pull-request-number != ''
+          && !cancelled()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+          PR_AUTHOR: ${{ steps.pr-author.outputs.author }}
+          PR_AUTHOR_TYPE: Bot
+          CODEOWNERS_PATH: ${{ inputs.codeowners-path }}
+          REQUEST_CODEOWNER_REVIEW: "true"
+        run: .lgtm-ci-tooling/scripts/ci/actions/assign-codeowner.sh
+      - name: Enable auto-merge
+        # yamllint disable-line rule:line-length
+        if: >-
+          inputs.auto-merge
+          && steps.create-pr.outputs.pull-request-number
+          && (
+            !inputs.auto-merge-patch-only
+            || steps.version.outputs.bump-type == 'patch'
+          )
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          PR_NUMBER: ${{ steps.create-pr.outputs.pull-request-number }}
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/enable-auto-merge.sh
+      - name: Write summary
+        if: always()
+        shell: bash
+        env:
+          IS_RELEASE: ${{ steps.guard.outputs.is-release-commit }}
+          PR_EXISTS: ${{ steps.check-pr.outputs.pr-exists }}
+          RELEASE_NEEDED: ${{ steps.version.outputs.release-needed }}
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          BUMP_TYPE: ${{ steps.version.outputs.bump-type }}
+          PR_URL: ${{ steps.create-pr.outputs.pull-request-url }}
+          PR_OP: ${{ steps.create-pr.outputs.pull-request-operation }}
+          ECOSYSTEMS: ${{ inputs.manifests }}
+        # yamllint disable-line rule:line-length
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
+  report-release-failure:
+    name: Report release automation failure
+    needs: [version-pr]
+    if: >-
+      always() &&
+      inputs.report-failures &&
+      needs.version-pr.result == 'failure'
+    runs-on: ${{ inputs.runner-image }}
+    # Keep an independent short cap: the caller's timeout-minutes bounds the
+    # main version-pr job, and lowering it must not cancel failure reporting.
+    timeout-minutes: 10
+    permissions:
+      # Read workflow/job metadata to generate failure context
+      actions: read
+      # Read repository context for issue body
+      contents: read
+      # Create or update failure notification issues
+      issues: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Resolve egress allowlist
+        id: egress-failure
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+      - name: Write failure trigger summary
+        shell: bash
+        env:
+          RELEASE_WORKFLOW_KEY: release-multi-ecosystem
+          PRIMARY_JOB_FAILED: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          write_trigger_summary
+      - name: Notify release failure
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_WORKFLOW_KEY: release-multi-ecosystem
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+          FAILURE_TARGET_BRANCH: ${{ inputs.failure-target-branch }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          notify_failure
