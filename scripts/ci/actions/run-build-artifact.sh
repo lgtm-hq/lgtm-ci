@@ -44,11 +44,13 @@ fi
 
 cd "$working_directory"
 echo "Running build command in ${working_directory}"
-bash -e -u -o pipefail -c "$build_command"
+# env -u BASH_ENV: kcov instruments nested bash via BASH_ENV; its injected
+# script trips `set -u` inside user commands, which are not coverage targets.
+env -u BASH_ENV bash -e -u -o pipefail -c "$build_command"
 
 if [[ -n "$post_build_test_command" ]]; then
 	echo "Running post-build test command"
-	bash -e -u -o pipefail -c "$post_build_test_command"
+	env -u BASH_ENV bash -e -u -o pipefail -c "$post_build_test_command"
 else
 	echo "No post-build-test-command set; skipping"
 fi
