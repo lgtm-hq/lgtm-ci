@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: add `reusable-build-artifact.yml` for Node build + artifact
+  handoff with optional post-build test and JSON version matrix (#522)
+
 ### Changed
 
 ### Deprecated
