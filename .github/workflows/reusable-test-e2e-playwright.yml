@@ -1,0 +1,344 @@
+---
+name: Reusable Playwright E2E Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check name for the Playwright E2E job"
+        required: true
+        type: string
+      test-command:
+        description: >-
+          Base Playwright CLI command (filters project/grep are appended).
+          Default: npx playwright test
+        required: false
+        type: string
+        default: "npx playwright test"
+      project:
+        description: "Playwright --project filter (e.g. chromium, smoke)"
+        required: false
+        type: string
+        default: ""
+      grep:
+        description: "Playwright --grep filter (e.g. @smoke, @a11y)"
+        required: false
+        type: string
+        default: ""
+      node-version:
+        description: "Node.js version to use"
+        required: false
+        type: string
+        default: "20"
+      browsers:
+        description: >-
+          Browsers for playwright install --with-deps (chromium, firefox,
+          webkit, space-separated list, or all)
+        required: false
+        type: string
+        default: "chromium"
+      upload-report:
+        description: "Upload HTML/blob Playwright report artifacts on failure"
+        required: false
+        type: boolean
+        default: true
+      base-url:
+        description: >-
+          Passthrough base URL (exported as BASE_URL and PLAYWRIGHT_BASE_URL)
+        required: false
+        type: string
+        default: ""
+      web-server:
+        description: >-
+          Passthrough web-server hint (exported as PLAYWRIGHT_WEB_SERVER for
+          consumer playwright.config)
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: "Working directory for install and tests"
+        required: false
+        type: string
+        default: "."
+      package-manager:
+        description: "Package manager for dependency install: npm, bun, pnpm"
+        required: false
+        type: string
+        default: "npm"
+      publish-test-summary:
+        description: >-
+          Publish or update the test summary comment on the pull request for
+          this workflow run
+        required: false
+        type: boolean
+        default: true
+      comment-marker:
+        description: "Unique marker for upserting this workflow's test summary"
+        required: false
+        type: string
+        default: "playwright-e2e-results"
+      draft-pr-skip:
+        description: "Skip jobs on draft pull requests"
+        required: false
+        type: boolean
+        default: true
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      # Folded scalar (>-): space-separated host:port for harden-runner pre-hook.
+      # Non-empty replace overrides egress-preset — keep in sync with playwright
+      # preset (scripts/ci/lib/egress/presets.sh); see #512.
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: >-
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          registry.npmjs.org:443
+          bun.sh:443
+          cdn.playwright.dev:443
+          playwright.azureedge.net:443
+          playwright-akamai.azureedge.net:443
+          archive.ubuntu.com:80
+          security.ubuntu.com:80
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker,
+          playwright, pypi, rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "playwright"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 60
+
+    outputs:
+      tests-passed:
+        description: "Number of tests passed"
+        value: ${{ jobs.test.outputs.tests-passed }}
+      tests-failed:
+        description: "Number of tests failed"
+        value: ${{ jobs.test.outputs.tests-failed }}
+      tests-total:
+        description: "Total number of tests"
+        value: ${{ jobs.test.outputs.tests-total }}
+      passed:
+        description: "Whether Playwright E2E tests passed"
+        value: ${{ jobs.test.outputs.passed }}
+
+jobs:
+  test:
+    name: ${{ inputs.job-name }}
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      !inputs.draft-pr-skip ||
+      github.event_name != 'pull_request' ||
+      github.event.pull_request.draft == false
+    permissions:
+      contents: read
+
+    outputs:
+      tests-passed: ${{ steps.parse.outputs.tests-passed }}
+      tests-failed: ${{ steps.parse.outputs.tests-failed }}
+      tests-total: ${{ steps.parse.outputs.tests-total }}
+      passed: ${{ steps.run.outputs.exit-code == '0' }}
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+      - name: Setup Bun
+        if: inputs.package-manager == 'bun'
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: latest
+      - name: Setup pnpm
+        if: inputs.package-manager == 'pnpm'
+        uses: pnpm/action-setup@0ebf47130e4866e96fce0953f49152a61190b271 # v6.0.9
+      - name: Install dependencies
+        shell: bash
+        env:
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          FROZEN_LOCKFILE: "true"
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/setup-package-manager.sh
+      - name: Resolve Playwright cache key
+        id: playwright-cache
+        shell: bash
+        env:
+          STEP: cache-key
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          BROWSERS: ${{ inputs.browsers }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      - name: Cache Playwright browsers
+        # Pinned to SHA for supply chain security
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/ms-playwright
+          key: ${{ runner.os }}-${{ steps.playwright-cache.outputs.cache-key }}
+          restore-keys: |
+            ${{ runner.os }}-playwright-
+      - name: Install Playwright browsers
+        shell: bash
+        env:
+          STEP: install-browsers
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          BROWSERS: ${{ inputs.browsers }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      - name: Run Playwright
+        id: run
+        shell: bash
+        env:
+          STEP: run
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          TEST_COMMAND: ${{ inputs.test-command }}
+          PROJECT: ${{ inputs.project }}
+          GREP: ${{ inputs.grep }}
+          BASE_URL: ${{ inputs.base-url }}
+          WEB_SERVER: ${{ inputs.web-server }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+        continue-on-error: true
+      - name: Parse results
+        id: parse
+        if: always()
+        shell: bash
+        env:
+          STEP: parse
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          REPORT_PATH: ${{ inputs.working-directory }}/playwright-results.json
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      - name: Generate summary
+        if: always()
+        shell: bash
+        env:
+          STEP: summary
+          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
+          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
+          TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
+          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
+          BROWSERS: ${{ inputs.browsers }}
+          PROJECT: ${{ inputs.project }}
+          GREP: ${{ inputs.grep }}
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      - name: Evaluate report upload gate
+        id: upload-gate
+        if: always()
+        shell: bash
+        env:
+          STEP: upload-gate
+          UPLOAD_REPORT: ${{ inputs.upload-report }}
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      - name: Upload Playwright report
+        if: >-
+          always()
+          && steps.upload-gate.outputs.should-upload == 'true'
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: playwright-report-${{ github.run_id }}
+          path: |
+            ${{ inputs.working-directory }}/playwright-report/
+            ${{ inputs.working-directory }}/playwright-results.json
+            ${{ inputs.working-directory }}/blob-report/
+            ${{ inputs.working-directory }}/test-results/
+          retention-days: 30
+          if-no-files-found: ignore
+      - name: Fail on Playwright errors
+        if: >-
+          steps.run.outputs.exit-code != ''
+          && steps.run.outputs.exit-code != '0'
+        shell: bash
+        env:
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
+
+  publish-test-summary:
+    needs: test
+    if: >-
+      always()
+      && github.event_name == 'pull_request'
+      && github.event.pull_request.head.repo.fork == false
+      && inputs.publish-test-summary
+      && (
+        !inputs.draft-pr-skip ||
+        github.event.pull_request.draft == false
+      )
+    uses: ./.github/workflows/reusable-publish-test-summary.yml
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      test-suite-name: ${{ inputs.job-name }}
+      comment-marker: ${{ inputs.comment-marker }}
+      tests-passed: ${{ needs.test.outputs.tests-passed }}
+      tests-failed: ${{ needs.test.outputs.tests-failed }}
+      tests-total: ${{ needs.test.outputs.tests-total }}
+      job-result: ${{ needs.test.outputs.passed == 'true' && 'success' || 'failure' }}
+      tooling-ref: ${{ inputs.tooling-ref }}
