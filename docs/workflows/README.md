@@ -40,6 +40,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-test-node-custom.yml` | Node.js tests via caller-provided command |
 | `reusable-test-shell.yml` | BATS shell tests with optional summaries |
 | `reusable-test-e2e.yml` | E2E testing with Playwright |
+| `reusable-test-e2e-playwright.yml` | Playwright E2E (smoke/a11y/full thin callers) |
 | `reusable-test-e2e-matrix.yml` | Matrix E2E testing with tag filtering |
 | `reusable-rust-build.yml` | Rust compile check |
 | `reusable-rust-test.yml` | Rust tests (nextest) with optional coverage |
@@ -59,6 +60,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-publish-gem.yml` | RubyGems publishing (OIDC) |
 | `reusable-publish-rust-release.yml` | Rust cross-compile release binaries |
 | `reusable-release-version-pr.yml` | Release version PR with changelog |
+| `reusable-release-multi-ecosystem.yml` | Multi-manifest version PR (npm/raw/gemspec/pep621) |
 | `reusable-release-auto-tag.yml` | Tag + GitHub release on merge |
 | `reusable-main-failure-notifier.yml` | Dedup'd issue on any main-branch workflow failure |
 | `reusable-auto-rerun-on-infra-failure.yml` | Re-run failed jobs once on transient infra outage signatures |

@@ -185,6 +185,16 @@ jobs:
     with:
       browsers: chromium
 
+  e2e-playwright:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-playwright.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      job-name: "🎭 E2E Tests"
+      browsers: chromium
+      grep: "@smoke"
+
   e2e-matrix:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@<sha>
     permissions:
@@ -201,6 +211,31 @@ coverage was collected, otherwise test pass/fail totals). Artifact-based comment
 use `reusable-publish-artifact-report.yml`.
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).
+
+### Playwright E2E (`reusable-test-e2e-playwright.yml`)
+
+Thin callers express full / smoke / a11y as separate jobs with distinct
+`job-name` values. `project` and `grep` append to `test-command` (default
+`npx playwright test`). Browser cache key uses the resolved Playwright version.
+Reports upload on failure only when `upload-report` is true. Default egress
+preset is `playwright`.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input             | Type    | Required | Default               | Purpose                          |
+| ----------------- | ------- | -------- | --------------------- | -------------------------------- |
+| `job-name`        | string  | yes      | —                     | Check / summary title            |
+| `test-command`    | string  | no       | `npx playwright test` | Base CLI                         |
+| `project`         | string  | no       | empty                 | `--project` filter               |
+| `grep`            | string  | no       | empty                 | `--grep` filter                  |
+| `browsers`        | string  | no       | `chromium`            | install `--with-deps` targets    |
+| `upload-report`   | boolean | no       | `true`                | HTML/blob artifact on failure    |
+| `base-url`        | string  | no       | empty                 | `BASE_URL` passthrough           |
+| `web-server`      | string  | no       | empty                 | `PLAYWRIGHT_WEB_SERVER`          |
+
+<!-- markdownlint-enable MD013 -->
+
+Outputs: `tests-passed`, `tests-failed`, `tests-total`, `passed`.
 
 ### Pages coverage HTML inputs (`reusable-test-node`)
 
@@ -482,6 +517,30 @@ jobs:
     secrets: inherit
 ```
 
+**Multi-ecosystem version PR** (explicit file→kind map; sibling of version-pr):
+
+```yaml
+jobs:
+  version-pr:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-multi-ecosystem.yml@<sha>
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      issues: write
+    with:
+      job-name: "Create Version PR"
+      tooling-ref: "<sha>"
+      manifests: >
+        {"package.json":"npm","VERSION":"raw",
+        "python/pyproject.toml":"pep621","my.gemspec":"gemspec"}
+      bump: auto-from-commits
+      changelog: true
+      # prerelease-tag: rc.1   # optional → 1.2.3-rc.1
+    secrets: inherit
+```
+
 **Cargo workspace auto-tag** (Rust monorepos that bump `Cargo.toml` on `main`):
 
 ```yaml
@@ -730,6 +789,75 @@ workflow does not download the artifact — it only links to it.
 
 ## Build, Coverage, And Supply Chain
 
+### Build artifact (`reusable-build-artifact.yml`)
+
+Generic Node build + artifact upload for cross-job handoff. Callers supply the
+build command; dependency install belongs in that command or a wrapper script.
+
+```yaml
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-artifact.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: <sha>
+      job-name: "🏗️ Build & Quality Checks"
+      build-command: ./scripts/build.sh --quick
+      node-version-matrix: '["20","22"]'
+      artifact-name: js-dist
+      artifact-path: dist
+      runner-image: ubuntu-24.04
+
+  validate-examples:
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@<sha>
+        with:
+          # Matrix legs upload js-dist-20 / js-dist-22
+          name: js-dist-20
+          path: dist
+```
+
+Single-version (holy-grail style build + test):
+
+```yaml
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-artifact.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: <sha>
+      job-name: "🏗️ Build & Test"
+      build-command: bun run build
+      post-build-test-command: bun test
+      node-version: "22"
+      artifact-name: app-dist
+      artifact-path: dist
+```
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                     | Type   | Required | Default | Notes                                      |
+| ------------------------- | ------ | -------- | ------- | ------------------------------------------ |
+| `build-command`           | string | yes      | —       | Shell build command                        |
+| `artifact-name`           | string | yes      | —       | Upload name; matrix appends `-<version>`   |
+| `artifact-path`           | string | yes      | —       | Relative to `working-directory`            |
+| `node-version`            | string | xor      | `""`    | Single version; not with matrix            |
+| `node-version-matrix`     | string | xor      | `""`    | JSON array e.g. `'["20","22"]'`            |
+| `post-build-test-command` | string | no       | `""`    | Optional post-build test                   |
+| `retention-days`          | number | no       | `7`     | Artifact retention                         |
+| `working-directory`       | string | no       | `.`     | Build cwd                                  |
+| `job-name`                | string | no       | `Build` | Static inner name; GitHub adds matrix leg  |
+
+<!-- markdownlint-enable MD013 -->
+
+Outputs: `artifact-name`, `artifact-id`, `artifact-url`. Check contexts:
+`{caller_job_id} / {job-name} ({node-version})` for matrix legs. See
+[workflow-contract.md](workflow-contract.md#build-artifact).
+
 ### Push (publish to registry)
 
 ```yaml
@@ -863,16 +991,27 @@ All inputs are opt-in; existing callers keep current behavior without changes.
 ### SBOM (`reusable-sbom.yml`)
 
 Generates an SBOM with Syft, optionally scans it with Grype, and can create a
-Sigstore attestation. Used by release layouts such as
+Sigstore attestation. `mode: release-assets` generates multi-format SBOMs,
+optionally cosign-signs them (keyless OIDC), and uploads them to a GitHub
+Release. Used by release layouts such as
 [python-release-publish.md](python-release-publish.md).
 
-| Input                  | Default      | Description                                      |
-| ---------------------- | ------------ | ------------------------------------------------ |
-| `scan-vulnerabilities` | `true`       | Run Grype against the generated SBOM             |
-| `fail-on-severity`     | `"critical"` | Fail when findings meet this severity or higher  |
-| `upload-sarif`         | `false`      | Upload Grype SARIF to GitHub Security            |
-| `create-attestation`   | `false`      | Create a Sigstore attestation for the SBOM       |
-| `egress-preset`        | `sbom`       | Harden-runner allowlist preset (workflow-contract) |
+<!-- markdownlint-disable MD013 -- SBOM input table; columns exceed default line length -->
+
+| Input                  | Default                      | Description                                      |
+| ---------------------- | ---------------------------- | ------------------------------------------------ |
+| `mode`                 | `report`                     | `report` or `release-assets`                     |
+| `formats`              | `spdx-json,cyclonedx-json`   | Syft formats for `release-assets` mode           |
+| `sign`                 | `true`                       | Cosign keyless sign in `release-assets` mode     |
+| `release-tag`          | `""`                         | Required when `mode: release-assets`             |
+| `scan-vulnerabilities` | `true`                       | Run Grype against the generated SBOM (report)    |
+| `fail-on-severity`     | `"critical"`                 | Fail when findings meet this severity or higher  |
+| `upload-sarif`         | `false`                      | Upload Grype SARIF to GitHub Security            |
+| `create-attestation`   | `false`                      | Create a Sigstore attestation for the SBOM       |
+| `upload-release-assets`| `false`                      | Report mode: attach artifact to release (#532)   |
+| `egress-preset`        | `sbom`                       | Harden-runner allowlist preset (workflow-contract) |
+
+<!-- markdownlint-enable MD013 -->
 
 **Breaking (#480):** `fail-on-severity` previously defaulted to `""` (advisory
 only). Callers that must keep advisory-only behavior should pass
@@ -889,6 +1028,19 @@ sbom:
   with:
     # default fail-on-severity is critical; opt out for advisory-only:
     # fail-on-severity: ""
+```
+
+```yaml
+sbom-release:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+  permissions:
+    contents: write
+    id-token: write
+  with:
+    mode: release-assets
+    release-tag: ${{ github.ref_name }}
+    formats: spdx-json,cyclonedx-json
+    sign: true
 ```
 
 ## PR Automation And Security

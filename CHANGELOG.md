@@ -19,6 +19,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.57.1] - 2026-07-17
+
+### Fixed
+
+- **deps**: update lintro (#612) (847c34d)
+
+## [0.57.0] - 2026-07-17
+
+### Added
+
+- **workflows**: add reusable-test-e2e-playwright (#596) (41d350e)
+- **workflows**: `reusable-test-e2e-playwright.yml` for Playwright E2E
+  (versioned browser cache, project/grep filters, failure-only report upload,
+  `playwright` egress preset) (#521)
+
+### Fixed
+
+- **deps**: update dependency lintro to 0.80.6 (patch) (#609) (d82d1e3)
+
+## [0.56.0] - 2026-07-17
+
+### Added
+
+- **workflows**: add reusable-build-artifact (#593) (9387288)
+- **workflows**: add `reusable-build-artifact.yml` for Node build + artifact
+  handoff with optional post-build test and JSON version matrix (#522)
+
+## [0.55.0] - 2026-07-17
+
+### Added
+
+- **sbom**: add release-assets mode to reusable-sbom (#606) (4a1acdc)
+
 ## [0.54.6] - 2026-07-17
 
 ### Fixed
@@ -1644,7 +1677,11 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.6...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.57.1...HEAD
+[0.57.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.57.0...v0.57.1
+[0.57.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.56.0...v0.57.0
+[0.56.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.55.0...v0.56.0
+[0.55.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.6...v0.55.0
 [0.54.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.5...v0.54.6
 [0.54.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.4...v0.54.5
 [0.54.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.3...v0.54.4

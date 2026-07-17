@@ -334,11 +334,20 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                         |
 | Release version       | `contents: write`, `pull-requests: write`,           | `reusable-release-version-pr.yml`            |
 |                       | `actions: read`, `issues: write`                     |                                              |
+| Release multi-eco     | `contents: write`, `pull-requests: write`,           | `reusable-release-multi-ecosystem.yml`       |
+|                       | `actions: read`, `issues: write`                     |                                              |
 | Release auto-tag      | `contents: write`, `actions: read`, `issues: write`  | `reusable-release-auto-tag.yml`              |
 | Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
+| Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
+| SBOM report           | `contents: read`, `security-events: write`,          | `reusable-sbom.yml` (`mode: report`)         |
+|                       | `id-token: write`, `attestations: write`             |                                              |
+| SBOM report + upload  | Report perms + `contents: write`                     | `reusable-sbom.yml`                          |
+|                       |                                                      | (`upload-release-assets: true`)              |
+| SBOM release assets   | `contents: write`, `id-token: write`                 | `reusable-sbom.yml`                          |
+|                       |                                                      | (`mode: release-assets`)                     |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -528,7 +537,8 @@ Workflows that cannot use the composite keep the explicit tooling checkout →
 `resolve-egress-allowlist` → `step-security/harden-runner` sequence for tooling
 layout, but still pass allowlists via **inputs or literals** (the action `pre`
 hook cannot see step outputs): the release workflows' two-phase checkouts
-(`reusable-release-auto-tag`, `reusable-release-version-pr`), the tiered Rust
+(`reusable-release-auto-tag`, `reusable-release-version-pr`,
+`reusable-release-multi-ecosystem`), the tiered Rust
 workflows where `validate-runner-policy` must run between checkout and resolve
 (`reusable-build-rust-binaries`, `reusable-publish-rust-release`), and the
 bootstrap/fallback flow in `reusable-validate-lintro-version`.
@@ -560,7 +570,7 @@ Callers may still pin **other** lgtm-ci composites with
 `lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;
 that pattern does not apply inside reusable workflow steps that need dynamic refs.
 
-### Release workflows (`reusable-release-auto-tag`, `reusable-release-version-pr`)
+### Release workflows (`reusable-release-auto-tag`, `reusable-release-version-pr`, `reusable-release-multi-ecosystem`)
 
 These jobs use **two** lgtm-ci checkouts:
 
@@ -716,6 +726,52 @@ Flow when `version-source: cargo`:
 Callers should filter `on.push.paths` to the manifest (for example `Cargo.toml`)
 and set `create-release: false` when release assets are published separately.
 
+### Multi-ecosystem release contract
+
+`reusable-release-multi-ecosystem.yml` extends the release-version-pr family for
+repos that bump **explicit file paths** across ecosystems in one version PR
+(reference consumer: turbo-themes). It reuses `scripts/ci/release/*` (guard,
+changelog, App-token PR creation, merge-queue skip, failure reporting) and
+adds a file→kind manifests runner under `scripts/ci/release/ecosystems/`.
+
+**Decision (extend vs new):** shipped as a **sibling** reusable rather than
+overloading `reusable-release-version-pr.yml`. The existing workflow is
+ecosystem-CSV + layout defaults (`node,ruby,python`); multi-ecosystem needs a
+required `manifests` JSON map (`npm|raw|gemspec|pep621`), `bump`
+(`auto-from-commits` \| `explicit`), and `prerelease-tag`. Sharing scripts keeps
+one release family; a separate workflow keeps the consumer contracts clear.
+
+<!-- markdownlint-disable MD013 MD060 -->
+
+| Input             | Default              | Purpose                                                         |
+| ----------------- | -------------------- | --------------------------------------------------------------- |
+| `manifests`       | *(required)*         | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
+| `bump`            | `auto-from-commits`  | Or `explicit` with `version`                                    |
+| `version`         | *(empty)*            | Semver when `bump=explicit` (optional `v` prefix)               |
+| `prerelease-tag`  | *(empty)*            | Appended as `-<tag>` (e.g. `rc.1` → `1.2.3-rc.1`)               |
+| `changelog`       | `true`               | Generate/update `CHANGELOG.md` via existing release scripts     |
+| `job-name`        | `Create Version PR`  | Visible check name                                              |
+| `tooling-ref`     | *(workflow SHA)*     | Pin lgtm-ci scripts/actions                                     |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+**Runner policy:** same two-checkout harden path as `reusable-release-version-pr`
+(GitHub-hosted Linux under `egress-policy: block` with `egress-preset:
+github-tooling` by default). Failure reporting uses workflow key
+`release-multi-ecosystem` and the shared `report-release-failure` job (see
+[Release failure reporting](#release-failure-reporting)).
+
+Kinds update only the listed path: `npm` → `package.json` `.version`; `raw` →
+plain-text `VERSION`; `gemspec` → literal `.version = "..."` in a `.gemspec`
+(constant-backed gemspecs need `version-update-script` / `version.rb`);
+`pep621` → `[project].version` only (no `__init__.py` / `uv.lock`).
+When `pep621` needs to install `tomlkit` under `egress-policy: block`, callers
+must allow `pypi.org:443` and `files.pythonhosted.org:443` in
+`allowed-endpoints` (or use `egress-preset: pypi` with
+`allowed-endpoints-mode: append` and include those hosts in
+`allowed-endpoints` — the initial harden-runner step uses the input list
+directly, matching `reusable-release-version-pr`).
+
 ## Egress presets
 
 Reusable workflows default to `egress-policy: block` and
@@ -771,13 +827,13 @@ and is the safe way to inherit the reusable preset at pre-enforcement.
 | `github-pages`   | GitHub Pages deploy/publish (OIDC)                                   |
 | `github-tooling` | Validate action pinning + GitHub raw/codeload                        |
 | `docker`         | Docker build/pull/push (`reusable-docker.yml`)                       |
-| `playwright`     | Playwright E2E + browser CDN downloads                               |
+| `playwright`     | Playwright E2E + browser CDN downloads (`reusable-test-e2e*.yml`)    |
 | `pypi`           | PyPI/TestPyPI publish and availability checks                        |
 | `rubygems`       | RubyGems publish                                                     |
 | `npm-publish`    | npm OIDC trusted publish + Sigstore (`oauth2.sigstore.dev`)          |
 | `quality`        | Docker `lintro chk` (default on quality lint)                        |
 | `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
-| `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
+| `sbom`           | SBOM, Grype scan, Sigstore attestation/cosign, release upload        |
 | `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
 | `osv-scanner`    | GitHub tooling + release assets + OSV APIs                           |
 
@@ -979,8 +1035,24 @@ egress-policy: block
 egress-preset: sbom
 ```
 
-Covers GitHub, Anchore (Syft/Grype), Sigstore attestation hosts. Canonical list:
-`scripts/ci/lib/egress/presets.sh` (preset name `sbom`).
+Covers GitHub, Anchore (Syft/Grype), Sigstore attestation/cosign hosts
+(`fulcio.sigstore.dev`, `rekor.sigstore.dev`, `oauth2.sigstore.dev`), and
+`uploads.github.com` for release-asset upload. Canonical list:
+`scripts/ci/lib/egress/presets.sh` (preset name `sbom`). With
+`allowed-endpoints-mode: replace`, a non-empty `allowed-endpoints` input
+overrides the preset — callers that pass a custom allowlist must include the
+full baseline (see #512).
+
+#### Permissions by mode (`reusable-sbom.yml`)
+
+<!-- markdownlint-disable MD013 -- SBOM mode permissions; columns exceed default line length -->
+
+| Mode | Job permissions | Notes |
+| ---- | --------------- | ----- |
+| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path; optional `upload-release-assets` job adds `contents: write` |
+| `release-assets` | `contents: write`, `id-token: write` | Multi-format generate + cosign sign + `gh release upload`; requires `release-tag` |
+
+<!-- markdownlint-enable MD013 -->
 
 `reusable-sbom.yml` defaults `fail-on-severity` to `critical` (breaking as of
 issue #480). The Grype gate fails the job when findings meet or exceed that
@@ -992,6 +1064,21 @@ sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   with:
     fail-on-severity: "" # advisory-only; default is critical
+```
+
+Release-asset mode (multi-format + optional cosign, no Grype gate):
+
+```yaml
+sbom-release:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+  permissions:
+    contents: write
+    id-token: write
+  with:
+    mode: release-assets
+    release-tag: ${{ github.ref_name }}
+    formats: spdx-json,cyclonedx-json
+    sign: true
 ```
 
 ## Action pinning policy
@@ -1287,6 +1374,82 @@ Work jobs require only `contents: read`. Optional `publish-test-summary` delegat
 to `reusable-publish-test-summary.yml` (requires `pull-requests: write` on the
 caller publish job path). Outputs: `passed`, `build-passed`, `test-passed`.
 
+## Playwright E2E (`reusable-test-e2e-playwright`)
+
+`reusable-test-e2e-playwright.yml` is the consumer-facing Playwright E2E reusable
+for smoke / a11y / full suites as thin callers with distinct `job-name` values
+(turbo-themes 🎭/🔥/♿, holy-grail 🎭 E2E). Prefer this over hand-rolled
+Playwright jobs; do not migrate consumers until org rulesets are updated in
+lockstep (#514).
+
+Single always-run job uses `name: ${{ inputs.job-name }}`. Browser binaries are
+cached under `~/.cache/ms-playwright` keyed on the resolved `@playwright/test`
+version plus `browsers`. Install uses `npx playwright install --with-deps
+<browsers>`. HTML/blob reports upload only on failure when `upload-report: true`.
+Default `egress-preset: playwright` (CDN + apt mirrors); the workflow default
+`allowed-endpoints` mirrors that full baseline under replace semantics (#512).
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input            | Default                | Notes                                              |
+| ---------------- | ---------------------- | -------------------------------------------------- |
+| `job-name`       | required               | Check name / summary suite title                   |
+| `test-command`   | `npx playwright test`  | Base CLI; `project` / `grep` append                |
+| `project`        | empty                  | `--project=` filter                                |
+| `grep`           | empty                  | `--grep=` filter (e.g. `@smoke`)                   |
+| `node-version`   | `20`                   | setup-node                                         |
+| `browsers`       | `chromium`             | install `--with-deps` list or `all`                |
+| `upload-report`  | `true`                 | HTML/blob artifact **on failure only**             |
+| `base-url`       | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                 |
+| `web-server`     | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config        |
+| `package-manager` | `npm`                  | `npm` / `bun` / `pnpm`                             |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
+`timeout-minutes`, `draft-pr-skip`, `publish-test-summary`, `comment-marker`).
+Caller permissions: `contents: read` (add `pull-requests: write` when publishing
+summaries). merge_group-safe: tests run; PR summary gated to `pull_request`.
+
+## Build artifact
+
+`reusable-build-artifact.yml` runs a caller-provided `build-command`, optionally a
+`post-build-test-command`, then uploads `artifact-path` for cross-job handoff
+(turbo-themes Build & Quality → Validate Examples; holy-grail Build & Test).
+
+Pass **exactly one** of `node-version` (single) or `node-version-matrix` (JSON
+array such as `'["20","22"]'`). Matrix legs keep a static inner `name:
+${{ inputs.job-name }}` so GitHub appends the version suffix. Required-check
+contexts therefore look like `{caller_job_id} / {job-name} ({node-version})`
+(for example `build / 🏗️ Build & Quality Checks (20)`). Plan org ruleset updates
+in lockstep with consumer migration.
+
+Single-version uploads use `artifact-name` verbatim. Matrix mode appends
+`-<node-version>` so parallel legs do not collide (`js-dist-20`, `js-dist-22`).
+Workflow outputs expose `artifact-name`, `artifact-id`, and `artifact-url` from
+the build job (matrix runs surface one completed leg — prefer the naming
+convention when downloading from multi-leg matrices).
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input                     | Default   | Notes                                              |
+| ------------------------- | --------- | -------------------------------------------------- |
+| `build-command`           | required  | e.g. `./scripts/build.sh --quick`, `bun run build` |
+| `artifact-name`           | required  | Base upload name; matrix appends `-<version>`      |
+| `artifact-path`           | required  | Relative to `working-directory`                     |
+| `node-version`            | empty     | XOR with `node-version-matrix`                     |
+| `node-version-matrix`     | empty     | JSON string array; XOR with `node-version`         |
+| `post-build-test-command` | empty     | Optional post-build test gate                      |
+| `retention-days`          | `7`       | Artifact retention                                 |
+| `working-directory`       | `.`       | Build / post-test cwd                              |
+| `job-name`                | `Build`   | Static inner check label                           |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
+`timeout-minutes`). Caller permissions: `contents: read` only. merge_group-safe
+(no PR-context requirements; no draft-PR job skip).
+
 ## Merge queue (`merge_group`)
 
 Callers using GitHub merge queue must add `merge_group:` triggers to every
@@ -1314,11 +1477,13 @@ passes to `reusable-codeql.yml`). See [org-rulesets.md](org-rulesets.md)
 | `reusable-dependency-review.yml`       | Runs on `merge_group` (same as PR)             |
 | `reusable-security-audit.yml`          | Audit on `merge_group`; PR comment on PR only  |
 | `reusable-site-quality.yml`            | Safe to run — no PR context required           |
+| `reusable-build-artifact.yml`          | Safe to run — no PR context required           |
 | `reusable-docker.yml`                  | Safe to run — no PR context required           |
 | `reusable-test-shell.yml`              | Tests run; PR summary comment on PR only       |
 | `reusable-test-python.yml`             | Tests run; PR summary comment on PR only       |
 | `reusable-test-node.yml`               | Tests run; PR summary comment on PR only       |
 | `reusable-test-node-custom.yml`        | Tests run; PR summary comment on PR only       |
+| `reusable-test-e2e-playwright.yml`     | Tests run; PR summary comment on PR only       |
 | `reusable-test-rust-build.yml`         | Safe to run — no PR context required           |
 | `reusable-coverage.yml`                | Coverage runs; PR comment on PR only           |
 | `reusable-semantic-pr-title.yml`       | No-op on `merge_group` — title validated on PR |

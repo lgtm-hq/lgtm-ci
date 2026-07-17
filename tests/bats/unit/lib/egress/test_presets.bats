@@ -50,6 +50,9 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_success
 	assert_output --partial 'anchore.io:443'
 	assert_output --partial 'fulcio.sigstore.dev:443'
+	assert_output --partial 'rekor.sigstore.dev:443'
+	assert_output --partial 'oauth2.sigstore.dev:443'
+	assert_output --partial 'uploads.github.com:443'
 	assert_output --partial 'sigstore-tuf-root.storage.googleapis.com:443'
 }
 
@@ -65,6 +68,8 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints playwright"
 	assert_success
 	assert_output --partial 'cdn.playwright.dev:443'
+	assert_output --partial 'playwright.azureedge.net:443'
+	assert_output --partial 'playwright-akamai.azureedge.net:443'
 	assert_output --partial 'registry.npmjs.org:443'
 }
 
