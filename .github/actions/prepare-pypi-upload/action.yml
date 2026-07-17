@@ -92,13 +92,12 @@ runs:
       id: set-validated
       shell: bash
       env:
-        VALIDATE_INPUT: ${{ inputs.validate }}
-      run: |
-        if [[ "$VALIDATE_INPUT" == "true" ]]; then
-          echo "validated=true" >> "$GITHUB_OUTPUT"
-        else
-          echo "validated=skipped" >> "$GITHUB_OUTPUT"
-        fi
+        OUTPUT_NAME: validated
+        CONDITION_VALUE: ${{ inputs.validate }}
+        MATCH_VALUE: "true"
+        TRUE_VALUE: "true"
+        FALSE_VALUE: skipped
+      run: "$SCRIPTS_DIR/ci/actions/set-conditional-output.sh"
 
     - name: Extract package metadata
       id: extract-metadata

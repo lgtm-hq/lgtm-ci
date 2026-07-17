@@ -1,0 +1,7 @@
+[[IgnoredVulns]]
+id = 'GHSA-stale-XXXX'
+reason = "resolved upstream"
+
+[[IgnoredVulns]]
+id = "GHSA-active-5555"
+reason = "still present"

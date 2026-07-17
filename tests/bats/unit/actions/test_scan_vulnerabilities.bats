@@ -94,3 +94,37 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" '^medium-count=0$'
 	assert_file_contains "$GITHUB_OUTPUT" '^low-count=0$'
 }
+
+@test "scan-vulnerabilities resolve-target: prefers SBOM_FILE when target-type is sbom" {
+	run env \
+		STEP=resolve-target \
+		TARGET=ignored-path \
+		TARGET_TYPE=sbom \
+		SBOM_FILE=/tmp/sbom.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/scan-vulnerabilities.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" '^path=/tmp/sbom.json$'
+}
+
+@test "scan-vulnerabilities resolve-target: uses TARGET otherwise" {
+	run env \
+		STEP=resolve-target \
+		TARGET=/tmp/image:tag \
+		TARGET_TYPE=image \
+		SBOM_FILE=/tmp/sbom.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/scan-vulnerabilities.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" '^path=/tmp/image:tag$'
+}
+
+@test "scan-vulnerabilities resolve-target: fails when TARGET_TYPE unset" {
+	run env -u TARGET_TYPE \
+		STEP=resolve-target \
+		TARGET=/tmp/target \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/scan-vulnerabilities.sh"
+
+	assert_failure
+	assert_output --partial "TARGET_TYPE is required"
+}
