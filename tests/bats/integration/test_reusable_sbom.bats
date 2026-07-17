@@ -79,7 +79,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-sbom.yml"
 	run awk '
 		/^  upload-release-assets:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  upload-release-assets:/ { in_job = 0 }
-		in_job && /if: inputs\.upload-release-assets/ { found = 1; exit }
+		in_job && /if: inputs\.mode != '\''release-assets'\'' && inputs\.upload-release-assets/ {
+			found = 1
+			exit
+		}
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
@@ -95,4 +98,69 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-sbom.yml"
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
+}
+
+@test "reusable-sbom: mode defaults to report" {
+	run awk '/^      mode:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: "report"'
+}
+
+@test "reusable-sbom: formats default to spdx and cyclonedx json" {
+	run awk '/^      formats:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: "spdx-json,cyclonedx-json"'
+}
+
+@test "reusable-sbom: sign defaults to true" {
+	run awk '/^      sign:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: true'
+}
+
+@test "reusable-sbom: report job skipped in release-assets mode" {
+	run awk '
+		/^  sbom:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  sbom:/ { in_job = 0 }
+		in_job && /if: inputs\.mode != '\''release-assets'\''/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-sbom: release-assets job uses contents write and id-token write" {
+	run awk '
+		/^  release-assets:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  release-assets:/ { in_job = 0 }
+		in_job && /^    permissions:/ { perms = 1 }
+		in_job && perms && /^      contents: write$/ { contents = 1 }
+		in_job && perms && /^      id-token: write$/ { idtoken = 1 }
+		in_job && perms && /^    [a-z]/ && !/^    permissions:/ { perms = 0 }
+		END { exit !(contents && idtoken) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-sbom: release-assets job gated on mode" {
+	run awk '
+		/^  release-assets:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  release-assets:/ { in_job = 0 }
+		in_job && /if: inputs\.mode == '\''release-assets'\''/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-sbom: validate job invokes validate-sbom-mode.sh" {
+	run grep -F 'scripts/ci/actions/validate-sbom-mode.sh' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-sbom: release-assets reuses upload-sbom-release-assets.sh" {
+	run grep -cF 'scripts/ci/actions/upload-sbom-release-assets.sh' "$WORKFLOW"
+	assert_success
+	[[ "$output" -ge 2 ]]
 }

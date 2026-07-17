@@ -9,11 +9,17 @@ coverage HTML inputs): [workflow-contract.md](../workflow-contract.md).
 
 `reusable-test-python.yml`, `reusable-test-node.yml` (Vitest),
 `reusable-test-node-custom.yml` (caller-provided command),
-`reusable-test-shell.yml` (BATS), `reusable-test-e2e.yml`, and
-`reusable-test-e2e-matrix.yml` share a standard shape: they check out
-lgtm-ci tooling, run the language runner, optionally collect coverage, and
-post/update a PR summary comment via `reusable-publish-test-summary.yml`
-when `pull-requests: write` is granted.
+`reusable-test-shell.yml` (BATS), `reusable-test-e2e.yml`,
+`reusable-test-e2e-playwright.yml`, and `reusable-test-e2e-matrix.yml` share a
+standard shape: they check out lgtm-ci tooling, run the language runner,
+optionally collect coverage, and post/update a PR summary comment via
+`reusable-publish-test-summary.yml` when `pull-requests: write` is granted.
+
+With `coverage: false` (the default), the PR summary is totals-only — no
+Coverage / Code Coverage sections and no “Unable to retrieve coverage…”
+warning. With `coverage: true`, rich or totals-with-percent comments stay as
+today; a missing report still warns. See workflow-contract.md
+[Comment body selection](../workflow-contract.md#comment-body-selection).
 
 ### reusable-test-python.yml
 
@@ -86,6 +92,29 @@ example "1/3"), `reporter` (json/html/junit, default 'html'),
 `upload-report` (default true).
 
 **Outputs:** `tests-passed`, `tests-failed`, `passed`.
+
+### reusable-test-e2e-playwright.yml
+
+Preferred Playwright E2E reusable for thin smoke / a11y / full callers with
+distinct required `job-name` values. Caches `~/.cache/ms-playwright` by
+resolved Playwright version; uploads HTML/blob reports on failure only.
+
+```yaml
+jobs:
+  e2e-smoke:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-playwright.yml@main
+    with:
+      job-name: "🔥 Smoke E2E"
+      grep: "@smoke"
+      browsers: "chromium"
+```
+
+**Inputs:** `job-name` (**required**), `test-command` (default
+`npx playwright test`), `project`, `grep`, `node-version`, `browsers`
+(default `chromium`), `upload-report` (default true, failure-only),
+`base-url`, `web-server`, plus standard egress / tooling inputs.
+
+**Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `passed`.
 
 ### reusable-test-e2e-matrix.yml
 

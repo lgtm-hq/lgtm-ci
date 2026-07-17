@@ -30,10 +30,7 @@ teardown() {
 }
 
 @test "detect_test_runner: detects pytest from pyproject.toml" {
-	cat >"$PROJECT_DIR/pyproject.toml" <<'EOF'
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-EOF
+	install_fixture "detect/pyproject-pytest.toml" "$PROJECT_DIR/pyproject.toml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_test_runner \"$PROJECT_DIR\""
 	assert_success
@@ -87,13 +84,7 @@ EOF
 }
 
 @test "detect_test_runner: detects vitest from package.json dependency" {
-	cat >"$PROJECT_DIR/package.json" <<'EOF'
-{
-  "devDependencies": {
-    "vitest": "^1.0.0"
-  }
-}
-EOF
+	install_fixture "detect/package-vitest.json" "$PROJECT_DIR/package.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_test_runner \"$PROJECT_DIR\""
 	assert_success
@@ -121,13 +112,7 @@ EOF
 }
 
 @test "detect_test_runner: detects playwright from package.json dependency" {
-	cat >"$PROJECT_DIR/package.json" <<'EOF'
-{
-  "devDependencies": {
-    "@playwright/test": "^1.40.0"
-  }
-}
-EOF
+	install_fixture "detect/package-playwright.json" "$PROJECT_DIR/package.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_test_runner \"$PROJECT_DIR\""
 	assert_success
@@ -197,11 +182,7 @@ EOF
 # =============================================================================
 
 @test "detect_coverage_format: detects cobertura from xml" {
-	cat >"$PROJECT_DIR/coverage.xml" <<'EOF'
-<?xml version="1.0" ?>
-<coverage line-rate="0.85">
-</coverage>
-EOF
+	install_fixture "detect/cobertura-empty.xml" "$PROJECT_DIR/coverage.xml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/coverage.xml\""
 	assert_success
@@ -235,14 +216,7 @@ EOF
 }
 
 @test "detect_coverage_format: detects istanbul from json structure" {
-	cat >"$PROJECT_DIR/coverage.json" <<'EOF'
-{
-  "/path/to/file.js": {
-    "path": "/path/to/file.js",
-    "statementMap": {}
-  }
-}
-EOF
+	install_fixture "detect/istanbul-statement-map.json" "$PROJECT_DIR/coverage.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/coverage.json\""
 	assert_success
@@ -268,19 +242,7 @@ EOF
 # =============================================================================
 
 @test "detect_coverage_source: detects python from cobertura with .py files" {
-	cat >"$PROJECT_DIR/coverage.xml" <<'EOF'
-<?xml version="1.0" ?>
-<coverage line-rate="0.85">
-  <packages>
-    <package name="mypackage">
-      <classes>
-        <class filename="mypackage/main.py">
-        </class>
-      </classes>
-    </package>
-  </packages>
-</coverage>
-EOF
+	install_fixture "detect/cobertura-python.xml" "$PROJECT_DIR/coverage.xml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_source \"$PROJECT_DIR/coverage.xml\""
 	assert_success
@@ -288,14 +250,7 @@ EOF
 }
 
 @test "detect_coverage_source: detects javascript from istanbul format" {
-	cat >"$PROJECT_DIR/coverage.json" <<'EOF'
-{
-  "/src/app.js": {
-    "path": "/src/app.js",
-    "statementMap": {}
-  }
-}
-EOF
+	install_fixture "detect/istanbul-js.json" "$PROJECT_DIR/coverage.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_source \"$PROJECT_DIR/coverage.json\""
 	assert_success
@@ -303,12 +258,7 @@ EOF
 }
 
 @test "detect_coverage_source: detects javascript from lcov with .ts files" {
-	cat >"$PROJECT_DIR/lcov.info" <<'EOF'
-TN:
-SF:/src/components/App.tsx
-FN:1,App
-end_of_record
-EOF
+	install_fixture "detect/lcov-tsx.info" "$PROJECT_DIR/lcov.info"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_source \"$PROJECT_DIR/lcov.info\""
 	assert_success
@@ -332,15 +282,7 @@ EOF
 }
 
 @test "detect_coverage_source: detects php from clover XML" {
-	cat >"$PROJECT_DIR/clover.xml" <<'EOF'
-<?xml version="1.0" ?>
-<coverage clover="true">
-  <project>
-    <file name="src/Controller.php">
-    </file>
-  </project>
-</coverage>
-EOF
+	install_fixture "detect/clover-php.xml" "$PROJECT_DIR/clover.xml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_source \"$PROJECT_DIR/clover.xml\""
 	assert_success
@@ -348,15 +290,7 @@ EOF
 }
 
 @test "detect_coverage_source: detects java from clover XML" {
-	cat >"$PROJECT_DIR/clover.xml" <<'EOF'
-<?xml version="1.0" ?>
-<coverage clover="true">
-  <project>
-    <file name="src/Main.java">
-    </file>
-  </project>
-</coverage>
-EOF
+	install_fixture "detect/clover-java.xml" "$PROJECT_DIR/clover.xml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_source \"$PROJECT_DIR/clover.xml\""
 	assert_success
@@ -364,14 +298,7 @@ EOF
 }
 
 @test "detect_coverage_source: detects python from lcov with .py files" {
-	cat >"$PROJECT_DIR/lcov.info" <<'EOF'
-TN:
-SF:/src/app.py
-DA:1,1
-LF:1
-LH:1
-end_of_record
-EOF
+	install_fixture "detect/lcov-python.info" "$PROJECT_DIR/lcov.info"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_source \"$PROJECT_DIR/lcov.info\""
 	assert_success
@@ -379,14 +306,7 @@ EOF
 }
 
 @test "detect_coverage_source: returns unknown for lcov with unknown extensions" {
-	cat >"$PROJECT_DIR/lcov.info" <<'EOF'
-TN:
-SF:/src/app.rb
-DA:1,1
-LF:1
-LH:1
-end_of_record
-EOF
+	install_fixture "detect/lcov-unknown.info" "$PROJECT_DIR/lcov.info"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_source \"$PROJECT_DIR/lcov.info\""
 	assert_success
@@ -404,11 +324,7 @@ EOF
 # =============================================================================
 
 @test "detect_coverage_format: detects clover from xml" {
-	cat >"$PROJECT_DIR/clover.xml" <<'EOF'
-<?xml version="1.0" ?>
-<coverage clover="true">
-</coverage>
-EOF
+	install_fixture "detect/clover-empty.xml" "$PROJECT_DIR/clover.xml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/clover.xml\""
 	assert_success
@@ -416,12 +332,7 @@ EOF
 }
 
 @test "detect_coverage_format: detects plain xml when no coverage markers" {
-	cat >"$PROJECT_DIR/data.xml" <<'EOF'
-<?xml version="1.0" ?>
-<data>
-  <item>test</item>
-</data>
-EOF
+	install_fixture "detect/plain-data.xml" "$PROJECT_DIR/data.xml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/data.xml\""
 	assert_success
@@ -429,9 +340,7 @@ EOF
 }
 
 @test "detect_coverage_format: detects coverage-py json from meta key" {
-	cat >"$PROJECT_DIR/coverage.json" <<'EOF'
-{"meta": {"version": "7.0", "format": 3}, "totals": {"percent_covered": 85}}
-EOF
+	install_fixture "detect/coverage-py-meta.json" "$PROJECT_DIR/coverage.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/coverage.json\""
 	assert_success
@@ -439,9 +348,7 @@ EOF
 }
 
 @test "detect_coverage_format: detects generic json for unknown structure" {
-	cat >"$PROJECT_DIR/data.json" <<'EOF'
-{"key": "value"}
-EOF
+	install_fixture "detect/generic.json" "$PROJECT_DIR/data.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/data.json\""
 	assert_success
@@ -457,11 +364,7 @@ EOF
 }
 
 @test "detect_coverage_format: content-based cobertura detection" {
-	cat >"$PROJECT_DIR/coverage.dat" <<'EOF'
-<?xml version="1.0" ?>
-<coverage line-rate="0.85">
-</coverage>
-EOF
+	install_fixture "detect/cobertura-empty.xml" "$PROJECT_DIR/coverage.dat"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/coverage.dat\""
 	assert_success
@@ -469,11 +372,7 @@ EOF
 }
 
 @test "detect_coverage_format: content-based clover detection" {
-	cat >"$PROJECT_DIR/coverage.dat" <<'EOF'
-<?xml version="1.0" ?>
-<coverage clover="true">
-</coverage>
-EOF
+	install_fixture "detect/clover-empty.xml" "$PROJECT_DIR/coverage.dat"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/coverage.dat\""
 	assert_success
@@ -481,11 +380,7 @@ EOF
 }
 
 @test "detect_coverage_format: content-based xml fallback" {
-	cat >"$PROJECT_DIR/coverage.dat" <<'EOF'
-<?xml version="1.0" ?>
-<report>
-</report>
-EOF
+	install_fixture "detect/plain-report.xml" "$PROJECT_DIR/coverage.dat"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/coverage.dat\""
 	assert_success
@@ -493,9 +388,7 @@ EOF
 }
 
 @test "detect_coverage_format: content-based json detection" {
-	cat >"$PROJECT_DIR/coverage.dat" <<'EOF'
-{"some": "data"}
-EOF
+	install_fixture "detect/generic-data.json" "$PROJECT_DIR/coverage.dat"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_coverage_format \"$PROJECT_DIR/coverage.dat\""
 	assert_success
@@ -525,13 +418,7 @@ EOF
 # =============================================================================
 
 @test "detect_all_runners: detects vitest from package.json" {
-	cat >"$PROJECT_DIR/package.json" <<'EOF'
-{
-  "devDependencies": {
-    "vitest": "^1.0.0"
-  }
-}
-EOF
+	install_fixture "detect/package-vitest.json" "$PROJECT_DIR/package.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_all_runners \"$PROJECT_DIR\""
 	assert_success
@@ -539,13 +426,7 @@ EOF
 }
 
 @test "detect_all_runners: detects playwright from package.json" {
-	cat >"$PROJECT_DIR/package.json" <<'EOF'
-{
-  "devDependencies": {
-    "@playwright/test": "^1.40.0"
-  }
-}
-EOF
+	install_fixture "detect/package-playwright.json" "$PROJECT_DIR/package.json"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_all_runners \"$PROJECT_DIR\""
 	assert_success
@@ -553,10 +434,7 @@ EOF
 }
 
 @test "detect_all_runners: detects pytest from pyproject.toml" {
-	cat >"$PROJECT_DIR/pyproject.toml" <<'EOF'
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-EOF
+	install_fixture "detect/pyproject-pytest.toml" "$PROJECT_DIR/pyproject.toml"
 
 	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && detect_all_runners \"$PROJECT_DIR\""
 	assert_success

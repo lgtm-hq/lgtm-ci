@@ -219,12 +219,23 @@ and dedicated publish reusables. Transport (marker upsert) stays on
 When `publish-test-summary: true` on a language test reusable or
 `reusable-coverage`:
 
-- Coverage not collected: `generate-test-summary.sh` (pass/fail totals)
+- Coverage not requested (`coverage: false` / `coverage-enabled: false`):
+  `generate-test-summary.sh` posts pass/fail totals only — **no** Coverage /
+  Code Coverage / Coverage Details sections and **no** “Unable to retrieve
+  coverage…” warning (disabled coverage must not look like a broken run)
 - Coverage collected with a downloadable artifact (Rust LCOV, Python JSON when
   `upload-coverage: true`): `generate-coverage-comment` (rich table)
 - Coverage collected without an artifact (e.g. Python with `upload-coverage: false`):
-  `generate-test-summary.sh` (pass/fail totals with coverage percent)
-- Shell/kcov: totals only (rich table not yet supported)
+  `generate-test-summary.sh` (pass/fail totals with coverage percent; requires
+  `coverage-enabled: true`)
+- Coverage requested but the report/percent is missing: totals summary keeps the
+  warning-flavored “Unable to retrieve coverage…” UX
+- Shell/kcov: totals only (rich table not yet supported); with `coverage: false`
+  the coverage block is omitted like other languages
+
+Callers thread `inputs.coverage` (or `true` for `reusable-coverage`) into
+`reusable-publish-test-summary.yml` as `coverage-enabled`, which sets
+`COVERAGE_ENABLED` for `generate-test-summary.sh`.
 
 Rich coverage comments use `generate-coverage-comment` with an optional
 `test-suite-name` input. When set, the visible heading becomes
@@ -317,7 +328,14 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
+| Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
+| SBOM report           | `contents: read`, `security-events: write`,          | `reusable-sbom.yml` (`mode: report`)         |
+|                       | `id-token: write`, `attestations: write`             |                                              |
+| SBOM report + upload  | Report perms + `contents: write`                     | `reusable-sbom.yml`                          |
+|                       |                                                      | (`upload-release-assets: true`)              |
+| SBOM release assets   | `contents: write`, `id-token: write`                 | `reusable-sbom.yml`                          |
+|                       |                                                      | (`mode: release-assets`)                     |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -748,13 +766,47 @@ Reusable workflows default to `egress-policy: block` and
 `allowed-endpoints-mode: replace`. `resolve-egress-allowlist` expands presets via
 bundled `lib/egress/presets.sh` (synced from `scripts/ci/lib/egress/presets.sh`).
 
+### Pre-enforcement allowlist (harden-runner, since v0.50.0)
+
+Since [#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) (v0.50.0), reusables feed
+the caller's `allowed-endpoints` **verbatim** to the job-start
+`step-security/harden-runner` step, before `resolve-egress-allowlist` runs. That
+pre-enforcement value **replaces** the reusable's default GitHub/Ubuntu baseline
+whenever it is non-empty — even when `allowed-endpoints-mode: append` (append only
+affects the later, non-enforcing resolution step for tooling/checkout helpers).
+
+`step-security/harden-runner` splits `allowed-endpoints` on **spaces**. A
+newline-separated `|` literal block (the common multiline YAML style) is treated as
+a single unrecognised host:port token (the whole multiline string), which blocks
+**all** egress — including `github.com:443` checkout. Prefer a folded scalar (`>-`)
+with space-separated `host:port` tokens, or use `egress-preset` /
+`allowed-endpoints-mode: append` with empty caller endpoints so the baked-in preset
+reaches pre-enforcement.
+
+Upgrade incidents during org-wide v0.52.3 adoption
+([#510](https://github.com/lgtm-hq/lgtm-ci/issues/510)):
+[homebrew-tap#126](https://github.com/lgtm-hq/homebrew-tap/pull/126),
+[podex#152](https://github.com/lgtm-hq/podex/pull/152),
+[Rustume#385](https://github.com/lgtm-hq/Rustume/pull/385),
+[turbo-themes#526](https://github.com/lgtm-hq/turbo-themes/pull/526),
+[py-lintro#1281](https://github.com/lgtm-hq/py-lintro/pull/1281).
+
+A future release may restore pre-enforcement normalization (tracked in the same
+[#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) thread) so presets merge again
+before the harden-runner `pre` hook runs; until then, treat non-empty
+`allowed-endpoints` as the complete enforced allowlist.
+
+The table below describes `resolve-egress-allowlist` / `allowed-endpoints-mode` only
+(not the pre-enforcement harden-runner step):
+
 | Mode      | Behavior                                                                        |
 | --------- | ------------------------------------------------------------------------------- |
 | `replace` | Non-empty `allowed-endpoints` overrides `egress-preset`; empty uses preset only |
 | `append`  | Merges preset + `allowed-endpoints` (deduped, first-seen wins)                  |
 
 Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
-`allowed-endpoints` under `append` still means preset-only (same as omitting extras).
+`allowed-endpoints` under `append` still means preset-only (same as omitting extras)
+and is the safe way to inherit the reusable preset at pre-enforcement.
 `audit` mode is unchanged (no enforced allowlist).
 
 | Preset           | Use case                                                             |
@@ -763,13 +815,13 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 | `github-pages`   | GitHub Pages deploy/publish (OIDC)                                   |
 | `github-tooling` | Validate action pinning + GitHub raw/codeload                        |
 | `docker`         | Docker build/pull/push (`reusable-docker.yml`)                       |
-| `playwright`     | Playwright E2E + browser CDN downloads                               |
+| `playwright`     | Playwright E2E + browser CDN downloads (`reusable-test-e2e*.yml`)    |
 | `pypi`           | PyPI/TestPyPI publish and availability checks                        |
 | `rubygems`       | RubyGems publish                                                     |
 | `npm-publish`    | npm OIDC trusted publish + Sigstore (`oauth2.sigstore.dev`)          |
 | `quality`        | Docker `lintro chk` (default on quality lint)                        |
 | `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
-| `sbom`           | SBOM, Grype scan, Sigstore attestation                               |
+| `sbom`           | SBOM, Grype scan, Sigstore attestation/cosign, release upload        |
 | `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
 | `osv-scanner`    | GitHub tooling + release assets + OSV APIs                           |
 
@@ -782,6 +834,41 @@ egress-preset: quality
 `timeout-minutes: 45`.
 
 ## Egress block examples
+
+### Allowlist formatting
+
+**Wrong** — `|` block becomes one token; harden-runner blocks all egress:
+
+```yaml
+allowed-endpoints: |
+  github.com:443
+  api.github.com:443
+```
+
+**Right** — folded scalar (`>-`) yields space-separated hosts:
+
+```yaml
+allowed-endpoints: >-
+  github.com:443
+  api.github.com:443
+```
+
+**Right** — rely on preset (recommended when the reusable ships one):
+
+```yaml
+egress-preset: quality
+allowed-endpoints-mode: append
+allowed-endpoints: ''
+```
+
+Or add project-specific hosts without replacing the preset baseline:
+
+```yaml
+egress-preset: quality
+allowed-endpoints-mode: append
+allowed-endpoints: >-
+  ghcr.io:443
+```
 
 ### Node / Bun (web)
 
@@ -936,8 +1023,24 @@ egress-policy: block
 egress-preset: sbom
 ```
 
-Covers GitHub, Anchore (Syft/Grype), Sigstore attestation hosts. Canonical list:
-`scripts/ci/lib/egress/presets.sh` (preset name `sbom`).
+Covers GitHub, Anchore (Syft/Grype), Sigstore attestation/cosign hosts
+(`fulcio.sigstore.dev`, `rekor.sigstore.dev`, `oauth2.sigstore.dev`), and
+`uploads.github.com` for release-asset upload. Canonical list:
+`scripts/ci/lib/egress/presets.sh` (preset name `sbom`). With
+`allowed-endpoints-mode: replace`, a non-empty `allowed-endpoints` input
+overrides the preset — callers that pass a custom allowlist must include the
+full baseline (see #512).
+
+#### Permissions by mode (`reusable-sbom.yml`)
+
+<!-- markdownlint-disable MD013 -- SBOM mode permissions; columns exceed default line length -->
+
+| Mode | Job permissions | Notes |
+| ---- | --------------- | ----- |
+| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path; optional `upload-release-assets` job adds `contents: write` |
+| `release-assets` | `contents: write`, `id-token: write` | Multi-format generate + cosign sign + `gh release upload`; requires `release-tag` |
+
+<!-- markdownlint-enable MD013 -->
 
 `reusable-sbom.yml` defaults `fail-on-severity` to `critical` (breaking as of
 issue #480). The Grype gate fails the job when findings meet or exceed that
@@ -949,6 +1052,21 @@ sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   with:
     fail-on-severity: "" # advisory-only; default is critical
+```
+
+Release-asset mode (multi-format + optional cosign, no Grype gate):
+
+```yaml
+sbom-release:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+  permissions:
+    contents: write
+    id-token: write
+  with:
+    mode: release-assets
+    release-tag: ${{ github.ref_name }}
+    formats: spdx-json,cyclonedx-json
+    sign: true
 ```
 
 ## Action pinning policy
@@ -1244,12 +1362,100 @@ Work jobs require only `contents: read`. Optional `publish-test-summary` delegat
 to `reusable-publish-test-summary.yml` (requires `pull-requests: write` on the
 caller publish job path). Outputs: `passed`, `build-passed`, `test-passed`.
 
+## Playwright E2E (`reusable-test-e2e-playwright`)
+
+`reusable-test-e2e-playwright.yml` is the consumer-facing Playwright E2E reusable
+for smoke / a11y / full suites as thin callers with distinct `job-name` values
+(turbo-themes 🎭/🔥/♿, holy-grail 🎭 E2E). Prefer this over hand-rolled
+Playwright jobs; do not migrate consumers until org rulesets are updated in
+lockstep (#514).
+
+Single always-run job uses `name: ${{ inputs.job-name }}`. Browser binaries are
+cached under `~/.cache/ms-playwright` keyed on the resolved `@playwright/test`
+version plus `browsers`. Install uses `npx playwright install --with-deps
+<browsers>`. HTML/blob reports upload only on failure when `upload-report: true`.
+Default `egress-preset: playwright` (CDN + apt mirrors); the workflow default
+`allowed-endpoints` mirrors that full baseline under replace semantics (#512).
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input            | Default                | Notes                                              |
+| ---------------- | ---------------------- | -------------------------------------------------- |
+| `job-name`       | required               | Check name / summary suite title                   |
+| `test-command`   | `npx playwright test`  | Base CLI; `project` / `grep` append                |
+| `project`        | empty                  | `--project=` filter                                |
+| `grep`           | empty                  | `--grep=` filter (e.g. `@smoke`)                   |
+| `node-version`   | `20`                   | setup-node                                         |
+| `browsers`       | `chromium`             | install `--with-deps` list or `all`                |
+| `upload-report`  | `true`                 | HTML/blob artifact **on failure only**             |
+| `base-url`       | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                 |
+| `web-server`     | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config        |
+| `package-manager` | `npm`                  | `npm` / `bun` / `pnpm`                             |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
+`timeout-minutes`, `draft-pr-skip`, `publish-test-summary`, `comment-marker`).
+Caller permissions: `contents: read` (add `pull-requests: write` when publishing
+summaries). merge_group-safe: tests run; PR summary gated to `pull_request`.
+
+## Build artifact
+
+`reusable-build-artifact.yml` runs a caller-provided `build-command`, optionally a
+`post-build-test-command`, then uploads `artifact-path` for cross-job handoff
+(turbo-themes Build & Quality → Validate Examples; holy-grail Build & Test).
+
+Pass **exactly one** of `node-version` (single) or `node-version-matrix` (JSON
+array such as `'["20","22"]'`). Matrix legs keep a static inner `name:
+${{ inputs.job-name }}` so GitHub appends the version suffix. Required-check
+contexts therefore look like `{caller_job_id} / {job-name} ({node-version})`
+(for example `build / 🏗️ Build & Quality Checks (20)`). Plan org ruleset updates
+in lockstep with consumer migration.
+
+Single-version uploads use `artifact-name` verbatim. Matrix mode appends
+`-<node-version>` so parallel legs do not collide (`js-dist-20`, `js-dist-22`).
+Workflow outputs expose `artifact-name`, `artifact-id`, and `artifact-url` from
+the build job (matrix runs surface one completed leg — prefer the naming
+convention when downloading from multi-leg matrices).
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input                     | Default   | Notes                                              |
+| ------------------------- | --------- | -------------------------------------------------- |
+| `build-command`           | required  | e.g. `./scripts/build.sh --quick`, `bun run build` |
+| `artifact-name`           | required  | Base upload name; matrix appends `-<version>`      |
+| `artifact-path`           | required  | Relative to `working-directory`                     |
+| `node-version`            | empty     | XOR with `node-version-matrix`                     |
+| `node-version-matrix`     | empty     | JSON string array; XOR with `node-version`         |
+| `post-build-test-command` | empty     | Optional post-build test gate                      |
+| `retention-days`          | `7`       | Artifact retention                                 |
+| `working-directory`       | `.`       | Build / post-test cwd                              |
+| `job-name`                | `Build`   | Static inner check label                           |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
+`timeout-minutes`). Caller permissions: `contents: read` only. merge_group-safe
+(no PR-context requirements; no draft-PR job skip).
+
 ## Merge queue (`merge_group`)
 
 Callers using GitHub merge queue must add `merge_group:` triggers to every
 caller workflow that produces a required check, alongside `pull_request:` —
 otherwise queued PRs time out waiting for checks that never report. The
 starter examples (`examples/ci-*.yml`) include `merge_group:` by default.
+
+### App-level code-scanning checks
+
+Never require the github-advanced-security app's code-scanning **summary** context
+(`CodeQL` alone, without a caller-job prefix) in a ruleset when the repo uses a
+merge queue. The app produces that check only on `pull_request` commits, never on
+`merge_group` commits, so every queue entry times out and is silently ejected
+([holy-grail#143](https://github.com/lgtm-hq/holy-grail/pull/143), twice during
+v0.52.3 adoption). Require the workflow-job contexts instead — for example
+`codeql / 🔬 CodeQL Analysis` (the `{caller_job_id} / {job-name}` path your caller
+passes to `reusable-codeql.yml`). See [org-rulesets.md](org-rulesets.md)
+(Check-name contract).
 
 | Workflow                               | `merge_group` behavior                         |
 | -------------------------------------- | ---------------------------------------------- |
@@ -1259,11 +1465,13 @@ starter examples (`examples/ci-*.yml`) include `merge_group:` by default.
 | `reusable-dependency-review.yml`       | Runs on `merge_group` (same as PR)             |
 | `reusable-security-audit.yml`          | Audit on `merge_group`; PR comment on PR only  |
 | `reusable-site-quality.yml`            | Safe to run — no PR context required           |
+| `reusable-build-artifact.yml`          | Safe to run — no PR context required           |
 | `reusable-docker.yml`                  | Safe to run — no PR context required           |
 | `reusable-test-shell.yml`              | Tests run; PR summary comment on PR only       |
 | `reusable-test-python.yml`             | Tests run; PR summary comment on PR only       |
 | `reusable-test-node.yml`               | Tests run; PR summary comment on PR only       |
 | `reusable-test-node-custom.yml`        | Tests run; PR summary comment on PR only       |
+| `reusable-test-e2e-playwright.yml`     | Tests run; PR summary comment on PR only       |
 | `reusable-test-rust-build.yml`         | Safe to run — no PR context required           |
 | `reusable-coverage.yml`                | Coverage runs; PR comment on PR only           |
 | `reusable-semantic-pr-title.yml`       | No-op on `merge_group` — title validated on PR |

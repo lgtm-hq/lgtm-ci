@@ -1,0 +1,9 @@
+{
+  "categories": {
+    "performance": {"score": 0.85},
+    "accessibility": {"score": 0.92},
+    "best-practices": {"score": 0.88},
+    "seo": {"score": 0.95},
+    "pwa": {"score": 0.60}
+  }
+}

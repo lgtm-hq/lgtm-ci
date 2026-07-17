@@ -15,10 +15,27 @@ EGRESS_STEP = re.compile(r"^\s+- name: Checkout lgtm-ci egress tooling\s*$")
 
 
 def job_needs_scripts(job_body: str) -> bool:
+    """Return True when a job runs CI scripts from lgtm-ci tooling.
+
+    Args:
+        job_body: YAML text for a single workflow job.
+
+    Returns:
+        True if the job references ``.lgtm-ci-tooling/scripts``.
+    """
     return ".lgtm-ci-tooling/scripts" in job_body
 
 
 def fix_sparse_block(block: str) -> str:
+    """Insert ``scripts/ci/`` into a sparse-checkout block when missing.
+
+    Args:
+        block: Indented sparse-checkout path lines from a checkout step.
+
+    Returns:
+        The block unchanged when ``scripts/ci/`` is already present, or
+        with ``scripts/ci/`` inserted after a supported action path.
+    """
     if "scripts/ci/" in block or "scripts/ci/actions/" in block:
         return block
     if "resolve-egress-allowlist" in block:
@@ -37,6 +54,18 @@ def fix_sparse_block(block: str) -> str:
 
 
 def fix_job(job_body: str) -> str:
+    """Ensure sparse-checkout includes ``scripts/ci/`` for tooling jobs.
+
+    Skips egress tooling checkout steps, which use a separate sparse
+    checkout that must not be modified.
+
+    Args:
+        job_body: YAML text for a single workflow job.
+
+    Returns:
+        Updated job text with ``scripts/ci/`` added to applicable
+        sparse-checkout blocks.
+    """
     if not job_needs_scripts(job_body):
         return job_body
 
@@ -70,6 +99,14 @@ def fix_job(job_body: str) -> str:
 
 
 def fix_workflow(text: str) -> str:
+    """Apply sparse-checkout fixes to every job in a workflow file.
+
+    Args:
+        text: Full contents of a reusable workflow YAML file.
+
+    Returns:
+        Updated workflow text with job-level sparse-checkout fixes applied.
+    """
     parts: list[str] = []
     last = 0
     for match in re.finditer(r"^  (\w[\w-]*):\n", text, re.MULTILINE):
@@ -89,6 +126,16 @@ def fix_workflow(text: str) -> str:
 
 
 def main() -> int:
+    """Update reusable workflows that run lgtm-ci tooling scripts.
+
+    Scans ``.github/workflows/reusable-*.yml`` and rewrites files that
+    reference ``.lgtm-ci-tooling/scripts`` so sparse-checkout includes
+    ``scripts/ci/``.
+
+    Returns:
+        0 always; raises on I/O errors propagated from ``Path.read_text``
+        or ``Path.write_text``.
+    """
     updated = 0
     for path in sorted(WORKFLOWS.glob("reusable-*.yml")):
         text = path.read_text()

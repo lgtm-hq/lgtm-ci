@@ -169,7 +169,9 @@ egress_preset_endpoints() {
 			api.deps.dev:443
 		;;
 	sbom)
-		# SBOM + Grype scan + Sigstore attestation (py-lintro sbom-on-main.yml).
+		# SBOM + Grype scan + Sigstore attestation/cosign + release asset upload.
+		# oauth2.sigstore.dev is required for keyless cosign OIDC in release-assets
+		# mode (#524); uploads.github.com for gh release upload.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -177,6 +179,7 @@ egress_preset_endpoints() {
 			release-assets.githubusercontent.com:443 \
 			objects.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
+			uploads.github.com:443 \
 			anchore.io:443 \
 			get.anchore.io:443 \
 			toolbox-data.anchore.io:443 \
@@ -186,7 +189,8 @@ egress_preset_endpoints() {
 			rekor.sigstore.dev:443 \
 			timestamp.sigstore.dev:443 \
 			tuf-repo-cdn.sigstore.dev:443 \
-			sigstore-tuf-root.storage.googleapis.com:443
+			sigstore-tuf-root.storage.googleapis.com:443 \
+			oauth2.sigstore.dev:443
 		;;
 	scorecard)
 		# OpenSSF Scorecard (reusable-scorecards.yml).
