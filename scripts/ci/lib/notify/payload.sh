@@ -15,7 +15,13 @@
 [[ -n "${_LGTM_CI_NOTIFY_PAYLOAD_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_NOTIFY_PAYLOAD_LOADED=1
 
+# Custom fields allowed per Discord embed: Discord caps embeds at 25
+# fields and we always append 3 context fields (Repository, Ref, Actor).
+readonly _LGTM_CI_NOTIFY_DISCORD_MAX_CUSTOM_FIELDS=22
+
 # Build a Slack Block Kit payload (attachment with status color + blocks).
+# Custom fields are chunked into section blocks of 10 (Slack's per-section
+# field limit).
 # Usage: notify_slack_payload <status> <title> <message> <fields-json>
 notify_slack_payload() {
 	local status="${1:-}"
@@ -47,10 +53,11 @@ notify_slack_payload() {
 								text: {type: "mrkdwn", text: $message}}]
 							else [] end)
 						+ (if ($fields | length) > 0
-							then [{type: "section",
-								fields: [$fields[]
-									| {type: "mrkdwn",
-										text: ("*" + .name + "*\n" + .value)}]}]
+							then [range(0; ($fields | length); 10) as $i
+								| {type: "section",
+									fields: [$fields[$i:$i + 10][]
+										| {type: "mrkdwn",
+											text: ("*" + .name + "*\n" + .value)}]}]
 							else [] end)
 						+ [{type: "context",
 							elements: [{type: "mrkdwn",
@@ -64,13 +71,23 @@ notify_slack_payload() {
 }
 
 # Build a Discord embed payload with status color and context fields.
+# Rejects more than 22 custom fields (25-field embed cap minus the 3
+# auto-added context fields).
 # Usage: notify_discord_payload <status> <title> <message> <fields-json>
 notify_discord_payload() {
 	local status="${1:-}"
 	local title="${2:-}"
 	local message="${3:-}"
 	local fields_json="${4:-[]}"
-	local color emoji context
+	local color emoji context field_count
+
+	field_count="$(jq 'length' <<<"$fields_json")" || return 1
+	if ((field_count > _LGTM_CI_NOTIFY_DISCORD_MAX_CUSTOM_FIELDS)); then
+		echo "notify: too many fields for Discord (${field_count} >" \
+			"${_LGTM_CI_NOTIFY_DISCORD_MAX_CUSTOM_FIELDS}; 3 context fields are" \
+			"auto-added and Discord caps embeds at 25 fields)" >&2
+		return 1
+	fi
 
 	notify_validate_status "$status" || return 1
 	color="$(notify_status_color_decimal "$status")" || return 1

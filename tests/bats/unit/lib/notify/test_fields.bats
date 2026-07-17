@@ -48,6 +48,12 @@ run_fields_json() {
 	assert_output '[{"name":"Environment","value":"production"}]'
 }
 
+@test "notify_fields_json: splits on the first separator in the line" {
+	run_fields_json $'Query: a=b\nExpr=x:y'
+	assert_success
+	assert_output '[{"name":"Query","value":"a=b"},{"name":"Expr","value":"x:y"}]'
+}
+
 @test "notify_fields_json: preserves = in values and skips comments" {
 	run_fields_json $'# a comment\nQuery=a=b\n\nRef=main'
 	assert_success

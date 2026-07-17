@@ -97,6 +97,30 @@ production"
 	assert_output --partial "test-user"
 }
 
+@test "notify_slack_payload: keeps 10 fields in one section block" {
+	local fields
+	fields="$(jq -cn '[range(0; 10) | {name: "k\(.)", value: "v"}]')"
+	run_slack_payload "success" "Title" "" "$fields"
+	assert_success
+
+	run jq -r \
+		'[.attachments[0].blocks[] | select(has("fields")) | (.fields | length)] | join(",")' \
+		<<<"$output"
+	assert_output "10"
+}
+
+@test "notify_slack_payload: chunks 11 fields across two section blocks" {
+	local fields
+	fields="$(jq -cn '[range(0; 11) | {name: "k\(.)", value: "v"}]')"
+	run_slack_payload "success" "Title" "" "$fields"
+	assert_success
+
+	run jq -r \
+		'[.attachments[0].blocks[] | select(has("fields")) | (.fields | length)] | join(",")' \
+		<<<"$output"
+	assert_output "10,1"
+}
+
 @test "notify_slack_payload: rejects invalid status" {
 	run_slack_payload "bogus" "Title" "" "[]"
 	assert_failure
@@ -159,6 +183,24 @@ production"
 
 	run jq -r '.embeds[0].fields[1].value' <<<"$payload"
 	assert_output "test-org/test-repo"
+}
+
+@test "notify_discord_payload: accepts 22 custom fields (25 total)" {
+	local fields
+	fields="$(jq -cn '[range(0; 22) | {name: "k\(.)", value: "v"}]')"
+	run_discord_payload "success" "Title" "" "$fields"
+	assert_success
+
+	run jq -r '.embeds[0].fields | length' <<<"$output"
+	assert_output "25"
+}
+
+@test "notify_discord_payload: rejects 23 custom fields" {
+	local fields
+	fields="$(jq -cn '[range(0; 23) | {name: "k\(.)", value: "v"}]')"
+	run_discord_payload "success" "Title" "" "$fields"
+	assert_failure
+	assert_output --partial "too many fields for Discord"
 }
 
 @test "notify_discord_payload: rejects invalid status" {

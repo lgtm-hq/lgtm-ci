@@ -34,15 +34,27 @@ notify_fields_json() {
 		# Allow YAML list items: "- KEY=VALUE"
 		trimmed="${trimmed#- }"
 
+		# Split on whichever separator (= or :) appears FIRST, so
+		# "Query: a=b" parses as name "Query", value "a=b".
+		local eq_pos=${#trimmed} colon_pos=${#trimmed} prefix
 		if [[ "$trimmed" == *=* ]]; then
-			name="${trimmed%%=*}"
-			value="${trimmed#*=}"
-		elif [[ "$trimmed" == *:* ]]; then
-			name="${trimmed%%:*}"
-			value="${trimmed#*:}"
-		else
+			prefix="${trimmed%%=*}"
+			eq_pos=${#prefix}
+		fi
+		if [[ "$trimmed" == *:* ]]; then
+			prefix="${trimmed%%:*}"
+			colon_pos=${#prefix}
+		fi
+		if ((eq_pos == ${#trimmed} && colon_pos == ${#trimmed})); then
 			echo "notify: invalid fields line (expected KEY=VALUE or KEY: VALUE): ${trimmed}" >&2
 			return 1
+		fi
+		if ((eq_pos < colon_pos)); then
+			name="${trimmed:0:eq_pos}"
+			value="${trimmed:eq_pos+1}"
+		else
+			name="${trimmed:0:colon_pos}"
+			value="${trimmed:colon_pos+1}"
 		fi
 
 		# Trim whitespace around name and value

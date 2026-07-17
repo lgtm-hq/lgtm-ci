@@ -22,7 +22,7 @@ a context line linking to the workflow run. The attachment color tracks
 `status` (green success, red failure, yellow cancelled).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/notify-slack@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/notify-slack@<commit-sha> # pin to a full commit SHA
   if: failure()
   with:
     webhook-url: ${{ secrets.SLACK_WEBHOOK }}
@@ -48,7 +48,7 @@ fields, and injected `Repository`/`Ref`/`Actor` fields. The embed color
 tracks `status`.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/notify-discord@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/notify-discord@<commit-sha> # pin to a full commit SHA
   with:
     webhook-url: ${{ secrets.DISCORD_WEBHOOK }}
     status: success
@@ -66,9 +66,18 @@ tracks `status`.
 ## Retry and delivery behavior
 
 Delivery POSTs the JSON payload with `curl` (10s connect timeout, 30s
-total). Up to 3 attempts are made; retries apply only to transport
-errors, HTTP 429, and HTTP 5xx, with a linear backoff (2s, 4s). Other
-non-2xx responses (bad webhook URL, malformed payload) fail immediately.
-Webhook URLs must use `https://`. Advanced tuning is available via
-environment variables (`NOTIFY_MAX_ATTEMPTS`, `NOTIFY_RETRY_BACKOFF`,
+total). The webhook URL is passed via a curl config file on stdin, not
+as a CLI argument, so it is not visible in the process table on shared
+runners. Up to 3 attempts are made; retries apply only to transport
+errors, HTTP 429, and HTTP 5xx, with a linear backoff (2s, 4s). On HTTP
+429 the `Retry-After` header (or Discord's JSON `retry_after` body) is
+honored when present, capped at 30s. Other non-2xx responses (bad
+webhook URL, malformed payload) fail immediately. Webhook URLs must use
+`https://`. Advanced tuning is available via environment variables
+(`NOTIFY_MAX_ATTEMPTS`, `NOTIFY_RETRY_BACKOFF`, `NOTIFY_RETRY_MAX_DELAY`,
 `NOTIFY_CONNECT_TIMEOUT`, `NOTIFY_MAX_TIME`).
+
+Field limits: Slack section blocks hold at most 10 fields, so custom
+fields are chunked across additional section blocks automatically.
+Discord embeds cap at 25 fields; with 3 auto-injected context fields,
+more than 22 custom fields is rejected with an error.

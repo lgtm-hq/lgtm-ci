@@ -112,8 +112,11 @@ run_notify_slack() {
 	assert_file_contains "$GITHUB_OUTPUT" "delivered=true"
 
 	run cat "${BATS_TEST_TMPDIR}/mock_calls_curl"
-	assert_output --partial "$WEBHOOK"
 	assert_output --partial "Content-Type: application/json"
+	# The webhook URL travels via the stdin curl config (-K -), never argv.
+	[[ "$output" != *"$WEBHOOK"* ]]
+	[[ "$output" == *"-K -"* ]]
+	[[ "$output" == *"--data-raw"* ]]
 }
 
 @test "notify-slack: fails and sets delivered=false on hard rejection" {
