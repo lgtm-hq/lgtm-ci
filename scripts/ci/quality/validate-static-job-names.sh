@@ -34,9 +34,14 @@ fi
 # Event-gated (check is not required so skip does not block merge):
 #   reusable-dependency-review.yml:dependency-review
 #
+# Mode-gated SBOM (#524): report vs release-assets share job-name for ruleset
+# contexts; exactly one of the two jobs runs per call.
+#   reusable-sbom.yml:sbom
+#   reusable-sbom.yml:release-assets
+#
 # Uses always() — never actually skips; conditional-success gate:
 #   reusable-required-check.yml:gate
-STATIC_JOB_NAME_EXCEPTIONS="${STATIC_JOB_NAME_EXCEPTIONS-reusable-dependency-review.yml:dependency-review reusable-required-check.yml:gate reusable-test-e2e.yml:test reusable-test-rust-build.yml:build reusable-test-node.yml:test-vitest reusable-site-quality.yml:site-build-link reusable-site-quality.yml:site-test reusable-test-python.yml:test reusable-test-node-custom.yml:test reusable-test-shell.yml:test reusable-rust-test.yml:test}"
+STATIC_JOB_NAME_EXCEPTIONS="${STATIC_JOB_NAME_EXCEPTIONS-reusable-dependency-review.yml:dependency-review reusable-required-check.yml:gate reusable-test-e2e.yml:test reusable-test-rust-build.yml:build reusable-test-node.yml:test-vitest reusable-site-quality.yml:site-build-link reusable-site-quality.yml:site-test reusable-test-python.yml:test reusable-test-node-custom.yml:test reusable-test-shell.yml:test reusable-rust-test.yml:test reusable-sbom.yml:sbom reusable-sbom.yml:release-assets}"
 
 violations=0
 
