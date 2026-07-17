@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.54.4] - 2026-07-17
+
+### Fixed
+
+- **ci**: bound BATS kcov coverage hangs with timeouts (#588) (d8071c9)
+
 ## [0.54.3] - 2026-07-17
 
 ### Fixed
@@ -1625,7 +1631,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.4...HEAD
+[0.54.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.3...v0.54.4
 [0.54.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.2...v0.54.3
 [0.54.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.1...v0.54.2
 [0.54.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.0...v0.54.1
