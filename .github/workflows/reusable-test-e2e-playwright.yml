@@ -335,6 +335,7 @@ jobs:
     uses: ./.github/workflows/reusable-publish-test-summary.yml
     permissions:
       contents: read
+      # Scoped to upserting the PR test-summary comment only.
       pull-requests: write
     with:
       test-suite-name: ${{ inputs.job-name }}

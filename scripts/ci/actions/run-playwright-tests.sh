@@ -44,7 +44,17 @@ resolve_playwright_version() {
 	local working_directory="$1"
 	local version=""
 
-	if [[ -f "${working_directory}/package.json" ]]; then
+	# Prefer the installed binary: it reflects the lockfile-resolved version,
+	# so lockfile-only upgrades rotate the cache key.
+	if command -v npx >/dev/null 2>&1; then
+		version="$(
+			cd "$working_directory" &&
+				npx --no-install playwright --version 2>/dev/null |
+				awk '{print $NF; exit}' || true
+		)"
+	fi
+
+	if [[ -z "$version" && -f "${working_directory}/package.json" ]]; then
 		version="$(
 			node -e '
 				const fs = require("fs");
@@ -53,14 +63,6 @@ resolve_playwright_version() {
 				const raw = deps["@playwright/test"] || deps.playwright || "";
 				process.stdout.write(String(raw).replace(/^[\^~>=<\s]+/, ""));
 			' "${working_directory}/package.json" 2>/dev/null || true
-		)"
-	fi
-
-	if [[ -z "$version" ]] && command -v npx >/dev/null 2>&1; then
-		version="$(
-			cd "$working_directory" &&
-				npx --no-install playwright --version 2>/dev/null |
-				awk '{print $NF; exit}' || true
 		)"
 	fi
 
@@ -77,12 +79,14 @@ assemble_playwright_filter_args() {
 	project="$(trim "${PROJECT:-}")"
 	grep_pattern="$(trim "${GREP:-}")"
 
+	# Shell-quote each filter: the run step re-parses the assembled command
+	# through `bash -c`, so raw spaces/metacharacters would split or expand.
 	local -a args=()
 	if [[ -n "$project" ]]; then
-		args+=("--project=${project}")
+		args+=("$(printf '%q' "--project=${project}")")
 	fi
 	if [[ -n "$grep_pattern" ]]; then
-		args+=("--grep=${grep_pattern}")
+		args+=("$(printf '%q' "--grep=${grep_pattern}")")
 	fi
 
 	if [[ ${#args[@]} -eq 0 ]]; then
@@ -203,7 +207,9 @@ run)
 	log_info "Running Playwright: ${full_command}"
 
 	exit_code=0
-	bash -euo pipefail -c "$full_command" || exit_code=$?
+	# env -u BASH_ENV: kcov instruments nested bash via BASH_ENV; its injected
+	# script trips `set -u` inside user commands, which are not coverage targets.
+	env -u BASH_ENV bash -euo pipefail -c "$full_command" || exit_code=$?
 
 	set_github_output "exit-code" "$exit_code"
 	if [[ -f "playwright-results.json" ]]; then
