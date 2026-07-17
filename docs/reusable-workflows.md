@@ -517,6 +517,30 @@ jobs:
     secrets: inherit
 ```
 
+**Multi-ecosystem version PR** (explicit file→kind map; sibling of version-pr):
+
+```yaml
+jobs:
+  version-pr:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-multi-ecosystem.yml@<sha>
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      issues: write
+    with:
+      job-name: "Create Version PR"
+      tooling-ref: "<sha>"
+      manifests: >
+        {"package.json":"npm","VERSION":"raw",
+        "python/pyproject.toml":"pep621","my.gemspec":"gemspec"}
+      bump: auto-from-commits
+      changelog: true
+      # prerelease-tag: rc.1   # optional → 1.2.3-rc.1
+    secrets: inherit
+```
+
 **Cargo workspace auto-tag** (Rust monorepos that bump `Cargo.toml` on `main`):
 
 ```yaml
