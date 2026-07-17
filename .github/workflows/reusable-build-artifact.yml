@@ -85,6 +85,7 @@ on:
           pipelines.actions.githubusercontent.com:443
           github-releases.githubusercontent.com:443
           bun.sh:443
+          nodejs.org:443
           registry.npmjs.org:443
           pypi.org:443
           files.pythonhosted.org:443
