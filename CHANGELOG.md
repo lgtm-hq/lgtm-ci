@@ -22,6 +22,73 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.55.0] - 2026-07-17
+
+### Added
+
+- **sbom**: add release-assets mode to reusable-sbom (#606) (4a1acdc)
+
+## [0.54.6] - 2026-07-17
+
+### Fixed
+
+- **ci**: omit coverage sections when coverage is disabled (#595) (20e80b3)
+
+## [0.54.5] - 2026-07-17
+
+### Fixed
+
+- **release**: dedupe Unreleased changelog bullets against generated commits (#591)
+  (63e01cd)
+
+## [0.54.4] - 2026-07-17
+
+### Fixed
+
+- **ci**: bound BATS kcov coverage hangs with timeouts (#588) (d8071c9)
+
+## [0.54.3] - 2026-07-17
+
+### Fixed
+
+- **ci**: pass COVERAGE env to node test summary staging step (#584) (016f2c2)
+
+## [0.54.2] - 2026-07-17
+
+### Changed
+
+- **contract**: document v0.50.0 harden-runner egress semantics and merge-queue-safe
+  required-check guidance (#582) (3784007)
+- **scripts**: add Google-style docstrings to fix-sparse-checkout-scripts.py functions
+  (#581) (9ecdb33)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro:latest docker digest to d56b40b (#598)
+  (3afe2bf)
+- **deps**: update github-actions (#587) (e923839)
+- **ci**: extract remaining inline shell into scripts/ci (#589) (d491fda)
+- **test**: move bats sample inputs into tests/fixtures (#594) (a0d3494)
+- **test**: extract shared _install_health_mocks helper for docker health bats suites
+  (#583) (50f04df)
+- **docker**: add unset-TAGS coverage for health-check-local script (#590) (4885bfa)
+
+### Fixed
+
+- **test**: raise bats_require_minimum_version to 1.7.0 in test_registry.bats (#585)
+  (098507a)
+
+## [0.54.1] - 2026-07-16
+
+### Changed
+
+- **deps**: update actions/setup-node action to v7.0.0 (major) (#574) (efa8cd3)
+- **deps**: update github-actions (#573) (011f59e)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.21.0 (minor) (#576)
+  (6e48c7c)
+
+### Fixed
+
+- **deps**: update lintro (#586) (a75e9f0)
+- **deps**: update lintro (#575) (2d1f9d0)
+
 ## [0.54.0] - 2026-07-13
 
 ### Added
@@ -1586,7 +1653,14 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.55.0...HEAD
+[0.55.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.6...v0.55.0
+[0.54.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.5...v0.54.6
+[0.54.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.4...v0.54.5
+[0.54.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.3...v0.54.4
+[0.54.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.2...v0.54.3
+[0.54.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.1...v0.54.2
+[0.54.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.54.0...v0.54.1
 [0.54.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.1...v0.54.0
 [0.53.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.53.0...v0.53.1
 [0.53.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.52.9...v0.53.0

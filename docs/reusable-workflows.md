@@ -932,16 +932,27 @@ All inputs are opt-in; existing callers keep current behavior without changes.
 ### SBOM (`reusable-sbom.yml`)
 
 Generates an SBOM with Syft, optionally scans it with Grype, and can create a
-Sigstore attestation. Used by release layouts such as
+Sigstore attestation. `mode: release-assets` generates multi-format SBOMs,
+optionally cosign-signs them (keyless OIDC), and uploads them to a GitHub
+Release. Used by release layouts such as
 [python-release-publish.md](python-release-publish.md).
 
-| Input                  | Default      | Description                                      |
-| ---------------------- | ------------ | ------------------------------------------------ |
-| `scan-vulnerabilities` | `true`       | Run Grype against the generated SBOM             |
-| `fail-on-severity`     | `"critical"` | Fail when findings meet this severity or higher  |
-| `upload-sarif`         | `false`      | Upload Grype SARIF to GitHub Security            |
-| `create-attestation`   | `false`      | Create a Sigstore attestation for the SBOM       |
-| `egress-preset`        | `sbom`       | Harden-runner allowlist preset (workflow-contract) |
+<!-- markdownlint-disable MD013 -- SBOM input table; columns exceed default line length -->
+
+| Input                  | Default                      | Description                                      |
+| ---------------------- | ---------------------------- | ------------------------------------------------ |
+| `mode`                 | `report`                     | `report` or `release-assets`                     |
+| `formats`              | `spdx-json,cyclonedx-json`   | Syft formats for `release-assets` mode           |
+| `sign`                 | `true`                       | Cosign keyless sign in `release-assets` mode     |
+| `release-tag`          | `""`                         | Required when `mode: release-assets`             |
+| `scan-vulnerabilities` | `true`                       | Run Grype against the generated SBOM (report)    |
+| `fail-on-severity`     | `"critical"`                 | Fail when findings meet this severity or higher  |
+| `upload-sarif`         | `false`                      | Upload Grype SARIF to GitHub Security            |
+| `create-attestation`   | `false`                      | Create a Sigstore attestation for the SBOM       |
+| `upload-release-assets`| `false`                      | Report mode: attach artifact to release (#532)   |
+| `egress-preset`        | `sbom`                       | Harden-runner allowlist preset (workflow-contract) |
+
+<!-- markdownlint-enable MD013 -->
 
 **Breaking (#480):** `fail-on-severity` previously defaulted to `""` (advisory
 only). Callers that must keep advisory-only behavior should pass
@@ -958,6 +969,19 @@ sbom:
   with:
     # default fail-on-severity is critical; opt out for advisory-only:
     # fail-on-severity: ""
+```
+
+```yaml
+sbom-release:
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+  permissions:
+    contents: write
+    id-token: write
+  with:
+    mode: release-assets
+    release-tag: ${{ github.ref_name }}
+    formats: spdx-json,cyclonedx-json
+    sign: true
 ```
 
 ## PR Automation And Security

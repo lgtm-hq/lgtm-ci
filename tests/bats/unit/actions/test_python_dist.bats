@@ -21,11 +21,8 @@ teardown() {
 
 _write_pyproject() {
 	local version="$1"
-	cat >pyproject.toml <<EOF
-[project]
-name = "example"
-version = "${version}"
-EOF
+	sed "s|__VERSION__|${version}|g" \
+		"${FIXTURES_DIR}/python/pyproject-version.toml" >pyproject.toml
 }
 
 _init_repo_on_main() {

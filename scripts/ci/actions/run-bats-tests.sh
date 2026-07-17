@@ -9,8 +9,13 @@
 #   KCOV_VERSION - kcov version to install (for install-kcov step, default: v43)
 #   TEST_PATH - Path to test files (for run-tests/run-coverage steps)
 #   TEST_FILTER - Filter tests by name pattern (optional)
-#   PARALLEL - Number of parallel jobs (optional, must be a positive integer)
+#   PARALLEL - Number of parallel jobs (optional, must be a positive integer).
+#              Under run-coverage, PARALLEL > 1 is ignored (kcov + parallel BATS
+#              is deadlock-prone); non-coverage runs still honor it.
 #   COVERAGE_DIR - Directory for coverage output (for run-coverage step)
+#   KCOV_SUITE_TIMEOUT_MINUTES - Suite timeout for kcov/BATS under
+#              run-coverage (default: 40). Uses timeout(1) with --kill-after;
+#              exit 124 on expiry. Kept below the coverage-run step timeout (45).
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
 #   COVERAGE_THRESHOLD - Minimum coverage threshold (for check-threshold step)
 
@@ -174,6 +179,10 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	FILTER="${TEST_FILTER:-}"
 	PARALLEL="${PARALLEL:-1}"
 	COVERAGE_DIR="${COVERAGE_DIR:-coverage-report}"
+	# Suite-level timeout (minutes). Must stay below the coverage-run step
+	# timeout (45) so timeout(1) fails the step with logs instead of a bare
+	# job/step cancellation. See #556.
+	SUITE_TIMEOUT_MINUTES="${KCOV_SUITE_TIMEOUT_MINUTES:-40}"
 
 	# Validate PARALLEL is a positive integer
 	if ! [[ "$PARALLEL" =~ ^[1-9][0-9]*$ ]]; then
@@ -181,39 +190,91 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		PARALLEL=1
 	fi
 
-	mkdir -p "$COVERAGE_DIR"
-
-	# Build bats command with same flags as main test step
-	# Include --tap so parse-results can read bats-output.tap
-	BATS_ARGS=("--recursive" "--tap")
-
-	if [[ -n "$FILTER" ]]; then
-		BATS_ARGS+=("--filter" "$FILTER")
+	# Validate suite timeout is a positive integer (minutes)
+	if ! [[ "$SUITE_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
+		echo "::warning::KCOV_SUITE_TIMEOUT_MINUTES='$SUITE_TIMEOUT_MINUTES' is not a valid positive integer, defaulting to 40"
+		SUITE_TIMEOUT_MINUTES=40
 	fi
 
+	# kcov instruments via PS4/DEBUG trap; parallel BATS under kcov is a known
+	# deadlock-prone combination. Always serialize coverage runs.
 	if [[ "$PARALLEL" -gt 1 ]]; then
-		BATS_ARGS+=("--jobs" "$PARALLEL")
+		echo "::notice::Serializing BATS under kcov (PARALLEL=$PARALLEL ignored; kcov+parallel is deadlock-prone)"
+		PARALLEL=1
 	fi
 
-	# Run kcov with bats
+	if ! command -v timeout >/dev/null 2>&1; then
+		echo "::error::timeout(1) is required for run-coverage (install coreutils)"
+		exit 1
+	fi
+
+	mkdir -p "$COVERAGE_DIR"
+	# kcov sets LD_PRELOAD to <outdir>/libkcov_sowrapper.so. Use an absolute
+	# outdir so chdir inside tests does not break preload resolution (stderr
+	# noise fails refute_output / exact-output assertions).
+	COVERAGE_DIR="$(cd "$COVERAGE_DIR" && pwd)"
+
+	# Resolve .bats files for diagnostics. Coverage itself must be a single
+	# kcov→bats process: per-file kcov invocations do not merge bash coverage
+	# with kcov v43 (empty cov.xml / 0% line-rate).
+	TEST_FILES=()
+	if [[ -f "$TEST_PATH" ]]; then
+		TEST_FILES=("$TEST_PATH")
+	elif [[ -d "$TEST_PATH" ]]; then
+		while IFS= read -r test_file; do
+			TEST_FILES+=("$test_file")
+		done < <(find "$TEST_PATH" -type f -name '*.bats' | LC_ALL=C sort)
+	else
+		echo "::error::TEST_PATH not found: $TEST_PATH"
+		exit 1
+	fi
+
+	if [[ ${#TEST_FILES[@]} -eq 0 ]]; then
+		echo "::error::No .bats files found under $TEST_PATH"
+		exit 1
+	fi
+
+	for test_file in "${TEST_FILES[@]}"; do
+		echo "coverage-plan file=${test_file}"
+	done
+
+	BATS_ARGS=(--tap)
+	if [[ -n "$FILTER" ]]; then
+		BATS_ARGS+=(--filter "$FILTER")
+	fi
+	# Never pass --jobs under kcov (serialized above).
+
+	REPO_ROOT="$(pwd)"
+	echo "coverage-start suite files=${#TEST_FILES[@]} timeout=${SUITE_TIMEOUT_MINUTES}m"
+	start_ts="$(date +%s)"
+
 	# Note: kcov instruments bash scripts via PS4/DEBUG trap
 	# --bash-parse-files-in-dir: Pre-parse bash files for coverage mapping
 	# --include-path: Only report coverage for library files
 	# --exclude-pattern: Skip test infrastructure files
-	echo "Running coverage: kcov ... bats ${BATS_ARGS[*]} $TEST_PATH"
-	kcov \
+	# --kill-after: if bats/kcov ignore SIGTERM, SIGKILL after grace so timeout(1)
+	# itself cannot hang waiting on an uninterruptible child (#556 / Greptile).
+	timeout --signal=TERM --kill-after=30s "${SUITE_TIMEOUT_MINUTES}m" \
+		kcov \
 		--cobertura \
-		--bash-parse-files-in-dir="$(pwd)/scripts/ci/lib" \
-		--include-path="$(pwd)/scripts/ci/lib" \
+		--bash-parse-files-in-dir="${REPO_ROOT}/scripts/ci/lib" \
+		--include-path="${REPO_ROOT}/scripts/ci/lib" \
 		--exclude-pattern="/tests/,/tmp/,/bats-" \
 		"$COVERAGE_DIR" \
-		bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
-	# Capture exit codes from both sides of the pipe
+		bats "${BATS_ARGS[@]}" "${TEST_FILES[@]}" 2>&1 | tee bats-output.tap
 	PIPE_STATUS=("${PIPESTATUS[@]}")
 	KCOV_EXIT=${PIPE_STATUS[0]:-0}
 	TEE_EXIT=${PIPE_STATUS[1]:-0}
-	# Use first non-zero exit code (prefer kcov/bats failure over tee)
-	if [[ "$KCOV_EXIT" -ne 0 ]]; then
+
+	end_ts="$(date +%s)"
+	elapsed=$((end_ts - start_ts))
+	echo "coverage-finish suite elapsed=${elapsed}s exit=${KCOV_EXIT}"
+
+	# GNU timeout exits 124 when the command times out.
+	if [[ "$KCOV_EXIT" -eq 124 ]]; then
+		echo "::error::kcov/BATS timed out after ${SUITE_TIMEOUT_MINUTES}m (see last TAP lines / coverage-plan order for the hanging file)"
+		EXIT_CODE=124
+	elif [[ "$KCOV_EXIT" -ne 0 ]]; then
 		EXIT_CODE="$KCOV_EXIT"
 	else
 		EXIT_CODE="$TEE_EXIT"

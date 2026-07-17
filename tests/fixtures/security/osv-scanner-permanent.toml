@@ -1,0 +1,7 @@
+[[IgnoredVulns]]
+id = "GHSA-permanent-stale"
+reason = "no expiry date"
+
+[[IgnoredVulns]]
+id = "GHSA-permanent-active"
+reason = "no expiry date"

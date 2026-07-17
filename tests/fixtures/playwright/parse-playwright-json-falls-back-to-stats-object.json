@@ -1,0 +1,8 @@
+{
+  "stats": {
+    "expected": 8,
+    "unexpected": 2,
+    "skipped": 1,
+    "duration": 10000
+  }
+}

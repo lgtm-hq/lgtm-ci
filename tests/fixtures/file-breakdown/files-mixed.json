@@ -1,0 +1,6 @@
+[
+  {"filename": "scripts/ci/actions/foo.sh", "status": "modified", "additions": 10, "deletions": 2},
+  {"filename": "scripts/ci/lib/bar.sh", "status": "added", "additions": 30, "deletions": 0},
+  {"filename": "docs/guide.md", "status": "modified", "additions": 5, "deletions": 5},
+  {"filename": "README.md", "status": "removed", "additions": 0, "deletions": 40}
+]
