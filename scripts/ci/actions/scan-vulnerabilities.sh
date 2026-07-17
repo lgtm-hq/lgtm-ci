@@ -3,11 +3,12 @@
 # Purpose: Scan for vulnerabilities using Grype
 #
 # Required environment variables:
-#   STEP - Which step to run: install, scan, parse, counts, sarif, summary
+#   STEP - Which step to run: resolve-target, install, scan, parse, counts, sarif, summary
 #   TARGET - Target to scan (SBOM file, image, directory)
 #   TARGET_TYPE - Type of target (sbom, image, dir)
 #   FAIL_ON - Severity threshold to fail on (critical, high, medium, low, none)
 #   RESULTS_FILE - Path to grype JSON results (counts, parse, summary steps)
+#   SBOM_FILE - Optional SBOM override used by resolve-target when TARGET_TYPE=sbom
 
 set -euo pipefail
 
@@ -19,6 +20,18 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 
 case "$STEP" in
+resolve-target)
+	: "${TARGET:?TARGET is required}"
+	: "${TARGET_TYPE:?TARGET_TYPE is required}"
+	SBOM_FILE="${SBOM_FILE:-}"
+
+	if [[ -n "${SBOM_FILE}" && "${TARGET_TYPE}" == "sbom" ]]; then
+		set_github_output "path" "${SBOM_FILE}"
+	else
+		set_github_output "path" "${TARGET}"
+	fi
+	;;
+
 install)
 	install_anchore_tool "grype" "${GRYPE_VERSION:-latest}"
 	;;

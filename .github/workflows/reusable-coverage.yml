@@ -309,6 +309,7 @@ jobs:
       test-suite-name: ${{ inputs.comment-title }}
       comment-marker: ${{ inputs.comment-marker }}
       coverage-percent: ${{ needs.coverage.outputs.coverage-percent }}
+      coverage-enabled: true
       coverage-threshold: ${{ inputs.threshold }}
       job-result: ${{ needs.coverage.outputs.passed == 'true' && 'success' || 'failure' }}
       rich-coverage-comment: true

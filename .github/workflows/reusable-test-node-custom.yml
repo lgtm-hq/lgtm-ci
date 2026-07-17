@@ -301,7 +301,7 @@ jobs:
             .github/actions/
             scripts/ci/
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
       - name: Setup Bun
@@ -432,12 +432,10 @@ jobs:
         if: always()
         id: record
         shell: bash
-        run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ job.status }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   aggregate-tests:
     name: Aggregate Node.js Results
     needs:
@@ -493,15 +491,15 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Aggregate matrix custom test results
         id: aggregate
         shell: bash
-        run: |
-          if [[ "${{ needs.test.result }}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ needs.test.result }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   pages-coverage-status:
     name: Pages coverage upload status
     needs:
@@ -591,6 +589,7 @@ jobs:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
+      coverage-enabled: ${{ inputs.coverage }}
       rich-coverage-comment: ${{ inputs.coverage }}
       coverage-artifact-name: ${{ inputs.coverage && 'node-coverage' || '' }}
       coverage-file: >-

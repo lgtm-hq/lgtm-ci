@@ -348,7 +348,7 @@ jobs:
             .github/actions/
             scripts/ci/
       - name: Setup Node.js
-        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
       - name: Setup Bun
@@ -487,6 +487,7 @@ jobs:
         env:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           COVERAGE_SUMMARY_FILE: ${{ inputs.coverage-summary-file }}
+          COVERAGE: ${{ inputs.coverage }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-coverage-test-summary.sh
       - name: Upload coverage for test summary
@@ -738,6 +739,7 @@ jobs:
       tests-failed: ${{ needs.aggregate-tests.outputs.tests-failed }}
       tests-total: ${{ needs.aggregate-tests.outputs.tests-total }}
       coverage-percent: ${{ needs.aggregate-tests.outputs.coverage-percent }}
+      coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       rich-coverage-comment: ${{ inputs.coverage }}
