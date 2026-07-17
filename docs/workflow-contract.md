@@ -1313,7 +1313,6 @@ Work jobs require only `contents: read`. Optional `publish-test-summary` delegat
 to `reusable-publish-test-summary.yml` (requires `pull-requests: write` on the
 caller publish job path). Outputs: `passed`, `build-passed`, `test-passed`.
 
-<<<<<<< HEAD
 ## Playwright E2E (`reusable-test-e2e-playwright`)
 
 `reusable-test-e2e-playwright.yml` is the consumer-facing Playwright E2E reusable
@@ -1343,7 +1342,14 @@ Default `egress-preset: playwright` (CDN + apt mirrors); the workflow default
 | `base-url`       | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                 |
 | `web-server`     | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config        |
 | `package-manager` | `npm`                  | `npm` / `bun` / `pnpm`                             |
-=======
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
+`timeout-minutes`, `draft-pr-skip`, `publish-test-summary`, `comment-marker`).
+Caller permissions: `contents: read` (add `pull-requests: write` when publishing
+summaries). merge_group-safe: tests run; PR summary gated to `pull_request`.
+
 ## Build artifact
 
 `reusable-build-artifact.yml` runs a caller-provided `build-command`, optionally a
@@ -1376,19 +1382,12 @@ convention when downloading from multi-leg matrices).
 | `retention-days`          | `7`       | Artifact retention                                 |
 | `working-directory`       | `.`       | Build / post-test cwd                              |
 | `job-name`                | `Build`   | Static inner check label                           |
->>>>>>> origin/main
 
 <!-- markdownlint-enable MD013 MD060 -->
 
 Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
-<<<<<<< HEAD
-`timeout-minutes`, `draft-pr-skip`, `publish-test-summary`, `comment-marker`).
-Caller permissions: `contents: read` (add `pull-requests: write` when publishing
-summaries). merge_group-safe: tests run; PR summary gated to `pull_request`.
-=======
 `timeout-minutes`). Caller permissions: `contents: read` only. merge_group-safe
 (no PR-context requirements; no draft-PR job skip).
->>>>>>> origin/main
 
 ## Merge queue (`merge_group`)
 
