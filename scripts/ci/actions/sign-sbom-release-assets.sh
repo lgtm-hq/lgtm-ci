@@ -14,7 +14,6 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
 
-: "${SBOM_DIR:?SBOM_DIR is required}"
 SIGN="${SIGN:-true}"
 
 case "$(printf '%s' "${SIGN}" | tr '[:upper:]' '[:lower:]')" in
@@ -26,6 +25,8 @@ false | 0 | no | off)
 	;;
 esac
 
+: "${SBOM_DIR:?SBOM_DIR is required}"
+
 if [[ ! -d "${SBOM_DIR}" ]]; then
 	echo "::error::SBOM directory not found: ${SBOM_DIR}" >&2
 	exit 1
@@ -36,7 +37,7 @@ if ! command -v cosign >/dev/null 2>&1; then
 fi
 
 mapfile -t sbom_files < <(
-	find "${SBOM_DIR}" -type f \
+	find "${SBOM_DIR}" -maxdepth 1 -type f \
 		\( -name '*.json' -o -name '*.xml' -o -name '*.spdx' \) \
 		! -name '*.bundle' ! -name '*.sig' ! -name '*.pem' ! -name '.*' |
 		sort

@@ -194,6 +194,7 @@ jobs:
         env:
           MODE: ${{ inputs.mode }}
           RELEASE_TAG: ${{ inputs.release-tag }}
+          FORMATS: ${{ inputs.formats }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-sbom-mode.sh
 
   sbom:
