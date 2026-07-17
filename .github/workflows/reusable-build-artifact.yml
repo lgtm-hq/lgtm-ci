@@ -1,0 +1,281 @@
+---
+# Build with a caller-provided command and upload an artifact for handoff.
+# Matrix legs keep a static inner job name so GitHub appends the version suffix
+# (e.g. "🏗️ Build & Quality Checks (20)"), matching org ruleset contexts:
+# `{caller_job_id} / {job-name} ({node-version})`.
+name: Reusable Build Artifact Workflow
+
+on:
+  workflow_call:
+    inputs:
+      job-name:
+        description: "GitHub check name for the build job (matrix suffix appended)"
+        required: false
+        type: string
+        default: "Build"
+      build-command:
+        description: >-
+          Shell command to build artifacts (e.g. ./scripts/build.sh --quick or
+          bun run build). Runs in working-directory.
+        required: true
+        type: string
+      node-version:
+        description: >-
+          Single Node.js version. Mutually exclusive with node-version-matrix.
+        required: false
+        type: string
+        default: ""
+      node-version-matrix:
+        description: >-
+          JSON array of Node.js versions for a matrix (e.g. '["20","22"]').
+          Mutually exclusive with node-version. Legs keep a static inner name;
+          GitHub appends the version suffix.
+        required: false
+        type: string
+        default: ""
+      artifact-name:
+        description: >-
+          Artifact name for upload. Matrix mode appends -<node-version> so legs
+          do not collide.
+        required: true
+        type: string
+      artifact-path:
+        description: "File or directory to upload after a successful build"
+        required: true
+        type: string
+      retention-days:
+        description: "Days to retain the uploaded artifact"
+        required: false
+        type: number
+        default: 7
+      post-build-test-command:
+        description: >-
+          Optional shell command after build-command (e.g. bun test). Empty
+          skips. Covers build+test combos such as holy-grail Build & Test.
+        required: false
+        type: string
+        default: ""
+      working-directory:
+        description: "Working directory for build and post-build commands"
+        required: false
+        type: string
+        default: "."
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          release-assets.githubusercontent.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          github-releases.githubusercontent.com:443
+          bun.sh:443
+          nodejs.org:443
+          registry.npmjs.org:443
+          pypi.org:443
+          files.pythonhosted.org:443
+          astral.sh:443
+          releases.astral.sh:443
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: "replace"
+
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
+          rubygems, npm-publish, quality, sbom, scorecard)
+        required: false
+        type: string
+        default: "quality"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Timeout for build jobs in minutes"
+        required: false
+        type: number
+        default: 30
+
+    outputs:
+      artifact-name:
+        description: >-
+          Uploaded artifact name (matrix legs append -<node-version>). For
+          multi-leg matrices this reflects one completed leg; prefer the
+          documented naming convention for downloads.
+        value: ${{ jobs.build.outputs.artifact-name }}
+      artifact-id:
+        description: "actions/upload-artifact artifact-id from the build job"
+        value: ${{ jobs.build.outputs.artifact-id }}
+      artifact-url:
+        description: "actions/upload-artifact artifact-url from the build job"
+        value: ${{ jobs.build.outputs.artifact-url }}
+
+jobs:
+  prepare:
+    name: Prepare Build Matrix
+    runs-on: ${{ inputs.runner-image }}
+    # Independent short cap: the caller's timeout-minutes bounds the build job.
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+      matrix-mode: ${{ steps.validate.outputs.matrix-mode }}
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Validate build artifact inputs
+        id: validate
+        shell: bash
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          NODE_VERSION: ${{ inputs.node-version }}
+          NODE_VERSION_MATRIX: ${{ inputs.node-version-matrix }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/validate-build-artifact-inputs.sh
+      - name: Generate Node.js matrix
+        id: matrix
+        shell: bash
+        env:
+          MATRIX_KEY: node-version
+          MATRIX_LABEL: Node.js
+          DEFAULT_VERSION: ${{ steps.validate.outputs.versions }}
+          VERSIONS_INPUT: ${{ steps.validate.outputs.versions }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
+
+  build:
+    name: ${{ inputs.job-name }}
+    needs: prepare
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.prepare.outputs.matrix) }}
+
+    outputs:
+      artifact-name: ${{ steps.resolve-name.outputs.artifact-name }}
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-url: ${{ steps.upload.outputs.artifact-url }}
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Resolve artifact name
+        id: resolve-name
+        shell: bash
+        env:
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          NODE_VERSION: ${{ matrix.node-version }}
+          MATRIX_MODE: ${{ needs.prepare.outputs.matrix-mode }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/resolve-build-artifact-name.sh
+      - name: Build and validate artifact
+        shell: bash
+        env:
+          BUILD_COMMAND: ${{ inputs.build-command }}
+          POST_BUILD_TEST_COMMAND: ${{ inputs.post-build-test-command }}
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-build-artifact.sh
+      - name: Upload build artifact
+        id: upload
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ steps.resolve-name.outputs.artifact-name }}
+          path: ${{ inputs.working-directory }}/${{ inputs.artifact-path }}
+          retention-days: ${{ inputs.retention-days }}
+          if-no-files-found: error

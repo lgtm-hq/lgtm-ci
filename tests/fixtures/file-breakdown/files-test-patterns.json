@@ -1,0 +1,6 @@
+[
+  {"filename": "tests/test_main.py", "status": "added", "additions": 10, "deletions": 0},
+  {"filename": "src/handler_test.go", "status": "added", "additions": 5, "deletions": 0},
+  {"filename": "app/models.spec.ts", "status": "added", "additions": 8, "deletions": 0},
+  {"filename": "__tests__/Button.test.jsx", "status": "added", "additions": 6, "deletions": 0}
+]

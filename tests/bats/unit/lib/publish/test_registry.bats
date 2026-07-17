@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Tests for scripts/ci/lib/publish/registry.sh
 
-bats_require_minimum_version 1.5.0
+bats_require_minimum_version 1.7.0
 
 load "../../../../helpers/common"
 load "../../../../helpers/mocks"

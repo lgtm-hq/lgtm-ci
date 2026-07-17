@@ -15,6 +15,12 @@ standard shape: they check out lgtm-ci tooling, run the language runner,
 optionally collect coverage, and post/update a PR summary comment via
 `reusable-publish-test-summary.yml` when `pull-requests: write` is granted.
 
+With `coverage: false` (the default), the PR summary is totals-only — no
+Coverage / Code Coverage sections and no “Unable to retrieve coverage…”
+warning. With `coverage: true`, rich or totals-with-percent comments stay as
+today; a missing report still warns. See workflow-contract.md
+[Comment body selection](../workflow-contract.md#comment-body-selection).
+
 ### reusable-test-python.yml
 
 ```yaml

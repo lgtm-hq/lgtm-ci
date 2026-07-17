@@ -1,0 +1,9 @@
+{
+  "stats": {
+    "expected": 5,
+    "unexpected": 1,
+    "flaky": 2,
+    "skipped": 0,
+    "duration": 3000
+  }
+}

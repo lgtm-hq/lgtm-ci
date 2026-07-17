@@ -71,6 +71,150 @@ _trim_section_body() {
 	'
 }
 
+# Build a comparison key for a "- " changelog bullet. Display text is unchanged.
+# Non-bullet lines yield an empty key (fail closed: never treated as duplicates).
+# Usage: _normalize_changelog_bullet_key "$line"
+_normalize_changelog_bullet_key() {
+	local line="${1:-}"
+
+	[[ "$line" =~ ^-\  ]] || {
+		printf ''
+		return 0
+	}
+
+	# Comparison-only: lowercase, strip trailing (#N)/(sha), backticks, articles,
+	# and the filler phrase " as a ", then collapse whitespace. Do not strip bare
+	# "as" — it often carries role/format meaning (e.g. "export as CSV").
+	# SHA match avoids awk interval expressions ({n,m}) for POSIX portability.
+	printf '%s\n' "$line" | awk '
+		{
+			line = tolower($0)
+			while (1) {
+				if (match(line, /[[:space:]]*\(#[0-9]+\)[[:space:]]*$/)) {
+					line = substr(line, 1, RSTART - 1)
+					continue
+				}
+				if (match(line, /[[:space:]]*\([0-9a-f]+\)[[:space:]]*$/)) {
+					paren = substr(line, RSTART, RLENGTH)
+					gsub(/[^0-9a-f]/, "", paren)
+					hlen = length(paren)
+					if (hlen >= 7 && hlen <= 40) {
+						line = substr(line, 1, RSTART - 1)
+						continue
+					}
+				}
+				break
+			}
+			gsub(/`/, "", line)
+			gsub(/ as a /, " ", line)
+			n = split(line, words, /[[:space:]]+/)
+			out = ""
+			for (i = 1; i <= n; i++) {
+				w = words[i]
+				if (w == "" || w == "a" || w == "an" || w == "the") {
+					continue
+				}
+				out = (out == "" ? w : out " " w)
+			}
+			print out
+		}
+	'
+}
+
+# Extract **scope** from a normalized bullet key, or empty if absent.
+# Usage: _changelog_bullet_scope_key "$normalized_key"
+_changelog_bullet_scope_key() {
+	local key="${1:-}"
+
+	if [[ "$key" =~ ^-\ \*\*([^*]+)\*\*: ]]; then
+		printf '%s' "${BASH_REMATCH[1]}"
+	else
+		printf ''
+	fi
+}
+
+# Return 0 when candidate should be treated as a duplicate of existing.
+# Exact normalized match, or same **scope**: with one key containing the other
+# when the shorter key is at least 70% the length of the longer (avoids dropping
+# Unreleased bullets that substantially extend a generated line).
+# Usage: _changelog_bullet_keys_duplicate "$candidate_key" "$existing_key"
+_changelog_bullet_keys_duplicate() {
+	local candidate="${1:-}"
+	local existing="${2:-}"
+	local candidate_scope existing_scope
+	local shorter longer shorter_len longer_len
+
+	[[ -z "$candidate" || -z "$existing" ]] && return 1
+	[[ "$candidate" == "$existing" ]] && return 0
+
+	candidate_scope=$(_changelog_bullet_scope_key "$candidate")
+	existing_scope=$(_changelog_bullet_scope_key "$existing")
+	[[ -n "$candidate_scope" && "$candidate_scope" == "$existing_scope" ]] || return 1
+
+	if [[ ${#candidate} -le ${#existing} ]]; then
+		shorter="$candidate"
+		longer="$existing"
+	else
+		shorter="$existing"
+		longer="$candidate"
+	fi
+	[[ "$longer" == *"$shorter"* ]] || return 1
+
+	shorter_len=${#shorter}
+	longer_len=${#longer}
+	[[ "$longer_len" -gt 0 ]] || return 1
+	# Integer percent: require shorter >= 70% of longer.
+	[[ $((shorter_len * 100)) -ge $((longer_len * 70)) ]]
+}
+
+# Merge generated (left) and Unreleased (right) section bodies, collapsing
+# duplicate "- " bullets. Prefers generated display text; keeps unique
+# Unreleased bullets; preserves generated-first order. Fail closed: non-bullets
+# and ambiguous lines are retained. Blank lines from either side are dropped so
+# skipped duplicates do not leave orphaned separators.
+# Usage: _dedupe_changelog_section_bodies "$left" "$right"
+_dedupe_changelog_section_bodies() {
+	local left="${1:-}"
+	local right="${2:-}"
+	local -a generated_keys=()
+	local line key existing_key is_dup output=""
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		[[ -z "${line//[[:space:]]/}" ]] && continue
+		key=$(_normalize_changelog_bullet_key "$line")
+		if [[ -n "$key" ]]; then
+			generated_keys+=("$key")
+		fi
+		if [[ -n "$output" ]]; then
+			output+=$'\n'
+		fi
+		output+="$line"
+	done <<<"$left"
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		[[ -z "${line//[[:space:]]/}" ]] && continue
+		key=$(_normalize_changelog_bullet_key "$line")
+		if [[ -n "$key" ]]; then
+			is_dup=false
+			for existing_key in "${generated_keys[@]}"; do
+				if _changelog_bullet_keys_duplicate "$key" "$existing_key"; then
+					is_dup=true
+					break
+				fi
+			done
+			if $is_dup; then
+				continue
+			fi
+		fi
+		if [[ -n "$output" ]]; then
+			output+=$'\n'
+		fi
+		output+="$line"
+	done <<<"$right"
+
+	printf '%s' "$output"
+}
+
 # Append a line to a named KaC section accumulator.
 _append_to_section() {
 	local section="${1:-}"
@@ -198,7 +342,7 @@ merge_changelog_sections() {
 		eval "right=\"\${_MERGE_SECTION_${section}:-}\""
 		merged=""
 		if [[ -n "$left" && -n "$right" ]]; then
-			merged="${left}"$'\n'"${right}"
+			merged=$(_dedupe_changelog_section_bodies "$left" "$right")
 		elif [[ -n "$left" ]]; then
 			merged="$left"
 		else
