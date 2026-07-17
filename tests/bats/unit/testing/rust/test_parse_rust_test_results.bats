@@ -10,12 +10,7 @@ setup() {
 }
 
 @test "parse-rust-test-results parses junit and excludes skipped from pass rate total" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="10" failures="2" errors="0" skipped="3">
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "rust/junit-skipped-pass-rate.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	cd "$BATS_TEST_TMPDIR"
 	run env \
@@ -30,23 +25,8 @@ EOF
 }
 
 @test "parse-rust-test-results extracts coverage percent from lcov when enabled" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="2" failures="0" errors="0" skipped="0"/>
-EOF
-	cat >"${BATS_TEST_TMPDIR}/rust-coverage.lcov" <<'EOF'
-TN:
-SF:/workspace/src/lib.rs
-FN:1,covered_fn
-FNDA:3,covered_fn
-FNF:1
-FNH:1
-DA:1,1
-DA:2,1
-LF:2
-LH:2
-end_of_record
-EOF
+	install_fixture "rust/junit-two-tests.xml" "${BATS_TEST_TMPDIR}/junit.xml"
+	install_fixture "rust/coverage-full.lcov" "${BATS_TEST_TMPDIR}/rust-coverage.lcov"
 
 	cd "$BATS_TEST_TMPDIR"
 	run env \
@@ -59,17 +39,8 @@ EOF
 }
 
 @test "parse-rust-test-results calculates partial coverage correctly" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="1" failures="0" errors="0" skipped="0"/>
-EOF
-	cat >"${BATS_TEST_TMPDIR}/rust-coverage.lcov" <<'EOF'
-TN:
-SF:/workspace/src/lib.rs
-LF:4
-LH:3
-end_of_record
-EOF
+	install_fixture "rust/junit-one-test.xml" "${BATS_TEST_TMPDIR}/junit.xml"
+	install_fixture "rust/coverage-partial.lcov" "${BATS_TEST_TMPDIR}/rust-coverage.lcov"
 
 	cd "$BATS_TEST_TMPDIR"
 	run env \
@@ -82,10 +53,7 @@ EOF
 }
 
 @test "parse-rust-test-results fails when coverage enabled but lcov file is missing" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="1" failures="0" errors="0" skipped="0"/>
-EOF
+	install_fixture "rust/junit-one-test.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	cd "$BATS_TEST_TMPDIR"
 	run env \

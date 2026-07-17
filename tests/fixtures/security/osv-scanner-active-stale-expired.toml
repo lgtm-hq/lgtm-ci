@@ -1,0 +1,14 @@
+[[IgnoredVulns]]
+id = "GHSA-active-1111"
+ignoreUntil = 2099-12-31
+reason = "still present"
+
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+ignoreUntil = 2099-12-31
+reason = "resolved upstream"
+
+[[IgnoredVulns]]
+id = "GHSA-expired-3333"
+ignoreUntil = 2020-01-01
+reason = "past due"
