@@ -714,7 +714,7 @@ Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
 | `github-pages`   | GitHub Pages deploy/publish (OIDC)                                   |
 | `github-tooling` | Validate action pinning + GitHub raw/codeload                        |
 | `docker`         | Docker build/pull/push (`reusable-docker.yml`)                       |
-| `playwright`     | Playwright E2E + browser CDN downloads                               |
+| `playwright`     | Playwright E2E + browser CDN downloads (`reusable-test-e2e*.yml`)    |
 | `pypi`           | PyPI/TestPyPI publish and availability checks                        |
 | `rubygems`       | RubyGems publish                                                     |
 | `npm-publish`    | npm OIDC trusted publish + Sigstore (`oauth2.sigstore.dev`)          |
@@ -1195,6 +1195,43 @@ Work jobs require only `contents: read`. Optional `publish-test-summary` delegat
 to `reusable-publish-test-summary.yml` (requires `pull-requests: write` on the
 caller publish job path). Outputs: `passed`, `build-passed`, `test-passed`.
 
+## Playwright E2E (`reusable-test-e2e-playwright`)
+
+`reusable-test-e2e-playwright.yml` is the consumer-facing Playwright E2E reusable
+for smoke / a11y / full suites as thin callers with distinct `job-name` values
+(turbo-themes 🎭/🔥/♿, holy-grail 🎭 E2E). Prefer this over hand-rolled
+Playwright jobs; do not migrate consumers until org rulesets are updated in
+lockstep (#514).
+
+Single always-run job uses `name: ${{ inputs.job-name }}`. Browser binaries are
+cached under `~/.cache/ms-playwright` keyed on the resolved `@playwright/test`
+version plus `browsers`. Install uses `npx playwright install --with-deps
+<browsers>`. HTML/blob reports upload only on failure when `upload-report: true`.
+Default `egress-preset: playwright` (CDN + apt mirrors); the workflow default
+`allowed-endpoints` mirrors that full baseline under replace semantics (#512).
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input            | Default                | Notes                                              |
+| ---------------- | ---------------------- | -------------------------------------------------- |
+| `job-name`       | required               | Check name / summary suite title                   |
+| `test-command`   | `npx playwright test`  | Base CLI; `project` / `grep` append                |
+| `project`        | empty                  | `--project=` filter                                |
+| `grep`           | empty                  | `--grep=` filter (e.g. `@smoke`)                   |
+| `node-version`   | `20`                   | setup-node                                         |
+| `browsers`       | `chromium`             | install `--with-deps` list or `all`                |
+| `upload-report`  | `true`                 | HTML/blob artifact **on failure only**             |
+| `base-url`       | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                 |
+| `web-server`     | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config        |
+| `package-manager` | `npm`                  | `npm` / `bun` / `pnpm`                             |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Plus standard contract inputs (`tooling-ref`, egress, `runner-image`,
+`timeout-minutes`, `draft-pr-skip`, `publish-test-summary`, `comment-marker`).
+Caller permissions: `contents: read` (add `pull-requests: write` when publishing
+summaries). merge_group-safe: tests run; PR summary gated to `pull_request`.
+
 ## Merge queue (`merge_group`)
 
 Callers using GitHub merge queue must add `merge_group:` triggers to every
@@ -1215,6 +1252,7 @@ starter examples (`examples/ci-*.yml`) include `merge_group:` by default.
 | `reusable-test-python.yml`             | Tests run; PR summary comment on PR only       |
 | `reusable-test-node.yml`               | Tests run; PR summary comment on PR only       |
 | `reusable-test-node-custom.yml`        | Tests run; PR summary comment on PR only       |
+| `reusable-test-e2e-playwright.yml`     | Tests run; PR summary comment on PR only       |
 | `reusable-test-rust-build.yml`         | Safe to run — no PR context required           |
 | `reusable-coverage.yml`                | Coverage runs; PR comment on PR only           |
 | `reusable-semantic-pr-title.yml`       | No-op on `merge_group` — title validated on PR |

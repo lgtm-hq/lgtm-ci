@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **workflows**: `reusable-test-e2e-playwright.yml` for Playwright E2E
+  (versioned browser cache, project/grep filters, failure-only report upload,
+  `playwright` egress preset) (#521)
+
 ### Changed
 
 ### Deprecated
