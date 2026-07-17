@@ -44,17 +44,7 @@ teardown() {
 # =============================================================================
 
 @test "parse_lighthouse_json: parses all category scores" {
-	cat >"${BATS_TEST_TMPDIR}/lhr.json" <<'EOF'
-{
-  "categories": {
-    "performance": {"score": 0.85},
-    "accessibility": {"score": 0.92},
-    "best-practices": {"score": 0.88},
-    "seo": {"score": 0.95},
-    "pwa": {"score": 0.60}
-  }
-}
-EOF
+	install_fixture "lighthouse/parse-lighthouse-json-parses-all-category-scores.json" "${BATS_TEST_TMPDIR}/lhr.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"
@@ -66,17 +56,7 @@ EOF
 }
 
 @test "parse_lighthouse_json: handles 100% scores" {
-	cat >"${BATS_TEST_TMPDIR}/lhr.json" <<'EOF'
-{
-  "categories": {
-    "performance": {"score": 1.0},
-    "accessibility": {"score": 1.0},
-    "best-practices": {"score": 1.0},
-    "seo": {"score": 1.0},
-    "pwa": {"score": 1.0}
-  }
-}
-EOF
+	install_fixture "lighthouse/parse-lighthouse-json-handles-100-scores.json" "${BATS_TEST_TMPDIR}/lhr.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"
@@ -88,16 +68,7 @@ EOF
 }
 
 @test "parse_lighthouse_json: handles 0% scores" {
-	cat >"${BATS_TEST_TMPDIR}/lhr.json" <<'EOF'
-{
-  "categories": {
-    "performance": {"score": 0},
-    "accessibility": {"score": 0},
-    "best-practices": {"score": 0},
-    "seo": {"score": 0}
-  }
-}
-EOF
+	install_fixture "lighthouse/parse-lighthouse-json-handles-0-scores.json" "${BATS_TEST_TMPDIR}/lhr.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"
@@ -109,16 +80,7 @@ EOF
 }
 
 @test "parse_lighthouse_json: handles missing PWA category" {
-	cat >"${BATS_TEST_TMPDIR}/lhr.json" <<'EOF'
-{
-  "categories": {
-    "performance": {"score": 0.90},
-    "accessibility": {"score": 0.95},
-    "best-practices": {"score": 0.85},
-    "seo": {"score": 0.88}
-  }
-}
-EOF
+	install_fixture "lighthouse/parse-lighthouse-json-handles-missing-pwa-category.json" "${BATS_TEST_TMPDIR}/lhr.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"
@@ -130,16 +92,7 @@ EOF
 }
 
 @test "parse_lighthouse_json: floors decimal scores correctly" {
-	cat >"${BATS_TEST_TMPDIR}/lhr.json" <<'EOF'
-{
-  "categories": {
-    "performance": {"score": 0.899},
-    "accessibility": {"score": 0.501},
-    "best-practices": {"score": 0.999},
-    "seo": {"score": 0.001}
-  }
-}
-EOF
+	install_fixture "lighthouse/parse-lighthouse-json-floors-decimal-scores-correctly.json" "${BATS_TEST_TMPDIR}/lhr.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"
@@ -170,13 +123,7 @@ EOF
 }
 
 @test "parse_lighthouse_manifest: extracts URLs from manifest" {
-	cat >"${BATS_TEST_TMPDIR}/manifest.json" <<'EOF'
-[
-  {"url": "https://example.com/", "summary": "./lhr-0.json"},
-  {"url": "https://example.com/about", "summary": "./lhr-1.json"},
-  {"url": "https://example.com/contact", "summary": "./lhr-2.json"}
-]
-EOF
+	install_fixture "lighthouse/parse-lighthouse-manifest-extracts-urls-from-manifest.json" "${BATS_TEST_TMPDIR}/manifest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"
@@ -190,11 +137,7 @@ EOF
 }
 
 @test "parse_lighthouse_manifest: handles single URL" {
-	cat >"${BATS_TEST_TMPDIR}/manifest.json" <<'EOF'
-[
-  {"url": "https://example.com/", "summary": "./lhr.json"}
-]
-EOF
+	install_fixture "lighthouse/parse-lighthouse-manifest-handles-single-url.json" "${BATS_TEST_TMPDIR}/manifest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"
@@ -206,9 +149,7 @@ EOF
 }
 
 @test "parse_lighthouse_manifest: handles empty manifest" {
-	cat >"${BATS_TEST_TMPDIR}/manifest.json" <<'EOF'
-[]
-EOF
+	install_fixture "lighthouse/parse-lighthouse-manifest-handles-empty-manifest.json" "${BATS_TEST_TMPDIR}/manifest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/lighthouse.sh\"

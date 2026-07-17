@@ -44,7 +44,7 @@ teardown() {
 # =============================================================================
 
 @test "parse_vitest_json: parses Vitest 4 aggregate JSON reporter under set -u" {
-	local fixture="${PROJECT_ROOT}/tests/fixtures/json/vitest-4-results.json"
+	local fixture="${FIXTURES_DIR}/json/vitest-4-results.json"
 
 	run bash -c "
 		set -u
@@ -57,14 +57,7 @@ teardown() {
 }
 
 @test "parse_vitest_json: parses aggregate num* fields" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "numPassedTests": 8,
-  "numFailedTests": 2,
-  "numPendingTests": 1,
-  "numTotalTests": 11
-}
-EOF
+	install_fixture "vitest/aggregate-num-fields.json" "${BATS_TEST_TMPDIR}/vitest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -76,14 +69,7 @@ EOF
 }
 
 @test "parse_vitest_json: handles all passing in aggregate format" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "numPassedTests": 15,
-  "numFailedTests": 0,
-  "numPendingTests": 0,
-  "numTotalTests": 15
-}
-EOF
+	install_fixture "vitest/all-passing.json" "${BATS_TEST_TMPDIR}/vitest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -95,15 +81,7 @@ EOF
 }
 
 @test "parse_vitest_json: includes numTodoTests in skipped count" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "numPassedTests": 1,
-  "numFailedTests": 0,
-  "numPendingTests": 1,
-  "numTodoTests": 2,
-  "numTotalTests": 4
-}
-EOF
+	install_fixture "vitest/with-todo.json" "${BATS_TEST_TMPDIR}/vitest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -115,16 +93,7 @@ EOF
 }
 
 @test "parse_vitest_json: calculates duration from timestamps" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "numPassedTests": 1,
-  "numFailedTests": 0,
-  "numPendingTests": 0,
-  "numTotalTests": 1,
-  "startTime": 1700000000000,
-  "endTime": 1700000010000
-}
-EOF
+	install_fixture "vitest/with-timestamps.json" "${BATS_TEST_TMPDIR}/vitest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -140,12 +109,7 @@ EOF
 # =============================================================================
 
 @test "parse_vitest_json: returns failure when numTotalTests is missing" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "numPassedTests": 1,
-  "numFailedTests": 0
-}
-EOF
+	install_fixture "vitest/missing-total.json" "${BATS_TEST_TMPDIR}/vitest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -158,13 +122,7 @@ EOF
 }
 
 @test "parse_vitest_json: returns failure when numTotalTests is not a number" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "numPassedTests": 1,
-  "numFailedTests": 0,
-  "numTotalTests": "2"
-}
-EOF
+	install_fixture "vitest/non-numeric-total.json" "${BATS_TEST_TMPDIR}/vitest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -177,15 +135,7 @@ EOF
 }
 
 @test "parse_vitest_json: handles missing endTime" {
-	cat >"${BATS_TEST_TMPDIR}/vitest.json" <<'EOF'
-{
-  "numPassedTests": 0,
-  "numFailedTests": 0,
-  "numPendingTests": 0,
-  "numTotalTests": 0,
-  "startTime": 1700000000000
-}
-EOF
+	install_fixture "vitest/missing-endtime.json" "${BATS_TEST_TMPDIR}/vitest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -216,15 +166,7 @@ EOF
 # =============================================================================
 
 @test "parse_vitest_coverage: parses istanbul coverage-summary.json" {
-	cat >"${BATS_TEST_TMPDIR}/coverage-summary.json" <<'EOF'
-{
-  "total": {
-    "lines": {"pct": 85.5},
-    "branches": {"pct": 72.3},
-    "functions": {"pct": 90.0}
-  }
-}
-EOF
+	install_fixture "vitest/coverage-summary-standard.json" "${BATS_TEST_TMPDIR}/coverage-summary.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -236,15 +178,7 @@ EOF
 }
 
 @test "parse_vitest_coverage: handles 100% coverage" {
-	cat >"${BATS_TEST_TMPDIR}/coverage-summary.json" <<'EOF'
-{
-  "total": {
-    "lines": {"pct": 100},
-    "branches": {"pct": 100},
-    "functions": {"pct": 100}
-  }
-}
-EOF
+	install_fixture "vitest/coverage-summary-100.json" "${BATS_TEST_TMPDIR}/coverage-summary.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -256,15 +190,7 @@ EOF
 }
 
 @test "parse_vitest_coverage: handles 0% coverage" {
-	cat >"${BATS_TEST_TMPDIR}/coverage-summary.json" <<'EOF'
-{
-  "total": {
-    "lines": {"pct": 0},
-    "branches": {"pct": 0},
-    "functions": {"pct": 0}
-  }
-}
-EOF
+	install_fixture "vitest/coverage-summary-0.json" "${BATS_TEST_TMPDIR}/coverage-summary.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"
@@ -276,15 +202,7 @@ EOF
 }
 
 @test "parse_vitest_coverage: uses lines coverage as primary percentage" {
-	cat >"${BATS_TEST_TMPDIR}/coverage-summary.json" <<'EOF'
-{
-  "total": {
-    "lines": {"pct": 80},
-    "branches": {"pct": 60},
-    "functions": {"pct": 90}
-  }
-}
-EOF
+	install_fixture "vitest/coverage-summary-lines-primary.json" "${BATS_TEST_TMPDIR}/coverage-summary.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/vitest.sh\"

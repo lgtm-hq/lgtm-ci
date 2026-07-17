@@ -1,0 +1,4 @@
+[[IgnoredVulns]]
+id = "CVE-2024-00001"
+ignoreUntil = 2099-06-01
+reason = "custom path"

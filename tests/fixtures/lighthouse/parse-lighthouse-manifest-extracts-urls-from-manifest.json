@@ -1,0 +1,5 @@
+[
+  {"url": "https://example.com/", "summary": "./lhr-0.json"},
+  {"url": "https://example.com/about", "summary": "./lhr-1.json"},
+  {"url": "https://example.com/contact", "summary": "./lhr-2.json"}
+]

@@ -1,0 +1,11 @@
+{
+  "suites": [
+    {
+      "tests": [
+        {"title": "test1", "status": "expected"},
+        {"title": "test2", "status": "flaky"},
+        {"title": "test3", "status": "expected"}
+      ]
+    }
+  ]
+}

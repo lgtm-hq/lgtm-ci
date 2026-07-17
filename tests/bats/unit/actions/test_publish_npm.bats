@@ -22,12 +22,7 @@ teardown() {
 }
 
 write_package_json() {
-	cat >"${PKG_DIR}/package.json" <<'EOF'
-{
-  "name": "test-package",
-  "version": "1.2.3"
-}
-EOF
+	install_fixture "npm/package-valid.json" "${PKG_DIR}/package.json"
 }
 
 @test "publish-npm: fails without STEP" {
@@ -57,12 +52,7 @@ EOF
 }
 
 @test "publish-npm: validate fails on invalid version" {
-	cat >"${PKG_DIR}/package.json" <<'EOF'
-{
-  "name": "test-package",
-  "version": "not-semver"
-}
-EOF
+	install_fixture "npm/package-invalid-version.json" "${PKG_DIR}/package.json"
 
 	STEP="validate" WORKING_DIRECTORY="$PKG_DIR" run bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_failure
@@ -119,11 +109,7 @@ EOF
 
 	npmrc_dir="${BATS_TEST_TMPDIR}/npmrc-home"
 	mkdir -p "$npmrc_dir"
-	cat >"${npmrc_dir}/.npmrc" <<'EOF'
-registry=https://registry.npmjs.org/
-//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}
-always-auth=true
-EOF
+	install_fixture "npm/npmrc-with-auth-token" "${npmrc_dir}/.npmrc"
 
 	STEP="publish" WORKING_DIRECTORY="$PKG_DIR" PROVENANCE="false" \
 		HOME="$npmrc_dir" \
