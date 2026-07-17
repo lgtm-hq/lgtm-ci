@@ -1,0 +1,4 @@
+[[IgnoredVulns]]
+id = "GHSA-only-1111"
+ignoreUntil = 2099-12-31
+reason = "probe missing"

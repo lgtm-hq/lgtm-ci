@@ -1,0 +1,11 @@
+<?xml version="1.0" ?>
+<coverage line-rate="0.85">
+  <packages>
+    <package name="mypackage">
+      <classes>
+        <class filename="mypackage/main.py">
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>

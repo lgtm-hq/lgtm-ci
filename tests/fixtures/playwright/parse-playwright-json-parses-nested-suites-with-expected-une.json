@@ -1,0 +1,22 @@
+{
+  "suites": [
+    {
+      "title": "Suite 1",
+      "tests": [
+        {"title": "test1", "status": "expected"},
+        {"title": "test2", "status": "expected"},
+        {"title": "test3", "status": "unexpected"}
+      ]
+    },
+    {
+      "title": "Suite 2",
+      "tests": [
+        {"title": "test4", "status": "expected"},
+        {"title": "test5", "status": "skipped"}
+      ]
+    }
+  ],
+  "stats": {
+    "duration": 5000
+  }
+}

@@ -16,21 +16,7 @@ teardown() {
 }
 
 @test "remove-stale-suppressions: preserves non-IgnoredVulns sections" {
-	cat >".osv-scanner.toml" <<'EOF'
-# Suppression config
-[PackageOverrides]
-path = "vendor/"
-
-[[IgnoredVulns]]
-id = "GHSA-stale-1111"
-ignoreUntil = 2099-12-31
-reason = "resolved"
-
-[[IgnoredVulns]]
-id = "GHSA-active-2222"
-ignoreUntil = 2099-12-31
-reason = "still present"
-EOF
+	install_fixture "security/osv-scanner-with-package-overrides.toml" ".osv-scanner.toml"
 
 	run bash -c "export REMOVE_IDS_JSON='[\"GHSA-stale-1111\"]'; python3 '$REMOVE_SCRIPT' .osv-scanner.toml"
 	assert_success
@@ -44,16 +30,7 @@ EOF
 }
 
 @test "remove-stale-suppressions: keeps comments inside retained blocks" {
-	cat >".osv-scanner.toml" <<'EOF'
-[[IgnoredVulns]]
-id = "GHSA-stale-3333"
-reason = "resolved upstream"
-
-[[IgnoredVulns]]
-# still relevant
-id = "GHSA-active-4444"
-reason = "active"
-EOF
+	install_fixture "security/osv-scanner-with-block-comments.toml" ".osv-scanner.toml"
 
 	run bash -c "export REMOVE_IDS_JSON='[\"GHSA-stale-3333\"]'; python3 '$REMOVE_SCRIPT' .osv-scanner.toml"
 	assert_success
@@ -64,15 +41,7 @@ EOF
 }
 
 @test "remove-stale-suppressions: handles single-quoted id" {
-	cat >".osv-scanner.toml" <<'EOF'
-[[IgnoredVulns]]
-id = 'GHSA-stale-XXXX'
-reason = "resolved upstream"
-
-[[IgnoredVulns]]
-id = "GHSA-active-5555"
-reason = "still present"
-EOF
+	install_fixture "security/osv-scanner-single-quoted-id.toml" ".osv-scanner.toml"
 
 	run bash -c "export REMOVE_IDS_JSON='[\"GHSA-stale-XXXX\"]'; python3 '$REMOVE_SCRIPT' .osv-scanner.toml"
 	assert_success
