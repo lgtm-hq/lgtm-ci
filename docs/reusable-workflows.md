@@ -185,6 +185,16 @@ jobs:
     with:
       browsers: chromium
 
+  e2e-playwright:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-playwright.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      job-name: "🎭 E2E Tests"
+      browsers: chromium
+      grep: "@smoke"
+
   e2e-matrix:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@<sha>
     permissions:
@@ -201,6 +211,31 @@ coverage was collected, otherwise test pass/fail totals). Artifact-based comment
 use `reusable-publish-artifact-report.yml`.
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).
+
+### Playwright E2E (`reusable-test-e2e-playwright.yml`)
+
+Thin callers express full / smoke / a11y as separate jobs with distinct
+`job-name` values. `project` and `grep` append to `test-command` (default
+`npx playwright test`). Browser cache key uses the resolved Playwright version.
+Reports upload on failure only when `upload-report` is true. Default egress
+preset is `playwright`.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input             | Type    | Required | Default               | Purpose                          |
+| ----------------- | ------- | -------- | --------------------- | -------------------------------- |
+| `job-name`        | string  | yes      | —                     | Check / summary title            |
+| `test-command`    | string  | no       | `npx playwright test` | Base CLI                         |
+| `project`         | string  | no       | empty                 | `--project` filter               |
+| `grep`            | string  | no       | empty                 | `--grep` filter                  |
+| `browsers`        | string  | no       | `chromium`            | install `--with-deps` targets    |
+| `upload-report`   | boolean | no       | `true`                | HTML/blob artifact on failure    |
+| `base-url`        | string  | no       | empty                 | `BASE_URL` passthrough           |
+| `web-server`      | string  | no       | empty                 | `PLAYWRIGHT_WEB_SERVER`          |
+
+<!-- markdownlint-enable MD013 -->
+
+Outputs: `tests-passed`, `tests-failed`, `tests-total`, `passed`.
 
 ### Pages coverage HTML inputs (`reusable-test-node`)
 

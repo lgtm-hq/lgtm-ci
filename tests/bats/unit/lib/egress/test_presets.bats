@@ -68,6 +68,8 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints playwright"
 	assert_success
 	assert_output --partial 'cdn.playwright.dev:443'
+	assert_output --partial 'playwright.azureedge.net:443'
+	assert_output --partial 'playwright-akamai.azureedge.net:443'
 	assert_output --partial 'registry.npmjs.org:443'
 }
 
