@@ -5,6 +5,10 @@
 # Required environment variables:
 #   STEP - cache-key | assemble-args | install-browsers | run | parse | summary | upload-gate
 #
+# STEP=assemble-args is a unit-test / direct-invocation helper that writes
+# filter-args to GITHUB_OUTPUT. The workflow uses STEP=run, which calls
+# assemble_playwright_filter_args() internally.
+#
 # Optional environment variables (by step):
 #   WORKING_DIRECTORY - Project directory (default: .)
 #   BROWSERS - Browser list for install/cache (default: chromium); "all" installs all
@@ -120,7 +124,6 @@ assemble-args)
 	else
 		log_info "No Playwright project/grep filters"
 	fi
-	printf '%s' "$filter_args"
 	;;
 
 install-browsers)

@@ -311,8 +311,10 @@ jobs:
           retention-days: 30
           if-no-files-found: ignore
       - name: Fail on Playwright errors
+        # always(): re-raise even if a prior always() step (report upload) failed
         if: >-
-          steps.run.outputs.exit-code != ''
+          always()
+          && steps.run.outputs.exit-code != ''
           && steps.run.outputs.exit-code != '0'
         shell: bash
         env:
