@@ -18,6 +18,12 @@ the floating major version tag. Both accept `report-failures` (default
 main-branch workflow (Docker publish, Pages deploy, …), one open issue per
 `workflow-key` + branch.
 
+Repos that bump several ecosystem manifests in one PR (for example
+`package.json`, `VERSION`, a gemspec, and `pyproject.toml`) use
+`reusable-release-multi-ecosystem.yml` with a `manifests` JSON map — same
+App-token / changelog / failure-reporting family as version-pr. See
+[workflow-contract.md](../workflow-contract.md#multi-ecosystem-release-contract).
+
 Cargo workspaces that bump `Cargo.toml` on `main` use
 `reusable-release-auto-tag.yml` with `version-source: cargo`.
 

@@ -311,6 +311,8 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                         |
 | Release version       | `contents: write`, `pull-requests: write`,           | `reusable-release-version-pr.yml`            |
 |                       | `actions: read`, `issues: write`                     |                                              |
+| Release multi-eco     | `contents: write`, `pull-requests: write`,           | `reusable-release-multi-ecosystem.yml`       |
+|                       | `actions: read`, `issues: write`                     |                                              |
 | Release auto-tag      | `contents: write`, `actions: read`, `issues: write`  | `reusable-release-auto-tag.yml`              |
 | Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
 | PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
@@ -505,7 +507,8 @@ Workflows that cannot use the composite keep the explicit tooling checkout →
 `resolve-egress-allowlist` → `step-security/harden-runner` sequence for tooling
 layout, but still pass allowlists via **inputs or literals** (the action `pre`
 hook cannot see step outputs): the release workflows' two-phase checkouts
-(`reusable-release-auto-tag`, `reusable-release-version-pr`), the tiered Rust
+(`reusable-release-auto-tag`, `reusable-release-version-pr`,
+`reusable-release-multi-ecosystem`), the tiered Rust
 workflows where `validate-runner-policy` must run between checkout and resolve
 (`reusable-build-rust-binaries`, `reusable-publish-rust-release`), and the
 bootstrap/fallback flow in `reusable-validate-lintro-version`.
@@ -537,7 +540,7 @@ Callers may still pin **other** lgtm-ci composites with
 `lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;
 that pattern does not apply inside reusable workflow steps that need dynamic refs.
 
-### Release workflows (`reusable-release-auto-tag`, `reusable-release-version-pr`)
+### Release workflows (`reusable-release-auto-tag`, `reusable-release-version-pr`, `reusable-release-multi-ecosystem`)
 
 These jobs use **two** lgtm-ci checkouts:
 
@@ -692,6 +695,46 @@ Flow when `version-source: cargo`:
 
 Callers should filter `on.push.paths` to the manifest (for example `Cargo.toml`)
 and set `create-release: false` when release assets are published separately.
+
+### Multi-ecosystem release contract
+
+`reusable-release-multi-ecosystem.yml` extends the release-version-pr family for
+repos that bump **explicit file paths** across ecosystems in one version PR
+(reference consumer: turbo-themes). It reuses `scripts/ci/release/*` (guard,
+changelog, App-token PR creation, merge-queue skip, failure reporting) and
+adds a file→kind manifests runner under `scripts/ci/release/ecosystems/`.
+
+**Decision (extend vs new):** shipped as a **sibling** reusable rather than
+overloading `reusable-release-version-pr.yml`. The existing workflow is
+ecosystem-CSV + layout defaults (`node,ruby,python`); multi-ecosystem needs a
+required `manifests` JSON map (`npm|raw|gemspec|pep621`), `bump`
+(`auto-from-commits` \| `explicit`), and `prerelease-tag`. Sharing scripts keeps
+one release family; a separate workflow keeps the consumer contracts clear.
+
+<!-- markdownlint-disable MD013 MD060 -->
+
+| Input             | Default              | Purpose                                                         |
+| ----------------- | -------------------- | --------------------------------------------------------------- |
+| `manifests`       | *(required)*         | JSON object: file path → kind (`npm`, `raw`, `gemspec`, `pep621`) |
+| `bump`            | `auto-from-commits`  | Or `explicit` with `version`                                    |
+| `version`         | *(empty)*            | Semver when `bump=explicit` (optional `v` prefix)               |
+| `prerelease-tag`  | *(empty)*            | Appended as `-<tag>` (e.g. `rc.1` → `1.2.3-rc.1`)               |
+| `changelog`       | `true`               | Generate/update `CHANGELOG.md` via existing release scripts     |
+| `job-name`        | `Create Version PR`  | Visible check name                                              |
+| `tooling-ref`     | *(workflow SHA)*     | Pin lgtm-ci scripts/actions                                     |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+**Runner policy:** same two-checkout harden path as `reusable-release-version-pr`
+(GitHub-hosted Linux under `egress-policy: block` with `egress-preset:
+github-tooling` by default). Failure reporting uses workflow key
+`release-multi-ecosystem` and the shared `report-release-failure` job (see
+[Release failure reporting](#release-failure-reporting)).
+
+Kinds update only the listed path: `npm` → `package.json` `.version`; `raw` →
+plain-text `VERSION`; `gemspec` → literal `.version = "..."` in a `.gemspec`
+(constant-backed gemspecs need `version-update-script` / `version.rb`);
+`pep621` → `[project].version` only (no `__init__.py` / `uv.lock`).
 
 ## Egress presets
 
