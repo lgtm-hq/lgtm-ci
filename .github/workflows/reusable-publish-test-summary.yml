@@ -181,11 +181,7 @@ jobs:
         shell: bash
         env:
           COVERAGE_FILE: ${{ inputs.coverage-file }}
-        run: |
-          if [[ -z "${COVERAGE_FILE}" ]]; then
-            echo "::error::rich-coverage-comment requires coverage-file (path to summary file)"
-            exit 1
-          fi
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-rich-coverage-inputs.sh
       - name: Download coverage artifact
         id: download-coverage
         if: >-

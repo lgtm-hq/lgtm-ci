@@ -60,10 +60,15 @@ reported check path and breaks the ruleset gate (checks stay **Expected**
 while Actions shows green under the new name).
 
 Never require an **app-generated code-scanning summary check** (for example
-the bare `CodeQL` context from the github-advanced-security app) in a repo
-that uses a merge queue: the app only produces it on `pull_request` commits,
-never merge-group commits, so every queue entry times out and is silently
-ejected (holy-grail, 2026-07-11). Require the workflow-job contexts instead.
+the bare `CodeQL` context from the github-advanced-security app, without a
+`{caller_job_id} /` prefix) in a repo that uses a merge queue: the app produces
+that check only on `pull_request` commits, never on `merge_group` commits, so
+every queue entry times out and is silently ejected
+([holy-grail#143](https://github.com/lgtm-hq/holy-grail/pull/143)). Require
+the workflow-job contexts from `reusable-codeql.yml` instead — for example
+`codeql / 🔬 CodeQL Analysis` — matching the exact `{caller_job_id} / {job-name}`
+path in this registry. Never combine a merge queue with required app-level
+code-scanning summary checks.
 
 When migrating additional rulesets, update this table in the same PR that
 updates the live ruleset.

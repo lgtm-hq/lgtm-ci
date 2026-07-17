@@ -487,6 +487,7 @@ jobs:
         env:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           COVERAGE_SUMMARY_FILE: ${{ inputs.coverage-summary-file }}
+          COVERAGE: ${{ inputs.coverage }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-coverage-test-summary.sh
       - name: Upload coverage for test summary

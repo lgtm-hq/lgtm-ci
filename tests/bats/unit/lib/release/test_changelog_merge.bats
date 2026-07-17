@@ -305,6 +305,139 @@ Second paragraph'
 - existing entry'
 }
 
+@test "merge_changelog_sections: dedupes bullets after stripping (#N) and sha suffixes" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)" "### Added
+
+- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#239)"
+	'
+	assert_success
+	assert_output --partial "### Added"
+	assert_output --partial "- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)"
+	refute_output --partial "(#239)"
+}
+
+@test "merge_changelog_sections: collapses near-duplicate Unreleased restatement" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)" "### Added
+
+- **gateway**: add \`JuliusBrussee/caveman\` as a SHA-pinned vendor catalog (#239)"
+	'
+	assert_success
+	assert_output --partial "- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)"
+	refute_output --partial "vendor catalog"
+	refute_output --partial "(#239)"
+}
+
+@test "merge_changelog_sections: retains unique Unreleased security note" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add vendor pin (#240) (3f672a5)" "### Security
+
+- Rotate API tokens after vendor catalog change"
+	'
+	assert_success
+	assert_output --partial "### Added"
+	assert_output --partial "- **gateway**: add vendor pin (#240) (3f672a5)"
+	assert_output --partial "### Security"
+	assert_output --partial "- Rotate API tokens after vendor catalog change"
+}
+
+@test "merge_changelog_sections: keeps two different Added bullets" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add caveman vendor (#240) (3f672a5)" "### Added
+
+- **skills**: document caveman install path (#241)"
+	'
+	assert_success
+	assert_output --partial $'- **gateway**: add caveman vendor (#240) (3f672a5)
+- **skills**: document caveman install path (#241)'
+}
+
+@test "merge_changelog_sections: keeps same-scope Unreleased that substantially extends generated" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **auth**: add OAuth2 provider (#10) (abcdef0)" "### Added
+
+- **auth**: add OAuth2 provider login page and user profile sync (#11)"
+	'
+	assert_success
+	assert_output --partial "- **auth**: add OAuth2 provider (#10) (abcdef0)"
+	assert_output --partial "- **auth**: add OAuth2 provider login page and user profile sync (#11)"
+}
+
+@test "merge_changelog_sections: dedupes exact unscoped bullets after (#N)/sha strip" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Fixed
+
+- Fix typo in readme (#12) (abcdef0)" "### Fixed
+
+- Fix typo in readme (#13)"
+	'
+	assert_success
+	assert_output --partial "- Fix typo in readme (#12) (abcdef0)"
+	refute_output --partial "(#13)"
+}
+
+@test "merge_changelog_sections: keeps similar but distinct unscoped bullets" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Fixed
+
+- Fix typo in readme (#12) (abcdef0)" "### Fixed
+
+- Fix typo in contributing guide (#13)"
+	'
+	assert_success
+	assert_output --partial $'- Fix typo in readme (#12) (abcdef0)
+- Fix typo in contributing guide (#13)'
+}
+
+@test "merge_changelog_sections: keeps role-distinct as phrases after dropping as stopword" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Changed
+
+- **deploy**: run service as systemd (#20) (abcdef0)" "### Changed
+
+- **deploy**: run service as container (#21)"
+	'
+	assert_success
+	assert_output --partial "- **deploy**: run service as systemd (#20) (abcdef0)"
+	assert_output --partial "- **deploy**: run service as container (#21)"
+}
+
+@test "merge_changelog_sections: skips blank lines around deduped Unreleased bullets" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add vendor pin (#240) (3f672a5)" "### Added
+
+- **gateway**: add vendor pin (#239)
+
+- **skills**: note install path (#241)"
+	'
+	assert_success
+	assert_output --partial $'- **gateway**: add vendor pin (#240) (3f672a5)
+- **skills**: note install path (#241)'
+	refute_output --partial "(#239)"
+}
+
 @test "merge_changelog_sections: concatenates prose and breaking blocks" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"

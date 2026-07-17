@@ -486,25 +486,17 @@ jobs:
         id: record-pages-upload
         shell: bash
         env:
-          PAGES_UPLOAD_OUTCOME: ${{ steps.pages-upload.outcome }}
-        run: |
-          if [[ "${PAGES_UPLOAD_OUTCOME}" == "success" ]]; then
-            echo "uploaded=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "uploaded=false" >>"$GITHUB_OUTPUT"
-          fi
+          OUTPUT_NAME: uploaded
+          CONDITION_VALUE: ${{ steps.pages-upload.outcome }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
       - name: Record job passed output
         if: always()
         id: record-passed
         shell: bash
         env:
-          JOB_STATUS: ${{ job.status }}
-        run: |
-          if [[ "${JOB_STATUS}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ job.status }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   aggregate:
     name: Aggregate Rust Results
     needs:

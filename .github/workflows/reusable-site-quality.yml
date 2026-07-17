@@ -411,12 +411,10 @@ jobs:
         if: always()
         id: record
         shell: bash
-        run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ job.status }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   site-test:
     name: ${{ inputs.test-job-name }}
     runs-on: ${{ inputs.runner-image }}
@@ -556,12 +554,10 @@ jobs:
         if: always()
         id: record
         shell: bash
-        run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ job.status }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   publish-test-summary:
     needs: site-test
     if: >-

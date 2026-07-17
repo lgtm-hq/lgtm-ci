@@ -44,17 +44,7 @@ teardown() {
 # =============================================================================
 
 @test "parse_pytest_json: parses standard pytest-json-report format" {
-	cat >"${BATS_TEST_TMPDIR}/pytest.json" <<'EOF'
-{
-  "summary": {
-    "passed": 10,
-    "failed": 2,
-    "skipped": 1,
-    "total": 13
-  },
-  "duration": 5.25
-}
-EOF
+	install_fixture "pytest/standard-report.json" "${BATS_TEST_TMPDIR}/pytest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -66,17 +56,7 @@ EOF
 }
 
 @test "parse_pytest_json: handles all passing tests" {
-	cat >"${BATS_TEST_TMPDIR}/pytest.json" <<'EOF'
-{
-  "summary": {
-    "passed": 25,
-    "failed": 0,
-    "skipped": 0,
-    "total": 25
-  },
-  "duration": 12.5
-}
-EOF
+	install_fixture "pytest/all-passing.json" "${BATS_TEST_TMPDIR}/pytest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -88,15 +68,7 @@ EOF
 }
 
 @test "parse_pytest_json: calculates total when not provided" {
-	cat >"${BATS_TEST_TMPDIR}/pytest.json" <<'EOF'
-{
-  "summary": {
-    "passed": 5,
-    "failed": 2,
-    "skipped": 3
-  }
-}
-EOF
+	install_fixture "pytest/no-total.json" "${BATS_TEST_TMPDIR}/pytest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -108,13 +80,7 @@ EOF
 }
 
 @test "parse_pytest_json: handles missing fields with defaults" {
-	cat >"${BATS_TEST_TMPDIR}/pytest.json" <<'EOF'
-{
-  "summary": {
-    "passed": 5
-  }
-}
-EOF
+	install_fixture "pytest/missing-fields.json" "${BATS_TEST_TMPDIR}/pytest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -126,11 +92,7 @@ EOF
 }
 
 @test "parse_pytest_json: handles empty summary" {
-	cat >"${BATS_TEST_TMPDIR}/pytest.json" <<'EOF'
-{
-  "summary": {}
-}
-EOF
+	install_fixture "pytest/empty-summary.json" "${BATS_TEST_TMPDIR}/pytest.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -161,15 +123,7 @@ EOF
 # =============================================================================
 
 @test "parse_pytest_coverage: parses coverage.py JSON format" {
-	cat >"${BATS_TEST_TMPDIR}/coverage.json" <<'EOF'
-{
-  "totals": {
-    "percent_covered": 85.5,
-    "covered_lines": 171,
-    "covered_branches": 42
-  }
-}
-EOF
+	install_fixture "pytest/coverage-standard.json" "${BATS_TEST_TMPDIR}/coverage.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -182,15 +136,7 @@ EOF
 }
 
 @test "parse_pytest_coverage: handles 100% coverage" {
-	cat >"${BATS_TEST_TMPDIR}/coverage.json" <<'EOF'
-{
-  "totals": {
-    "percent_covered": 100.0,
-    "covered_lines": 500,
-    "covered_branches": 100
-  }
-}
-EOF
+	install_fixture "pytest/coverage-100.json" "${BATS_TEST_TMPDIR}/coverage.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -202,15 +148,7 @@ EOF
 }
 
 @test "parse_pytest_coverage: handles 0% coverage" {
-	cat >"${BATS_TEST_TMPDIR}/coverage.json" <<'EOF'
-{
-  "totals": {
-    "percent_covered": 0,
-    "covered_lines": 0,
-    "covered_branches": 0
-  }
-}
-EOF
+	install_fixture "pytest/coverage-0.json" "${BATS_TEST_TMPDIR}/coverage.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"
@@ -222,14 +160,7 @@ EOF
 }
 
 @test "parse_pytest_coverage: handles missing branch coverage" {
-	cat >"${BATS_TEST_TMPDIR}/coverage.json" <<'EOF'
-{
-  "totals": {
-    "percent_covered": 75.0,
-    "covered_lines": 150
-  }
-}
-EOF
+	install_fixture "pytest/coverage-no-branches.json" "${BATS_TEST_TMPDIR}/coverage.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/pytest.sh\"

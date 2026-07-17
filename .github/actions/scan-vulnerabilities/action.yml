@@ -62,12 +62,12 @@ runs:
     - name: Determine scan target
       id: target
       shell: bash
-      run: |
-        if [[ -n "${{ inputs.sbom-file }}" && "${{ inputs.target-type }}" == "sbom" ]]; then
-          echo "path=${{ inputs.sbom-file }}" >> "$GITHUB_OUTPUT"
-        else
-          echo "path=${{ inputs.target }}" >> "$GITHUB_OUTPUT"
-        fi
+      env:
+        STEP: resolve-target
+        TARGET: ${{ inputs.target }}
+        TARGET_TYPE: ${{ inputs.target-type }}
+        SBOM_FILE: ${{ inputs.sbom-file }}
+      run: $SCRIPTS_DIR/ci/actions/scan-vulnerabilities.sh
 
     - name: Scan for vulnerabilities
       id: scan
@@ -105,7 +105,7 @@ runs:
     - name: Upload SARIF to GitHub Security
       if: inputs.upload-sarif == 'true' && steps.sarif.outputs.sarif-file != ''
       # Pinned to SHA for supply chain security
-      uses: github/codeql-action/upload-sarif@99df26d4f13ea111d4ec1a7dddef6063f76b97e9 # v4.37.0
+      uses: github/codeql-action/upload-sarif@7188fc363630916deb702c7fdcf4e481b751f97a # v4.37.1
       with:
         sarif_file: ${{ steps.sarif.outputs.sarif-file }}
         category: "vulnerability-scan"

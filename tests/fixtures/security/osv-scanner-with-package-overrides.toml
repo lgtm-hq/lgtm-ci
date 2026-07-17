@@ -1,0 +1,13 @@
+# Suppression config
+[PackageOverrides]
+path = "vendor/"
+
+[[IgnoredVulns]]
+id = "GHSA-stale-1111"
+ignoreUntil = 2099-12-31
+reason = "resolved"
+
+[[IgnoredVulns]]
+id = "GHSA-active-2222"
+ignoreUntil = 2099-12-31
+reason = "still present"
