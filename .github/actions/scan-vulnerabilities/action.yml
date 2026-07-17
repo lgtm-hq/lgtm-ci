@@ -62,12 +62,12 @@ runs:
     - name: Determine scan target
       id: target
       shell: bash
-      run: |
-        if [[ -n "${{ inputs.sbom-file }}" && "${{ inputs.target-type }}" == "sbom" ]]; then
-          echo "path=${{ inputs.sbom-file }}" >> "$GITHUB_OUTPUT"
-        else
-          echo "path=${{ inputs.target }}" >> "$GITHUB_OUTPUT"
-        fi
+      env:
+        STEP: resolve-target
+        TARGET: ${{ inputs.target }}
+        TARGET_TYPE: ${{ inputs.target-type }}
+        SBOM_FILE: ${{ inputs.sbom-file }}
+      run: $SCRIPTS_DIR/ci/actions/scan-vulnerabilities.sh
 
     - name: Scan for vulnerabilities
       id: scan
