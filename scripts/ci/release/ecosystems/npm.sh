@@ -28,5 +28,10 @@ fi
 export ECOSYSTEM_CONFIG_JSON
 ECOSYSTEM_CONFIG_JSON=$(jq -nc --arg p "$MANIFEST_PATH" '{package: $p}')
 
+if [[ ! -f "$SCRIPT_DIR/node.sh" ]]; then
+	log_error "[npm] node.sh missing at: $SCRIPT_DIR/node.sh"
+	exit 1
+fi
+
 log_info "[npm] Delegating to node updater for $MANIFEST_PATH"
 "$SCRIPT_DIR/node.sh"

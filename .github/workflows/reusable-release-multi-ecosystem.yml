@@ -439,7 +439,7 @@ jobs:
 
             ### Changelog
 
-            ${{ steps.changelog.outputs.changelog || '_Changelog generation disabled._' }}
+            ${{ steps.changelog.outputs.changelog || '_No changelog entries._' }}
 
             ### What happens when this PR is merged?
 
