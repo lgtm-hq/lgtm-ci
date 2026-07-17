@@ -432,12 +432,10 @@ jobs:
         if: always()
         id: record
         shell: bash
-        run: |
-          if [[ "${{ job.status }}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ job.status }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   aggregate-tests:
     name: Aggregate Node.js Results
     needs:
@@ -493,15 +491,15 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
       - name: Aggregate matrix custom test results
         id: aggregate
         shell: bash
-        run: |
-          if [[ "${{ needs.test.result }}" == "success" ]]; then
-            echo "passed=true" >>"$GITHUB_OUTPUT"
-          else
-            echo "passed=false" >>"$GITHUB_OUTPUT"
-          fi
+        env:
+          OUTPUT_NAME: passed
+          CONDITION_VALUE: ${{ needs.test.result }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
   pages-coverage-status:
     name: Pages coverage upload status
     needs:

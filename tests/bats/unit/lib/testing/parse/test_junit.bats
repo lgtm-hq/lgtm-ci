@@ -44,12 +44,7 @@ teardown() {
 # =============================================================================
 
 @test "parse_junit_xml: parses single testsuite element" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="10" failures="2" errors="1" skipped="1">
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "junit/single-suite-mixed.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -62,12 +57,7 @@ EOF
 }
 
 @test "parse_junit_xml: handles testsuite with all passing" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="5" failures="0" errors="0" skipped="0">
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "junit/single-suite-all-passing.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -79,12 +69,7 @@ EOF
 }
 
 @test "parse_junit_xml: handles missing optional attributes" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="5" failures="1">
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "junit/single-suite-missing-optional.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -101,13 +86,7 @@ EOF
 # =============================================================================
 
 @test "parse_junit_xml: parses testsuites with summary attributes" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuites tests="20" failures="3" errors="1" skipped="2">
-  <testsuite name="suite1" tests="10" failures="1" errors="0" skipped="1"/>
-  <testsuite name="suite2" tests="10" failures="2" errors="1" skipped="1"/>
-</testsuites>
-EOF
+	install_fixture "junit/testsuites-summary.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -120,13 +99,7 @@ EOF
 }
 
 @test "parse_junit_xml: aggregates from child testsuites when root has no attributes" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuites>
-  <testsuite name="suite1" tests="10" failures="1" errors="0" skipped="1"/>
-  <testsuite name="suite2" tests="15" failures="2" errors="1" skipped="0"/>
-</testsuites>
-EOF
+	install_fixture "junit/testsuites-aggregate-children.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -141,13 +114,7 @@ EOF
 
 @test "parse_junit_xml: handles mixed root and child attributes" {
 	# Root has tests but child has failures
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuites tests="10">
-  <testsuite name="suite1" tests="5" failures="1" errors="0" skipped="0"/>
-  <testsuite name="suite2" tests="5" failures="1" errors="0" skipped="1"/>
-</testsuites>
-EOF
+	install_fixture "junit/testsuites-mixed-root-child.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -165,13 +132,7 @@ EOF
 # =============================================================================
 
 @test "parse_junit_xml: handles XML prolog and DOCTYPE" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE testsuite SYSTEM "junit.dtd">
-<testsuite name="tests" tests="3" failures="0" errors="0" skipped="0">
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "junit/with-doctype.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -183,14 +144,7 @@ EOF
 }
 
 @test "parse_junit_xml: handles XML comments" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<!-- This is a comment -->
-<testsuite name="tests" tests="5" failures="1" errors="0" skipped="0">
-  <!-- Another comment -->
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "junit/with-comments.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -203,12 +157,7 @@ EOF
 
 @test "parse_junit_xml: prevents negative passed count" {
 	# Edge case where failures + skipped > total (malformed input)
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="tests" tests="5" failures="3" errors="3" skipped="2">
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "junit/negative-passed-clamp.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"
@@ -221,12 +170,7 @@ EOF
 }
 
 @test "parse_junit_xml: handles attribute order variations" {
-	cat >"${BATS_TEST_TMPDIR}/junit.xml" <<'EOF'
-<?xml version="1.0" encoding="UTF-8"?>
-<testsuite failures="2" name="tests" skipped="1" tests="10" errors="0">
-  <testcase name="test1"/>
-</testsuite>
-EOF
+	install_fixture "junit/attribute-order.xml" "${BATS_TEST_TMPDIR}/junit.xml"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/junit.sh\"

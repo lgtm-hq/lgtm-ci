@@ -1,0 +1,17 @@
+{
+  "results": [
+    {
+      "tool": "osv_scanner",
+      "issues_count": 1,
+      "issues": [
+        {
+          "message": "GHSA-xxxx-yyyy-zzzz in example-crate",
+          "file": "Cargo.lock"
+        }
+      ],
+      "ai_metadata": {
+        "suppressions": []
+      }
+    }
+  ]
+}

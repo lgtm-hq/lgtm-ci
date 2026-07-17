@@ -65,6 +65,29 @@ export FIXTURES_DIR="${PROJECT_ROOT}/tests/fixtures"
 export HELPERS_DIR="${PROJECT_ROOT}/tests/helpers"
 
 # =============================================================================
+# Fixture helpers
+# =============================================================================
+# Copy a committed sample input from tests/fixtures/ into a test workspace path.
+# Usage: install_fixture <relative-path-under-fixtures> <destination-path>
+install_fixture() {
+	local relative="$1"
+	local dest="$2"
+	local src="${FIXTURES_DIR}/${relative}"
+
+	if [[ ! -f "$src" ]]; then
+		echo "ERROR: fixture not found: ${src}" >&2
+		return 1
+	fi
+
+	local dest_dir
+	dest_dir="$(dirname -- "$dest")"
+	if [[ "$dest_dir" != "." ]]; then
+		mkdir -p "$dest_dir"
+	fi
+	cp "$src" "$dest"
+}
+
+# =============================================================================
 # Bash 4+ detection and usage
 # =============================================================================
 # Find bash 4+ for tests that require modern bash features

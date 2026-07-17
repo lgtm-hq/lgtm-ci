@@ -16,41 +16,10 @@ teardown() {
 }
 
 @test "classify-suppressions: classifies active stale and expired entries" {
-	cat >".osv-scanner.toml" <<'EOF'
-[[IgnoredVulns]]
-id = "GHSA-active-1111"
-ignoreUntil = 2099-12-31
-reason = "still present"
-
-[[IgnoredVulns]]
-id = "GHSA-stale-2222"
-ignoreUntil = 2099-12-31
-reason = "resolved upstream"
-
-[[IgnoredVulns]]
-id = "GHSA-expired-3333"
-ignoreUntil = 2020-01-01
-reason = "past due"
-EOF
+	install_fixture "security/osv-scanner-active-stale-expired.toml" ".osv-scanner.toml"
 
 	local probe_json
-	probe_json=$(
-		cat <<'EOF'
-{
-  "results": [
-    {
-      "packages": [
-        {
-          "vulnerabilities": [
-            { "id": "GHSA-active-1111" }
-          ]
-        }
-      ]
-    }
-  ]
-}
-EOF
-	)
+	probe_json=$(cat "${FIXTURES_DIR}/security/probe-active-1111.json")
 
 	run bash -c "printf '%s' '$probe_json' | python3 '$CLASSIFY_SCRIPT'"
 	assert_success
@@ -62,12 +31,7 @@ EOF
 
 @test "classify-suppressions: honors CONFIG_PATH override" {
 	mkdir -p config
-	cat >"config/custom.toml" <<'EOF'
-[[IgnoredVulns]]
-id = "CVE-2024-00001"
-ignoreUntil = 2099-06-01
-reason = "custom path"
-EOF
+	install_fixture "security/osv-scanner-custom-path.toml" "config/custom.toml"
 
 	local probe_json='{"results":[{"packages":[{"vulnerabilities":[{"id":"CVE-2024-00001"}]}]}]}'
 
@@ -77,15 +41,7 @@ EOF
 }
 
 @test "classify-suppressions: treats missing ignoreUntil as permanent suppression" {
-	cat >".osv-scanner.toml" <<'EOF'
-[[IgnoredVulns]]
-id = "GHSA-permanent-stale"
-reason = "no expiry date"
-
-[[IgnoredVulns]]
-id = "GHSA-permanent-active"
-reason = "no expiry date"
-EOF
+	install_fixture "security/osv-scanner-permanent.toml" ".osv-scanner.toml"
 
 	local probe_json='{"results":[{"packages":[{"vulnerabilities":[{"id":"GHSA-permanent-active"}]}]}]}'
 
@@ -97,12 +53,7 @@ EOF
 }
 
 @test "classify-suppressions: fails on empty probe output" {
-	cat >".osv-scanner.toml" <<'EOF'
-[[IgnoredVulns]]
-id = "GHSA-only-1111"
-ignoreUntil = 2099-12-31
-reason = "probe missing"
-EOF
+	install_fixture "security/osv-scanner-probe-missing.toml" ".osv-scanner.toml"
 
 	run bash -c "printf '' | python3 '$CLASSIFY_SCRIPT'"
 	assert_failure
