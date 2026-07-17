@@ -4,6 +4,7 @@
 
 load "../../../../helpers/common"
 load "../../../../helpers/mocks"
+load "../../../../helpers/health_mocks"
 
 LIB="${PROJECT_ROOT}/scripts/ci/actions/docker/health-lib.sh"
 ACTIONS_LIB="${PROJECT_ROOT}/scripts/ci/lib/actions.sh"
@@ -16,49 +17,6 @@ setup() {
 teardown() {
 	restore_path
 	teardown_temp_dir
-}
-
-_install_health_mocks() {
-	local mock_bin="${BATS_TEST_TMPDIR}/bin"
-	local docker_calls="${BATS_TEST_TMPDIR}/mock_calls_docker"
-	mkdir -p "$mock_bin"
-	: >"$docker_calls"
-
-	# docker: run prints a container id; logs/rm succeed
-	cat >"${mock_bin}/docker" <<EOF
-#!/usr/bin/env bash
-echo "\$*" >> '${docker_calls}'
-case "\$1" in
-run)
-	echo "cid123"
-	exit 0
-	;;
-logs|rm)
-	exit 0
-	;;
-*)
-	exit 0
-	;;
-esac
-EOF
-	chmod +x "${mock_bin}/docker"
-
-	# macOS/CI-safe timeout: ignore duration, run remaining args
-	cat >"${mock_bin}/timeout" <<'EOF'
-#!/usr/bin/env bash
-shift
-exec "$@"
-EOF
-	chmod +x "${mock_bin}/timeout"
-
-	# Make port_listening succeed immediately via nc
-	cat >"${mock_bin}/nc" <<'EOF'
-#!/usr/bin/env bash
-exit 0
-EOF
-	chmod +x "${mock_bin}/nc"
-
-	export PATH="${mock_bin}:$PATH"
 }
 
 @test "health-lib.sh: parse_duration_seconds accepts Ns form" {
