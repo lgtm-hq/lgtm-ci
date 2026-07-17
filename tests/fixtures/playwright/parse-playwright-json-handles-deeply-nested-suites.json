@@ -1,0 +1,27 @@
+{
+  "suites": [
+    {
+      "title": "Root",
+      "suites": [
+        {
+          "title": "Nested",
+          "tests": [
+            {"title": "test1", "status": "expected"},
+            {"title": "test2", "status": "expected"}
+          ],
+          "suites": [
+            {
+              "title": "Deeply Nested",
+              "tests": [
+                {"title": "test3", "status": "unexpected"}
+              ]
+            }
+          ]
+        }
+      ],
+      "tests": [
+        {"title": "root test", "status": "expected"}
+      ]
+    }
+  ]
+}

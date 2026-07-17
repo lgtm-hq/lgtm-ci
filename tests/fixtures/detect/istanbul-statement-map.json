@@ -1,0 +1,6 @@
+{
+  "/path/to/file.js": {
+    "path": "/path/to/file.js",
+    "statementMap": {}
+  }
+}

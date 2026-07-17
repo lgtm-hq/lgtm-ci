@@ -1,0 +1,4 @@
+[
+  {"filename": ".github/workflows/ci.yml", "status": "modified", "additions": 1, "deletions": 1},
+  {"filename": "config.yml", "status": "modified", "additions": 2, "deletions": 0}
+]

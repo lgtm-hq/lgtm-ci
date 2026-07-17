@@ -10,7 +10,6 @@ actions/generate-matrix.sh
 actions/generate-sbom.sh
 actions/merge-node-coverage.sh
 actions/merge-playwright-reports.sh
-actions/run-bats-tests.sh
 actions/run-command.sh
 actions/run-lighthouse.sh
 actions/run-playwright.sh

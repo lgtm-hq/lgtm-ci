@@ -20,28 +20,12 @@ teardown() {
 
 write_mixed_fixture() {
 	local file="$1"
-	cat >"$file" <<'EOF'
-[
-  {"filename": "scripts/ci/actions/foo.sh", "status": "modified", "additions": 10, "deletions": 2},
-  {"filename": "scripts/ci/lib/bar.sh", "status": "added", "additions": 30, "deletions": 0},
-  {"filename": "docs/guide.md", "status": "modified", "additions": 5, "deletions": 5},
-  {"filename": "README.md", "status": "removed", "additions": 0, "deletions": 40}
-]
-EOF
+	install_fixture "file-breakdown/files-mixed.json" "$file"
 }
 
 write_all_categories_fixture() {
 	local file="$1"
-	cat >"$file" <<'EOF'
-[
-  {"filename": ".github/workflows/ci.yml", "status": "modified", "additions": 3, "deletions": 1},
-  {"filename": "src/main.py", "status": "modified", "additions": 20, "deletions": 5},
-  {"filename": "tests/test_main.py", "status": "added", "additions": 15, "deletions": 0},
-  {"filename": "README.md", "status": "modified", "additions": 2, "deletions": 1},
-  {"filename": "logo.png", "status": "added", "additions": 0, "deletions": 0},
-  {"filename": "pyproject.toml", "status": "modified", "additions": 1, "deletions": 1}
-]
-EOF
+	install_fixture "file-breakdown/files-all-categories.json" "$file"
 }
 
 # =============================================================================
@@ -236,9 +220,7 @@ sys.stdout.write("    - \".\"\n")
 }
 
 @test "generate-file-breakdown: escapes pipes and strips backticks in paths" {
-	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
-[{"filename": "weird|name`x.txt", "status": "added", "additions": 1, "deletions": 0}]
-EOF
+	install_fixture "file-breakdown/files-pipe-backtick.json" "${BATS_TEST_TMPDIR}/files.json"
 	run env \
 		STEP="generate" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
@@ -270,9 +252,7 @@ EOF
 }
 
 @test "generate-file-breakdown: neutralizes newlines in filenames" {
-	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
-[{"filename": "line1\nline2.txt", "status": "added", "additions": 1, "deletions": 0}]
-EOF
+	install_fixture "file-breakdown/files-newline-name.json" "${BATS_TEST_TMPDIR}/files.json"
 	run env \
 		STEP="generate" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
@@ -333,12 +313,7 @@ EOF
 }
 
 @test "generate-file-breakdown: CI-CD category takes priority over Config for .github files" {
-	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
-[
-  {"filename": ".github/workflows/ci.yml", "status": "modified", "additions": 1, "deletions": 1},
-  {"filename": "config.yml", "status": "modified", "additions": 2, "deletions": 0}
-]
-EOF
+	install_fixture "file-breakdown/files-cicd-vs-config.json" "${BATS_TEST_TMPDIR}/files.json"
 	run env \
 		STEP="generate" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
@@ -349,14 +324,7 @@ EOF
 }
 
 @test "generate-file-breakdown: test patterns match various conventions" {
-	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
-[
-  {"filename": "tests/test_main.py", "status": "added", "additions": 10, "deletions": 0},
-  {"filename": "src/handler_test.go", "status": "added", "additions": 5, "deletions": 0},
-  {"filename": "app/models.spec.ts", "status": "added", "additions": 8, "deletions": 0},
-  {"filename": "__tests__/Button.test.jsx", "status": "added", "additions": 6, "deletions": 0}
-]
-EOF
+	install_fixture "file-breakdown/files-test-patterns.json" "${BATS_TEST_TMPDIR}/files.json"
 	run env \
 		STEP="generate" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
@@ -383,12 +351,7 @@ EOF
 }
 
 @test "generate-file-breakdown: bar shows 100% for single category" {
-	cat >"${BATS_TEST_TMPDIR}/files.json" <<'EOF'
-[
-  {"filename": "src/a.py", "status": "added", "additions": 10, "deletions": 0},
-  {"filename": "src/b.py", "status": "added", "additions": 5, "deletions": 0}
-]
-EOF
+	install_fixture "file-breakdown/files-single-category.json" "${BATS_TEST_TMPDIR}/files.json"
 	run env \
 		STEP="generate" \
 		PR_FILES_JSON="${BATS_TEST_TMPDIR}/files.json" \
@@ -404,11 +367,7 @@ EOF
 @test "generate-file-breakdown: extends categories via config file" {
 	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
 
-	cat >"${BATS_TEST_TMPDIR}/config.yml" <<'YAML'
-categories:
-  Shell-Scripts:
-    - "\\.sh$"
-YAML
+	install_fixture "file-breakdown/config-shell-scripts.yml" "${BATS_TEST_TMPDIR}/config.yml"
 
 	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
 	run env \
@@ -427,11 +386,7 @@ YAML
 	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
 
 	# Override Docs to only match .rst files
-	cat >"${BATS_TEST_TMPDIR}/config.yml" <<'YAML'
-categories:
-  Docs:
-    - "\\.rst$"
-YAML
+	install_fixture "file-breakdown/config-docs-rst.yml" "${BATS_TEST_TMPDIR}/config.yml"
 
 	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
 	run env \
@@ -449,11 +404,7 @@ YAML
 	python3 -c 'import yaml' 2>/dev/null || skip "python3 yaml module not available"
 
 	# Unquoted true: becomes bool True under yaml.safe_load — must still render.
-	cat >"${BATS_TEST_TMPDIR}/config.yml" <<'YAML'
-categories:
-  true:
-    - "\\.sh$"
-YAML
+	install_fixture "file-breakdown/config-bool-key.yml" "${BATS_TEST_TMPDIR}/config.yml"
 
 	write_mixed_fixture "${BATS_TEST_TMPDIR}/files.json"
 	run env \

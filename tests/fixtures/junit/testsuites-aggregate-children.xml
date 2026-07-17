@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="suite1" tests="10" failures="1" errors="0" skipped="1"/>
+  <testsuite name="suite2" tests="15" failures="2" errors="1" skipped="0"/>
+</testsuites>

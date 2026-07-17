@@ -1,0 +1,13 @@
+{
+  "results": [
+    {
+      "packages": [
+        {
+          "vulnerabilities": [
+            { "id": "GHSA-active-1111" }
+          ]
+        }
+      ]
+    }
+  ]
+}

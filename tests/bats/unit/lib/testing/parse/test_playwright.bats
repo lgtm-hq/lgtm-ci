@@ -44,30 +44,7 @@ teardown() {
 # =============================================================================
 
 @test "parse_playwright_json: parses nested suites with expected/unexpected status" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "suites": [
-    {
-      "title": "Suite 1",
-      "tests": [
-        {"title": "test1", "status": "expected"},
-        {"title": "test2", "status": "expected"},
-        {"title": "test3", "status": "unexpected"}
-      ]
-    },
-    {
-      "title": "Suite 2",
-      "tests": [
-        {"title": "test4", "status": "expected"},
-        {"title": "test5", "status": "skipped"}
-      ]
-    }
-  ],
-  "stats": {
-    "duration": 5000
-  }
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-parses-nested-suites-with-expected-une.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -79,19 +56,7 @@ EOF
 }
 
 @test "parse_playwright_json: handles passed/failed status variants" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "suites": [
-    {
-      "tests": [
-        {"title": "test1", "status": "passed"},
-        {"title": "test2", "status": "failed"},
-        {"title": "test3", "status": "passed"}
-      ]
-    }
-  ]
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-handles-passed-failed-status-variants.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -103,18 +68,7 @@ EOF
 }
 
 @test "parse_playwright_json: counts timedOut as failed" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "suites": [
-    {
-      "tests": [
-        {"title": "test1", "status": "expected"},
-        {"title": "test2", "status": "timedOut"}
-      ]
-    }
-  ]
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-counts-timedout-as-failed.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -126,19 +80,7 @@ EOF
 }
 
 @test "parse_playwright_json: counts flaky as failed" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "suites": [
-    {
-      "tests": [
-        {"title": "test1", "status": "expected"},
-        {"title": "test2", "status": "flaky"},
-        {"title": "test3", "status": "expected"}
-      ]
-    }
-  ]
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-counts-flaky-as-failed.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -154,16 +96,7 @@ EOF
 # =============================================================================
 
 @test "parse_playwright_json: falls back to stats object" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "stats": {
-    "expected": 8,
-    "unexpected": 2,
-    "skipped": 1,
-    "duration": 10000
-  }
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-falls-back-to-stats-object.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -175,17 +108,7 @@ EOF
 }
 
 @test "parse_playwright_json: includes flaky in stats failed count" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "stats": {
-    "expected": 5,
-    "unexpected": 1,
-    "flaky": 2,
-    "skipped": 0,
-    "duration": 3000
-  }
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-includes-flaky-in-stats-failed-count.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -202,14 +125,7 @@ EOF
 # =============================================================================
 
 @test "parse_playwright_json: converts duration from ms to seconds" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "stats": {
-    "expected": 1,
-    "duration": 5500
-  }
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-converts-duration-from-ms-to-seconds.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -222,14 +138,7 @@ EOF
 }
 
 @test "parse_playwright_json: handles small duration" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "stats": {
-    "expected": 1,
-    "duration": 100
-  }
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-handles-small-duration.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -242,13 +151,7 @@ EOF
 }
 
 @test "parse_playwright_json: handles missing duration" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "stats": {
-    "expected": 1
-  }
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-handles-missing-duration.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -264,35 +167,7 @@ EOF
 # =============================================================================
 
 @test "parse_playwright_json: handles deeply nested suites" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "suites": [
-    {
-      "title": "Root",
-      "suites": [
-        {
-          "title": "Nested",
-          "tests": [
-            {"title": "test1", "status": "expected"},
-            {"title": "test2", "status": "expected"}
-          ],
-          "suites": [
-            {
-              "title": "Deeply Nested",
-              "tests": [
-                {"title": "test3", "status": "unexpected"}
-              ]
-            }
-          ]
-        }
-      ],
-      "tests": [
-        {"title": "root test", "status": "expected"}
-      ]
-    }
-  ]
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-handles-deeply-nested-suites.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -304,11 +179,7 @@ EOF
 }
 
 @test "parse_playwright_json: handles empty suites" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "suites": []
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-handles-empty-suites.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
@@ -320,19 +191,7 @@ EOF
 }
 
 @test "parse_playwright_json: handles all passing tests" {
-	cat >"${BATS_TEST_TMPDIR}/playwright.json" <<'EOF'
-{
-  "suites": [
-    {
-      "tests": [
-        {"title": "test1", "status": "expected"},
-        {"title": "test2", "status": "expected"},
-        {"title": "test3", "status": "expected"}
-      ]
-    }
-  ]
-}
-EOF
+	install_fixture "playwright/parse-playwright-json-handles-all-passing-tests.json" "${BATS_TEST_TMPDIR}/playwright.json"
 
 	run bash -c "
 		source \"\$LIB_DIR/testing/parse/playwright.sh\"
