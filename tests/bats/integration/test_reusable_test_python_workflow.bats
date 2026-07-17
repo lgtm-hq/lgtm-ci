@@ -95,6 +95,27 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 	assert_success
 }
 
+@test "reusable-test-python: workflow outputs fall back when pipeline-skip is set" {
+	run awk '
+		/^jobs:/ { done = 1 }
+		!done && /^    outputs:/ { in_outputs = 1 }
+		!done && in_outputs && /^      [a-z-]+:/ { total++ }
+		!done && in_outputs && /inputs\.pipeline-skip &&/ { guarded++ }
+		END { exit !(total == 5 && guarded == 5) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-python: passed output reports true when pipeline-skip is set" {
+	run awk '
+		/^      passed:/ { in_passed = 1 }
+		in_passed && /inputs\.pipeline-skip && '\''true'\'' \|\|/ { found = 1 }
+		in_passed && /^jobs:/ { exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-test-python: pipeline-skip guards prepare, test, aggregate, and summary jobs" {
 	run awk '
 		function job_if_has_pipeline_skip(job,    in_job, if_line, found) {

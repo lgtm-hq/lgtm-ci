@@ -22,7 +22,7 @@ Where applicable, workflows accept:
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
 | `comment-marker` / `comment-title` | Upsert identity for summary comments (marker + heading)                |
 | `draft-pr-skip`                    | Skip PR jobs on draft pull requests (default `true` on test reusables) |
-| `pipeline-skip`                    | Skip test jobs when the caller deems the diff pipeline-irrelevant (default `false`; nested required contexts still report as skipped) |
+| `pipeline-skip`                    | Skip test jobs on pipeline-irrelevant diffs (default `false`)          |
 
 <!-- markdownlint-enable MD013 -->
 

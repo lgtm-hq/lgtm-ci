@@ -149,27 +149,34 @@ on:
       tests-passed:
         description: "Number of tests passed"
         value: >-
-          ${{ inputs.python-versions != '' && jobs.aggregate.outputs.tests-passed ||
+          ${{ inputs.pipeline-skip && '0' ||
+          inputs.python-versions != '' && jobs.aggregate.outputs.tests-passed ||
           jobs.test.outputs.tests-passed }}
       tests-failed:
         description: "Number of tests failed"
         value: >-
-          ${{ inputs.python-versions != '' && jobs.aggregate.outputs.tests-failed ||
+          ${{ inputs.pipeline-skip && '0' ||
+          inputs.python-versions != '' && jobs.aggregate.outputs.tests-failed ||
           jobs.test.outputs.tests-failed }}
       tests-total:
         description: "Total number of tests"
         value: >-
-          ${{ inputs.python-versions != '' && jobs.aggregate.outputs.tests-total ||
+          ${{ inputs.pipeline-skip && '0' ||
+          inputs.python-versions != '' && jobs.aggregate.outputs.tests-total ||
           jobs.test.outputs.tests-total }}
       coverage-percent:
         description: "Coverage percentage"
         value: >-
-          ${{ inputs.python-versions != '' && jobs.aggregate.outputs.coverage-percent ||
+          ${{ inputs.pipeline-skip && '0' ||
+          inputs.python-versions != '' && jobs.aggregate.outputs.coverage-percent ||
           jobs.test.outputs.coverage-percent }}
       passed:
-        description: "Whether all tests passed"
+        description: >-
+          Whether all tests passed. Reports 'true' when pipeline-skip is set so
+          callers gating on this output treat a skipped pipeline as green.
         value: >-
-          ${{ inputs.python-versions != '' && jobs.aggregate.outputs.passed ||
+          ${{ inputs.pipeline-skip && 'true' ||
+          inputs.python-versions != '' && jobs.aggregate.outputs.passed ||
           jobs.test.outputs.passed }}
 
 jobs:
