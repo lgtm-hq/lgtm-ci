@@ -51,6 +51,12 @@ There is no `checks-ui-framework` row: the repo's only gate is the shared
 `checks-quality` context. `ui-framework` is not in `checks-socket` because
 the Socket app does not scan it yet.
 
+Repo-level `merge-queue` rulesets (one per repo, targeting
+`~DEFAULT_BRANCH`) are structural — merge method, batch sizes, timeouts —
+and require no status-check contexts, so they are deliberately not
+registered in the tables above; this document registers check **names**
+only.
+
 `spotify-curator` went public on 2026-07-18, lifting its earlier
 private-repo caps: the repo-level `merge-queue` ruleset now exists
 (`19138667`) and the full security workflow set landed via
