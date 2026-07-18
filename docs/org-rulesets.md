@@ -43,12 +43,20 @@ Per-repo rulesets (stack-specific gates only; canonical emoji names per #514):
 | `checks-podex` | `16438314` | `podex` | `semantic-title / 📝 Validate PR Title`, `test / Aggregate Python Results` |
 | `checks-py-lintro` | `16132640` | `py-lintro` | `🚦 Test Gate`, `codeql / 🔬 CodeQL Analysis`, `lintro-code-quality / 🛠️ Lintro Code Quality`, `semantic-title / 📝 Validate PR Title`, `test-compat / Aggregate Python Results`, `test-compat / Python Compatibility`, `test-coverage / Aggregate Python Results`, `test-coverage / Python Coverage`, `test-suite-coverage / 🧪 Test Suite & Coverage`, `🐳 Build Docker Images`, `🔐 Security Audit`, `🧪 Docker Integration Tests` |
 | `checks-rustume` | `16132643` | `Rustume` | `codeql / 🔬 CodeQL Analysis`, `semantic-title / 📝 Validate PR Title`, `validate / 📌 Validate Action Pinning`, `rust-build / 🔨 Build Check`, `rust-coverage / 🦀 Rust Coverage`, `web-coverage / 🌐 Web Coverage`, `🔐 Security Audit` |
+| `checks-spotify-curator` | `19138064` | `spotify-curator` | `semantic-title / 📝 Validate PR Title` |
 | `checks-turbo-themes` | `16132642` | `turbo-themes` | `♿ E2E Accessibility Tests`, `semantic-title / 📝 Validate PR Title`, `🎭 E2E Tests`, `🏗️ Build & Quality Checks (20)`, `🏗️ Build & Quality Checks (22)`, `sbom / 📋 SBOM & Supply Chain`, `📦 Validate Examples`, `codeql / 🔬 CodeQL Analysis`, `security-audit / 🔐 Security Audit`, `🔥 E2E Smoke Tests` |
 | `checks-winnow` | `17448561` | `winnow` | `codeql / 🔬 CodeQL Analysis`, `security-audit / 🔐 Security Audit`, `semantic-title / 📝 Validate PR Title`, `test / Aggregate Python Results`, `test / 🧪 Python Compatibility`, `validate / 🧾 Validate Lintro Version` |
 
 There is no `checks-ui-framework` row: the repo's only gate is the shared
 `checks-quality` context. `ui-framework` is not in `checks-socket` because
 the Socket app does not scan it yet.
+
+`spotify-curator` is **private**, which caps its gates: no repo-level
+`merge-queue` ruleset (GitHub merge queues require a public repo or
+Enterprise), and no CodeQL / dependency-review contexts (both GHAS-gated on
+private repos — spotify-curator#37 tracks adding them if the repo goes
+public). Its `test-coverage` contexts join the row once the repo has tests
+(spotify-curator#36).
 
 <!-- markdownlint-enable MD013 -->
 
