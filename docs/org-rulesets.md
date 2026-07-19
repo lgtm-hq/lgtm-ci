@@ -60,9 +60,9 @@ only.
 
 `hass-turbo-themes` (HACS distribution repo for turbo-themes) onboarded
 2026-07-19: included in `main`, `review-required`, `checks-quality`, and
-`checks-socket`; repo-level `merge-queue` ruleset is `19175368`. Its
-`drift / 🎨 Theme Drift Check` context joins the row once the regen
-workflow lands (hass-turbo-themes#4).
+`checks-socket`; repo-level `merge-queue` ruleset is `19175368`. Its inline
+`🎨 Theme Drift Check` context joined the row when the regen workflow
+landed (hass-turbo-themes#4).
 
 `spotify-curator` went public on 2026-07-18, lifting its earlier
 private-repo caps: the repo-level `merge-queue` ruleset now exists
