@@ -43,9 +43,10 @@ setup_bare_remote() {
 
 run_update_floating_tag_push() {
 	local tag="$1"
+	shift
 	(
 		cd "$MOCK_GIT_REPO" || exit 1
-		env TAG="$tag" PUSH=true PUSH_RETRY_DELAY=0 \
+		env TAG="$tag" PUSH=true PUSH_RETRY_DELAY=0 "$@" \
 			bash "${PROJECT_ROOT}/scripts/ci/release/update-floating-tag.sh"
 	)
 }
@@ -204,7 +205,7 @@ EOF
 	create_release_tag "v1.2.3"
 	fail_remote_pushes 99
 
-	run run_update_floating_tag_push "v1.2.3"
+	run run_update_floating_tag_push "v1.2.3" PUSH_MAX_ATTEMPTS=3
 
 	assert_failure
 	assert_output --partial "after 3 attempts"
