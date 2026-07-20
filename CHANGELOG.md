@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.1] - 2026-07-20
+
+### Changed
+
+- **rulesets**: register hass-turbo-themes in org ruleset registry (#655) (a605494)
+- refresh spotify-curator ruleset registry after repo went public (#625) (9a7197d)
+- register checks-spotify-curator in org ruleset registry (#621) (9773f2d)
+- **deps**: update renovatebot/github-action action to v46.1.20 (patch) (#658) (6ab10c1)
+
+### Fixed
+
+- **release**: make auto-tag scripts idempotent on rerun (#660) (875a3b5)
+- **deps**: update lintro (#652) (d3a0881)
+- **deps**: update lintro (#650) (f50044a)
+- **deps**: update lintro (#622) (79f3487)
+
 ## [0.59.0] - 2026-07-17
 
 ### Added
@@ -1695,7 +1711,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.1...HEAD
+[0.59.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.0...v0.59.1
 [0.59.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.1...v0.59.0
 [0.58.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.0...v0.58.1
 [0.58.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.57.1...v0.58.0
