@@ -93,25 +93,49 @@ bundle_find_workflow_run() {
 		jq -r --arg wf "$workflow_key" "$jq_filter"
 }
 
+# Resolve a workflow key (display name or file basename) to its workflow ID.
+# Usage: bundle_resolve_workflow_id WORKFLOW_KEY
+bundle_resolve_workflow_id() {
+	local workflow_key="$1"
+
+	local jq_filter
+	# shellcheck disable=SC2016
+	jq_filter='first((.workflows // [])[] | select(((.name | ascii_downcase) == ($wf | ascii_downcase)) or ((.path | split("/")[-1] | sub("\\.ya?ml$"; "") | ascii_downcase) == ($wf | ascii_downcase))) | .id) // empty'
+
+	gh api "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" |
+		jq -r --arg wf "$workflow_key" "$jq_filter"
+}
+
 # Find the latest workflow run on a fallback branch (e.g. main).
+#
+# Queries the per-workflow runs endpoint (server-side filtering) instead of
+# scanning one page of all branch runs: on a busy branch, a workflow whose
+# latest run is older than the newest page of runs would otherwise be missed
+# even though a usable run exists (#663).
+#
 # Usage: bundle_find_workflow_run_on_ref WORKFLOW_KEY FALLBACK_REF REQUIRE_SUCCESS
 bundle_find_workflow_run_on_ref() {
 	local workflow_key="$1"
 	local fallback_ref="$2"
 	local require_success="${3:-true}"
 
-	local workflow_match
-	local jq_filter
-	# shellcheck disable=SC2016
-	workflow_match='((.name | ascii_downcase) == ($wf | ascii_downcase)) or ((.path | split("/")[-1] | sub("\\.ya?ml$"; "") | ascii_downcase) == ($wf | ascii_downcase))'
-	if [[ "$require_success" == "false" ]]; then
-		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and (.conclusion == \"success\" or .conclusion == \"failure\" or .conclusion == \"cancelled\" or .conclusion == \"timed_out\")) | .id) // empty"
-	else
-		jq_filter="first(.workflow_runs[] | select(${workflow_match} and .head_branch == \$branch and .conclusion == \"success\") | .id) // empty"
+	local workflow_id
+	workflow_id=$(bundle_resolve_workflow_id "$workflow_key")
+	if [[ -z "$workflow_id" ]]; then
+		return 0
 	fi
 
-	gh api "repos/${GITHUB_REPOSITORY}/actions/runs?branch=${fallback_ref}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" |
-		jq -r --arg wf "$workflow_key" --arg branch "$fallback_ref" "$jq_filter"
+	local jq_filter
+	if [[ "$require_success" == "false" ]]; then
+		# shellcheck disable=SC2016
+		jq_filter='first(.workflow_runs[] | select(.head_branch == $branch and (.conclusion == "success" or .conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")) | .id) // empty'
+	else
+		# shellcheck disable=SC2016
+		jq_filter='first(.workflow_runs[] | select(.head_branch == $branch and .conclusion == "success") | .id) // empty'
+	fi
+
+	gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow_id}/runs?branch=${fallback_ref}&per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" |
+		jq -r --arg branch "$fallback_ref" "$jq_filter"
 }
 
 # Resolve artifact ID from a workflow run.
