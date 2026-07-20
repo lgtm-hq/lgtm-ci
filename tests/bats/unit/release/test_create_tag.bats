@@ -56,8 +56,20 @@ run_create_tag() {
 	git -C "$MOCK_GIT_REPO" rev-parse --verify refs/tags/release-1.0.0
 }
 
-@test "create-tag: fails when tag already exists" {
+@test "create-tag: succeeds when tag already exists at HEAD (rerun)" {
 	git -C "$MOCK_GIT_REPO" tag -a v1.2.3 -m "existing"
+
+	VERSION="1.2.3" run run_create_tag
+	assert_success
+	assert_output --partial "already exists"
+	assert_output --partial "skipping creation"
+	assert_output --partial "tag-name=v1.2.3"
+	assert_file_contains "$GITHUB_OUTPUT" "tag-name=v1.2.3"
+}
+
+@test "create-tag: fails when tag exists at a different commit" {
+	git -C "$MOCK_GIT_REPO" tag -a v1.2.3 -m "existing"
+	add_commit "feat: another change"
 
 	VERSION="1.2.3" run run_create_tag
 	assert_failure
