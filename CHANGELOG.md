@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.2] - 2026-07-21
+
+### Fixed
+
+- **bundle**: resolve fallback workflow runs via per-workflow endpoint (#664) (1157151)
+- **deps**: update lintro (#661) (d837a69)
+
 ## [0.59.1] - 2026-07-20
 
 ### Changed
@@ -1711,7 +1718,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.2...HEAD
+[0.59.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.1...v0.59.2
 [0.59.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.0...v0.59.1
 [0.59.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.1...v0.59.0
 [0.58.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.0...v0.58.1
