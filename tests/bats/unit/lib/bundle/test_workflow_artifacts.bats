@@ -130,11 +130,18 @@ case "\$url" in
 ]}
 JSON
 	;;
-*actions/runs?branch=main*)
+*actions/workflows/*/runs?branch=main*)
 	cat <<'JSON'
 {"workflow_runs":[
-  {"id":${run_id},"name":"quality-ci-main","path":".github/workflows/quality-ci-main.yml","conclusion":"success","head_branch":"main"},
-  {"id":${run_id},"name":"coverage-reports","path":".github/workflows/coverage-reports.yml","conclusion":"success","head_branch":"main"}
+  {"id":${run_id},"conclusion":"success","head_branch":"main"}
+]}
+JSON
+	;;
+*actions/workflows?*)
+	cat <<'JSON'
+{"workflows":[
+  {"id":7,"name":"quality-ci-main","path":".github/workflows/quality-ci-main.yml"},
+  {"id":8,"name":"coverage-reports","path":".github/workflows/coverage-reports.yml"}
 ]}
 JSON
 	;;
@@ -222,6 +229,62 @@ PY
 	assert_output --partial "path traversal"
 	run test ! -e "${BATS_TEST_TMPDIR}/outside.txt"
 	assert_success
+}
+
+@test "bundle_find_workflow_run_on_ref: finds run even when branch run listing is dominated by other workflows" {
+	# Regression for #663: the old implementation scanned one page of ALL
+	# branch runs client-side, so a workflow whose latest run was older than
+	# the newest page of runs was reported missing. The generic branch runs
+	# endpoint deliberately returns only unrelated workflows here.
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/gh" <<'EOF'
+#!/usr/bin/env bash
+url=""
+for ((i = 1; i <= $#; i++)); do
+	case "${!i}" in
+	repos/*) url="${!i}" ;;
+	esac
+done
+
+case "$url" in
+*actions/workflows/8/runs?branch=main*)
+	echo '{"workflow_runs":[{"id":4242,"conclusion":"success","head_branch":"main"}]}'
+	;;
+*actions/workflows?*)
+	echo '{"workflows":[{"id":8,"name":"coverage-reports","path":".github/workflows/coverage-reports.yml"}]}'
+	;;
+*actions/runs?branch=main*)
+	echo '{"workflow_runs":[{"id":1,"name":"other","path":".github/workflows/other.yml","conclusion":"success","head_branch":"main"}]}'
+	;;
+*)
+	echo '{"workflow_runs":[],"workflows":[],"artifacts":[]}'
+	;;
+esac
+exit 0
+EOF
+	chmod +x "${mock_bin}/gh"
+	export PATH="${mock_bin}:$PATH"
+
+	run bundle_find_workflow_run_on_ref "coverage-reports" "main" "true"
+	[ "$status" -eq 0 ]
+	[ "$output" = "4242" ]
+}
+
+@test "bundle_find_workflow_run_on_ref: returns empty when workflow is unknown" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/gh" <<'EOF'
+#!/usr/bin/env bash
+echo '{"workflow_runs":[],"workflows":[],"artifacts":[]}'
+exit 0
+EOF
+	chmod +x "${mock_bin}/gh"
+	export PATH="${mock_bin}:$PATH"
+
+	run bundle_find_workflow_run_on_ref "no-such-workflow" "main" "true"
+	[ "$status" -eq 0 ]
+	[ "$output" = "" ]
 }
 
 @test "bundle_run_manifest: does not claim fallback when lookup fails" {
