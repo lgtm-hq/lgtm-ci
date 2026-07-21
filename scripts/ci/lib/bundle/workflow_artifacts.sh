@@ -22,6 +22,7 @@
 [[ -n "${_LGTM_CI_BUNDLE_WORKFLOW_ARTIFACTS_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_BUNDLE_WORKFLOW_ARTIFACTS_LOADED=1
 readonly BUNDLE_WORKFLOW_RUNS_PER_PAGE=100
+readonly BUNDLE_WORKFLOWS_PER_PAGE=100
 
 # Load manifest JSON from inline JSON or a .json/.yaml/.yml file path.
 # Sets BUNDLE_MANIFEST_JSON.
@@ -102,7 +103,7 @@ bundle_resolve_workflow_id() {
 	# shellcheck disable=SC2016
 	jq_filter='first((.workflows // [])[] | select(((.name | ascii_downcase) == ($wf | ascii_downcase)) or ((.path | split("/")[-1] | sub("\\.ya?ml$"; "") | ascii_downcase) == ($wf | ascii_downcase))) | .id) // empty'
 
-	gh api "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=${BUNDLE_WORKFLOW_RUNS_PER_PAGE}" |
+	gh api "repos/${GITHUB_REPOSITORY}/actions/workflows?per_page=${BUNDLE_WORKFLOWS_PER_PAGE}" |
 		jq -r --arg wf "$workflow_key" "$jq_filter"
 }
 
