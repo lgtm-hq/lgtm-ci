@@ -185,27 +185,27 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Initialize CodeQL
         if: inputs.config-file == '' && matrix.language != ''
-        uses: github/codeql-action/init@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: ${{ matrix.language }}
           build-mode: ${{ matrix.build-mode }}
       - name: Initialize CodeQL with auto-detected languages
         if: inputs.config-file == '' && matrix.language == ''
-        uses: github/codeql-action/init@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           build-mode: ${{ matrix.build-mode }}
       - name: Initialize CodeQL with config
         if: inputs.config-file != ''
-        uses: github/codeql-action/init@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: ${{ matrix.language != '' && matrix.language || inputs.languages }}
           build-mode: ${{ matrix.build-mode }}
           config-file: ${{ inputs.config-file }}
       - name: Autobuild
         if: matrix.build-mode == 'autobuild'
-        uses: github/codeql-action/autobuild@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/autobuild@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
       - name: Analyze
-        uses: github/codeql-action/analyze@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/analyze@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           category: >-
             ${{ inputs.category != '' && inputs.category

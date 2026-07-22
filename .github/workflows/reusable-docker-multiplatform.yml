@@ -424,7 +424,7 @@ jobs:
       - name: Upload Trivy scan results (${{ matrix.platform }})
         if: always() && inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: "trivy-results-${{ matrix.slug }}.sarif"
           category: "trivy-${{ matrix.slug }}"
@@ -911,6 +911,6 @@ jobs:
           exit-code: ${{ inputs.scan-exit-code }}
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@e0647621c2984b5ed2f768cb892365bf2a616ad1 # v4.37.2
+        uses: github/codeql-action/upload-sarif@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           sarif_file: "trivy-results.sarif"
