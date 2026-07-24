@@ -99,6 +99,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: add `reusable-test-e2e-playwright.yml` for Playwright E2E
   (versioned browser cache, project/grep filters, failure-only report upload,
   `playwright` egress preset) (#521, #596)
+  (41d350e)
 
 ### Fixed
 
@@ -110,6 +111,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **workflows**: add `reusable-build-artifact.yml` for Node build + artifact
   handoff with optional post-build test and JSON version matrix (#522, #593)
+  (9387288)
 
 ## [0.55.0] - 2026-07-17
 
