@@ -187,6 +187,16 @@ jobs:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          # Scopes are declared explicitly so the token's reach is visible
+          # here rather than silently tracking the App's configuration.
+          # `workflows` is required by "Update floating tag": moving `v0`
+          # onto a commit whose range touches `.github/workflows/**` is
+          # rejected as a workflow update without it (see #698).
+          # NOTE: create-github-app-token errors when asked for a permission
+          # the installation does not hold — the App must be granted
+          # `Workflows: Read and write` before this merges.
+          permission-contents: write
+          permission-workflows: write
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
