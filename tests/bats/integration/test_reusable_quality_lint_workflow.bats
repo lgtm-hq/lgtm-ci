@@ -78,10 +78,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	assert_success
 }
 
+# Scoped to the warn step: workflow-wide greps would still pass if the guard
+# and the warning drifted into unrelated steps.
 @test "reusable-quality-lint: failed report upload warns instead of failing" {
-	run grep -qF "if: steps.upload-report.outcome == 'failure'" "$WORKFLOW"
-	assert_success
-	run grep -qF '::warning::Linting report upload failed' "$WORKFLOW"
+	run awk '
+		/- name: Warn on failed report upload/ { in_step = 1 }
+		in_step && /^      - name: / && !/Warn on failed report upload/ { exit }
+		in_step && /if: steps\.upload-report\.outcome == .failure./ { guarded = 1 }
+		in_step && /::warning::Linting report upload failed/ { warned = 1 }
+		END { exit !(guarded && warned) }
+	' "$WORKFLOW"
 	assert_success
 }
 
