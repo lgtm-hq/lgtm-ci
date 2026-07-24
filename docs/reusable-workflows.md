@@ -517,6 +517,16 @@ jobs:
     secrets: inherit
 ```
 
+> **Release App prerequisite.** `reusable-release-auto-tag` requests
+> `Workflows: Read and write` on the App token — the `Update floating tag`
+> step force-pushes the major tag onto the release commit, which GitHub treats
+> as a workflow update whenever the range touches `.github/workflows/**`. An
+> App without that permission fails at
+> `Create GitHub App installation token`, before any tag or release is
+> created. See
+> [onboarding.md](onboarding.md#upgrading-an-existing-release-app) for the
+> upgrade path, including the installation approval step.
+
 **Multi-ecosystem version PR** (explicit file→kind map; sibling of version-pr):
 
 ```yaml
