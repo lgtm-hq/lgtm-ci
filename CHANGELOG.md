@@ -19,6 +19,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.3] - 2026-07-24
+
+### Changed
+
+- **rulesets**: add Deploy Shell Tests context to checks-rustume-ops row (#673)
+  (0b4fdbd)
+- **rulesets**: record shell-tests contexts in checks-rustume-ops row (#672) (188786e)
+- **rulesets**: register checks-podex-ops and checks-rustume-ops (#668) (a108c0f)
+- **deps**: update github/codeql-action action to v4.37.3 (patch) (#675) (8d62a84)
+- **deps**: update ghcr.io/lgtm-hq/py-lintro:latest docker digest to 05ab962 (#667)
+  (fcd3f6e)
+- **deps**: update all major dependencies (major) (#665) (81e7ccf)
+- **deps**: update github-actions (#671) (c52295e)
+- **deps**: update actions/checkout action to v7.0.1 (patch) (#662) (a55a48b)
+
+### Fixed
+
+- **deps**: update lintro (#684) (ddbe2c3)
+- **deps**: update lintro (#683) (2960e40)
+- **deps**: update lintro (#682) (7c01473)
+- **deps**: update lintro (#680) (0e8df84)
+- **deps**: update lintro (#678) (3d4317b)
+- **deps**: update lintro (#677) (35e771d)
+- **deps**: update lintro (#674) (cdce862)
+
 ## [0.59.2] - 2026-07-21
 
 ### Fixed
@@ -1718,7 +1743,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.3...HEAD
+[0.59.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.2...v0.59.3
 [0.59.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.1...v0.59.2
 [0.59.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.0...v0.59.1
 [0.59.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.58.1...v0.59.0
