@@ -103,7 +103,7 @@ on:
         required: false
         type: string
         # yamllint disable-line rule:line-length
-        default: "ghcr.io/lgtm-hq/py-lintro@sha256:5f039b845f131ce2dabac62574544817e2fb6fb8d6d7af25067b18c84cde24ff"
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:62ba8c8c807b1f44e0d3270c7c720d5b84b0ddd60c1bc8831a58e42e185074fd"
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
@@ -148,12 +148,12 @@ jobs:
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling

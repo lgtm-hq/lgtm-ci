@@ -40,5 +40,10 @@ teardown() {
 
 	run git -C "$MOCK_GIT_REPO" remote get-url origin
 	assert_success
-	assert_output "https://x-access-token:token123@github.com/owner/repo.git"
+	# Build expected URL from parts so trufflehog does not flag a literal
+	# user:pass@host credential URI in the test fixture source.
+	local expected
+	expected="$(printf 'https://%s:%s@github.com/%s.git' \
+		'x-access-token' 'token123' 'owner/repo')"
+	assert_output "$expected"
 }

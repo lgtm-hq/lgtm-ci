@@ -8,6 +8,8 @@
 # Optional environment variables:
 #   TAG_PREFIX - Prefix for tag name (default: v)
 #   PUSH - Whether to push the tag (default: false)
+#   PUSH_MAX_ATTEMPTS - Push attempts before giving up (default: 3)
+#   PUSH_RETRY_DELAY - Base seconds between push attempts (default: 5)
 
 set -euo pipefail
 
@@ -25,6 +27,8 @@ source "$LIB_DIR/release.sh"
 : "${TAG:?TAG is required}"
 : "${TAG_PREFIX:=v}"
 : "${PUSH:=false}"
+: "${PUSH_MAX_ATTEMPTS:=3}"
+: "${PUSH_RETRY_DELAY:=5}"
 
 # Extract version from tag
 CLEAN_VERSION="${TAG#"$TAG_PREFIX"}"
@@ -49,9 +53,34 @@ log_success "Updated local tag: $FLOATING_TAG -> $TAG"
 
 # Push if requested
 if [[ "$PUSH" == "true" ]]; then
-	log_info "Pushing floating tag to origin..."
-	git push origin "$FLOATING_TAG" --force
-	log_success "Pushed floating tag: $FLOATING_TAG"
+	TARGET_COMMIT=$(git rev-parse "${FLOATING_TAG}^{}")
+
+	# Reruns must converge: skip the push when the remote floating tag
+	# already dereferences to the target commit.
+	REMOTE_REFS=$(git ls-remote origin "refs/tags/${FLOATING_TAG}" "refs/tags/${FLOATING_TAG}^{}" 2>/dev/null || true)
+	REMOTE_COMMIT=$(printf '%s\n' "$REMOTE_REFS" | awk -v ref="refs/tags/${FLOATING_TAG}^{}" '$2 == ref {print $1}')
+	if [[ -z "$REMOTE_COMMIT" ]]; then
+		REMOTE_COMMIT=$(printf '%s\n' "$REMOTE_REFS" | awk -v ref="refs/tags/${FLOATING_TAG}" '$2 == ref {print $1}')
+	fi
+
+	if [[ "$REMOTE_COMMIT" == "$TARGET_COMMIT" ]]; then
+		log_info "Remote floating tag $FLOATING_TAG already points at $TARGET_COMMIT; skipping push"
+	else
+		log_info "Pushing floating tag to origin..."
+		# GitHub occasionally rejects ref updates transiently (e.g.
+		# "remote: fatal error in commit_refs"); retry before failing.
+		ATTEMPT=1
+		until git push origin "$FLOATING_TAG" --force; do
+			if ((ATTEMPT >= PUSH_MAX_ATTEMPTS)); then
+				log_error "Failed to push floating tag $FLOATING_TAG after $PUSH_MAX_ATTEMPTS attempts"
+				exit 1
+			fi
+			log_warning "Push failed (attempt $ATTEMPT/$PUSH_MAX_ATTEMPTS); retrying in $((ATTEMPT * PUSH_RETRY_DELAY))s..."
+			sleep $((ATTEMPT * PUSH_RETRY_DELAY))
+			ATTEMPT=$((ATTEMPT + 1))
+		done
+		log_success "Pushed floating tag: $FLOATING_TAG"
+	fi
 fi
 
 # Output for GitHub Actions

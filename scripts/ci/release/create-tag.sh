@@ -36,32 +36,43 @@ TAG_NAME="${TAG_PREFIX}${CLEAN_VERSION}"
 
 log_info "Creating tag: $TAG_NAME"
 
-# Check if tag already exists
+# A tag that already exists at HEAD is a rerun of a partially failed release
+# job, not a collision — skip creation so the job can converge (idempotent).
+TAG_EXISTS=false
 if git rev-parse --verify --quiet "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
-	log_error "Tag $TAG_NAME already exists"
-	exit 1
+	EXISTING_COMMIT=$(git rev-parse "${TAG_NAME}^{}")
+	HEAD_COMMIT=$(git rev-parse HEAD)
+	if [[ "$EXISTING_COMMIT" == "$HEAD_COMMIT" ]]; then
+		log_info "Tag $TAG_NAME already exists at $EXISTING_COMMIT; skipping creation"
+		TAG_EXISTS=true
+	else
+		log_error "Tag $TAG_NAME already exists at $EXISTING_COMMIT but HEAD is $HEAD_COMMIT"
+		exit 1
+	fi
 fi
 
-# Get from_ref if not specified
-if [[ -z "$FROM_REF" ]]; then
-	FROM_REF=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
-fi
+if [[ "$TAG_EXISTS" != "true" ]]; then
+	# Get from_ref if not specified
+	if [[ -z "$FROM_REF" ]]; then
+		FROM_REF=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+	fi
 
-# Generate message if not provided
-if [[ -z "$MESSAGE" ]]; then
-	log_info "Generating changelog for tag message..."
-	CHANGELOG=$(generate_changelog "$FROM_REF" "HEAD" "$CLEAN_VERSION" "full")
-	MESSAGE="Release ${TAG_NAME}"$'\n\n'"${CHANGELOG}"
-fi
+	# Generate message if not provided
+	if [[ -z "$MESSAGE" ]]; then
+		log_info "Generating changelog for tag message..."
+		CHANGELOG=$(generate_changelog "$FROM_REF" "HEAD" "$CLEAN_VERSION" "full")
+		MESSAGE="Release ${TAG_NAME}"$'\n\n'"${CHANGELOG}"
+	fi
 
-# Configure git user for CI
-if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
-	configure_git_ci_user
-fi
+	# Configure git user for CI
+	if [[ -n "${GITHUB_ACTIONS:-}" ]]; then
+		configure_git_ci_user
+	fi
 
-# Create annotated tag
-git tag -a "$TAG_NAME" -m "$MESSAGE"
-log_success "Created tag: $TAG_NAME"
+	# Create annotated tag
+	git tag -a "$TAG_NAME" -m "$MESSAGE"
+	log_success "Created tag: $TAG_NAME"
+fi
 
 # Get tag SHA
 TAG_SHA=$(git rev-parse "$TAG_NAME")
