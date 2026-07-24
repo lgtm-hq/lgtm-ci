@@ -113,6 +113,12 @@ jobs:
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
 
+  # The `linting-report` artifact is best-effort. `reusable-quality-lint`
+  # uploads it with `continue-on-error`, and this workflow downloads it the
+  # same way — a storage hiccup emits a warning and skips the summary, and
+  # never turns a passing lint run red. `status` and `exit-code` always
+  # reflect the lint result alone.
+
   validate:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate.yml@<sha>
     permissions:

@@ -63,3 +63,30 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	run grep -qF 'inputs.tools' "$WORKFLOW"
 	assert_success
 }
+
+# The report artifact is optional: reusable-publish-quality-summary downloads
+# it with continue-on-error and warns when absent. A fatal upload here would
+# make it mandatory to produce but optional to consume, failing builds whose
+# lint actually passed (#686).
+@test "reusable-quality-lint: report upload is non-fatal" {
+	run awk '
+		/- name: Upload linting report/ { in_step = 1 }
+		in_step && /^      - name: / && !/Upload linting report/ { exit }
+		in_step && /continue-on-error: true/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-quality-lint: failed report upload warns instead of failing" {
+	run grep -qF "if: steps.upload-report.outcome == 'failure'" "$WORKFLOW"
+	assert_success
+	run grep -qF '::warning::Linting report upload failed' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-quality-lint: no failure-reason classifier output" {
+	# Superseded by the non-fatal upload — transience is removed, not guessed.
+	run grep -qF 'failure-reason' "$WORKFLOW"
+	assert_failure
+}

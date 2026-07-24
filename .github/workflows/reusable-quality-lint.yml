@@ -190,8 +190,16 @@ jobs:
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
           MAP_HOST_USER: "true"
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
+      # Best-effort: the report is a convenience artifact, not part of the
+      # lint verdict. reusable-publish-quality-summary already downloads it
+      # with continue-on-error and warns when it is absent, so failing this
+      # job over an unuploadable report would fail a build whose code passed.
+      # upload-artifact retries transient errors internally; if it still
+      # fails we warn and let the lint result stand on its own.
       - name: Upload linting report
+        id: upload-report
         if: inputs.upload-report && always()
+        continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -201,3 +209,8 @@ jobs:
             ${{ inputs.working-directory }}/chk-output.txt
           retention-days: 7
           if-no-files-found: ignore
+      - name: Warn on failed report upload
+        if: steps.upload-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Linting report upload failed; the lint result is unaffected."
