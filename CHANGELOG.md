@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.6] - 2026-07-24
+
+### Changed
+
+- **deps**: update docker/login-action action to v4.5.1 (patch) (#693) (b451db8)
+
+### Fixed
+
+- **deps**: update dependency lintro to 0.91.22 (patch) (#695) (1ff70fe)
+
 ## [0.59.5] - 2026-07-24
 
 ### Changed
@@ -1767,7 +1777,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.5...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.6...HEAD
+[0.59.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.5...v0.59.6
 [0.59.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.4...v0.59.5
 [0.59.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.3...v0.59.4
 [0.59.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.2...v0.59.3
