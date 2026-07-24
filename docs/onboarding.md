@@ -81,7 +81,16 @@ Copying a release example without these secrets fails at the
    URL needed.
 2. **Repository permissions**: `Contents: Read and write`,
    `Pull requests: Read and write`, `Issues: Read and write` (issues cover
-   the `report-release-failure` follow-up job).
+   the `report-release-failure` follow-up job), and
+   `Workflows: Read and write`.
+
+   `Workflows` is required by `reusable-release-auto-tag`: the
+   `Update floating tag` step force-pushes the major tag (`v0`) onto the
+   release commit, and GitHub rejects that push as a workflow update when the
+   range touches `.github/workflows/**` — which it does on any release that
+   includes a workflow change. The reusable requests this scope explicitly, so
+   an App without it fails at `Create GitHub App installation token`, before
+   any tag or release is created.
 3. **Install the App** on the organization (the reusables request the token
    with `owner: ${{ github.repository_owner }}`), scoped to the repositories
    that run release workflows.
@@ -102,6 +111,31 @@ secrets:
   RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
   RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 ```
+
+#### Upgrading an existing release App
+
+Release Apps created before `Workflows: Read and write` was required must be
+updated, or `reusable-release-auto-tag` fails at
+`Create GitHub App installation token`.
+
+Editing the App's permissions is only half the change: GitHub queues the new
+scope as a **pending approval on each installation**, and an org owner must
+accept it before tokens carry it. Until then the installation keeps its old
+permission set and the failure persists with no obvious cause.
+
+1. *App settings → Permissions & events* → set `Workflows: Read and write`.
+2. *Organization Settings → Installed GitHub Apps* → open the App → approve
+   the requested permission update.
+3. Verify the installation actually reflects it:
+
+   ```bash
+   gh api /orgs/<org>/installations \
+     --jq '.installations[] | select(.app_slug=="<app-slug>") | {permissions, updated_at}'
+   ```
+
+   `permissions` must include `"workflows": "write"`, and `updated_at` should
+   move to the approval time. If it has not changed, the approval in step 2 has
+   not been accepted.
 
 ### PyPI publish: trusted publisher
 
@@ -207,6 +241,9 @@ Ruleset documentation and sync tooling are tracked in
 - [ ] `uses:` SHA and `tooling-ref` repinned to the current release (step 4)
 - [ ] Release repos: GitHub App installed, `RELEASE_APP_ID` and
       `RELEASE_APP_PRIVATE_KEY` secrets set (step 2)
+- [ ] Release repos: App holds `Workflows: Read and write`, and the
+      installation has **accepted** the permission (step 2) — see
+      "Upgrading an existing release App" below
 - [ ] Publish repos: PyPI trusted publisher registered (step 2)
 - [ ] Egress audited and allowlist appended where needed; policy on `block`
       (step 3)
