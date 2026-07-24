@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.8] - 2026-07-24
+
+### Fixed
+
+- **reusable-quality-lint**: make report upload non-fatal instead of classifying its
+  failures (#696) (a66497e)
+- **deps**: update lintro (#704) (0b12601)
+
 ## [0.59.7] - 2026-07-24
 
 ### Fixed
@@ -1784,7 +1792,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.7...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.8...HEAD
+[0.59.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.7...v0.59.8
 [0.59.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.6...v0.59.7
 [0.59.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.5...v0.59.6
 [0.59.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.4...v0.59.5
