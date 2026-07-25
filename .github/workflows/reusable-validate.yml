@@ -156,14 +156,27 @@ jobs:
           COMMENT_OUTPUT: validation-report.md
           OUTPUT_FILE: validation-output.txt
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-validate-script.sh
+      # Convenience payload for the PR comment, never the validation verdict —
+      # the "Fail on validation errors" step below owns that, and the publisher
+      # already warns instead of failing when the artifact is missing.
       - name: Upload validation report
+        id: upload-report
         if: steps.validate.outputs.exit-code != '0'
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: validation-report
           path: validation-report.md
           retention-days: 1
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run; the later
+          # attempt's report is authoritative.
+          overwrite: true
+      - name: Warn on failed report upload
+        if: steps.upload-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Validation report upload failed; the validation result is unaffected."
       - name: Fail on validation errors
         if: steps.validate.outputs.exit-code != '0'
         shell: bash

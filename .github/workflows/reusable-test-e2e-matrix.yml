@@ -287,6 +287,10 @@ jobs:
             ${{ inputs.working-directory }}/blob-report/
           retention-days: 30
           if-no-files-found: ignore
+          # The merge job consumes these shards, so no continue-on-error —
+          # overwrite only, so a repeated call in one run hands the merge its
+          # latest shard instead of 409ing.
+          overwrite: true
   merge:
     name: Merge Reports
     needs: test
@@ -368,6 +372,11 @@ jobs:
           path: merged-report
           retention-days: 30
           if-no-files-found: ignore
+          # The publish job downloads this without a tolerance guard, so the
+          # upload is part of that leg's verdict — no continue-on-error here.
+          # Overwrite only, so a repeated call in one run publishes its latest
+          # merged report instead of 409ing.
+          overwrite: true
   publish:
     name: Publish Results
     needs: merge

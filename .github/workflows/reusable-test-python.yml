@@ -428,6 +428,10 @@ jobs:
           path: python-result-${{ matrix.python-version }}/summary.json
           retention-days: 7
           if-no-files-found: error
+          # The aggregate job's verdict reads this summary, so no
+          # continue-on-error — overwrite only, so a retried call's summary
+          # wins over the earlier attempt's.
+          overwrite: true
       - name: Upload coverage report
         if: >-
           always()
@@ -445,6 +449,10 @@ jobs:
             ${{ inputs.working-directory }}/pytest-results.json
           retention-days: 7
           if-no-files-found: ignore
+          # Feeds the coverage publish path and the aggregate merge, so no
+          # continue-on-error — overwrite only, so a retried call's coverage
+          # wins over the earlier attempt's.
+          overwrite: true
       - name: Fail on pytest errors
         if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
         shell: bash

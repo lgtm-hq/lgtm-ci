@@ -42,6 +42,14 @@ on:
         required: false
         type: boolean
         default: false
+      link-report-artifact-name:
+        description: >-
+          Artifact name for the uploaded lychee report. Override when a caller
+          runs this workflow more than once in a single run, so the sibling
+          calls do not collide on one artifact name.
+        required: false
+        type: string
+        default: "lychee-report"
       working-directory:
         description: "Working directory for link checking"
         required: false
@@ -171,17 +179,32 @@ jobs:
           output: lychee-report.md
           token: ${{ github.token }}
           fail: ${{ inputs.fail-on-error }}
+      # The report is a convenience payload for the PR comment, never the
+      # link-check verdict — `fail-on-error` on the lychee step owns that. The
+      # publisher already treats a missing artifact as a warning, so a storage
+      # hiccup must not redden a job whose links are fine.
       - name: Upload link report
+        id: upload-report
         if: >-
           always()
           && inputs.publish-link-check-report
           && hashFiles('lychee-report.md') != ''
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: lychee-report
+          name: ${{ inputs.link-report-artifact-name }}
           path: lychee-report.md
           retention-days: 1
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run; without overwrite
+          # the second upload 409s and the publisher resolves the first
+          # attempt's report. The latest attempt is authoritative.
+          overwrite: true
+      - name: Warn on failed report upload
+        if: steps.upload-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Link report upload failed; the link-check result is unaffected."
   publish-link-check-report:
     name: Publish link-check report
     needs: link-check
@@ -195,7 +218,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      artifact-name: lychee-report
+      artifact-name: ${{ inputs.link-report-artifact-name }}
       report-file: lychee-report.md
       marker: ${{ inputs.comment-marker }}
       job-name: Publish link-check report

@@ -437,6 +437,10 @@ jobs:
           path: ${{ runner.temp }}/staging-digest/digest.txt
           if-no-files-found: error
           retention-days: 1
+          # The manifest merge consumes this digest, so no continue-on-error —
+          # overwrite only, so a repeated call in one run hands the merge its
+          # latest digest instead of 409ing.
+          overwrite: true
   # Optional per-platform smoke test gate (push path only). Runs against each
   # staging image on its native runner before manifest merge.
   verify-per-platform:

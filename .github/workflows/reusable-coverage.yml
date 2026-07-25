@@ -212,6 +212,11 @@ jobs:
             ${{ inputs.working-directory }}/coverage/
           retention-days: 30
           if-no-files-found: ignore
+          # The publish job downloads this without a tolerance guard, so the
+          # upload is part of that leg's verdict — no continue-on-error here.
+          # Overwrite only, so a repeated call in one run publishes its latest
+          # coverage instead of 409ing.
+          overwrite: true
   publish:
     name: Publish Coverage
     needs: coverage

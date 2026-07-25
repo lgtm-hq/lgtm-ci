@@ -183,3 +183,7 @@ jobs:
           path: ${{ inputs.working-directory }}/dist/
           retention-days: ${{ inputs.artifact-retention-days }}
           if-no-files-found: error
+          # The dist is this job's verdict and the publish path's input, so no
+          # continue-on-error — overwrite only, so a repeated call in one run
+          # publishes its latest build instead of 409ing.
+          overwrite: true

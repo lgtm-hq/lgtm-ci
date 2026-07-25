@@ -256,8 +256,13 @@ jobs:
           COVERAGE_PERCENT: ${{ steps.coverage.outputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      # Debug convenience only: nothing downloads the TAP output (the summary
+      # comment reads job outputs), and the bats run plus the coverage
+      # threshold step above own the job verdict.
       - name: Upload test results
+        id: upload-results
         if: always()
+        continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -266,8 +271,19 @@ jobs:
             ${{ inputs.working-directory }}/bats-output.tap
           retention-days: 7
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run; the later
+          # attempt's TAP output is authoritative.
+          overwrite: true
+      - name: Warn on failed test results upload
+        if: steps.upload-results.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Test results upload failed; the test result is unaffected."
+      # Debug convenience only, same reasoning as the TAP upload above.
       - name: Upload coverage report
+        id: upload-coverage-report
         if: ${{ always() && inputs.upload-coverage && inputs.coverage }}
+        continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -276,6 +292,14 @@ jobs:
             ${{ inputs.working-directory }}/coverage-report
           retention-days: 7
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run; the later
+          # attempt's coverage is authoritative.
+          overwrite: true
+      - name: Warn on failed coverage report upload
+        if: steps.upload-coverage-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Coverage report upload failed; the test result is unaffected."
   publish-test-summary:
     needs: test
     if: >-

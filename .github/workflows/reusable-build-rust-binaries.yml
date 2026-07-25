@@ -245,3 +245,7 @@ jobs:
             SHA256SUMS-${{ matrix.target }}
           if-no-files-found: error
           retention-days: ${{ inputs.retention-days }}
+          # Release binaries are this job's verdict, so no continue-on-error —
+          # overwrite only, so a repeated call in one run publishes its latest
+          # build instead of 409ing.
+          overwrite: true

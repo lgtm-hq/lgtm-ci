@@ -30,8 +30,20 @@ on:
         required: false
         type: boolean
         default: false
+      coverage-artifact-name:
+        description: >-
+          Artifact name for the coverage payload handed to the test-summary
+          comment. Defaults to node-custom-coverage rather than node-coverage so
+          a caller that also runs reusable-test-node.yml in the same run does
+          not collide on one artifact name.
+        required: false
+        type: string
+        default: "node-custom-coverage"
       pages-coverage-artifact-name:
-        description: "Artifact name for flat Node HTML coverage upload"
+        description: >-
+          Artifact name for flat Node HTML coverage upload. The default matches
+          reusable-test-node.yml; a caller that enables Pages coverage on both
+          in one run must override one of them.
         required: false
         type: string
         default: "coverage-html"
@@ -367,7 +379,11 @@ jobs:
           COVERAGE: ${{ inputs.coverage }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/stage-node-coverage-test-summary.sh
+      # Convenience payload for the test-summary comment, never the test
+      # verdict — the publisher downloads it with continue-on-error and skips
+      # the rich comment when it is absent.
       - name: Upload coverage for test summary
+        id: upload-summary-coverage
         if: >-
           always()
           && inputs.coverage
@@ -375,12 +391,21 @@ jobs:
           && inputs.node-versions == ''
           && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.fork == false
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: node-coverage
+          name: ${{ inputs.coverage-artifact-name }}
           path: node-coverage-staged/
           retention-days: 7
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run; the later
+          # attempt's coverage is authoritative.
+          overwrite: true
+      - name: Warn on failed summary coverage upload
+        if: steps.upload-summary-coverage.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Summary coverage upload failed; the test result is unaffected."
       - name: Evaluate pages coverage upload gate
         id: pages-upload-gate
         if: always() && inputs.upload-pages-coverage-html && inputs.coverage
@@ -416,6 +441,9 @@ jobs:
           path: ${{ inputs.pages-coverage-artifact-name }}/
           retention-days: 7
           if-no-files-found: error
+          # This upload's outcome is recorded and gates the Pages bundle, so it
+          # keeps its own failure semantics — overwrite only.
+          overwrite: true
       - name: Record pages upload outcome
         if: >-
           always()
@@ -591,7 +619,8 @@ jobs:
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       coverage-enabled: ${{ inputs.coverage }}
       rich-coverage-comment: ${{ inputs.coverage }}
-      coverage-artifact-name: ${{ inputs.coverage && 'node-coverage' || '' }}
+      coverage-artifact-name: >-
+        ${{ inputs.coverage && inputs.coverage-artifact-name || '' }}
       coverage-file: >-
         ${{ inputs.working-directory == '.' && inputs.coverage-summary-file ||
         format('{0}/{1}', inputs.working-directory, inputs.coverage-summary-file) }}
