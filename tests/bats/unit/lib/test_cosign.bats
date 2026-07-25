@@ -267,6 +267,29 @@ _signer_call_count() {
 	assert_output "0"
 }
 
+# The action scripts validate bounds up front, but a direct caller may not.
+# The helper self-validates so a zero-padded knob cannot raise "value too great
+# for base" part-way through signing.
+@test "cosign_sign_with_retry: normalises bounds when the caller skipped validation" {
+	_make_signer 1 "Error: fetching ambient OIDC credentials: none"
+
+	run env COSIGN_SIGN_MAX_ATTEMPTS=04 COSIGN_SIGN_MAX_DELAY=08 \
+		bash -c 'source "$LIB_DIR/cosign.sh" && cosign_sign_with_retry "cosign sign-blob" "blob.txt" fake-signer blob.txt'
+	assert_success
+	refute_output --partial "value too great for base"
+	assert_equal "2" "$(_signer_call_count)"
+}
+
+@test "cosign_sign_with_retry: rejects invalid bounds before running the command" {
+	_make_signer 0 ""
+
+	run env COSIGN_SIGN_MAX_ATTEMPTS=three \
+		bash -c 'source "$LIB_DIR/cosign.sh" && cosign_sign_with_retry "cosign sign-blob" "blob.txt" fake-signer blob.txt'
+	assert_failure
+	assert_output --partial "COSIGN_SIGN_MAX_ATTEMPTS must be a non-negative integer"
+	assert_equal "0" "$(_signer_call_count)"
+}
+
 @test "cosign_sign_with_retry: fails loudly when given no command" {
 	run bash -c 'source "$LIB_DIR/cosign.sh" && cosign_sign_with_retry "cosign sign-blob" "blob.txt"'
 	assert_failure

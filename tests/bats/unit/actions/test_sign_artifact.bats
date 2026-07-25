@@ -261,6 +261,25 @@ sleep_call_count() {
 	assert_equal "1" "$(sleep_call_count)"
 }
 
+# A fatal failure on one blob aborts the whole batch rather than carrying on to
+# the remaining files, so a broken signing setup cannot half-sign a release.
+@test "sign-artifact: a fatal failure on the first blob aborts the batch" {
+	printf 'artifact two\n' >"${ARTIFACT_DIR}/two.tar.gz"
+	export FILES="${ARTIFACT_DIR}/one.tar.gz ${ARTIFACT_DIR}/two.tar.gz"
+	mock_cosign_failing 99 "Error: signature rejected by policy: identity not allowed"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "not a transient OIDC token fetch, not retrying"
+	# Exactly one attempt total: the first blob is fatal, the second is never tried.
+	assert_equal "1" "$(cosign_call_count)"
+	assert_equal "0" "$(sleep_call_count)"
+	refute_output --partial "Successfully signed"
+	# No signature was produced for the second blob.
+	run bash -c 'set -- "${SIGNATURES_DIR}"/*two.tar.gz.sig; [[ -f "$1" ]]'
+	assert_failure
+}
+
 # =============================================================================
 # Non-transient failures stay fatal
 # =============================================================================

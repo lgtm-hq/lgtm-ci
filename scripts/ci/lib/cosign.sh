@@ -137,8 +137,14 @@ cosign_sign_with_retry() {
 		die "cosign_sign_with_retry: no command given for ${operation} of ${target}"
 	fi
 
-	local max_attempts="${COSIGN_SIGN_MAX_ATTEMPTS:-$COSIGN_SIGN_DEFAULT_MAX_ATTEMPTS}"
-	local max_delay="${COSIGN_SIGN_MAX_DELAY:-$COSIGN_SIGN_DEFAULT_MAX_DELAY}"
+	# Self-validate so direct callers get the same defaults, base-10
+	# normalisation, and loud rejection of bad knobs as the action scripts that
+	# call cosign_validate_retry_bounds up front. Idempotent: once normalised
+	# the values are plain decimal digits, so re-validating is a no-op.
+	cosign_validate_retry_bounds
+
+	local max_attempts="$COSIGN_SIGN_MAX_ATTEMPTS"
+	local max_delay="$COSIGN_SIGN_MAX_DELAY"
 	local attempt=1 delay=1 output status marker
 
 	# Honour COSIGN_SIGN_MAX_DELAY=0 as "retry without waiting".
