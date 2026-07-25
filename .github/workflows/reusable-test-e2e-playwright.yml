@@ -42,6 +42,15 @@ on:
         required: false
         type: boolean
         default: true
+      report-artifact-name:
+        description: >-
+          Artifact name for the uploaded Playwright report. Empty resolves to
+          playwright-report-<run_id>. Override when a caller runs this workflow
+          more than once in a single run, so the sibling calls do not collide
+          on one artifact name.
+        required: false
+        type: string
+        default: ""
       base-url:
         description: >-
           Passthrough base URL (exported as BASE_URL and PLAYWRIGHT_BASE_URL)
@@ -295,14 +304,20 @@ jobs:
           UPLOAD_REPORT: ${{ inputs.upload-report }}
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      # Debug convenience only: nothing downloads this report, and the "Fail on
+      # Playwright errors" step below owns the job verdict.
       - name: Upload Playwright report
+        id: upload-report
         if: >-
           always()
           && steps.upload-gate.outputs.should-upload == 'true'
+        continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report-${{ github.run_id }}
+          name: >-
+            ${{ inputs.report-artifact-name != '' && inputs.report-artifact-name
+            || format('playwright-report-{0}', github.run_id) }}
           path: |
             ${{ inputs.working-directory }}/playwright-report/
             ${{ inputs.working-directory }}/playwright-results.json
@@ -310,6 +325,14 @@ jobs:
             ${{ inputs.working-directory }}/test-results/
           retention-days: 30
           if-no-files-found: ignore
+          # run_id is stable across a rerun of the same run, so a repeated call
+          # would 409 without this; the later attempt is authoritative.
+          overwrite: true
+      - name: Warn on failed report upload
+        if: always() && steps.upload-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Playwright report upload failed; the test result is unaffected."
       - name: Fail on Playwright errors
         # always(): re-raise even if a prior always() step (report upload) failed
         if: >-

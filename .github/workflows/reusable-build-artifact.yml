@@ -279,3 +279,7 @@ jobs:
           path: ${{ inputs.working-directory }}/${{ inputs.artifact-path }}
           retention-days: ${{ inputs.retention-days }}
           if-no-files-found: error
+          # The build output is this job's verdict, so no continue-on-error —
+          # overwrite only, so a repeated call in one run publishes its latest
+          # build instead of 409ing.
+          overwrite: true

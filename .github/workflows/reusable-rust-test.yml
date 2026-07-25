@@ -389,7 +389,12 @@ jobs:
           COVERAGE_ENABLED: ${{ inputs.coverage }}
         run: >-
           bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-rust-test-results.sh"
+      # Convenience payload for the test-summary comment, never the test
+      # verdict — the publisher downloads it with continue-on-error and skips
+      # the rich comment when it is absent. The coverage gate below is the
+      # verdict and is unaffected.
       - name: Upload LCOV for test summary
+        id: upload-summary-lcov
         if: >-
           always()
           && inputs.coverage
@@ -397,11 +402,20 @@ jobs:
           && inputs.rust-toolchains == ''
           && github.event_name == 'pull_request'
           && github.event.pull_request.head.repo.fork == false
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: rust-coverage-lcov
           path: ${{ inputs.working-directory }}/rust-coverage.lcov
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run; the later
+          # attempt's coverage is authoritative.
+          overwrite: true
+      - name: Warn on failed summary LCOV upload
+        if: always() && steps.upload-summary-lcov.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Summary LCOV upload failed; the test result is unaffected."
       - name: Check coverage threshold
         id: coverage-gate
         if: inputs.coverage && inputs.coverage-threshold > 0
@@ -440,6 +454,10 @@ jobs:
           path: rust-result-${{ matrix.rust-toolchain }}/summary.json
           retention-days: 7
           if-no-files-found: error
+          # The aggregate job's verdict reads this summary, so no
+          # continue-on-error — overwrite only, so a retried call's summary
+          # wins over the earlier attempt's.
+          overwrite: true
       - name: Generate Rust coverage HTML
         if: >-
           inputs.coverage
@@ -471,6 +489,9 @@ jobs:
           path: ${{ inputs.working-directory }}/${{ inputs.pages-coverage-artifact-name }}/
           retention-days: 7
           if-no-files-found: error
+          # This upload's outcome is recorded and gates the Pages bundle, so it
+          # keeps its own failure semantics — overwrite only.
+          overwrite: true
       - name: Fail on test errors
         if: >-
           (!inputs.coverage && steps.run-nextest.outcome == 'failure')

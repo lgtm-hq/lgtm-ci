@@ -34,6 +34,15 @@ on:
         required: false
         type: boolean
         default: true
+      report-artifact-name:
+        description: >-
+          Artifact name for the uploaded report. Empty resolves to
+          e2e-report-<run_id>, which is distinct from
+          reusable-test-e2e-playwright.yml's playwright-report-<run_id> so a
+          caller can run both in one run without colliding.
+        required: false
+        type: string
+        default: ""
       extra-args:
         description: "Additional arguments to pass to Playwright"
         required: false
@@ -190,15 +199,29 @@ jobs:
           shard: ${{ inputs.shard }}
           extra-args: ${{ inputs.extra-args }}
           working-directory: ${{ inputs.working-directory }}
+      # Debug convenience only: nothing downloads this report, and the
+      # Playwright step above already owns the job verdict.
       - name: Upload report
+        id: upload-report
         if: inputs.upload-report && always()
+        continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-report-${{ github.run_id }}
+          name: >-
+            ${{ inputs.report-artifact-name != '' && inputs.report-artifact-name
+            || format('e2e-report-{0}', github.run_id) }}
           path: |
             ${{ inputs.working-directory }}/playwright-report/
             ${{ inputs.working-directory }}/playwright-results.json
             ${{ inputs.working-directory }}/test-results/
           retention-days: 30
           if-no-files-found: ignore
+          # run_id is stable across a rerun of the same run, so a repeated call
+          # would 409 without this; the later attempt is authoritative.
+          overwrite: true
+      - name: Warn on failed report upload
+        if: always() && steps.upload-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::E2E report upload failed; the test result is unaffected."

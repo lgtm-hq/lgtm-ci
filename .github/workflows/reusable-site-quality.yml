@@ -120,6 +120,15 @@ on:
         required: false
         type: string
         default: ""
+      link-report-artifact-name:
+        description: >-
+          Artifact name for the uploaded lychee report. Defaults to
+          site-lychee-report rather than lychee-report so a caller that also
+          runs reusable-link-check.yml in the same run does not collide on one
+          artifact name.
+        required: false
+        type: string
+        default: "site-lychee-report"
       upload-site-artifact:
         description: >-
           Upload built site dist as a workflow artifact. Requires
@@ -376,17 +385,30 @@ jobs:
           output: lychee-report.md
           token: ${{ github.token }}
           fail: true
+      # Convenience payload only: the lychee step runs with fail: true and owns
+      # the link verdict, and nothing downloads this artifact. A storage hiccup
+      # must not flip the job (whose status this workflow reports as `passed`).
       - name: Upload lychee report
+        id: upload-link-report
         if: >-
           always()
           && inputs.enable-lychee
           && hashFiles('lychee-report.md') != ''
+        continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: lychee-report
+          name: ${{ inputs.link-report-artifact-name }}
           path: lychee-report.md
           retention-days: 1
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run; the later attempt
+          # is authoritative, so overwrite instead of 409ing.
+          overwrite: true
+      - name: Warn on failed lychee report upload
+        if: always() && steps.upload-link-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Lychee report upload failed; the link result is unaffected."
       - name: Resolve site artifact path
         if: inputs.upload-site-artifact
         id: site-artifact
@@ -407,6 +429,10 @@ jobs:
           name: ${{ inputs.site-artifact-name }}
           path: ${{ steps.site-artifact.outputs.path }}
           retention-days: 1
+          # Site dist is a job verdict input for downstream deploys, so no
+          # continue-on-error here — only make a repeated call in one run
+          # publish its latest build instead of 409ing.
+          overwrite: true
       - name: Record build and link result
         if: always()
         id: record
