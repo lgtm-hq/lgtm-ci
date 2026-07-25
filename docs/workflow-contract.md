@@ -1074,6 +1074,10 @@ sbom-release:
   permissions:
     contents: write
     id-token: write
+    # Declared by the scan job, which this mode does not run; reusable
+    # permission requests are validated statically, before `if:`.
+    security-events: write
+    attestations: write
   with:
     mode: release-assets
     release-tag: ${{ github.ref_name }}
