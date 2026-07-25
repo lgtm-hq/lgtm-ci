@@ -48,15 +48,21 @@ fi
 # Both knobs feed arithmetic comparisons; reject anything that is not a
 # non-negative integer up front so typos fail loudly instead of raising an
 # arithmetic error under set -e.
+#
+# Zero-padded values ("08") pass the digit-only check but are invalid octal in
+# Bash arithmetic, so normalise to base 10 before any (( )) evaluation instead
+# of letting set -e abort the signing step on a raw arithmetic error.
 if [[ ! "$COSIGN_SIGN_MAX_ATTEMPTS" =~ ^[0-9]+$ ]]; then
 	die "COSIGN_SIGN_MAX_ATTEMPTS must be a non-negative integer (got '${COSIGN_SIGN_MAX_ATTEMPTS}')"
 fi
+COSIGN_SIGN_MAX_ATTEMPTS=$((10#$COSIGN_SIGN_MAX_ATTEMPTS))
 if ((COSIGN_SIGN_MAX_ATTEMPTS < 1)); then
 	die "COSIGN_SIGN_MAX_ATTEMPTS must be at least 1 (got '${COSIGN_SIGN_MAX_ATTEMPTS}')"
 fi
 if [[ ! "$COSIGN_SIGN_MAX_DELAY" =~ ^[0-9]+$ ]]; then
 	die "COSIGN_SIGN_MAX_DELAY must be a non-negative integer (got '${COSIGN_SIGN_MAX_DELAY}')"
 fi
+COSIGN_SIGN_MAX_DELAY=$((10#$COSIGN_SIGN_MAX_DELAY))
 
 if ! command -v cosign >/dev/null 2>&1; then
 	die "cosign not found. Install via sigstore/cosign-installer action."

@@ -182,6 +182,20 @@ sleep_call_count() {
 	assert_equal "0" "$(cosign_call_count)"
 }
 
+# Zero-padded knobs are digit-only but invalid octal in Bash arithmetic; the
+# script normalises them to base 10 rather than aborting on "value too great
+# for base".
+@test "sign-image.sh: accepts zero-padded retry knobs" {
+	export COSIGN_SIGN_MAX_ATTEMPTS="04"
+	export COSIGN_SIGN_MAX_DELAY="08"
+	mock_cosign_failing 3 "Error: fetching ambient OIDC credentials: no credentials found"
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "value too great for base"
+	assert_equal "4" "$(cosign_call_count)"
+}
+
 # =============================================================================
 # Transient ambient-OIDC retry
 # =============================================================================
