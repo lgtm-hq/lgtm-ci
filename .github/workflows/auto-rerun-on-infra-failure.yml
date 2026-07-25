@@ -1,0 +1,32 @@
+# SPDX-License-Identifier: MIT
+# Dogfoods reusable-auto-rerun-on-infra-failure.yml for this repository's own
+# CI: when a CI run fails and its failed-job logs match a known transient
+# GitHub-side infra signature ("The runner has received a shutdown signal",
+# "Failed to resolve action download info", …), re-run only the failed jobs —
+# once. Same wiring as examples/auto-rerun-on-infra-failure.yml, but calling
+# the local reusable workflow so dogfooding always tracks main.
+#
+# Caveat: workflow_run triggers only run from the workflow definition on the
+# default branch, so edits to this file take effect only once merged to main.
+---
+name: Auto Rerun on Infra Failure
+
+"on":
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
+
+permissions: {}
+
+jobs:
+  rerun:
+    if: github.event.workflow_run.conclusion == 'failure'
+    uses: ./.github/workflows/reusable-auto-rerun-on-infra-failure.yml
+    permissions:
+      actions: write
+      contents: read
+    with:
+      # run id/attempt are numbers in the event payload; format() passes them
+      # as the strings the reusable workflow inputs expect.
+      run-id: ${{ format('{0}', github.event.workflow_run.id) }}
+      run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
