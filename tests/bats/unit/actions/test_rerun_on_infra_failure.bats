@@ -244,6 +244,50 @@ _call_count() {
 }
 
 # =============================================================================
+# Cosign transient OIDC markers are built-in signatures (#719)
+# =============================================================================
+
+@test "rerun-on-infra-failure: a cosign ambient-OIDC failure triggers rerun via the defaults alone" {
+	# No SIGNATURES input: the marker must be a built-in, otherwise a flake that
+	# outlived the in-step retry leaves the run failed for a human.
+	_mock_gh "Error: getting signer: fetching ambient OIDC credentials: none"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "fetching ambient OIDC credentials"
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+}
+
+# Parity guard: every marker in the single source (scripts/ci/lib/cosign.sh) has
+# to be matchable here, so adding a fourth marker there cannot leave this list
+# stale.
+@test "rerun-on-infra-failure: every cosign OIDC marker triggers rerun via the defaults" {
+	local marker
+	# shellcheck source=../../../../scripts/ci/lib/cosign.sh
+	source "${PROJECT_ROOT}/scripts/ci/lib/cosign.sh"
+	while IFS= read -r marker; do
+		[[ -z "$marker" ]] && continue
+		_mock_gh "cosign sign: Error: ${marker}: EOF"
+		run bash "$SCRIPT"
+		assert_success
+		assert_output --partial "$marker"
+		assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+	done <<<"$COSIGN_OIDC_TRANSIENT_MARKERS"
+}
+
+@test "rerun-on-infra-failure: signature matching stays case-sensitive" {
+	# The in-step cosign retry matches case-insensitively because it only ever
+	# sees one already-failed cosign invocation. The safety net decides whether
+	# to re-run a whole workflow, so it keeps the stricter match and stores the
+	# markers in the exact case cosign emits.
+	_mock_gh "Error: FETCHING AMBIENT OIDC CREDENTIALS: none"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "No infra signature matched"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+# =============================================================================
 # Rerun command shape
 # =============================================================================
 

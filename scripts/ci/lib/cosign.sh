@@ -2,7 +2,10 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Cosign keyless-signing helpers: transient ambient-OIDC
 #          classification plus a bounded, transient-only retry shared by every
-#          cosign signing path (image manifests and blobs alike).
+#          cosign signing path (image manifests and blobs alike). Also the
+#          single source of the transient ambient-OIDC marker strings, consumed
+#          by the auto-rerun safety net in
+#          scripts/ci/actions/rerun-on-infra-failure.sh.
 #
 # Usage:
 #   source "$(dirname "${BASH_SOURCE:-$0}")/cosign.sh"
@@ -49,17 +52,27 @@ fi
 
 # Ambient-OIDC token fetches flake on Sigstore/GitHub hiccups and are the only
 # signing failure class safe to retry: nothing has been signed yet, so a retry
-# cannot mask a rejected signature. Fixed strings, matched case-insensitively.
+# cannot mask a rejected signature. Fixed strings, one per line, transcribed in
+# the exact case cosign emits (Go error strings are lower-case by convention;
+# only the "OIDC" and "ID token" acronyms are capitalised).
 #
-# This is the single source for the cosign OIDC marker list; issue #719 (marker
-# parity with the auto-rerun matcher signatures in
-# scripts/ci/actions/rerun-on-infra-failure.sh) should consume this array rather
-# than introducing a second shared definition.
-COSIGN_OIDC_TRANSIENT_MARKERS=(
-	"fetching ambient OIDC credentials"
-	"retrieving ID token"
-	"reading ID token"
-)
+# This is the single source for the cosign OIDC marker list. Besides the signing
+# paths in this repo it is also consumed by the after-the-fact auto-rerun safety
+# net (scripts/ci/actions/rerun-on-infra-failure.sh, #719), which matches the
+# same flake class in failed-job logs once the in-step retry is exhausted. Add a
+# marker here and both the fast path and the slow path pick it up.
+#
+# A newline-delimited string rather than an array (#719): the public helpers are
+# exported with `export -f` like every other lib in scripts/ci/lib, and bash
+# cannot export an array — an exported function invoked in a child shell would
+# hit an unbound-variable error under `set -u`. A scalar can be exported, so the
+# exported functions stay usable without re-sourcing the lib. It also lets the
+# auto-rerun matcher append the markers straight onto its newline-delimited
+# signature list.
+COSIGN_OIDC_TRANSIENT_MARKERS="fetching ambient OIDC credentials
+retrieving ID token
+reading ID token"
+export COSIGN_OIDC_TRANSIENT_MARKERS
 readonly COSIGN_OIDC_TRANSIENT_MARKERS
 
 readonly COSIGN_SIGN_DEFAULT_MAX_ATTEMPTS=3
@@ -67,14 +80,23 @@ readonly COSIGN_SIGN_DEFAULT_MAX_DELAY=30
 
 # Print the first transient OIDC marker present in the given cosign output;
 # return 1 when none match (i.e. the failure is real and must stay fatal).
+#
+# Deliberately case-insensitive, unlike the case-sensitive matcher in
+# scripts/ci/actions/rerun-on-infra-failure.sh (#719). The blast radius differs:
+# here the input is the output of one cosign invocation that has already failed
+# with nothing signed yet, so a lenient match costs at most a few retried
+# seconds while a missed match costs a whole failed publish. The safety net
+# instead decides whether to re-run an entire workflow that may have failed for
+# real, so it stays strict.
 cosign_transient_oidc_marker() {
 	local output="$1" marker
-	for marker in "${COSIGN_OIDC_TRANSIENT_MARKERS[@]}"; do
+	while IFS= read -r marker; do
+		[[ -z "$marker" ]] && continue
 		if grep -qiF -- "$marker" <<<"$output"; then
 			printf '%s\n' "$marker"
 			return 0
 		fi
-	done
+	done <<<"$COSIGN_OIDC_TRANSIENT_MARKERS"
 	return 1
 }
 
