@@ -78,6 +78,20 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	assert_success
 }
 
+# A caller may invoke this workflow twice in one run (bounded lint retry).
+# Without overwrite the retry's upload 409s, continue-on-error swallows it, and
+# the artifact keeps the first attempt's report — consumers then resolve a stale
+# report instead of the authoritative latest one (#717).
+@test "reusable-quality-lint: report upload overwrites a prior attempt" {
+	run awk '
+		/- name: Upload linting report/ { in_step = 1 }
+		in_step && /^      - name: / && !/Upload linting report/ { exit }
+		in_step && /^          overwrite: true$/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
 # Scoped to the warn step: workflow-wide greps would still pass if the guard
 # and the warning drifted into unrelated steps.
 @test "reusable-quality-lint: failed report upload warns instead of failing" {

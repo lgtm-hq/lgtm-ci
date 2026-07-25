@@ -209,6 +209,12 @@ jobs:
             ${{ inputs.working-directory }}/chk-output.txt
           retention-days: 7
           if-no-files-found: ignore
+          # A caller may run this workflow twice in one run (bounded lint
+          # retry). Without overwrite, the retry's upload 409s, the
+          # continue-on-error above swallows it, and the artifact keeps the
+          # first (failed) attempt's report — so consumers download a stale,
+          # non-authoritative result. The latest attempt is authoritative.
+          overwrite: true
       - name: Warn on failed report upload
         if: steps.upload-report.outcome == 'failure'
         shell: bash

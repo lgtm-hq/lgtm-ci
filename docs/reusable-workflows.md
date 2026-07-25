@@ -117,7 +117,9 @@ jobs:
   # uploads it with `continue-on-error`, and this workflow downloads it the
   # same way — a storage hiccup emits a warning and skips the summary, and
   # never turns a passing lint run red. `status` and `exit-code` always
-  # reflect the lint result alone.
+  # reflect the lint result alone. The upload also sets `overwrite: true`, so
+  # a caller that runs the lint twice in one run (a bounded retry) publishes
+  # the latest attempt's report rather than keeping the first one.
 
   validate:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-validate.yml@<sha>
