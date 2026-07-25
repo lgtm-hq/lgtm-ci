@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.14] - 2026-07-25
+
+### Fixed
+
+- **ci**: retry transient OIDC failures on cosign sign-blob paths (#732) (8862932)
+
 ## [0.59.13] - 2026-07-25
 
 ### Fixed
@@ -1832,7 +1838,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.13...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.14...HEAD
+[0.59.14]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.13...v0.59.14
 [0.59.13]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.12...v0.59.13
 [0.59.12]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.11...v0.59.12
 [0.59.11]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.10...v0.59.11
