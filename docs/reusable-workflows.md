@@ -454,6 +454,16 @@ summary and exits successfully without re-running — a real failure stays
 failed. `max-reruns` (default `1`) caps automation per run: attempts beyond
 the cap exit without re-running, so a persistent outage can never loop.
 
+`workflow_run: completed` can fire before GitHub finishes ingesting the log
+tail, so the matcher refetches the failed-job logs while they come back empty
+(or the fetch errors) — up to `LOG_FETCH_ATTEMPTS` times (default `5`) with
+`LOG_FETCH_DELAY` seconds between attempts (default `5`), both script-level env
+knobs rather than workflow inputs. The first non-empty payload is matched
+immediately, so the happy path never sleeps. When the logs never arrive the job
+reports *inconclusive: logs unavailable* and exits successfully — deliberately
+distinct from "no signature matched … the failure looks real", which is only
+claimed when logs were actually read.
+
 Call it from a thin `workflow_run` consumer gated on a failed conclusion
 (see [examples/auto-rerun-on-infra-failure.yml](../examples/auto-rerun-on-infra-failure.yml)):
 

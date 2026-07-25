@@ -15,7 +15,9 @@ setup() {
 	export RUN_ATTEMPT="1"
 	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary.md"
 	export RERUN_CALLS="${BATS_TEST_TMPDIR}/rerun_calls"
-	unset MAX_RERUNS SIGNATURES
+	export FETCH_CALLS="${BATS_TEST_TMPDIR}/fetch_calls"
+	export SLEEP_CALLS="${BATS_TEST_TMPDIR}/sleep_calls"
+	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 }
 
 teardown() {
@@ -34,11 +36,13 @@ _mock_gh() {
 	local logs_file="${mock_bin}/.failed_logs"
 	printf '%s\n' "$logs" >"$logs_file"
 	: >"$RERUN_CALLS"
+	: >"$FETCH_CALLS"
 
 	cat >"${mock_bin}/gh" <<EOF
 #!/usr/bin/env bash
 case "\$*" in
 	run\ view\ *--log-failed*)
+		echo "\$*" >> '${FETCH_CALLS}'
 		cat '${logs_file}'
 		;;
 	run\ rerun\ *)
@@ -52,6 +56,76 @@ esac
 EOF
 	chmod +x "${mock_bin}/gh"
 	export PATH="${mock_bin}:$PATH"
+}
+
+# Mock gh with a per-attempt failed-log script (#716 ingestion race). Each
+# argument describes one `run view --log-failed` attempt as
+# "<exit-code>:<payload>"; attempts past the last spec repeat it. `run rerun`
+# invocations are recorded as with _mock_gh.
+_mock_gh_attempts() {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	local spec_dir="${BATS_TEST_TMPDIR}/gh_attempts"
+	mkdir -p "$mock_bin" "$spec_dir"
+	: >"$RERUN_CALLS"
+	: >"$FETCH_CALLS"
+
+	local count=0 spec
+	for spec in "$@"; do
+		count=$((count + 1))
+		printf '%s' "${spec#*:}" >"${spec_dir}/${count}.log"
+		printf '%s' "${spec%%:*}" >"${spec_dir}/${count}.status"
+	done
+	printf '%s' "$count" >"${spec_dir}/count"
+
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+spec_dir='${spec_dir}'
+case "\$*" in
+	run\ view\ *--log-failed*)
+		echo "\$*" >> '${FETCH_CALLS}'
+		attempt=\$(grep -c '' '${FETCH_CALLS}')
+		count=\$(cat "\${spec_dir}/count")
+		if [[ "\$attempt" -gt "\$count" ]]; then
+			attempt="\$count"
+		fi
+		cat "\${spec_dir}/\${attempt}.log"
+		exit "\$(cat "\${spec_dir}/\${attempt}.status")"
+		;;
+	run\ rerun\ *)
+		echo "\$*" >> '${RERUN_CALLS}'
+		;;
+	*)
+		echo "unexpected gh call: \$*" >&2
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+	export PATH="${mock_bin}:$PATH"
+}
+
+# Stub sleep so retry-loop tests record the backoff instead of waiting on it.
+_mock_sleep() {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	: >"$SLEEP_CALLS"
+
+	cat >"${mock_bin}/sleep" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${SLEEP_CALLS}'
+EOF
+	chmod +x "${mock_bin}/sleep"
+	export PATH="${mock_bin}:$PATH"
+}
+
+# Count lines in a recording file, tolerating a missing/empty file.
+_call_count() {
+	local file="$1"
+	if [[ ! -s "$file" ]]; then
+		echo 0
+		return 0
+	fi
+	grep -c '' "$file"
 }
 
 # =============================================================================
@@ -97,6 +171,26 @@ EOF
 	assert_failure
 	assert_output --partial "RUN_ATTEMPT must be a non-negative integer"
 	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: non-numeric LOG_FETCH_ATTEMPTS fails with a clear error" {
+	export LOG_FETCH_ATTEMPTS="lots"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_FETCH_ATTEMPTS must be a non-negative integer (got 'lots')"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: non-numeric LOG_FETCH_DELAY fails with a clear error" {
+	export LOG_FETCH_DELAY="5s"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_FETCH_DELAY must be a non-negative integer (got '5s')"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
 }
 
 # =============================================================================
@@ -171,10 +265,13 @@ EOF
 @test "rerun-on-infra-failure: RUN_ATTEMPT above MAX_RERUNS skips without fetching logs" {
 	export RUN_ATTEMPT="2"
 	_mock_gh "Failed to resolve action download info"
+	_mock_sleep
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "exceeds MAX_RERUNS=1"
 	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+	[ ! -s "$SLEEP_CALLS" ]
 }
 
 @test "rerun-on-infra-failure: raised MAX_RERUNS allows a second attempt" {
@@ -230,4 +327,132 @@ EOF
 	assert_output "1"
 	run grep -c "Failed to resolve action download info" "$GITHUB_STEP_SUMMARY"
 	assert_output "1"
+}
+
+# =============================================================================
+# Log-ingestion race: bounded refetch loop (#716)
+# =============================================================================
+
+@test "rerun-on-infra-failure: empty logs on the first attempt are refetched and matched" {
+	_mock_gh_attempts "0:" "0:The runner has received a shutdown signal"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "The runner has received a shutdown signal"
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+	assert_equal "1" "$(_call_count "$SLEEP_CALLS")"
+}
+
+@test "rerun-on-infra-failure: whitespace-only logs are treated as unavailable and refetched" {
+	_mock_gh_attempts "0:$(printf '\n\n   \n')" "0:Error resolving allowed domain github.com"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+}
+
+@test "rerun-on-infra-failure: logs empty on every attempt reports inconclusive, not a real failure" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::Inconclusive"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable."
+	run grep -cF "The failure looks real" "$GITHUB_STEP_SUMMARY"
+	assert_failure
+}
+
+@test "rerun-on-infra-failure: inconclusive logs do not sleep after the final attempt" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	# 5 attempts means 4 backoff waits, never a trailing one.
+	assert_equal "4" "$(_call_count "$SLEEP_CALLS")"
+}
+
+@test "rerun-on-infra-failure: non-empty unmatched logs are not refetched" {
+	_mock_gh_attempts "0:assertion failed: expected 200 got 500"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "No infra signature matched"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_equal "1" "$(_call_count "$FETCH_CALLS")"
+	[ ! -s "$SLEEP_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "The failure looks real"
+}
+
+@test "rerun-on-infra-failure: matching logs on the first attempt never sleep" {
+	_mock_gh_attempts "0:Failed to resolve action download info"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$FETCH_CALLS")"
+	[ ! -s "$SLEEP_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: a failing log fetch is retried within the loop" {
+	_mock_gh_attempts "1:gh: could not read logs" "0:lost communication with the server"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+}
+
+@test "rerun-on-infra-failure: a log fetch failing on every attempt fails loudly" {
+	_mock_gh_attempts "1:gh: could not read logs"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Failed to fetch failed-job logs for run ${RUN_ID} after 5 attempt(s)"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "every one of 5 fetch attempt(s) failed"
+	run grep -cF "The failure looks real" "$GITHUB_STEP_SUMMARY"
+	assert_failure
+}
+
+# =============================================================================
+# Refetch bounds are configurable
+# =============================================================================
+
+@test "rerun-on-infra-failure: LOG_FETCH_ATTEMPTS caps the number of fetches" {
+	export LOG_FETCH_ATTEMPTS="2"
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+	assert_equal "1" "$(_call_count "$SLEEP_CALLS")"
+	assert_output --partial "after 2 attempt(s)"
+}
+
+@test "rerun-on-infra-failure: LOG_FETCH_DELAY controls the backoff passed to sleep" {
+	export LOG_FETCH_ATTEMPTS="2"
+	export LOG_FETCH_DELAY="7"
+	_mock_gh_attempts "0:" "0:Failed to resolve action download info"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	run cat "$SLEEP_CALLS"
+	assert_output "7"
+}
+
+@test "rerun-on-infra-failure: LOG_FETCH_DELAY of zero skips sleeping entirely" {
+	export LOG_FETCH_DELAY="0"
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
+	[ ! -s "$SLEEP_CALLS" ]
 }
