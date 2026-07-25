@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.15] - 2026-07-25
+
+### Fixed
+
+- **ci**: eliminate reusable-workflow artifact name collisions (#728)
+  (8e895bb). **Consumer-visible:** three reusable workflows change their
+  **default** artifact name — `reusable-site-quality.yml` `lychee-report` →
+  `site-lychee-report`, `reusable-test-node-custom.yml` `node-coverage` →
+  `node-custom-coverage`, and `reusable-test-e2e.yml`
+  `playwright-report-<run_id>` → `e2e-report-<run_id>`. Consumers that download
+  these artifacts by name must adopt the new name or pin the old one via the
+  matching input (`link-report-artifact-name`, `coverage-artifact-name`,
+  `report-artifact-name`). `pages-coverage-artifact-name` deliberately keeps its
+  `coverage-html` default on both Node workflows, so a caller enabling Pages
+  coverage on both in one run must override one of them.
+
 ## [0.59.14] - 2026-07-25
 
 ### Fixed
@@ -1838,7 +1854,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.14...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.15...HEAD
+[0.59.15]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.14...v0.59.15
 [0.59.14]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.13...v0.59.14
 [0.59.13]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.12...v0.59.13
 [0.59.12]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.11...v0.59.12
