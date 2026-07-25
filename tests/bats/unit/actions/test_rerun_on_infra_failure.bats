@@ -428,9 +428,36 @@ _call_count() {
 	assert_output --partial "Failed to fetch failed-job logs for run ${RUN_ID} after 5 attempt(s)"
 	[ ! -s "$RERUN_CALLS" ]
 	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
-	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "every one of 5 fetch attempt(s) failed"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "the last of 5 fetch attempt(s) failed"
 	run grep -cF "The failure looks real" "$GITHUB_STEP_SUMMARY"
 	assert_failure
+}
+
+# The terminal classification comes from the last attempt only, so pin both
+# orderings of a mixed error/empty run rather than leaving the semantics to
+# uniform specs.
+@test "rerun-on-infra-failure: an error followed by an empty payload is inconclusive" {
+	export LOG_FETCH_ATTEMPTS="2"
+	_mock_gh_attempts "1:gh: could not read logs" "0:"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "inconclusive, not re-running"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable"
+}
+
+@test "rerun-on-infra-failure: an empty payload followed by an error fails loudly" {
+	export LOG_FETCH_ATTEMPTS="2"
+	_mock_gh_attempts "0:" "1:gh: could not read logs"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Failed to fetch failed-job logs for run ${RUN_ID} after 2 attempt(s)"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "the last of 2 fetch attempt(s) failed"
 }
 
 # =============================================================================

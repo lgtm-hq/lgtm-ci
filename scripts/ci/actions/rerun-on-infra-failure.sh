@@ -148,8 +148,11 @@ main() {
 	if ! fetch_failed_logs_with_retry; then
 		add_github_summary "## Auto re-run on infra failure"
 		add_github_summary ""
+		# FETCH_OUTCOME records the last attempt's classification only, so the
+		# wording speaks to the final attempt rather than claiming every one of
+		# them errored (earlier attempts may have returned empty payloads).
 		if [[ "$FETCH_OUTCOME" == "error" ]]; then
-			add_github_summary "Could not read the failed-job logs of run ${RUN_ID}: every one of ${LOG_FETCH_ATTEMPTS} fetch attempt(s) failed. No signature check was possible, so this says nothing about whether the failure is genuine."
+			add_github_summary "Could not read the failed-job logs of run ${RUN_ID}: the last of ${LOG_FETCH_ATTEMPTS} fetch attempt(s) failed. No signature check was possible, so this says nothing about whether the failure is genuine."
 			die "Failed to fetch failed-job logs for run ${RUN_ID} after ${LOG_FETCH_ATTEMPTS} attempt(s)"
 		fi
 		# GitHub never made the log tail available. Inconclusive is not the same

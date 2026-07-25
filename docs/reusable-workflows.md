@@ -462,7 +462,9 @@ script-level env knobs rather than workflow inputs. The first non-empty payload 
 immediately, so the happy path never sleeps. When the logs never arrive the job
 reports *inconclusive: logs unavailable* and exits successfully — deliberately
 distinct from "no signature matched … the failure looks real", which is only
-claimed when logs were actually read.
+claimed when logs were actually read. If the final fetch attempt errors outright
+(rather than returning an empty payload) the job fails instead, so a broken
+`gh run view` is surfaced rather than reported as a quiet inconclusive.
 
 Call it from a thin `workflow_run` consumer gated on a failed conclusion
 (see [examples/auto-rerun-on-infra-failure.yml](../examples/auto-rerun-on-infra-failure.yml)):
