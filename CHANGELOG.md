@@ -23,7 +23,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **ci**: eliminate reusable-workflow artifact name collisions (#728) (8e895bb)
+- **ci**: eliminate reusable-workflow artifact name collisions (#728)
+  (8e895bb). **Consumer-visible:** three reusable workflows change their
+  **default** artifact name — `reusable-site-quality.yml` `lychee-report` →
+  `site-lychee-report`, `reusable-test-node-custom.yml` `node-coverage` →
+  `node-custom-coverage`, and `reusable-test-e2e.yml`
+  `playwright-report-<run_id>` → `e2e-report-<run_id>`. Consumers that download
+  these artifacts by name must adopt the new name or pin the old one via the
+  matching input (`link-report-artifact-name`, `coverage-artifact-name`,
+  `report-artifact-name`). `pages-coverage-artifact-name` deliberately keeps its
+  `coverage-html` default on both Node workflows, so a caller enabling Pages
+  coverage on both in one run must override one of them.
 
 ## [0.59.14] - 2026-07-25
 
