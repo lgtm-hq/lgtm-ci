@@ -58,12 +58,26 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/github/summary.sh
 source "$SCRIPT_DIR/../lib/github/summary.sh"
+# Sourced in this shell for COSIGN_OIDC_TRANSIENT_MARKERS, the single source of
+# the transient ambient-OIDC marker strings (#719). This script is not a signing
+# path, but the markers are cosign-emitted strings, so cosign.sh stays their
+# home; sourcing it here is side-effect-free (a load guard, function
+# definitions, and two numeric defaults).
+# shellcheck source=../lib/cosign.sh
+source "$SCRIPT_DIR/../lib/cosign.sh"
 
 # Known transient infra failure signatures (fixed strings, one per line).
+#
+# The trailing cosign markers are the ambient-OIDC flake class that
+# scripts/ci/lib/cosign.sh already retries in-step. The in-step retry is the
+# fast path; this matcher is the slow path for when that retry is exhausted and
+# the publish fails outright. Without them a persistent OIDC flake burned its
+# retries and then matched nothing here, leaving a human to press re-run (#719).
 DEFAULT_SIGNATURES="Failed to resolve action download info
 The runner has received a shutdown signal
 Error resolving allowed domain
-lost communication with the server"
+lost communication with the server
+${COSIGN_OIDC_TRANSIENT_MARKERS}"
 
 # Build the effective signature list: defaults plus optional SIGNATURES
 # extensions, blank lines dropped.
@@ -124,6 +138,14 @@ fetch_failed_logs_with_retry() {
 
 # Print the first signature found in the logs on stdin; return 1 when none
 # match.
+#
+# Matching stays case-sensitive (#719). Every signature is stored in the exact
+# case its source emits — including the cosign markers — so case-insensitive
+# matching would buy no extra true positives, while widening what auto-rerun
+# fires on across ALL signatures, not just the OIDC ones. The cost of a false
+# positive here is re-running a workflow that may have failed for real; the cost
+# of a miss is the pre-#719 status quo of a human pressing re-run. Strict is the
+# safe default for the safety net.
 match_signature() {
 	local logs="$1" signature
 	while IFS= read -r signature; do

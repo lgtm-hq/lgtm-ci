@@ -508,6 +508,18 @@ known transient-infrastructure signature. Built-in signatures:
 - `The runner has received a shutdown signal`
 - `Error resolving allowed domain`
 - `lost communication with the server`
+- `fetching ambient OIDC credentials`
+- `retrieving ID token`
+- `reading ID token`
+
+The last three are cosign's transient ambient-OIDC markers, single-sourced from
+`scripts/ci/lib/cosign.sh` so the in-step signing retry and this after-the-fact
+safety net cannot drift apart. The in-step retry is the fast path; this matcher
+covers the case where that retry is exhausted and the publish fails outright.
+
+Signatures are matched as fixed strings, case-sensitively: every default is
+stored in the exact case its source emits, so case-insensitive matching would
+only widen what auto-rerun fires on.
 
 Extend the list via the multiline `signatures` input (newline-separated,
 appended to the defaults). When no signature matches, the job writes a step
@@ -1093,7 +1105,10 @@ on the first attempt. Tune with `COSIGN_SIGN_MAX_ATTEMPTS` (default `3`) and
 `COSIGN_SIGN_MAX_DELAY` (default `30` seconds) in the job environment. The same
 retry (from `scripts/ci/lib/cosign.sh`) covers the `cosign sign-blob` paths in
 the `sign-artifact` action and `reusable-sbom.yml`'s `release-assets` signing,
-applied per blob so an already-signed artifact is never re-signed.
+applied per blob so an already-signed artifact is never re-signed. The same
+marker list is also a built-in signature of
+[`reusable-auto-rerun-on-infra-failure.yml`](#auto-re-run-on-infra-failure), so a
+flake that outlives the in-step retry still gets the failed jobs re-run.
 
 All inputs are opt-in; existing callers keep current behavior without changes.
 

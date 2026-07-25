@@ -103,6 +103,42 @@ _signer_call_count() {
 	assert_readonly_var "COSIGN_OIDC_TRANSIENT_MARKERS"
 }
 
+# The markers are a newline-delimited scalar rather than an array precisely so
+# they can be exported alongside the exported functions (#719): `-rx` pins
+# readonly + exported and, by the absence of `a`, not an array.
+@test "cosign.sh: marker list is an exported, readonly, newline-delimited string" {
+	source "$LIB_DIR/cosign.sh"
+	run awk '{ print $2 }' <<<"$(declare -p COSIGN_OIDC_TRANSIENT_MARKERS)"
+	assert_output "-rx"
+	run grep -c '' <<<"$COSIGN_OIDC_TRANSIENT_MARKERS"
+	assert_output "3"
+	run grep -cF -- "fetching ambient OIDC credentials" <<<"$COSIGN_OIDC_TRANSIENT_MARKERS"
+	assert_output "1"
+}
+
+# Regression for the export edge (#719): bash cannot export an array, so before
+# the markers became a scalar an exported helper invoked in a child shell hit an
+# unbound-variable error under `set -u` instead of classifying the failure.
+#
+# env -u BASH_ENV: kcov instruments nested bash via BASH_ENV, and its injected
+# preamble reads BASH_SOURCE, which is itself unbound under `set -u` — the child
+# then prints an unbound-variable line that has nothing to do with the exported
+# function under test. Same idiom as run-build-artifact.sh and
+# run-playwright-tests.sh, so the assertion sees only the helper's own output.
+@test "cosign_transient_oidc_marker: works in a child shell without re-sourcing the lib" {
+	source "$LIB_DIR/cosign.sh"
+	run env -u BASH_ENV bash -uc 'cosign_transient_oidc_marker "Error: retrieving ID token: EOF"'
+	assert_success
+	assert_output "retrieving ID token"
+}
+
+@test "cosign_transient_oidc_marker: still fails cleanly in a child shell on a real failure" {
+	source "$LIB_DIR/cosign.sh"
+	run env -u BASH_ENV bash -uc 'cosign_transient_oidc_marker "Error: manifest unknown"'
+	assert_failure
+	refute_output
+}
+
 # =============================================================================
 # cosign_transient_oidc_marker
 # =============================================================================
