@@ -243,8 +243,12 @@ Rich coverage comments use `generate-coverage-comment` with an optional
 `## 📊 Code Coverage Report — {test-suite-name}`; `comment-marker` remains the
 upsert identity.
 
-Node test reusables (`reusable-test-node`, `reusable-test-node-custom`) upload the
-`node-coverage` artifact from `{working-directory}/{coverage-summary-file}`.
+Node test reusables upload the coverage payload from
+`{working-directory}/{coverage-summary-file}` under `coverage-artifact-name`,
+which defaults to `node-coverage` on `reusable-test-node` and
+`node-custom-coverage` on `reusable-test-node-custom` so the two cannot collide
+in one run (see
+[reusable-workflows.md](reusable-workflows.md#artifact-names)).
 `publish-test-summary` must pass the same path (including the `working-directory`
 prefix when it is not `.`) as `coverage-file` to
 `reusable-publish-test-summary.yml` so `download-artifact` resolves the summary

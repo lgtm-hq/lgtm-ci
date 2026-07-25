@@ -87,6 +87,43 @@ Caller examples live under [examples/](../examples/) (see [examples/README.md](.
 For GitHub Pages (coverage, test reports, and static sites), see
 [pages-publishing.md](pages-publishing.md).
 
+## Artifact names
+
+`actions/upload-artifact` v4+ rejects a second upload of an existing name with
+`409 Conflict`. Every artifact upload in a reusable workflow therefore sets
+`overwrite: true`, so a caller that invokes the same reusable twice in one run
+(a bounded retry, or two legs of a fan-out) publishes the latest attempt rather
+than failing — the latest attempt is authoritative.
+
+Report-style convenience artifacts (link reports, validation reports, audit
+comment payloads, test-summary coverage payloads, debug Playwright/TAP output)
+additionally upload with `continue-on-error: true` and warn, so a storage hiccup
+never reddens a job whose actual verdict is green. Artifacts that are a job's
+verdict or a downstream job's required input (build outputs, dists, per-matrix
+result summaries, Pages coverage bundles, merged reports) keep hard failure.
+
+Sibling reusables that a caller can run in the same run use **distinct default
+artifact names**, and expose an input so a caller running one workflow twice can
+disambiguate further:
+
+<!-- markdownlint-disable MD013 -->
+
+| Workflow                           | Input                       | Default                      |
+| ---------------------------------- | --------------------------- | ---------------------------- |
+| `reusable-link-check.yml`          | `link-report-artifact-name` | `lychee-report`              |
+| `reusable-site-quality.yml`        | `link-report-artifact-name` | `site-lychee-report`         |
+| `reusable-test-node.yml`           | `coverage-artifact-name`    | `node-coverage`              |
+| `reusable-test-node-custom.yml`    | `coverage-artifact-name`    | `node-custom-coverage`       |
+| `reusable-test-e2e-playwright.yml` | `report-artifact-name`      | `playwright-report-<run_id>` |
+| `reusable-test-e2e.yml`            | `report-artifact-name`      | `e2e-report-<run_id>`        |
+
+<!-- markdownlint-enable MD013 -->
+
+`pages-coverage-artifact-name` still defaults to `coverage-html` on **both**
+`reusable-test-node.yml` and `reusable-test-node-custom.yml`, because that name
+is baked into consumers' Pages bundles. A caller that enables
+`upload-pages-coverage-html` on both in one run must override one of them.
+
 ## Quality And Validation
 
 ```yaml
@@ -1448,6 +1485,11 @@ consumer and are passed as command inputs.
 | `test-egress-preset`     | falls back to `egress-preset` | Override egress for site-test job       |
 
 <!-- markdownlint-enable MD013 -->
+
+`link-report-artifact-name` names the uploaded lychee report and defaults to
+`site-lychee-report` — deliberately different from `reusable-link-check.yml`'s
+`lychee-report`, so a caller running both in one run does not collide. See
+[Artifact names](#artifact-names).
 
 ```yaml
 jobs:
