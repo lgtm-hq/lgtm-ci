@@ -1021,7 +1021,10 @@ when — and only when — cosign fails while fetching its ambient OIDC credenti
 the transient flake class that otherwise fails a whole tag publish. Every other
 signing failure (registry error, rejected signature, policy failure) stays fatal
 on the first attempt. Tune with `COSIGN_SIGN_MAX_ATTEMPTS` (default `3`) and
-`COSIGN_SIGN_MAX_DELAY` (default `30` seconds) in the job environment.
+`COSIGN_SIGN_MAX_DELAY` (default `30` seconds) in the job environment. The same
+retry (from `scripts/ci/lib/cosign.sh`) covers the `cosign sign-blob` paths in
+the `sign-artifact` action and `reusable-sbom.yml`'s `release-assets` signing,
+applied per blob so an already-signed artifact is never re-signed.
 
 All inputs are opt-in; existing callers keep current behavior without changes.
 

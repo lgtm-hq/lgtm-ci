@@ -26,7 +26,7 @@ Full function-level reference: [reference.md](reference.md).
 ## Layout
 
 Single-file libraries at the top of `scripts/ci/lib/` are either standalone
-(`log.sh`, `fs.sh`, `platform.sh`, `git.sh`, `egress.sh`,
+(`log.sh`, `fs.sh`, `platform.sh`, `git.sh`, `egress.sh`, `cosign.sh`,
 `pages_coverage.sh`) or thin **aggregators** that source every module in a
 same-named subdirectory, so callers can pick one file for a whole domain:
 
@@ -58,3 +58,7 @@ aggregator.
 verification (`LGTM_CI_CA_BUNDLE`, `LGTM_CI_PINNED_PUBKEY`); functions fail
 closed when a configured CA bundle is unreadable. `fs.sh`'s
 `write_file_atomic` avoids partial-file commits on producer failure.
+`cosign.sh` is the single source for the cosign ambient-OIDC transient marker
+list and the bounded, transient-only signing retry used by every cosign signing
+path (image manifests and blobs); only OIDC token-fetch flakes are retried, so a
+retry can never mask a rejected signature or a policy failure.

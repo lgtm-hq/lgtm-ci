@@ -5,6 +5,11 @@
 # Required environment variables:
 #   STEP - Which step to run: sign, upload-release, summary
 #   FILES - Glob pattern(s) for files to sign (space-separated)
+#
+# Optional environment variables (see scripts/ci/lib/cosign.sh):
+#   COSIGN_SIGN_MAX_ATTEMPTS - Max signing attempts per blob (default: 3)
+#   COSIGN_SIGN_MAX_DELAY    - Cap for the exponential backoff, seconds
+#                              (default: 30)
 
 set -euo pipefail
 
@@ -14,11 +19,15 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=../lib/actions.sh
 source "$SCRIPT_DIR/../lib/actions.sh"
+# shellcheck source=../lib/cosign.sh
+source "$SCRIPT_DIR/../lib/cosign.sh"
 
 case "$STEP" in
 sign)
 	: "${FILES:?FILES is required}"
 	: "${SIGNATURES_DIR:=${RUNNER_TEMP:-/tmp}/cosign-signatures}"
+
+	cosign_validate_retry_bounds
 
 	if ! command -v cosign >/dev/null 2>&1; then
 		die "cosign not found. Install via sigstore/cosign-installer action."
@@ -57,7 +66,10 @@ sign)
 
 		log_info "Signing: $file"
 
-		cosign sign-blob --yes \
+		# Retry per blob, not per batch: a batch-level retry would re-sign
+		# blobs that already succeeded.
+		cosign_sign_with_retry "cosign sign-blob" "$file" \
+			cosign sign-blob --yes \
 			--output-signature "$sig_file" \
 			--output-certificate "$cert_file" \
 			"$file"

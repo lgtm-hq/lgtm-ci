@@ -238,6 +238,14 @@ Sign release artifacts with Sigstore/Cosign keyless signing.
 Requires `id-token: write` (and `contents: write` when uploading to a
 release).
 
+Each blob is signed with a bounded, transient-only retry (shared with the
+image-signing path via `scripts/ci/lib/cosign.sh`): only an ambient-OIDC
+token-fetch flake is retried, with exponential backoff, and every other failure
+stays fatal on the first attempt. The retry is scoped per file, so a flake on
+one artifact never re-signs the ones that already succeeded. Tune with
+`COSIGN_SIGN_MAX_ATTEMPTS` (default `3`) and `COSIGN_SIGN_MAX_DELAY` (default
+`30` seconds) in the job environment.
+
 ### verify-signature
 
 Verify Sigstore/Cosign signatures.
