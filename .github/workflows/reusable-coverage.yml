@@ -85,6 +85,16 @@ on:
         required: false
         type: boolean
         default: true
+      coverage-artifact-name:
+        description: >-
+          Name of the coverage-report artifact handed to the publish jobs.
+          Override it when one workflow run calls this workflow more than once
+          (for example per working directory): overwrite makes the last upload
+          of a shared name authoritative, so distinct calls need distinct names
+          to keep their handoffs isolated.
+        required: false
+        type: string
+        default: "coverage-report"
       comment-marker:
         description: "Upsert marker for the coverage test summary comment"
         required: false
@@ -206,7 +216,7 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: coverage-report
+          name: ${{ inputs.coverage-artifact-name }}
           path: |
             ${{ inputs.working-directory }}/${{ steps.collect.outputs.merged-coverage-file }}
             ${{ inputs.working-directory }}/coverage/
@@ -285,7 +295,9 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: coverage-report
+          name: ${{ inputs.coverage-artifact-name }}
+          # Local extraction directory, deliberately fixed: the path
+          # expressions below are relative to it, not to the artifact name.
           path: coverage-report
       - name: Publish to GitHub Pages
         id: publish
@@ -318,7 +330,7 @@ jobs:
       coverage-threshold: ${{ inputs.threshold }}
       job-result: ${{ needs.coverage.outputs.passed == 'true' && 'success' || 'failure' }}
       rich-coverage-comment: true
-      coverage-artifact-name: coverage-report
+      coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
       coverage-file: ${{ needs.coverage.outputs.merged-coverage-file }}
       coverage-format: ${{ inputs.format }}
       tooling-ref: ${{ inputs.tooling-ref }}

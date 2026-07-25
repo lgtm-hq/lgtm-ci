@@ -116,6 +116,7 @@ disambiguate further:
 | `reusable-test-node-custom.yml`    | `coverage-artifact-name`    | `node-custom-coverage`       |
 | `reusable-test-e2e-playwright.yml` | `report-artifact-name`      | `playwright-report-<run_id>` |
 | `reusable-test-e2e.yml`            | `report-artifact-name`      | `e2e-report-<run_id>`        |
+| `reusable-coverage.yml`            | `coverage-artifact-name`    | `coverage-report`            |
 
 <!-- markdownlint-enable MD013 -->
 

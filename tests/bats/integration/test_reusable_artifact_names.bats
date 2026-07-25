@@ -117,6 +117,30 @@ _uploads_missing_overwrite() {
 	assert_output --partial 'default: "node-custom-coverage"'
 }
 
+# reusable-coverage.yml's handoff has no tolerance guard, so a caller invoking
+# it twice in one run (per working directory, say) must be able to keep the two
+# uploads apart instead of having overwrite silently pick one.
+@test "reusable-coverage: coverage artifact name defaults to coverage-report" {
+	run awk '/^      coverage-artifact-name:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"${WORKFLOW_DIR}/reusable-coverage.yml"
+	assert_success
+	assert_output --partial 'default: "coverage-report"'
+}
+
+# Upload, publish-job download and the summary publisher must all resolve the
+# same name, or an override splits the handoff.
+@test "reusable-coverage: every consumer of the artifact reuses the input" {
+	run grep -cF 'coverage-artifact-name: ${{ inputs.coverage-artifact-name }}' \
+		"${WORKFLOW_DIR}/reusable-coverage.yml"
+	assert_output "1"
+	run grep -cE '^ +name: \$\{\{ inputs\.coverage-artifact-name \}\}$' \
+		"${WORKFLOW_DIR}/reusable-coverage.yml"
+	assert_output "2"
+	run grep -E '^          name: coverage-report$' \
+		"${WORKFLOW_DIR}/reusable-coverage.yml"
+	assert_failure
+}
+
 # The summary publisher must read the same name the test job uploaded, or the
 # rich coverage comment silently degrades to pass/fail totals.
 @test "reusable-test-node variants: summary publisher reuses coverage-artifact-name" {
