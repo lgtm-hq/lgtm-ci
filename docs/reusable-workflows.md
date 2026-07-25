@@ -1002,6 +1002,13 @@ export manifest lists from SBOM attestations, so attestations are intentionally
 skipped on that path. The publish path (main/tags with `push: true`) still
 receives full SBOM and provenance attestations.
 
+`cosign-sign` signing retries a bounded number of times with exponential backoff
+when — and only when — cosign fails while fetching its ambient OIDC credentials,
+the transient flake class that otherwise fails a whole tag publish. Every other
+signing failure (registry error, rejected signature, policy failure) stays fatal
+on the first attempt. Tune with `COSIGN_SIGN_MAX_ATTEMPTS` (default `3`) and
+`COSIGN_SIGN_MAX_DELAY` (default `30` seconds) in the job environment.
+
 All inputs are opt-in; existing callers keep current behavior without changes.
 
 ### SBOM (`reusable-sbom.yml`)
