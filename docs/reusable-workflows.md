@@ -456,9 +456,9 @@ the cap exit without re-running, so a persistent outage can never loop.
 
 `workflow_run: completed` can fire before GitHub finishes ingesting the log
 tail, so the matcher refetches the failed-job logs while they come back empty
-(or the fetch errors) — up to `LOG_FETCH_ATTEMPTS` times (default `5`) with
-`LOG_FETCH_DELAY` seconds between attempts (default `5`), both script-level env
-knobs rather than workflow inputs. The first non-empty payload is matched
+(or the fetch errors) — up to `LOG_FETCH_ATTEMPTS` times (default `5`, must be at
+least `1`) with `LOG_FETCH_DELAY` seconds between attempts (default `5`), both
+script-level env knobs rather than workflow inputs. The first non-empty payload is matched
 immediately, so the happy path never sleeps. When the logs never arrive the job
 reports *inconclusive: logs unavailable* and exits successfully — deliberately
 distinct from "no signature matched … the failure looks real", which is only

@@ -178,7 +178,19 @@ _call_count() {
 	_mock_gh "Failed to resolve action download info"
 	run bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "::error::LOG_FETCH_ATTEMPTS must be a non-negative integer (got 'lots')"
+	assert_output --partial "::error::LOG_FETCH_ATTEMPTS must be a positive integer (got 'lots')"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: LOG_FETCH_ATTEMPTS of zero is rejected" {
+	# Zero attempts would silently disable the log inspection the safety net is
+	# built on, so it is a typo, not a valid opt-out.
+	export LOG_FETCH_ATTEMPTS="0"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_FETCH_ATTEMPTS must be a positive integer (got '0')"
 	[ ! -s "$RERUN_CALLS" ]
 	[ ! -s "$FETCH_CALLS" ]
 }

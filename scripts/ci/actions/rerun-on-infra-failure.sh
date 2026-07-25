@@ -16,7 +16,7 @@
 #   MAX_RERUNS        - Maximum automatic re-runs per run (default: 1)
 #   SIGNATURES        - Extra newline-separated log signatures appended to the
 #                       built-in defaults (optional)
-#   LOG_FETCH_ATTEMPTS - Max failed-job log fetch attempts (default: 5)
+#   LOG_FETCH_ATTEMPTS - Max failed-job log fetch attempts, at least 1 (default: 5)
 #   LOG_FETCH_DELAY   - Seconds to wait between log fetch attempts (default: 5)
 #   GITHUB_REPOSITORY - owner/repo (provided by GitHub Actions)
 #   GH_TOKEN          - Token with actions:write scope
@@ -32,8 +32,8 @@ set -euo pipefail
 : "${LOG_FETCH_DELAY:=5}"
 
 # RUN_ATTEMPT, MAX_RERUNS and the log-fetch bounds feed arithmetic; reject
-# anything that is not a non-negative integer up front so workflow-input typos
-# fail loudly instead of raising an arithmetic error under set -e.
+# non-integers up front so workflow-input typos fail loudly instead of raising
+# an arithmetic error under set -e.
 if [[ ! "$RUN_ATTEMPT" =~ ^[0-9]+$ ]]; then
 	echo "::error::RUN_ATTEMPT must be a non-negative integer (got '${RUN_ATTEMPT}')"
 	exit 1
@@ -42,8 +42,10 @@ if [[ ! "$MAX_RERUNS" =~ ^[0-9]+$ ]]; then
 	echo "::error::MAX_RERUNS must be a non-negative integer (got '${MAX_RERUNS}')"
 	exit 1
 fi
-if [[ ! "$LOG_FETCH_ATTEMPTS" =~ ^[0-9]+$ ]]; then
-	echo "::error::LOG_FETCH_ATTEMPTS must be a non-negative integer (got '${LOG_FETCH_ATTEMPTS}')"
+# Zero attempts would mean the safety net silently never inspects the logs, so
+# this bound is positive rather than merely non-negative.
+if [[ ! "$LOG_FETCH_ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
+	echo "::error::LOG_FETCH_ATTEMPTS must be a positive integer (got '${LOG_FETCH_ATTEMPTS}')"
 	exit 1
 fi
 if [[ ! "$LOG_FETCH_DELAY" =~ ^[0-9]+$ ]]; then
