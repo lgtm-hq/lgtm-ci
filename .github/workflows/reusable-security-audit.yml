@@ -222,7 +222,7 @@ jobs:
           # attempt's report is authoritative.
           overwrite: true
       - name: Warn on failed comment upload
-        if: steps.upload-comment.outcome == 'failure'
+        if: always() && steps.upload-comment.outcome == 'failure'
         shell: bash
         run: |
           echo "::warning::Audit comment upload failed; the audit result is unaffected."

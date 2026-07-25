@@ -221,7 +221,7 @@ jobs:
           # would 409 without this; the later attempt is authoritative.
           overwrite: true
       - name: Warn on failed report upload
-        if: steps.upload-report.outcome == 'failure'
+        if: always() && steps.upload-report.outcome == 'failure'
         shell: bash
         run: |
           echo "::warning::E2E report upload failed; the test result is unaffected."

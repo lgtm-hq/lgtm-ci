@@ -128,17 +128,38 @@ _uploads_missing_overwrite() {
 }
 
 # Upload, publish-job download and the summary publisher must all resolve the
-# same name, or an override splits the handoff.
+# same name, or an override splits the handoff. Asserted per step block, not by
+# file-wide grep: a hardcoded name inside the real step would otherwise hide
+# behind matching text elsewhere in the file.
 @test "reusable-coverage: every consumer of the artifact reuses the input" {
-	run grep -cF 'coverage-artifact-name: ${{ inputs.coverage-artifact-name }}' \
-		"${WORKFLOW_DIR}/reusable-coverage.yml"
-	assert_output "1"
-	run grep -cE '^ +name: \$\{\{ inputs\.coverage-artifact-name \}\}$' \
-		"${WORKFLOW_DIR}/reusable-coverage.yml"
-	assert_output "2"
-	run grep -E '^          name: coverage-report$' \
-		"${WORKFLOW_DIR}/reusable-coverage.yml"
-	assert_failure
+	local step
+	for step in "Upload coverage report" "Download coverage report"; do
+		run awk -v step="      - name: ${step}" '
+			$0 == step { seen = 1; in_step = 1; next }
+			in_step && /^      - name: / { exit }
+			in_step && /^          name: / {
+				line = $0
+				sub(/^          name: /, "", line)
+				resolved = (line == "${{ inputs.coverage-artifact-name }}")
+				exit
+			}
+			END { exit !(seen && resolved) }
+		' "${WORKFLOW_DIR}/reusable-coverage.yml"
+		assert_success
+	done
+	# The publish-test-summary caller job passes the same input through.
+	run awk '
+		/^  publish-test-summary:$/ { seen = 1; in_job = 1; next }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ { exit }
+		in_job && /^      coverage-artifact-name: / {
+			line = $0
+			sub(/^      coverage-artifact-name: /, "", line)
+			resolved = (line == "${{ inputs.coverage-artifact-name }}")
+			exit
+		}
+		END { exit !(seen && resolved) }
+	' "${WORKFLOW_DIR}/reusable-coverage.yml"
+	assert_success
 }
 
 # The summary publisher must read the same name the test job uploaded, or the
@@ -216,6 +237,33 @@ _uploads_missing_overwrite() {
 	done
 }
 
+# The uploads these warnings report on are always()-gated, so the warning must be
+# too: without it the implicit success() check skips the warning on exactly the
+# runs where the tests failed — the storage hiccup would then go unreported.
+@test "reusable workflows: upload warnings survive a failed job" {
+	local wf missing=""
+	while read -r wf; do
+		# Warnings that report on an upload step's outcome only. Publisher-job
+		# download warnings are excluded: nothing runs before their download, so
+		# the job cannot already be failing when they are evaluated.
+		if ! awk '
+			/^      - name: Warn on/ { in_step = 1; next }
+			in_step && /^        if: .*steps\.upload-[A-Za-z0-9_-]*\.outcome/ {
+				if ($0 !~ /if: always\(\)/) { bad = 1 }
+				in_step = 0
+			}
+			in_step && /^      - name: / { in_step = 0 }
+			END { exit bad }
+		' "$wf"; then
+			missing+=" $(basename "$wf")"
+		fi
+	done < <(_reusable_workflows)
+	[ -z "$missing" ] || {
+		echo "warn steps missing always():${missing}" >&2
+		return 1
+	}
+}
+
 # The inverse guard: these artifacts are a job's verdict or a downstream job's
 # required input, so continue-on-error would turn a real failure green.
 @test "reusable workflows: verdict uploads stay fatal" {
@@ -235,10 +283,10 @@ _uploads_missing_overwrite() {
 		wf="${entry%%:*}"
 		step="${entry#*:}"
 		run awk -v step="      - name: ${step}" '
-			$0 == step { in_step = 1; next }
+			$0 == step { seen = 1; in_step = 1; next }
 			in_step && /^      - name: / { exit }
 			in_step && /^        continue-on-error: true$/ { bad = 1; exit }
-			END { exit bad }
+			END { exit (!seen || bad) }
 		' "${WORKFLOW_DIR}/${wf}"
 		assert_success
 	done

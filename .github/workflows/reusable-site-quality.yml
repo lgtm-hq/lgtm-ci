@@ -405,7 +405,7 @@ jobs:
           # is authoritative, so overwrite instead of 409ing.
           overwrite: true
       - name: Warn on failed lychee report upload
-        if: steps.upload-link-report.outcome == 'failure'
+        if: always() && steps.upload-link-report.outcome == 'failure'
         shell: bash
         run: |
           echo "::warning::Lychee report upload failed; the link result is unaffected."

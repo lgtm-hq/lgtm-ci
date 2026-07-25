@@ -412,7 +412,7 @@ jobs:
           # attempt's coverage is authoritative.
           overwrite: true
       - name: Warn on failed summary LCOV upload
-        if: steps.upload-summary-lcov.outcome == 'failure'
+        if: always() && steps.upload-summary-lcov.outcome == 'failure'
         shell: bash
         run: |
           echo "::warning::Summary LCOV upload failed; the test result is unaffected."

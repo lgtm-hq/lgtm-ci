@@ -532,7 +532,7 @@ jobs:
           # attempt's coverage is authoritative.
           overwrite: true
       - name: Warn on failed summary coverage upload
-        if: steps.upload-summary-coverage.outcome == 'failure'
+        if: always() && steps.upload-summary-coverage.outcome == 'failure'
         shell: bash
         run: |
           echo "::warning::Summary coverage upload failed; the test result is unaffected."
