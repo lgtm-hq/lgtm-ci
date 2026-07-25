@@ -4,7 +4,17 @@ Use reusable workflows from consumer repositories with a thin caller job.
 
 **Tag/release and non-PR pipelines** should call lint/test/coverage reusables
 directly (for example `reusable-quality-lint.yml`) with `contents: read` only.
-Grant `pull-requests: write` only when invoking workflows that post PR summaries and reports.
+
+**Grant what the workflow declares, not what your inputs use.** GitHub validates
+a reusable workflow's permission requests **statically**, before any job `if:` is
+evaluated, so the caller job must grant at least the union of every scope
+declared across the called workflow's jobs — including jobs your inputs disable.
+A caller that grants less does not get a step failure: the run dies at
+`startup_failure` with nothing executed. Copy the permission block from the
+example for the workflow you call instead of trimming it to the scopes the
+feature you enabled appears to need. Where a scope looks broader than a
+snippet's inputs warrant, that is the static check talking, and the fix belongs
+in the workflow (see #730 for that pattern), not in the caller.
 
 ```yaml
 jobs:
@@ -209,6 +219,9 @@ jobs:
   python:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
     permissions:
+      # Required by the `aggregate` job's static request, not by any artifact
+      # API call this workflow makes. Drop it once #730 removes the request.
+      actions: write
       contents: read
       pull-requests: write
     with:
@@ -246,6 +259,11 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
+      # Declared by the `publish` job (Pages report deploy). Required even with
+      # publish-results left off, because the request is validated statically.
+      pages: write
+      id-token: write
+      actions: write
     with:
       test-suites: smoke,visual
       browsers: chromium,firefox
@@ -348,6 +366,9 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
       contents: read
+      # Declared by the `publish-test-summary` job; still required with
+      # publish-test-summary: false, since the request is validated statically.
+      pull-requests: write
     with:
       tooling-ref: "<sha>"
       job-name: "Rust Compat"
@@ -769,7 +790,9 @@ deploy-site:
     contents: read
     pages: write
     id-token: write
-    actions: read
+    # write, not read: the build job resolves and downloads report artifacts and
+    # prunes stale Pages artifacts on rerun (#415).
+    actions: write
   with:
     site-root: apps/site/dist
     build-command: bun run build
@@ -1016,7 +1039,9 @@ jobs:
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
     permissions:
-      contents: read
+      # write, not read: declared by the release-asset jobs. Required in scan
+      # mode too, since the request is validated statically.
+      contents: write
       security-events: write
       id-token: write
       attestations: write
@@ -1025,6 +1050,12 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-coverage.yml@<sha>
     permissions:
       contents: read
+      # Declared by the `publish` (Pages) and `publish-test-summary` jobs.
+      # Required with publish-pages off, since requests validate statically.
+      pages: write
+      id-token: write
+      actions: write
+      pull-requests: write
 
   ghcr-cleanup:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ghcr-cleanup.yml@<sha>
@@ -1099,7 +1130,9 @@ only). Callers that must keep advisory-only behavior should pass
 sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
-    contents: read
+    # write, not read: declared by the release-asset jobs. Required in scan mode
+    # too, since the request is validated statically.
+    contents: write
     security-events: write
     id-token: write
     attestations: write
@@ -1114,6 +1147,9 @@ sbom-release:
   permissions:
     contents: write
     id-token: write
+    # Declared by the scan job, which this mode does not run.
+    security-events: write
+    attestations: write
   with:
     mode: release-assets
     release-tag: ${{ github.ref_name }}
@@ -1522,6 +1558,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-site-quality.yml@<sha>
     permissions:
       contents: read
+      # Declared by the `publish-test-summary` job.
+      pull-requests: write
     with:
       tooling-ref: "<sha>"
       job-name: "Build and check documentation site"
@@ -1600,6 +1638,7 @@ jobs:
   assign:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-pr-auto-assign.yml@<sha>
     permissions:
+      contents: read
       pull-requests: write
 
   action-pinning:
@@ -1611,6 +1650,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-link-check.yml@<sha>
     permissions:
       contents: read
+      # Declared by the `publish-link-check-report` job.
+      pull-requests: write
 
   codeql:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@<sha>

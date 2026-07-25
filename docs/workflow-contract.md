@@ -350,8 +350,9 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 |                       | `id-token: write`, `attestations: write`             |                                              |
 | SBOM report + upload  | Report perms + `contents: write`                     | `reusable-sbom.yml`                          |
 |                       |                                                      | (`upload-release-assets: true`)              |
-| SBOM release assets   | `contents: write`, `id-token: write`                 | `reusable-sbom.yml`                          |
-|                       |                                                      | (`mode: release-assets`)                     |
+| SBOM release assets   | `contents: write`, `id-token: write`,                | `reusable-sbom.yml`                          |
+|                       | `security-events: write`, `attestations: write`      | (`mode: release-assets`); the last two are   |
+|                       |                                                      | requested by the scan job this mode skips    |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1054,7 +1055,7 @@ full baseline (see #512).
 | Mode | Job permissions | Notes |
 | ---- | --------------- | ----- |
 | `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path; optional `upload-release-assets` job adds `contents: write` |
-| `release-assets` | `contents: write`, `id-token: write` | Multi-format generate + cosign sign + `gh release upload`; requires `release-tag` |
+| `release-assets` | `contents: write`, `id-token: write`, `security-events: write`, `attestations: write` | Multi-format generate + cosign sign + `gh release upload`; requires `release-tag`. The last two belong to the scan job this mode skips, but reusable permission requests are validated statically — omitting them fails the run with `startup_failure` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1078,6 +1079,10 @@ sbom-release:
   permissions:
     contents: write
     id-token: write
+    # Declared by the scan job, which this mode does not run; reusable
+    # permission requests are validated statically, before `if:`.
+    security-events: write
+    attestations: write
   with:
     mode: release-assets
     release-tag: ${{ github.ref_name }}
