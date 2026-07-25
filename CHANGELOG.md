@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.10] - 2026-07-25
+
+### Fixed
+
+- **ci**: dogfood auto-rerun on transient infra failures (#709) (28b98e2)
+
 ## [0.59.9] - 2026-07-25
 
 ### Changed
@@ -1805,7 +1811,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.9...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.10...HEAD
+[0.59.10]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.9...v0.59.10
 [0.59.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.8...v0.59.9
 [0.59.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.7...v0.59.8
 [0.59.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.6...v0.59.7
