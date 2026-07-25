@@ -95,6 +95,12 @@ scripts for standalone sourcing — the canonical versions are in `fs.sh` and
 - `generate_semver_tags` / `generate_sha_tag` / `generate_branch_tag` / `generate_pr_tag` (docker/tags.sh) - Tag generators
 - `generate_docker_tags` (docker/tags.sh) - Generate all standard tags for a build
 
+## Cosign signing retry
+
+- `cosign_transient_oidc_marker` (cosign.sh) - Print the transient ambient-OIDC marker matched by cosign output, else fail
+- `cosign_validate_retry_bounds` (cosign.sh) - Validate/normalise `COSIGN_SIGN_MAX_ATTEMPTS` and `COSIGN_SIGN_MAX_DELAY`
+- `cosign_sign_with_retry` (cosign.sh) - Run a cosign signing command, retrying only transient OIDC failures with capped backoff
+
 ## GHCR registry & cleanup
 
 - `ghcr_exchange_registry_token` (ghcr/registry.sh) - Exchange `GITHUB_TOKEN` for a ghcr.io pull bearer token
