@@ -78,7 +78,7 @@ _tooling_sparse_cone_ok() {
 	assert_success
 	run grep -F 'resolve-build-artifact-name.sh' "$WORKFLOW"
 	assert_success
-	run grep -F 'generate-version-matrix.sh' "$WORKFLOW"
+	run grep -F 'generate-build-matrix.sh' "$WORKFLOW"
 	assert_success
 }
 
@@ -101,4 +101,133 @@ _tooling_sparse_cone_ok() {
 @test "reusable-build-artifact: no pull-requests permission" {
 	run grep -q 'pull-requests:' "$WORKFLOW"
 	assert_failure
+}
+
+# --- toolchain-agnostic contract (#760) -------------------------------------
+
+_input_default() {
+	local workflow="$1" input="$2"
+	awk -v want="      ${input}:" '
+		$0 == want { in_input = 1; next }
+		in_input && /^      [a-zA-Z0-9_-]+:/ { exit }
+		in_input && /^        default:/ {
+			sub(/^        default: /, "")
+			gsub(/"/, "")
+			print
+			exit
+		}
+	' "$workflow"
+}
+
+@test "reusable-build-artifact: toolchain input defaults to node" {
+	run _input_default "$WORKFLOW" "toolchain"
+	assert_success
+	assert_output "node"
+}
+
+@test "reusable-build-artifact: toolchain input documents the vetted enum" {
+	run grep -F 'node | rust | python' "$WORKFLOW"
+	assert_success
+	run grep -F 'toolchain must be one of: node, rust, python, none' \
+		"${PROJECT_ROOT}/scripts/ci/actions/validate-build-artifact-inputs.sh"
+	assert_success
+}
+
+@test "reusable-build-artifact: exposes matrix runner-map and toolchain-version inputs" {
+	local input
+	for input in matrix runner-map runner-map-key toolchain-version; do
+		run grep -qE "^      ${input}:" "$WORKFLOW"
+		assert_success
+	done
+}
+
+@test "reusable-build-artifact: runner-map defaults to an empty object" {
+	run _input_default "$WORKFLOW" "runner-map"
+	assert_success
+	assert_output "{}"
+}
+
+@test "reusable-build-artifact: node-version and node-version-matrix survive" {
+	run grep -qE '^      node-version:' "$WORKFLOW"
+	assert_success
+	run grep -qE '^      node-version-matrix:' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-build-artifact: node-version-matrix is marked deprecated" {
+	run awk '
+		/^      node-version-matrix:/ { in_input = 1; next }
+		in_input && /^      [a-zA-Z0-9_-]+:/ { exit }
+		in_input && /DEPRECATED/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-build-artifact: build runs-on falls back to runner-image" {
+	run grep -F 'runs-on: ${{ matrix.runner || inputs.runner-image }}' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-build-artifact: each toolchain setup step is gated on the enum" {
+	local toolchain
+	for toolchain in node python rust; do
+		run grep -F "if: inputs.toolchain == '${toolchain}'" "$WORKFLOW"
+		assert_success
+	done
+}
+
+@test "reusable-build-artifact: toolchain setup actions are digest-pinned" {
+	# node uses the upstream action directly; python and rust go through
+	# lgtm-ci composites that pin astral-sh/setup-uv and dtolnay/rust-toolchain.
+	run grep -qE 'uses: actions/setup-node@[0-9a-f]{40} # v' "$WORKFLOW"
+	assert_success
+	run grep -F 'uses: ./.lgtm-ci-tooling/.github/actions/setup-python' "$WORKFLOW"
+	assert_success
+	run grep -F 'uses: ./.lgtm-ci-tooling/.github/actions/setup-rust' "$WORKFLOW"
+	assert_success
+	run grep -qE 'uses: astral-sh/setup-uv@[0-9a-f]{40} # v' \
+		"${PROJECT_ROOT}/.github/actions/setup-python/action.yml"
+	assert_success
+	run grep -qE 'uses: dtolnay/rust-toolchain@[0-9a-f]{40} # v' \
+		"${PROJECT_ROOT}/.github/actions/setup-rust/action.yml"
+	assert_success
+}
+
+@test "reusable-build-artifact: build sparse checkout adds the setup composites" {
+	run awk '
+		/^  build:/ { in_build = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  build:/ { in_build = 0 }
+		in_build && /\.github\/actions\/setup-python/ { python = 1 }
+		in_build && /\.github\/actions\/setup-rust/ { rust = 1 }
+		END { exit !(python && rust) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-build-artifact: artifact name resolution reads the matrix leg" {
+	run grep -F 'MATRIX_JSON: ${{ toJson(matrix) }}' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-build-artifact: the build step receives the matrix leg" {
+	# Both the name resolver and the build runner need the leg: the runner
+	# exports it as MATRIX_<FIELD> for the caller's build command.
+	run grep -cF 'MATRIX_JSON: ${{ toJson(matrix) }}' "$WORKFLOW"
+	assert_success
+	assert_output "2"
+}
+
+@test "reusable-build-artifact: prepare forwards the toolchain inputs" {
+	local pair
+	for pair in \
+		'TOOLCHAIN: ${{ inputs.toolchain }}' \
+		'TOOLCHAIN_VERSION: ${{ inputs.toolchain-version }}' \
+		'MATRIX: ${{ inputs.matrix }}' \
+		'RUNNER_MAP: ${{ inputs.runner-map }}' \
+		'RUNNER_MAP_KEY: ${{ inputs.runner-map-key }}' \
+		'DEFAULT_RUNNER: ${{ inputs.runner-image }}'; do
+		run grep -F "$pair" "$WORKFLOW"
+		assert_success
+	done
 }
