@@ -85,11 +85,14 @@ its caller snippet below — those are the authoritative contract and are pinned
 `tests/bats/integration/test_reusable_permission_unions.bats`.
 
 The `actions: write` row is worth contrasting with #730. There the scope was
-requested for `actions/upload-artifact/merge`, which authenticates with the
-per-run `ACTIONS_RUNTIME_TOKEN` rather than `GITHUB_TOKEN`, so `permissions:`
-never gated it and the declaration was pure over-grant. Here the same scope name
-covers a genuine `GITHUB_TOKEN` REST call that hard-fails without it. The scope
-string alone proves nothing — the credential the code path uses decides it.
+requested for an `actions/upload-artifact/merge` step in
+`reusable-test-python.yml`, which authenticates with the per-run
+`ACTIONS_RUNTIME_TOKEN` rather than `GITHUB_TOKEN`, so `permissions:` never
+gated it and the declaration was pure over-grant. (That step has since been
+deleted outright — it was unreachable under every valid input combination, #756.)
+Here the same scope name covers a genuine `GITHUB_TOKEN` REST call that
+hard-fails without it. The scope string alone proves nothing — the credential
+the code path uses decides it.
 
 None of these can be narrowed in place: a reusable workflow's request is the
 union over its jobs, so the union only shrinks when *no* job declares the scope.
