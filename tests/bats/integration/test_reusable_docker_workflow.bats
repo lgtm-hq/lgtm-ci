@@ -20,6 +20,22 @@ _family_workflows() {
 	cat "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$SMOKE_WORKFLOW"
 }
 
+# Every buildkit cache expression line across the two building reusables
+# (single-platform and per-platform). Both cache-from and cache-to entries.
+_cache_expressions() {
+	grep -hE 'type=(gha|registry)' "$BUILD_WORKFLOW" "$MULTI_WORKFLOW"
+}
+
+# Only the cache-to (export) expressions: they carry mode=max.
+_cache_export_expressions() {
+	_cache_expressions | grep -F 'mode=max'
+}
+
+# Only the cache-from (import) expressions: everything without mode=max.
+_cache_import_expressions() {
+	_cache_expressions | grep -vF 'mode=max'
+}
+
 @test "reusable-docker: orchestrator delegates use-split=false to reusable-docker-build" {
 	run awk '
 		/^  build:/ { in_job = 1 }
@@ -246,4 +262,60 @@ _family_workflows() {
 	[ "$parse_steps" -eq "$extra_tag_blocks" ]
 	[ "$gated_extra_tags" -eq "$extra_tag_blocks" ]
 	[ "$extra_tag_blocks" -ge 2 ]
+}
+
+@test "reusable-docker family: no-cache suppresses every cache expression" {
+	# Backfills run with no-cache: true and must emit neither cache-from nor
+	# cache-to entries, so every cache line stays behind the same guard.
+	local total gated
+	total=$(_cache_expressions | grep -c 'type=')
+	gated=$(_cache_expressions | grep -cF '${{ inputs.no-cache == false &&')
+	# Two building reusables x (gha read, registry read, gha write, registry write).
+	[ "$total" -eq 8 ]
+	[ "$gated" -eq "$total" ]
+}
+
+@test "reusable-docker family: cache-from keeps the type=gha read on every path" {
+	# The gha import is a harmless read and stays unconditional (beyond
+	# no-cache); only the export was narrowed in #681.
+	local gha_imports push_gated
+	gha_imports=$(_cache_import_expressions | grep -cF 'type=gha')
+	push_gated=$(_cache_import_expressions | grep -F 'type=gha' | grep -cF 'inputs.push' || true)
+	[ "$gha_imports" -eq 2 ]
+	[ "$push_gated" -eq 0 ]
+}
+
+@test "reusable-docker family: type=gha export is skipped on push builds with a registry cache" {
+	# The gha exporter intermittently fails with `not_found` on the Actions
+	# Cache v2 backend and killed an already-pushed release (#681). On push
+	# builds the registry cache is the durable source of truth, so the
+	# redundant gha write must not run there. PR builds (push == false) and
+	# registry-less builds keep it as their only speedup.
+	local gha_exports gated
+	gha_exports=$(_cache_export_expressions | grep -cF 'type=gha')
+	gated=$(_cache_export_expressions | grep -F 'type=gha' |
+		grep -cF "(inputs.cache-registry-ref == '' || inputs.push == false) &&")
+	[ "$gha_exports" -eq 2 ]
+	[ "$gated" -eq "$gha_exports" ]
+}
+
+@test "reusable-docker family: every type=gha cache export is non-fatal" {
+	# A best-effort cache write must never fail an already-built image, so the
+	# PR-path export carries ignore-error=true.
+	local gha_exports tolerant
+	gha_exports=$(_cache_export_expressions | grep -cF 'type=gha')
+	tolerant=$(_cache_export_expressions | grep -F 'type=gha' | grep -cF 'ignore-error=true')
+	[ "$gha_exports" -eq 2 ]
+	[ "$tolerant" -eq "$gha_exports" ]
+}
+
+@test "reusable-docker family: push builds still export the registry cache" {
+	# The registry cache is what replaces the dropped gha write; it must stay
+	# gated on both a configured ref and an actual push.
+	local registry_exports gated
+	registry_exports=$(_cache_export_expressions | grep -cF 'type=registry')
+	gated=$(_cache_export_expressions | grep -F 'type=registry' |
+		grep -cF "inputs.cache-registry-ref != '' && inputs.push &&")
+	[ "$registry_exports" -eq 2 ]
+	[ "$gated" -eq "$registry_exports" ]
 }

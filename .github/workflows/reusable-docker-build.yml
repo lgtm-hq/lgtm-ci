@@ -339,7 +339,7 @@ jobs:
             ${{ inputs.no-cache == false && 'type=gha' || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}', inputs.cache-registry-ref) || '' }}
           cache-to: |
-            ${{ inputs.no-cache == false && 'type=gha,mode=max' || '' }}
+            ${{ inputs.no-cache == false && (inputs.cache-registry-ref == '' || inputs.push == false) && 'type=gha,mode=max,ignore-error=true' || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0},mode=max', inputs.cache-registry-ref) || '' }}
           # yamllint enable rule:line-length
           provenance: ${{ inputs.provenance && inputs.push && inputs.health-check-cmd == '' }}

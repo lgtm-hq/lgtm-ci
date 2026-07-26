@@ -55,9 +55,12 @@ inputs:
     required: false
     default: "type=gha"
   cache-to:
-    description: "Cache destination (e.g., type=gha,mode=max)"
+    description:
+      "Cache destination (e.g., type=gha,mode=max,ignore-error=true). Cache
+      export is best-effort: keep ignore-error=true on type=gha so a transient
+      Actions Cache fault cannot fail an already-built image."
     required: false
-    default: "type=gha,mode=max"
+    default: "type=gha,mode=max,ignore-error=true"
   github-token:
     description: "GitHub token for GHCR authentication"
     required: false

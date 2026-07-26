@@ -1097,6 +1097,15 @@ export manifest lists from SBOM attestations, so attestations are intentionally
 skipped on that path. The publish path (main/tags with `push: true`) still
 receives full SBOM and provenance attestations.
 
+Build cache is best-effort and never release-blocking. `type=gha` is always read
+from (`cache-from`), but it is only written to on PR/non-push builds or when no
+`cache-registry-ref` is configured — on push builds the registry cache is the
+durable, cross-run source of truth and the extra GitHub Actions Cache write is
+redundant. Where the `type=gha` export does run it carries `ignore-error=true`,
+so a transient Actions Cache fault degrades the next build's cache hit rate
+instead of failing an image that has already been built and pushed. `no-cache:
+true` still suppresses every cache import and export.
+
 `cosign-sign` signing retries a bounded number of times with exponential backoff
 when — and only when — cosign fails while fetching its ambient OIDC credentials,
 the transient flake class that otherwise fails a whole tag publish. Every other
