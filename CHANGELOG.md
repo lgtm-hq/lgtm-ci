@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.21] - 2026-07-26
+
+### Fixed
+
+- **ci**: namespace e2e-matrix artifacts with artifact-prefix (#752) (54afb09)
+
 ## [0.59.20] - 2026-07-26
 
 ### Fixed
@@ -1892,7 +1898,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.20...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.21...HEAD
+[0.59.21]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.20...v0.59.21
 [0.59.20]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.19...v0.59.20
 [0.59.19]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.18...v0.59.19
 [0.59.18]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.17...v0.59.18
