@@ -145,3 +145,32 @@ teardown() {
 	assert_failure
 	assert_output --partial "MATRIX_JSON must be valid JSON"
 }
+
+@test "run-build-artifact: exports non-string matrix values as JSON scalars" {
+	run env \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		MATRIX_JSON='{"cross":true,"jobs":4}' \
+		BUILD_COMMAND='mkdir -p dist && echo "$MATRIX_CROSS/$MATRIX_JOBS" > dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND="" \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_equal "true/4" "$(cat "${WORK_DIR}/dist/out.txt")"
+}
+
+@test "run-build-artifact: leaves no matrix temp file behind on failure" {
+	local before after
+	before="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l)"
+	run env \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		MATRIX_JSON='[1,2]' \
+		BUILD_COMMAND='mkdir -p dist && touch dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND="" \
+		bash "$SCRIPT"
+
+	assert_failure
+	after="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l)"
+	assert_equal "$before" "$after"
+}

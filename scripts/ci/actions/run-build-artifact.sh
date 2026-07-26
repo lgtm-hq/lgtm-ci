@@ -50,6 +50,8 @@ fi
 # matrix needs matrix.target as `cargo build --target "$MATRIX_TARGET"`).
 if [[ -n "$(trim "$MATRIX_JSON")" ]]; then
 	matrix_env_file="$(mktemp)"
+	# shellcheck disable=SC2064 # expand the path now, not at trap time
+	trap "rm -f '${matrix_env_file}'" EXIT
 	export MATRIX_JSON
 	# Not a process substitution: a parser failure must fail the build step.
 	python3 - >"$matrix_env_file" <<'PY'
@@ -73,7 +75,10 @@ for key, value in entry.items():
     name = "MATRIX_" + re.sub(r"[^A-Za-z0-9]+", "_", str(key)).upper()
     if not re.fullmatch(r"MATRIX_[A-Za-z_][A-Za-z0-9_]*", name):
         continue
-    sys.stdout.write(f"{name}\0{value}\0")
+    # Match generate-build-matrix.sh: non-strings serialise as JSON (true, 3),
+    # never as Python reprs (True).
+    text = value if isinstance(value, str) else json.dumps(value)
+    sys.stdout.write(f"{name}\0{text}\0")
 PY
 	while IFS= read -r -d '' name && IFS= read -r -d '' value; do
 		export "${name}=${value}"
