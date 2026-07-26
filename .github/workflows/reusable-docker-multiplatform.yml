@@ -360,7 +360,7 @@ jobs:
             ${{ inputs.no-cache == false && format('type=gha,scope={0}', matrix.slug) || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}-{1}', inputs.cache-registry-ref, matrix.slug) || '' }}
           cache-to: |
-            ${{ inputs.no-cache == false && format('type=gha,mode=max,scope={0}', matrix.slug) || '' }}
+            ${{ inputs.no-cache == false && (inputs.cache-registry-ref == '' || inputs.push == false) && format('type=gha,mode=max,scope={0},ignore-error=true', matrix.slug) || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0}-{1},mode=max', inputs.cache-registry-ref, matrix.slug) || '' }}
           # yamllint enable rule:line-length
           provenance: false
