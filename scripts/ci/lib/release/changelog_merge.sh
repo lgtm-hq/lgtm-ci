@@ -444,14 +444,19 @@ _changelog_join_group_children() {
 	printf '%s' "$out"
 }
 
-# Combine a generated bullet with a duplicate Unreleased bullet: keep the more
-# informative (longer) display text, merge the PR references found anywhere in
-# either bullet, and keep the generated commit sha when present. Only the lead
-# bullet is merged; nested sub-bullets are re-attached by the caller.
-# Usage: _merge_changelog_duplicate_group "$generated" "$unreleased"
+# Combine a generated bullet with a duplicate Unreleased bullet: merge the PR
+# references found anywhere in either bullet and keep the generated commit sha
+# when present. References are merged on EVERY match kind - a duplicate is a
+# duplicate, and dropping the Unreleased bullet's "(#N)" loses a real PR from
+# the history. Display text is chosen per match kind: "subject" keeps the more
+# informative (longer) text, while "exact"/"contained" keep the generated text
+# because it is the canonical restatement. Only the lead bullet is merged;
+# nested sub-bullets are re-attached by the caller.
+# Usage: _merge_changelog_duplicate_group "$generated" "$unreleased" "$kind"
 _merge_changelog_duplicate_group() {
 	local generated="${1:-}"
 	local unreleased="${2:-}"
+	local kind="${3:-subject}"
 	local generated_lead unreleased_lead
 	local preferred refs_raw sha last head joined ref
 
@@ -460,7 +465,7 @@ _merge_changelog_duplicate_group() {
 	_split_changelog_group_children "$unreleased"
 	unreleased_lead="$_CL_GROUP_LEAD"
 
-	if [[ ${#unreleased_lead} -gt ${#generated_lead} ]]; then
+	if [[ "$kind" == "subject" && ${#unreleased_lead} -gt ${#generated_lead} ]]; then
 		preferred="$unreleased_lead"
 	else
 		preferred="$generated_lead"
@@ -562,9 +567,10 @@ _changelog_group_key() {
 }
 
 # Merge generated (left) and Unreleased (right) section bodies, collapsing
-# duplicate bullets. Near-identical restatements keep the generated display
-# text; same-subject duplicates keep the more informative text and merge PR
-# references, and nested sub-bullets from both sides survive under the kept
+# duplicate bullets. Every duplicate merges both sides' PR references into the
+# surviving entry; only the display text differs by match kind (near-identical
+# restatements keep the generated text, same-subject duplicates keep the more
+# informative text). Nested sub-bullets from both sides survive under the kept
 # parent. Unique Unreleased bullets are kept and generated-first order is
 # preserved. Fail closed: non-bullets and ambiguous lines are retained. Blank
 # lines from either side are dropped so skipped duplicates do not leave
@@ -593,15 +599,10 @@ _dedupe_changelog_section_bodies() {
 			while [[ $index -lt ${#left_keys[@]} ]]; do
 				if kind=$(_changelog_bullet_keys_duplicate "$key" "${left_keys[$index]}"); then
 					matched=true
-					if [[ "$kind" == "subject" ]]; then
-						merged_lead=$(
-							_merge_changelog_duplicate_group \
-								"${left_texts[$index]}" "$group"
-						)
-					else
-						_split_changelog_group_children "${left_texts[$index]}"
-						merged_lead="$_CL_GROUP_LEAD"
-					fi
+					merged_lead=$(
+						_merge_changelog_duplicate_group \
+							"${left_texts[$index]}" "$group" "$kind"
+					)
 					# The parent is a duplicate; its sub-bullets may not be.
 					left_texts[index]=$(
 						_changelog_join_group_children \
