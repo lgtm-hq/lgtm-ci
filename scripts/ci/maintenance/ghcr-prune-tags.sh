@@ -51,6 +51,9 @@ source "$SCRIPT_DIR/../lib/ghcr/retention.sh"
 # GitHub Packages REST API encodes nested path slashes; registry v2 paths do not.
 PACKAGE_NAME_API="${PACKAGE_NAME//\//%2F}"
 
+# Populated by ghcr_fetch_versions and read by the classification block below.
+all_versions='[]'
+
 ghcr_fetch_versions() {
 	all_versions=$(gh api --paginate \
 		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
@@ -64,6 +67,9 @@ ghcr_fetch_versions() {
 ghcr_delete_version() {
 	local version_id="$1"
 
+	# Belt-and-braces: the main loop already skips this call under dry run, but
+	# this script deletes container images, so the guard stays for any future
+	# caller that forgets. Deliberately unreachable today.
 	if [[ "$DRY_RUN" == "true" ]]; then
 		return 0
 	fi

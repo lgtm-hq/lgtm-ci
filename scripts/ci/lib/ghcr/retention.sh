@@ -136,4 +136,7 @@ ghcr_all_tags_deletable() {
 	return 0
 }
 
+# The patterns travel with the exported functions: a child bash process that
+# inherits the functions without them would evaluate an empty regex.
+export _GHCR_SEMVER_TAG_PATTERN _GHCR_MAIN_TAG_PATTERN _GHCR_PRERELEASE_TAG_PATTERN
 export -f ghcr_tag_retention_class ghcr_tag_is_deletable ghcr_all_tags_deletable
