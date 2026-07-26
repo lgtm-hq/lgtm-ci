@@ -54,6 +54,14 @@ on:
         required: false
         type: number
         default: 30
+      artifact-prefix:
+        description: >-
+          Namespace for this call's artifacts; give a second call in the same
+          run its own prefix so its shards are not merged into this one's
+          report. Must match [A-Za-z0-9_.]+ ('-' separates prefix from shard)
+        required: false
+        type: string
+        default: "playwright"
 
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
@@ -190,6 +198,11 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
+      - name: Validate artifact prefix
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
       - name: Generate matrix
         id: matrix
         shell: bash
@@ -280,7 +293,8 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.shard }}
+          # yamllint disable-line rule:line-length
+          name: ${{ inputs.artifact-prefix }}-${{ matrix.suite }}-${{ matrix.browser }}-${{ matrix.shard }}
           path: |
             ${{ inputs.working-directory }}/playwright-report/
             ${{ inputs.working-directory }}/playwright-results.json
@@ -353,7 +367,9 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: playwright-*
+          # Namespaced per call (#739): a bare playwright-* also matched the
+          # shards of a sibling call of this same reusable in the run.
+          pattern: ${{ inputs.artifact-prefix }}-*
           path: playwright-reports
           merge-multiple: true
       - name: Merge reports
@@ -368,7 +384,7 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: playwright-merged-report
+          name: ${{ inputs.artifact-prefix }}-merged-report
           path: merged-report
           retention-days: 30
           if-no-files-found: ignore
@@ -440,7 +456,7 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: playwright-merged-report
+          name: ${{ inputs.artifact-prefix }}-merged-report
           path: merged-report
       - name: Publish to GitHub Pages
         id: publish

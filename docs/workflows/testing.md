@@ -126,7 +126,15 @@ merging.
 default 'smoke'), `browsers` (comma-separated, default 'chromium'),
 `tag-prefix` (default '@'), `shards` (per suite, default 1), `reporter`
 (json/html/blob, default 'html'), `upload-report` (default true),
-`publish-results` (default false), `timeout-minutes` (default 30).
+`publish-results` (default false), `timeout-minutes` (default 30),
+`artifact-prefix` (default 'playwright').
+
+Shards upload as `<artifact-prefix>-<suite>-<browser>-<shard>` and the merge
+job collects them with `<artifact-prefix>-*`, so a caller running this workflow
+twice in one run must give the second call its own `artifact-prefix` — otherwise
+each merge picks up the other call's shards. The prefix must match
+`[A-Za-z0-9_.]+`: `-` is reserved as the separator, and allowing it inside the
+prefix would let `e2e-*` match an `e2e-nightly` call's shards.
 
 **Outputs:** `total-passed`, `total-failed`, `report-url`.
 
