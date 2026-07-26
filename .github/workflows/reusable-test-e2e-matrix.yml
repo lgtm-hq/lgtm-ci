@@ -307,8 +307,12 @@ jobs:
           overwrite: true
   merge:
     name: Merge Reports
-    needs: test
-    if: always() && inputs.upload-report
+    # `setup` is in `needs` only to gate on it: `always()` would otherwise let
+    # this job run after a failed prefix validation and glob with the very
+    # prefix that was rejected (#739). The `test` dependency stays loose on
+    # purpose — a report is still wanted when tests fail.
+    needs: [setup, test]
+    if: always() && inputs.upload-report && needs.setup.result == 'success'
     runs-on: ${{ inputs.runner-image }}
     # Independent short cap: the caller's timeout-minutes bounds the main
     # test job; this coordinator leg keeps its own fixed cap.
@@ -396,7 +400,10 @@ jobs:
   publish:
     name: Publish Results
     needs: merge
-    if: inputs.publish-results && !cancelled()
+    # Without the explicit result check, `!cancelled()` also lets this run when
+    # `merge` was skipped or failed, and it then dies downloading a merged
+    # report that was never produced — a second red job on an already-red run.
+    if: inputs.publish-results && !cancelled() && needs.merge.result == 'success'
     runs-on: ${{ inputs.runner-image }}
     # Independent short cap: the caller's timeout-minutes bounds the main
     # test job; this coordinator leg keeps its own fixed cap.

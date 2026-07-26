@@ -302,13 +302,22 @@ _uploads_missing_overwrite() {
 
 # Raw value of `key` under the `with:` block of the named step, read out of the
 # real YAML so the assertions below cannot drift from the workflow.
+#
+# Fails loudly when the step or key is absent: returning an empty string with
+# status 0 would let the comparisons below pass vacuously against '' == '' the
+# moment a step is renamed or its indentation drifts.
 _e2e_matrix_with_value() {
-	local step_name="$1" with_key="$2"
-	awk -v step="      - name: ${step_name}" -v key="          ${with_key}: " '
+	local step_name="$1" with_key="$2" value
+	value="$(awk -v step="      - name: ${step_name}" -v key="          ${with_key}: " '
 		$0 == step { in_step = 1; next }
 		in_step && /^      - name: / { exit }
 		in_step && index($0, key) == 1 { print substr($0, length(key) + 1); exit }
-	' "$E2E_MATRIX"
+	' "$E2E_MATRIX")"
+	if [[ -z "$value" ]]; then
+		echo "no '${with_key}:' under step '${step_name}' in ${E2E_MATRIX}" >&2
+		return 1
+	fi
+	printf '%s' "$value"
 }
 
 # Substitutes a candidate prefix (and a representative matrix leg) into one of
@@ -452,12 +461,45 @@ _e2e_matrix_render() {
 # The guard only helps if the workflow actually runs it, and it must run in the
 # job every other job depends on so an invalid prefix fails before any upload.
 @test "reusable-test-e2e-matrix: the setup job validates the prefix" {
+	# Both facts must hold for the *same* step: tracked independently, a
+	# validator step with no env plus an unrelated step carrying the env would
+	# satisfy the assertion while the script ran with an empty prefix.
 	run awk '
 		/^  setup:$/ { in_job = 1 }
 		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  setup:$/ { exit }
-		in_job && /validate-artifact-prefix\.sh$/ { found = 1 }
-		in_job && /ARTIFACT_PREFIX: \$\{\{ inputs\.artifact-prefix \}\}$/ { wired = 1 }
-		END { exit !(found && wired) }
+		in_job && /^      - name: / { step_script = 0; step_wired = 0 }
+		in_job && /validate-artifact-prefix\.sh$/ { step_script = 1 }
+		in_job && /ARTIFACT_PREFIX: \$\{\{ inputs\.artifact-prefix \}\}$/ { step_wired = 1 }
+		step_script && step_wired { ok = 1 }
+		END { exit !ok }
+	' "$E2E_MATRIX"
+	assert_success
+}
+
+# always() on the merge job would otherwise run it after setup failed, i.e.
+# after the prefix was rejected — globbing with the very value the validator
+# refused. The test dependency stays loose so a report is still merged when
+# tests fail; only setup is required to have succeeded.
+@test "reusable-test-e2e-matrix: a failed setup blocks the merge job" {
+	run awk '
+		/^  merge:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  merge:$/ { exit }
+		in_job && /^    needs: / && /setup/ && /test/ { needs_setup = 1 }
+		in_job && /^    if: / && /always\(\)/ &&
+			/needs\.setup\.result == .success./ { gated = 1 }
+		END { exit !(needs_setup && gated) }
+	' "$E2E_MATRIX"
+	assert_success
+}
+
+# !cancelled() alone also passes when merge was skipped or failed, and publish
+# then dies downloading a merged report that was never produced.
+@test "reusable-test-e2e-matrix: publish requires a successful merge" {
+	run awk '
+		/^  publish:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  publish:$/ { exit }
+		in_job && /^    if: / && /needs\.merge\.result == .success./ { gated = 1 }
+		END { exit !gated }
 	' "$E2E_MATRIX"
 	assert_success
 }
