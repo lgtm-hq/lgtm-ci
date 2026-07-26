@@ -10,6 +10,8 @@
 load "../../helpers/common"
 
 WORKFLOW_DIR="${PROJECT_ROOT}/.github/workflows"
+E2E_MATRIX="${WORKFLOW_DIR}/reusable-test-e2e-matrix.yml"
+PREFIX_VALIDATOR="${PROJECT_ROOT}/scripts/ci/actions/validate-artifact-prefix.sh"
 
 # reusable-quality-lint.yml is asserted by
 # test_reusable_quality_lint_workflow.bats instead (#717/#724 own that upload).
@@ -290,4 +292,214 @@ _uploads_missing_overwrite() {
 		' "${WORKFLOW_DIR}/${wf}"
 		assert_success
 	done
+}
+
+# --- reusable-test-e2e-matrix artifact namespacing (#739) -------------------
+#
+# The merge job collects shards with a glob. Before #739 every site was the
+# literal `playwright`, so two calls of this reusable in one run shared one
+# namespace and the second call's merge swallowed the first call's shards.
+
+# Raw value of `key` under the `with:` block of the named step, read out of the
+# real YAML so the assertions below cannot drift from the workflow.
+#
+# Fails loudly when the step or key is absent: returning an empty string with
+# status 0 would let the comparisons below pass vacuously against '' == '' the
+# moment a step is renamed or its indentation drifts.
+_e2e_matrix_with_value() {
+	local step_name="$1" with_key="$2" value
+	value="$(awk -v step="      - name: ${step_name}" -v key="          ${with_key}: " '
+		$0 == step { in_step = 1; next }
+		in_step && /^      - name: / { exit }
+		in_step && index($0, key) == 1 { print substr($0, length(key) + 1); exit }
+	' "$E2E_MATRIX")"
+	if [[ -z "$value" ]]; then
+		echo "no '${with_key}:' under step '${step_name}' in ${E2E_MATRIX}" >&2
+		return 1
+	fi
+	printf '%s' "$value"
+}
+
+# Substitutes a candidate prefix (and a representative matrix leg) into one of
+# those templates.
+_e2e_matrix_render() {
+	local template="$1" prefix="$2"
+	template="${template//'${{ inputs.artifact-prefix }}'/$prefix}"
+	template="${template//'${{ matrix.suite }}'/smoke}"
+	template="${template//'${{ matrix.browser }}'/chromium}"
+	template="${template//'${{ matrix.shard }}'/1}"
+	printf '%s' "$template"
+}
+
+@test "reusable-test-e2e-matrix: artifact-prefix defaults to playwright" {
+	run awk '/^      artifact-prefix:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$E2E_MATRIX"
+	assert_success
+	assert_output --partial 'default: "playwright"'
+	assert_output --partial "type: string"
+	assert_output --partial "required: false"
+}
+
+# A caller that passes nothing must keep today's names byte-for-byte: this is a
+# backwards-compatible input addition, not an interface break.
+@test "reusable-test-e2e-matrix: the default prefix reproduces today's names" {
+	local shard merged pattern published
+	shard="$(_e2e_matrix_render "$(_e2e_matrix_with_value "Upload report" name)" playwright)"
+	merged="$(_e2e_matrix_render "$(_e2e_matrix_with_value "Upload merged report" name)" playwright)"
+	pattern="$(_e2e_matrix_render "$(_e2e_matrix_with_value "Download all reports" pattern)" playwright)"
+	published="$(_e2e_matrix_render "$(_e2e_matrix_with_value "Download merged report" name)" playwright)"
+
+	[ "$shard" = "playwright-smoke-chromium-1" ] || {
+		echo "shard upload name changed: ${shard}" >&2
+		return 1
+	}
+	[ "$merged" = "playwright-merged-report" ] || {
+		echo "merged report name changed: ${merged}" >&2
+		return 1
+	}
+	[ "$pattern" = "playwright-*" ] || {
+		echo "download pattern changed: ${pattern}" >&2
+		return 1
+	}
+	# The publish job downloads the merged report by exact name; an override
+	# that missed this fourth site would strand the Pages deploy.
+	[ "$published" = "$merged" ] || {
+		echo "publish job downloads ${published}, merge job uploads ${merged}" >&2
+		return 1
+	}
+}
+
+# All three sites must be parameterised together. Threading only the uploads
+# leaves the merge globbing the whole run; threading only the pattern leaves it
+# globbing nothing.
+@test "reusable-test-e2e-matrix: every artifact site is built from the input" {
+	local entry step key value
+	for entry in \
+		"Upload report:name" \
+		"Upload merged report:name" \
+		"Download all reports:pattern" \
+		"Download merged report:name"; do
+		step="${entry%:*}"
+		key="${entry##*:}"
+		value="$(_e2e_matrix_with_value "$step" "$key")"
+		case "$value" in
+		'${{ inputs.artifact-prefix }}'*) ;;
+		*)
+			echo "${step} / ${key} is not prefixed by the input: ${value}" >&2
+			return 1
+			;;
+		esac
+	done
+}
+
+# Two calls with distinct prefixes must not see each other's artifacts: neither
+# download pattern may match the other call's upload names.
+@test "reusable-test-e2e-matrix: distinct prefixes are mutually invisible" {
+	local shard_tpl pattern_tpl a_shard b_shard a_pattern b_pattern
+	shard_tpl="$(_e2e_matrix_with_value "Upload report" name)"
+	pattern_tpl="$(_e2e_matrix_with_value "Download all reports" pattern)"
+
+	a_shard="$(_e2e_matrix_render "$shard_tpl" playwright)"
+	b_shard="$(_e2e_matrix_render "$shard_tpl" e2e)"
+	a_pattern="$(_e2e_matrix_render "$pattern_tpl" playwright)"
+	b_pattern="$(_e2e_matrix_render "$pattern_tpl" e2e)"
+
+	[ "$a_shard" != "$b_shard" ] || {
+		echo "distinct prefixes produced the same upload name: ${a_shard}" >&2
+		return 1
+	}
+	# shellcheck disable=SC2053 # deliberate glob match, pattern must stay unquoted
+	[[ $a_shard == $a_pattern ]] || {
+		echo "${a_pattern} does not collect its own shard ${a_shard}" >&2
+		return 1
+	}
+	# shellcheck disable=SC2053
+	[[ $b_shard == $b_pattern ]] || {
+		echo "${b_pattern} does not collect its own shard ${b_shard}" >&2
+		return 1
+	}
+	# shellcheck disable=SC2053
+	if [[ $b_shard == $a_pattern ]]; then
+		echo "${a_pattern} also matches the other call's shard ${b_shard}" >&2
+		return 1
+	fi
+	# shellcheck disable=SC2053
+	if [[ $a_shard == $b_pattern ]]; then
+		echo "${b_pattern} also matches the other call's shard ${a_shard}" >&2
+		return 1
+	fi
+}
+
+# The substring case: `e2e-*` would match `e2e-nightly-smoke-chromium-1`, so a
+# glob on a hyphenated prefix cannot isolate the two calls. The workflow keeps
+# the guarantee by rejecting the hyphen up front rather than by hoping callers
+# pick non-overlapping names.
+@test "reusable-test-e2e-matrix: a substring prefix pair cannot be configured" {
+	local shard_tpl pattern_tpl outer_pattern inner_shard
+	shard_tpl="$(_e2e_matrix_with_value "Upload report" name)"
+	pattern_tpl="$(_e2e_matrix_with_value "Download all reports" pattern)"
+	outer_pattern="$(_e2e_matrix_render "$pattern_tpl" e2e)"
+	inner_shard="$(_e2e_matrix_render "$shard_tpl" e2e-nightly)"
+
+	# Demonstrate the overlap the guard exists to prevent.
+	# shellcheck disable=SC2053
+	[[ $inner_shard == $outer_pattern ]] || {
+		echo "expected ${outer_pattern} to swallow ${inner_shard}" >&2
+		return 1
+	}
+
+	run env ARTIFACT_PREFIX="e2e-nightly" bash "$PREFIX_VALIDATOR"
+	assert_failure
+	assert_output --partial "artifact-prefix must match"
+
+	run env ARTIFACT_PREFIX="e2e" bash "$PREFIX_VALIDATOR"
+	assert_success
+	run env ARTIFACT_PREFIX="e2e_nightly" bash "$PREFIX_VALIDATOR"
+	assert_success
+}
+
+# The guard only helps if the workflow actually runs it, and it must run in the
+# job every other job depends on so an invalid prefix fails before any upload.
+@test "reusable-test-e2e-matrix: the setup job validates the prefix" {
+	# Both facts must hold for the *same* step: tracked independently, a
+	# validator step with no env plus an unrelated step carrying the env would
+	# satisfy the assertion while the script ran with an empty prefix.
+	run awk '
+		/^  setup:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  setup:$/ { exit }
+		in_job && /^      - name: / { step_script = 0; step_wired = 0 }
+		in_job && /validate-artifact-prefix\.sh$/ { step_script = 1 }
+		in_job && /ARTIFACT_PREFIX: \$\{\{ inputs\.artifact-prefix \}\}$/ { step_wired = 1 }
+		step_script && step_wired { ok = 1 }
+		END { exit !ok }
+	' "$E2E_MATRIX"
+	assert_success
+}
+
+# always() on the merge job would otherwise run it after setup failed, i.e.
+# after the prefix was rejected — globbing with the very value the validator
+# refused. The test dependency stays loose so a report is still merged when
+# tests fail; only setup is required to have succeeded.
+@test "reusable-test-e2e-matrix: a failed setup blocks the merge job" {
+	run awk '
+		/^  merge:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  merge:$/ { exit }
+		in_job && /^    needs: / && /setup/ && /test/ { needs_setup = 1 }
+		in_job && /^    if: / && /always\(\)/ &&
+			/needs\.setup\.result == .success./ { gated = 1 }
+		END { exit !(needs_setup && gated) }
+	' "$E2E_MATRIX"
+	assert_success
+}
+
+# !cancelled() alone also passes when merge was skipped or failed, and publish
+# then dies downloading a merged report that was never produced.
+@test "reusable-test-e2e-matrix: publish requires a successful merge" {
+	run awk '
+		/^  publish:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  publish:$/ { exit }
+		in_job && /^    if: / && /needs\.merge\.result == .success./ { gated = 1 }
+		END { exit !gated }
+	' "$E2E_MATRIX"
+	assert_success
 }
