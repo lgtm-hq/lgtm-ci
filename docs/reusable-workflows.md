@@ -74,6 +74,16 @@ second group, and each is annotated in the workflow next to the declaration:
 
 <!-- markdownlint-enable MD013 -->
 
+**This table is the #737 audit's subset, not a full caller contract.** It covers
+only the scopes that audit examined — the ones that looked like over-grants and
+turned out not to be. Other scopes are equally unavoidable and simply were not
+in question: `reusable-sbom.yml` also forces `security-events: write`,
+`id-token: write` and `attestations: write` (all declared by its `sbom` job), and
+`reusable-coverage.yml` also forces `pull-requests: write` (declared by
+`publish-test-summary`). For the complete union a given workflow requires, use
+its caller snippet below — those are the authoritative contract and are pinned by
+`tests/bats/integration/test_reusable_permission_unions.bats`.
+
 The `actions: write` row is worth contrasting with #730. There the scope was
 requested for `actions/upload-artifact/merge`, which authenticates with the
 per-run `ACTIONS_RUNTIME_TOKEN` rather than `GITHUB_TOKEN`, so `permissions:`
