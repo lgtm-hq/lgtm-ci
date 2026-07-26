@@ -177,6 +177,16 @@ Generate an SBOM using [Syft](https://github.com/anchore/syft).
 
 **Outputs:** `sbom-file`, `sbom-format`.
 
+Before calling `anchore/sbom-action`, the action runs
+`scripts/ci/actions/prime-syft-tool-cache.sh`, which downloads Syft into the
+Actions tool cache with retries and verifies it against the published
+`checksums.txt`. `anchore/sbom-action` then finds Syft already cached and skips
+its own no-retry download, so a transient GitHub CDN 5xx no longer fails the
+job (#697). A checksum mismatch is never retried — it fails the job
+immediately. The pinned Syft version lives in that script (Renovate-tracked)
+and is passed to `anchore/sbom-action` via its `syft-version` input, so the two
+cannot drift apart.
+
 ### scan-vulnerabilities
 
 Scan for vulnerabilities using [Grype](https://github.com/anchore/grype).
