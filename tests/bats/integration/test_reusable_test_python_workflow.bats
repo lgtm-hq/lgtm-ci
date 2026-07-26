@@ -71,9 +71,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 }
 
 @test "reusable-test-python: coverage merge omits findBy so it uses the runtime token" {
-	# Comments are stripped first: the permissions block explains the contract
-	# in prose, and that explanation must not satisfy its own assertion.
-	run bash -c 'sed "s/#.*//" "$1" | grep -q "findBy"' _ "$WORKFLOW"
+	# Whole-line comments are stripped first: the permissions block explains the
+	# contract in prose, and that explanation must not satisfy its own
+	# assertion. Only whole-line comments — stripping from every `#` would also
+	# blank out quoted content and could hide a real `findBy`.
+	run bash -c 'grep -vE "^[[:space:]]*#" "$1" | grep -q "findBy"' _ "$WORKFLOW"
 	assert_failure
 }
 
