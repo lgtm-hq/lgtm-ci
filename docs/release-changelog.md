@@ -41,9 +41,20 @@ reset `[Unreleased]` template additionally includes the empty `Deprecated`,
 
 Hand-written `[Unreleased]` bullets are merged into the matching Keep a
 Changelog sections of the new version block (generated commit lines first).
-Near-duplicates of generated conventional-commit bullets are collapsed —
-normalized comparison prefers the generated line and keeps Unreleased bullets
-that remain unique (security notes, migrations, and other curated detail).
+Near-duplicates of generated conventional-commit bullets are collapsed.
+Wrapped bullets are compared as a unit (continuation lines are folded into the
+bullet, then kept or dropped with it), and two bullets are duplicates when
+either their normalized text is near-identical — in which case the generated
+line wins — or, within the same `**scope**`, they name the same feature
+identifier: the kebab-case workflow or script token, with a leading verb
+(`add`, `introduce`, `create`, `new`) and a `.yml`/`.yaml`/`.sh` extension
+stripped. Same-identifier duplicates keep the more informative (longer)
+display text, merge the PR references from both bullets (`(#521, #596)`), and
+keep the generated commit sha.
+
+Matching fails closed: without a confident identifier on both sides, differing
+bullets are kept. Unreleased bullets that remain unique (security notes,
+migrations, and other curated detail) are always preserved.
 
 Prefer **not** restating conventional commits under `[Unreleased]`. Use
 Unreleased for context the commit subject does not carry. The merger still
@@ -77,7 +88,8 @@ On the next release PR after bumping the pin:
 - [ ] Hand-written `[Unreleased]` entries were merged into the matching KAC
       sections of the new version block
 - [ ] Near-duplicate Unreleased bullets that restate generated commits were
-      collapsed (generated line kept)
+      collapsed (generated line kept for near-identical restatements; the
+      longer text with merged PR references for same-identifier duplicates)
 - [ ] `[Unreleased]` was reset with the empty KAC section skeleton
 - [ ] Markdown lint passes without manual heading edits
 
