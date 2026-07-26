@@ -85,6 +85,14 @@ name: Reusable - Auto Re-run on Infra Failure
         type: string
         default: "ubuntu-24.04"
       timeout-minutes:
+        # Kept at 10 deliberately (#743). The script now bounds itself:
+        # LOG_FETCH_DEADLINE (180s) for the refetch loop, plus one in-flight
+        # GH_CMD_TIMEOUT (60s) fetch, plus one bounded `gh run rerun` (60s),
+        # is a ~5.5 min worst case, and the harden/checkout steps add well
+        # under a minute. 10 leaves this job timeout as an outer backstop for
+        # whatever the script cannot bound, rather than the binding constraint
+        # it was when it silently killed the safety net mid-fetch. The happy
+        # path finishes in seconds.
         description: "Job timeout in minutes"
         required: false
         type: number
