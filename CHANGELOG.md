@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.26] - 2026-07-26
+
+### Fixed
+
+- **ci**: namespace the e2e-matrix Pages target-dir per call (#779) (6310cf3)
+
 ## [0.59.25] - 2026-07-26
 
 ### Changed
@@ -1930,7 +1936,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.25...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.26...HEAD
+[0.59.26]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.25...v0.59.26
 [0.59.25]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.24...v0.59.25
 [0.59.24]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.23...v0.59.24
 [0.59.23]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.22...v0.59.23
