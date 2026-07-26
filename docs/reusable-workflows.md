@@ -550,9 +550,11 @@ re-runs. When the bounds are exhausted the job reports *timed out reading logs*
 (GitHub answered with nothing) and from "no signature matched" (logs were read)
 — and exits successfully without re-running. A `gh run rerun` that is killed or
 errors fails the job loudly instead, because a matched signature the script
-could not act on needs a human. `timeout` is required: the script fails up front
-when it is missing rather than silently reverting to unbounded calls. Set
-`TIMEOUT_BIN=gtimeout` on hosts that name the coreutils binary differently.
+could not act on needs a human. A coreutils `timeout` is required: the script
+picks whichever of `timeout` or `gtimeout` is on `PATH` — `runner-image` is a
+caller input, and macOS runners ship the binary under the second name — and
+fails up front when neither is present rather than silently reverting to
+unbounded calls. Set `TIMEOUT_BIN` explicitly to name a different binary.
 
 Call it from a thin `workflow_run` consumer gated on a failed conclusion
 (see [examples/auto-rerun-on-infra-failure.yml](../examples/auto-rerun-on-infra-failure.yml)):

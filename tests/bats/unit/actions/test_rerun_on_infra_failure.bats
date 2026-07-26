@@ -670,6 +670,49 @@ _call_count() {
 	[ ! -s "$RERUN_CALLS" ]
 }
 
+# A PATH holding only what the script needs, so `timeout` can be made genuinely
+# absent. Restricting PATH is the only way to test the fallback on a Linux
+# runner, where /usr/bin/timeout cannot be hidden any other way.
+_minimal_path_dir() {
+	local dir="${BATS_TEST_TMPDIR}/sysbin" tool src
+	mkdir -p "$dir"
+	for tool in bash env cat chmod dirname grep kill mkfifo mktemp rm sleep; do
+		src="$(command -v "$tool" 2>/dev/null)" || continue
+		ln -sf "$src" "${dir}/${tool}"
+	done
+	printf '%s\n' "$dir"
+}
+
+@test "rerun-on-infra-failure: falls back to gtimeout when timeout is absent" {
+	# `runner-image` is a caller input and macOS ships no `timeout`; hardcoding
+	# the name would silently disable the safety net on any such runner.
+	export TIMEOUT_CALLS="${BATS_TEST_TMPDIR}/timeout_calls"
+	: >"$TIMEOUT_CALLS"
+	_mock_gh "Failed to resolve action download info"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mv "${mock_bin}/timeout" "${mock_bin}/gtimeout"
+	PATH="${mock_bin}:$(_minimal_path_dir)"
+	export PATH
+	run env -u BASH_ENV bash "$SCRIPT"
+	assert_success
+	assert_equal "2" "$(_call_count "$TIMEOUT_CALLS")"
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: no timeout binary at all fails loudly" {
+	_mock_gh "Failed to resolve action download info"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	rm -f "${mock_bin}/timeout"
+	PATH="${mock_bin}:$(_minimal_path_dir)"
+	export PATH
+	run env -u BASH_ENV bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Neither 'timeout' nor 'gtimeout' is on PATH"
+	[ ! -s "$FETCH_CALLS" ]
+	[ ! -s "$RERUN_CALLS" ]
+}
+
 @test "rerun-on-infra-failure: both the log fetch and the rerun run under GH_CMD_TIMEOUT" {
 	export TIMEOUT_CALLS="${BATS_TEST_TMPDIR}/timeout_calls"
 	export GH_CMD_TIMEOUT="42"

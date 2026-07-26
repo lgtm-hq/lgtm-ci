@@ -23,7 +23,7 @@
 #   GH_CMD_TIMEOUT    - Wall-clock bound in seconds on each `gh` call, at least
 #                       1 (default: 60)
 #   TIMEOUT_BIN       - Name/path of the coreutils timeout binary (default:
-#                       timeout; set to gtimeout on hosts that name it that way)
+#                       whichever of timeout / gtimeout is on PATH)
 #   GITHUB_REPOSITORY - owner/repo (provided by GitHub Actions)
 #   GH_TOKEN          - Token with actions:write scope
 
@@ -38,7 +38,6 @@ set -euo pipefail
 : "${LOG_FETCH_DELAY:=5}"
 : "${LOG_FETCH_DEADLINE:=180}"
 : "${GH_CMD_TIMEOUT:=60}"
-: "${TIMEOUT_BIN:=timeout}"
 
 # `timeout` exits 124 when it kills the command it wrapped. That is the one
 # non-zero status this script must not treat as a generic `gh` error.
@@ -80,9 +79,27 @@ fi
 # Every `gh` call runs under `timeout`, so a missing binary would silently
 # restore unbounded calls. Fail loudly instead: an absent bound is exactly the
 # outage this guard prevents.
-if ! command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then
-	echo "::error::TIMEOUT_BIN '${TIMEOUT_BIN}' not found on PATH; coreutils timeout is required to bound gh calls"
-	exit 1
+#
+# The binary is auto-resolved rather than hardcoded because `runner-image` is a
+# caller input: ubuntu images ship coreutils as `timeout`, while macOS ships
+# none by default and names the Homebrew coreutils build `gtimeout`. An explicit
+# TIMEOUT_BIN always wins, so an unusual host can still name its own.
+if [[ -n "${TIMEOUT_BIN:-}" ]]; then
+	if ! command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then
+		echo "::error::TIMEOUT_BIN '${TIMEOUT_BIN}' not found on PATH; coreutils timeout is required to bound gh calls"
+		exit 1
+	fi
+else
+	for candidate in timeout gtimeout; do
+		if command -v "$candidate" >/dev/null 2>&1; then
+			TIMEOUT_BIN="$candidate"
+			break
+		fi
+	done
+	if [[ -z "${TIMEOUT_BIN:-}" ]]; then
+		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH; coreutils timeout is required to bound gh calls (install coreutils or set TIMEOUT_BIN)"
+		exit 1
+	fi
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
