@@ -262,8 +262,18 @@ main() {
 		# wording speaks to the final attempt rather than claiming every one of
 		# them errored (earlier attempts may have returned empty payloads).
 		if [[ "$FETCH_OUTCOME" == "error" ]]; then
-			add_github_summary "Could not read the failed-job logs of run ${RUN_ID}: the last of ${LOG_FETCH_ATTEMPTS} fetch attempt(s) failed. No signature check was possible, so this says nothing about whether the failure is genuine."
-			die "Failed to fetch failed-job logs for run ${RUN_ID} after ${LOG_FETCH_ATTEMPTS} attempt(s)"
+			# Same class as "empty" and "timeout": the safety net could not
+			# reach a verdict. It used to `die` here, which reddened a job whose
+			# whole purpose is to react to someone else's red job (#763). The
+			# common cause is benign — a superseded run's log archive is gone,
+			# so `gh` errors with `log not found`, and there is nothing to
+			# re-run anyway. Kept distinct from "empty" in the wording: an
+			# errored fetch is a different triage story from GitHub answering
+			# with nothing yet.
+			log_warn "Failed-job log fetch for run ${RUN_ID} errored on all ${LOG_FETCH_ATTEMPTS} attempt(s); inconclusive, not re-running"
+			echo "::warning::Inconclusive: fetching the failed-job logs of run ${RUN_ID} errored on all ${LOG_FETCH_ATTEMPTS} attempt(s); no infra-signature check was possible"
+			add_github_summary "Inconclusive: log fetch errored. Reading the failed-job logs of run ${RUN_ID} failed on all ${LOG_FETCH_ATTEMPTS} attempt(s) — \`gh\` returned an error rather than an empty payload. The usual cause is a run that was cancelled or superseded, whose log archive GitHub has already discarded (\`log not found\`); there is nothing to re-run in that case. No infra signature could be checked, so this says **nothing** about whether the failure is genuine — re-check the run manually."
+			return 0
 		fi
 		if [[ "$FETCH_OUTCOME" == "timeout" ]]; then
 			# Distinct from both "logs unavailable" (GitHub answered, with

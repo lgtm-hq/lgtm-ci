@@ -541,17 +541,36 @@ _call_count() {
 	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
 }
 
-@test "rerun-on-infra-failure: a log fetch failing on every attempt fails loudly" {
+# An errored fetch is inconclusive, not fatal (#763). This job exists to react
+# to someone else's red job; failing here adds a second red job and says nothing
+# about the run it was inspecting. The common trigger is benign: a superseded
+# run's log archive is already gone, and there is nothing to re-run.
+@test "rerun-on-infra-failure: a log fetch failing on every attempt is inconclusive" {
 	_mock_gh_attempts "1:gh: could not read logs"
 	_mock_sleep
 	run bash "$SCRIPT"
-	assert_failure
-	assert_output --partial "Failed to fetch failed-job logs for run ${RUN_ID} after 5 attempt(s)"
+	assert_success
+	assert_output --partial "inconclusive, not re-running"
 	[ ! -s "$RERUN_CALLS" ]
 	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
-	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "the last of 5 fetch attempt(s) failed"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: log fetch errored"
+	# Errored and empty must stay distinguishable for triage.
+	run grep -cF "Inconclusive: logs unavailable" "$GITHUB_STEP_SUMMARY"
+	assert_failure
 	run grep -cF "The failure looks real" "$GITHUB_STEP_SUMMARY"
 	assert_failure
+}
+
+# The exact shape #763 was filed for: the triggering run was cancelled, so
+# GitHub had already discarded the job's log archive.
+@test "rerun-on-infra-failure: a superseded run whose logs are gone is not an error" {
+	_mock_gh_attempts "1:log not found: 89765935589"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: log fetch errored"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "cancelled or superseded"
 }
 
 # The terminal classification comes from the last attempt only, so pin both
@@ -569,16 +588,17 @@ _call_count() {
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable"
 }
 
-@test "rerun-on-infra-failure: an empty payload followed by an error fails loudly" {
+@test "rerun-on-infra-failure: an empty payload followed by an error is inconclusive" {
 	export LOG_FETCH_ATTEMPTS="2"
 	_mock_gh_attempts "0:" "1:gh: could not read logs"
 	_mock_sleep
 	run bash "$SCRIPT"
-	assert_failure
-	assert_output --partial "Failed to fetch failed-job logs for run ${RUN_ID} after 2 attempt(s)"
+	assert_success
+	assert_output --partial "inconclusive, not re-running"
 	[ ! -s "$RERUN_CALLS" ]
 	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
-	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "the last of 2 fetch attempt(s) failed"
+	# Terminal classification comes from the last attempt: errored, not empty.
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: log fetch errored"
 }
 
 # =============================================================================
