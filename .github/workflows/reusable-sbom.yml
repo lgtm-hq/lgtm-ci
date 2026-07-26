@@ -287,6 +287,14 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
+      # STRUCTURALLY UNAVOIDABLE for every caller, including scan-mode ones that
+      # never reach this job (#737). `gh release upload --clobber` in
+      # scripts/ci/actions/upload-sbom-release-assets.sh:29 authenticates with
+      # GITHUB_TOKEN (GH_TOKEN below) and writes a release asset, which the REST
+      # release API gates on `contents: write`. Unlike #730's `actions: write`,
+      # there is no runtime-token code path to fall back on. Reusable permission
+      # requests are validated statically, so the union cannot shrink while this
+      # job lives in this file — splitting it out is tracked in #770.
       contents: write
 
     steps:
@@ -330,7 +338,11 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
+      # Same unavoidable grant as upload-release-assets above: this job ends in
+      # `gh release upload` (scripts/ci/actions/upload-sbom-release-assets.sh:29).
       contents: write
+      # Keyless cosign signing fetches an ambient OIDC credential; the scan job
+      # declares the same scope, so this one does not widen the caller union.
       id-token: write
 
     steps:

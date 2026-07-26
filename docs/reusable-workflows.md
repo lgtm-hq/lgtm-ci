@@ -54,6 +54,38 @@ reusables (quality, test-*, validate-*, release-*, etc.). Production callers
 should pin the workflow ref to a commit SHA and pass the same ref as
 `tooling-ref` on script-backed workflows.
 
+## Scopes a caller cannot avoid granting
+
+Sometimes a snippet asks for a scope that the inputs it shows plainly do not use.
+That is either a bug in the workflow (a scope declared but never exercised —
+the #730 case, fixed by deleting the declaration) or a scope a conditional job
+really does need, in which case the static check forces it on everyone. The
+audit in #737 classified the remaining broad grants; all of them fall in the
+second group, and each is annotated in the workflow next to the declaration:
+
+<!-- markdownlint-disable MD013 -- citation column exceeds default line length -->
+
+| Workflow | Scope forced on all callers | Declared by | Why it is real |
+| --- | --- | --- | --- |
+| `reusable-sbom.yml` | `contents: write` | `upload-release-assets`, `release-assets` | `gh release upload --clobber` with `GITHUB_TOKEN` (`scripts/ci/actions/upload-sbom-release-assets.sh:29`) |
+| `reusable-coverage.yml`, `reusable-test-e2e-matrix.yml` | `pages: write` | `publish` | `actions/deploy-pages` posts `/repos/{owner}/{repo}/pages/deployments` with `GITHUB_TOKEN` |
+| `reusable-coverage.yml`, `reusable-test-e2e-matrix.yml` | `id-token: write` | `publish` | `actions/deploy-pages` calls `core.getIDToken()` and sends it as the deployment's `oidc_token` |
+| `reusable-coverage.yml`, `reusable-test-e2e-matrix.yml` | `actions: write` | `publish` | `gh api --method DELETE /repos/{}/actions/artifacts/{id}` clears stale same-run Pages artifacts on rerun (`scripts/ci/actions/delete-run-pages-artifacts.sh:45-46`, #415) |
+
+<!-- markdownlint-enable MD013 -->
+
+The `actions: write` row is worth contrasting with #730. There the scope was
+requested for `actions/upload-artifact/merge`, which authenticates with the
+per-run `ACTIONS_RUNTIME_TOKEN` rather than `GITHUB_TOKEN`, so `permissions:`
+never gated it and the declaration was pure over-grant. Here the same scope name
+covers a genuine `GITHUB_TOKEN` REST call that hard-fails without it. The scope
+string alone proves nothing — the credential the code path uses decides it.
+
+None of these can be narrowed in place: a reusable workflow's request is the
+union over its jobs, so the union only shrinks when *no* job declares the scope.
+Moving each publishing job into its own reusable workflow, invoked only by
+callers that publish, is proposed in #770 and deliberately out of scope for #737.
+
 ## Runner pinning
 
 Script-backed reusables accept `runner-image` on every job. Pin explicitly in
@@ -255,9 +287,10 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@<sha>
     permissions:
       contents: read
-      pull-requests: write
       # Declared by the `publish` job (Pages report deploy). Required even with
       # publish-results left off, because the request is validated statically.
+      # All three are genuinely used when the job runs — see
+      # "Scopes a caller cannot avoid granting" above and #770.
       pages: write
       id-token: write
       actions: write
@@ -1048,8 +1081,10 @@ jobs:
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
     permissions:
-      # write, not read: declared by the release-asset jobs. Required in scan
-      # mode too, since the request is validated statically.
+      # write, not read: declared by the release-asset jobs, which end in
+      # `gh release upload`. Required in scan mode too, since the request is
+      # validated statically — see "Scopes a caller cannot avoid granting"
+      # above and #770.
       contents: write
       security-events: write
       id-token: write
@@ -1060,7 +1095,8 @@ jobs:
     permissions:
       contents: read
       # Declared by the `publish` (Pages) and `publish-test-summary` jobs.
-      # Required with publish-pages off, since requests validate statically.
+      # Required with publish-pages off, since requests validate statically —
+      # see "Scopes a caller cannot avoid granting" above and #770.
       pages: write
       id-token: write
       actions: write
@@ -1142,8 +1178,10 @@ only). Callers that must keep advisory-only behavior should pass
 sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
-    # write, not read: declared by the release-asset jobs. Required in scan mode
-    # too, since the request is validated statically.
+    # write, not read: declared by the release-asset jobs, which end in
+    # `gh release upload`. Required in scan mode too, since the request is
+    # validated statically — see "Scopes a caller cannot avoid granting" above
+    # and #770.
     contents: write
     security-events: write
     id-token: write

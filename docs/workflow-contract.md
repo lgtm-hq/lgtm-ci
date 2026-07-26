@@ -335,7 +335,8 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | Test / coverage only  | `contents: read`                                     | Reusables with `publish-test-summary: false` |
 | Test / report publish | `contents: read`, `pull-requests: write`             | `reusable-publish-test-summary.yml`,         |
 |                       |                                                      | `reusable-publish-artifact-report.yml`       |
-| Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`  | Separate publish job                         |
+| Publish to Pages      | `contents: read`, `pages: write`, `id-token: write`, | Separate publish job; `actions: write`       |
+|                       | `actions: write`                                     | clears stale Pages artifacts (#415)          |
 | Release version       | `contents: write`, `pull-requests: write`,           | `reusable-release-version-pr.yml`            |
 |                       | `actions: read`, `issues: write`                     |                                              |
 | Release multi-eco     | `contents: write`, `pull-requests: write`,           | `reusable-release-multi-ecosystem.yml`       |
@@ -346,9 +347,11 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
 | Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
-| SBOM report           | `contents: read`, `security-events: write`,          | `reusable-sbom.yml` (`mode: report`)         |
-|                       | `id-token: write`, `attestations: write`             |                                              |
-| SBOM report + upload  | Report perms + `contents: write`                     | `reusable-sbom.yml`                          |
+| SBOM report           | `contents: write`, `security-events: write`,         | `reusable-sbom.yml` (`mode: report`); the    |
+|                       | `id-token: write`, `attestations: write`             | scan jobs only read contents, but the        |
+|                       |                                                      | release-upload jobs declare write and the    |
+|                       |                                                      | request validates statically (#737, #770)    |
+| SBOM report + upload  | Same as SBOM report                                  | `reusable-sbom.yml`                          |
 |                       |                                                      | (`upload-release-assets: true`)              |
 | SBOM release assets   | `contents: write`, `id-token: write`,                | `reusable-sbom.yml`                          |
 |                       | `security-events: write`, `attestations: write`      | (`mode: release-assets`); the last two are   |
@@ -1054,7 +1057,7 @@ full baseline (see #512).
 
 | Mode | Job permissions | Notes |
 | ---- | --------------- | ----- |
-| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path; optional `upload-release-assets` job adds `contents: write` |
+| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path. The **caller** must still grant `contents: write`: the `upload-release-assets` and `release-assets` jobs declare it for `gh release upload`, and the request validates statically even when `upload-release-assets: false` skips the job (#737, split proposed in #770) |
 | `release-assets` | `contents: write`, `id-token: write`, `security-events: write`, `attestations: write` | Multi-format generate + cosign sign + `gh release upload`; requires `release-tag`. The last two belong to the scan job this mode skips, but reusable permission requests are validated statically — omitting them fails the run with `startup_failure` |
 
 <!-- markdownlint-enable MD013 -->

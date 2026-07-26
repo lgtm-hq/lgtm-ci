@@ -240,10 +240,25 @@ jobs:
       name: github-pages
       url: ${{ steps.publish.outputs.pages-url }}
     permissions:
+      # All three write scopes below are STRUCTURALLY UNAVOIDABLE for every
+      # caller, including ones passing publish-pages: false (#737). Reusable
+      # permission requests are validated statically, before any job `if:`, so
+      # the caller union cannot shrink while this job lives in this file.
+      # Splitting it into its own reusable workflow is tracked in #770.
       contents: read
+      # actions/deploy-pages@cd2ce8f src/internal/api-client.js:125 —
+      # POST /repos/{owner}/{repo}/pages/deployments, authenticated with
+      # GITHUB_TOKEN. actions/configure-pages reads the Pages config the same way.
       pages: write
+      # actions/deploy-pages@cd2ce8f src/index.js:22 — core.getIDToken(), sent
+      # as the deployment's `oidc_token` (src/internal/api-client.js:117).
       id-token: write
-      actions: write # delete stale same-run Pages artifacts on rerun (#415)
+      # scripts/ci/actions/delete-run-pages-artifacts.sh:45-46 —
+      # `gh api --method DELETE /repos/{}/actions/artifacts/{id}` with
+      # GITHUB_TOKEN, to clear stale same-run Pages artifacts on rerun (#415).
+      # This is the REST artifact API, not the ACTIONS_RUNTIME_TOKEN path that
+      # made the same scope unnecessary in #730, and the script dies on failure.
+      actions: write
 
     outputs:
       pages-url: ${{ steps.publish.outputs.pages-url }}
