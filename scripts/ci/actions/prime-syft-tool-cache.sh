@@ -94,7 +94,12 @@ esac
 
 : "${RUNNER_TOOL_CACHE:?RUNNER_TOOL_CACHE is required (set by the Actions runner)}"
 
-tool_dir="${RUNNER_TOOL_CACHE}/syft/${version}/${node_arch}"
+# @actions/tool-cache keys the directory on semver.clean(), whose `.version`
+# drops build metadata (`1.42.3+ci` -> `1.42.3`). The release asset and the
+# version we hand back to sbom-action keep the full string, but the cache path
+# must not, or cache.find() would look somewhere we never wrote.
+cache_version="${version%%+*}"
+tool_dir="${RUNNER_TOOL_CACHE}/syft/${cache_version}/${node_arch}"
 marker="${tool_dir}.complete"
 
 if [[ -x "${tool_dir}/syft" && -f "$marker" ]]; then

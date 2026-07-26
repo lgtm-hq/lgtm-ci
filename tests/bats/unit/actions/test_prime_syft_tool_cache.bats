@@ -174,6 +174,44 @@ _run_script() {
 	assert_equal "$(_curl_call_count)" "0"
 }
 
+# The marker is written last precisely so an interrupted prime leaves an
+# unusable entry. A binary without it must be re-downloaded, not trusted:
+# @actions/tool-cache also ignores the entry, so trusting it would mean
+# sbom-action downloading anyway with no retry.
+@test "prime-syft-tool-cache: re-primes a tool dir with no completion marker" {
+	_publish_release valid
+	mkdir -p "$TOOL_DIR"
+	printf 'half-written\n' >"${TOOL_DIR}/syft"
+	chmod +x "${TOOL_DIR}/syft"
+
+	_run_script
+	assert_success
+	[[ -f "${TOOL_DIR}.complete" ]]
+	! grep -qF "half-written" "${TOOL_DIR}/syft"
+	# archive + checksums: the stale entry was not reused.
+	assert_equal "$(_curl_call_count)" "2"
+}
+
+# @actions/tool-cache keys on semver.clean(), which drops build metadata. The
+# asset name keeps it, so the two must be derived separately or cache.find()
+# looks in a directory we never wrote.
+@test "prime-syft-tool-cache: strips build metadata from the cache path only" {
+	local meta_version="${SYFT_TEST_VERSION}+ci.1"
+	ARCHIVE_NAME="syft_${meta_version}_${SYFT_OS}_${SYFT_GOARCH}.tar.gz"
+	CHECKSUMS_NAME="syft_${meta_version}_checksums.txt"
+	_publish_release valid
+
+	_run_script SYFT_VERSION="$meta_version"
+	assert_success
+	# Cache path: build metadata stripped.
+	[[ -x "${RUNNER_TOOL_CACHE}/syft/${SYFT_TEST_VERSION}/${SYFT_NODE_ARCH}/syft" ]]
+	[[ -f "${RUNNER_TOOL_CACHE}/syft/${SYFT_TEST_VERSION}/${SYFT_NODE_ARCH}.complete" ]]
+	[[ ! -e "${RUNNER_TOOL_CACHE}/syft/${meta_version}" ]]
+	# Asset URL and the version handed to sbom-action: metadata retained.
+	assert_github_output "syft-version" "v${meta_version}"
+	grep -qF "$ARCHIVE_NAME" "$CURL_CALLS"
+}
+
 # =============================================================================
 # Transport-level failures: retried
 # =============================================================================
