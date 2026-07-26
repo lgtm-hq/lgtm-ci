@@ -93,6 +93,13 @@ name: Reusable - Auto Re-run on Infra Failure
         # whatever the script cannot bound, rather than the binding constraint
         # it was when it silently killed the safety net mid-fetch. The happy
         # path finishes in seconds.
+        #
+        # Since #776 this is no longer the only backstop either: the script
+        # carries its own WATCHDOG_DEADLINE (420s) covering work `timeout`
+        # cannot see — including the shell's own string handling, which is what
+        # actually hung — and exits green with diagnostics when it trips. Lower
+        # this below 7 minutes and the job timeout becomes the binding bound
+        # again, which means a red job and no diagnostics.
         description: "Job timeout in minutes"
         required: false
         type: number

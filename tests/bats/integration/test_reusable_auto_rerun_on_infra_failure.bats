@@ -80,6 +80,25 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	[ "$output" -ge 8 ]
 }
 
+@test "auto-rerun: the script's watchdog trips before the job timeout does" {
+	# The watchdog only buys anything if it fires first. Lose that ordering and
+	# the job timeout is the binding bound again — a red job and no diagnostics,
+	# which is exactly the silent ten minutes of #776.
+	local script="${PROJECT_ROOT}/scripts/ci/actions/rerun-on-infra-failure.sh"
+	run grep -oE 'WATCHDOG_DEADLINE:=[0-9]+' "$script"
+	assert_success
+	local watchdog="${output##*=}"
+
+	run awk '
+		/^      timeout-minutes:/ { in_input = 1; next }
+		in_input && /^        default: / { print $2; found = 1; exit }
+		in_input && /^      [a-z-]+:/ { in_input = 0 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+	[ "$watchdog" -lt $((output * 60)) ]
+}
+
 @test "auto-rerun: caps automatic re-runs at one by default" {
 	run awk '
 		/^      max-reruns:/ { in_input = 1; next }
