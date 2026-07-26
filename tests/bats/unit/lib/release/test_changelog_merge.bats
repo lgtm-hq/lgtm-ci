@@ -505,6 +505,55 @@ Second paragraph'
 	refute_output --partial "(#239)"
 }
 
+@test "merge_changelog_sections: keeps same-subject bullets describing different changes" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **workflows**: add reusable-build-artifact Node 22 runtime support (#600) (abc1234)" "### Added
+
+- **workflows**: add reusable-build-artifact retention window override (#601)"
+	'
+	assert_success
+	assert_output --partial $'- **workflows**: add reusable-build-artifact Node 22 runtime support (#600) (abc1234)
+- **workflows**: add reusable-build-artifact retention window override (#601)'
+	refute_output --partial "(#600, #601)"
+	refute_output --partial "(#601) (abc1234)"
+}
+
+@test "merge_changelog_sections: keeps unique sub-bullets of a deduped parent" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add vendor pin (#240) (3f672a5)" "### Added
+
+- **gateway**: add vendor pin (#239)
+  - also rotates the staging token
+  - documents the fallback path"
+	'
+	assert_success
+	assert_output --partial $'- **gateway**: add vendor pin (#240) (3f672a5)
+  - also rotates the staging token
+  - documents the fallback path'
+	refute_output --partial "(#239)"
+}
+
+@test "merge_changelog_sections: keeps a PR ref from a non-final wrapped line" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **workflows**: add reusable-build-artifact (#593) (9387288)" "### Added
+
+- **workflows**: add \`reusable-build-artifact.yml\` for Node build (#522)
+  with an optional post-build test step"
+	'
+	assert_success
+	assert_output --partial '- **workflows**: add `reusable-build-artifact.yml` for Node build'
+	assert_output --partial "with an optional post-build test step (#522, #593) (9387288)"
+}
+
 @test "merge_changelog_sections: keeps unscoped bullets out of subject matching" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"
