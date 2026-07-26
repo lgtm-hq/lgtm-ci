@@ -315,9 +315,8 @@ Second paragraph'
 - **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#239)"
 	'
 	assert_success
-	assert_output --partial "### Added"
-	assert_output --partial "- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)"
-	refute_output --partial "(#239)"
+	# exact match: one bullet survives, carrying BOTH sides' PR references.
+	assert_output $'### Added\n\n- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#239, #240) (3f672a5)'
 }
 
 @test "merge_changelog_sections: collapses near-duplicate Unreleased restatement" {
@@ -330,9 +329,10 @@ Second paragraph'
 - **gateway**: add \`JuliusBrussee/caveman\` as a SHA-pinned vendor catalog (#239)"
 	'
 	assert_success
-	assert_output --partial "- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#240) (3f672a5)"
+	# contained match: the generated display text stays canonical, but #239 is a
+	# real PR and its reference is merged in rather than dropped.
+	assert_output --partial "- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#239, #240) (3f672a5)"
 	refute_output --partial "vendor catalog"
-	refute_output --partial "(#239)"
 }
 
 @test "merge_changelog_sections: retains unique Unreleased security note" {
@@ -389,8 +389,36 @@ Second paragraph'
 - Fix typo in readme (#13)"
 	'
 	assert_success
-	assert_output --partial "- Fix typo in readme (#12) (abcdef0)"
-	refute_output --partial "(#13)"
+	# exact match on an unscoped bullet: references merge here too.
+	assert_output $'### Fixed\n\n- Fix typo in readme (#12, #13) (abcdef0)'
+}
+
+@test "merge_changelog_sections: canonicalises merged refs on the exact path" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add vendor pin (#500) (3f672a5)" "### Added
+
+- **gateway**: add vendor pin (#12, #98)"
+	'
+	assert_success
+	# Numeric ascending order, deduplicated, from the shared ordering code.
+	assert_output $'### Added\n\n- **gateway**: add vendor pin (#12, #98, #500) (3f672a5)'
+}
+
+@test "merge_changelog_sections: canonicalises merged refs on the contained path" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#500) (3f672a5)" "### Added
+
+- **gateway**: add \`JuliusBrussee/caveman\` as a SHA-pinned vendor catalog (#12)"
+	'
+	assert_success
+	assert_output $'### Added\n\n- **gateway**: add JuliusBrussee/caveman SHA-pinned vendor (#12, #500) (3f672a5)'
+	refute_output --partial "vendor catalog"
 }
 
 @test "merge_changelog_sections: keeps similar but distinct unscoped bullets" {
@@ -433,9 +461,8 @@ Second paragraph'
 - **skills**: note install path (#241)"
 	'
 	assert_success
-	assert_output --partial $'- **gateway**: add vendor pin (#240) (3f672a5)
+	assert_output --partial $'- **gateway**: add vendor pin (#239, #240) (3f672a5)
 - **skills**: note install path (#241)'
-	refute_output --partial "(#239)"
 }
 
 @test "merge_changelog_sections: dedupes the 0.56.0 wrapped workflow bullet pair" {
@@ -500,9 +527,9 @@ Second paragraph'
 - **skills**: note install path (#241)"
 	'
 	assert_success
-	assert_output --partial $'- **gateway**: add vendor pin with extra wrapped detail (#240) (3f672a5)
+	assert_output --partial $'- **gateway**: add vendor pin with extra wrapped detail (#239, #240) (3f672a5)
 - **skills**: note install path (#241)'
-	refute_output --partial "(#239)"
+	refute_output --partial "  with extra wrapped detail"
 }
 
 @test "merge_changelog_sections: keeps same-subject bullets describing different changes" {
@@ -533,10 +560,9 @@ Second paragraph'
   - documents the fallback path"
 	'
 	assert_success
-	assert_output --partial $'- **gateway**: add vendor pin (#240) (3f672a5)
+	assert_output --partial $'- **gateway**: add vendor pin (#239, #240) (3f672a5)
   - also rotates the staging token
   - documents the fallback path'
-	refute_output --partial "(#239)"
 }
 
 @test "merge_changelog_sections: keeps a PR ref from a non-final wrapped line" {
