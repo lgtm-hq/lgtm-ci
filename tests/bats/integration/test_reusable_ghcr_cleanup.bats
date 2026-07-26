@@ -27,6 +27,41 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ghcr-cleanup.yml"
 	assert_output --partial "default: true"
 }
 
+@test "reusable-ghcr-cleanup: prune-tagged defaults to false so existing consumers are unaffected" {
+	run awk '/^      prune-tagged:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial "default: false"
+}
+
+@test "reusable-ghcr-cleanup: main-retention-days defaults to 30" {
+	run awk '/^      main-retention-days:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial "default: 30"
+}
+
+@test "reusable-ghcr-cleanup: prerelease-retention-days defaults to 90" {
+	run awk '/^      prerelease-retention-days:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial "default: 90"
+}
+
+@test "reusable-ghcr-cleanup: tagged prune step is gated on prune-tagged and reuses dry-run" {
+	run awk '
+		/- name: Prune aged tagged GHCR images/ { step = 1; next }
+		step && /^      - name:/ { exit }
+		step && /if: \$\{\{ inputs.prune-tagged \}\}/ { gated = 1 }
+		step && /MAIN_RETENTION_DAYS: \$\{\{ inputs.main-retention-days \}\}/ { main = 1 }
+		step && /PRERELEASE_RETENTION_DAYS: \$\{\{ inputs.prerelease-retention-days \}\}/ { pre = 1 }
+		step && /DRY_RUN: \$\{\{ inputs.dry-run \}\}/ { dry = 1 }
+		step && /ghcr-prune-tags.sh/ { script = 1 }
+		END { exit !(gated && main && pre && dry && script) }
+	' "$WORKFLOW"
+	assert_success
+}
+
 @test "reusable-ghcr-cleanup: passes build-cache and protection env vars" {
 	run awk '
 		/- name: Clean untagged GHCR images/ { step = 1 }
