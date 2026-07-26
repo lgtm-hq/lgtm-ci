@@ -108,6 +108,9 @@ scripts for standalone sourcing — the canonical versions are in `fs.sh` and
 - `ghcr_fetch_referrers` (ghcr/registry.sh) - Fetch OCI Referrers descriptors for a digest
 - `ghcr_collect_referenced_digests` (ghcr/registry.sh) - Collect digests referenced by tagged manifest indexes and referrers
 - `ghcr_is_ephemeral_only_tagged` (ghcr/tags.sh) - True when every tag on the version matches the ephemeral pattern
+- `ghcr_tag_retention_class` (ghcr/retention.sh) - Classify a tag as `permanent`, `main`, `prerelease`, or `unknown`
+- `ghcr_tag_is_deletable` (ghcr/retention.sh) - True when one tag is past its class cutoff
+- `ghcr_all_tags_deletable` (ghcr/retention.sh) - True only when **every** tag on the version is deletable
 
 ## Egress allowlist
 

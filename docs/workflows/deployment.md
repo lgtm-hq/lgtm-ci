@@ -135,7 +135,10 @@ inputs.
 `reusable-ghcr-cleanup.yml` prunes aged untagged container versions and
 ephemeral build-cache tags (`pr-*`, `mq-*`, `dispatch-*`), skipping the
 prune when referenced-digest collection is incomplete (protects multi-arch
-manifest children and cosign/SLSA attestations from accidental deletion).
+manifest children and cosign/SLSA attestations from accidental deletion). Its
+opt-in `prune-tagged` input adds tagged retention (`main`/`sha-*` at 30 days,
+pre-release at 90, `latest`/semver never), deleting a version only when every
+tag on it is deletable.
 `reusable-registry-health-check.yml` scans workflow files for digest-pinned
 images and verifies the digests still resolve, optionally opening an issue
 on failure — used by lgtm-ci's own `registry-health-check.yml` caller.

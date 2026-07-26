@@ -84,7 +84,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-sbom.yml` | SBOM generation with Cosign signing |
 | `reusable-build-rust-binaries.yml` | Cross-compiled Rust release binaries matrix |
 | `reusable-site-quality.yml` | Docs site build, lychee, and site tests |
-| `reusable-ghcr-cleanup.yml` | Prune aged untagged GHCR images and build-cache tags |
+| `reusable-ghcr-cleanup.yml` | Prune aged untagged GHCR images, build-cache tags, and (opt-in) aged tagged versions |
 
 ### Security and repo hygiene
 
