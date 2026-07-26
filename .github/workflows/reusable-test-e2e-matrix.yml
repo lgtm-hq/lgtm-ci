@@ -62,6 +62,15 @@ on:
         required: false
         type: string
         default: "playwright"
+      pages-target-dir:
+        description: >-
+          Pages subdirectory the merged report deploys into; give a second
+          publishing call in the same run its own value so it does not
+          overwrite this one. Relative path, no '..' segments. Separate from
+          artifact-prefix on purpose: this one is URL-visible
+        required: false
+        type: string
+        default: "playwright"
 
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
@@ -203,6 +212,11 @@ jobs:
         env:
           ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
         run: .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
+      - name: Validate Pages target dir
+        shell: bash
+        env:
+          PAGES_TARGET_DIR: ${{ inputs.pages-target-dir }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/validate-pages-target-dir.sh
       - name: Generate matrix
         id: matrix
         shell: bash
@@ -485,4 +499,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
         with:
           results-path: merged-report
-          target-dir: playwright
+          # Namespaced per call (#754): a hardcoded `playwright` meant two
+          # publishing calls in one run deployed to the same Pages directory
+          # and the second overwrote the first. Validated in `setup`.
+          target-dir: ${{ inputs.pages-target-dir }}

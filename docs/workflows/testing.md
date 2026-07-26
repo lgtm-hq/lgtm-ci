@@ -127,7 +127,8 @@ default 'smoke'), `browsers` (comma-separated, default 'chromium'),
 `tag-prefix` (default '@'), `shards` (per suite, default 1), `reporter`
 (json/html/blob, default 'html'), `upload-report` (default true),
 `publish-results` (default false), `timeout-minutes` (default 30),
-`artifact-prefix` (default 'playwright').
+`artifact-prefix` (default 'playwright'), `pages-target-dir`
+(default 'playwright').
 
 Shards upload as `<artifact-prefix>-<suite>-<browser>-<shard>` and the merge
 job collects them with `<artifact-prefix>-*`, so a caller running this workflow
@@ -135,6 +136,28 @@ twice in one run must give the second call its own `artifact-prefix` — otherwi
 each merge picks up the other call's shards. The prefix must match
 `[A-Za-z0-9_.]+`: `-` is reserved as the separator, and allowing it inside the
 prefix would let `e2e-*` match an `e2e-nightly` call's shards.
+
+`pages-target-dir` is the separate, Pages-side half of the same isolation
+(#754). The `publish` job deploys the merged report to
+`<pages-site>/<pages-target-dir>/`, so two calls in one run that both set
+`publish-results: true` overwrite each other unless each is given its own
+value. It is **not** derived from `artifact-prefix`: this value is URL-visible,
+has no glob-disjointness requirement (so `-` is allowed), and deriving it would
+silently move the published URL of any caller that sets `artifact-prefix` for
+artifact reasons alone.
+
+The workflow cannot detect the collision for you — a reusable workflow cannot
+see its sibling calls, so the `setup` job only validates the value in
+isolation: it must be a relative path matching `[A-Za-z0-9._/-]+` with no
+leading `/` and no `..` segment, because it is interpolated into a deploy
+destination. Keeping two publishing calls apart is the caller's contract.
+
+Distinct `pages-target-dir` values are necessary but not sufficient for two
+publishing calls on one site: every deploy uploads a **full site artifact** that
+replaces the whole published site, and both jobs share the
+`pages-<repo>-<ref>` concurrency group. Callers publishing more than one report
+tree should use Model B (`reusable-deploy-site-with-reports`) or
+`merge-existing-site` — see [pages-publishing.md](../pages-publishing.md).
 
 **Outputs:** `total-passed`, `total-failed`, `report-url`.
 
