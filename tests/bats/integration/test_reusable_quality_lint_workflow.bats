@@ -93,12 +93,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 }
 
 # Scoped to the warn step: workflow-wide greps would still pass if the guard
-# and the warning drifted into unrelated steps.
+# and the warning drifted into unrelated steps. The guard requires always() —
+# without it, the implicit success() check skips this warning whenever the
+# job is already failing, i.e. exactly when the upload failure matters most
+# (#740).
 @test "reusable-quality-lint: failed report upload warns instead of failing" {
 	run awk '
 		/- name: Warn on failed report upload/ { in_step = 1 }
 		in_step && /^      - name: / && !/Warn on failed report upload/ { exit }
-		in_step && /if: steps\.upload-report\.outcome == .failure./ { guarded = 1 }
+		in_step && /if: always\(\) && steps\.upload-report\.outcome == .failure./ { guarded = 1 }
 		in_step && /::warning::Linting report upload failed/ { warned = 1 }
 		END { exit !(guarded && warned) }
 	' "$WORKFLOW"

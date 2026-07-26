@@ -479,7 +479,10 @@ jobs:
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
     permissions:
-      actions: write # upload-artifact/merge re-uploads merged python-coverage (artifact write)
+      # No `actions` scope: upload-artifact/merge sets no `findBy`, so
+      # @actions/artifact takes its *Internal paths and authenticates with the
+      # per-run ACTIONS_RUNTIME_TOKEN, not GITHUB_TOKEN. Requesting it here
+      # would force every consumer to grant it (static validation) for nothing.
       contents: read
     outputs:
       tests-passed: ${{ steps.aggregate.outputs.tests-passed }}

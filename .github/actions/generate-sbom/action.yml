@@ -57,11 +57,23 @@ runs:
         SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
         echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
+    # anchore/sbom-action downloads Syft with no retry, so one CDN 504 kills
+    # the job and every consumer release job gated on it (#697). Pre-populate
+    # the Actions tool cache with a retried, checksum-verified download; the
+    # action's cache.find() then short-circuits its own download.
+    - name: Prime Syft tool cache
+      id: syft
+      shell: bash
+      run: $SCRIPTS_DIR/ci/actions/prime-syft-tool-cache.sh
+
     - name: Generate SBOM
       id: generate
       # Pinned to SHA for supply chain security
       uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
       with:
+        # Single-sourced from prime-syft-tool-cache.sh so the primed cache
+        # entry and the version the action looks for cannot drift apart.
+        syft-version: ${{ steps.syft.outputs.syft-version }}
         path: ${{ inputs.target-type == 'dir' && inputs.target || '' }}
         image: ${{ inputs.target-type == 'image' && inputs.target || '' }}
         file: ${{ inputs.target-type == 'file' && inputs.target || '' }}

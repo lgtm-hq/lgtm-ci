@@ -57,9 +57,12 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
     permissions:
-      # Required by the aggregate job's static permission request, not by any
-      # artifact API call the workflow makes; a caller granting less dies at
-      # startup_failure. Drop it once #730 removes the request.
+      # Required at the pin above, and only there: v0.46.0's `aggregate` job
+      # statically requests `actions: write`, so a caller granting less dies at
+      # startup_failure. #730 drops that request, but only from the tip.
+      # This is a real capability grant (workflow re-run/cancel, artifact
+      # deletion) that nothing in the workflow uses, so drop it as soon as the
+      # pin advances past the release carrying #730.
       actions: write
       contents: read
       pull-requests: write

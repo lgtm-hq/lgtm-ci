@@ -103,7 +103,7 @@ on:
         required: false
         type: string
         # yamllint disable-line rule:line-length
-        default: "ghcr.io/lgtm-hq/py-lintro@sha256:8e9e6596d60fbde8040d24ecf522dac0c501c94247d41b5b62a02638b78db2bb"
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:d536f15578f28801c0362c6da1f008368c2144d5dc64223e17b4b05b7db9b919"
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
@@ -216,7 +216,7 @@ jobs:
           # non-authoritative result. The latest attempt is authoritative.
           overwrite: true
       - name: Warn on failed report upload
-        if: steps.upload-report.outcome == 'failure'
+        if: always() && steps.upload-report.outcome == 'failure'
         shell: bash
         run: |
           echo "::warning::Linting report upload failed; the lint result is unaffected."

@@ -54,14 +54,29 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 	assert_success
 }
 
-@test "reusable-test-python: aggregate job grants actions write for artifact merge" {
+# The merge runs on the artifact runtime token, not GITHUB_TOKEN. Two
+# conditions keep it there, and both are asserted: no `findBy` (which would
+# switch @actions/artifact to its *Public, Octokit-backed paths) and no
+# `delete-merged` (asserted above). A reusable workflow's permission request is
+# validated statically, so requesting an unused `actions` scope here would force
+# every consumer to grant it or die at startup_failure (#730).
+@test "reusable-test-python: aggregate job requests no actions scope" {
 	run awk '
 		/^  aggregate:/ { in_aggregate = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate:/ { in_aggregate = 0 }
-		in_aggregate && /actions: write/ { found = 1; exit }
-		END { exit !found }
+		in_aggregate && /^ *actions: / { found = 1; exit }
+		END { exit found }
 	' "$WORKFLOW"
 	assert_success
+}
+
+@test "reusable-test-python: coverage merge omits findBy so it uses the runtime token" {
+	# Whole-line comments are stripped first: the permissions block explains the
+	# contract in prose, and that explanation must not satisfy its own
+	# assertion. Only whole-line comments — stripping from every `#` would also
+	# blank out quoted content and could hide a real `findBy`.
+	run bash -c 'grep -vE "^[[:space:]]*#" "$1" | grep -q "findBy"' _ "$WORKFLOW"
+	assert_failure
 }
 
 @test "reusable-test-python: coverage merge continues on error when no artifacts exist" {

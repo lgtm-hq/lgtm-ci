@@ -219,9 +219,6 @@ jobs:
   python:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
     permissions:
-      # Required by the `aggregate` job's static request, not by any artifact
-      # API call this workflow makes. Drop it once #730 removes the request.
-      actions: write
       contents: read
       pull-requests: write
     with:
