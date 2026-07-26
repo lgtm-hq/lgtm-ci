@@ -106,8 +106,10 @@ if [[ -n "$node_version" && -n "$toolchain_version" ]]; then
 	exit 1
 fi
 
-# node-version and toolchain-version are aliases when toolchain is node.
-if [[ "$toolchain" == "node" && -z "$node_version" ]]; then
+# node-version and toolchain-version are aliases when toolchain is node. With a
+# matrix, toolchain-version keeps its cross-toolchain meaning instead: the
+# default version for legs that omit the version field.
+if [[ "$toolchain" == "node" && -z "$node_version" && -z "$matrix" ]]; then
 	node_version="$toolchain_version"
 fi
 
@@ -116,8 +118,8 @@ matrix_mode="false"
 
 if [[ -n "$matrix" ]]; then
 	if [[ -n "$node_version" || -n "$node_version_matrix" ]]; then
-		echo "::error::matrix is mutually exclusive with node-version," \
-			"node-version-matrix and toolchain-version" >&2
+		echo "::error::matrix is mutually exclusive with node-version" \
+			"and node-version-matrix" >&2
 		exit 1
 	fi
 	matrix_mode="true"

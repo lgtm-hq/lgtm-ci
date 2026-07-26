@@ -290,3 +290,18 @@ teardown() {
 	assert_success
 	assert_output --partial "::warning::node-version-matrix is deprecated"
 }
+
+@test "validate-build-artifact-inputs: matrix keeps toolchain-version as the leg default" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN_VERSION="22" \
+		MATRIX='[{"target":"linux"},{"target":"darwin"}]' \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -q '^toolchain-version=22$' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -q '^matrix-mode=true$' "$GITHUB_OUTPUT"
+	assert_success
+}
