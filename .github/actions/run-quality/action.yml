@@ -9,7 +9,7 @@ inputs:
   lintro-image:
     description: "Pinned ghcr.io/lgtm-hq/py-lintro image (digest strongly recommended)"
     required: true
-    default: "ghcr.io/lgtm-hq/py-lintro@sha256:ae98cd26096a696858fdf66aafd97135a5c211ec890b63218656ab3b0170e264"
+    default: "ghcr.io/lgtm-hq/py-lintro@sha256:ba6eb43c2469f72033fe21c40a738e783724dc1faf1c60bf431c05c9b933fc68"
   tools:
     description: "Comma-separated list of lintro tools to run (empty = all)"
     required: false
