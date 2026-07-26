@@ -213,10 +213,16 @@ deleted_ids() {
 
 	run bash -c 'bash "$SCRIPT" 2>&1'
 	assert_success
+	assert_output --partial "6 deleted, 0 retained"
 
+	# Every one of the six pre-release shapes must be deleted, not just some.
 	run deleted_ids
-	assert_line "1"
-	assert_line "6"
+	assert_output "1
+2
+3
+4
+5
+6"
 }
 
 @test "ghcr-prune-tags: prerelease shapes within retention are retained" {
