@@ -827,3 +827,181 @@ _minimal_path_dir() {
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "press re-run manually"
 	refute_output --partial "::notice::"
 }
+
+# =============================================================================
+# Silent-hang regression and the script-level watchdog (#776)
+# =============================================================================
+
+# Mock gh serving a large, whitespace-dense failed-job payload followed by a
+# transient signature. Whitespace density is the point: the #776 hang was
+# `${logs//[[:space:]]/}`, whose cost is O(length x matches), so it is the
+# proportion of whitespace — not the size alone — that made a real failed-job
+# log take minutes to classify.
+_mock_gh_large_log() {
+	local bytes="$1" trailer="$2"
+
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	: >"$RERUN_CALLS"
+	: >"$FETCH_CALLS"
+
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	run\ view\ *--log-failed*)
+		echo "\$*" >> '${FETCH_CALLS}'
+		yes '	shell-tests	2026-07-26T12:45:31.1234567Z ok 1 a test name with spaces' | head -c '${bytes}'
+		printf '\n%s\n' '${trailer}'
+		;;
+	run\ rerun\ *)
+		echo "\$*" >> '${RERUN_CALLS}'
+		;;
+	*)
+		echo "unexpected gh call: \$*" >&2
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+	_mock_timeout
+	export PATH="${mock_bin}:$PATH"
+}
+
+@test "rerun-on-infra-failure: a megabyte of failed-job log is classified in seconds, not minutes" {
+	# The #776 regression. `${logs//[[:space:]]/}` on this payload measured 21s
+	# at 1 MB and 147s at 4 MB, so a real multi-megabyte failed-job log burned
+	# the whole 10-minute job timeout inside one parameter expansion — on the
+	# success path, where nothing is logged, hence ten minutes of zero output.
+	# The bound here is deliberately far above the fixed cost (well under a
+	# second) and far below the quadratic one.
+	_mock_gh_large_log $((1024 * 1024)) "The runner has received a shutdown signal"
+	local start=$SECONDS
+	run bash "$SCRIPT"
+	local elapsed=$((SECONDS - start))
+	assert_success
+	[ "$elapsed" -lt 15 ]
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: announces itself before any work" {
+	# Ten minutes of total silence must not be a reachable state: the first
+	# write happens before validation, sourcing or any subprocess, so "never
+	# started" is always distinguishable from "started and stopped somewhere".
+	export RUN_ATTEMPT="not-a-number"
+	_mock_gh "irrelevant"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "rerun-on-infra-failure: starting (run=${RUN_ID} attempt=not-a-number)"
+}
+
+@test "rerun-on-infra-failure: logs the phase and payload size it is working on" {
+	_mock_gh "The runner has received a shutdown signal"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Checking re-run eligibility for run ${RUN_ID}"
+	assert_output --partial "Fetching failed-job logs of run ${RUN_ID} (attempt 1/5"
+	assert_output --partial "bytes of failed-job logs for run ${RUN_ID}"
+	assert_output --partial "Re-running the failed jobs of run ${RUN_ID}"
+}
+
+@test "rerun-on-infra-failure: children get /dev/null on stdin, never the caller's" {
+	# An inherited stdin is the other way to block forever while printing
+	# nothing. The probe reads with a timeout: against /dev/null `read` reports
+	# EOF immediately, against an open fifo it would block for the full 5s.
+	local probe="${BATS_TEST_TMPDIR}/stdin_probe"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	: >"$RERUN_CALLS"
+	: >"$FETCH_CALLS"
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+if read -r -t 5 _; then
+	echo "readable" >>'${probe}'
+else
+	echo "eof=\$?" >>'${probe}'
+fi
+case "\$*" in
+	run\ view\ *--log-failed*)
+		echo "\$*" >> '${FETCH_CALLS}'
+		echo "The runner has received a shutdown signal"
+		;;
+	run\ rerun\ *) echo "\$*" >> '${RERUN_CALLS}' ;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+	_mock_timeout
+	export PATH="${mock_bin}:$PATH"
+
+	local fifo="${BATS_TEST_TMPDIR}/stdin.fifo"
+	mkfifo "$fifo"
+	# fd 9 holds the fifo open for read and write, so an inherited stdin would
+	# block rather than see EOF — exactly the shape of the hang being excluded.
+	run bash -c 'exec 9<>"$1"; bash "$2" <&9' _ "$fifo" "$SCRIPT"
+	assert_success
+	run grep -c "^eof=1$" "$probe"
+	assert_output "2"
+}
+
+@test "rerun-on-infra-failure: the watchdog turns a hang into a diagnostic and exits 0" {
+	# `timeout` bounds gh; nothing bounded the shell itself, and #776 hung
+	# inside bash. The watchdog is the outermost bound, and per #763 the safety
+	# net declining to act must never redden the job.
+	export WATCHDOG_DEADLINE="2"
+	export GH_CMD_TIMEOUT="60"
+	_mock_gh_attempts "hang:60"
+	local start=$SECONDS
+	run bash "$SCRIPT"
+	local elapsed=$((SECONDS - start))
+	assert_success
+	[ "$elapsed" -lt 30 ]
+	assert_output --partial "::warning::Auto re-run for run ${RUN_ID} exceeded its own 2s budget"
+	# The diagnostic names where it was stuck, which is the whole point: the
+	# real occurrence left nothing at all to triage from.
+	assert_output --partial "stopped while: Fetching failed-job logs of run ${RUN_ID}"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Watchdog stopped the safety net."
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "WATCHDOG_DEADLINE=2"
+}
+
+@test "rerun-on-infra-failure: the watchdog stays out of the way of a normal run" {
+	export WATCHDOG_DEADLINE="300"
+	_mock_gh "The runner has received a shutdown signal"
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "Watchdog"
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: non-numeric WATCHDOG_DEADLINE fails with a clear error" {
+	export WATCHDOG_DEADLINE="soon"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::WATCHDOG_DEADLINE must be a positive integer (got 'soon')"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: WATCHDOG_DEADLINE of zero is rejected" {
+	# Zero would mean "expired before starting", disabling the safety net.
+	export WATCHDOG_DEADLINE="0"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "WATCHDOG_DEADLINE must be a positive integer"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: a watchdog-stopped run leaves no scratch state behind" {
+	export WATCHDOG_DEADLINE="2"
+	export GH_CMD_TIMEOUT="60"
+	export TMPDIR="${BATS_TEST_TMPDIR}/scratch"
+	mkdir -p "$TMPDIR"
+	_mock_gh_attempts "hang:60"
+	run bash "$SCRIPT"
+	assert_success
+	run bash -c 'shopt -s nullglob; leftovers=("$1"/rerun-on-infra-failure.*); echo "${#leftovers[@]}"' _ "$TMPDIR"
+	assert_output "0"
+}

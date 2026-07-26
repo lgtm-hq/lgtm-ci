@@ -596,6 +596,19 @@ caller input, and macOS runners ship the binary under the second name — and
 fails up front when neither is present rather than silently reverting to
 unbounded calls. Set `TIMEOUT_BIN` explicitly to name a different binary.
 
+Those bounds cover `gh`; they cannot cover the shell itself. A quadratic
+parameter expansion over a multi-megabyte failed-job log once burned the whole
+10-minute job timeout inside a single bash command, with every `gh` bound
+untouched and no output at all. So the script also announces itself before any
+work, logs the phase and payload size it is working on, reads nothing from
+stdin, and runs under its own watchdog: `WATCHDOG_DEADLINE` seconds (default
+`420`, must be at least `1`) for the whole script, after which it prints the
+phase it was stuck in and exits **successfully**. A safety net declining to act
+must never add a second red job to a run that already failed, and a hang that
+names itself is triageable where ten minutes of silence is not. Keep
+`WATCHDOG_DEADLINE` below the job's `timeout-minutes`, or the job timeout wins
+and you are back to the silent version.
+
 Call it from a thin `workflow_run` consumer gated on a failed conclusion
 (see [examples/auto-rerun-on-infra-failure.yml](../examples/auto-rerun-on-infra-failure.yml)):
 
