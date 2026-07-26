@@ -438,6 +438,101 @@ Second paragraph'
 	refute_output --partial "(#239)"
 }
 
+@test "merge_changelog_sections: dedupes the 0.56.0 wrapped workflow bullet pair" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **workflows**: add reusable-build-artifact (#593) (9387288)" "### Added
+
+- **workflows**: add \`reusable-build-artifact.yml\` for Node build + artifact
+  handoff with optional post-build test and JSON version matrix (#522)"
+	'
+	assert_success
+	assert_output --partial $'- **workflows**: add `reusable-build-artifact.yml` for Node build + artifact
+  handoff with optional post-build test and JSON version matrix (#522, #593) (9387288)'
+	refute_output --partial "add reusable-build-artifact (#593)"
+}
+
+@test "merge_changelog_sections: dedupes the 0.57.0 verb-less workflow bullet pair" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **workflows**: add reusable-test-e2e-playwright (#596) (41d350e)" "### Added
+
+- **workflows**: \`reusable-test-e2e-playwright.yml\` for Playwright E2E
+  (versioned browser cache, project/grep filters, failure-only report upload,
+  \`playwright\` egress preset) (#521)"
+	'
+	assert_success
+	assert_output --partial $'- **workflows**: `reusable-test-e2e-playwright.yml` for Playwright E2E
+  (versioned browser cache, project/grep filters, failure-only report upload,
+  `playwright` egress preset) (#521, #596) (41d350e)'
+	refute_output --partial "add reusable-test-e2e-playwright (#596)"
+}
+
+@test "merge_changelog_sections: keeps distinct same-scope workflow bullets" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **workflows**: add reusable-build-artifact (#593) (9387288)" "### Added
+
+- **workflows**: add \`reusable-test-e2e-playwright.yml\` for Playwright E2E
+  (versioned browser cache, project/grep filters) (#521)"
+	'
+	assert_success
+	assert_output --partial "- **workflows**: add reusable-build-artifact (#593) (9387288)"
+	assert_output --partial '- **workflows**: add `reusable-test-e2e-playwright.yml` for Playwright E2E'
+	assert_output --partial "(#521)"
+}
+
+@test "merge_changelog_sections: drops every line of a duplicate wrapped bullet" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **gateway**: add vendor pin with extra wrapped detail (#240) (3f672a5)" "### Added
+
+- **gateway**: add vendor pin
+  with extra wrapped detail (#239)
+- **skills**: note install path (#241)"
+	'
+	assert_success
+	assert_output --partial $'- **gateway**: add vendor pin with extra wrapped detail (#240) (3f672a5)
+- **skills**: note install path (#241)'
+	refute_output --partial "(#239)"
+}
+
+@test "merge_changelog_sections: keeps unscoped bullets out of subject matching" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- add reusable-build-artifact (#593) (9387288)" "### Added
+
+- add \`reusable-build-artifact.yml\` for Node build and artifact handoff (#522)"
+	'
+	assert_success
+	assert_output --partial "- add reusable-build-artifact (#593) (9387288)"
+	assert_output --partial '- add `reusable-build-artifact.yml` for Node build and artifact handoff (#522)'
+}
+
+@test "merge_changelog_sections: keeps same-scope bullets without a confident subject" {
+	run bash -c '
+		source "$LIB_DIR/release/changelog_merge.sh"
+		merge_changelog_sections "### Added
+
+- **auth**: add tokens (#10) (abcdef0)" "### Added
+
+- **auth**: add sessions with refresh handling and revocation support (#11)"
+	'
+	assert_success
+	assert_output --partial "- **auth**: add tokens (#10) (abcdef0)"
+	assert_output --partial "- **auth**: add sessions with refresh handling and revocation support (#11)"
+}
+
 @test "merge_changelog_sections: concatenates prose and breaking blocks" {
 	run bash -c '
 		source "$LIB_DIR/release/changelog_merge.sh"

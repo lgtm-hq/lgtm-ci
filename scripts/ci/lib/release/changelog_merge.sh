@@ -133,19 +133,73 @@ _changelog_bullet_scope_key() {
 	fi
 }
 
-# Return 0 when candidate should be treated as a duplicate of existing.
-# Exact normalized match, or same **scope**: with one key containing the other
-# when the shorter key is at least 70% the length of the longer (avoids dropping
-# Unreleased bullets that substantially extend a generated line).
+# Extract the feature identifier (subject) from a normalized scoped bullet key.
+# Strips a leading verb (add/introduce/create/new) and a .yml/.yaml/.sh
+# extension, then requires the remaining token to look like a workflow or
+# script identifier: kebab-case, path-like, or carrying a stripped extension.
+# Anything less confident yields no output and a non-zero status (fail closed).
+# Usage: _changelog_bullet_subject "$normalized_key"
+_changelog_bullet_subject() {
+	local key="${1:-}"
+	local rest first second token had_extension=false
+
+	[[ "$key" =~ ^-\ \*\*[^*]+\*\*:\ +(.+)$ ]] || return 1
+	rest="${BASH_REMATCH[1]}"
+
+	read -r first second _ <<<"$rest"
+	case "$first" in
+	add | adds | added | introduce | introduces | create | creates | new)
+		token="$second"
+		;;
+	*)
+		token="$first"
+		;;
+	esac
+
+	while [[ "$token" =~ [,\;:\(\)\.]$ ]]; do
+		token="${token%?}"
+	done
+	case "$token" in
+	*.yml | *.yaml | *.sh)
+		token="${token%.*}"
+		had_extension=true
+		;;
+	esac
+	while [[ "$token" =~ [,\;:\(\)\.]$ ]]; do
+		token="${token%?}"
+	done
+
+	[[ -n "$token" ]] || return 1
+	[[ "$token" =~ ^[a-z0-9][a-z0-9._/-]*$ ]] || return 1
+	if ! $had_extension && [[ "$token" != *-* && "$token" != */* ]]; then
+		return 1
+	fi
+
+	printf '%s' "$token"
+}
+
+# Classify two bullet keys as duplicates. Prints the match kind on success:
+#   exact    - identical normalized keys
+#   contained - same **scope**, one key contains the other and the shorter key
+#               is at least 70% the length of the longer (near-identical
+#               restatement; the generated display text is canonical)
+#   subject  - same **scope** and the same feature identifier, regardless of
+#              length (the Unreleased bullet carries extra detail)
+# Returns 1 when the keys are not duplicates. Fail closed: without a confident
+# identifier on both sides, differing keys are kept as separate bullets.
 # Usage: _changelog_bullet_keys_duplicate "$candidate_key" "$existing_key"
 _changelog_bullet_keys_duplicate() {
 	local candidate="${1:-}"
 	local existing="${2:-}"
 	local candidate_scope existing_scope
+	local candidate_subject existing_subject
 	local shorter longer shorter_len longer_len
 
 	[[ -z "$candidate" || -z "$existing" ]] && return 1
-	[[ "$candidate" == "$existing" ]] && return 0
+	if [[ "$candidate" == "$existing" ]]; then
+		printf 'exact'
+		return 0
+	fi
 
 	candidate_scope=$(_changelog_bullet_scope_key "$candidate")
 	existing_scope=$(_changelog_bullet_scope_key "$existing")
@@ -158,59 +212,209 @@ _changelog_bullet_keys_duplicate() {
 		shorter="$existing"
 		longer="$candidate"
 	fi
-	[[ "$longer" == *"$shorter"* ]] || return 1
-
 	shorter_len=${#shorter}
 	longer_len=${#longer}
-	[[ "$longer_len" -gt 0 ]] || return 1
-	# Integer percent: require shorter >= 70% of longer.
-	[[ $((shorter_len * 100)) -ge $((longer_len * 70)) ]]
+	if [[ "$longer" == *"$shorter"* && "$longer_len" -gt 0 ]]; then
+		# Integer percent: require shorter >= 70% of longer.
+		if [[ $((shorter_len * 100)) -ge $((longer_len * 70)) ]]; then
+			printf 'contained'
+			return 0
+		fi
+	fi
+
+	candidate_subject=$(_changelog_bullet_subject "$candidate") || return 1
+	existing_subject=$(_changelog_bullet_subject "$existing") || return 1
+	[[ "$candidate_subject" == "$existing_subject" ]] || return 1
+
+	printf 'subject'
+}
+
+# Split trailing "(#N)"/"(#N, #M)" and "(sha)" suffixes off a bullet line.
+# Sets _CL_META_TEXT (line without the suffixes), _CL_META_REFS (raw ref digits)
+# and _CL_META_SHA (first commit sha seen, if any).
+# Usage: _changelog_split_trailing_meta "$line"
+_changelog_split_trailing_meta() {
+	local line="${1:-}"
+	local matched=true
+
+	_CL_META_REFS=""
+	_CL_META_SHA=""
+
+	while $matched; do
+		matched=false
+		if [[ "$line" =~ ^(.*)[[:space:]]\(#([0-9]+([[:space:]]*,[[:space:]]*#[0-9]+)*)\)[[:space:]]*$ ]]; then
+			_CL_META_REFS="${BASH_REMATCH[2]} ${_CL_META_REFS}"
+			line="${BASH_REMATCH[1]}"
+			matched=true
+			continue
+		fi
+		if [[ "$line" =~ ^(.*)[[:space:]]\(([0-9a-f]{7,40})\)[[:space:]]*$ ]]; then
+			[[ -z "$_CL_META_SHA" ]] && _CL_META_SHA="${BASH_REMATCH[2]}"
+			line="${BASH_REMATCH[1]}"
+			matched=true
+			continue
+		fi
+	done
+
+	_CL_META_TEXT="${line%"${line##*[![:space:]]}"}"
+}
+
+# Combine a generated bullet with a duplicate Unreleased bullet: keep the more
+# informative (longer) display text, merge the PR references from both, and
+# keep the generated commit sha when present.
+# Usage: _merge_changelog_duplicate_group "$generated" "$unreleased"
+_merge_changelog_duplicate_group() {
+	local generated="${1:-}"
+	local unreleased="${2:-}"
+	local preferred refs_raw sha last head joined ref
+
+	if [[ ${#unreleased} -gt ${#generated} ]]; then
+		preferred="$unreleased"
+	else
+		preferred="$generated"
+	fi
+
+	_changelog_split_trailing_meta "${generated##*$'\n'}"
+	refs_raw="$_CL_META_REFS"
+	sha="$_CL_META_SHA"
+	_changelog_split_trailing_meta "${unreleased##*$'\n'}"
+	refs_raw+=" $_CL_META_REFS"
+	[[ -z "$sha" ]] && sha="$_CL_META_SHA"
+
+	last="${preferred##*$'\n'}"
+	if [[ "$preferred" == *$'\n'* ]]; then
+		head="${preferred%$'\n'*}"
+	else
+		head=""
+	fi
+	_changelog_split_trailing_meta "$last"
+	last="$_CL_META_TEXT"
+
+	joined=""
+	while read -r ref; do
+		[[ -z "$ref" ]] && continue
+		if [[ -n "$joined" ]]; then
+			joined+=", "
+		fi
+		joined+="#${ref}"
+	done < <(printf '%s\n' "$refs_raw" | grep -oE '[0-9]+' | sort -un)
+
+	[[ -n "$joined" ]] && last+=" (${joined})"
+	[[ -n "$sha" ]] && last+=" (${sha})"
+
+	if [[ -n "$head" ]]; then
+		printf '%s\n%s' "$head" "$last"
+	else
+		printf '%s' "$last"
+	fi
+}
+
+# Split a section body into logical bullet groups: an unindented line starts a
+# group and indented continuation lines (wrapped bullet text, nested bullets)
+# are folded into the preceding group so multi-line bullets compare and
+# keep/drop as a unit. Blank lines are dropped. Result lands in _CL_GROUPS.
+# Usage: _collect_changelog_bullet_groups "$body"
+_collect_changelog_bullet_groups() {
+	local body="${1:-}"
+	local line current="" has_current=false
+
+	_CL_GROUPS=()
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		[[ -z "${line//[[:space:]]/}" ]] && continue
+		if $has_current && [[ "$line" =~ ^[[:space:]]+[^[:space:]] ]]; then
+			current+=$'\n'"$line"
+			continue
+		fi
+		if $has_current; then
+			_CL_GROUPS+=("$current")
+		fi
+		current="$line"
+		has_current=true
+	done <<<"$body"
+
+	if $has_current; then
+		_CL_GROUPS+=("$current")
+	fi
+}
+
+# Build the comparison key for a logical bullet group: continuation lines are
+# folded into a single line before normalization so wrapped bullets are keyed
+# on their full text. Groups that do not start with "- " yield an empty key.
+# Usage: _changelog_group_key "$group"
+_changelog_group_key() {
+	local group="${1:-}"
+	local line joined=""
+
+	[[ "$group" =~ ^-\  ]] || {
+		printf ''
+		return 0
+	}
+
+	while IFS= read -r line || [[ -n "$line" ]]; do
+		line="${line#"${line%%[![:space:]]*}"}"
+		[[ -z "$line" ]] && continue
+		if [[ -n "$joined" ]]; then
+			joined+=" "
+		fi
+		joined+="$line"
+	done <<<"$group"
+
+	_normalize_changelog_bullet_key "$joined"
 }
 
 # Merge generated (left) and Unreleased (right) section bodies, collapsing
-# duplicate "- " bullets. Prefers generated display text; keeps unique
-# Unreleased bullets; preserves generated-first order. Fail closed: non-bullets
-# and ambiguous lines are retained. Blank lines from either side are dropped so
-# skipped duplicates do not leave orphaned separators.
+# duplicate bullets. Near-identical restatements keep the generated display
+# text; same-subject duplicates keep the more informative text and merge PR
+# references. Unique Unreleased bullets are kept and generated-first order is
+# preserved. Fail closed: non-bullets and ambiguous lines are retained. Blank
+# lines from either side are dropped so skipped duplicates do not leave
+# orphaned separators.
 # Usage: _dedupe_changelog_section_bodies "$left" "$right"
 _dedupe_changelog_section_bodies() {
 	local left="${1:-}"
 	local right="${2:-}"
-	local -a generated_keys=()
-	local line key existing_key is_dup output=""
+	local -a left_texts=() left_keys=() right_groups=() extra_texts=()
+	local group key kind index matched output=""
 
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		[[ -z "${line//[[:space:]]/}" ]] && continue
-		key=$(_normalize_changelog_bullet_key "$line")
-		if [[ -n "$key" ]]; then
-			generated_keys+=("$key")
-		fi
-		if [[ -n "$output" ]]; then
-			output+=$'\n'
-		fi
-		output+="$line"
-	done <<<"$left"
+	_collect_changelog_bullet_groups "$left"
+	for group in ${_CL_GROUPS[@]+"${_CL_GROUPS[@]}"}; do
+		left_texts+=("$group")
+		left_keys+=("$(_changelog_group_key "$group")")
+	done
 
-	while IFS= read -r line || [[ -n "$line" ]]; do
-		[[ -z "${line//[[:space:]]/}" ]] && continue
-		key=$(_normalize_changelog_bullet_key "$line")
+	_collect_changelog_bullet_groups "$right"
+	right_groups=(${_CL_GROUPS[@]+"${_CL_GROUPS[@]}"})
+
+	for group in ${right_groups[@]+"${right_groups[@]}"}; do
+		key=$(_changelog_group_key "$group")
+		matched=false
 		if [[ -n "$key" ]]; then
-			is_dup=false
-			for existing_key in "${generated_keys[@]}"; do
-				if _changelog_bullet_keys_duplicate "$key" "$existing_key"; then
-					is_dup=true
+			index=0
+			while [[ $index -lt ${#left_keys[@]} ]]; do
+				if kind=$(_changelog_bullet_keys_duplicate "$key" "${left_keys[$index]}"); then
+					matched=true
+					if [[ "$kind" == "subject" ]]; then
+						left_texts[index]=$(
+							_merge_changelog_duplicate_group \
+								"${left_texts[$index]}" "$group"
+						)
+					fi
 					break
 				fi
+				index=$((index + 1))
 			done
-			if $is_dup; then
-				continue
-			fi
 		fi
+		$matched && continue
+		extra_texts+=("$group")
+	done
+
+	for group in ${left_texts[@]+"${left_texts[@]}"} ${extra_texts[@]+"${extra_texts[@]}"}; do
 		if [[ -n "$output" ]]; then
 			output+=$'\n'
 		fi
-		output+="$line"
-	done <<<"$right"
+		output+="$group"
+	done
 
 	printf '%s' "$output"
 }
