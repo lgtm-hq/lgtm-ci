@@ -441,17 +441,19 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: >-
-            ${{ inputs.python-versions != '' && format('python-coverage-{0}',
-            matrix.python-version) || 'python-coverage' }}
+          # Always the flat name: this step needs `coverage: true`, and the
+          # compat/coverage contract (#345) rejects that with a non-empty
+          # `python-versions`, so the matrix never reaches here and there are
+          # no per-version coverage artifacts to disambiguate (#756).
+          name: python-coverage
           path: |
             ${{ inputs.working-directory }}/${{ steps.run.outputs.coverage-file }}
             ${{ inputs.working-directory }}/pytest-results.json
           retention-days: 7
           if-no-files-found: ignore
-          # Feeds the coverage publish path and the aggregate merge, so no
-          # continue-on-error — overwrite only, so a retried call's coverage
-          # wins over the earlier attempt's.
+          # Feeds the coverage publish path, so no continue-on-error —
+          # overwrite only, so a retried call's coverage wins over the
+          # earlier attempt's.
           overwrite: true
       - name: Fail on pytest errors
         if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
@@ -479,10 +481,11 @@ jobs:
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
     permissions:
-      # No `actions` scope: upload-artifact/merge sets no `findBy`, so
-      # @actions/artifact takes its *Internal paths and authenticates with the
-      # per-run ACTIONS_RUNTIME_TOKEN, not GITHUB_TOKEN. Requesting it here
-      # would force every consumer to grant it (static validation) for nothing.
+      # No `actions` scope: this job only downloads same-run artifacts, and
+      # @actions/artifact takes its *Internal paths (no `findBy`), which
+      # authenticate with the per-run ACTIONS_RUNTIME_TOKEN, not GITHUB_TOKEN.
+      # A reusable workflow's request is validated statically, so declaring it
+      # here would force every consumer to grant it for nothing (#730).
       contents: read
     outputs:
       tests-passed: ${{ steps.aggregate.outputs.tests-passed }}
@@ -546,15 +549,6 @@ jobs:
           RESULTS_DIR: python-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
-      - name: Merge per-version coverage artifacts
-        if: inputs.upload-coverage && inputs.coverage
-        continue-on-error: true
-        # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact/merge@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-        with:
-          name: python-coverage
-          pattern: python-coverage-*
-          retention-days: 7
   publish-test-summary:
     needs:
       - test
