@@ -66,6 +66,20 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	assert_success
 }
 
+@test "auto-rerun: keeps the job timeout above the script's own wall-clock bounds" {
+	# The script bounds itself to a ~5.5 min worst case (#743), so this job
+	# timeout is an outer backstop and must stay comfortably above it — it must
+	# never again be the thing that kills the safety net mid-fetch.
+	run awk '
+		/^      timeout-minutes:/ { in_input = 1; next }
+		in_input && /^        default: / { print $2; found = 1; exit }
+		in_input && /^      [a-z-]+:/ { in_input = 0 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+	[ "$output" -ge 8 ]
+}
+
 @test "auto-rerun: caps automatic re-runs at one by default" {
 	run awk '
 		/^      max-reruns:/ { in_input = 1; next }

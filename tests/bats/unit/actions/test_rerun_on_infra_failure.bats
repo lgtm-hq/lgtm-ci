@@ -18,6 +18,7 @@ setup() {
 	export FETCH_CALLS="${BATS_TEST_TMPDIR}/fetch_calls"
 	export SLEEP_CALLS="${BATS_TEST_TMPDIR}/sleep_calls"
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
+	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
 }
 
 teardown() {
@@ -25,10 +26,73 @@ teardown() {
 	teardown_temp_dir
 }
 
+# Portable stand-in for coreutils `timeout` (#743). macOS ships no `timeout`, so
+# depending on the real binary would make this suite pass on CI and fail
+# locally; stubbing it unconditionally keeps both identical. It implements only
+# the shape the script uses — flags, then "<seconds> cmd ..." — exits 124 when
+# the bound trips, and blocks on a fifo rather than `sleep`, which this suite
+# also stubs.
+_mock_timeout() {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+
+	cat >"${mock_bin}/timeout" <<'EOF'
+#!/usr/bin/env bash
+if [[ -n "${TIMEOUT_CALLS:-}" ]]; then
+	echo "$*" >>"$TIMEOUT_CALLS"
+fi
+while [[ "$1" == -* ]]; do
+	case "$1" in
+	-k | -s) shift 2 ;;
+	*) shift ;;
+	esac
+done
+limit="$1"
+shift
+
+fifo="$(mktemp -u "${TMPDIR:-/tmp}/timeout-stub.XXXXXX")"
+mkfifo "$fifo"
+exec 9<>"$fifo"
+rm -f "$fifo"
+
+"$@" &
+child=$!
+(read -r -t "$limit" -u 9 _ || kill -TERM "$child" 2>/dev/null) &
+watchdog=$!
+
+status=0
+wait "$child" || status=$?
+printf 'done\n' >&9
+wait "$watchdog" 2>/dev/null || true
+
+# A command killed by the watchdog reports a signal status; report it the way
+# coreutils timeout does.
+if ((status > 128)); then
+	exit 124
+fi
+exit "$status"
+EOF
+	chmod +x "${mock_bin}/timeout"
+}
+
+# Shell snippet for a gh mock that blocks for "$hang_for" seconds without
+# sleeping, so the wrapping timeout is what ends it.
+_gh_hang_snippet() {
+	cat <<'EOF'
+	hang_fifo="$(mktemp -u "${TMPDIR:-/tmp}/gh-hang.XXXXXX")"
+	mkfifo "$hang_fifo"
+	exec 8<>"$hang_fifo"
+	rm -f "$hang_fifo"
+	read -r -t "$hang_for" -u 8 _ || true
+	exit 0
+EOF
+}
+
 # Mock gh: serve the given failed-job logs for `run view --log-failed` and
-# record `run rerun` invocations.
+# record `run rerun` invocations. Optional arguments make `run rerun` block for
+# that many seconds, and exit with that status.
 _mock_gh() {
-	local logs="$1"
+	local logs="$1" rerun_hang="${2:-0}" rerun_status="${3:-0}"
 
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
@@ -47,6 +111,11 @@ case "\$*" in
 		;;
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
+		hang_for='${rerun_hang}'
+		if [[ "\$hang_for" != "0" ]]; then
+$(_gh_hang_snippet)
+		fi
+		exit '${rerun_status}'
 		;;
 	*)
 		echo "unexpected gh call: \$*" >&2
@@ -55,13 +124,15 @@ case "\$*" in
 esac
 EOF
 	chmod +x "${mock_bin}/gh"
+	_mock_timeout
 	export PATH="${mock_bin}:$PATH"
 }
 
 # Mock gh with a per-attempt failed-log script (#716 ingestion race). Each
 # argument describes one `run view --log-failed` attempt as
-# "<exit-code>:<payload>"; attempts past the last spec repeat it. `run rerun`
-# invocations are recorded as with _mock_gh.
+# "<exit-code>:<payload>", or as "hang:<seconds>" to make that attempt block
+# until the wrapping timeout kills it (#743); attempts past the last spec repeat
+# it. `run rerun` invocations are recorded as with _mock_gh.
 _mock_gh_attempts() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	local spec_dir="${BATS_TEST_TMPDIR}/gh_attempts"
@@ -88,8 +159,13 @@ case "\$*" in
 		if [[ "\$attempt" -gt "\$count" ]]; then
 			attempt="\$count"
 		fi
+		status="\$(cat "\${spec_dir}/\${attempt}.status")"
+		if [[ "\$status" == "hang" ]]; then
+			hang_for="\$(cat "\${spec_dir}/\${attempt}.log")"
+$(_gh_hang_snippet)
+		fi
 		cat "\${spec_dir}/\${attempt}.log"
-		exit "\$(cat "\${spec_dir}/\${attempt}.status")"
+		exit "\$status"
 		;;
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
@@ -101,6 +177,7 @@ case "\$*" in
 esac
 EOF
 	chmod +x "${mock_bin}/gh"
+	_mock_timeout
 	export PATH="${mock_bin}:$PATH"
 }
 
@@ -464,17 +541,36 @@ _call_count() {
 	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
 }
 
-@test "rerun-on-infra-failure: a log fetch failing on every attempt fails loudly" {
+# An errored fetch is inconclusive, not fatal (#763). This job exists to react
+# to someone else's red job; failing here adds a second red job and says nothing
+# about the run it was inspecting. The common trigger is benign: a superseded
+# run's log archive is already gone, and there is nothing to re-run.
+@test "rerun-on-infra-failure: a log fetch failing on every attempt is inconclusive" {
 	_mock_gh_attempts "1:gh: could not read logs"
 	_mock_sleep
 	run bash "$SCRIPT"
-	assert_failure
-	assert_output --partial "Failed to fetch failed-job logs for run ${RUN_ID} after 5 attempt(s)"
+	assert_success
+	assert_output --partial "inconclusive, not re-running"
 	[ ! -s "$RERUN_CALLS" ]
 	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
-	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "the last of 5 fetch attempt(s) failed"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: log fetch errored"
+	# Errored and empty must stay distinguishable for triage.
+	run grep -cF "Inconclusive: logs unavailable" "$GITHUB_STEP_SUMMARY"
+	assert_failure
 	run grep -cF "The failure looks real" "$GITHUB_STEP_SUMMARY"
 	assert_failure
+}
+
+# The exact shape #763 was filed for: the triggering run was cancelled, so
+# GitHub had already discarded the job's log archive.
+@test "rerun-on-infra-failure: a superseded run whose logs are gone is not an error" {
+	_mock_gh_attempts "1:log not found: 89765935589"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: log fetch errored"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "cancelled or superseded"
 }
 
 # The terminal classification comes from the last attempt only, so pin both
@@ -492,16 +588,17 @@ _call_count() {
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable"
 }
 
-@test "rerun-on-infra-failure: an empty payload followed by an error fails loudly" {
+@test "rerun-on-infra-failure: an empty payload followed by an error is inconclusive" {
 	export LOG_FETCH_ATTEMPTS="2"
 	_mock_gh_attempts "0:" "1:gh: could not read logs"
 	_mock_sleep
 	run bash "$SCRIPT"
-	assert_failure
-	assert_output --partial "Failed to fetch failed-job logs for run ${RUN_ID} after 2 attempt(s)"
+	assert_success
+	assert_output --partial "inconclusive, not re-running"
 	[ ! -s "$RERUN_CALLS" ]
 	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
-	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "the last of 2 fetch attempt(s) failed"
+	# Terminal classification comes from the last attempt: errored, not empty.
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: log fetch errored"
 }
 
 # =============================================================================
@@ -538,4 +635,195 @@ _call_count() {
 	assert_success
 	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
 	[ ! -s "$SLEEP_CALLS" ]
+}
+
+# =============================================================================
+# Wall-clock bounds on every gh call (#743)
+# =============================================================================
+
+@test "rerun-on-infra-failure: non-numeric GH_CMD_TIMEOUT fails with a clear error" {
+	export GH_CMD_TIMEOUT="90s"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::GH_CMD_TIMEOUT must be a positive integer (got '90s')"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: GH_CMD_TIMEOUT of zero is rejected" {
+	# coreutils reads `timeout 0` as "no limit", which is precisely the
+	# unbounded call this guard exists to forbid.
+	export GH_CMD_TIMEOUT="0"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::GH_CMD_TIMEOUT must be a positive integer (got '0')"
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: non-numeric LOG_FETCH_DEADLINE fails with a clear error" {
+	export LOG_FETCH_DEADLINE="3m"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_FETCH_DEADLINE must be a positive integer (got '3m')"
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: LOG_FETCH_DEADLINE of zero is rejected" {
+	export LOG_FETCH_DEADLINE="0"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_FETCH_DEADLINE must be a positive integer (got '0')"
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: a missing timeout binary fails loudly instead of running unbounded" {
+	export TIMEOUT_BIN="lgtm-ci-no-such-timeout"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "TIMEOUT_BIN 'lgtm-ci-no-such-timeout' not found on PATH"
+	[ ! -s "$FETCH_CALLS" ]
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+# A PATH holding only what the script needs, so `timeout` can be made genuinely
+# absent. Restricting PATH is the only way to test the fallback on a Linux
+# runner, where /usr/bin/timeout cannot be hidden any other way.
+_minimal_path_dir() {
+	local dir="${BATS_TEST_TMPDIR}/sysbin" tool src
+	mkdir -p "$dir"
+	for tool in bash env cat chmod dirname grep kill mkfifo mktemp rm sleep; do
+		src="$(command -v "$tool" 2>/dev/null)" || continue
+		ln -sf "$src" "${dir}/${tool}"
+	done
+	printf '%s\n' "$dir"
+}
+
+@test "rerun-on-infra-failure: falls back to gtimeout when timeout is absent" {
+	# `runner-image` is a caller input and macOS ships no `timeout`; hardcoding
+	# the name would silently disable the safety net on any such runner.
+	export TIMEOUT_CALLS="${BATS_TEST_TMPDIR}/timeout_calls"
+	: >"$TIMEOUT_CALLS"
+	_mock_gh "Failed to resolve action download info"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mv "${mock_bin}/timeout" "${mock_bin}/gtimeout"
+	PATH="${mock_bin}:$(_minimal_path_dir)"
+	export PATH
+	run env -u BASH_ENV bash "$SCRIPT"
+	assert_success
+	assert_equal "2" "$(_call_count "$TIMEOUT_CALLS")"
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: no timeout binary at all fails loudly" {
+	_mock_gh "Failed to resolve action download info"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	rm -f "${mock_bin}/timeout"
+	PATH="${mock_bin}:$(_minimal_path_dir)"
+	export PATH
+	run env -u BASH_ENV bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Neither 'timeout' nor 'gtimeout' is on PATH"
+	[ ! -s "$FETCH_CALLS" ]
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: both the log fetch and the rerun run under GH_CMD_TIMEOUT" {
+	export TIMEOUT_CALLS="${BATS_TEST_TMPDIR}/timeout_calls"
+	export GH_CMD_TIMEOUT="42"
+	: >"$TIMEOUT_CALLS"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "2" "$(_call_count "$TIMEOUT_CALLS")"
+	run grep -c -- "42 gh run view" "$TIMEOUT_CALLS"
+	assert_output "1"
+	run grep -c -- "42 gh run rerun" "$TIMEOUT_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: a fetch that hangs past GH_CMD_TIMEOUT is retried, not fatal" {
+	export GH_CMD_TIMEOUT="1"
+	export LOG_FETCH_DEADLINE="60"
+	_mock_gh_attempts "hang:30" "0:The runner has received a shutdown signal"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "exceeded GH_CMD_TIMEOUT=1s and was killed"
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: a fetch that hangs on every attempt is its own outcome" {
+	export GH_CMD_TIMEOUT="1"
+	export LOG_FETCH_DEADLINE="60"
+	export LOG_FETCH_ATTEMPTS="2"
+	_mock_gh_attempts "hang:30"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::Timed out reading the failed-job logs"
+	assert_equal "2" "$(_call_count "$FETCH_CALLS")"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Timed out reading logs."
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "command"
+	# Distinct from both other non-rerun outcomes, so triage cannot conflate a
+	# hang with GitHub's ingestion lag or with a genuine failure.
+	run grep -cF "Inconclusive: logs unavailable" "$GITHUB_STEP_SUMMARY"
+	assert_failure
+	run grep -cF "The failure looks real" "$GITHUB_STEP_SUMMARY"
+	assert_failure
+}
+
+@test "rerun-on-infra-failure: the timeout summary says the safety net bounded itself" {
+	# Both real occurrences read as `cancelled` at run level and were misread as
+	# a GitHub-side cancellation; the summary has to make the timeout obvious.
+	export GH_CMD_TIMEOUT="1"
+	export LOG_FETCH_ATTEMPTS="1"
+	_mock_gh_attempts "hang:30"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "timeout in the safety net itself"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "GH_CMD_TIMEOUT=1"
+}
+
+@test "rerun-on-infra-failure: LOG_FETCH_DEADLINE short-circuits the remaining attempts" {
+	# Five attempts are configured, but the first hanging fetch already spends
+	# the whole wall-clock budget, so the loop must not start a second one.
+	export GH_CMD_TIMEOUT="1"
+	export LOG_FETCH_DEADLINE="1"
+	_mock_gh_attempts "hang:30"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Log-fetch deadline of 1s reached"
+	assert_equal "1" "$(_call_count "$FETCH_CALLS")"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "deadline"
+}
+
+@test "rerun-on-infra-failure: a rerun that hangs past GH_CMD_TIMEOUT fails loudly" {
+	export GH_CMD_TIMEOUT="1"
+	_mock_gh "Failed to resolve action download info" "30"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Timed out re-running failed jobs of run ${RUN_ID} after 1s"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "press re-run manually"
+	refute_output --partial "::notice::"
+}
+
+@test "rerun-on-infra-failure: a rerun that errors is reported, not a silent success" {
+	_mock_gh "Failed to resolve action download info" "0" "1"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "gh run rerun exited 1"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "press re-run manually"
+	refute_output --partial "::notice::"
 }

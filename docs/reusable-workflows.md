@@ -536,6 +536,23 @@ claimed when logs were actually read. If the final fetch attempt errors outright
 (rather than returning an empty payload) the job fails instead, so a broken
 `gh run view` is surfaced rather than reported as a quiet inconclusive.
 
+Every `gh` call runs under `timeout`, bounded by `GH_CMD_TIMEOUT` seconds
+(default `60`, must be at least `1`), and the refetch loop as a whole is bounded
+by `LOG_FETCH_DEADLINE` seconds (default `180`, checked before each attempt).
+Without those bounds a stalled `gh run view --log-failed` consumed the entire
+job budget and the safety net never fired at all. A killed fetch is retryable
+like an empty one, so a single slow attempt followed by a fast one still
+re-runs. When the bounds are exhausted the job reports *timed out reading logs*
+— a fourth outcome, deliberately distinct from *inconclusive: logs unavailable*
+(GitHub answered with nothing) and from "no signature matched" (logs were read)
+— and exits successfully without re-running. A `gh run rerun` that is killed or
+errors fails the job loudly instead, because a matched signature the script
+could not act on needs a human. A coreutils `timeout` is required: the script
+picks whichever of `timeout` or `gtimeout` is on `PATH` — `runner-image` is a
+caller input, and macOS runners ship the binary under the second name — and
+fails up front when neither is present rather than silently reverting to
+unbounded calls. Set `TIMEOUT_BIN` explicitly to name a different binary.
+
 Call it from a thin `workflow_run` consumer gated on a failed conclusion
 (see [examples/auto-rerun-on-infra-failure.yml](../examples/auto-rerun-on-infra-failure.yml)):
 

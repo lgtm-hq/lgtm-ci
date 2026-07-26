@@ -18,6 +18,12 @@
 #                       built-in defaults (optional)
 #   LOG_FETCH_ATTEMPTS - Max failed-job log fetch attempts, at least 1 (default: 5)
 #   LOG_FETCH_DELAY   - Seconds to wait between log fetch attempts (default: 5)
+#   LOG_FETCH_DEADLINE - Wall-clock budget in seconds for the whole log-fetch
+#                       loop, at least 1 (default: 180)
+#   GH_CMD_TIMEOUT    - Wall-clock bound in seconds on each `gh` call, at least
+#                       1 (default: 60)
+#   TIMEOUT_BIN       - Name/path of the coreutils timeout binary (default:
+#                       whichever of timeout / gtimeout is on PATH)
 #   GITHUB_REPOSITORY - owner/repo (provided by GitHub Actions)
 #   GH_TOKEN          - Token with actions:write scope
 
@@ -30,6 +36,12 @@ set -euo pipefail
 : "${SIGNATURES:=}"
 : "${LOG_FETCH_ATTEMPTS:=5}"
 : "${LOG_FETCH_DELAY:=5}"
+: "${LOG_FETCH_DEADLINE:=180}"
+: "${GH_CMD_TIMEOUT:=60}"
+
+# `timeout` exits 124 when it kills the command it wrapped. That is the one
+# non-zero status this script must not treat as a generic `gh` error.
+readonly TIMEOUT_EXIT_STATUS=124
 
 # RUN_ATTEMPT, MAX_RERUNS and the log-fetch bounds feed arithmetic; reject
 # non-integers up front so workflow-input typos fail loudly instead of raising
@@ -51,6 +63,43 @@ fi
 if [[ ! "$LOG_FETCH_DELAY" =~ ^[0-9]+$ ]]; then
 	echo "::error::LOG_FETCH_DELAY must be a non-negative integer (got '${LOG_FETCH_DELAY}')"
 	exit 1
+fi
+# Both wall-clock bounds are positive: zero would either forbid the first fetch
+# outright or hand `timeout` a "no limit" argument, reinstating the unbounded
+# hang this script exists to prevent (#743).
+if [[ ! "$LOG_FETCH_DEADLINE" =~ ^[1-9][0-9]*$ ]]; then
+	echo "::error::LOG_FETCH_DEADLINE must be a positive integer (got '${LOG_FETCH_DEADLINE}')"
+	exit 1
+fi
+if [[ ! "$GH_CMD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+	echo "::error::GH_CMD_TIMEOUT must be a positive integer (got '${GH_CMD_TIMEOUT}')"
+	exit 1
+fi
+
+# Every `gh` call runs under `timeout`, so a missing binary would silently
+# restore unbounded calls. Fail loudly instead: an absent bound is exactly the
+# outage this guard prevents.
+#
+# The binary is auto-resolved rather than hardcoded because `runner-image` is a
+# caller input: ubuntu images ship coreutils as `timeout`, while macOS ships
+# none by default and names the Homebrew coreutils build `gtimeout`. An explicit
+# TIMEOUT_BIN always wins, so an unusual host can still name its own.
+if [[ -n "${TIMEOUT_BIN:-}" ]]; then
+	if ! command -v "$TIMEOUT_BIN" >/dev/null 2>&1; then
+		echo "::error::TIMEOUT_BIN '${TIMEOUT_BIN}' not found on PATH; coreutils timeout is required to bound gh calls"
+		exit 1
+	fi
+else
+	for candidate in timeout gtimeout; do
+		if command -v "$candidate" >/dev/null 2>&1; then
+			TIMEOUT_BIN="$candidate"
+			break
+		fi
+	done
+	if [[ -z "${TIMEOUT_BIN:-}" ]]; then
+		echo "::error::Neither 'timeout' nor 'gtimeout' is on PATH; coreutils timeout is required to bound gh calls (install coreutils or set TIMEOUT_BIN)"
+		exit 1
+	fi
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
@@ -88,35 +137,73 @@ build_signatures() {
 	fi
 }
 
+# Run `gh` under a hard wall-clock bound. `gh run view --log-failed` downloads
+# the failed-job log archive, which stalled twice on 2026-07-25 and burned the
+# whole job budget, so the safety net never fired (#743). SIGTERM first, then
+# SIGKILL for a `gh` that ignores it, so a wedged download can never outlive
+# the bound.
+gh_bounded() {
+	"$TIMEOUT_BIN" --kill-after=10s "$GH_CMD_TIMEOUT" gh "$@"
+}
+
 fetch_failed_logs() {
-	gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed
+	gh_bounded run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed
 }
 
 # Outputs of fetch_failed_logs_with_retry: the log payload and why the loop
-# ended ("ok", "empty" or "error"). Set as globals because the payload can be
-# large and command substitution would strip the outcome.
+# ended ("ok", "empty", "error" or "timeout"). Set as globals because the
+# payload can be large and command substitution would strip the outcome.
 FETCHED_LOGS=""
 FETCH_OUTCOME="empty"
+# For the "timeout" outcome, which bound tripped: "command" (a single fetch
+# exceeded GH_CMD_TIMEOUT) or "deadline" (the loop ran out of wall clock).
+FETCH_TIMEOUT_REASON="command"
+# Seconds the fetch loop spent, for the triage breadcrumb in the summary.
+FETCH_ELAPSED=0
 
 # Fetch the failed-job logs, retrying while GitHub has not made them available
 # yet. The workflow_run:completed event fires before log ingestion is
-# guaranteed complete, so an empty payload (or an outright `gh` error) is
-# retryable rather than terminal.
+# guaranteed complete, so an empty payload, an outright `gh` error, or a fetch
+# killed at GH_CMD_TIMEOUT is retryable rather than terminal.
 #
 # Retries stop at the first non-empty payload: signature matching runs against
-# it immediately, which keeps the happy path free of any sleeping. Sets
-# FETCHED_LOGS/FETCH_OUTCOME; returns 0 when a non-empty payload was obtained.
+# it immediately, which keeps the happy path free of any sleeping.
+#
+# LOG_FETCH_ATTEMPTS x LOG_FETCH_DELAY bounds attempts but not time, so slow
+# fetches would still let the loop run to the job timeout. LOG_FETCH_DEADLINE
+# bounds it in wall clock as well, checked before each attempt from the shell's
+# own SECONDS rather than by shelling out per iteration. Sets FETCHED_LOGS,
+# FETCH_OUTCOME, FETCH_TIMEOUT_REASON and FETCH_ELAPSED; returns 0 when a
+# non-empty payload was obtained.
 fetch_failed_logs_with_retry() {
-	local attempt logs status
+	local attempt logs status start=$SECONDS
 
 	FETCHED_LOGS=""
 	FETCH_OUTCOME="empty"
+	FETCH_TIMEOUT_REASON="command"
+	FETCH_ELAPSED=0
 
 	for ((attempt = 1; attempt <= LOG_FETCH_ATTEMPTS; attempt++)); do
+		FETCH_ELAPSED=$((SECONDS - start))
+		# Attempt 1 always runs: LOG_FETCH_DEADLINE is positive and elapsed is 0.
+		if ((FETCH_ELAPSED >= LOG_FETCH_DEADLINE)); then
+			FETCH_OUTCOME="timeout"
+			FETCH_TIMEOUT_REASON="deadline"
+			log_warn "Log-fetch deadline of ${LOG_FETCH_DEADLINE}s reached after ${FETCH_ELAPSED}s for run ${RUN_ID}; abandoning the remaining attempt(s) of ${LOG_FETCH_ATTEMPTS}"
+			return 1
+		fi
+
 		status=0
 		logs="$(fetch_failed_logs)" || status=$?
+		FETCH_ELAPSED=$((SECONDS - start))
 
-		if ((status != 0)); then
+		if ((status == TIMEOUT_EXIT_STATUS)); then
+			# A killed fetch may have written a partial archive; discard it
+			# rather than matching signatures against a truncated payload.
+			FETCH_OUTCOME="timeout"
+			FETCH_TIMEOUT_REASON="command"
+			log_warn "Fetching failed-job logs for run ${RUN_ID} exceeded GH_CMD_TIMEOUT=${GH_CMD_TIMEOUT}s and was killed (attempt ${attempt}/${LOG_FETCH_ATTEMPTS})"
+		elif ((status != 0)); then
 			FETCH_OUTCOME="error"
 			log_warn "Fetching failed-job logs for run ${RUN_ID} exited ${status} (attempt ${attempt}/${LOG_FETCH_ATTEMPTS})"
 		elif [[ -n "${logs//[[:space:]]/}" ]]; then
@@ -133,6 +220,7 @@ fetch_failed_logs_with_retry() {
 		fi
 	done
 
+	FETCH_ELAPSED=$((SECONDS - start))
 	return 1
 }
 
@@ -174,8 +262,34 @@ main() {
 		# wording speaks to the final attempt rather than claiming every one of
 		# them errored (earlier attempts may have returned empty payloads).
 		if [[ "$FETCH_OUTCOME" == "error" ]]; then
-			add_github_summary "Could not read the failed-job logs of run ${RUN_ID}: the last of ${LOG_FETCH_ATTEMPTS} fetch attempt(s) failed. No signature check was possible, so this says nothing about whether the failure is genuine."
-			die "Failed to fetch failed-job logs for run ${RUN_ID} after ${LOG_FETCH_ATTEMPTS} attempt(s)"
+			# Same class as "empty" and "timeout": the safety net could not
+			# reach a verdict. It used to `die` here, which reddened a job whose
+			# whole purpose is to react to someone else's red job (#763). The
+			# common cause is benign — a superseded run's log archive is gone,
+			# so `gh` errors with `log not found`, and there is nothing to
+			# re-run anyway. Kept distinct from "empty" in the wording: an
+			# errored fetch is a different triage story from GitHub answering
+			# with nothing yet.
+			log_warn "Failed-job log fetch for run ${RUN_ID} errored on all ${LOG_FETCH_ATTEMPTS} attempt(s); inconclusive, not re-running"
+			echo "::warning::Inconclusive: fetching the failed-job logs of run ${RUN_ID} errored on all ${LOG_FETCH_ATTEMPTS} attempt(s); no infra-signature check was possible"
+			add_github_summary "Inconclusive: log fetch errored. Reading the failed-job logs of run ${RUN_ID} failed on all ${LOG_FETCH_ATTEMPTS} attempt(s) — \`gh\` returned an error rather than an empty payload. The usual cause is a run that was cancelled or superseded, whose log archive GitHub has already discarded (\`log not found\`); there is nothing to re-run in that case. No infra signature could be checked, so this says **nothing** about whether the failure is genuine — re-check the run manually."
+			return 0
+		fi
+		if [[ "$FETCH_OUTCOME" == "timeout" ]]; then
+			# Distinct from both "logs unavailable" (GitHub answered, with
+			# nothing) and "looks real" (logs were read): here the fetch itself
+			# never came back. Reported, not fatal — the safety net declining to
+			# act must not add a second red job to a run that already failed.
+			log_warn "Log fetch for run ${RUN_ID} hit its wall-clock bound after ${FETCH_ELAPSED}s; not re-running"
+			echo "::warning::Timed out reading the failed-job logs of run ${RUN_ID} after ${FETCH_ELAPSED}s (${FETCH_TIMEOUT_REASON} bound); no infra-signature check was possible and the failed jobs were not re-run"
+			add_github_summary "Timed out reading logs. The failed-job log fetch for run ${RUN_ID} hit its **${FETCH_TIMEOUT_REASON}** wall-clock bound after ${FETCH_ELAPSED}s (\`GH_CMD_TIMEOUT=${GH_CMD_TIMEOUT}\`s per call, \`LOG_FETCH_DEADLINE=${LOG_FETCH_DEADLINE}\`s for the loop, \`LOG_FETCH_ATTEMPTS=${LOG_FETCH_ATTEMPTS}\`), so no infra signature could be checked and the failed jobs were not re-run."
+			add_github_summary ""
+			# Triage breadcrumb (#743): both real occurrences surfaced at RUN
+			# level as `cancelled` and were misread twice as a GitHub-side
+			# cancellation before job-step evidence showed a timeout. Saying so
+			# here means the next reader does not have to rediscover it.
+			add_github_summary "This is a **timeout in the safety net itself**, not a verdict on run ${RUN_ID}. \`gh run view --log-failed\` stalled; the script bounded itself and exited rather than burning the job budget. Re-check run ${RUN_ID} manually and re-run its failed jobs if the failure was transient."
+			return 0
 		fi
 		# GitHub never made the log tail available. Inconclusive is not the same
 		# as "no signature matched": say so explicitly and do not fail the
@@ -196,7 +310,21 @@ main() {
 	fi
 
 	log_info "Infra signature matched for run ${RUN_ID}: ${matched}"
-	gh run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY" --failed
+	local rerun_status=0
+	gh_bounded run rerun "$RUN_ID" --repo "$GITHUB_REPOSITORY" --failed || rerun_status=$?
+	if ((rerun_status != 0)); then
+		# A matched signature the script could not act on is the worst outcome:
+		# a human must press re-run. Fail loudly rather than let a killed or
+		# errored `gh run rerun` read as a successful safety-net run.
+		add_github_summary "## Auto re-run on infra failure"
+		add_github_summary ""
+		if ((rerun_status == TIMEOUT_EXIT_STATUS)); then
+			add_github_summary "Matched transient infra signature \`${matched}\` in the failed-job logs of run ${RUN_ID}, but \`gh run rerun\` exceeded \`GH_CMD_TIMEOUT=${GH_CMD_TIMEOUT}\`s and was killed. The failed jobs were **not** re-run — press re-run manually."
+			die "Timed out re-running failed jobs of run ${RUN_ID} after ${GH_CMD_TIMEOUT}s"
+		fi
+		add_github_summary "Matched transient infra signature \`${matched}\` in the failed-job logs of run ${RUN_ID}, but \`gh run rerun\` exited ${rerun_status}. The failed jobs were **not** re-run — press re-run manually."
+		die "Failed to re-run failed jobs of run ${RUN_ID}: gh run rerun exited ${rerun_status}"
+	fi
 	echo "::notice::Re-ran failed jobs of run ${RUN_ID} (attempt ${RUN_ATTEMPT}): matched infra signature '${matched}'"
 	add_github_summary "## Auto re-run on infra failure"
 	add_github_summary ""
