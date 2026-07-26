@@ -77,6 +77,28 @@ if EXISTING_RELEASE_URL=$(gh release view "$TAG" --repo "$REPO" --json url --jq 
 	RELEASE_URL="$EXISTING_RELEASE_URL"
 fi
 
+# Resolve the requested assets before branching: both paths need them. A
+# previous attempt can die between creating the release and finishing its
+# uploads, so "the release exists" does not imply "its assets are there".
+ASSET_FILES=()
+if [[ -n "$FILE_PATTERNS" ]]; then
+	release_collect_asset_files "$FILE_PATTERNS"
+	if ((${#RELEASE_ASSET_FILES[@]} == 0)); then
+		log_error "No release assets matched FILE_PATTERNS"
+		exit 1
+	fi
+	ASSET_FILES=("${RELEASE_ASSET_FILES[@]}")
+elif [[ -n "$FILES" ]]; then
+	# shellcheck disable=SC2086 # Word splitting intended for space-separated FILES
+	for file in $FILES; do
+		if [[ -f "$file" ]]; then
+			ASSET_FILES+=("$file")
+		else
+			log_warn "File not found, skipping: $file"
+		fi
+	done
+fi
+
 if [[ "$RELEASE_EXISTS" != "true" ]]; then
 	# Build gh release create command
 	GH_ARGS=("release" "create" "$TAG")
@@ -103,25 +125,8 @@ if [[ "$RELEASE_EXISTS" != "true" ]]; then
 	fi
 
 	# Add files if specified
-	if [[ -n "$FILE_PATTERNS" ]]; then
-		release_collect_asset_files "$FILE_PATTERNS"
-		count=${#RELEASE_ASSET_FILES[@]}
-		if ((count == 0)); then
-			log_error "No release assets matched FILE_PATTERNS"
-			exit 1
-		fi
-		for file in "${RELEASE_ASSET_FILES[@]}"; do
-			GH_ARGS+=("$file")
-		done
-	elif [[ -n "$FILES" ]]; then
-		# shellcheck disable=SC2086 # Word splitting intended for space-separated FILES
-		for file in $FILES; do
-			if [[ -f "$file" ]]; then
-				GH_ARGS+=("$file")
-			else
-				log_warn "File not found, skipping: $file"
-			fi
-		done
+	if ((${#ASSET_FILES[@]} > 0)); then
+		GH_ARGS+=("${ASSET_FILES[@]}")
 	fi
 
 	# Create release
@@ -142,6 +147,17 @@ if [[ "$RELEASE_EXISTS" != "true" ]]; then
 		fi
 		exit 1
 	fi
+elif ((${#ASSET_FILES[@]} > 0)); then
+	# The release object survived, but the attempt that made it may have died
+	# mid-upload. Re-upload every requested asset; --clobber makes an asset that
+	# did land a no-op overwrite rather than a "already exists" failure, so the
+	# rerun converges on the complete asset set either way.
+	log_info "Uploading ${#ASSET_FILES[@]} asset(s) to existing release $TAG"
+	if ! gh release upload "$TAG" --repo "$REPO" --clobber "${ASSET_FILES[@]}"; then
+		log_error "Failed to upload assets to existing release $TAG"
+		exit 1
+	fi
+	log_success "Uploaded assets to existing release: $RELEASE_URL"
 fi
 
 # Get release info

@@ -17,6 +17,7 @@ SCRIPT="scripts/ci/release/create-github-release.sh"
 #   MOCK_EXISTING_RELEASE_*  - id/url reported for that pre-existing release
 #   MOCK_CREATED_RELEASE_*   - id/url reported for a release created this run
 #   MOCK_CREATE_ERROR        - when set, `release create` fails with this stderr
+#   MOCK_UPLOAD_ERROR        - when set, `release upload` fails with this stderr
 mock_gh() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
@@ -67,6 +68,14 @@ if [[ "\$1" == "release" && "\$2" == "create" ]]; then
 	exit 0
 fi
 
+if [[ "\$1" == "release" && "\$2" == "upload" ]]; then
+	if [[ -n "\${MOCK_UPLOAD_ERROR:-}" ]]; then
+		echo "\${MOCK_UPLOAD_ERROR}" >&2
+		exit 1
+	fi
+	exit 0
+fi
+
 exit 0
 EOF
 	chmod +x "${mock_bin}/gh"
@@ -86,6 +95,7 @@ setup() {
 	export MOCK_CREATED_RELEASE_ID="111222"
 	export MOCK_CREATED_RELEASE_URL="https://github.com/test-org/test-repo/releases/tag/v1.0.0"
 	export MOCK_CREATE_ERROR=""
+	export MOCK_UPLOAD_ERROR=""
 
 	mock_gh
 }
@@ -241,6 +251,55 @@ refute_gh_called_with() {
 	refute_output --partial "skipping creation"
 
 	assert_gh_called_with "release create v1.0.0"
+}
+
+# The release object and its assets are created by two separate API calls, so
+# an attempt can die between them. Skipping creation must not also skip the
+# uploads, or the rerun reports success on a release missing its artifacts.
+@test "create-github-release: rerun re-uploads assets to the existing release" {
+	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
+	echo "data" >"$asset"
+	export MOCK_EXISTING_TAG="v1.0.0"
+
+	TAG="v1.0.0" BODY="notes" FILES="$asset" run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "skipping creation"
+	assert_output --partial "Uploading 1 asset(s) to existing release v1.0.0"
+
+	refute_gh_called_with "release create"
+	# --clobber: an asset the previous attempt did land must overwrite, not fail.
+	assert_gh_called_with "release upload v1.0.0 --repo test-org/test-repo --clobber ${asset}"
+}
+
+@test "create-github-release: rerun with no requested assets skips the upload" {
+	export MOCK_EXISTING_TAG="v1.0.0"
+
+	TAG="v1.0.0" BODY="notes" run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+
+	refute_gh_called_with "release upload"
+}
+
+@test "create-github-release: rerun fails when the asset upload fails" {
+	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
+	echo "data" >"$asset"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_UPLOAD_ERROR="HTTP 502: Bad gateway"
+
+	TAG="v1.0.0" BODY="notes" FILES="$asset" run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_failure
+	assert_output --partial "Failed to upload assets to existing release v1.0.0"
+}
+
+# The empty-match guard is a hard error about the caller's own build output, so
+# it must not become a silent no-op just because the release already exists.
+@test "create-github-release: rerun still fails when FILE_PATTERNS matches nothing" {
+	export MOCK_EXISTING_TAG="v1.0.0"
+
+	TAG="v1.0.0" BODY="notes" FILE_PATTERNS="${BATS_TEST_TMPDIR}/nope-*.tgz" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_failure
+	assert_output --partial "No release assets matched FILE_PATTERNS"
 }
 
 @test "create-github-release: unrelated gh failure still exits non-zero" {
