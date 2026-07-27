@@ -210,8 +210,10 @@ else
 	printf '[]\n' >"$refs_file"
 fi
 
-# Fail closed: a truncated or unparsable refs file would make $refs[0] null,
-# and `null | index($n)` is null, which would mark every aged tag deletable.
+# Fail closed: the reference set must be a JSON array before anything is
+# decided from it. An empty or truncated file leaves $refs[0] null, and a
+# wrong-typed document would build the lookup set out of the wrong values.
+# Die with a clear message rather than partitioning against a bogus set.
 jq -e 'type == "array"' "$refs_file" >/dev/null 2>&1 ||
 	die "Referenced-digest file is not a JSON array; refusing to prune"
 
@@ -231,12 +233,19 @@ aged_versions=$(echo "$staging_versions" | jq --arg cutoff "$cutoff_date" --argj
 aged_count=$(echo "$aged_versions" | jq 'length')
 log_info "Found $aged_count staging tag(s) older than the cutoff"
 
-to_delete=$(echo "$aged_versions" | jq --slurpfile refs "$refs_file" '
-	[ .[] | select(.name as $n | ($refs[0] | index($n) | not)) ]
+# index($n) is a linear scan, so partitioning was O(aged x refs) and both
+# sides grow with every release. Build a digest-keyed object once and probe
+# it instead. A digest is "referenced" iff it is a key of that object, which
+# is exactly the membership test index() performed.
+partitioned=$(echo "$aged_versions" | jq --slurpfile refs "$refs_file" '
+	INDEX($refs[0][]; .) as $ref_set
+	| {
+		to_delete: [ .[] | select($ref_set[.name] == null) ],
+		protected: [ .[] | select($ref_set[.name] != null) ]
+	}
 ')
-protected=$(echo "$aged_versions" | jq --slurpfile refs "$refs_file" '
-	[ .[] | select(.name as $n | ($refs[0] | index($n))) ]
-')
+to_delete=$(jq '.to_delete' <<<"$partitioned")
+protected=$(jq '.protected' <<<"$partitioned")
 delete_count=$(echo "$to_delete" | jq 'length')
 protected_count=$(echo "$protected" | jq 'length')
 
