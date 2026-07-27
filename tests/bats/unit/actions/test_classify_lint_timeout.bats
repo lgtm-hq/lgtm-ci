@@ -337,6 +337,46 @@ EOF
 	assert_output --partial "timeout-flake=false"
 }
 
+# An explicit empty list alongside a timed-out result is a report contradicting
+# itself. Treating "empty" the same as "absent" would skip the cross-check and
+# report true here — a fail-open gap.
+@test "classify-lint-timeout.py: an empty timed_out_tools contradicting results is not a flake" {
+	write_report <<'EOF'
+{
+  "summary": {"total_issues": 0, "timed_out_tools": []},
+  "results": [{"tool": "mypy", "success": false, "issues_count": 0,
+               "timed_out": true}]
+}
+EOF
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=false"
+	refute_output --partial "timeout-flake=true"
+}
+
+# An absent key means the report predates summary.timed_out_tools; there is
+# nothing to cross-check, so the results array alone decides.
+@test "classify-lint-timeout.py: an absent timed_out_tools still allows a flake" {
+	write_report <<'EOF'
+{
+  "summary": {"total_issues": 0},
+  "results": [{"tool": "mypy", "success": false, "issues_count": 0,
+               "timed_out": true}]
+}
+EOF
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=true"
+	assert_output --partial "timed-out-tools=mypy"
+}
+
+@test "classify-lint-timeout.py: an unreadable non-UTF8 report is not a flake" {
+	printf '\xff\xfe\x00\x80binary' >"${REPORT}"
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=false"
+}
+
 @test "classify-lint-timeout.py: a malformed timed_out_tools list is not a flake" {
 	write_report <<'EOF'
 {

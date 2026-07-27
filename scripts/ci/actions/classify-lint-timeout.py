@@ -137,7 +137,7 @@ def _timed_out(result: dict[str, Any]) -> bool:
     return result.get("timed_out") is True
 
 
-def _summary_timed_out_tools(summary: dict[str, Any]) -> tuple[set[str], bool]:
+def _summary_timed_out_tools(summary: dict[str, Any]) -> tuple[set[str] | None, bool]:
     """Read ``summary.timed_out_tools`` as a cross-check on the results array.
 
     The list is a convenience lintro derives from the same per-tool ``timed_out``
@@ -145,18 +145,26 @@ def _summary_timed_out_tools(summary: dict[str, Any]) -> tuple[set[str], bool]:
     independent source. Treating it as authoritative would mean trusting a
     summary that the results array does not back.
 
+    An absent key and a present-but-empty list are deliberately distinguished.
+    Absent means "this lintro predates the field", so there is nothing to
+    cross-check. An explicit ``[]`` alongside a timed-out tool in ``results`` is
+    a report contradicting itself, which must be rejected rather than silently
+    skipped.
+
     Args:
         summary: The ``summary`` object from the lintro report.
 
     Returns:
-        A ``(names, usable)`` pair. ``usable`` is False when the key is present
-        but not a list of strings, which makes the report untrustworthy.
+        A ``(names, usable)`` pair. ``names`` is ``None`` when the key is
+        absent, otherwise the set it holds — including an empty set. ``usable``
+        is False when the key is present but not a list of strings, which makes
+        the report untrustworthy.
     """
     raw = summary.get("timed_out_tools")
     if raw is None:
-        return set(), True
+        return None, True
     if not isinstance(raw, list) or not all(isinstance(name, str) for name in raw):
-        return set(), False
+        return None, False
     return set(raw), True
 
 
@@ -239,7 +247,7 @@ def classify(payload: Any) -> Classification:
             False,
             reason="summary.timed_out_tools is present but malformed",
         )
-    if summary_names and summary_names != set(timed_out):
+    if summary_names is not None and summary_names != set(timed_out):
         return Classification(
             False,
             reason=(
@@ -269,7 +277,7 @@ def _read_payload(report: str) -> Any:
     """
     try:
         text = sys.stdin.read() if report == "-" else Path(report).read_text("utf-8")
-    except OSError as exc:
+    except (OSError, UnicodeDecodeError) as exc:
         print(f"[WARN] cannot read report {report}: {exc}", file=sys.stderr)
         return None
     try:

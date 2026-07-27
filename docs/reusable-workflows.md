@@ -401,9 +401,12 @@ jobs:
       contents: read
       packages: read
 
+  # always() is required: a timeout makes the quality job fail, and a
+  # dependent job is skipped by default when what it needs failed — so
+  # without it this job never runs in exactly the case it exists for.
   retry-on-timeout:
     needs: quality
-    if: needs.quality.outputs.timeout-flake == 'true'
+    if: always() && needs.quality.outputs.timeout-flake == 'true'
     runs-on: ubuntu-24.04
     steps:
       - run: |
