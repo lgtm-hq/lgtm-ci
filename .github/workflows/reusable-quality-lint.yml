@@ -24,6 +24,15 @@ on:
         required: false
         type: boolean
         default: true
+      upload-json-report:
+        description: >-
+          Upload the structured lintro JSON report as its own artifact. Kept
+          separate from upload-report so a caller can consume the
+          timeout-flake / timed-out-tools outputs without paying for the
+          artifact; the outputs are derived regardless of this input.
+        required: false
+        type: boolean
+        default: true
       working-directory:
         description: "Working directory for linting"
         required: false
@@ -123,6 +132,18 @@ on:
       status:
         description: "passed or failed"
         value: ${{ jobs.quality.outputs.status }}
+      timeout-flake:
+        description: >-
+          'true' only when this run's own report shows >=1 tool timed out and
+          zero genuine issues anywhere. Fails closed: a missing or malformed
+          report, a non-timeout tool failure, or any issue yields 'false'.
+          Describes THIS run only — never use it to excuse another job's
+          failure.
+        value: ${{ jobs.quality.outputs.timeout-flake }}
+      timed-out-tools:
+        description: >-
+          Comma-separated names of tools that timed out, '' when none.
+        value: ${{ jobs.quality.outputs.timed-out-tools }}
 
 jobs:
   quality:
@@ -135,6 +156,8 @@ jobs:
     outputs:
       exit-code: ${{ steps.quality.outputs.exit-code }}
       status: ${{ steps.quality.outputs.status }}
+      timeout-flake: ${{ steps.classify-timeout.outputs.timeout-flake }}
+      timed-out-tools: ${{ steps.classify-timeout.outputs.timed-out-tools }}
     env:
       LINTRO_IMAGE: ${{ inputs.lintro-image }}
 
@@ -190,6 +213,24 @@ jobs:
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
           MAP_HOST_USER: "true"
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
+      # Classify THIS run's own report. Runs on failure too (always()) because
+      # a timeout is exactly the case where the lint step exited non-zero.
+      # continue-on-error keeps the verdict strictly advisory: the outputs are
+      # informational, so an unreadable report or an unexpected classifier
+      # fault must never turn a lint run whose code passed red. Skipped or
+      # failed, the outputs are then empty, which every consumer comparison
+      # (== 'true') already treats as fail-closed.
+      - name: Classify lint timeout
+        id: classify-timeout
+        if: always()
+        continue-on-error: true
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          REPORT: .lintro/artifacts/json/results.json
+          # yamllint disable-line rule:line-length
+          CLASSIFIER: ${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/classify-lint-timeout.py
+        run: python3 "$CLASSIFIER" --report "$REPORT"
       # Best-effort: the report is a convenience artifact, not part of the
       # lint verdict. reusable-publish-quality-summary already downloads it
       # with continue-on-error and warns when it is absent, so failing this
@@ -215,8 +256,32 @@ jobs:
           # first (failed) attempt's report — so consumers download a stale,
           # non-authoritative result. The latest attempt is authoritative.
           overwrite: true
+      # Published separately from linting-report so a consumer that only wants
+      # machine-readable evidence can download a small JSON document instead of
+      # the whole .lintro/ tree. Best-effort for the same reason as above: the
+      # verdict outputs are already derived by this point, so an upload hiccup
+      # must not fail a job whose code passed.
+      - name: Upload lint JSON report
+        id: upload-json-report
+        if: inputs.upload-json-report && always()
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: linting-json-report
+          path: ${{ inputs.working-directory }}/.lintro/artifacts/json/results.json
+          retention-days: 7
+          if-no-files-found: ignore
+          # Same bounded-retry rationale as the linting-report upload: the
+          # latest attempt is the authoritative one.
+          overwrite: true
       - name: Warn on failed report upload
         if: always() && steps.upload-report.outcome == 'failure'
         shell: bash
         run: |
           echo "::warning::Linting report upload failed; the lint result is unaffected."
+      - name: Warn on failed JSON report upload
+        if: always() && steps.upload-json-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Lint JSON report upload failed; the lint result is unaffected."

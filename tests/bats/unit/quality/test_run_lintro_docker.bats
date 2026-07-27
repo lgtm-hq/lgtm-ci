@@ -68,6 +68,35 @@ EOF
 	assert_file_exists "${BATS_TEST_TMPDIR}/ws/chk-output.txt"
 }
 
+# lintro auto-emits .lintro/artifacts/{sarif,json}/ only when it sees
+# GITHUB_ACTIONS=true. That belongs to the runner, not the container, so
+# without this passthrough the JSON report the timeout classifier reads is
+# never written and the verdict silently degrades to fail-closed (#746).
+@test "run-lintro-docker.sh forwards GITHUB_ACTIONS into the container" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+
+	run env STEP=check LINTRO_IMAGE=ghcr.io/test/img:tag MAP_HOST_USER=false \
+		GITHUB_ACTIONS=true bash "${SCRIPT}"
+
+	assert_success
+	assert_file_contains "${BATS_TEST_TMPDIR}/mock_calls_docker" "-e GITHUB_ACTIONS=true"
+}
+
+@test "run-lintro-docker.sh omits GITHUB_ACTIONS outside Actions" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+
+	run env STEP=check LINTRO_IMAGE=ghcr.io/test/img:tag MAP_HOST_USER=false \
+		GITHUB_ACTIONS=false bash "${SCRIPT}"
+
+	assert_success
+	run grep -qF -- "-e GITHUB_ACTIONS=true" "${BATS_TEST_TMPDIR}/mock_calls_docker"
+	assert_failure
+}
+
 @test "run-lintro-docker.sh check passes --tool-options when TOOL_OPTIONS is set" {
 	mock_command_record docker ""
 	mkdir -p "${BATS_TEST_TMPDIR}/ws"

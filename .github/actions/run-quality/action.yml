@@ -34,6 +34,16 @@ outputs:
   status:
     description: "Status: passed or failed"
     value: ${{ steps.lint.outputs.status }}
+  timeout-flake:
+    description: >-
+      'true' only when this run's own report shows >=1 tool timed out and zero
+      genuine issues anywhere. Fails closed: a missing or malformed report, a
+      non-timeout tool failure, or any issue yields 'false'. Describes THIS run
+      only — never use it to excuse another job's failure.
+    value: ${{ steps.classify-timeout.outputs.timeout-flake }}
+  timed-out-tools:
+    description: "Comma-separated names of tools that timed out, '' when none"
+    value: ${{ steps.classify-timeout.outputs.timed-out-tools }}
 
 runs:
   using: "composite"
@@ -55,6 +65,25 @@ runs:
         FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
         LINTRO_IMAGE: ${{ inputs.lintro-image }}
       run: bash "$GITHUB_ACTION_PATH/../../../scripts/ci/quality/run-lintro-docker.sh"
+
+    # Classify THIS run's own report. Runs on failure too (always()) because a
+    # timeout is exactly the case where the lint step exited non-zero. The
+    # verdict is strictly advisory, so a missing report or an unexpected
+    # classifier fault leaves the outputs empty — which every consumer
+    # comparison (== 'true') already treats as fail-closed — rather than
+    # changing the lint result. A composite action cannot use
+    # continue-on-error, so the invocation absorbs its own failure instead.
+    - name: Classify lint timeout
+      id: classify-timeout
+      if: always()
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        REPORT: .lintro/artifacts/json/results.json
+      run: |
+        python3 \
+          "$GITHUB_ACTION_PATH/../../../scripts/ci/actions/classify-lint-timeout.py" \
+          --report "$REPORT" || echo "::warning::lint timeout classification failed"
 
 branding:
   icon: "check-circle"

@@ -113,3 +113,162 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	run grep -qF 'failure-reason' "$WORKFLOW"
 	assert_failure
 }
+
+# --------------------------------------------------------------------------
+# Timeout verdict (#746)
+# --------------------------------------------------------------------------
+
+@test "reusable-quality-lint: exposes timeout-flake and timed-out-tools outputs" {
+	run awk '
+		/^    outputs:$/ { in_outputs = 1 }
+		in_outputs && /^      timeout-flake:$/ { flake = 1 }
+		in_outputs && /^      timed-out-tools:$/ { tools = 1 }
+		END { exit !(flake && tools) }
+	' "$WORKFLOW"
+	assert_success
+	run grep -F 'value: ${{ jobs.quality.outputs.timeout-flake }}' "$WORKFLOW"
+	assert_success
+	run grep -F 'value: ${{ jobs.quality.outputs.timed-out-tools }}' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-quality-lint: job forwards the classifier step outputs" {
+	run grep -F 'timeout-flake: ${{ steps.classify-timeout.outputs.timeout-flake }}' \
+		"$WORKFLOW"
+	assert_success
+	run grep -F 'timed-out-tools: ${{ steps.classify-timeout.outputs.timed-out-tools }}' \
+		"$WORKFLOW"
+	assert_success
+}
+
+# A timeout is exactly the case where the lint step exits non-zero, so the
+# classifier must run on failure. Without always() the implicit success()
+# check skips it precisely when the verdict is needed.
+@test "reusable-quality-lint: classifier runs even when lint fails" {
+	run awk '
+		/- name: Classify lint timeout/ { in_step = 1 }
+		in_step && /^      - name: / && !/Classify lint timeout/ { exit }
+		in_step && /^        if: always\(\)$/ { guarded = 1 }
+		in_step && /classify-lint-timeout\.py/ { invoked = 1 }
+		END { exit !(guarded && invoked) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+# The verdict is advisory. A classifier fault must never turn red a lint run
+# whose code actually passed, so the step absorbs its own failure and leaves
+# the outputs empty — which consumers compare as fail-closed.
+@test "reusable-quality-lint: classifier cannot fail the job" {
+	run awk '
+		/- name: Classify lint timeout/ { in_step = 1 }
+		in_step && /^      - name: / && !/Classify lint timeout/ { exit }
+		in_step && /^        continue-on-error: true$/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-quality-lint: run-quality classifier absorbs its own failure" {
+	local action="${PROJECT_ROOT}/.github/actions/run-quality/action.yml"
+	run awk '
+		/- name: Classify lint timeout/ { in_step = 1 }
+		in_step && /^    - name: / && !/Classify lint timeout/ { exit }
+		in_step && /\|\| echo "::warning::lint timeout classification failed"/ {
+			found = 1
+		}
+		END { exit !found }
+	' "$action"
+	assert_success
+}
+
+@test "reusable-quality-lint: classifier reads this run's own report" {
+	run awk '
+		/- name: Classify lint timeout/ { in_step = 1 }
+		in_step && /^      - name: / && !/Classify lint timeout/ { exit }
+		in_step && /REPORT: \.lintro\/artifacts\/json\/results\.json/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-quality-lint: upload-json-report defaults to true" {
+	run awk '/^      upload-json-report:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial "default: true"
+	assert_output --partial "type: boolean"
+}
+
+# The verdict must not depend on the artifact: a caller may want the outputs
+# with upload-json-report disabled.
+@test "reusable-quality-lint: classifier is not gated on upload-json-report" {
+	run awk '
+		/- name: Classify lint timeout/ { in_step = 1 }
+		in_step && /^      - name: / && !/Classify lint timeout/ { exit }
+		in_step && /upload-json-report/ { found = 1 }
+		END { exit found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-quality-lint: JSON report upload is non-fatal and overwrites" {
+	run awk '
+		/- name: Upload lint JSON report/ { in_step = 1 }
+		in_step && /^      - name: / && !/Upload lint JSON report/ { exit }
+		in_step && /continue-on-error: true/ { nonfatal = 1 }
+		in_step && /^          overwrite: true$/ { overwrite = 1 }
+		in_step && /name: linting-json-report/ { named = 1 }
+		END { exit !(nonfatal && overwrite && named) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+# Backwards compatibility: a caller that sets no new inputs and reads no new
+# outputs must behave exactly as today. Every new input is optional with a
+# default, and the pre-existing outputs keep their names and wiring.
+@test "reusable-quality-lint: new inputs are optional" {
+	run awk '/^      upload-json-report:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial "required: false"
+}
+
+@test "reusable-quality-lint: pre-existing outputs are unchanged" {
+	run grep -F 'value: ${{ jobs.quality.outputs.exit-code }}' "$WORKFLOW"
+	assert_success
+	run grep -F 'value: ${{ jobs.quality.outputs.status }}' "$WORKFLOW"
+	assert_success
+	run grep -F 'exit-code: ${{ steps.quality.outputs.exit-code }}' "$WORKFLOW"
+	assert_success
+	run grep -F 'status: ${{ steps.quality.outputs.status }}' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-quality-lint: every workflow_call input has a default" {
+	run awk '
+		/^  workflow_call:$/ { in_call = 1 }
+		in_call && /^    inputs:$/ { in_inputs = 1; next }
+		in_inputs && /^    [a-z]/ { in_inputs = 0 }
+		in_inputs && /^      [a-z0-9-]+:$/ {
+			if (name != "" && !has_default) { print "missing default: " name; bad = 1 }
+			name = $1; has_default = 0
+		}
+		in_inputs && /^        default:/ { has_default = 1 }
+		END {
+			if (name != "" && !has_default) { print "missing default: " name; bad = 1 }
+			exit bad
+		}
+	' "$WORKFLOW"
+	assert_success
+	assert_output ""
+}
+
+@test "reusable-quality-lint: run-quality action exposes the same verdict outputs" {
+	local action="${PROJECT_ROOT}/.github/actions/run-quality/action.yml"
+	run grep -F 'value: ${{ steps.classify-timeout.outputs.timeout-flake }}' "$action"
+	assert_success
+	run grep -F 'value: ${{ steps.classify-timeout.outputs.timed-out-tools }}' "$action"
+	assert_success
+	run grep -F 'classify-lint-timeout.py' "$action"
+	assert_success
+}
