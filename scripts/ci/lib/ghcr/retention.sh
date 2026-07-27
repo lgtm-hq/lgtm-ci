@@ -45,6 +45,12 @@ readonly _GHCR_MAIN_TAG_PATTERN='^(main|sha-.+)$'
 # `unknown` class, which is the fail-safe direction.
 readonly _GHCR_PRERELEASE_TAG_PATTERN='^(.*-)?(alpha|beta|rc|pre|dev|snapshot)([0-9._-].*)?$'
 
+# Timestamps the GitHub Packages API returns: RFC 3339, UTC, `Z`-suffixed, with
+# optional fractional seconds. Cutoffs are generated in the same shape, so a
+# lexicographic comparison is exact -- but only for this shape. Anything else
+# (a numeric offset, a local time, junk) is rejected and the version is kept.
+readonly _GHCR_UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'
+
 # Classify a single tag into a retention class.
 # Args:
 #   $1 - tag
@@ -84,8 +90,17 @@ ghcr_tag_is_deletable() {
 	local prerelease_cutoff="${4:?prerelease cutoff required}"
 	local class
 
-	# No usable timestamp means no defensible age -- keep.
-	[[ -z "$version_time" ]] && return 1
+	# No usable timestamp, or one whose shape the lexicographic comparison below
+	# cannot order safely, means no defensible age -- keep.
+	[[ "$version_time" =~ $_GHCR_UTC_TIMESTAMP_PATTERN ]] || return 1
+	[[ "$main_cutoff" =~ $_GHCR_UTC_TIMESTAMP_PATTERN ]] || return 1
+	[[ "$prerelease_cutoff" =~ $_GHCR_UTC_TIMESTAMP_PATTERN ]] || return 1
+
+	# Drop fractional seconds so a timestamp on the cutoff second compares equal
+	# to the cutoff (and is therefore kept) rather than sorting either side of it
+	# on the strength of a millisecond.
+	version_time="${version_time%.*}"
+	version_time="${version_time%Z}Z"
 
 	class=$(ghcr_tag_retention_class "$tag")
 
@@ -139,4 +154,5 @@ ghcr_all_tags_deletable() {
 # The patterns travel with the exported functions: a child bash process that
 # inherits the functions without them would evaluate an empty regex.
 export _GHCR_SEMVER_TAG_PATTERN _GHCR_MAIN_TAG_PATTERN _GHCR_PRERELEASE_TAG_PATTERN
+export _GHCR_UTC_TIMESTAMP_PATTERN
 export -f ghcr_tag_retention_class ghcr_tag_is_deletable ghcr_all_tags_deletable

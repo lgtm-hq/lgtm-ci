@@ -214,6 +214,30 @@ all_deletable() {
 	assert_failure
 }
 
+@test "ghcr_tag_is_deletable: unparseable timestamp keeps the tag" {
+	# A shape the lexicographic comparison cannot order safely must never
+	# produce a deletion. Retention is the fail-safe direction.
+	deletable "main" "not-a-timestamp"
+	assert_failure
+	deletable "main" "2024-01-01 00:00:00"
+	assert_failure
+	deletable "main" "2024-01-01T00:00:00+00:00"
+	assert_failure
+}
+
+@test "ghcr_tag_is_deletable: fractional seconds do not straddle the cutoff" {
+	# Same second as the cutoff: not strictly older, so it is kept, with or
+	# without a fractional part. A millisecond must not decide a deletion.
+	deletable "main" "$MAIN_CUTOFF"
+	assert_failure
+	deletable "main" "2024-06-01T00:00:00.999Z"
+	assert_failure
+
+	# One second older, with a fractional part: genuinely past the cutoff.
+	deletable "main" "2024-05-31T23:59:59.001Z"
+	assert_success
+}
+
 # =============================================================================
 # ghcr_all_tags_deletable - THE RULE THAT MUST NOT BE INVERTED
 # =============================================================================
