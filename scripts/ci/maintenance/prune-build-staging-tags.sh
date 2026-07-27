@@ -190,11 +190,30 @@ else
 	log_warning "PROTECT_REFERENCED=false: referenced-digest safety gate disabled"
 fi
 
+# The reference set is handed to jq through a FILE, never through --argjson.
+# --argjson places the whole document on the execve argument list, and the set
+# grows monotonically with every release: at ~2k digests it crossed ARG_MAX and
+# jq started dying with "Argument list too long" (#793). --slurpfile reads the
+# same JSON off disk at no argument-list cost. Note the extra array level it
+# introduces: the document is $refs[0], not $refs.
+refs_file=$(mktemp "${TMPDIR:-/tmp}/prune-staging-refs.XXXXXX") ||
+	die "Could not create temporary file for referenced digests"
+
+cleanup_refs_file() {
+	rm -f "$refs_file"
+}
+trap cleanup_refs_file EXIT
+
 if ((${#referenced_digests[@]} > 0)); then
-	refs_json=$(printf '%s\n' "${referenced_digests[@]}" | jq -R . | jq -s .)
+	printf '%s\n' "${referenced_digests[@]}" | jq -R . | jq -s . >"$refs_file"
 else
-	refs_json='[]'
+	printf '[]\n' >"$refs_file"
 fi
+
+# Fail closed: a truncated or unparsable refs file would make $refs[0] null,
+# and `null | index($n)` is null, which would mark every aged tag deletable.
+jq -e 'type == "array"' "$refs_file" >/dev/null 2>&1 ||
+	die "Referenced-digest file is not a JSON array; refusing to prune"
 
 # =============================================================================
 # Select prunable staging tags: older than the cutoff, not among the newest
@@ -212,11 +231,11 @@ aged_versions=$(echo "$staging_versions" | jq --arg cutoff "$cutoff_date" --argj
 aged_count=$(echo "$aged_versions" | jq 'length')
 log_info "Found $aged_count staging tag(s) older than the cutoff"
 
-to_delete=$(echo "$aged_versions" | jq --argjson refs "$refs_json" '
-	[ .[] | select(.name as $n | ($refs | index($n) | not)) ]
+to_delete=$(echo "$aged_versions" | jq --slurpfile refs "$refs_file" '
+	[ .[] | select(.name as $n | ($refs[0] | index($n) | not)) ]
 ')
-protected=$(echo "$aged_versions" | jq --argjson refs "$refs_json" '
-	[ .[] | select(.name as $n | ($refs | index($n))) ]
+protected=$(echo "$aged_versions" | jq --slurpfile refs "$refs_file" '
+	[ .[] | select(.name as $n | ($refs[0] | index($n))) ]
 ')
 delete_count=$(echo "$to_delete" | jq 'length')
 protected_count=$(echo "$protected" | jq 'length')
