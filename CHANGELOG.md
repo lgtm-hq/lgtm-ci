@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.63.0] - 2026-07-27
+
+### Added
+
+- **quality-lint**: publish a structured lint report so callers can classify
+  tool-execution timeouts (#814) (0e85915)
+
 ## [0.62.1] - 2026-07-27
 
 ### Fixed
@@ -2007,7 +2014,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.0...HEAD
+[0.63.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.1...v0.63.0
 [0.62.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.0...v0.62.1
 [0.62.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.61.1...v0.62.0
 [0.61.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.61.0...v0.61.1
