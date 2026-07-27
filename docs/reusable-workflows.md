@@ -1062,6 +1062,10 @@ jobs:
       build-command: cargo build --release --target "$MATRIX_TARGET"
       artifact-name: rustume
       artifact-path: target/release
+      # Optional: the default allowlist already covers rustup and crates.io, so
+      # a preset is only needed for hosts a build reaches beyond its toolchain.
+      # allowed-endpoints-mode must be append or the non-empty default
+      # allowed-endpoints replaces the preset outright.
       egress-preset: rust-release
       allowed-endpoints-mode: append
 ```
@@ -1098,11 +1102,14 @@ hard error rather than a silent default.
 
 <!-- markdownlint-enable MD013 -->
 
-Outputs: `artifact-name`, `artifact-id`, `artifact-url`. Check contexts:
-`{caller_job_id} / {job-name} ({node-version})` for matrix legs. A caller that
-sets none of the toolchain inputs keeps exactly the Node behaviour it had
-before #760, including job names and required-check contexts — `runner` is only
-added to matrix legs when `runner-map` is non-empty. See
+Outputs: `artifact-name`, `artifact-id`, `artifact-url`. GitHub appends a matrix
+leg's fields to the check context, so a legacy Node caller still gets
+`{caller_job_id} / {job-name} ({node-version})` while an arbitrary `matrix` gets
+the fields it declares (`(x86_64-apple-darwin, stable)`), plus the injected
+`runner` when `runner-map` is non-empty. A caller that sets none of the toolchain
+inputs keeps exactly the Node behaviour it had before #760, including job names
+and required-check contexts — `runner` is only added to matrix legs when
+`runner-map` is non-empty. See
 [workflow-contract.md](workflow-contract.md#build-artifact).
 
 ### Push (publish to registry)

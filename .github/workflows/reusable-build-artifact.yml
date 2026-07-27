@@ -121,7 +121,10 @@ on:
         type: string
         default: "block"
       allowed-endpoints:
-        description: "Allowed endpoints when egress-policy is block"
+        description: >-
+          Allowed endpoints when egress-policy is block. The default covers the
+          setup host and ecosystem registry of every vetted toolchain, so any
+          `toolchain` value builds with no egress configuration.
         required: false
         type: string
         default: >
@@ -140,6 +143,11 @@ on:
           files.pythonhosted.org:443
           astral.sh:443
           releases.astral.sh:443
+          static.rust-lang.org:443
+          sh.rustup.rs:443
+          crates.io:443
+          static.crates.io:443
+          index.crates.io:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -192,6 +200,9 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       matrix-mode: ${{ steps.validate.outputs.matrix-mode }}
+      # Validated and trimmed; the setup steps gate on this rather than on the
+      # raw input so a padded toolchain value cannot skip its setup step.
+      toolchain: ${{ steps.validate.outputs.toolchain }}
 
     steps:
       - name: Harden runner
@@ -310,13 +321,13 @@ jobs:
             .github/actions/setup-python
             .github/actions/setup-rust
       - name: Setup Node.js
-        if: inputs.toolchain == 'node'
+        if: needs.prepare.outputs.toolchain == 'node'
         # Pinned to SHA for supply chain security
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
       - name: Setup Python
-        if: inputs.toolchain == 'python'
+        if: needs.prepare.outputs.toolchain == 'python'
         # Digest pinning lives inside the composite (astral-sh/setup-uv).
         # Dependency installation stays the caller's build-command.
         uses: ./.lgtm-ci-tooling/.github/actions/setup-python
@@ -325,7 +336,7 @@ jobs:
           working-directory: ${{ inputs.working-directory }}
           install-dependencies: "false"
       - name: Setup Rust
-        if: inputs.toolchain == 'rust'
+        if: needs.prepare.outputs.toolchain == 'rust'
         # Digest pinning lives inside the composite (dtolnay/rust-toolchain).
         # A matrix.target field, when present, is installed as a rustup target
         # so cross-compilation matrices work without extra inputs.

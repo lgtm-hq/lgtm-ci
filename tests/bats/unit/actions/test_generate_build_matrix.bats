@@ -249,6 +249,30 @@ legacy_matrix() {
 		'{"include":[{"target":"aarch64-unknown-linux-gnu","cross":"true"}]}'
 }
 
+@test "generate-build-matrix: rejects unquoted decimal matrix values" {
+	# 3.10 unquoted round-trips through JSON as 3.1, which would silently
+	# install Python 3.1 instead of 3.10.
+	run env \
+		VERSION_KEY="python-version" \
+		MATRIX='[{"python-version":3.10}]' \
+		DEFAULT_RUNNER="ubuntu-24.04" \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "must be a quoted string"
+}
+
+@test "generate-build-matrix: keeps a quoted decimal matrix value intact" {
+	run env \
+		VERSION_KEY="python-version" \
+		MATRIX='[{"python-version":"3.10"}]' \
+		DEFAULT_RUNNER="ubuntu-24.04" \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_equal "$(emitted_matrix)" '{"include":[{"python-version":"3.10"}]}'
+}
+
 @test "generate-build-matrix: rejects nested matrix values" {
 	run env \
 		VERSION_KEY="" \

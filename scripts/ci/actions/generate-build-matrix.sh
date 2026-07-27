@@ -116,6 +116,14 @@ if raw_matrix:
                     f"matrix entry #{index + 1} field '{key}' must be a scalar "
                     "(string, number or boolean)",
                 )
+            # Unquoted decimals lose trailing zeros through JSON (3.10 -> 3.1),
+            # which silently selects the wrong toolchain version. Reject them
+            # rather than build the wrong thing.
+            if isinstance(value, float):
+                fail(
+                    f"matrix entry #{index + 1} field '{key}' must be a quoted "
+                    'string: an unquoted decimal loses precision (3.10 -> 3.1)',
+                )
             normalised[key] = value if isinstance(value, str) else json.dumps(value)
         entries.append(normalised)
 else:

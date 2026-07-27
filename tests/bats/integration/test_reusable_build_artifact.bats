@@ -170,9 +170,26 @@ _input_default() {
 }
 
 @test "reusable-build-artifact: each toolchain setup step is gated on the enum" {
+	# Gated on the validated (trimmed) prepare output, not the raw input, so a
+	# padded toolchain value cannot pass validation yet skip its setup step.
 	local toolchain
 	for toolchain in node python rust; do
-		run grep -F "if: inputs.toolchain == '${toolchain}'" "$WORKFLOW"
+		run grep -F "if: needs.prepare.outputs.toolchain == '${toolchain}'" "$WORKFLOW"
+		assert_success
+	done
+	run grep -F 'toolchain: ${{ steps.validate.outputs.toolchain }}' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-build-artifact: default egress allowlist covers every toolchain" {
+	# Each vetted toolchain must build with no egress configuration at all, so
+	# the default allowlist carries its setup host and ecosystem registry.
+	local endpoint
+	for endpoint in \
+		nodejs.org:443 registry.npmjs.org:443 \
+		pypi.org:443 files.pythonhosted.org:443 astral.sh:443 \
+		static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443; do
+		run grep -F "          ${endpoint}" "$WORKFLOW"
 		assert_success
 	done
 }

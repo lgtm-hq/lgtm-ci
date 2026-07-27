@@ -1449,12 +1449,16 @@ Each matrix field is exported to `build-command` and `post-build-test-command`
 as `MATRIX_<FIELD>` (`target` → `$MATRIX_TARGET`), so a cross-compile leg can
 read its own target without a per-repo wrapper.
 
-Pass **exactly one** of `node-version` (single) or `node-version-matrix` (JSON
-array such as `'["20","22"]'`). Matrix legs keep a static inner `name:
-${{ inputs.job-name }}` so GitHub appends the version suffix. Required-check
-contexts therefore look like `{caller_job_id} / {job-name} ({node-version})`
-(for example `build / 🏗️ Build & Quality Checks (20)`). Plan org ruleset updates
-in lockstep with consumer migration.
+Legacy Node callers pass **exactly one** of `node-version` (single) or
+`node-version-matrix` (JSON array such as `'["20","22"]'`); both are rejected
+alongside `matrix`, which is the general form every non-Node caller uses. Matrix
+legs keep a static inner `name: ${{ inputs.job-name }}` so GitHub appends the
+matrix suffix. For a legacy Node caller that suffix is the node version, so
+required-check contexts look like `{caller_job_id} / {job-name} ({node-version})`
+(for example `build / 🏗️ Build & Quality Checks (20)`) — unchanged by #760. An
+arbitrary `matrix` gets the fields it declares instead (`(x86_64-apple-darwin,
+stable)`), plus the injected `runner` when `runner-map` is non-empty. Plan org
+ruleset updates in lockstep with consumer migration.
 
 Single-version uploads use `artifact-name` verbatim. Matrix mode appends the
 leg's matrix values so parallel legs do not collide (`js-dist-20`,

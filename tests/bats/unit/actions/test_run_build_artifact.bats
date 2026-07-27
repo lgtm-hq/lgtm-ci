@@ -122,7 +122,10 @@ teardown() {
 }
 
 @test "run-build-artifact: runs without MATRIX_JSON" {
+	# -u MATRIX_JSON: the missing-input path must be exercised even if a leaked
+	# MATRIX_JSON is present in the caller's environment.
 	run env \
+		-u MATRIX_JSON \
 		WORKING_DIRECTORY="$WORK_DIR" \
 		BUILD_COMMAND='mkdir -p dist && touch dist/out.txt' \
 		ARTIFACT_PATH="dist" \
@@ -160,9 +163,12 @@ teardown() {
 }
 
 @test "run-build-artifact: leaves no matrix temp file behind on failure" {
-	local before after
-	before="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l)"
+	# A private TMPDIR makes the assertion deterministic: a shared /tmp count
+	# races against anything else creating temp files during the run.
+	local tmp_dir="${BATS_TEST_TMPDIR}/matrix-tmp"
+	mkdir -p "$tmp_dir"
 	run env \
+		TMPDIR="$tmp_dir" \
 		WORKING_DIRECTORY="$WORK_DIR" \
 		MATRIX_JSON='[1,2]' \
 		BUILD_COMMAND='mkdir -p dist && touch dist/out.txt' \
@@ -171,6 +177,5 @@ teardown() {
 		bash "$SCRIPT"
 
 	assert_failure
-	after="$(find "${TMPDIR:-/tmp}" -maxdepth 1 -name 'tmp.*' 2>/dev/null | wc -l)"
-	assert_equal "$before" "$after"
+	assert_equal "" "$(find "$tmp_dir" -mindepth 1 2>/dev/null)"
 }
