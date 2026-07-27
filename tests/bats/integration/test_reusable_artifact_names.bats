@@ -505,14 +505,32 @@ _e2e_matrix_render() {
 # snippet without `needs:` would reproduce exactly that failure for everyone who
 # copies it.
 @test "docs: the publisher snippets order the deploy after its producer" {
+	# The producer job names the snippets use. Asserting membership rather than
+	# mere presence of a `needs:` is the point: a snippet depending on some
+	# unrelated job would satisfy "has a needs" while still racing the report
+	# upload, which is the exact failure the old `needs.merge.result` guard
+	# existed to prevent.
+	local producers="coverage e2e-matrix"
 	local doc
 	for doc in docs/pages-publishing.md docs/reusable-workflows.md \
 		docs/workflows/testing.md; do
-		# Every documented publisher call must be preceded, inside its own job
-		# block, by a `needs:` on the job that produced the artifact.
-		run awk '
+		run awk -v producers="$producers" '
+			BEGIN { split(producers, p, " "); for (i in p) is_producer[p[i]] = 1 }
+			# A new job key ends the previous job block, so a `needs:` never
+			# leaks across snippet boundaries.
 			/^[[:space:]]*[a-z0-9-]+:[[:space:]]*$/ { pending = 0 }
-			/^[[:space:]]+needs: / { pending = 1 }
+			/^[[:space:]]+needs:[[:space:]]/ {
+				value = $0
+				sub(/^[[:space:]]+needs:[[:space:]]*/, "", value)
+				# Normalise the list form `needs: [a, b]` to bare names so both
+				# spellings are accepted and neither is accepted vacuously.
+				gsub(/[][,]/, " ", value)
+				pending = 0
+				n = split(value, names, " ")
+				for (i = 1; i <= n; i++) {
+					if (names[i] in is_producer) { pending = 1 }
+				}
+			}
 			/reusable-publish-test-results-pages\.yml@/ {
 				calls += 1
 				if (pending) { ordered += 1 }

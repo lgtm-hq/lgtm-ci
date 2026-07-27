@@ -221,10 +221,11 @@ is a low-noise build-only alternative safe to run without PR context. See
 ## Coverage
 
 `reusable-coverage.yml` unifies coverage collection (auto-detects format),
-threshold checking, badge generation, and optional Pages publish in one
-workflow — the workflow-level equivalent of chaining `collect-coverage` +
-`check-coverage-threshold` + `generate-coverage-badge`
-(see [actions/coverage.md](../actions/coverage.md)).
+threshold checking and badge generation in one workflow — the workflow-level
+equivalent of chaining `collect-coverage` + `check-coverage-threshold` +
+`generate-coverage-badge` (see [actions/coverage.md](../actions/coverage.md)).
+It does **not** publish to Pages; since #770 that is a separate call to
+`reusable-publish-test-results-pages.yml`, described below.
 
 **Inputs:** `coverage-files` (glob or list, default auto-detect), `format`
 (auto/istanbul/coverage-py/lcov, default 'auto'), `threshold` (default 0),
