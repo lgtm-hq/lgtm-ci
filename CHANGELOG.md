@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.59.31] - 2026-07-27
+
+### Fixed
+
+- **ci**: pass prune reference set to jq via file, not argument list (#798) (6ecf5e5)
+
 ## [0.59.30] - 2026-07-27
 
 ### Changed
@@ -1968,7 +1974,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.30...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.31...HEAD
+[0.59.31]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.30...v0.59.31
 [0.59.30]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.29...v0.59.30
 [0.59.29]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.28...v0.59.29
 [0.59.28]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.27...v0.59.28
