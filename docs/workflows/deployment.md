@@ -136,9 +136,12 @@ inputs.
 ephemeral build-cache tags (`pr-*`, `mq-*`, `dispatch-*`), skipping the
 prune when referenced-digest collection is incomplete (protects multi-arch
 manifest children and cosign/SLSA attestations from accidental deletion). Its
-opt-in `prune-tagged` input adds tagged retention (`main`/`sha-*` at 30 days,
-pre-release at 90, `latest`/semver never), deleting a version only when every
-tag on it is deletable.
+opt-in `prune-tagged` input adds tagged retention — `main`/`sha-*` at
+`main-retention-days` (default 30), pre-release at
+`prerelease-retention-days` (default 90), `latest`/semver never — deleting a
+version only when every tag on it is deletable. See
+[reusable-workflows.md](../reusable-workflows.md#tagged-retention-prune-tagged)
+for the full policy and its interaction with `sha-`-pinned GitOps consumers.
 `reusable-registry-health-check.yml` scans workflow files for digest-pinned
 images and verifies the digests still resolve, optionally opening an issue
 on failure — used by lgtm-ci's own `registry-health-check.yml` caller.

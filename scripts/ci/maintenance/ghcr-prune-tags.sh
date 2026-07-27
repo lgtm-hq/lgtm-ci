@@ -10,7 +10,8 @@
 # Retention policy (see scripts/ci/lib/ghcr/retention.sh):
 #   latest, semver              keep forever
 #   main, sha-*                 delete past MAIN_RETENTION_DAYS
-#   alpha/beta/rc/pre/dev/snap  delete past PRERELEASE_RETENTION_DAYS
+#   alpha/beta/rc/pre/dev/snapshot
+#                               delete past PRERELEASE_RETENTION_DAYS
 #   anything else               keep forever (fail safe)
 #
 # A version is deleted only when EVERY tag on it is deletable. That is what
@@ -73,11 +74,12 @@ all_versions='[]'
 ghcr_fetch_versions() {
 	local err_file org_err user_err
 	err_file=$(mktemp)
+	# Covers the die path and any interrupt, not just the explicit returns.
+	trap 'rm -f "$err_file"' RETURN
 
 	if all_versions=$(gh api --paginate \
 		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
 		2>"$err_file" | jq -s 'add // []'); then
-		rm -f "$err_file"
 		return 0
 	fi
 	org_err=$(<"$err_file")
@@ -85,11 +87,9 @@ ghcr_fetch_versions() {
 	if all_versions=$(gh api --paginate \
 		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
 		2>"$err_file" | jq -s 'add // []'); then
-		rm -f "$err_file"
 		return 0
 	fi
 	user_err=$(<"$err_file")
-	rm -f "$err_file"
 
 	die "Failed to fetch package versions (orgs: ${org_err:-none}; users: ${user_err:-none})"
 }
@@ -191,6 +191,12 @@ if [[ "$tagged_count" -eq 0 ]]; then
 	exit 0
 fi
 
+# Materialised rather than read from a process substitution: `pipefail` does not
+# cover process substitution, so a jq failure there would look identical to "no
+# versions" and the script would report a clean run having done nothing.
+rows=$(jq -r '.[] | [.id, .t, (.tags | @json)] | @tsv' <<<"$tagged_versions") ||
+	die "Failed to serialise tagged versions"
+
 while IFS=$'\t' read -r version_id version_time tags_json; do
 	[[ -z "$version_id" ]] && continue
 
@@ -217,7 +223,7 @@ while IFS=$'\t' read -r version_id version_time tags_json; do
 	else
 		failed=$((failed + 1))
 	fi
-done < <(jq -r '.[] | [.id, .t, (.tags | @json)] | @tsv' <<<"$tagged_versions")
+done <<<"$rows"
 
 if [[ "$DRY_RUN" == "true" ]]; then
 	log_info "Dry run complete: $deleted version(s) would be deleted, $retained retained"

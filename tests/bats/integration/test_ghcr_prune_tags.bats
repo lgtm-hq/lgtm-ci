@@ -68,7 +68,9 @@ EOF
 }
 
 deleted_ids() {
-	grep -o '/versions/[0-9]*' "$DELETE_LOG" 2>/dev/null | sed 's|/versions/||' | sort -u
+	# Numeric sort: a fixture with id 10 would otherwise sort before id 2 and
+	# produce a confusing failure.
+	grep -o '/versions/[0-9]*' "$DELETE_LOG" 2>/dev/null | sed 's|/versions/||' | sort -un
 }
 
 # Mock gh with independent behaviour per ownership endpoint, so the org -> user
@@ -348,6 +350,29 @@ EOF
 	assert_output "3"
 }
 
+@test "ghcr-prune-tags: merges the multiple documents gh api --paginate emits" {
+	# `gh api --paginate` concatenates one JSON array per page; `jq -s 'add'`
+	# is what flattens them. A single-array mock never exercises that.
+	mock_gh_endpoints \
+		"printf '%s' '[
+			{\"id\": 1, \"name\": \"sha256:aaa\", \"updated_at\": \"$AGED\",
+			 \"metadata\": {\"container\": {\"tags\": [\"sha-page1\"]}}}
+		]
+		[
+			{\"id\": 2, \"name\": \"sha256:bbb\", \"updated_at\": \"$AGED\",
+			 \"metadata\": {\"container\": {\"tags\": [\"sha-page2\"]}}}
+		]'" \
+		'exit 1'
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Found 2 tagged version(s)"
+
+	run deleted_ids
+	assert_output "1
+2"
+}
+
 @test "ghcr-prune-tags: reports both endpoint errors when neither owner matches" {
 	# A bare "failed to fetch" sends the reader hunting for a permissions
 	# problem that may not exist; both underlying errors must survive.
@@ -502,6 +527,12 @@ EOF
 	assert_output --partial "Failed to delete version 1"
 	assert_output --partial "delete-org-boom"
 	assert_output --partial "delete-user-boom"
+
+	# The warning branch of emit_summary is only reachable with failed > 0.
+	local summary
+	summary=$(cat "$GITHUB_STEP_SUMMARY")
+	[[ "$summary" == *"Failed | 1"* ]]
+	[[ "$summary" == *"Completed with errors"* ]]
 }
 
 @test "ghcr-prune-tags: writes a step summary" {

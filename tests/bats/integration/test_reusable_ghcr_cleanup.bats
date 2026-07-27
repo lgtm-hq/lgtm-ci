@@ -56,8 +56,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ghcr-cleanup.yml"
 		step && /MAIN_RETENTION_DAYS: \$\{\{ inputs.main-retention-days \}\}/ { main = 1 }
 		step && /PRERELEASE_RETENTION_DAYS: \$\{\{ inputs.prerelease-retention-days \}\}/ { pre = 1 }
 		step && /DRY_RUN: \$\{\{ inputs.dry-run \}\}/ { dry = 1 }
+		# Auth and target: the script hard-fails without these, and miswiring
+		# them would point a destructive run at the wrong package or identity.
+		step && /GH_TOKEN: \$\{\{ secrets.token \}\}/ { token = 1 }
+		step && /PACKAGE_NAME: \$\{\{ inputs.package-name \}\}/ { package = 1 }
+		step && /GITHUB_ORG: \$\{\{ github.repository_owner \}\}/ { org = 1 }
 		step && /ghcr-prune-tags.sh/ { script = 1 }
-		END { exit !(gated && main && pre && dry && script) }
+		END { exit !(gated && main && pre && dry && token && package && org && script) }
 	' "$WORKFLOW"
 	assert_success
 }
