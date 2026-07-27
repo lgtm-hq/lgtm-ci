@@ -98,23 +98,37 @@ class Classification:
     reason: str = ""
 
 
-def _result_issue_count(result: dict[str, Any]) -> int:
+def _result_issue_count(result: dict[str, Any]) -> int | None:
     """Return the issue count a tool result reports.
 
     Uses the larger of ``issues_count`` and the length of the ``issues`` array
     so a report that carries only one of the two, or whose two disagree, still
     fails closed on the higher number.
 
+    An omitted field is fine — not every result carries both — but a field that
+    is *present* and malformed is not silently coerced to zero, because zero is
+    the value that lets a timed-out tool qualify as a flake.
+
     Args:
         result: One per-tool object from the lintro report.
 
     Returns:
-        The number of issues attributed to the tool.
+        The number of issues attributed to the tool, or ``None`` when a present
+        field is malformed and the result cannot be trusted.
     """
-    raw_count = result.get("issues_count", 0)
-    count = raw_count if isinstance(raw_count, int) and raw_count > 0 else 0
-    issues = result.get("issues")
-    if isinstance(issues, list):
+    count = 0
+    if "issues_count" in result:
+        raw_count = result["issues_count"]
+        # bool is a subclass of int; reject it so `false` cannot pass as 0.
+        if isinstance(raw_count, bool) or not isinstance(raw_count, int):
+            return None
+        if raw_count < 0:
+            return None
+        count = raw_count
+    if "issues" in result:
+        issues = result["issues"]
+        if not isinstance(issues, list):
+            return None
         count = max(count, len(issues))
     return count
 
@@ -160,9 +174,9 @@ def _summary_timed_out_tools(summary: dict[str, Any]) -> tuple[set[str] | None, 
         is False when the key is present but not a list of strings, which makes
         the report untrustworthy.
     """
-    raw = summary.get("timed_out_tools")
-    if raw is None:
+    if "timed_out_tools" not in summary:
         return None, True
+    raw = summary["timed_out_tools"]
     if not isinstance(raw, list) or not all(isinstance(name, str) for name in raw):
         return None, False
     return set(raw), True
@@ -218,6 +232,11 @@ def classify(payload: Any) -> Classification:
             )
 
         issue_count = _result_issue_count(entry)
+        if issue_count is None:
+            return Classification(
+                False,
+                reason=f"{name} has a malformed issue count",
+            )
         if _timed_out(entry):
             if issue_count:
                 return Classification(

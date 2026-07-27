@@ -277,6 +277,76 @@ EOF
 	assert_output --partial "timeout-flake=false"
 }
 
+# bool is a subclass of int in Python, so `false` would pass an
+# isinstance(..., int) check and read as a zero count.
+@test "classify-lint-timeout.py: a false total_issues is not a flake" {
+	write_report <<'EOF'
+{
+  "summary": {"total_issues": false, "timed_out_tools": ["mypy"]},
+  "results": [{"tool": "mypy", "success": false, "issues_count": 0,
+               "timed_out": true}]
+}
+EOF
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=false"
+}
+
+@test "classify-lint-timeout.py: a false issues_count is not a flake" {
+	write_report <<'EOF'
+{
+  "summary": {"total_issues": 0, "timed_out_tools": ["mypy"]},
+  "results": [{"tool": "mypy", "success": false, "issues_count": false,
+               "timed_out": true}]
+}
+EOF
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=false"
+}
+
+# A present-but-malformed count must not be coerced to zero — zero is exactly
+# the value that lets a timed-out tool qualify as a flake.
+@test "classify-lint-timeout.py: a non-integer issues_count is not a flake" {
+	write_report <<'EOF'
+{
+  "summary": {"total_issues": 0, "timed_out_tools": ["mypy"]},
+  "results": [{"tool": "mypy", "success": false, "issues_count": "0",
+               "timed_out": true}]
+}
+EOF
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=false"
+}
+
+@test "classify-lint-timeout.py: a non-list issues field is not a flake" {
+	write_report <<'EOF'
+{
+  "summary": {"total_issues": 0, "timed_out_tools": ["mypy"]},
+  "results": [{"tool": "mypy", "success": false, "issues_count": 0,
+               "timed_out": true, "issues": "none"}]
+}
+EOF
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=false"
+}
+
+# An explicit null is a malformed value, not an absent key.
+@test "classify-lint-timeout.py: a null timed_out_tools is not a flake" {
+	write_report <<'EOF'
+{
+  "summary": {"total_issues": 0, "timed_out_tools": null},
+  "results": [{"tool": "mypy", "success": false, "issues_count": 0,
+               "timed_out": true}]
+}
+EOF
+	run python3 "${SCRIPT}" --report "${REPORT}"
+	assert_success
+	assert_output --partial "timeout-flake=false"
+}
+
 @test "classify-lint-timeout.py: a non-object results entry is not a flake" {
 	write_report <<'EOF'
 {"summary": {"total_issues": 0}, "results": ["mypy"]}
