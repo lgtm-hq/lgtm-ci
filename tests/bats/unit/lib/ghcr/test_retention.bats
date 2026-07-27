@@ -225,6 +225,43 @@ all_deletable() {
 	assert_failure
 }
 
+@test "ghcr_tag_is_deletable: structurally invalid calendar values keep the tag" {
+	# A zeroed or out-of-range field sorts before every real cutoff, so a naive
+	# shape check would delete on garbage. Retention is the fail-safe direction.
+	deletable "main" "0000-00-00T00:00:00Z"
+	assert_failure
+	deletable "main" "2024-13-01T00:00:00Z"
+	assert_failure
+	deletable "main" "2024-01-32T00:00:00Z"
+	assert_failure
+	deletable "main" "2024-01-01T24:00:00Z"
+	assert_failure
+	deletable "main" "2024-01-01T00:60:00Z"
+	assert_failure
+	deletable "main" "2024-01-01T00:00:60Z"
+	assert_failure
+}
+
+@test "ghcr_tag_is_deletable: a fractional cutoff is normalised too, not just the version" {
+	# `Z` sorts after `.`, so normalising only the version side would make a
+	# bare `...00Z` compare greater than a fractional `...00.5Z` cutoff and
+	# silently retain a version that is genuinely older.
+	run bash -c '
+		source "$LIB_DIR/ghcr/retention.sh"
+		ghcr_tag_is_deletable "main" "2024-05-31T23:59:59Z" \
+			"2024-06-01T00:00:00.500Z" "$PRERELEASE_CUTOFF"
+	'
+	assert_success
+
+	# And the same second on both sides still compares equal, so it is kept.
+	run bash -c '
+		source "$LIB_DIR/ghcr/retention.sh"
+		ghcr_tag_is_deletable "main" "2024-06-01T00:00:00Z" \
+			"2024-06-01T00:00:00.500Z" "$PRERELEASE_CUTOFF"
+	'
+	assert_failure
+}
+
 @test "ghcr_tag_is_deletable: fractional seconds do not straddle the cutoff" {
 	# Same second as the cutoff: not strictly older, so it is kept, with or
 	# without a fractional part. A millisecond must not decide a deletion.

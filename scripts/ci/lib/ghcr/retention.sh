@@ -49,7 +49,11 @@ readonly _GHCR_PRERELEASE_TAG_PATTERN='^(.*-)?(alpha|beta|rc|pre|dev|snapshot)([
 # optional fractional seconds. Cutoffs are generated in the same shape, so a
 # lexicographic comparison is exact -- but only for this shape. Anything else
 # (a numeric offset, a local time, junk) is rejected and the version is kept.
-readonly _GHCR_UTC_TIMESTAMP_PATTERN='^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?Z$'
+#
+# The field ranges are pinned rather than left as bare `[0-9]{2}`: a structurally
+# invalid value such as `0000-00-00T00:00:00Z` would otherwise sort before every
+# real cutoff and get a `main` tag deleted, which is the wrong direction to fail.
+readonly _GHCR_UTC_TIMESTAMP_PATTERN='^[0-9]{4}-(0[1-9]|1[0-2])-(0[1-9]|[12][0-9]|3[01])T([01][0-9]|2[0-3]):[0-5][0-9]:[0-5][0-9](\.[0-9]+)?Z$'
 
 # Classify a single tag into a retention class.
 # Args:
@@ -77,6 +81,16 @@ ghcr_tag_retention_class() {
 	printf 'unknown\n'
 }
 
+# Drop the fractional-second part of a validated UTC timestamp, keeping the `Z`.
+# Args:
+#   $1 - timestamp already matched against _GHCR_UTC_TIMESTAMP_PATTERN
+# Prints the second-resolution timestamp
+_ghcr_truncate_fraction() {
+	local stamp="${1-}"
+	stamp="${stamp%Z}"
+	printf '%sZ\n' "${stamp%.*}"
+}
+
 # Return 0 when a single tag is deletable at the given version timestamp.
 # Args:
 #   $1 - tag
@@ -96,11 +110,14 @@ ghcr_tag_is_deletable() {
 	[[ "$main_cutoff" =~ $_GHCR_UTC_TIMESTAMP_PATTERN ]] || return 1
 	[[ "$prerelease_cutoff" =~ $_GHCR_UTC_TIMESTAMP_PATTERN ]] || return 1
 
-	# Drop fractional seconds so a timestamp on the cutoff second compares equal
-	# to the cutoff (and is therefore kept) rather than sorting either side of it
-	# on the strength of a millisecond.
-	version_time="${version_time%.*}"
-	version_time="${version_time%Z}Z"
+	# Drop fractional seconds from ALL THREE so a timestamp on the cutoff second
+	# compares equal to the cutoff (and is therefore kept) rather than sorting
+	# either side of it on the strength of a millisecond. Normalising only one
+	# side is worse than normalising neither: `Z` sorts after `.`, so a bare
+	# `...00Z` would compare greater than a fractional `...00.5Z` cutoff.
+	version_time=$(_ghcr_truncate_fraction "$version_time")
+	main_cutoff=$(_ghcr_truncate_fraction "$main_cutoff")
+	prerelease_cutoff=$(_ghcr_truncate_fraction "$prerelease_cutoff")
 
 	class=$(ghcr_tag_retention_class "$tag")
 
@@ -155,4 +172,5 @@ ghcr_all_tags_deletable() {
 # inherits the functions without them would evaluate an empty regex.
 export _GHCR_SEMVER_TAG_PATTERN _GHCR_MAIN_TAG_PATTERN _GHCR_PRERELEASE_TAG_PATTERN
 export _GHCR_UTC_TIMESTAMP_PATTERN
+export -f _ghcr_truncate_fraction
 export -f ghcr_tag_retention_class ghcr_tag_is_deletable ghcr_all_tags_deletable
