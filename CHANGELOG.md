@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.60.0] - 2026-07-27
+
+### Added
+
+- **workflows**: add opt-in tagged retention to reusable-ghcr-cleanup (#797) (2a2c42e)
+
 ## [0.59.31] - 2026-07-27
 
 ### Fixed
@@ -1974,7 +1980,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.31...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.60.0...HEAD
+[0.60.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.31...v0.60.0
 [0.59.31]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.30...v0.59.31
 [0.59.30]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.29...v0.59.30
 [0.59.29]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.28...v0.59.29
