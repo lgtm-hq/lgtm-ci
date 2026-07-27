@@ -128,6 +128,34 @@ EOF
 	assert_output --partial "GH_TOKEN is required"
 }
 
+@test "ghcr-prune-tags: rejects a DRY_RUN value that is neither true nor false" {
+	# Everything but a literal `true` would otherwise mean "delete for real",
+	# so a typo would quietly arm a destructive run. Fail closed instead.
+	local bad
+	for bad in True TRUE YES yes 1 on; do
+		export DRY_RUN="$bad"
+		run bash -c 'bash "$SCRIPT" 2>&1'
+		assert_failure
+		assert_output --partial "DRY_RUN must be 'true' or 'false'"
+	done
+}
+
+@test "ghcr-prune-tags: an empty DRY_RUN falls back to the safe default" {
+	# `:=` treats empty as unset, so this is dry run rather than a hard error.
+	export DRY_RUN=""
+	mock_gh_versions "[
+		{\"id\": 1, \"name\": \"sha256:aaa\", \"updated_at\": \"$AGED\",
+		 \"metadata\": {\"container\": {\"tags\": [\"sha-abc1234\"]}}}
+	]"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "[dry-run]"
+
+	run deleted_ids
+	assert_output ""
+}
+
 @test "ghcr-prune-tags: rejects a non-numeric MAIN_RETENTION_DAYS" {
 	export MAIN_RETENTION_DAYS="thirty"
 	run bash -c 'bash "$SCRIPT" 2>&1'
@@ -445,6 +473,35 @@ EOF
 	run bash -c 'bash "$SCRIPT" 2>&1'
 	assert_failure
 	assert_output --partial "Failed to delete version 1"
+}
+
+@test "ghcr-prune-tags: a failed deletion reports both endpoint errors" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	DELETE_LOG="${mock_bin}/.gh_deletes"
+	export DELETE_LOG
+	: >"$DELETE_LOG"
+
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*--method\ DELETE*/orgs/*) echo "delete-org-boom" >&2; exit 1;;
+	*--method\ DELETE*/users/*) echo "delete-user-boom" >&2; exit 1;;
+	*packages/container*) printf '%s' '[
+		{"id": 1, "name": "sha256:aaa", "updated_at": "$AGED",
+		 "metadata": {"container": {"tags": ["sha-abc1234"]}}}
+	]';;
+	*) exit 1;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+	export PATH="${mock_bin}:$PATH"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_failure
+	assert_output --partial "Failed to delete version 1"
+	assert_output --partial "delete-org-boom"
+	assert_output --partial "delete-user-boom"
 }
 
 @test "ghcr-prune-tags: writes a step summary" {

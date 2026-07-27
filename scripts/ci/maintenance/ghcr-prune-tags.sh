@@ -34,6 +34,17 @@ set -euo pipefail
 : "${PRERELEASE_RETENTION_DAYS:=90}"
 : "${DRY_RUN:=true}"
 
+# Anything other than a literal `true` would otherwise mean "delete for real",
+# so `DRY_RUN=True` or `DRY_RUN=yes` would quietly arm a destructive run. This
+# script deletes container images: fail closed on anything unrecognised.
+case "$DRY_RUN" in
+true | false) ;;
+*)
+	echo "ERROR: DRY_RUN must be 'true' or 'false', got: '$DRY_RUN'" >&2
+	exit 1
+	;;
+esac
+
 [[ "$MAIN_RETENTION_DAYS" =~ ^[0-9]+$ ]] || {
 	echo "ERROR: MAIN_RETENTION_DAYS must be a non-negative integer, got: '$MAIN_RETENTION_DAYS'" >&2
 	exit 1
@@ -93,20 +104,23 @@ ghcr_delete_version() {
 		return 0
 	fi
 
-	local err=""
-	if err=$(gh api --method DELETE \
+	# Same org-then-user probe as ghcr_fetch_versions, and the same reason to
+	# keep both errors: the org attempt's message is usually the informative
+	# one, and overwriting it with the user 404 hides why the delete failed.
+	local org_err user_err
+	if org_err=$(gh api --method DELETE \
 		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions/${version_id}" \
 		2>&1); then
 		return 0
 	fi
 
-	if err=$(gh api --method DELETE \
+	if user_err=$(gh api --method DELETE \
 		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions/${version_id}" \
 		2>&1); then
 		return 0
 	fi
 
-	log_error "Failed to delete version ${version_id}: ${err}"
+	log_error "Failed to delete version ${version_id} (orgs: ${org_err:-none}; users: ${user_err:-none})"
 	return 1
 }
 
