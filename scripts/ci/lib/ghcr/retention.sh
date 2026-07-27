@@ -104,6 +104,12 @@ ghcr_tag_is_deletable() {
 	local prerelease_cutoff="${4:?prerelease cutoff required}"
 	local class
 
+	# `[[ a < b ]]` collates in the current locale. The timestamps are fixed-width
+	# ASCII, so this is academic today, but a locale whose collation folds or
+	# ignores punctuation could reorder them -- and a mis-ordered comparison here
+	# deletes container images. Pin the byte order for the whole function.
+	local LC_ALL=C
+
 	# No usable timestamp, or one whose shape the lexicographic comparison below
 	# cannot order safely, means no defensible age -- keep.
 	[[ "$version_time" =~ $_GHCR_UTC_TIMESTAMP_PATTERN ]] || return 1

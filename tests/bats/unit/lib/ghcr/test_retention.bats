@@ -275,6 +275,26 @@ all_deletable() {
 	assert_success
 }
 
+@test "ghcr_tag_is_deletable: the age comparison is locale-independent" {
+	# `[[ a < b ]]` collates in the current locale. A collation that folds or
+	# ignores punctuation could reorder these fixed-width timestamps, and a
+	# mis-ordered comparison here deletes container images.
+	local loc
+	for loc in C en_US.UTF-8 de_DE.UTF-8 tr_TR.UTF-8; do
+		LC_ALL="$loc" run bash -c '
+			source "$LIB_DIR/ghcr/retention.sh"
+			ghcr_tag_is_deletable "$1" "$2" "$MAIN_CUTOFF" "$PRERELEASE_CUTOFF"
+		' _ "main" "$AGED"
+		assert_success
+
+		LC_ALL="$loc" run bash -c '
+			source "$LIB_DIR/ghcr/retention.sh"
+			ghcr_tag_is_deletable "$1" "$2" "$MAIN_CUTOFF" "$PRERELEASE_CUTOFF"
+		' _ "main" "$RECENT"
+		assert_failure
+	done
+}
+
 # =============================================================================
 # ghcr_all_tags_deletable - THE RULE THAT MUST NOT BE INVERTED
 # =============================================================================
