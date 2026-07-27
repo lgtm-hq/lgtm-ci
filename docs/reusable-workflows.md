@@ -1536,6 +1536,9 @@ collection is incomplete.
 | `build-cache-pr-age-days` | `14` | Min age before cache deletion |
 | `protect-referenced` | `true` | Skip when refs incomplete |
 | `prune-buildcache` | `true` | Delete aged ephemeral tags |
+| `prune-tagged` | `false` | Opt in to tagged retention (below) |
+| `main-retention-days` | `30` | `main` / `sha-*` retention (`prune-tagged` only) |
+| `prerelease-retention-days` | `90` | Pre-release retention (`prune-tagged` only) |
 | `dry-run` | `false` | Log only, no deletions |
 | `egress-policy` | `block` | `audit` or `block` |
 | `egress-preset` | `github-tooling` | API + GHCR hosts |
@@ -1546,6 +1549,64 @@ collection is incomplete.
 
 Grant `contents: read` and `packages: write` on the caller job. Forward a token with
 `packages:write` via `secrets.token` (or `secrets: inherit`).
+
+#### Tagged retention (`prune-tagged`)
+
+Untagged pruning alone leaves tagged versions to accumulate forever: any repo
+using `reusable-docker` with the default tag matrix publishes a `sha-<commit>`
+tag on every default-branch push. Set `prune-tagged: true` to also age out
+tagged versions. It is **off by default**, so existing callers are unaffected.
+
+| Tag shape | Policy |
+| --- | --- |
+| `latest` | never deleted |
+| semver (`1`, `1.2`, `1.2.3`, optional leading `v`) | never deleted |
+| `main`, `sha-*` | deleted past `main-retention-days` |
+| pre-release channel (below) | deleted past `prerelease-retention-days` |
+| anything else | never deleted (fail safe) |
+
+A tag is in the pre-release channel when it is exactly `alpha`, `beta`, `rc`,
+`pre`, `dev` or `snapshot`, optionally preceded by anything ending in `-` and
+optionally followed by digits, `.`, `_` or `-`: `dev`, `1.2.3-alpha.1`,
+`2.0.0-beta`, `1.2.3-rc1`, `1.0.0-pre.2`, `3.1.0-snapshot`. The match is
+anchored, not a substring — `predeploy` is *not* the `pre` channel and lands in
+"anything else", which is never deleted. The exact patterns live in
+`scripts/ci/lib/ghcr/retention.sh`.
+
+A GHCR version can carry several tags on one manifest. **A version is deleted
+only when *every* tag on it is deletable** — never when any single tag says
+delete. That is what makes the policy safe:
+
+- A release build publishes `:latest`, `:<semver>` and `:sha-<commit>` onto one
+  manifest. `latest` and semver never expire, so the whole version is retained
+  and the release's immutable `sha-` pin survives forever.
+- A main-push build publishes only `:main` + `:sha-<commit>`. Once `:main` moves
+  on, the version is a lone `sha-*` and ages out at `main-retention-days`.
+
+Inverting that rule ("delete if *any* tag is deletable") would delete every
+release image the moment its `sha-` tag ages out while `:latest` still pointed
+at it. The library enforcing it is `scripts/ci/lib/ghcr/retention.sh`
+(`ghcr_all_tags_deletable`), and it is covered by named regression tests.
+
+Age uses `updated_at` when GitHub reports it, falling back to `created_at`, so a
+recently re-pushed manifest is never treated as old. `dry-run` covers tagged
+pruning too — there is no second dry-run input.
+
+##### GitOps consumers that pin `sha-<commit>`
+
+Some deployment repos pin a concrete `ghcr.io/<owner>/<pkg>:sha-<commit>` as
+their production reference (lgtm-hq/rustume-ops does, in `deploy/image.txt`). A
+running container survives its image being pruned, but redeploy, restart and
+rollback all fail to pull.
+
+The all-must-agree rule makes this safe **only when the pinned image came from a
+release build** — that manifest also carries `latest`/semver, so it is retained
+indefinitely. An image pinned from a plain main build carries only `main` +
+`sha-*` and *will* be pruned at `main-retention-days`. Pin release-channel
+images, or raise `main-retention-days` beyond your longest expected deploy gap.
+
+This policy was proven in production in lgtm-hq/Rustume's inline `prune-tagged`
+job before being generalised here; that repo can now drop its local copy.
 
 ```yaml
 'on':

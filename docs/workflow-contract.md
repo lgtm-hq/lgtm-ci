@@ -1329,7 +1329,11 @@ Required secrets: `GH_TOKEN`.
 `reusable-ghcr-cleanup.yml` prunes aged untagged container versions and ephemeral
 build-cache tags. Referenced-digest protection walks tagged manifest indexes and
 OCI Referrers before untagged deletion; the job skips pruning when registry auth
-or manifest collection is incomplete.
+or manifest collection is incomplete. Opt in to `prune-tagged` to also age out
+`main`/`sha-*` and pre-release tagged versions — a version is deleted only when
+every tag on it is deletable, so release manifests (`latest` + semver + `sha-*`)
+are kept forever. See
+[reusable-workflows.md](reusable-workflows.md#tagged-retention-prune-tagged).
 
 | Input | Default | Notes |
 | --- | --- | --- |
@@ -1339,6 +1343,9 @@ or manifest collection is incomplete.
 | `build-cache-pr-age-days` | `14` | Min cache age |
 | `protect-referenced` | `true` | Skip when incomplete |
 | `prune-buildcache` | `true` | Delete ephemeral tags |
+| `prune-tagged` | `false` | Opt in to tagged retention |
+| `main-retention-days` | `30` | `main` / `sha-*` retention |
+| `prerelease-retention-days` | `90` | Pre-release retention |
 | `dry-run` | `false` | Log only |
 | `egress-policy` | `block` | `audit` or `block` |
 | `egress-preset` | `github-tooling` | Preset host list |
