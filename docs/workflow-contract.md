@@ -1436,15 +1436,41 @@ summaries). merge_group-safe: tests run; PR summary gated to `pull_request`.
 `post-build-test-command`, then uploads `artifact-path` for cross-job handoff
 (turbo-themes Build & Quality → Validate Examples; holy-grail Build & Test).
 
-Pass **exactly one** of `node-version` (single) or `node-version-matrix` (JSON
-array such as `'["20","22"]'`). Matrix legs keep a static inner `name:
-${{ inputs.job-name }}` so GitHub appends the version suffix. Required-check
-contexts therefore look like `{caller_job_id} / {job-name} ({node-version})`
-(for example `build / 🏗️ Build & Quality Checks (20)`). Plan org ruleset updates
-in lockstep with consumer migration.
+`toolchain` (`node` | `rust` | `python` | `none`, default `node`) selects the
+setup action installed before the build. It is an enum, not a free-form action
+ref, so every toolchain stays digest-pinned inside lgtm-ci and covered by
+`validate-action-pinning`; new ecosystems arrive by PR here. `toolchain-version`
+sets the version (`stable` for rust, `3.12` for python; alias of `node-version`
+for node). Neither the Rust nor the Python setup installs project dependencies.
 
-Single-version uploads use `artifact-name` verbatim. Matrix mode appends
-`-<node-version>` so parallel legs do not collide (`js-dist-20`, `js-dist-22`).
+`matrix` takes an arbitrary JSON matrix (array of objects, or an object with an
+`include` array) and generalises `node-version-matrix`, which is **deprecated**
+and warns when set. `runner-map` maps a matrix value to a runner label, the same
+pair `reusable-docker` uses for `platforms`; values with no mapping fall back to
+`runner-image` with a `::notice::`. Set `runner-map-key` when entries have more
+than one field — an entry missing that field is rejected. The resolved runner is
+injected as a `runner` matrix field (and only when `runner-map` is non-empty), so
+legacy Node callers keep their existing job names and check contexts.
+
+Each matrix field is exported to `build-command` and `post-build-test-command`
+as `MATRIX_<FIELD>` (`target` → `$MATRIX_TARGET`), so a cross-compile leg can
+read its own target without a per-repo wrapper.
+
+Legacy Node callers pass **exactly one** of `node-version` (single) or
+`node-version-matrix` (JSON array such as `'["20","22"]'`); both are rejected
+alongside `matrix`, which is the general form every non-Node caller uses. Matrix
+legs keep a static inner `name: ${{ inputs.job-name }}` so GitHub appends the
+matrix suffix. For a legacy Node caller that suffix is the node version, so
+required-check contexts look like `{caller_job_id} / {job-name} ({node-version})`
+(for example `build / 🏗️ Build & Quality Checks (20)`) — unchanged by #760. An
+arbitrary `matrix` gets the fields it declares instead (`(x86_64-apple-darwin,
+stable)`), plus the injected `runner` when `runner-map` is non-empty. Plan org
+ruleset updates in lockstep with consumer migration.
+
+Single-version uploads use `artifact-name` verbatim. Matrix mode appends the
+leg's matrix values so parallel legs do not collide (`js-dist-20`,
+`js-dist-22`; `rustume-x86_64-apple-darwin-stable`). The injected `runner` field
+is excluded from the suffix, so adding `runner-map` never renames an artifact.
 Workflow outputs expose `artifact-name`, `artifact-id`, and `artifact-url` from
 the build job (matrix runs surface one completed leg — prefer the naming
 convention when downloading from multi-leg matrices).
@@ -1456,8 +1482,13 @@ convention when downloading from multi-leg matrices).
 | `build-command`           | required  | e.g. `./scripts/build.sh --quick`, `bun run build` |
 | `artifact-name`           | required  | Base upload name; matrix appends `-<version>`      |
 | `artifact-path`           | required  | Relative to `working-directory`                     |
+| `toolchain`               | `node`    | `node` \| `rust` \| `python` \| `none`             |
+| `toolchain-version`       | empty     | Toolchain version; alias of `node-version` (node)  |
+| `matrix`                  | empty     | Arbitrary JSON matrix; XOR with the node inputs    |
+| `runner-map`              | `{}`      | Matrix value → runner; unmapped uses `runner-image`|
+| `runner-map-key`          | empty     | Lookup field; auto for single-field entries        |
 | `node-version`            | empty     | XOR with `node-version-matrix`                     |
-| `node-version-matrix`     | empty     | JSON string array; XOR with `node-version`         |
+| `node-version-matrix`     | empty     | Deprecated (use `matrix`); XOR with `node-version` |
 | `post-build-test-command` | empty     | Optional post-build test gate                      |
 | `retention-days`          | `7`       | Artifact retention                                 |
 | `working-directory`       | `.`       | Build / post-test cwd                              |

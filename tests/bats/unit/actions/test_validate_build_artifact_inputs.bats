@@ -121,3 +121,187 @@ teardown() {
 	assert_failure
 	assert_output --partial "non-empty JSON array"
 }
+
+# --- toolchain-agnostic inputs (#760) ---------------------------------------
+
+@test "validate-build-artifact-inputs: legacy node call emits node toolchain outputs" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		NODE_VERSION="20" \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -q '^toolchain=node$' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -q '^version-key=node-version$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: rejects an unknown toolchain" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN="deno" \
+		TOOLCHAIN_VERSION="2" \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "toolchain must be one of: node, rust, python, none"
+}
+
+@test "validate-build-artifact-inputs: rust toolchain defaults to stable" {
+	run env \
+		BUILD_COMMAND="cargo build --release" \
+		ARTIFACT_PATH="target/release/app" \
+		TOOLCHAIN="rust" \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_output --partial "Resolved Rust versions: stable"
+	run grep -q '^version-key=rust-toolchain$' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -q '^versions=stable$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: python toolchain honours toolchain-version" {
+	run env \
+		BUILD_COMMAND="uv build" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN="python" \
+		TOOLCHAIN_VERSION="3.13" \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -q '^version-key=python-version$' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -q '^versions=3.13$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: python toolchain defaults to 3.12" {
+	run env \
+		BUILD_COMMAND="uv build" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN="python" \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -q '^versions=3.12$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: toolchain none needs no version" {
+	run env \
+		BUILD_COMMAND="make dist" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN="none" \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -q '^version-key=$' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -q '^matrix-mode=false$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: toolchain-version is a node-version alias" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN_VERSION="22" \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_output --partial "Resolved Node.js versions: 22"
+	run grep -q '^versions=22$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: rejects node-version with a non-node toolchain" {
+	run env \
+		BUILD_COMMAND="cargo build" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN="rust" \
+		NODE_VERSION="20" \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "require toolchain: node"
+}
+
+@test "validate-build-artifact-inputs: rejects node-version with toolchain-version" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		NODE_VERSION="20" \
+		TOOLCHAIN_VERSION="22" \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "Set node-version or toolchain-version, not both"
+}
+
+@test "validate-build-artifact-inputs: matrix sets matrix mode" {
+	run env \
+		BUILD_COMMAND="cargo build --release" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN="rust" \
+		MATRIX='[{"target":"x86_64-apple-darwin"}]' \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -q '^matrix-mode=true$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "validate-build-artifact-inputs: rejects matrix with node-version" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		NODE_VERSION="20" \
+		MATRIX='[{"node-version":"20"}]' \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "matrix is mutually exclusive"
+}
+
+@test "validate-build-artifact-inputs: rejects matrix with node-version-matrix" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		NODE_VERSION_MATRIX='["20"]' \
+		MATRIX='[{"node-version":"20"}]' \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "matrix is mutually exclusive"
+}
+
+@test "validate-build-artifact-inputs: warns that node-version-matrix is deprecated" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		NODE_VERSION_MATRIX='["20","22"]' \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_output --partial "::warning::node-version-matrix is deprecated"
+}
+
+@test "validate-build-artifact-inputs: matrix keeps toolchain-version as the leg default" {
+	run env \
+		BUILD_COMMAND="bun run build" \
+		ARTIFACT_PATH="dist" \
+		TOOLCHAIN_VERSION="22" \
+		MATRIX='[{"target":"linux"},{"target":"darwin"}]' \
+		bash "$SCRIPT"
+
+	assert_success
+	run grep -q '^toolchain-version=22$' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -q '^matrix-mode=true$' "$GITHUB_OUTPUT"
+	assert_success
+}

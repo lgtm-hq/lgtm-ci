@@ -3,6 +3,11 @@
 # Matrix legs keep a static inner job name so GitHub appends the version suffix
 # (e.g. "🏗️ Build & Quality Checks (20)"), matching org ruleset contexts:
 # `{caller_job_id} / {job-name} ({node-version})`.
+#
+# Toolchain-agnostic (#760): `toolchain` selects a vetted, digest-pinned setup
+# action, `matrix` generalises `node-version-matrix`, and `runner-map` routes
+# matrix entries to runners the same way reusable-docker does. A caller that
+# sets none of those keeps exactly today's Node behaviour, including job names.
 name: Reusable Build Artifact Workflow
 
 on:
@@ -19,24 +24,68 @@ on:
           bun run build). Runs in working-directory.
         required: true
         type: string
+      toolchain:
+        description: >-
+          Toolchain to install before build-command: node | rust | python |
+          none. Each value maps to a digest-pinned setup action inside lgtm-ci
+          (enum rather than a free-form action ref so pinning stays centralised
+          and validate-action-pinning keeps covering it).
+        required: false
+        type: string
+        default: "node"
+      toolchain-version:
+        description: >-
+          Version for the selected toolchain (node-version / python-version /
+          rust-toolchain). Alias of node-version when toolchain is node.
+          Defaults: rust stable, python 3.12. Ignored when toolchain is none.
+        required: false
+        type: string
+        default: ""
+      matrix:
+        description: >-
+          Arbitrary JSON build matrix: an array of objects, or an object with an
+          "include" array. Generalises node-version-matrix, e.g.
+          '[{"target":"x86_64-apple-darwin"},{"target":"x86_64-unknown-linux-musl"}]'.
+          Mutually exclusive with node-version and node-version-matrix.
+        required: false
+        type: string
+        default: ""
+      runner-map:
+        description: >-
+          JSON object mapping a matrix value to a runner label, mirroring
+          reusable-docker. Matrix values with no mapping fall back to
+          runner-image. Example: {"x86_64-apple-darwin":"macos-15"}
+        required: false
+        type: string
+        default: "{}"
+      runner-map-key:
+        description: >-
+          Matrix field used as the runner-map lookup key. Empty auto-detects
+          when matrix entries have exactly one field; required when they have
+          more than one.
+        required: false
+        type: string
+        default: ""
       node-version:
         description: >-
           Single Node.js version. Mutually exclusive with node-version-matrix.
+          Equivalent to toolchain-version with toolchain: node.
         required: false
         type: string
         default: ""
       node-version-matrix:
         description: >-
-          JSON array of Node.js versions for a matrix (e.g. '["20","22"]').
-          Mutually exclusive with node-version. Legs keep a static inner name;
-          GitHub appends the version suffix.
+          DEPRECATED (use matrix). JSON array of Node.js versions for a matrix
+          (e.g. '["20","22"]'). Mutually exclusive with node-version. Legs keep
+          a static inner name; GitHub appends the version suffix.
         required: false
         type: string
         default: ""
       artifact-name:
         description: >-
-          Artifact name for upload. Matrix mode appends -<node-version> so legs
-          do not collide.
+          Artifact name for upload. Matrix mode appends the leg's matrix values
+          (-<node-version>, -<target>, ...) so legs do not collide. The
+          runner-map-injected runner is excluded from the suffix.
         required: true
         type: string
       artifact-path:
@@ -72,7 +121,10 @@ on:
         type: string
         default: "block"
       allowed-endpoints:
-        description: "Allowed endpoints when egress-policy is block"
+        description: >-
+          Allowed endpoints when egress-policy is block. The default covers the
+          setup host and ecosystem registry of every vetted toolchain, so any
+          `toolchain` value builds with no egress configuration.
         required: false
         type: string
         default: >
@@ -91,6 +143,11 @@ on:
           files.pythonhosted.org:443
           astral.sh:443
           releases.astral.sh:443
+          static.rust-lang.org:443
+          sh.rustup.rs:443
+          crates.io:443
+          static.crates.io:443
+          index.crates.io:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -121,7 +178,7 @@ on:
     outputs:
       artifact-name:
         description: >-
-          Uploaded artifact name (matrix legs append -<node-version>). For
+          Uploaded artifact name (matrix legs append their matrix values). For
           multi-leg matrices this reflects one completed leg; prefer the
           documented naming convention for downloads.
         value: ${{ jobs.build.outputs.artifact-name }}
@@ -143,6 +200,9 @@ jobs:
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
       matrix-mode: ${{ steps.validate.outputs.matrix-mode }}
+      # Validated and trimmed; the setup steps gate on this rather than on the
+      # raw input so a padded toolchain value cannot skip its setup step.
+      toolchain: ${{ steps.validate.outputs.toolchain }}
 
     steps:
       - name: Harden runner
@@ -185,24 +245,32 @@ jobs:
         env:
           BUILD_COMMAND: ${{ inputs.build-command }}
           ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          TOOLCHAIN: ${{ inputs.toolchain }}
+          TOOLCHAIN_VERSION: ${{ inputs.toolchain-version }}
           NODE_VERSION: ${{ inputs.node-version }}
           NODE_VERSION_MATRIX: ${{ inputs.node-version-matrix }}
+          MATRIX: ${{ inputs.matrix }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-build-artifact-inputs.sh
-      - name: Generate Node.js matrix
+      - name: Generate build matrix
         id: matrix
         shell: bash
         env:
-          MATRIX_KEY: node-version
-          MATRIX_LABEL: Node.js
-          DEFAULT_VERSION: ${{ steps.validate.outputs.versions }}
-          VERSIONS_INPUT: ${{ steps.validate.outputs.versions }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
+          VERSION_KEY: ${{ steps.validate.outputs.version-key }}
+          VERSIONS: ${{ steps.validate.outputs.versions }}
+          TOOLCHAIN_VERSION: ${{ steps.validate.outputs.toolchain-version }}
+          MATRIX: ${{ inputs.matrix }}
+          RUNNER_MAP: ${{ inputs.runner-map }}
+          RUNNER_MAP_KEY: ${{ inputs.runner-map-key }}
+          DEFAULT_RUNNER: ${{ inputs.runner-image }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-build-matrix.sh
 
   build:
     name: ${{ inputs.job-name }}
     needs: prepare
-    runs-on: ${{ inputs.runner-image }}
+    # runner-map legs carry their own runner; every other leg (including every
+    # legacy Node caller, which never gets a runner field) uses runner-image.
+    runs-on: ${{ matrix.runner || inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -250,15 +318,39 @@ jobs:
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             scripts/ci/
+            .github/actions/setup-python
+            .github/actions/setup-rust
       - name: Setup Node.js
+        if: needs.prepare.outputs.toolchain == 'node'
+        # Pinned to SHA for supply chain security
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node-version }}
+      - name: Setup Python
+        if: needs.prepare.outputs.toolchain == 'python'
+        # Digest pinning lives inside the composite (astral-sh/setup-uv).
+        # Dependency installation stays the caller's build-command.
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+        with:
+          python-version: ${{ matrix.python-version }}
+          working-directory: ${{ inputs.working-directory }}
+          install-dependencies: "false"
+      - name: Setup Rust
+        if: needs.prepare.outputs.toolchain == 'rust'
+        # Digest pinning lives inside the composite (dtolnay/rust-toolchain).
+        # A matrix.target field, when present, is installed as a rustup target
+        # so cross-compilation matrices work without extra inputs.
+        uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
+        with:
+          toolchain: ${{ matrix.rust-toolchain }}
+          targets: ${{ matrix.target }}
+          working-directory: ${{ inputs.working-directory }}
       - name: Resolve artifact name
         id: resolve-name
         shell: bash
         env:
           ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          MATRIX_JSON: ${{ toJson(matrix) }}
           NODE_VERSION: ${{ matrix.node-version }}
           MATRIX_MODE: ${{ needs.prepare.outputs.matrix-mode }}
         run: >-
@@ -270,6 +362,9 @@ jobs:
           POST_BUILD_TEST_COMMAND: ${{ inputs.post-build-test-command }}
           ARTIFACT_PATH: ${{ inputs.artifact-path }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          # Exposes the leg as MATRIX_<FIELD> (e.g. MATRIX_TARGET) so an
+          # arbitrary matrix can reach the caller's build command.
+          MATRIX_JSON: ${{ toJson(matrix) }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-build-artifact.sh
       - name: Upload build artifact
         id: upload

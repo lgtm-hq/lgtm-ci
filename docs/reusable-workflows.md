@@ -967,8 +967,30 @@ workflow does not download the artifact — it only links to it.
 
 ### Build artifact (`reusable-build-artifact.yml`)
 
-Generic Node build + artifact upload for cross-job handoff. Callers supply the
-build command; dependency install belongs in that command or a wrapper script.
+Generic build + artifact upload for cross-job handoff, for any of the vetted
+toolchains. Callers supply the build command; dependency install belongs in that
+command or a wrapper script.
+
+`toolchain` is an enum (`node` | `rust` | `python` | `none`), not a free-form
+action ref: every value maps to a setup action pinned by digest inside lgtm-ci,
+so `validate-action-pinning` keeps covering the toolchain and consumers never
+carry that burden. Adding an ecosystem is a PR here.
+
+<!-- markdownlint-disable MD013 -->
+
+| `toolchain` | Setup                                                 | Version input                          | Matrix field     |
+| ----------- | ----------------------------------------------------- | -------------------------------------- | ---------------- |
+| `node`      | `actions/setup-node`                                  | `node-version`                         | `node-version`   |
+| `rust`      | `.github/actions/setup-rust` (dtolnay/rust-toolchain) | `toolchain-version` (default `stable`) | `rust-toolchain` |
+| `python`    | `.github/actions/setup-python` (astral-sh/setup-uv)   | `toolchain-version` (default `3.12`)   | `python-version` |
+| `none`      | nothing installed                                     | —                                      | —                |
+
+<!-- markdownlint-enable MD013 -->
+
+With `toolchain: rust`, a `target` field on a matrix entry is installed as a
+rustup target, so cross-compilation matrices need no extra input. Neither the
+Python nor the Rust setup installs project dependencies — that stays in
+`build-command`.
 
 ```yaml
 jobs:
@@ -980,7 +1002,8 @@ jobs:
       tooling-ref: <sha>
       job-name: "🏗️ Build & Quality Checks"
       build-command: ./scripts/build.sh --quick
-      node-version-matrix: '["20","22"]'
+      # node-version-matrix: '["20","22"]' still works but is deprecated
+      matrix: '[{"node-version":"20"},{"node-version":"22"}]'
       artifact-name: js-dist
       artifact-path: dist
       runner-image: ubuntu-24.04
@@ -1014,24 +1037,79 @@ jobs:
       artifact-path: dist
 ```
 
+Non-Node example — a Rust cross-compile matrix with per-target runners. `matrix`
+is the general form of `node-version-matrix`, and `runner-map` routes each entry
+to a runner exactly like `reusable-docker`'s `platforms` + `runner-map` pair:
+
+```yaml
+jobs:
+  build:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-artifact.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      tooling-ref: <sha>
+      job-name: "🦀 Build binaries"
+      toolchain: rust
+      toolchain-version: stable
+      matrix: >-
+        [{"target":"x86_64-unknown-linux-musl"},
+         {"target":"aarch64-apple-darwin"},
+         {"target":"x86_64-pc-windows-msvc"}]
+      runner-map: >-
+        {"aarch64-apple-darwin":"macos-15",
+         "x86_64-pc-windows-msvc":"windows-2025"}
+      build-command: cargo build --release --target "$MATRIX_TARGET"
+      artifact-name: rustume
+      artifact-path: target/release
+      # Optional: the default allowlist already covers rustup and crates.io, so
+      # a preset is only needed for hosts a build reaches beyond its toolchain.
+      # allowed-endpoints-mode must be append or the non-empty default
+      # allowed-endpoints replaces the preset outright.
+      egress-preset: rust-release
+      allowed-endpoints-mode: append
+```
+
+Every matrix field reaches `build-command` and `post-build-test-command` as
+`MATRIX_<FIELD>` (`target` → `$MATRIX_TARGET`, `rust-toolchain` →
+`$MATRIX_RUST_TOOLCHAIN`), which is how a cross-compile leg knows its target.
+
+Legs upload `rustume-x86_64-unknown-linux-musl-stable`, … — the suffix is the
+leg's matrix values (the injected `runner` is excluded). The unmapped
+`x86_64-unknown-linux-musl` entry falls back to `runner-image` with a `::notice::`,
+mirroring `reusable-docker`'s runner-map. When entries carry more than one field,
+set `runner-map-key` to name the lookup field; an entry missing that field is a
+hard error rather than a silent default.
+
 <!-- markdownlint-disable MD013 -->
 
-| Input                     | Type   | Required | Default | Notes                                      |
-| ------------------------- | ------ | -------- | ------- | ------------------------------------------ |
-| `build-command`           | string | yes      | —       | Shell build command                        |
-| `artifact-name`           | string | yes      | —       | Upload name; matrix appends `-<version>`   |
-| `artifact-path`           | string | yes      | —       | Relative to `working-directory`            |
-| `node-version`            | string | xor      | `""`    | Single version; not with matrix            |
-| `node-version-matrix`     | string | xor      | `""`    | JSON array e.g. `'["20","22"]'`            |
-| `post-build-test-command` | string | no       | `""`    | Optional post-build test                   |
-| `retention-days`          | number | no       | `7`     | Artifact retention                         |
-| `working-directory`       | string | no       | `.`     | Build cwd                                  |
-| `job-name`                | string | no       | `Build` | Static inner name; GitHub adds matrix leg  |
+| Input                     | Type   | Required | Default  | Notes                                                        |
+| ------------------------- | ------ | -------- | -------- | ------------------------------------------------------------ |
+| `build-command`           | string | yes      | —        | Shell build command                                          |
+| `artifact-name`           | string | yes      | —        | Upload name; matrix appends the leg's values                 |
+| `artifact-path`           | string | yes      | —        | Relative to `working-directory`                              |
+| `toolchain`               | string | no       | `node`   | `node` \| `rust` \| `python` \| `none`                       |
+| `toolchain-version`       | string | no       | `""`     | Toolchain version; alias of `node-version` for `node`        |
+| `matrix`                  | string | no       | `""`     | JSON array of objects (or `{"include": [...]}`)              |
+| `runner-map`              | string | no       | `{}`     | Matrix value → runner label; unmapped falls back             |
+| `runner-map-key`          | string | no       | `""`     | Lookup field; auto when entries have one field               |
+| `node-version`            | string | xor      | `""`     | Single version; not with `matrix`                            |
+| `node-version-matrix`     | string | xor      | `""`     | **Deprecated** — use `matrix`; warns when set                |
+| `post-build-test-command` | string | no       | `""`     | Optional post-build test                                     |
+| `retention-days`          | number | no       | `7`      | Artifact retention                                           |
+| `working-directory`       | string | no       | `.`      | Build cwd                                                    |
+| `job-name`                | string | no       | `Build`  | Static inner name; GitHub adds matrix leg                    |
 
 <!-- markdownlint-enable MD013 -->
 
-Outputs: `artifact-name`, `artifact-id`, `artifact-url`. Check contexts:
-`{caller_job_id} / {job-name} ({node-version})` for matrix legs. See
+Outputs: `artifact-name`, `artifact-id`, `artifact-url`. GitHub appends a matrix
+leg's fields to the check context, so a legacy Node caller still gets
+`{caller_job_id} / {job-name} ({node-version})` while an arbitrary `matrix` gets
+the fields it declares (`(x86_64-apple-darwin, stable)`), plus the injected
+`runner` when `runner-map` is non-empty. A caller that sets none of the toolchain
+inputs keeps exactly the Node behaviour it had before #760, including job names
+and required-check contexts — `runner` is only added to matrix legs when
+`runner-map` is non-empty. See
 [workflow-contract.md](workflow-contract.md#build-artifact).
 
 ### Push (publish to registry)

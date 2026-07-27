@@ -92,3 +92,90 @@ teardown() {
 	assert_failure
 	assert_output --partial "Working directory does not exist"
 }
+
+# --- matrix leg exposure (#760) ---------------------------------------------
+
+@test "run-build-artifact: exports matrix fields to the build command" {
+	run env \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		MATRIX_JSON='{"target":"x86_64-apple-darwin","rust-toolchain":"stable"}' \
+		BUILD_COMMAND='mkdir -p dist && echo "$MATRIX_TARGET/$MATRIX_RUST_TOOLCHAIN" > dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND="" \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_output --partial "Matrix field exported: MATRIX_TARGET"
+	assert_equal "x86_64-apple-darwin/stable" "$(cat "${WORK_DIR}/dist/out.txt")"
+}
+
+@test "run-build-artifact: exports matrix fields to the post-build test command" {
+	run env \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		MATRIX_JSON='{"target":"wasm32-wasip1"}' \
+		BUILD_COMMAND='mkdir -p dist && touch dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND='test "$MATRIX_TARGET" = wasm32-wasip1' \
+		bash "$SCRIPT"
+
+	assert_success
+}
+
+@test "run-build-artifact: runs without MATRIX_JSON" {
+	# -u MATRIX_JSON: the missing-input path must be exercised even if a leaked
+	# MATRIX_JSON is present in the caller's environment.
+	run env \
+		-u MATRIX_JSON \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		BUILD_COMMAND='mkdir -p dist && touch dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND="" \
+		bash "$SCRIPT"
+
+	assert_success
+	refute_output --partial "Matrix field exported"
+}
+
+@test "run-build-artifact: fails on invalid MATRIX_JSON" {
+	run env \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		MATRIX_JSON='{target}' \
+		BUILD_COMMAND='mkdir -p dist && touch dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND="" \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_output --partial "MATRIX_JSON must be valid JSON"
+}
+
+@test "run-build-artifact: exports non-string matrix values as JSON scalars" {
+	run env \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		MATRIX_JSON='{"cross":true,"jobs":4}' \
+		BUILD_COMMAND='mkdir -p dist && echo "$MATRIX_CROSS/$MATRIX_JOBS" > dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND="" \
+		bash "$SCRIPT"
+
+	assert_success
+	assert_equal "true/4" "$(cat "${WORK_DIR}/dist/out.txt")"
+}
+
+@test "run-build-artifact: leaves no matrix temp file behind on failure" {
+	# A private TMPDIR makes the assertion deterministic: a shared /tmp count
+	# races against anything else creating temp files during the run.
+	local tmp_dir="${BATS_TEST_TMPDIR}/matrix-tmp"
+	mkdir -p "$tmp_dir"
+	run env \
+		TMPDIR="$tmp_dir" \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		MATRIX_JSON='[1,2]' \
+		BUILD_COMMAND='mkdir -p dist && touch dist/out.txt' \
+		ARTIFACT_PATH="dist" \
+		POST_BUILD_TEST_COMMAND="" \
+		bash "$SCRIPT"
+
+	assert_failure
+	assert_equal "" "$(find "$tmp_dir" -mindepth 1 2>/dev/null)"
+}
