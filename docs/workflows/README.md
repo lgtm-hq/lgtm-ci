@@ -42,10 +42,11 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-test-e2e.yml` | E2E testing with Playwright |
 | `reusable-test-e2e-playwright.yml` | Playwright E2E (smoke/a11y/full thin callers) |
 | `reusable-test-e2e-matrix.yml` | Matrix E2E testing with tag filtering |
+| `reusable-publish-test-results-pages.yml` | Deploy a report artifact to GitHub Pages |
 | `reusable-rust-build.yml` | Rust compile check |
 | `reusable-rust-test.yml` | Rust tests (nextest) with optional coverage |
 | `reusable-test-rust-build.yml` | Low-noise Rust build-only check (no PR context) |
-| `reusable-coverage.yml` | Unified coverage collection and publishing |
+| `reusable-coverage.yml` | Unified coverage collection and thresholds |
 | `reusable-publish-test-summary.yml` | Shared test/coverage summary comment publisher |
 | `reusable-test-node-publish.yml` | Node tests + isolated Pages/coverage-badge publish |
 | `reusable-test-python-publish.yml` | Python tests + isolated Pages/coverage-badge publish |
@@ -82,6 +83,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-deploy-pages.yml` | GitHub Pages deploy-only (caller builds) |
 | `reusable-deploy-site-with-reports.yml` | Build + bundle CI reports + deploy Pages (Model B) |
 | `reusable-sbom.yml` | SBOM generation with Cosign signing |
+| `reusable-sbom-release-upload.yml` | Attach SBOM artifact files to a GitHub Release |
 | `reusable-build-rust-binaries.yml` | Cross-compiled Rust release binaries matrix |
 | `reusable-site-quality.yml` | Docs site build, lychee, and site tests |
 | `reusable-ghcr-cleanup.yml` | Prune aged untagged GHCR images and build-cache tags |

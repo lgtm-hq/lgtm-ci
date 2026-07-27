@@ -33,7 +33,7 @@ inputs:
   upload-release-assets:
     description: >-
       Upload SBOM to the GitHub Release via anchore/sbom-action. Prefer false and
-      a dedicated contents:write job (reusable-sbom upload-release-assets).
+      a dedicated contents:write job (reusable-sbom-release-upload.yml, #770).
     required: false
     default: "false"
 

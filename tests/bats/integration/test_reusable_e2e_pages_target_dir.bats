@@ -1,15 +1,24 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Contract tests for reusable-test-e2e-matrix's Pages deploy path (#754)
+# Purpose: Contract tests for the Pages deploy path of the report publisher
+#          (#754, carried through the #770 split)
 #
-# #739/PR #752 namespaced this workflow's *artifacts*. The publish job still
-# deployed to a hardcoded `target-dir: playwright`, so two calls in one run that
-# both set `publish-results: true` wrote to the same Pages directory and the
-# second overwrote the first. `pages-target-dir` closes that half.
+# #739/PR #752 namespaced reusable-test-e2e-matrix's *artifacts*. Its publish
+# job still deployed to a hardcoded `target-dir: playwright`, so two calls in
+# one run that both published wrote to the same Pages directory and the second
+# overwrote the first. `pages-target-dir` closed that half.
+#
+# #770 then moved the publish job into reusable-publish-test-results-pages.yml,
+# so the deploy path these tests describe now lives there — input name,
+# validator and all. The assertions follow the behaviour rather than the file:
+# the same facts must hold, on whichever workflow performs the deploy. The last
+# two additionally pin that the deprecated input left behind on the matrix
+# workflow is genuinely inert.
 
 load "../../helpers/common"
 
-WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-e2e-matrix.yml"
+WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-test-results-pages.yml"
+E2E_MATRIX="${PROJECT_ROOT}/.github/workflows/reusable-test-e2e-matrix.yml"
 TARGET_DIR_VALIDATOR="${PROJECT_ROOT}/scripts/ci/actions/validate-pages-target-dir.sh"
 
 # Raw value of `key` under the `with:` block of the named step, read out of the
@@ -37,18 +46,20 @@ _render_target_dir() {
 	printf '%s' "${template//'${{ inputs.pages-target-dir }}'/$value}"
 }
 
-@test "reusable-test-e2e-matrix: pages-target-dir defaults to playwright" {
+# Required, not defaulted: the Pages directory is URL-visible, so a default
+# would silently publish a half-migrated caller's report over the site root.
+@test "publisher: pages-target-dir is a required string input" {
 	run awk '/^      pages-target-dir:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
 		"$WORKFLOW"
 	assert_success
-	assert_output --partial 'default: "playwright"'
 	assert_output --partial "type: string"
-	assert_output --partial "required: false"
+	assert_output --partial "required: true"
+	refute_output --partial "default:"
 }
 
-# A caller passing nothing must deploy to exactly today's path. This is a
-# backwards-compatible input addition, not a change of the published URL.
-@test "reusable-test-e2e-matrix: the default deploys to today's Pages path" {
+# A caller migrating off reusable-test-e2e-matrix passes the pages-target-dir it
+# used to pass there and must land on exactly the same published path.
+@test "publisher: passing playwright deploys to the pre-split Pages path" {
 	local rendered
 	rendered="$(_render_target_dir \
 		"$(_publish_with_value "Publish to GitHub Pages" target-dir)" playwright)"
@@ -59,7 +70,19 @@ _render_target_dir() {
 	}
 }
 
-@test "reusable-test-e2e-matrix: the publish target-dir is built from the input" {
+# Likewise for the coverage producer, whose publish job hardcoded `coverage`.
+@test "publisher: passing coverage deploys to the pre-split coverage path" {
+	local rendered
+	rendered="$(_render_target_dir \
+		"$(_publish_with_value "Publish to GitHub Pages" target-dir)" coverage)"
+
+	[ "$rendered" = "coverage" ] || {
+		echo "published coverage path changed: ${rendered}" >&2
+		return 1
+	}
+}
+
+@test "publisher: the publish target-dir is built from the input" {
 	local template
 	template="$(_publish_with_value "Publish to GitHub Pages" target-dir)"
 
@@ -72,14 +95,14 @@ _render_target_dir() {
 # The hardcoded value must be gone, not merely shadowed: a surviving literal
 # `target-dir: playwright` anywhere in this workflow would silently keep one
 # call pinned to the shared directory.
-@test "reusable-test-e2e-matrix: no hardcoded target-dir survives" {
+@test "publisher: no hardcoded target-dir survives" {
 	run grep -nE '^\s*target-dir:\s*[^$[:space:]]' "$WORKFLOW"
 	assert_failure
 }
 
 # The whole point of the input: two calls given distinct values must land in
 # distinct Pages directories, with neither a prefix of the other's tree.
-@test "reusable-test-e2e-matrix: distinct values deploy to distinct paths" {
+@test "publisher: distinct values deploy to distinct paths" {
 	local template a b
 	template="$(_publish_with_value "Publish to GitHub Pages" target-dir)"
 	a="$(_render_target_dir "$template" playwright)"
@@ -103,32 +126,30 @@ _render_target_dir() {
 	esac
 }
 
-# `pages-target-dir` must stay a separate input, not an alias of
-# `artifact-prefix`: the Pages path is URL-visible and deriving it would move a
-# caller's published URL the moment they set a prefix for artifact reasons.
-@test "reusable-test-e2e-matrix: artifact-prefix alone does not move the Pages path" {
+# `pages-target-dir` must stay a separate input, not an alias of the artifact
+# name: the Pages path is URL-visible and deriving it would move a caller's
+# published URL the moment they renamed an artifact for artifact reasons.
+@test "publisher: artifact-name alone does not move the Pages path" {
 	local template rendered
 	template="$(_publish_with_value "Publish to GitHub Pages" target-dir)"
-	# A caller that namespaces artifacts only, leaving pages-target-dir at its
-	# default: substituting artifact-prefix must be a no-op on the deploy path.
-	rendered="${template//'${{ inputs.artifact-prefix }}'/e2e_nightly}"
+	rendered="${template//'${{ inputs.artifact-name }}'/e2e-nightly-merged-report}"
 	rendered="$(_render_target_dir "$rendered" playwright)"
 
 	[ "$rendered" = "playwright" ] || {
-		echo "setting artifact-prefix moved the Pages path to: ${rendered}" >&2
+		echo "setting artifact-name moved the Pages path to: ${rendered}" >&2
 		return 1
 	}
 }
 
 # The value is interpolated into a deploy destination, so it must be validated
-# before anything runs — and in the job every other job depends on.
-@test "reusable-test-e2e-matrix: the setup job validates pages-target-dir" {
+# before anything is downloaded or staged.
+@test "publisher: the publish job validates pages-target-dir" {
 	# Both facts must hold for the *same* step: tracked independently, a
 	# validator step with no env plus an unrelated step carrying the env would
 	# satisfy the assertion while the script ran with an empty value.
 	run awk '
-		/^  setup:$/ { in_job = 1 }
-		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  setup:$/ { exit }
+		/^  publish:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  publish:$/ { exit }
 		in_job && /^      - name: / { step_script = 0; step_wired = 0 }
 		in_job && /validate-pages-target-dir\.sh$/ { step_script = 1 }
 		in_job && /PAGES_TARGET_DIR: \$\{\{ inputs\.pages-target-dir \}\}$/ { step_wired = 1 }
@@ -138,26 +159,66 @@ _render_target_dir() {
 	assert_success
 }
 
-# A rejected value must never reach the deploy. `publish` requires a successful
-# `merge`, and `merge` requires a successful `setup`, so a validation failure
-# transitively blocks the Pages write rather than deploying the rejected path.
-@test "reusable-test-e2e-matrix: a rejected value cannot reach the deploy" {
+# A rejected value must never reach the deploy. The split removed the
+# setup -> merge -> publish gate chain that used to provide this, so the
+# ordering inside the publish job is now what enforces it: the validator step
+# must come before the download and the deploy, and a failing step aborts the
+# job. Asserted on step order, not on presence, so moving the validator below
+# the deploy fails here.
+@test "publisher: validation precedes the download and the deploy" {
 	run awk '
-		/^  merge:$/ { job = "merge" }
-		/^  publish:$/ { job = "publish" }
-		job == "merge" && /^    if: / && /needs\.setup\.result == .success./ { merge_gated = 1 }
-		job == "publish" && /^    needs: merge$/ { publish_needs_merge = 1 }
-		job == "publish" && /^    if: / && /needs\.merge\.result == .success./ { publish_gated = 1 }
-		END { exit !(merge_gated && publish_needs_merge && publish_gated) }
+		/^  publish:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  publish:$/ { exit }
+		in_job && /^      - name: / { n += 1 }
+		in_job && /^      - name: Validate Pages target dir$/ { validate = n }
+		in_job && /^      - name: Download report artifact$/ { download = n }
+		in_job && /^      - name: Publish to GitHub Pages$/ { deploy = n }
+		END { exit !(validate && download && deploy && validate < download && download < deploy) }
 	' "$WORKFLOW"
+	assert_success
+	# No continue-on-error would let a rejected value sail past the validator.
+	run grep -q 'continue-on-error' "$WORKFLOW"
+	assert_failure
+}
+
+# The input left behind on the matrix workflow must be genuinely inert: still
+# accepted, since an unknown input to a reusable workflow is a hard
+# startup_failure, but read by nothing except the deprecation warning.
+@test "reusable-test-e2e-matrix: pages-target-dir is accepted but inert" {
+	run awk '/^      pages-target-dir:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$E2E_MATRIX"
+	assert_success
+	assert_output --partial "DEPRECATED"
+
+	run grep -c 'inputs\.pages-target-dir' "$E2E_MATRIX"
+	assert_success
+	[ "$output" -eq 1 ]
+	run grep -q 'INPUT_VALUE: ${{ inputs.pages-target-dir }}' "$E2E_MATRIX"
+	assert_success
+}
+
+@test "reusable-test-e2e-matrix: setting a deprecated publish input warns" {
+	local input
+	for input in publish-results pages-target-dir publish-egress-preset \
+		publish-allowed-endpoints; do
+		run awk -v name="          INPUT_NAME: ${input}" '
+			$0 == name { found = 1 }
+			END { exit !found }
+		' "$E2E_MATRIX"
+		assert_success
+	done
+	run grep -q 'warn-deprecated-workflow-input.sh' "$E2E_MATRIX"
 	assert_success
 }
 
 # The validator is the security control behind the deploy path; the workflow
 # default and the traversal/absolute rejections are asserted here against the
 # real script so the wiring above is not vacuous.
-@test "reusable-test-e2e-matrix: the validator accepts the default and rejects escapes" {
+@test "publisher: the validator accepts the migrated values and rejects escapes" {
 	run env PAGES_TARGET_DIR="playwright" bash "$TARGET_DIR_VALIDATOR"
+	assert_success
+
+	run env PAGES_TARGET_DIR="coverage" bash "$TARGET_DIR_VALIDATOR"
 	assert_success
 
 	run env PAGES_TARGET_DIR="../../etc" bash "$TARGET_DIR_VALIDATOR"
@@ -167,7 +228,12 @@ _render_target_dir() {
 	assert_failure
 }
 
-@test "reusable-test-e2e-matrix: docs document pages-target-dir" {
+@test "docs document pages-target-dir and where it moved" {
 	run grep -q "pages-target-dir" "${PROJECT_ROOT}/docs/workflows/testing.md"
+	assert_success
+	run grep -q "pages-target-dir" "${PROJECT_ROOT}/docs/pages-publishing.md"
+	assert_success
+	run grep -q "reusable-publish-test-results-pages" \
+		"${PROJECT_ROOT}/docs/workflows/testing.md"
 	assert_success
 }

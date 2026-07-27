@@ -126,9 +126,11 @@ merging.
 default 'smoke'), `browsers` (comma-separated, default 'chromium'),
 `tag-prefix` (default '@'), `shards` (per suite, default 1), `reporter`
 (json/html/blob, default 'html'), `upload-report` (default true),
-`publish-results` (default false), `timeout-minutes` (default 30),
-`artifact-prefix` (default 'playwright'), `pages-target-dir`
-(default 'playwright').
+`timeout-minutes` (default 30), `artifact-prefix` (default 'playwright').
+
+`publish-results`, `pages-target-dir`, `publish-egress-preset` and
+`publish-allowed-endpoints` are **deprecated and inert** since #770 — see
+below.
 
 Shards upload as `<artifact-prefix>-<suite>-<browser>-<shard>` and the merge
 job collects them with `<artifact-prefix>-*`, so a caller running this workflow
@@ -137,20 +139,50 @@ each merge picks up the other call's shards. The prefix must match
 `[A-Za-z0-9_.]+`: `-` is reserved as the separator, and allowing it inside the
 prefix would let `e2e-*` match an `e2e-nightly` call's shards.
 
-`pages-target-dir` is the separate, Pages-side half of the same isolation
-(#754). The `publish` job deploys the merged report to
-`<pages-site>/<pages-target-dir>/`, so two calls in one run that both set
-`publish-results: true` overwrite each other unless each is given its own
-value. It is **not** derived from `artifact-prefix`: this value is URL-visible,
-has no glob-disjointness requirement (so `-` is allowed), and deriving it would
-silently move the published URL of any caller that sets `artifact-prefix` for
-artifact reasons alone.
+#### Publishing moved out (#770)
 
-The workflow cannot detect the collision for you — a reusable workflow cannot
-see its sibling calls, so the `setup` job only validates the value in
-isolation: it must be a relative path matching `[A-Za-z0-9._/-]+` with no
-leading `/` and no `..` segment, because it is interpolated into a deploy
-destination. Keeping two publishing calls apart is the caller's contract.
+This workflow no longer deploys to Pages. Its `publish` job declared
+`pages: write`, `id-token: write` and `actions: write`, and because a reusable
+workflow's permission request is validated **statically**, every caller had to
+grant all three — including callers running with `publish-results: false`. The
+job moved to `reusable-publish-test-results-pages.yml`, which the caller invokes
+in its own job:
+
+```yaml
+publish-e2e:
+  needs: e2e-matrix
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-test-results-pages.yml@<sha>
+  permissions:
+    contents: read
+    pages: write
+    id-token: write
+    actions: write
+  with:
+    artifact-name: playwright-merged-report # '<artifact-prefix>-merged-report'
+    pages-target-dir: playwright # the value this call used to pass
+    results-path: "."
+```
+
+`publish-results`, `pages-target-dir`, `publish-egress-preset` and
+`publish-allowed-endpoints` are still accepted so pinned callers keep parsing —
+an unknown input to a reusable workflow is a hard `startup_failure` — but they
+do nothing and warn when set to a non-default value. `report-url` is always
+empty; read `pages-url` off the publisher job instead.
+
+`pages-target-dir` kept its name and its validator: it is the separate,
+Pages-side half of the artifact isolation (#754). The publisher deploys to
+`<pages-site>/<pages-target-dir>/`, so two publishing calls in one run overwrite
+each other unless each is given its own value. It is **not** derived from
+`artifact-prefix`: this value is URL-visible, has no glob-disjointness
+requirement (so `-` is allowed), and deriving it would silently move the
+published URL of any caller that sets `artifact-prefix` for artifact reasons
+alone.
+
+Neither workflow can detect the collision for you — a reusable workflow cannot
+see its sibling calls, so the publisher only validates the value in isolation:
+it must be a relative path matching `[A-Za-z0-9._/-]+` with no leading `/` and
+no `..` segment, because it is interpolated into a deploy destination. Keeping
+two publishing calls apart is the caller's contract.
 
 Distinct `pages-target-dir` values are necessary but not sufficient for two
 publishing calls on one site: every deploy uploads a **full site artifact** that
@@ -159,7 +191,8 @@ replaces the whole published site, and both jobs share the
 tree should use Model B (`reusable-deploy-site-with-reports`) or
 `merge-existing-site` — see [pages-publishing.md](../pages-publishing.md).
 
-**Outputs:** `total-passed`, `total-failed`, `report-url`.
+**Outputs:** `total-passed`, `total-failed`, `report-url` (deprecated, always
+empty).
 
 ### Isolated Pages publish variants
 
@@ -195,10 +228,18 @@ workflow — the workflow-level equivalent of chaining `collect-coverage` +
 
 **Inputs:** `coverage-files` (glob or list, default auto-detect), `format`
 (auto/istanbul/coverage-py/lcov, default 'auto'), `threshold` (default 0),
-`generate-badge` (default true), `publish-pages` (default false).
+`generate-badge` (default true).
 
-**Outputs:** `coverage-percent`, `badge-url`, `pages-url`, `passed`. The
-publish job requires `contents: read`, `pages: write`, `id-token: write`.
+`publish-pages` is **deprecated and inert** since #770: the Pages publish job
+moved to `reusable-publish-test-results-pages.yml` so that callers which never
+publish stop granting `pages`, `id-token` and `actions: write`. Call that
+workflow with `artifact-name` set to this call's `coverage-artifact-name`,
+`pages-target-dir: coverage`, `coverage-path` set to the `working-directory`
+(`.` for the repo root) and `badge-path` set to `<working-directory>/coverage`.
+
+**Outputs:** `coverage-percent`, `badge-url`, `passed`, plus `pages-url`
+(deprecated, always empty). The workflow itself requires only
+`contents: read` and `pull-requests: write`.
 
 ## Quality and gating
 

@@ -68,17 +68,20 @@ on:
         default: "sbom"
       upload-release-assets:
         description: >-
-          Report mode only: when true, run a dedicated contents:write job that
-          attaches the SBOM artifact to the GitHub Release. Generation itself
-          stays contents:read.
+          DEPRECATED (#770), accepted but inert. The contents:write upload job
+          moved to reusable-sbom-release-upload.yml, which the caller invokes
+          in its own job; keeping it here forced contents:write onto every
+          caller, scan-only ones included. Setting this to true warns and does
+          nothing. Removal is planned a release or two out.
         required: false
         type: boolean
         default: false
       release-tag:
         description: >-
-          Release tag for asset upload. Required when mode is release-assets.
-          In report mode with upload-release-assets, defaults to github.ref_name
-          when empty.
+          Ref to check out and generate the SBOM from in release-assets mode;
+          required in that mode. Attaching the result to the release is
+          reusable-sbom-release-upload.yml's job since #770, and that workflow
+          takes its own release-tag.
         required: false
         type: string
         default: ""
@@ -196,6 +199,18 @@ jobs:
           RELEASE_TAG: ${{ inputs.release-tag }}
           FORMATS: ${{ inputs.formats }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-sbom-mode.sh
+      - name: Warn on deprecated upload-release-assets
+        shell: bash
+        env:
+          INPUT_NAME: upload-release-assets
+          INPUT_VALUE: ${{ inputs.upload-release-assets }}
+          DEFAULT_VALUE: "false"
+          REPLACEMENT: >-
+            Add a job calling
+            lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom-release-upload.yml
+            with needs on this call, the same artifact-name and your
+            release-tag, and move the contents:write grant onto that job.
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-deprecated-workflow-input.sh
 
   sbom:
     name: ${{ inputs.job-name }}
@@ -205,7 +220,9 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Generation/scan/attest only need read for contents. Release asset upload
-      # is isolated in upload-release-assets (contents: write) — see #532.
+      # is isolated in reusable-sbom-release-upload.yml (contents: write) —
+      # see #532 for the original job split and #770 for moving it out of this
+      # file, which is what let this workflow's caller union drop to read.
       contents: read
       security-events: write
       id-token: write
@@ -262,7 +279,8 @@ jobs:
           upload-artifact: "true"
           artifact-name: ${{ inputs.artifact-name }}
           # Never let anchore attach release assets here — that needs
-          # contents:write and belongs in upload-release-assets (#532).
+          # contents:write and belongs in reusable-sbom-release-upload.yml
+          # (#532, #770).
           upload-release-assets: "false"
       - name: Scan vulnerabilities
         id: scan
@@ -280,57 +298,6 @@ jobs:
         with:
           subject-path: ${{ steps.generate.outputs.sbom-file }}
 
-  upload-release-assets:
-    name: Upload SBOM release assets
-    needs: [validate, sbom]
-    if: inputs.mode != 'release-assets' && inputs.upload-release-assets
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    permissions:
-      # STRUCTURALLY UNAVOIDABLE for every caller, including scan-mode ones that
-      # never reach this job (#737). `gh release upload --clobber` in
-      # scripts/ci/actions/upload-sbom-release-assets.sh:29 authenticates with
-      # GITHUB_TOKEN (GH_TOKEN below) and writes a release asset, which the REST
-      # release API gates on `contents: write`. Unlike #730's `actions: write`,
-      # there is no runtime-token code path to fall back on. Reusable permission
-      # requests are validated statically, so the union cannot shrink while this
-      # job lives in this file — splitting it out is tracked in #770.
-      contents: write
-
-    steps:
-      - name: Harden runner
-        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            scripts/ci/
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-      - name: Download SBOM artifact
-        # Pinned to SHA for supply chain security
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ inputs.artifact-name }}
-          path: sbom-artifact
-      - name: Upload SBOM to GitHub Release
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
-          ARTIFACT_NAME: ${{ inputs.artifact-name }}
-          SBOM_ARTIFACT_DIR: sbom-artifact
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/upload-sbom-release-assets.sh
-
   release-assets:
     name: ${{ inputs.job-name }}
     needs: [validate]
@@ -338,9 +305,11 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
-      # Same unavoidable grant as upload-release-assets above: this job ends in
-      # `gh release upload` (scripts/ci/actions/upload-sbom-release-assets.sh:29).
-      contents: write
+      # Read, not write (#770): this job generates and signs, then hands the
+      # files over as a workflow artifact. Attaching them to the release is
+      # reusable-sbom-release-upload.yml's job, so no job in this file requests
+      # contents:write any more and scan-mode callers stop granting it.
+      contents: read
       # Keyless cosign signing fetches an ambient OIDC credential; the scan job
       # declares the same scope, so this one does not widen the caller union.
       id-token: write
@@ -407,11 +376,33 @@ jobs:
           SIGN: ${{ inputs.sign }}
           SBOM_DIR: sbom
         run: bash .lgtm-ci-tooling/scripts/ci/actions/sign-sbom-release-assets.sh
-      - name: Upload SBOM assets to GitHub Release
+      # The handoff that replaces the in-job `gh release upload` (#770).
+      # reusable-sbom-release-upload.yml downloads this artifact by name and
+      # attaches every file in it to the release.
+      - name: Upload SBOM assets as artifact
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: sbom
+          retention-days: 30
+          # The release upload workflow downloads this without a tolerance
+          # guard, so the upload is part of this leg's verdict — no
+          # continue-on-error and no if-no-files-found: ignore here.
+          if-no-files-found: error
+          overwrite: true
+      - name: Warn that release upload moved
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ inputs.release-tag }}
-          ARTIFACT_NAME: ${{ inputs.artifact-name }}
-          SBOM_ARTIFACT_DIR: sbom
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/upload-sbom-release-assets.sh
+          NOTICE_KIND: behavior-change
+          INPUT_NAME: mode
+          INPUT_VALUE: ${{ inputs.mode }}
+          DEFAULT_VALUE: "report"
+          REPLACEMENT: >-
+            release-assets mode no longer attaches the generated files to the
+            GitHub Release itself; it uploads them as the '${{ inputs.artifact-name }}'
+            workflow artifact. Add a job calling
+            lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom-release-upload.yml
+            with needs on this one, the same artifact-name and your release-tag,
+            and grant contents:write there instead of here.
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-deprecated-workflow-input.sh
