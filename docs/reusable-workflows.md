@@ -59,30 +59,24 @@ should pin the workflow ref to a commit SHA and pass the same ref as
 Sometimes a snippet asks for a scope that the inputs it shows plainly do not use.
 That is either a bug in the workflow (a scope declared but never exercised —
 the #730 case, fixed by deleting the declaration) or a scope a conditional job
-really does need, in which case the static check forces it on everyone. The
-audit in #737 classified the remaining broad grants; all of them fall in the
-second group, and each is annotated in the workflow next to the declaration:
+really does need, in which case the static check forces it on everyone.
+
+The audit in #737 classified the broad grants on `reusable-sbom.yml`,
+`reusable-coverage.yml` and `reusable-test-e2e-matrix.yml`. **All of them were
+real**, so none could be deleted. #770 removed them from those callers the only
+way a genuinely-needed scope can be removed: by moving the job that needs it
+into its own reusable workflow, which a caller invokes only when it publishes.
 
 <!-- markdownlint-disable MD013 -- citation column exceeds default line length -->
 
-| Workflow | Scope forced on all callers | Declared by | Why it is real |
-| --- | --- | --- | --- |
-| `reusable-sbom.yml` | `contents: write` | `upload-release-assets`, `release-assets` | `gh release upload --clobber` with `GITHUB_TOKEN` (`scripts/ci/actions/upload-sbom-release-assets.sh:29`) |
-| `reusable-coverage.yml`, `reusable-test-e2e-matrix.yml` | `pages: write` | `publish` | `actions/deploy-pages` posts `/repos/{owner}/{repo}/pages/deployments` with `GITHUB_TOKEN` |
-| `reusable-coverage.yml`, `reusable-test-e2e-matrix.yml` | `id-token: write` | `publish` | `actions/deploy-pages` calls `core.getIDToken()` and sends it as the deployment's `oidc_token` |
-| `reusable-coverage.yml`, `reusable-test-e2e-matrix.yml` | `actions: write` | `publish` | `gh api --method DELETE /repos/{}/actions/artifacts/{id}` clears stale same-run Pages artifacts on rerun (`scripts/ci/actions/delete-run-pages-artifacts.sh:45-46`, #415) |
+| Scope | Now declared by | Why it is real |
+| --- | --- | --- |
+| `contents: write` | `reusable-sbom-release-upload.yml` | `gh release upload --clobber` with `GITHUB_TOKEN` (`scripts/ci/actions/upload-sbom-release-assets.sh:29`) |
+| `pages: write` | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` posts `/repos/{owner}/{repo}/pages/deployments` with `GITHUB_TOKEN` |
+| `id-token: write` | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` calls `core.getIDToken()` and sends it as the deployment's `oidc_token` |
+| `actions: write` | `reusable-publish-test-results-pages.yml` | `gh api --method DELETE /repos/{}/actions/artifacts/{id}` clears stale same-run Pages artifacts on rerun (`scripts/ci/actions/delete-run-pages-artifacts.sh:45-46`, #415) |
 
 <!-- markdownlint-enable MD013 -->
-
-**This table is the #737 audit's subset, not a full caller contract.** It covers
-only the scopes that audit examined — the ones that looked like over-grants and
-turned out not to be. Other scopes are equally unavoidable and simply were not
-in question: `reusable-sbom.yml` also forces `security-events: write`,
-`id-token: write` and `attestations: write` (all declared by its `sbom` job), and
-`reusable-coverage.yml` also forces `pull-requests: write` (declared by
-`publish-test-summary`). For the complete union a given workflow requires, use
-its caller snippet below — those are the authoritative contract and are pinned by
-`tests/bats/integration/test_reusable_permission_unions.bats`.
 
 The `actions: write` row is worth contrasting with #730. There the scope was
 requested for an `actions/upload-artifact/merge` step in
@@ -94,10 +88,130 @@ Here the same scope name covers a genuine `GITHUB_TOKEN` REST call that
 hard-fails without it. The scope string alone proves nothing — the credential
 the code path uses decides it.
 
-None of these can be narrowed in place: a reusable workflow's request is the
-union over its jobs, so the union only shrinks when *no* job declares the scope.
-Moving each publishing job into its own reusable workflow, invoked only by
-callers that publish, is proposed in #770 and deliberately out of scope for #737.
+Scopes still forced on every caller of a producer workflow are the ones its
+*unconditional* jobs need: `reusable-sbom.yml` requires `security-events: write`,
+`id-token: write` and `attestations: write` (all declared by its `sbom` job), and
+`reusable-coverage.yml` requires `pull-requests: write` (declared by
+`publish-test-summary`). For the complete union a given workflow requires, use
+its caller snippet below — those are the authoritative contract and are pinned by
+`tests/bats/integration/test_reusable_permission_unions.bats`.
+
+## Publishing split (#770)
+
+Three workflows used to carry a conditional publishing job. Because a reusable
+workflow's `permissions:` request is validated **statically**, before any job
+`if:` is evaluated, that job's scopes were part of the union every caller had to
+grant — including callers that had switched the job off. #770 moved the jobs out.
+
+<!-- markdownlint-disable MD013 -- migration table; columns exceed default line length -->
+
+| Was | Now |
+| --- | --- |
+| `reusable-coverage.yml` with `publish-pages: true` | `reusable-coverage.yml` + a caller job on `reusable-publish-test-results-pages.yml` |
+| `reusable-test-e2e-matrix.yml` with `publish-results: true` | `reusable-test-e2e-matrix.yml` + a caller job on `reusable-publish-test-results-pages.yml` |
+| `reusable-sbom.yml` with `upload-release-assets: true` | `reusable-sbom.yml` + a caller job on `reusable-sbom-release-upload.yml` |
+| `reusable-sbom.yml` with `mode: release-assets` | same call (it now uploads a workflow artifact) + a caller job on `reusable-sbom-release-upload.yml` |
+
+<!-- markdownlint-enable MD013 -->
+
+### Deprecation window
+
+`publish-pages`, `publish-results`, `pages-target-dir`, `publish-egress-preset`,
+`publish-allowed-endpoints` and `upload-release-assets` are still **accepted**
+and are **inert**. They are not deleted yet on purpose: a reusable workflow
+rejects an unknown input with a hard `startup_failure`, so removing them outright
+would break every pinned caller at parse time instead of letting it migrate.
+Setting any of them to a non-default value emits a `::warning::` and a job-summary
+block naming the replacement. They will be removed a release or two out.
+
+The `pages-url` output of `reusable-coverage.yml` and the `report-url` output of
+`reusable-test-e2e-matrix.yml` are kept for the same reason and are always empty.
+Read `pages-url` off the `reusable-publish-test-results-pages.yml` job instead.
+
+### Shared Pages publisher (`reusable-publish-test-results-pages.yml`)
+
+One publisher, not one per producer. Both former `publish` jobs wrapped the same
+`publish-test-results` composite action with the same three write scopes, the
+same `pages-<repo>-<ref>` concurrency group and the same `github-pages`
+environment; only the action's path inputs differed. The concurrency group and
+the environment moved with the job.
+
+`artifact-name` and `pages-target-dir` are **required**: the Pages directory is
+URL-visible, and defaulting it would publish a half-migrated caller's report over
+the site root. `results-path`, `coverage-path` and `badge-path` are relative to
+the **downloaded artifact's root**, where `.` means the root itself and the empty
+string means "this artifact has no content of that kind".
+
+```yaml
+jobs:
+  coverage:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-coverage.yml@<sha>
+    permissions:
+      contents: read
+      pull-requests: write
+
+  publish-coverage:
+    needs: coverage
+    if: github.ref == 'refs/heads/main'
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-test-results-pages.yml@<sha>
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: write
+    with:
+      artifact-name: coverage-report # the call's coverage-artifact-name
+      pages-target-dir: coverage # reproduces the pre-#770 URL
+      coverage-path: "." # working-directory '.'; otherwise pass it here
+      badge-path: coverage # otherwise '<working-directory>/coverage'
+
+  e2e-matrix:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@<sha>
+    permissions:
+      contents: read
+
+  publish-e2e:
+    needs: e2e-matrix
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-test-results-pages.yml@<sha>
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: write
+    with:
+      artifact-name: playwright-merged-report # '<artifact-prefix>-merged-report'
+      pages-target-dir: playwright # reproduces the pre-#770 URL
+      results-path: "."
+```
+
+### SBOM release upload (`reusable-sbom-release-upload.yml`)
+
+`reusable-sbom.yml` no longer contains a `gh release upload`. In both modes it
+leaves the SBOM files behind as a workflow artifact named `artifact-name`, and
+this workflow attaches them to the release.
+
+```yaml
+jobs:
+  sbom:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      attestations: write
+    with:
+      mode: release-assets
+      release-tag: ${{ github.ref_name }}
+
+  sbom-release-upload:
+    needs: sbom
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom-release-upload.yml@<sha>
+    permissions:
+      contents: write
+    with:
+      artifact-name: sbom
+      release-tag: ${{ github.ref_name }}
+```
 
 **Changing a reusable workflow's permissions or inputs does not automatically
 mean `examples/**` and `docs/onboarding.md` need the same change.** Those
@@ -312,14 +426,10 @@ jobs:
   e2e-matrix:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@<sha>
     permissions:
+      # Just read since #770: the Pages deploy moved to
+      # reusable-publish-test-results-pages.yml, which the caller invokes in its
+      # own job when it publishes.
       contents: read
-      # Declared by the `publish` job (Pages report deploy). Required even with
-      # publish-results left off, because the request is validated statically.
-      # All three are genuinely used when the job runs — see
-      # "Scopes a caller cannot avoid granting" above and #770.
-      pages: write
-      id-token: write
-      actions: write
     with:
       test-suites: smoke,visual
       browsers: chromium,firefox
@@ -1215,11 +1325,10 @@ jobs:
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
     permissions:
-      # write, not read: declared by the release-asset jobs, which end in
-      # `gh release upload`. Required in scan mode too, since the request is
-      # validated statically — see "Scopes a caller cannot avoid granting"
-      # above and #770.
-      contents: write
+      # Read since #770: the release-asset upload moved to
+      # reusable-sbom-release-upload.yml. The other three are declared by the
+      # unconditional `sbom` job.
+      contents: read
       security-events: write
       id-token: write
       attestations: write
@@ -1228,12 +1337,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-coverage.yml@<sha>
     permissions:
       contents: read
-      # Declared by the `publish` (Pages) and `publish-test-summary` jobs.
-      # Required with publish-pages off, since requests validate statically —
-      # see "Scopes a caller cannot avoid granting" above and #770.
-      pages: write
-      id-token: write
-      actions: write
+      # Declared by the `publish-test-summary` job. The Pages scopes moved out
+      # with the publish job in #770.
       pull-requests: write
 
   ghcr-cleanup:
@@ -1298,8 +1403,9 @@ All inputs are opt-in; existing callers keep current behavior without changes.
 
 Generates an SBOM with Syft, optionally scans it with Grype, and can create a
 Sigstore attestation. `mode: release-assets` generates multi-format SBOMs,
-optionally cosign-signs them (keyless OIDC), and uploads them to a GitHub
-Release. Used by release layouts such as
+optionally cosign-signs them (keyless OIDC), and uploads them as a workflow
+artifact for `reusable-sbom-release-upload.yml` to attach to a GitHub Release
+(#770). Used by release layouts such as
 [python-release-publish.md](python-release-publish.md).
 
 <!-- markdownlint-disable MD013 -- SBOM input table; columns exceed default line length -->
@@ -1314,7 +1420,7 @@ Release. Used by release layouts such as
 | `fail-on-severity`     | `"critical"`                 | Fail when findings meet this severity or higher  |
 | `upload-sarif`         | `false`                      | Upload Grype SARIF to GitHub Security            |
 | `create-attestation`   | `false`                      | Create a Sigstore attestation for the SBOM       |
-| `upload-release-assets`| `false`                      | Report mode: attach artifact to release (#532)   |
+| `upload-release-assets`| `false`                      | DEPRECATED and inert (#770); use `reusable-sbom-release-upload.yml` |
 | `egress-preset`        | `sbom`                       | Harden-runner allowlist preset (workflow-contract) |
 
 <!-- markdownlint-enable MD013 -->
@@ -1327,11 +1433,9 @@ only). Callers that must keep advisory-only behavior should pass
 sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
-    # write, not read: declared by the release-asset jobs, which end in
-    # `gh release upload`. Required in scan mode too, since the request is
-    # validated statically — see "Scopes a caller cannot avoid granting" above
-    # and #770.
-    contents: write
+    # Read since #770: the release-asset upload moved to
+    # reusable-sbom-release-upload.yml.
+    contents: read
     security-events: write
     id-token: write
     attestations: write
@@ -1344,7 +1448,9 @@ sbom:
 sbom-release:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
-    contents: write
+    # Read since #770: this mode now leaves the signed SBOMs as a workflow
+    # artifact for reusable-sbom-release-upload.yml to attach to the release.
+    contents: read
     id-token: write
     # Declared by the scan job, which this mode does not run.
     security-events: write

@@ -347,15 +347,14 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 | PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
 | Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
-| SBOM report           | `contents: write`, `security-events: write`,         | `reusable-sbom.yml` (`mode: report`); the    |
-|                       | `id-token: write`, `attestations: write`             | scan jobs only read contents, but the        |
-|                       |                                                      | release-upload jobs declare write and the    |
-|                       |                                                      | request validates statically (#737, #770)    |
-| SBOM report + upload  | Same as SBOM report                                  | `reusable-sbom.yml`                          |
-|                       |                                                      | (`upload-release-assets: true`)              |
-| SBOM release assets   | `contents: write`, `id-token: write`,                | `reusable-sbom.yml`                          |
-|                       | `security-events: write`, `attestations: write`      | (`mode: release-assets`); the last two are   |
-|                       |                                                      | requested by the scan job this mode skips    |
+| SBOM (any mode)       | `contents: read`, `security-events: write`,          | `reusable-sbom.yml`; no job in it requests   |
+|                       | `id-token: write`, `attestations: write`             | contents write since #770                    |
+| SBOM release upload   | `contents: write`                                    | `reusable-sbom-release-upload.yml`, called   |
+|                       |                                                      | by the caller when it attaches assets (#770) |
+| Pages report publish  | `contents: read`, `pages: write`,                    | `reusable-publish-test-results-pages.yml`,   |
+|                       | `id-token: write`, `actions: write`                  | called by the caller when it publishes (#770)|
+| Coverage              | `contents: read`, `pull-requests: write`             | `reusable-coverage.yml` (#770)               |
+| E2E matrix            | `contents: read`                                     | `reusable-test-e2e-matrix.yml` (#770)        |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -942,7 +941,9 @@ OSV, bun/rust/uv hosts, and `api.deps.dev` (py-lintro dogfooding lint).
 
 Prefer the preset (used by `reusable-deploy-pages.yml`,
 `reusable-deploy-site-with-reports.yml` (`egress-deploy-preset`), and the
-`publish` job in `reusable-test-e2e-matrix.yml` via `publish-egress-preset`):
+`publish` job of `reusable-publish-test-results-pages.yml` via `egress-preset`;
+`reusable-test-e2e-matrix.yml`'s `publish-egress-preset` is deprecated and inert
+since #770):
 
 ```yaml
 egress-policy: block
@@ -1057,8 +1058,8 @@ full baseline (see #512).
 
 | Mode | Job permissions | Notes |
 | ---- | --------------- | ----- |
-| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path. The **caller** must still grant `contents: write`: the `upload-release-assets` and `release-assets` jobs declare it for `gh release upload`, and the request validates statically even when `upload-release-assets: false` skips the job (#737, split proposed in #770) |
-| `release-assets` | `contents: write`, `id-token: write`, `security-events: write`, `attestations: write` | Multi-format generate + cosign sign + `gh release upload`; requires `release-tag`. The last two belong to the scan job this mode skips, but reusable permission requests are validated statically — omitting them fails the run with `startup_failure` |
+| `report` (default) | `contents: read`, `security-events: write`, `id-token: write`, `attestations: write` | Scan/attest path. Since #770 the caller grants `contents: read`: the release-asset upload moved to `reusable-sbom-release-upload.yml`, so no job here declares write |
+| `release-assets` | `contents: read`, `id-token: write`, `security-events: write`, `attestations: write` | Multi-format generate + cosign sign, then upload as the `artifact-name` **workflow artifact**; requires `release-tag`. Attaching it to the release is `reusable-sbom-release-upload.yml`'s job (#770). The last two belong to the scan job this mode skips, but reusable permission requests are validated statically — omitting them fails the run with `startup_failure` |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -1080,7 +1081,9 @@ Release-asset mode (multi-format + optional cosign, no Grype gate):
 sbom-release:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
   permissions:
-    contents: write
+    # Read since #770: the generated files leave as a workflow artifact and
+    # reusable-sbom-release-upload.yml attaches them to the release.
+    contents: read
     id-token: write
     # Declared by the scan job, which this mode does not run; reusable
     # permission requests are validated statically, before `if:`.

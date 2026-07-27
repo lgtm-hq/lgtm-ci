@@ -129,13 +129,17 @@ _uploads_missing_overwrite() {
 	assert_output --partial 'default: "coverage-report"'
 }
 
-# Upload, publish-job download and the summary publisher must all resolve the
-# same name, or an override splits the handoff. Asserted per step block, not by
-# file-wide grep: a hardcoded name inside the real step would otherwise hide
-# behind matching text elsewhere in the file.
+# Upload and the summary publisher must both resolve the same name, or an
+# override splits the handoff. Asserted per step block, not by file-wide grep: a
+# hardcoded name inside the real step would otherwise hide behind matching text
+# elsewhere in the file.
+#
+# The third consumer, the Pages publisher's download, moved out of this file in
+# #770 and is asserted in test_reusable_publish_split.bats — it now takes the
+# name as its own `artifact-name` input, which the caller wires up.
 @test "reusable-coverage: every consumer of the artifact reuses the input" {
 	local step
-	for step in "Upload coverage report" "Download coverage report"; do
+	for step in "Upload coverage report"; do
 		run awk -v step="      - name: ${step}" '
 			$0 == step { seen = 1; in_step = 1; next }
 			in_step && /^      - name: / { exit }
@@ -361,12 +365,14 @@ _e2e_matrix_render() {
 		echo "download pattern changed: ${pattern}" >&2
 		return 1
 	}
-	# The publish job downloads the merged report by exact name; an override
-	# that missed this fourth site would strand the Pages deploy.
-	[ "$published" = "$merged" ] || {
-		echo "publish job downloads ${published}, merge job uploads ${merged}" >&2
-		return 1
-	}
+	# Since #770 the Pages deploy lives in a separate workflow the caller wires
+	# up by name, so the name this merge uploads is a published contract: it is
+	# what docs tell a migrating caller to pass as the publisher's
+	# artifact-name. A drift here strands every migrated deploy.
+	run grep -qF "artifact-name: playwright-merged-report" \
+		"${PROJECT_ROOT}/docs/pages-publishing.md"
+	assert_success
+	[ "$merged" = "playwright-merged-report" ]
 }
 
 # All three sites must be parameterised together. Threading only the uploads
@@ -377,8 +383,7 @@ _e2e_matrix_render() {
 	for entry in \
 		"Upload report:name" \
 		"Upload merged report:name" \
-		"Download all reports:pattern" \
-		"Download merged report:name"; do
+		"Download all reports:pattern"; do
 		step="${entry%:*}"
 		key="${entry##*:}"
 		value="$(_e2e_matrix_with_value "$step" "$key")"
@@ -492,14 +497,46 @@ _e2e_matrix_render() {
 	assert_success
 }
 
-# !cancelled() alone also passes when merge was skipped or failed, and publish
-# then dies downloading a merged report that was never produced.
-@test "reusable-test-e2e-matrix: publish requires a successful merge" {
-	run awk '
-		/^  publish:$/ { in_job = 1 }
-		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  publish:$/ { exit }
-		in_job && /^    if: / && /needs\.merge\.result == .success./ { gated = 1 }
-		END { exit !gated }
-	' "$E2E_MATRIX"
-	assert_success
+# The publish job used to guard `needs.merge.result == 'success'`, because
+# !cancelled() alone also passes when merge was skipped or failed and publish
+# then dies downloading a merged report that was never produced. #770 moved the
+# deploy into a workflow the caller invokes, so the workflow can no longer
+# enforce that ordering for the caller — the documented snippets have to, and a
+# snippet without `needs:` would reproduce exactly that failure for everyone who
+# copies it.
+@test "docs: the publisher snippets order the deploy after its producer" {
+	# The producer job names the snippets use. Asserting membership rather than
+	# mere presence of a `needs:` is the point: a snippet depending on some
+	# unrelated job would satisfy "has a needs" while still racing the report
+	# upload, which is the exact failure the old `needs.merge.result` guard
+	# existed to prevent.
+	local producers="coverage e2e-matrix"
+	local doc
+	for doc in docs/pages-publishing.md docs/reusable-workflows.md \
+		docs/workflows/testing.md; do
+		run awk -v producers="$producers" '
+			BEGIN { split(producers, p, " "); for (i in p) is_producer[p[i]] = 1 }
+			# A new job key ends the previous job block, so a `needs:` never
+			# leaks across snippet boundaries.
+			/^[[:space:]]*[a-z0-9-]+:[[:space:]]*$/ { pending = 0 }
+			/^[[:space:]]+needs:[[:space:]]/ {
+				value = $0
+				sub(/^[[:space:]]+needs:[[:space:]]*/, "", value)
+				# Normalise the list form `needs: [a, b]` to bare names so both
+				# spellings are accepted and neither is accepted vacuously.
+				gsub(/[][,]/, " ", value)
+				pending = 0
+				n = split(value, names, " ")
+				for (i = 1; i <= n; i++) {
+					if (names[i] in is_producer) { pending = 1 }
+				}
+			}
+			/reusable-publish-test-results-pages\.yml@/ {
+				calls += 1
+				if (pending) { ordered += 1 }
+			}
+			END { exit !(calls > 0 && calls == ordered) }
+		' "${PROJECT_ROOT}/${doc}"
+		assert_success
+	done
 }

@@ -1,0 +1,114 @@
+---
+name: Reusable SBOM Release Upload
+
+# Standalone `gh release upload` for SBOM files that another job produced and
+# uploaded as a workflow artifact (#770). Split out of reusable-sbom.yml's
+# `upload-release-assets` and `release-assets` jobs so that scan-mode callers
+# stop being forced to grant `contents: write` — a reusable workflow's
+# permission request is validated statically, before any job `if:`, so that
+# scope could not be avoided while an upload job lived in that file (#737).
+#
+# This is the ONLY workflow in the SBOM path that requests `contents: write`.
+# Generation, scanning, attestation and cosign signing all stay `contents: read`
+# in reusable-sbom.yml and hand their output over as an artifact.
+
+on:
+  workflow_call:
+    inputs:
+      artifact-name:
+        description: >-
+          Name of the SBOM artifact to download. Must match the artifact-name
+          passed to reusable-sbom.yml.
+        required: false
+        type: string
+        default: "sbom"
+      release-tag:
+        description: >-
+          Release tag to attach the SBOM files to. Defaults to github.ref_name
+          when empty, which is correct for a tag-triggered release run.
+        required: false
+        type: string
+        default: ""
+
+      tooling-ref:
+        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: "Allowed endpoints when egress-policy is block"
+        required: false
+        type: string
+        default: >
+          github.com:443
+          api.github.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          release-assets.githubusercontent.com:443
+          uploads.github.com:443
+          pipelines.actions.githubusercontent.com:443
+
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: "Job timeout in minutes"
+        required: false
+        type: number
+        default: 20
+
+jobs:
+  upload-release-assets:
+    name: Upload SBOM release assets
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      # `gh release upload --clobber` in
+      # scripts/ci/actions/upload-sbom-release-assets.sh:29 authenticates with
+      # GITHUB_TOKEN (GH_TOKEN below) and writes a release asset, which the REST
+      # release API gates on `contents: write`. Unlike #730's `actions: write`,
+      # there is no runtime-token code path to fall back on — which is exactly
+      # why this job now lives in a workflow a caller invokes only when it does
+      # attach assets to a release.
+      contents: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Download SBOM artifact
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: sbom-artifact
+      - name: Upload SBOM to GitHub Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
+          ARTIFACT_NAME: ${{ inputs.artifact-name }}
+          SBOM_ARTIFACT_DIR: sbom-artifact
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/upload-sbom-release-assets.sh

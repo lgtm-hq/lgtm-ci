@@ -36,11 +36,12 @@ instead.
 <!-- Wide table kept to compare page-publishing entry points and output paths. -->
 <!-- markdownlint-disable MD013 -->
 
-| Workflow / action                        | Content                     | `target-dir` / `site-root`  |
-| ---------------------------------------- | --------------------------- | --------------------------- |
-| `publish-test-results`                   | Coverage, badges, test HTML | configurable (`target-dir`) |
-| `reusable-deploy-pages` (deploy-only)    | Caller-built static sites   | caller-uploaded artifact    |
-| `reusable-deploy-site-with-reports`      | Site + CI HTML bundles      | `site-root`                 |
+| Workflow / action                     | Content                            | `target-dir` / `site-root`  |
+| ------------------------------------- | ---------------------------------- | --------------------------- |
+| `publish-test-results`                | Coverage, badges, test HTML        | configurable (`target-dir`) |
+| `reusable-publish-test-results-pages` | A report artifact from another job | `pages-target-dir`          |
+| `reusable-deploy-pages` (deploy-only) | Caller-built static sites          | caller-uploaded artifact    |
+| `reusable-deploy-site-with-reports`   | Site + CI HTML bundles             | `site-root`                 |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -52,6 +53,65 @@ Typical Model B destinations include `coverage`, `playwright`, `lighthouse`,
 
 Both paths upload a **full site artifact** per deployment. Each deploy replaces
 the entire published site with that artifact.
+
+## Migrating off the in-workflow publish jobs (#770)
+
+`reusable-coverage.yml` and `reusable-test-e2e-matrix.yml` used to carry their
+own `publish` job, gated on `publish-pages` / `publish-results`. A reusable
+workflow's `permissions:` request is validated **statically**, before any job
+`if:` is evaluated, so that job's `pages: write`, `id-token: write` and
+`actions: write` were part of the union every caller had to grant — including
+callers that had publishing switched off. #737 confirmed all three scopes were
+genuinely used by the job, which left moving the job as the only lever. #770
+moved it, into the shared `reusable-publish-test-results-pages.yml`.
+
+One publisher, not one per producer: both jobs wrapped the same
+`publish-test-results` action with the same scopes, the same
+`pages-<repo>-<ref>` concurrency group and the same `github-pages` environment,
+which moved with the job. Only the action's path inputs differed.
+
+Its `results-path`, `coverage-path` and `badge-path` are relative to the
+**downloaded artifact's root**: `.` means the root itself and the empty string
+means "this artifact has no content of that kind". `artifact-name` and
+`pages-target-dir` are required — the Pages directory is URL-visible, and
+defaulting it would publish a half-migrated caller's report over the site root.
+
+<!-- markdownlint-disable MD013 -- migration table; columns exceed default line length -->
+
+| Old call | New publisher job |
+| --- | --- |
+| `reusable-coverage.yml` with `publish-pages: true` | `artifact-name: <coverage-artifact-name>`, `pages-target-dir: coverage`, `coverage-path: <working-directory>` (`.` at the repo root), `badge-path: <working-directory>/coverage` (`coverage` at the root) |
+| `reusable-test-e2e-matrix.yml` with `publish-results: true` | `artifact-name: <artifact-prefix>-merged-report`, `pages-target-dir: <the pages-target-dir that call passed>`, `results-path: "."` |
+
+<!-- markdownlint-enable MD013 -->
+
+```yaml
+jobs:
+  e2e-matrix:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-matrix.yml@<sha>
+    permissions:
+      contents: read
+
+  publish-e2e:
+    needs: e2e-matrix
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-test-results-pages.yml@<sha>
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+      actions: write
+    with:
+      artifact-name: playwright-merged-report
+      pages-target-dir: playwright
+      results-path: "."
+```
+
+The old inputs stay **accepted and inert** for a release or two, warning when
+set to a non-default value: a reusable workflow rejects an unknown input with a
+hard `startup_failure`, so deleting them outright would break every pinned
+caller at parse time rather than letting it migrate. The `pages-url` /
+`report-url` outputs of the producers are kept for the same reason and are
+always empty — read `pages-url` off the publisher job instead.
 
 ## Model B caller example
 

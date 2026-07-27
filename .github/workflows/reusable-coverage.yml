@@ -25,7 +25,12 @@ on:
         type: boolean
         default: true
       publish-pages:
-        description: "Publish coverage to GitHub Pages"
+        description: >-
+          DEPRECATED (#770), accepted but inert. Pages publishing moved to
+          reusable-publish-test-results-pages.yml, which the caller invokes in
+          its own job; keeping the publish job here forced pages/id-token/
+          actions:write onto every caller, publishing or not. Setting this to
+          true warns and does nothing. Removal is planned a release or two out.
         required: false
         type: boolean
         default: false
@@ -87,7 +92,8 @@ on:
         default: true
       coverage-artifact-name:
         description: >-
-          Name of the coverage-report artifact handed to the publish jobs.
+          Name of the coverage-report artifact handed to the summary comment
+          job and to a caller's Pages publisher call (#770).
           Override it when one workflow run calls this workflow more than once
           (for example per working directory): overwrite makes the last upload
           of a shared name authoritative, so distinct calls need distinct names
@@ -126,8 +132,11 @@ on:
         description: "URL to coverage badge"
         value: ${{ jobs.coverage.outputs.badge-url }}
       pages-url:
-        description: "GitHub Pages URL"
-        value: ${{ jobs.publish.outputs.pages-url }}
+        description: >-
+          DEPRECATED (#770), always empty. Kept so callers referencing it keep
+          parsing; read the pages-url output of
+          reusable-publish-test-results-pages.yml instead.
+        value: ${{ '' }}
       passed:
         description: "Whether coverage meets threshold"
         value: ${{ jobs.coverage.outputs.passed }}
@@ -182,6 +191,21 @@ jobs:
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/
+      - name: Warn on deprecated publish-pages
+        shell: bash
+        env:
+          INPUT_NAME: publish-pages
+          INPUT_VALUE: ${{ inputs.publish-pages }}
+          DEFAULT_VALUE: "false"
+          REPLACEMENT: >-
+            Add a job calling
+            lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-test-results-pages.yml
+            with artifact-name matching this call's coverage-artifact-name and
+            pages-target-dir 'coverage', and move the pages/id-token/
+            actions:write grant onto that job. See the migration section of
+            docs/pages-publishing.md for the coverage-path/badge-path values,
+            which depend on working-directory.
+        run: .lgtm-ci-tooling/scripts/ci/actions/warn-deprecated-workflow-input.sh
       - name: Download coverage artifacts
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
@@ -222,109 +246,11 @@ jobs:
             ${{ inputs.working-directory }}/coverage/
           retention-days: 30
           if-no-files-found: ignore
-          # The publish job downloads this without a tolerance guard, so the
-          # upload is part of that leg's verdict — no continue-on-error here.
-          # Overwrite only, so a repeated call in one run publishes its latest
-          # coverage instead of 409ing.
+          # reusable-publish-test-results-pages.yml downloads this without a
+          # tolerance guard, so the upload is part of that leg's verdict — no
+          # continue-on-error here. Overwrite only, so a repeated call in one
+          # run publishes its latest coverage instead of 409ing.
           overwrite: true
-  publish:
-    name: Publish Coverage
-    needs: coverage
-    if: inputs.publish-pages
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
-    concurrency:
-      group: pages-${{ github.repository }}-${{ github.ref }}
-      cancel-in-progress: false
-    environment:
-      name: github-pages
-      url: ${{ steps.publish.outputs.pages-url }}
-    permissions:
-      # All three write scopes below are STRUCTURALLY UNAVOIDABLE for every
-      # caller, including ones passing publish-pages: false (#737). Reusable
-      # permission requests are validated statically, before any job `if:`, so
-      # the caller union cannot shrink while this job lives in this file.
-      # Splitting it into its own reusable workflow is tracked in #770.
-      contents: read
-      # actions/deploy-pages@cd2ce8f src/internal/api-client.js:125 —
-      # POST /repos/{owner}/{repo}/pages/deployments, authenticated with
-      # GITHUB_TOKEN. actions/configure-pages reads the Pages config the same way.
-      pages: write
-      # actions/deploy-pages@cd2ce8f src/index.js:22 — core.getIDToken(), sent
-      # as the deployment's `oidc_token` (src/internal/api-client.js:117).
-      id-token: write
-      # scripts/ci/actions/delete-run-pages-artifacts.sh:45-46 —
-      # `gh api --method DELETE /repos/{}/actions/artifacts/{id}` with
-      # GITHUB_TOKEN, to clear stale same-run Pages artifacts on rerun (#415).
-      # This is the REST artifact API, not the ACTIONS_RUNTIME_TOKEN path that
-      # made the same scope unnecessary in #730, and the script dies on failure.
-      actions: write
-
-    outputs:
-      pages-url: ${{ steps.publish.outputs.pages-url }}
-
-    steps:
-      - name: Harden runner
-        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: >
-            github.com:443
-            api.github.com:443
-            actions.githubusercontent.com:443
-            codeload.github.com:443
-            objects.githubusercontent.com:443
-            release-assets.githubusercontent.com:443
-            pipelines.actions.githubusercontent.com:443
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-      - name: Checkout and harden
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-        with:
-          tooling-ref: ${{ inputs.tooling-ref }}
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: github-pages
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-          sparse-checkout-extra: |
-            .github/actions/
-            scripts/ci/
-      - name: Download coverage report
-        # Pinned to SHA for supply chain security
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: ${{ inputs.coverage-artifact-name }}
-          # Local extraction directory, deliberately fixed: the path
-          # expressions below are relative to it, not to the artifact name.
-          path: coverage-report
-      - name: Publish to GitHub Pages
-        id: publish
-        uses: ./.lgtm-ci-tooling/.github/actions/publish-test-results
-        with:
-          coverage-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report' ||
-            format('coverage-report/{0}', inputs.working-directory) }}
-          badge-path: >-
-            ${{ inputs.working-directory == '.' && 'coverage-report/coverage' ||
-            format('coverage-report/{0}/coverage', inputs.working-directory) }}
-          target-dir: coverage
   publish-test-summary:
     name: Publish test summary
     needs: coverage
