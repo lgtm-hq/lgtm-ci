@@ -349,8 +349,9 @@ write_large_index_manifest() {
 	assert_output --partial "[dry-run] Would prune staging version 111"
 	refute_output --partial "Would prune staging version 333"
 
+	# DRY_RUN must issue no DELETE at all, not merely spare version 111.
 	run cat "${BATS_TEST_TMPDIR}/bin/.gh_deletes"
-	refute_output --partial "versions/111"
+	assert_output ""
 }
 
 @test "prune-staging: removes its referenced-digest temp file on exit" {
