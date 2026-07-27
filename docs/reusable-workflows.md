@@ -1562,8 +1562,16 @@ tagged versions. It is **off by default**, so existing callers are unaffected.
 | `latest` | never deleted |
 | semver (`1`, `1.2`, `1.2.3`, optional leading `v`) | never deleted |
 | `main`, `sha-*` | deleted past `main-retention-days` |
-| `*-alpha*`/`beta`/`rc`/`pre`/`dev`/`snapshot` | deleted past `prerelease-retention-days` |
+| pre-release channel (below) | deleted past `prerelease-retention-days` |
 | anything else | never deleted (fail safe) |
+
+A tag is in the pre-release channel when it is exactly `alpha`, `beta`, `rc`,
+`pre`, `dev` or `snapshot`, optionally preceded by anything ending in `-` and
+optionally followed by digits, `.`, `_` or `-`: `dev`, `1.2.3-alpha.1`,
+`2.0.0-beta`, `1.2.3-rc1`, `1.0.0-pre.2`, `3.1.0-snapshot`. The match is
+anchored, not a substring — `predeploy` is *not* the `pre` channel and lands in
+"anything else", which is never deleted. The exact patterns live in
+`scripts/ci/lib/ghcr/retention.sh`.
 
 A GHCR version can carry several tags on one manifest. **A version is deleted
 only when *every* tag on it is deletable** — never when any single tag says
