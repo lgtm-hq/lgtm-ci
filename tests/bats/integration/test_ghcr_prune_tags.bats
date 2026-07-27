@@ -71,6 +71,38 @@ deleted_ids() {
 	grep -o '/versions/[0-9]*' "$DELETE_LOG" 2>/dev/null | sed 's|/versions/||' | sort -u
 }
 
+# Mock gh with independent behaviour per ownership endpoint, so the org -> user
+# fallback probe in ghcr_fetch_versions can be exercised on its own.
+# Args:
+#   $1 - shell fragment run for /orgs/... requests
+#   $2 - shell fragment run for /users/... requests
+mock_gh_endpoints() {
+	local org_body="$1"
+	local user_body="$2"
+
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+
+	DELETE_LOG="${mock_bin}/.gh_deletes"
+	export DELETE_LOG
+	: >"$DELETE_LOG"
+
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	*--method\ DELETE*) printf '%s\n' "\$*" >>'$DELETE_LOG'; exit 0;;
+	*/orgs/*) $org_body;;
+	*/users/*) $user_body;;
+	*) exit 1;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
+}
+
 # =============================================================================
 # Required env var validation
 # =============================================================================
@@ -85,6 +117,15 @@ deleted_ids() {
 	run bash -c 'unset GITHUB_ORG; bash "$SCRIPT" 2>&1'
 	assert_failure
 	assert_output --partial "GITHUB_ORG is required"
+}
+
+@test "ghcr-prune-tags: fails when GH_TOKEN is not set" {
+	# gh would otherwise fall through to whatever ambient auth the runner has;
+	# an explicit guard keeps a misconfigured caller from deleting under the
+	# wrong identity (or silently doing nothing).
+	run bash -c 'unset GH_TOKEN; bash "$SCRIPT" 2>&1'
+	assert_failure
+	assert_output --partial "GH_TOKEN is required"
 }
 
 @test "ghcr-prune-tags: rejects a non-numeric MAIN_RETENTION_DAYS" {
@@ -258,6 +299,80 @@ deleted_ids() {
 
 	run deleted_ids
 	assert_output "2"
+}
+
+# =============================================================================
+# Package ownership probe (org first, user second)
+# =============================================================================
+
+@test "ghcr-prune-tags: falls back to the user endpoint when the org endpoint 404s" {
+	mock_gh_endpoints \
+		'echo "HTTP 404: Not Found" >&2; exit 1' \
+		"printf '%s' '[
+			{\"id\": 3, \"name\": \"sha256:aaa\", \"updated_at\": \"$AGED\",
+			 \"metadata\": {\"container\": {\"tags\": [\"sha-abc1234\"]}}}
+		]'"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+
+	run deleted_ids
+	assert_output "3"
+}
+
+@test "ghcr-prune-tags: reports both endpoint errors when neither owner matches" {
+	# A bare "failed to fetch" sends the reader hunting for a permissions
+	# problem that may not exist; both underlying errors must survive.
+	mock_gh_endpoints \
+		'echo "org-endpoint-boom" >&2; exit 1' \
+		'echo "user-endpoint-boom" >&2; exit 1'
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_failure
+	assert_output --partial "Failed to fetch package versions"
+	assert_output --partial "org-endpoint-boom"
+	assert_output --partial "user-endpoint-boom"
+
+	run deleted_ids
+	assert_output ""
+}
+
+# =============================================================================
+# Timestamp shapes returned by the Packages API
+# =============================================================================
+
+@test "ghcr-prune-tags: handles fractional-second API timestamps" {
+	mock_gh_versions "[
+		{\"id\": 1, \"name\": \"sha256:aaa\", \"updated_at\": \"2020-01-01T00:00:00.123Z\",
+		 \"metadata\": {\"container\": {\"tags\": [\"sha-abc1234\"]}}},
+		{\"id\": 2, \"name\": \"sha256:bbb\", \"updated_at\": \"${RECENT%Z}.456Z\",
+		 \"metadata\": {\"container\": {\"tags\": [\"sha-def5678\"]}}}
+	]"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+
+	# Aged one goes, recent one stays: the fraction changes nothing.
+	run deleted_ids
+	assert_output "1"
+}
+
+@test "ghcr-prune-tags: retains a version whose timestamp shape cannot be ordered" {
+	# An offset-bearing or otherwise unexpected timestamp has no defensible
+	# age, so the fail-safe direction is to keep the version.
+	mock_gh_versions "[
+		{\"id\": 1, \"name\": \"sha256:aaa\", \"updated_at\": \"2020-01-01T00:00:00+00:00\",
+		 \"metadata\": {\"container\": {\"tags\": [\"sha-abc1234\"]}}},
+		{\"id\": 2, \"name\": \"sha256:bbb\", \"updated_at\": \"not-a-timestamp\",
+		 \"metadata\": {\"container\": {\"tags\": [\"main\"]}}}
+	]"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "0 deleted, 2 retained"
+
+	run deleted_ids
+	assert_output ""
 }
 
 # =============================================================================

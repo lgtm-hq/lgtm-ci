@@ -29,6 +29,7 @@ set -euo pipefail
 
 : "${PACKAGE_NAME:?PACKAGE_NAME is required}"
 : "${GITHUB_ORG:?GITHUB_ORG is required}"
+: "${GH_TOKEN:?GH_TOKEN is required (needs packages:write)}"
 : "${MAIN_RETENTION_DAYS:=30}"
 : "${PRERELEASE_RETENTION_DAYS:=90}"
 : "${DRY_RUN:=true}"
@@ -54,14 +55,32 @@ PACKAGE_NAME_API="${PACKAGE_NAME//\//%2F}"
 # Populated by ghcr_fetch_versions and read by the classification block below.
 all_versions='[]'
 
+# Packages live under /orgs for org-owned repos and /users for user-owned ones,
+# and there is no cheap way to tell which without asking. Try org, fall back to
+# user, and report BOTH errors when neither works -- a bare "failed to fetch"
+# sends the reader hunting for a permissions problem that may not exist.
 ghcr_fetch_versions() {
-	all_versions=$(gh api --paginate \
+	local err_file org_err user_err
+	err_file=$(mktemp)
+
+	if all_versions=$(gh api --paginate \
 		"/orgs/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
-		2>/dev/null | jq -s 'add // []') || {
-		all_versions=$(gh api --paginate \
-			"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
-			2>/dev/null | jq -s 'add // []') || die "Failed to fetch package versions"
-	}
+		2>"$err_file" | jq -s 'add // []'); then
+		rm -f "$err_file"
+		return 0
+	fi
+	org_err=$(<"$err_file")
+
+	if all_versions=$(gh api --paginate \
+		"/users/${GITHUB_ORG}/packages/container/${PACKAGE_NAME_API}/versions" \
+		2>"$err_file" | jq -s 'add // []'); then
+		rm -f "$err_file"
+		return 0
+	fi
+	user_err=$(<"$err_file")
+	rm -f "$err_file"
+
+	die "Failed to fetch package versions (orgs: ${org_err:-none}; users: ${user_err:-none})"
 }
 
 ghcr_delete_version() {
