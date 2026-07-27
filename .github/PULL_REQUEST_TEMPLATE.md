@@ -19,6 +19,12 @@
 - [ ] Shell scripts pass `shellcheck`
 - [ ] YAML files pass `yamllint`
 - [ ] Python code passes `ruff` and `black`
+- [ ] If this changes a reusable workflow's permissions or inputs: checked
+      whether `examples/**` and `docs/onboarding.md` need the same change —
+      they are pinned to a released SHA (not the tip), so a fix landing here
+      often does **not** need a matching example edit until the next pin bump
+      (see `docs/reusable-workflows.md` "Scopes a caller cannot avoid
+      granting" and #765)
 
 ## Breaking Changes
 

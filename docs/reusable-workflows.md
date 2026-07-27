@@ -99,6 +99,19 @@ union over its jobs, so the union only shrinks when *no* job declares the scope.
 Moving each publishing job into its own reusable workflow, invoked only by
 callers that publish, is proposed in #770 and deliberately out of scope for #737.
 
+**Changing a reusable workflow's permissions or inputs does not automatically
+mean `examples/**` and `docs/onboarding.md` need the same change.** Those
+snippets pin `uses:` and `tooling-ref` to a released commit SHA, not the
+workflow tip (#765) — deliberately: pinning by SHA is the right security
+posture for consumers copying a snippet, so examples keep pinning rather than
+tracking a floating major. A fix landing on `main` only reaches the examples
+once their pin is next bumped to a release that carries it. #730 is the
+cautionary case: reflexively syncing the caller snippet to a permissions fix
+that hadn't shipped yet made `examples/ci-python.yml` `startup_failure` for
+anyone copying it, and it took a corrective restore (`d6190c1`) to fix. Check
+which release the example is pinned to before assuming a workflow change
+needs a matching example edit.
+
 ## Runner pinning
 
 Script-backed reusables accept `runner-image` on every job. Pin explicitly in

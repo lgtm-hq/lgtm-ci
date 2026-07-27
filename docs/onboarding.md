@@ -190,19 +190,19 @@ SHA** with a `# vX.Y.Z` comment — not the tag name and not the annotated tag
 object SHA. Resolve a release tag to its commit:
 
 ```bash
-git ls-remote https://github.com/lgtm-hq/lgtm-ci 'refs/tags/v0.46.0^{}'
+git ls-remote https://github.com/lgtm-hq/lgtm-ci 'refs/tags/v0.59.30^{}'
 ```
 
 Or via the API (fetch the tag ref, then peel the annotated tag object to its
 commit):
 
 ```bash
-gh api repos/lgtm-hq/lgtm-ci/git/ref/tags/v0.46.0 --jq '.object.sha' |
+gh api repos/lgtm-hq/lgtm-ci/git/ref/tags/v0.59.30 --jq '.object.sha' |
   xargs -I{} gh api repos/lgtm-hq/lgtm-ci/git/tags/{} --jq '.object.sha'
 ```
 
-Both print the release commit SHA (for v0.46.0:
-`4aaefe64763b7841b6d92d94dc47185083d34c9a`). lgtm-ci release tags are
+Both print the release commit SHA (for v0.59.30:
+`cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b`). lgtm-ci release tags are
 annotated; if a tag ever does not peel (lightweight tag), the `^{}` query
 prints nothing and the `git/tags/{}` API call fails — in that case the tag
 ref itself already points at the commit, so use
@@ -213,9 +213,9 @@ directly. Use the commit SHA in both places, always together:
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
 ```yaml
-uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@4aaefe64763b7841b6d92d94dc47185083d34c9a # v0.46.0
+uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
 with:
-  tooling-ref: "4aaefe64763b7841b6d92d94dc47185083d34c9a" # v0.46.0
+  tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
 ```
 
 <!-- markdownlint-enable MD013 -->
