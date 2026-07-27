@@ -14,6 +14,9 @@
 #   OUTPUT_LOG     Log path for STEP=check tee (default: chk-output.txt)
 #   MAP_HOST_USER  true|false — map host UID/GID via docker --user (default: true
 #                  when GITHUB_ACTIONS=true, otherwise unset/false)
+#
+# GITHUB_ACTIONS=true is forwarded into the container when set, so lintro
+# auto-emits .lintro/artifacts/{sarif,json}/ alongside the console output.
 
 set -euo pipefail
 
@@ -79,6 +82,16 @@ declare -a docker_args=(
 	-v "${WORKSPACE}:/code"
 	-w /code
 )
+# lintro auto-emits its side-channel artifacts (SARIF for Code Scanning, and
+# the JSON report the timeout classifier reads) only when it detects
+# GITHUB_ACTIONS=true. That variable belongs to the runner, not the container,
+# so without this passthrough .lintro/artifacts/json/results.json is never
+# written and the classifier silently degrades to its fail-closed verdict.
+# The alternative side channel — execution.artifacts in .lintro-config.yaml —
+# lives in the caller's repository, which a reusable workflow must not rewrite.
+if [[ "${GITHUB_ACTIONS:-}" == "true" ]]; then
+	docker_args+=(-e GITHUB_ACTIONS=true)
+fi
 if [[ "${MAP_HOST_USER}" == "true" ]]; then
 	docker_args+=(--user "$(id -u):$(id -g)")
 fi

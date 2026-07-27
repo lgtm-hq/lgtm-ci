@@ -350,6 +350,70 @@ jobs:
       script: scripts/ci/validate.sh
 ```
 
+### Structured lint report and timeout verdict (`reusable-quality-lint.yml`)
+
+A tool that exceeds its execution timeout makes lintro exit `1` with
+`status=failed` — indistinguishable from a genuine finding through `exit-code`
+and `status` alone. The lint job therefore also publishes the structured JSON
+report from **its own** run and derives a verdict from it.
+
+lintro writes the report to `.lintro/artifacts/json/results.json` (auto-emitted
+under GitHub Actions, so `--output-format grid` and the `chk-output.txt` every
+consumer parses are untouched). `scripts/ci/actions/classify-lint-timeout.py`
+reads it and sets the outputs below.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                | Type    | Required | Default | Purpose                                                      |
+| -------------------- | ------- | -------- | ------- | ------------------------------------------------------------ |
+| `upload-json-report` | boolean | no       | `true`  | Upload the JSON report as the `linting-json-report` artifact |
+
+| Output            | Value                                                                     |
+| ----------------- | ------------------------------------------------------------------------- |
+| `timeout-flake`   | `'true'` only when ≥1 tool timed out **and** the run reported zero issues |
+| `timed-out-tools` | Comma-separated names of the tools that timed out, `''` when none         |
+
+<!-- markdownlint-enable MD013 -->
+
+`upload-json-report` is separate from `upload-report` so a caller can consume
+the verdict without paying for the artifact — the outputs are derived either
+way. Both uploads are best-effort (`continue-on-error`), so a storage hiccup
+warns rather than failing a job whose code passed.
+
+**The classifier fails closed.** `timeout-flake` is `'true'` only when the
+report positively proves a timeout with no findings anywhere. A missing or
+malformed report, a non-timeout tool failure, an internally inconsistent
+report, or any issue at all yields `'false'`. Absence of evidence is never
+evidence of a flake.
+
+**The verdict describes only the run that produced it.** A tool that times out
+contributes zero findings precisely because it did not finish, so a clean
+verdict here cannot clear a failure reported by a different lint job — a
+different file scope or ordinary timing variance is enough for the two to
+disagree. Consuming it across jobs can turn a required check green over a
+genuine finding; only the job that produced the report may act on it.
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+
+  retry-on-timeout:
+    needs: quality
+    if: needs.quality.outputs.timeout-flake == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - run: |
+          echo "::warning::lintro timed out: ${{ needs.quality.outputs.timed-out-tools }}"
+```
+
+A caller that sets none of the new inputs and reads none of the new outputs
+behaves exactly as before: `exit-code` and `status` keep their existing
+meanings and still reflect the lint result alone.
+
 ### Org ruleset gate (`reusable-required-check.yml`)
 
 Thin aggregate-status gate for org rulesets. Like every `uses:` job, it
