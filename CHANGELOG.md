@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.62.0] - 2026-07-27
+
+### Added
+
+- **ci**: split the Pages publish and SBOM release-asset jobs into their own reusable
+  workflows (#796) (779b0bd)
+
 ## [0.61.1] - 2026-07-27
 
 ### Fixed
@@ -1992,7 +1999,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.61.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.0...HEAD
+[0.62.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.61.1...v0.62.0
 [0.61.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.61.0...v0.61.1
 [0.61.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.60.0...v0.61.0
 [0.60.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.59.31...v0.60.0
