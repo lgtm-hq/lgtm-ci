@@ -56,6 +56,19 @@
       "datasourceTemplate": "github-tags",
       "versioningTemplate": "semver",
       "extractVersionTemplate": "^v(?<version>.*)$"
+    },
+    {
+      "customType": "regex",
+      "description": "Track lgtm-ci self-references (uses: refs and tooling-ref) pinned in consumer-facing examples and onboarding docs (#765)",
+      "managerFilePatterns": ["/^examples/.*\\.ya?ml$/", "/^docs/.*\\.md$/"],
+      "matchStrings": [
+        "lgtm-hq/lgtm-ci/\\.github/(?:workflows|actions)/[^@\\s]+@(?<currentDigest>[a-f0-9]{40}) # v(?<currentValue>\\d+\\.\\d+\\.\\d+)",
+        "tooling-ref:\\s*\"?(?<currentDigest>[a-f0-9]{40})\"? # v(?<currentValue>\\d+\\.\\d+\\.\\d+)"
+      ],
+      "depNameTemplate": "lgtm-hq/lgtm-ci",
+      "datasourceTemplate": "github-tags",
+      "versioningTemplate": "semver",
+      "extractVersionTemplate": "^v(?<version>.*)$"
     }
   ],
   "packageRules": [
@@ -63,6 +76,12 @@
       "description": "Group harden-runner SHA pins so workflow and non-workflow copies update together",
       "groupName": "step-security/harden-runner",
       "matchPackageNames": ["step-security/harden-runner"],
+      "automerge": false
+    },
+    {
+      "description": "Group lgtm-ci self-reference pins in examples/docs so every uses: and tooling-ref bump together (#765)",
+      "groupName": "lgtm-ci example and docs pins",
+      "matchPackageNames": ["lgtm-hq/lgtm-ci"],
       "automerge": false
     }
   ]
