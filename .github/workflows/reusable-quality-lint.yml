@@ -112,7 +112,7 @@ on:
         required: false
         type: string
         # yamllint disable-line rule:line-length
-        default: "ghcr.io/lgtm-hq/py-lintro@sha256:26cf0df6a0c15d51d21723b12fdde6c092f251fa43e8e4466d99f629ddbf7ff1"
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:79db6f3f942a5df5743c62a71e4ace18cc5a61a7d2907e8deeab7c1fc6445bba"
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
