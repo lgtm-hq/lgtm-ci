@@ -83,7 +83,7 @@ allowlist before checkout or other network I/O. `pre` alone is not enough.
 
 ```yaml
 - name: Harden runner
-  uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+  uses: step-security/harden-runner@b09bb98e06d4d774595224525879c09bc6e98c40 # v2.20.1
   with:
     egress-policy: block # default; use audit to log only
     allowed-endpoints: ${{ inputs.allowed-endpoints }}

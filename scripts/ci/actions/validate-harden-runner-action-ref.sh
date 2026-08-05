@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # dir containing only reusable-*.yml is safe.
 WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 
-HARDEN_SHA='bf7454d06d71f1098171f2acdf0cd4708d7b5920' # v2.20.0
+HARDEN_SHA='b09bb98e06d4d774595224525879c09bc6e98c40' # v2.20.1
 STEP_SECURITY_HARDEN_RE="^[[:space:]]+uses:[[:space:]]+step-security/harden-runner@${HARDEN_SHA}([[:space:]]+#.*)?[[:space:]]*$"
 TOOLING_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 TOOLING_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/harden-runner[[:space:]]*$'
