@@ -44,7 +44,7 @@ runs:
     - name: Login to GHCR
       if: inputs.registry == 'ghcr.io'
       # Pinned to SHA for supply chain security
-      uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
         registry: ghcr.io
         username: ${{ github.actor }}
@@ -53,7 +53,7 @@ runs:
     - name: Login to Docker Hub
       if: inputs.registry == 'docker.io'
       # Pinned to SHA for supply chain security
-      uses: docker/login-action@371161bbe7024a29a25c5e19bfcbc0804fe9ad2c # v4.5.2
+      uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
       with:
         username: ${{ inputs.dockerhub-username }}
         password: ${{ inputs.dockerhub-token }}
