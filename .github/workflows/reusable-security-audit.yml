@@ -14,7 +14,7 @@ on:
         required: false
         type: string
         # yamllint disable-line rule:line-length
-        default: "ghcr.io/lgtm-hq/py-lintro@sha256:281fa6984ce85f6a49314770f814af54abac8032ede8ee458ee85023a5145cd7"
+        default: "ghcr.io/lgtm-hq/py-lintro@sha256:014f35b94db7d71ae53c6827a4a4a959e49f3c71465f78adc54c7b32657ebffe"
       audit-script:
         description: >-
           Path to security audit script (repo checkout or tooling checkout).
