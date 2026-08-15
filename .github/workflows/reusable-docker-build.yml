@@ -154,14 +154,16 @@ on:
         description: >-
           Reclaim unused ubuntu-24.04 amd64 toolchains before the build
           (dotnet, Android SDK, ghc, PowerShell, unused toolcache). No-op
-          when those paths are absent (e.g. ubuntu-24.04-arm).
+          when those paths are absent (e.g. ubuntu-24.04-arm). Runs only
+          on github-hosted runners.
         required: false
         type: boolean
         default: false
       resource-monitor:
         description: >-
           Background a 30s memory/disk sampler into $RUNNER_TEMP and dump
-          the tail at job end so resource kills are attributable.
+          the tail at job end so resource kills are attributable. Start
+          is best-effort and does not fail the build.
         required: false
         type: boolean
         default: false
@@ -288,11 +290,12 @@ jobs:
             scripts/ci/
             .github/actions/docker-auth
       - name: Free disk space
-        if: inputs.free-disk-space
+        if: inputs.free-disk-space && runner.environment == 'github-hosted'
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/docker/free-disk-space.sh
       - name: Start resource monitor
         if: inputs.resource-monitor
+        continue-on-error: true
         shell: bash
         run: .lgtm-ci-tooling/scripts/ci/docker/resource-monitor.sh start
       - name: Setup QEMU

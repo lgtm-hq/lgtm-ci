@@ -1469,15 +1469,18 @@ marker list is also a built-in signature of
 [`reusable-auto-rerun-on-infra-failure.yml`](#auto-re-run-on-infra-failure), so a
 flake that outlives the in-step retry still gets the failed jobs re-run.
 
-`free-disk-space: true` removes unused hosted-image toolchains
-(`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`,
-`/usr/local/share/powershell`, unused `$AGENT_TOOLSDIRECTORY` entries) and
-prints `df -h /` before and after. Missing paths are skipped, so ARM/lean
-runners are a no-op. `resource-monitor: true` backgrounds a 30s
-`date` / `free -m` / `df -h /` sampler into `$RUNNER_TEMP/resource-monitor.log`
-(flushed each iteration) and dumps the last ~100 lines with `if: always()` so
-the next resource failure is attributable as memory vs disk when the
-runner survives long enough for the dump step.
+`free-disk-space: true` runs only on `github-hosted` runners. It removes
+unused hosted-image toolchains (`/usr/share/dotnet`,
+`/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and
+unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go,
+Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node) and prints `df -h /`
+before and after. Missing paths are skipped, so ARM/lean runners are a
+no-op. `resource-monitor: true` backgrounds a 30s `date` / `free -m` /
+`df -h /` sampler into `$RUNNER_TEMP/resource-monitor.log` (flushed each
+iteration). Start is best-effort (`continue-on-error`) so a sampler fault
+does not skip the image build. The last ~100 lines dump with
+`if: always()` so the next resource failure is attributable as memory vs
+disk when the runner survives long enough for the dump step.
 
 ```yaml
 with:

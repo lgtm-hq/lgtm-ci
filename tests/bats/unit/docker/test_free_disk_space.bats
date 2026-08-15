@@ -222,16 +222,19 @@ EOF
 	unset FREE_DISK_TOOLCACHE_NAMES
 	local toolcache
 	toolcache="${BATS_TEST_TMPDIR}/prod-toolcache"
-	mkdir -p "${toolcache}/CodeQL" "${toolcache}/go" "${toolcache}/ExtraTool"
-	echo unused >"${toolcache}/CodeQL/x"
-	echo unused >"${toolcache}/go/x"
-	echo unused >"${toolcache}/ExtraTool/x"
+	local name
+	for name in CodeQL go Java_Temurin-Hotspot_jdk PyPy Python Ruby node ExtraTool; do
+		mkdir -p "${toolcache}/${name}"
+		echo unused >"${toolcache}/${name}/x"
+	done
 	export AGENT_TOOLSDIRECTORY="$toolcache"
 
 	run bash "$SCRIPT"
 	assert_success
-	assert_file_contains_literal "${BATS_TEST_TMPDIR}/mock_calls_rm" "-rf -- ${toolcache}/CodeQL"
-	assert_file_contains_literal "${BATS_TEST_TMPDIR}/mock_calls_rm" "-rf -- ${toolcache}/go"
+	for name in CodeQL go Java_Temurin-Hotspot_jdk PyPy Python Ruby node; do
+		assert_file_contains_literal "${BATS_TEST_TMPDIR}/mock_calls_rm" \
+			"-rf -- ${toolcache}/${name}"
+	done
 	if grep -qF "ExtraTool" "${BATS_TEST_TMPDIR}/mock_calls_rm"; then
 		echo "rm was called for unlisted ExtraTool entry" >&2
 		return 1
@@ -252,6 +255,19 @@ EOF
 		run grep -F "$path" "${PROJECT_ROOT}/docs/reusable-workflows.md"
 		assert_success
 	done
-	run grep -E '^\s+CodeQL$' "$SCRIPT"
-	assert_success
+	for path in \
+		CodeQL \
+		go \
+		Java_Temurin-Hotspot_jdk \
+		PyPy \
+		Python \
+		Ruby \
+		node; do
+		run grep -F "$path" "$SCRIPT"
+		assert_success
+		run grep -F "$path" "${PROJECT_ROOT}/docs/workflow-contract.md"
+		assert_success
+		run grep -F "$path" "${PROJECT_ROOT}/docs/reusable-workflows.md"
+		assert_success
+	done
 }

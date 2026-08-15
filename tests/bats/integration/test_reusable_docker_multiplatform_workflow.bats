@@ -151,16 +151,21 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
 		in_job && /name: Start resource monitor/ { start = NR }
 		in_job && /uses: docker\/build-push-action@/ { build = NR }
 		in_job && /name: Dump resource monitor/ { dump = NR }
-		in_job && /if: inputs\.free-disk-space/ { free_if = 1 }
+		in_job && /if: inputs\.free-disk-space && runner\.environment == .github-hosted./ {
+			free_if = 1
+		}
 		in_job && /if: inputs\.resource-monitor/ && $0 !~ /always/ { start_if = 1 }
 		in_job && /if: always\(\) && inputs\.resource-monitor/ { dump_if = 1 }
+		in_job && /name: Start resource monitor/ { in_start = 1 }
+		in_start && /continue-on-error: true/ { start_coe = 1 }
+		in_start && /^      - name: / && $0 !~ /Start resource monitor/ { in_start = 0 }
 		in_job && /scripts\/ci\/docker\/free-disk-space\.sh/ { free_script = 1 }
 		in_job && /scripts\/ci\/docker\/resource-monitor\.sh start/ { start_script = 1 }
 		in_job && /scripts\/ci\/docker\/resource-monitor\.sh dump/ { dump_script = 1 }
 		END {
 			exit !(cah && free && start && build && dump &&
 				cah < free && free < start && start < build && build < dump &&
-				free_if && start_if && dump_if &&
+				free_if && start_if && dump_if && start_coe &&
 				free_script && start_script && dump_script)
 		}
 	' "$WORKFLOW"

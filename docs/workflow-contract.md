@@ -133,8 +133,8 @@ Two boolean inputs (default `false`, so existing callers are unchanged) on
 
 | Input              | Default | Behavior                                                                                          |
 | ------------------ | ------- | ------------------------------------------------------------------------------------------------- |
-| `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh`: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, unused `$AGENT_TOOLSDIRECTORY` entries). Existence-guarded; no-op on lean/ARM images. |
-| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /` flushed to `$RUNNER_TEMP/resource-monitor.log`). A final `if: always()` step dumps the last ~100 lines so OOM vs disk-full is visible when the job fails but the runner is still up. |
+| `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh` on `github-hosted` runners only: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go, Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node). Existence-guarded; no-op on lean/ARM images. |
+| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /` flushed to `$RUNNER_TEMP/resource-monitor.log`). Start is best-effort (`continue-on-error`) so a sampler fault does not skip the image build. A final `if: always()` step dumps the last ~100 lines so OOM vs disk-full is visible when the job fails but the runner is still up. |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
