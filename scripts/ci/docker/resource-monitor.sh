@@ -132,8 +132,10 @@ start_monitor() {
 	# Write-first loop: the first sample is flushed before the first sleep.
 	# The compound redirect closes the file each iteration (survives a kill).
 	# $1/$2/$3 expand in the inner bash, not this shell.
+	# env -u BASH_ENV: kcov instruments nested bash via BASH_ENV; its injected
+	# script trips `set -u` inside the sampler, which is not a coverage target.
 	# shellcheck disable=SC2016
-	nohup bash -c '
+	nohup env -u BASH_ENV bash -c '
 		set -eu
 		log_file="$1"
 		interval="$2"
