@@ -161,10 +161,14 @@ start_monitor() {
 	fi
 	disown || true
 
-	# Readiness requires a newly appended sample, not a stale nonempty log.
-	# Finite samplers (tests) may exit after that first flush.
+	# Ready when this invocation appended a sample, or the sampler is still
+	# alive (first flush can lag under kcov). A stale nonempty log alone
+	# is not success — that hid a dead child after a failed append.
 	local i current
 	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+		if is_running "$pid_file"; then
+			break
+		fi
 		current="$(file_byte_size "$log_file")"
 		if [[ "$current" -gt "$log_bytes_before" ]]; then
 			break
@@ -172,7 +176,7 @@ start_monitor() {
 		sleep 0.1
 	done
 	current="$(file_byte_size "$log_file")"
-	if [[ "$current" -le "$log_bytes_before" ]]; then
+	if ! is_running "$pid_file" && [[ "$current" -le "$log_bytes_before" ]]; then
 		stop_started_monitor "$pid_file"
 		log_error "Resource monitor failed to stay running"
 		exit 1
