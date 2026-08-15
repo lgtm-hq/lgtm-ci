@@ -1430,6 +1430,8 @@ jobs:
 | `cache-registry-ref` | `""`    | Registry cache fallback (e.g. `ghcr.io/org/repo:cache`)       |
 | `cosign-sign`        | `false` | Keyless Cosign signature on pushed manifests                  |
 | `no-cache`           | `false` | Disable GHA/registry cache for clean release builds           |
+| `free-disk-space`    | `false` | Reclaim unused ubuntu-24.04 amd64 toolchains before the build |
+| `resource-monitor`   | `false` | Sample memory/disk every 30s; dump the tail at job end        |
 | `provenance`         | `true`  | Generate provenance attestation (only when `push: true`)      |
 | `sbom`               | `true`  | Generate SBOM attestation (only when `push: true`)            |
 
@@ -1466,6 +1468,25 @@ applied per blob so an already-signed artifact is never re-signed. The same
 marker list is also a built-in signature of
 [`reusable-auto-rerun-on-infra-failure.yml`](#auto-re-run-on-infra-failure), so a
 flake that outlives the in-step retry still gets the failed jobs re-run.
+
+`free-disk-space: true` runs only on `github-hosted` runners. It removes
+unused hosted-image toolchains (`/usr/share/dotnet`,
+`/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and
+unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go,
+Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node) and prints `df -h /`
+before and after. Missing paths are skipped, so ARM/lean runners are a
+no-op. `resource-monitor: true` backgrounds a 30s `date` / `free -m` /
+`df -h /` sampler into `$RUNNER_TEMP/resource-monitor.log` (flushed each
+iteration). Start is best-effort (`continue-on-error`) so a sampler fault
+does not skip the image build. The last ~100 lines dump with
+`if: always()` so the next resource failure is attributable as memory vs
+disk when the runner survives long enough for the dump step.
+
+```yaml
+with:
+  free-disk-space: true
+  resource-monitor: true
+```
 
 All inputs are opt-in; existing callers keep current behavior without changes.
 

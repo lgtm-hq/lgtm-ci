@@ -123,6 +123,30 @@ names with the delegating job (for example
 protection / merge-queue required checks accordingly when upgrading across
 the #381 split.
 
+#### Opt-in runner disk and resource observability
+
+Two boolean inputs (default `false`, so existing callers are unchanged) on
+`reusable-docker.yml`, `reusable-docker-build.yml`, and
+`reusable-docker-multiplatform.yml`:
+
+<!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
+
+| Input              | Default | Behavior                                                                                          |
+| ------------------ | ------- | ------------------------------------------------------------------------------------------------- |
+| `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh` on `github-hosted` runners only: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go, Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node). Existence-guarded; no-op on lean/ARM images. |
+| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /` flushed to `$RUNNER_TEMP/resource-monitor.log`). Start is best-effort (`continue-on-error`) so a sampler fault does not skip the image build. A final `if: always()` step dumps the last ~100 lines so OOM vs disk-full is visible when the job fails but the runner is still up. |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Scripts resolve from the `.lgtm-ci-tooling` checkout — callers do not vendor
+them. Example consumer opt-in:
+
+```yaml
+with:
+  free-disk-space: true
+  resource-monitor: true
+```
+
 #### Runner pinning exceptions
 
 These reusables intentionally omit `runner-image`:

@@ -177,6 +177,23 @@ on:
         required: false
         type: boolean
         default: false
+      free-disk-space:
+        description: >-
+          Reclaim unused ubuntu-24.04 amd64 toolchains before the build
+          (dotnet, Android SDK, ghc, PowerShell, unused toolcache). No-op
+          when those paths are absent (e.g. ubuntu-24.04-arm). Runs only
+          on github-hosted runners.
+        required: false
+        type: boolean
+        default: false
+      resource-monitor:
+        description: >-
+          Background a 30s memory/disk sampler into $RUNNER_TEMP and dump
+          the tail at job end so resource kills are attributable. Start
+          is best-effort and does not fail the build.
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: "Git ref for lgtm-ci tooling checkout. Defaults to the reusable workflow commit."
@@ -298,6 +315,15 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
+      - name: Free disk space
+        if: inputs.free-disk-space && runner.environment == 'github-hosted'
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/docker/free-disk-space.sh
+      - name: Start resource monitor
+        if: inputs.resource-monitor
+        continue-on-error: true
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/docker/resource-monitor.sh start
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -441,6 +467,10 @@ jobs:
           # overwrite only, so a repeated call in one run hands the merge its
           # latest digest instead of 409ing.
           overwrite: true
+      - name: Dump resource monitor
+        if: always() && inputs.resource-monitor
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/docker/resource-monitor.sh dump
   # Optional per-platform smoke test gate (push path only). Runs against each
   # staging image on its native runner before manifest merge.
   verify-per-platform:

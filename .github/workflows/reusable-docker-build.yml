@@ -150,6 +150,23 @@ on:
         required: false
         type: boolean
         default: false
+      free-disk-space:
+        description: >-
+          Reclaim unused ubuntu-24.04 amd64 toolchains before the build
+          (dotnet, Android SDK, ghc, PowerShell, unused toolcache). No-op
+          when those paths are absent (e.g. ubuntu-24.04-arm). Runs only
+          on github-hosted runners.
+        required: false
+        type: boolean
+        default: false
+      resource-monitor:
+        description: >-
+          Background a 30s memory/disk sampler into $RUNNER_TEMP and dump
+          the tail at job end so resource kills are attributable. Start
+          is best-effort and does not fail the build.
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: "Git ref for lgtm-ci tooling checkout. Defaults to the reusable workflow commit."
@@ -272,6 +289,15 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
             .github/actions/docker-auth
+      - name: Free disk space
+        if: inputs.free-disk-space && runner.environment == 'github-hosted'
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/docker/free-disk-space.sh
+      - name: Start resource monitor
+        if: inputs.resource-monitor
+        continue-on-error: true
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/docker/resource-monitor.sh start
       - name: Setup QEMU
         # Pinned to SHA for supply chain security
         uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
@@ -471,6 +497,10 @@ jobs:
           SCAN_ENABLED: ${{ inputs.scan }}
           HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+      - name: Dump resource monitor
+        if: always() && inputs.resource-monitor
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/docker/resource-monitor.sh dump
   scan:
     name: Vulnerability Scan
     needs: build

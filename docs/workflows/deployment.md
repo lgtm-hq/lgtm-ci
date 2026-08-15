@@ -47,7 +47,9 @@ platform → runner label; unmapped platforms use `ubuntu-24.04` + QEMU),
 image) or `smoke-test-script` (caller-owned script with env `IMAGE`,
 `PLATFORM`, `REGISTRY`; mutually exclusive), `health-check-cmd` /
 `health-check-port` / `health-check-timeout` (detached-container health
-gate before publish), `tooling-ref`.
+gate before publish), `free-disk-space` / `resource-monitor` (opt-in
+runner disk reclaim and 30s memory/disk sampler; default false),
+`tooling-ref`.
 
 **Outputs:** `tags`, `digest`.
 

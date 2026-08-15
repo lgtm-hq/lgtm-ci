@@ -141,3 +141,33 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
 	# build-per-platform, verify-per-platform, health-check-per-platform, merge, scan.
 	assert_output "5"
 }
+
+@test "reusable-docker-multiplatform: free-disk-space and resource-monitor run on build-per-platform" {
+	run awk '
+		/^  build-per-platform:/ { in_job = 1 }
+		in_job && /^  [a-z].*:$/ && $0 !~ /^  build-per-platform:/ { in_job = 0 }
+		in_job && /name: Checkout and harden/ { cah = NR }
+		in_job && /name: Free disk space/ { free = NR }
+		in_job && /name: Start resource monitor/ { start = NR }
+		in_job && /uses: docker\/build-push-action@/ { build = NR }
+		in_job && /name: Dump resource monitor/ { dump = NR }
+		in_job && /if: inputs\.free-disk-space && runner\.environment == .github-hosted./ {
+			free_if = 1
+		}
+		in_job && /if: inputs\.resource-monitor/ && $0 !~ /always/ { start_if = 1 }
+		in_job && /if: always\(\) && inputs\.resource-monitor/ { dump_if = 1 }
+		in_job && /name: Start resource monitor/ { in_start = 1 }
+		in_start && /continue-on-error: true/ { start_coe = 1 }
+		in_start && /^      - name: / && $0 !~ /Start resource monitor/ { in_start = 0 }
+		in_job && /scripts\/ci\/docker\/free-disk-space\.sh/ { free_script = 1 }
+		in_job && /scripts\/ci\/docker\/resource-monitor\.sh start/ { start_script = 1 }
+		in_job && /scripts\/ci\/docker\/resource-monitor\.sh dump/ { dump_script = 1 }
+		END {
+			exit !(cah && free && start && build && dump &&
+				cah < free && free < start && start < build && build < dump &&
+				free_if && start_if && dump_if && start_coe &&
+				free_script && start_script && dump_script)
+		}
+	' "$WORKFLOW"
+	assert_success
+}
