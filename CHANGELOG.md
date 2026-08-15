@@ -19,6 +19,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.64.0] - 2026-08-15
+
+### Added
+
+- **docker**: add opt-in free-disk-space and resource-monitor inputs (#854) (f8ee2c5)
+
+### Changed
+
+- **deps**: lock file maintenance (#846) (d7d7d72)
+- **deps**: lock file maintenance (#835) (1408604)
+- **deps**: update docker/login-action action to v4.5.2 (patch) (#820) (8489f6b)
+
+### Fixed
+
+- **deps**: update lintro (#850) (adc8cc8)
+- **deps**: update lintro (#848) (c705d22)
+- **deps**: update lintro (#847) (f0b4a00)
+- **deps**: update lintro (#845) (eb07293)
+- **deps**: update lintro (#844) (53b0a0a)
+- **deps**: update lintro (#843) (41aca21)
+- **deps**: update lintro (#842) (d79cfd4)
+- **deps**: update lintro (#841) (5862dcb)
+- **deps**: update lintro (#839) (413b4d5)
+- **deps**: update lintro (#838) (b4c2caf)
+- **deps**: update lintro (#837) (d59b2fd)
+- **deps**: update lintro (#836) (c1b86fe)
+- **deps**: update lintro (#834) (e5d3d57)
+- **deps**: update lintro (#832) (42df847)
+- **deps**: update lintro (#831) (e2d6db4)
+- **deps**: update lintro (#830) (dafae66)
+- **deps**: update lintro (#829) (24e5543)
+- **deps**: update lintro (#828) (7c8c43f)
+- **deps**: update dependency lintro to 0.96.0 (minor) (#827) (7821f09)
+- **deps**: update lintro (#826) (fdd53cc)
+- **deps**: update lintro (#824) (8419afd)
+- **deps**: update lintro (#823) (9ce3221)
+- **deps**: update lintro (#821) (d7ddf03)
+- **deps**: update lintro (#819) (129ad26)
+- **deps**: update lintro (#818) (6a0817c)
+- **deps**: update dependency lintro to 0.93.1 (patch) (#815) (9a4ddfb)
+
 ## [0.63.0] - 2026-07-27
 
 ### Added
@@ -2014,7 +2055,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.64.0...HEAD
+[0.64.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.0...v0.64.0
 [0.63.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.1...v0.63.0
 [0.62.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.0...v0.62.1
 [0.62.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.61.1...v0.62.0
