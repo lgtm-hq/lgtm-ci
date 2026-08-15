@@ -98,6 +98,26 @@ _cache_import_expressions() {
 	done
 }
 
+@test "reusable-docker family: exposes free-disk-space and resource-monitor inputs" {
+	local wf
+	for wf in "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW"; do
+		run grep -E '^      free-disk-space:$' "$wf"
+		assert_success
+		run grep -E '^      resource-monitor:$' "$wf"
+		assert_success
+	done
+}
+
+@test "reusable-docker: orchestrator forwards disk and monitor inputs to both nested calls" {
+	local entry count
+	for entry in \
+		'free-disk-space: ${{ inputs.free-disk-space }}' \
+		'resource-monitor: ${{ inputs.resource-monitor }}'; do
+		count=$(grep -cF "$entry" "$WORKFLOW")
+		[ "$count" -eq 2 ]
+	done
+}
+
 @test "reusable-docker: orchestrator forwards secrets to both nested calls" {
 	local count
 	count=$(grep -cF 'DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}' "$WORKFLOW")

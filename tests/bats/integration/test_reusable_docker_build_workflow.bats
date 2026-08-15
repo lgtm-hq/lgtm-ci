@@ -89,3 +89,28 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-build.yml"
 	run grep -E '^[[:space:]]+\.github/actions/docker-auth$' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-docker-build: free-disk-space and resource-monitor run after harden and before build" {
+	run awk '
+		/^  build:/ { in_job = 1 }
+		in_job && /^  [a-z].*:$/ && $0 !~ /^  build:/ { in_job = 0 }
+		in_job && /name: Checkout and harden/ { cah = NR }
+		in_job && /name: Free disk space/ { free = NR }
+		in_job && /name: Start resource monitor/ { start = NR }
+		in_job && /uses: docker\/build-push-action@/ { build = NR }
+		in_job && /name: Dump resource monitor/ { dump = NR }
+		in_job && /if: inputs\.free-disk-space/ { free_if = 1 }
+		in_job && /if: inputs\.resource-monitor/ { start_if = 1 }
+		in_job && /if: always\(\) && inputs\.resource-monitor/ { dump_if = 1 }
+		in_job && /scripts\/ci\/docker\/free-disk-space\.sh/ { free_script = 1 }
+		in_job && /scripts\/ci\/docker\/resource-monitor\.sh start/ { start_script = 1 }
+		in_job && /scripts\/ci\/docker\/resource-monitor\.sh dump/ { dump_script = 1 }
+		END {
+			exit !(cah && free && start && build && dump &&
+				cah < free && free < start && start < build && build < dump &&
+				free_if && start_if && dump_if &&
+				free_script && start_script && dump_script)
+		}
+	' "$WORKFLOW"
+	assert_success
+}

@@ -205,6 +205,21 @@ on:
         required: false
         type: boolean
         default: false
+      free-disk-space:
+        description: >-
+          Reclaim unused ubuntu-24.04 amd64 toolchains before the build
+          (dotnet, Android SDK, ghc, PowerShell, unused toolcache). No-op
+          when those paths are absent (e.g. ubuntu-24.04-arm).
+        required: false
+        type: boolean
+        default: false
+      resource-monitor:
+        description: >-
+          Background a 30s memory/disk sampler into $RUNNER_TEMP and dump
+          the tail at job end so resource kills are attributable.
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: "Git ref for lgtm-ci tooling checkout. Defaults to the reusable workflow commit."
@@ -374,6 +389,8 @@ jobs:
       cache-registry-ref: ${{ inputs.cache-registry-ref }}
       cosign-sign: ${{ inputs.cosign-sign }}
       no-cache: ${{ inputs.no-cache }}
+      free-disk-space: ${{ inputs.free-disk-space }}
+      resource-monitor: ${{ inputs.resource-monitor }}
       tooling-ref: ${{ inputs.tooling-ref }}
       egress-policy: ${{ inputs.egress-policy }}
       allowed-endpoints: ${{ inputs.allowed-endpoints }}
@@ -419,6 +436,8 @@ jobs:
       cache-registry-ref: ${{ inputs.cache-registry-ref }}
       cosign-sign: ${{ inputs.cosign-sign }}
       no-cache: ${{ inputs.no-cache }}
+      free-disk-space: ${{ inputs.free-disk-space }}
+      resource-monitor: ${{ inputs.resource-monitor }}
       tooling-ref: ${{ inputs.tooling-ref }}
       egress-policy: ${{ inputs.egress-policy }}
       allowed-endpoints: ${{ inputs.allowed-endpoints }}
