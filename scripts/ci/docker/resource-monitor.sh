@@ -109,7 +109,25 @@ start_monitor() {
 	' _ "$log_file" "$interval" "$max_samples" >/dev/null 2>&1 &
 	echo $! >"$pid_file"
 	disown || true
-	log_info "Started resource monitor (pid $!, log ${log_file}, interval ${interval}s)"
+
+	# Finite samplers (tests) may exit after the first flush; otherwise the
+	# child must still be alive or we reported a green start with no samples.
+	local i
+	for i in 1 2 3 4 5; do
+		if is_running "$pid_file"; then
+			break
+		fi
+		if [[ "$max_samples" -gt 0 && -s "$log_file" ]]; then
+			break
+		fi
+		sleep 0.1
+	done
+	if ! is_running "$pid_file" && [[ ! -s "$log_file" ]]; then
+		log_error "Resource monitor failed to stay running"
+		exit 1
+	fi
+
+	log_info "Started resource monitor (pid $(cat "$pid_file"), log ${log_file}, interval ${interval}s)"
 }
 
 dump_monitor() {

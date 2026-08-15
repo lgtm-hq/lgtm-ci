@@ -91,7 +91,7 @@ remove_path() {
 		log_success "Removed ${path} (reclaimed ${size_kb}K)"
 		return 0
 	fi
-	if command -v sudo >/dev/null 2>&1 && sudo rm -rf -- "$path"; then
+	if command -v sudo >/dev/null 2>&1 && sudo -n rm -rf -- "$path"; then
 		log_success "Removed ${path} via sudo (reclaimed ${size_kb}K)"
 		return 0
 	fi

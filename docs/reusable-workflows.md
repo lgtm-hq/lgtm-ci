@@ -1476,7 +1476,8 @@ prints `df -h /` before and after. Missing paths are skipped, so ARM/lean
 runners are a no-op. `resource-monitor: true` backgrounds a 30s
 `date` / `free -m` / `df -h /` sampler into `$RUNNER_TEMP/resource-monitor.log`
 (flushed each iteration) and dumps the last ~100 lines with `if: always()` so
-the next runner shutdown is attributable as memory vs disk from the job log.
+the next resource failure is attributable as memory vs disk when the
+runner survives long enough for the dump step.
 
 ```yaml
 with:

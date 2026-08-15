@@ -134,7 +134,7 @@ Two boolean inputs (default `false`, so existing callers are unchanged) on
 | Input              | Default | Behavior                                                                                          |
 | ------------------ | ------- | ------------------------------------------------------------------------------------------------- |
 | `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh`: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, unused `$AGENT_TOOLSDIRECTORY` entries). Existence-guarded; no-op on lean/ARM images. |
-| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /` flushed to `$RUNNER_TEMP/resource-monitor.log`). A final `if: always()` step dumps the last ~100 lines so OOM vs disk-full is visible in the job log. |
+| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /` flushed to `$RUNNER_TEMP/resource-monitor.log`). A final `if: always()` step dumps the last ~100 lines so OOM vs disk-full is visible when the job fails but the runner is still up. |
 
 <!-- markdownlint-enable MD013 MD060 -->
 

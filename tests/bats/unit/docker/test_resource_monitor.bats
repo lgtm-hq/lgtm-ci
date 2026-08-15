@@ -30,6 +30,7 @@ _stop_monitor() {
 		local pid
 		pid="$(cat "$pid_file" 2>/dev/null || true)"
 		if [[ -n "${pid:-}" ]]; then
+			pkill -P "$pid" 2>/dev/null || true
 			kill -9 "$pid" 2>/dev/null || true
 		fi
 		rm -f "$pid_file"

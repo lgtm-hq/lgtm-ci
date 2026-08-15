@@ -12,8 +12,8 @@ setup() {
 	save_path
 	export SCRIPT
 	export AGENT_TOOLSDIRECTORY="${BATS_TEST_TMPDIR}/toolcache-missing"
-	export FREE_DISK_FIXED_PATHS=""
-	export FREE_DISK_TOOLCACHE_NAMES=""
+	unset FREE_DISK_FIXED_PATHS
+	unset FREE_DISK_TOOLCACHE_NAMES
 }
 
 teardown() {
@@ -171,7 +171,7 @@ exit 1
 EOF
 	cat >"${mock_bin}/sudo" <<EOF
 #!/usr/bin/env bash
-echo "\$@" >> '${sudo_calls}'
+printf '%s\n' "\$*" >> '${sudo_calls}'
 exit 0
 EOF
 	chmod +x "${mock_bin}/rm" "${mock_bin}/sudo"
@@ -187,7 +187,7 @@ EOF
 	assert_success
 	assert_output --partial "Removed ${locked} via sudo"
 	assert_file_contains_literal "$rm_calls" "-rf -- ${locked}"
-	assert_file_contains_literal "$sudo_calls" "rm -rf -- ${locked}"
+	assert_file_contains_literal "$sudo_calls" "-n rm -rf -- ${locked}"
 }
 
 @test "free-disk-space.sh: continues when both rm and sudo fail" {
@@ -213,6 +213,29 @@ EOF
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "Failed to remove ${locked}; continuing"
+}
+
+@test "free-disk-space.sh: walks production toolcache defaults when overrides are unset" {
+	_mock_df
+	_mock_rm_record
+	unset FREE_DISK_FIXED_PATHS
+	unset FREE_DISK_TOOLCACHE_NAMES
+	local toolcache
+	toolcache="${BATS_TEST_TMPDIR}/prod-toolcache"
+	mkdir -p "${toolcache}/CodeQL" "${toolcache}/go" "${toolcache}/ExtraTool"
+	echo unused >"${toolcache}/CodeQL/x"
+	echo unused >"${toolcache}/go/x"
+	echo unused >"${toolcache}/ExtraTool/x"
+	export AGENT_TOOLSDIRECTORY="$toolcache"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/mock_calls_rm" "-rf -- ${toolcache}/CodeQL"
+	assert_file_contains_literal "${BATS_TEST_TMPDIR}/mock_calls_rm" "-rf -- ${toolcache}/go"
+	if grep -qF "ExtraTool" "${BATS_TEST_TMPDIR}/mock_calls_rm"; then
+		echo "rm was called for unlisted ExtraTool entry" >&2
+		return 1
+	fi
 }
 
 @test "free-disk-space.sh: documents the production toolchain list" {
