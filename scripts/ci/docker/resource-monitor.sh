@@ -59,6 +59,46 @@ is_running() {
 	kill -0 "$pid" 2>/dev/null
 }
 
+ensure_parent_dir() {
+	local path="$1"
+	local label="$2"
+	local parent
+	parent="$(dirname -- "$path")"
+	if [[ ! -d "$parent" ]]; then
+		if ! mkdir -p -- "$parent"; then
+			log_error "Cannot create ${label} parent directory: ${parent}"
+			exit 1
+		fi
+	fi
+	if [[ ! -w "$parent" ]]; then
+		log_error "${label} parent directory is not writable: ${parent}"
+		exit 1
+	fi
+}
+
+file_byte_size() {
+	local path="$1"
+	if [[ -f "$path" ]]; then
+		wc -c <"$path" | tr -d '[:space:]'
+	else
+		echo 0
+	fi
+}
+
+stop_started_monitor() {
+	local pid_file="$1"
+	local pid
+	if [[ ! -f "$pid_file" ]]; then
+		return 0
+	fi
+	pid="$(cat "$pid_file" 2>/dev/null || true)"
+	if [[ -n "${pid:-}" ]]; then
+		pkill -P "$pid" 2>/dev/null || true
+		kill "$pid" 2>/dev/null || true
+	fi
+	rm -f "$pid_file"
+}
+
 start_monitor() {
 	require_runner_temp
 
@@ -83,12 +123,18 @@ start_monitor() {
 		exit 1
 	fi
 
+	ensure_parent_dir "$log_file" "log"
+	ensure_parent_dir "$pid_file" "PID file"
+
+	local log_bytes_before
+	log_bytes_before="$(file_byte_size "$log_file")"
+
 	# Write-first loop: the first sample is flushed before the first sleep.
 	# The compound redirect closes the file each iteration (survives a kill).
 	# $1/$2/$3 expand in the inner bash, not this shell.
 	# shellcheck disable=SC2016
 	nohup bash -c '
-		set -u
+		set -eu
 		log_file="$1"
 		interval="$2"
 		max_samples="$3"
@@ -107,22 +153,27 @@ start_monitor() {
 			sleep "$interval"
 		done
 	' _ "$log_file" "$interval" "$max_samples" >/dev/null 2>&1 &
-	echo $! >"$pid_file"
+	local monitor_pid=$!
+	if ! echo "$monitor_pid" >"$pid_file"; then
+		kill "$monitor_pid" 2>/dev/null || true
+		log_error "Failed to write PID file: ${pid_file}"
+		exit 1
+	fi
 	disown || true
 
-	# Finite samplers (tests) may exit after the first flush; otherwise the
-	# child must still be alive or we reported a green start with no samples.
-	local i
-	for i in 1 2 3 4 5; do
-		if is_running "$pid_file"; then
-			break
-		fi
-		if [[ "$max_samples" -gt 0 && -s "$log_file" ]]; then
+	# Readiness requires a newly appended sample, not a stale nonempty log.
+	# Finite samplers (tests) may exit after that first flush.
+	local i current
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+		current="$(file_byte_size "$log_file")"
+		if [[ "$current" -gt "$log_bytes_before" ]]; then
 			break
 		fi
 		sleep 0.1
 	done
-	if ! is_running "$pid_file" && [[ ! -s "$log_file" ]]; then
+	current="$(file_byte_size "$log_file")"
+	if [[ "$current" -le "$log_bytes_before" ]]; then
+		stop_started_monitor "$pid_file"
 		log_error "Resource monitor failed to stay running"
 		exit 1
 	fi

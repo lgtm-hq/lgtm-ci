@@ -15,6 +15,8 @@ setup() {
 	mkdir -p "$RUNNER_TEMP"
 	unset RESOURCE_MONITOR_MAX_SAMPLES
 	unset RESOURCE_MONITOR_INTERVAL
+	unset RESOURCE_MONITOR_LOG
+	unset RESOURCE_MONITOR_PID_FILE
 	_stop_monitor || true
 }
 
@@ -77,6 +79,13 @@ _wait_for_sample() {
 		sleep 0.1
 	done
 	return 1
+}
+
+_assert_no_sampler_for() {
+	local marker="$1"
+	local leftover
+	leftover="$(pgrep -f "$marker" || true)"
+	assert_equal "" "$leftover"
 }
 
 @test "resource-monitor.sh: script is executable" {
@@ -160,4 +169,27 @@ _wait_for_sample() {
 	run bash "$SCRIPT" dump
 	assert_success
 	assert_output --partial "No resource monitor log found"
+}
+
+@test "resource-monitor.sh: start fails when log parent is unavailable" {
+	local blocker="${BATS_TEST_TMPDIR}/unavailable-log-parent"
+	touch "$blocker"
+	export RESOURCE_MONITOR_LOG="${blocker}/monitor.log"
+
+	run bash "$SCRIPT" start
+	assert_failure
+	assert_output --partial "Cannot create log parent directory"
+	_assert_no_sampler_for "${blocker}/monitor.log"
+}
+
+@test "resource-monitor.sh: start fails when PID-file parent is unavailable" {
+	local blocker="${BATS_TEST_TMPDIR}/unavailable-pid-parent"
+	touch "$blocker"
+	export RESOURCE_MONITOR_PID_FILE="${blocker}/monitor.pid"
+
+	run bash "$SCRIPT" start
+	assert_failure
+	assert_output --partial "Cannot create PID file parent directory"
+	_assert_no_sampler_for "${blocker}/monitor.pid"
+	_assert_no_sampler_for "${RUNNER_TEMP}/resource-monitor.log"
 }
