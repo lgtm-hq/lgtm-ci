@@ -84,8 +84,19 @@ remove_path() {
 	local size_kb
 	size_kb="$(path_size_kb "$path")"
 	log_info "Removing ${path} (${size_kb}K)"
-	rm -rf -- "$path"
-	log_success "Removed ${path} (reclaimed ${size_kb}K)"
+
+	# Hosted-image toolchains are root-owned; try unsudoed rm first so
+	# tests and writable paths stay simple, then sudo, then continue.
+	if rm -rf -- "$path"; then
+		log_success "Removed ${path} (reclaimed ${size_kb}K)"
+		return 0
+	fi
+	if command -v sudo >/dev/null 2>&1 && sudo rm -rf -- "$path"; then
+		log_success "Removed ${path} via sudo (reclaimed ${size_kb}K)"
+		return 0
+	fi
+	log_warn "Failed to remove ${path}; continuing"
+	return 0
 }
 
 avail_kb() {

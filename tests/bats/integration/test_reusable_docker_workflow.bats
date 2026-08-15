@@ -108,6 +108,24 @@ _cache_import_expressions() {
 	done
 }
 
+@test "reusable-docker family: disk and monitor inputs default to false" {
+	local wf
+	for wf in "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW"; do
+		run awk '
+			/^      free-disk-space:$/ { in_free = 1; in_mon = 0 }
+			/^      resource-monitor:$/ { in_mon = 1; in_free = 0 }
+			in_free && /^        default: false$/ { free_false = 1 }
+			in_mon && /^        default: false$/ { mon_false = 1 }
+			/^      [a-z].*:$/ && !/^      free-disk-space:$/ && !/^      resource-monitor:$/ {
+				in_free = 0
+				in_mon = 0
+			}
+			END { exit !(free_false && mon_false) }
+		' "$wf"
+		assert_success
+	done
+}
+
 @test "reusable-docker: orchestrator forwards disk and monitor inputs to both nested calls" {
 	local entry count
 	for entry in \

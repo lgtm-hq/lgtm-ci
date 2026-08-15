@@ -100,6 +100,12 @@ _wait_for_sample() {
 	assert_output --partial "RUNNER_TEMP is required"
 }
 
+@test "resource-monitor.sh: start rejects invalid interval" {
+	run env RESOURCE_MONITOR_INTERVAL=0 bash "$SCRIPT" start
+	assert_failure
+	assert_output --partial "RESOURCE_MONITOR_INTERVAL must be a positive integer"
+}
+
 @test "resource-monitor.sh: start appends timestamp + free + df and flushes" {
 	_mock_free_df_date
 	export RESOURCE_MONITOR_INTERVAL=30

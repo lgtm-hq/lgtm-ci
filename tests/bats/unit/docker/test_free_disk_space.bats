@@ -155,3 +155,80 @@ EOF
 	assert_output --partial "BEFORE-DF"
 	assert_output --partial "AFTER-DF"
 }
+
+@test "free-disk-space.sh: falls back to sudo when unsudoed rm fails" {
+	_mock_df
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	local rm_calls="${BATS_TEST_TMPDIR}/mock_calls_rm"
+	local sudo_calls="${BATS_TEST_TMPDIR}/mock_calls_sudo"
+	: >"$rm_calls"
+	: >"$sudo_calls"
+	cat >"${mock_bin}/rm" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${rm_calls}'
+exit 1
+EOF
+	cat >"${mock_bin}/sudo" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${sudo_calls}'
+exit 0
+EOF
+	chmod +x "${mock_bin}/rm" "${mock_bin}/sudo"
+	export PATH="${mock_bin}:$PATH"
+
+	local locked="${BATS_TEST_TMPDIR}/locked-dotnet"
+	mkdir -p "$locked"
+	echo payload >"${locked}/file"
+	export FREE_DISK_FIXED_PATHS="$locked"
+	export AGENT_TOOLSDIRECTORY="${BATS_TEST_TMPDIR}/no-such-toolcache"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Removed ${locked} via sudo"
+	assert_file_contains_literal "$rm_calls" "-rf -- ${locked}"
+	assert_file_contains_literal "$sudo_calls" "rm -rf -- ${locked}"
+}
+
+@test "free-disk-space.sh: continues when both rm and sudo fail" {
+	_mock_df
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/rm" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+	cat >"${mock_bin}/sudo" <<'EOF'
+#!/usr/bin/env bash
+exit 1
+EOF
+	chmod +x "${mock_bin}/rm" "${mock_bin}/sudo"
+	export PATH="${mock_bin}:$PATH"
+
+	local locked="${BATS_TEST_TMPDIR}/still-there"
+	mkdir -p "$locked"
+	export FREE_DISK_FIXED_PATHS="$locked"
+	export AGENT_TOOLSDIRECTORY="${BATS_TEST_TMPDIR}/no-such-toolcache"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Failed to remove ${locked}; continuing"
+}
+
+@test "free-disk-space.sh: documents the production toolchain list" {
+	local path
+	for path in \
+		/usr/share/dotnet \
+		/usr/local/lib/android \
+		/opt/ghc \
+		/usr/local/share/powershell; do
+		run grep -F "$path" "$SCRIPT"
+		assert_success
+		run grep -F "$path" "${PROJECT_ROOT}/docs/workflow-contract.md"
+		assert_success
+		run grep -F "$path" "${PROJECT_ROOT}/docs/reusable-workflows.md"
+		assert_success
+	done
+	run grep -E '^\s+CodeQL$' "$SCRIPT"
+	assert_success
+}
