@@ -28,6 +28,7 @@ teardown() {
 
 _stop_monitor() {
 	local pid_file="${RESOURCE_MONITOR_PID_FILE:-${RUNNER_TEMP:-}/resource-monitor.pid}"
+	local log_file="${RESOURCE_MONITOR_LOG:-${RUNNER_TEMP:-}/resource-monitor.log}"
 	if [[ -n "${pid_file}" && -f "$pid_file" ]]; then
 		local pid
 		pid="$(cat "$pid_file" 2>/dev/null || true)"
@@ -36,6 +37,10 @@ _stop_monitor() {
 			kill -9 "$pid" 2>/dev/null || true
 		fi
 		rm -f "$pid_file"
+	fi
+	# kcov waits on leftover samplers; reap by the log path in the child argv.
+	if [[ -n "${log_file}" ]]; then
+		pkill -f "$log_file" 2>/dev/null || true
 	fi
 }
 
@@ -69,7 +74,7 @@ EOF
 _wait_for_sample() {
 	local log_file="$1"
 	local i
-	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
 		if [[ -f "$log_file" ]] &&
 			grep -qF "2026-08-15T09:00:00Z" "$log_file" &&
 			grep -qE "Mem:|free:" "$log_file" &&
@@ -135,7 +140,9 @@ _assert_no_sampler_for() {
 
 @test "resource-monitor.sh: start is idempotent when the loop is running" {
 	_mock_free_df_date
-	export RESOURCE_MONITOR_INTERVAL=30
+	# Finite loop so a missed teardown cannot pin kcov until the suite timeout.
+	export RESOURCE_MONITOR_INTERVAL=1
+	export RESOURCE_MONITOR_MAX_SAMPLES=30
 
 	run bash "$SCRIPT" start
 	assert_success
