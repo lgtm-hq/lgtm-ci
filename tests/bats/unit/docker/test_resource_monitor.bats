@@ -161,13 +161,44 @@ _assert_no_sampler_for() {
 	local start_out="${BATS_TEST_TMPDIR}/start.out"
 	local again_out="${BATS_TEST_TMPDIR}/start-again.out"
 	bash "$SCRIPT" start >"$start_out" 2>&1
+	assert_equal "0" "$?"
 	assert_file_contains_literal "$start_out" "Started resource monitor"
 	local first_pid
 	first_pid="$(cat "${RUNNER_TEMP}/resource-monitor.pid")"
 
 	bash "$SCRIPT" start >"$again_out" 2>&1
+	assert_equal "0" "$?"
 	assert_file_contains_literal "$again_out" "already running"
 	assert_equal "$first_pid" "$(cat "${RUNNER_TEMP}/resource-monitor.pid")"
+}
+
+@test "resource-monitor.sh: later samples still append after stdout is closed" {
+	_mock_free_df_date
+	export RESOURCE_MONITOR_INTERVAL=1
+	export RESOURCE_MONITOR_MAX_SAMPLES=4
+
+	local err_file="${BATS_TEST_TMPDIR}/start.err"
+	# Process substitution reader exits immediately so later prints EPIPE.
+	# File append must still land (stdout failure is best-effort).
+	bash "$SCRIPT" start > >(true) 2>"$err_file"
+	assert_equal "0" "$?"
+	assert_file_contains_literal "$err_file" "Started resource monitor"
+
+	local log_file="${RUNNER_TEMP}/resource-monitor.log"
+	_wait_for_sample "$log_file"
+	local before
+	before="$(wc -c <"$log_file" | tr -d '[:space:]')"
+
+	local i current
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+		current="$(wc -c <"$log_file" | tr -d '[:space:]')"
+		if [[ "$current" -gt "$before" ]]; then
+			break
+		fi
+		sleep 0.1
+	done
+	current="$(wc -c <"$log_file" | tr -d '[:space:]')"
+	[[ "$current" -gt "$before" ]]
 }
 
 @test "resource-monitor.sh: dump prints last 100 lines" {

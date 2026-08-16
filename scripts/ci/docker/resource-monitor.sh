@@ -133,27 +133,37 @@ start_monitor() {
 	log_bytes_before="$(file_byte_size "$log_file")"
 
 	# Write-first loop: the first sample is flushed before the first sleep.
-	# tee -a re-opens the file each iteration (last complete sample still
-	# dumpable). Stdout carries the same lines into the live job log so a
-	# VM kill still leaves samples in the downloaded log. $1/$2/$3 expand
-	# in the inner bash, not this shell.
+	# File append is independent of stdout. Print to stdout is best-effort
+	# so a still-open runner pipe keeps samples in the live job log; a
+	# closed pipe must not starve the dump file. trap "" PIPE: writing to
+	# a closed start-step pipe sends SIGPIPE, which would kill the sampler
+	# even with `printf || true`.
+	# $1/$2/$3 expand in the inner bash, not this shell.
 	# env -u BASH_ENV: kcov instruments nested bash via BASH_ENV; its injected
 	# script trips `set -u` inside the sampler, which is not a coverage target.
 	# stderr stays discarded so kcov/bash noise does not pollute the job log.
+	# The GHA runner waits on the start script PID, not stdout EOF, so
+	# leaving the child's stdout open does not hang the start step (bats
+	# `run` does wait for every writer — tests redirect to a file).
 	# shellcheck disable=SC2016
 	nohup env -u BASH_ENV bash -c '
 		set -eu
+		trap "" PIPE
 		log_file="$1"
 		interval="$2"
 		max_samples="$3"
 		samples=0
 		while true; do
-			{
-				date
-				free -m || echo "free: unavailable"
-				df -h / || echo "df: unavailable"
-				echo
-			} | sed "s/^/[resource-monitor] /" | tee -a "$log_file" || true
+			sample="$(
+				{
+					date
+					free -m || echo "free: unavailable"
+					df -h / || echo "df: unavailable"
+					echo
+				} | sed "s/^/[resource-monitor] /"
+			)"
+			printf "%s\n" "$sample" >>"$log_file"
+			printf "%s\n" "$sample" || true
 			samples=$((samples + 1))
 			if [[ "$max_samples" -gt 0 && "$samples" -ge "$max_samples" ]]; then
 				break
