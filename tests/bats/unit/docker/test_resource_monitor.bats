@@ -186,19 +186,19 @@ _assert_no_sampler_for() {
 
 	local log_file="${RUNNER_TEMP}/resource-monitor.log"
 	_wait_for_sample "$log_file"
-	local before
-	before="$(wc -c <"$log_file" | tr -d '[:space:]')"
 
-	local i current
-	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
-		current="$(wc -c <"$log_file" | tr -d '[:space:]')"
-		if [[ "$current" -gt "$before" ]]; then
+	# One extra append can land before SIGPIPE kills an untrapped sampler.
+	# Require three prefixed timestamps so the loop outlived the closed pipe.
+	local i sample_count
+	sample_count=0
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
+		sample_count="$(grep -cF "[resource-monitor] 2026-08-15T09:00:00Z" "$log_file" || true)"
+		if [[ "$sample_count" -ge 3 ]]; then
 			break
 		fi
-		sleep 0.1
+		sleep 0.2
 	done
-	current="$(wc -c <"$log_file" | tr -d '[:space:]')"
-	[[ "$current" -gt "$before" ]]
+	[[ "$sample_count" -ge 3 ]]
 }
 
 @test "resource-monitor.sh: dump prints last 100 lines" {
