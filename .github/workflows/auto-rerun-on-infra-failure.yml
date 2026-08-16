@@ -2,9 +2,10 @@
 # Dogfoods reusable-auto-rerun-on-infra-failure.yml for this repository's own
 # CI: when a CI run fails and its failed-job logs match a known transient
 # GitHub-side infra signature ("The runner has received a shutdown signal",
-# "Failed to resolve action download info", …), re-run only the failed jobs —
-# once. Same wiring as examples/auto-rerun-on-infra-failure.yml, but calling
-# the local reusable workflow so dogfooding always tracks main.
+# "Failed to resolve action download info", …), re-run only the failed jobs
+# up to max-reruns times. Same wiring as
+# examples/auto-rerun-on-infra-failure.yml, but calling the local reusable
+# workflow so dogfooding always tracks main.
 #
 # Caveat: workflow_run triggers only run from the workflow definition on the
 # default branch, so edits to this file take effect only once merged to main.
@@ -30,3 +31,8 @@ jobs:
       # as the strings the reusable workflow inputs expect.
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
+      # One retry is not enough on runner-shutdown kill streaks: attempt 1
+      # and attempt 2 both get 143, then the default cap leaves the run
+      # red for a human (#833). Three automatic re-runs converge those
+      # streaks without looping a genuine failure.
+      max-reruns: "3"

@@ -762,6 +762,10 @@ appended to the defaults). When no signature matches, the job writes a step
 summary and exits successfully without re-running — a real failure stays
 failed. `max-reruns` (default `1`) caps automation per run: attempts beyond
 the cap exit without re-running, so a persistent outage can never loop.
+This repository's own caller and the consumer example set `max-reruns: "3"`
+because a single retry does not converge runner-shutdown kill streaks
+(#833). The reusable default stays `1` so existing callers keep their
+current bound.
 
 `workflow_run: completed` can fire before GitHub finishes ingesting the log
 tail, so the matcher refetches the failed-job logs while they come back empty
@@ -826,6 +830,7 @@ jobs:
       tooling-ref: "<sha>" # vX.Y.Z
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
+      max-reruns: "3"
 ```
 
 Caveats: `workflow_run` triggers only execute from the workflow definition on

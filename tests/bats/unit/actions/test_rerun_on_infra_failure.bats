@@ -417,6 +417,27 @@ _call_count() {
 	assert_output "1"
 }
 
+@test "rerun-on-infra-failure: MAX_RERUNS=3 allows attempt 3 and skips attempt 4" {
+	# #833 caller cap: three automatic re-runs, then hand off to a human.
+	export MAX_RERUNS="3"
+	_mock_gh "The runner has received a shutdown signal"
+
+	export RUN_ATTEMPT="3"
+	run bash "$SCRIPT"
+	assert_success
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+
+	: >"$RERUN_CALLS"
+	: >"$FETCH_CALLS"
+	export RUN_ATTEMPT="4"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "exceeds MAX_RERUNS=3"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+}
+
 # =============================================================================
 # Custom SIGNATURES extend the defaults
 # =============================================================================

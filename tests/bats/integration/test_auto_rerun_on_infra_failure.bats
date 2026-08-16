@@ -32,6 +32,20 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/auto-rerun-on-infra-failure.yml"
 	assert_success
 }
 
+@test "auto-rerun: raises max-reruns above the reusable default of 1" {
+	# #833: a single retry does not converge runner-shutdown kill streaks.
+	# workflow_run callers execute from the default branch, so this pin
+	# is what actually takes effect for this repo.
+	run grep -F 'max-reruns: "3"' "$WORKFLOW"
+	assert_success
+}
+
+@test "auto-rerun example: documents max-reruns of 3" {
+	local example="${PROJECT_ROOT}/examples/auto-rerun-on-infra-failure.yml"
+	run grep -F 'max-reruns: "3"' "$example"
+	assert_success
+}
+
 @test "auto-rerun: grants minimal required permissions" {
 	run awk '
 		/^  rerun:/ { in_job = 1; in_perms = 0 }
