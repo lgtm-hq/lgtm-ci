@@ -3,10 +3,13 @@
 # Purpose: Sample runner memory and disk during Docker builds.
 #
 # Subcommands:
-#   start - Background a 30s loop appending date + free -m + df -h / to
-#           $RUNNER_TEMP/resource-monitor.log. Each iteration re-opens the
-#           file so the last complete sample survives a VM kill. Idempotent
-#           when the loop is already running.
+#   start - Background a 30s loop of date + free -m + df -h /. Each sample
+#           is prefixed with [resource-monitor] and teed to stdout (live job
+#           log) and $RUNNER_TEMP/resource-monitor.log. The file is re-opened
+#           each iteration so a last complete sample can still be dumped on
+#           clean completion. A VM kill cancels remaining steps, so stdout
+#           is the kill-case signal. Idempotent when the loop is already
+#           running. Stdout write failures are ignored (best-effort).
 #   dump  - Print the last ~100 lines of the log to the job log.
 #
 # Environment variables:
@@ -130,10 +133,13 @@ start_monitor() {
 	log_bytes_before="$(file_byte_size "$log_file")"
 
 	# Write-first loop: the first sample is flushed before the first sleep.
-	# The compound redirect closes the file each iteration (survives a kill).
-	# $1/$2/$3 expand in the inner bash, not this shell.
+	# tee -a re-opens the file each iteration (last complete sample still
+	# dumpable). Stdout carries the same lines into the live job log so a
+	# VM kill still leaves samples in the downloaded log. $1/$2/$3 expand
+	# in the inner bash, not this shell.
 	# env -u BASH_ENV: kcov instruments nested bash via BASH_ENV; its injected
 	# script trips `set -u` inside the sampler, which is not a coverage target.
+	# stderr stays discarded so kcov/bash noise does not pollute the job log.
 	# shellcheck disable=SC2016
 	nohup env -u BASH_ENV bash -c '
 		set -eu
@@ -147,14 +153,14 @@ start_monitor() {
 				free -m || echo "free: unavailable"
 				df -h / || echo "df: unavailable"
 				echo
-			} >>"$log_file"
+			} | sed "s/^/[resource-monitor] /" | tee -a "$log_file" || true
 			samples=$((samples + 1))
 			if [[ "$max_samples" -gt 0 && "$samples" -ge "$max_samples" ]]; then
 				break
 			fi
 			sleep "$interval"
 		done
-	' _ "$log_file" "$interval" "$max_samples" >/dev/null 2>&1 &
+	' _ "$log_file" "$interval" "$max_samples" 2>/dev/null &
 	local monitor_pid=$!
 	if ! echo "$monitor_pid" >"$pid_file"; then
 		kill "$monitor_pid" 2>/dev/null || true
@@ -163,14 +169,13 @@ start_monitor() {
 	fi
 	disown || true
 
-	# Ready when this invocation appended a sample, or the sampler is still
-	# alive (first flush can lag under kcov). A stale nonempty log alone
-	# is not success — that hid a dead child after a failed append.
+	# Ready when this invocation appended a sample (so the first
+	# [resource-monitor] line is already on stdout), or the sampler is
+	# still alive after the wait (first flush can lag under kcov). A stale
+	# nonempty log alone is not success — that hid a dead child after a
+	# failed append.
 	local i current
 	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do
-		if is_running "$pid_file"; then
-			break
-		fi
 		current="$(file_byte_size "$log_file")"
 		if [[ "$current" -gt "$log_bytes_before" ]]; then
 			break

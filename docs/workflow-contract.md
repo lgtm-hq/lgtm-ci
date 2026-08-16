@@ -134,7 +134,7 @@ Two boolean inputs (default `false`, so existing callers are unchanged) on
 | Input              | Default | Behavior                                                                                          |
 | ------------------ | ------- | ------------------------------------------------------------------------------------------------- |
 | `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh` on `github-hosted` runners only: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go, Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node). Existence-guarded; no-op on lean/ARM images. |
-| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /` flushed to `$RUNNER_TEMP/resource-monitor.log`). Start is best-effort (`continue-on-error`) so a sampler fault does not skip the image build. A final `if: always()` step dumps the last ~100 lines so OOM vs disk-full is visible when the job fails but the runner is still up. |
+| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /`, each line prefixed `[resource-monitor]` and teed to stdout plus `$RUNNER_TEMP/resource-monitor.log`). Start is best-effort (`continue-on-error`) so a sampler fault does not skip the image build. Stdout is the kill-case signal: a VM shutdown cancels remaining steps, so the `if: always()` dump of the last ~100 lines only runs when the runner survives. |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
