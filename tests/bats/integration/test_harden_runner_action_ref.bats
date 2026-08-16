@@ -5,7 +5,18 @@
 load "../../helpers/common"
 
 VALIDATE="${PROJECT_ROOT}/scripts/ci/actions/validate-harden-runner-action-ref.sh"
-HARDEN_PIN='step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0'
+# Derive the fixture pin from the validator so Renovate SHA bumps stay in sync.
+HARDEN_LINE="$(sed -nE "s/^HARDEN_SHA='([a-f0-9]{40})' # (v[0-9.]+).*/\\1 \\2/p" "$VALIDATE")"
+HARDEN_SHA="${HARDEN_LINE%% *}"
+HARDEN_TAG="${HARDEN_LINE#* }"
+HARDEN_PIN="step-security/harden-runner@${HARDEN_SHA} # ${HARDEN_TAG}"
+
+setup() {
+	if [[ -z "$HARDEN_SHA" || -z "$HARDEN_TAG" || "$HARDEN_SHA" == "$HARDEN_TAG" ]]; then
+		echo "failed to parse HARDEN_SHA/HARDEN_TAG from ${VALIDATE}" >&2
+		return 1
+	fi
+}
 
 @test "validate-harden-runner-action-ref: all reusables use direct step-security/harden-runner" {
 	run bash "$VALIDATE"
