@@ -165,6 +165,99 @@ run_coverage() {
 	[[ "$output" == coverage-dir=/* ]]
 }
 
+@test "run-coverage: wraps bats output in a stop-commands guard" {
+	cat >"${MOCK_BIN}/bats" <<'EOF'
+#!/usr/bin/env bash
+echo "1..1"
+echo "ok 1 fixture"
+echo "::error::fake annotation from a passing test"
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests/alpha.bats \
+		COVERAGE_DIR=coverage-report \
+		PARALLEL=1
+
+	assert_success
+	assert_output --partial "::stop-commands::lgtm-ci-bats-"
+	assert_output --partial "::error::fake annotation from a passing test"
+	# Resume token is `::<token>::` matching the stop-commands token.
+	local token
+	token="$(printf '%s\n' "$output" | sed -n 's/^::stop-commands::\(lgtm-ci-bats-[0-9][0-9]*\)$/\1/p' | head -n 1)"
+	[ -n "$token" ]
+	assert_output --partial "::${token}::"
+	# Fixture command sits between the guard markers.
+	local stop_line fake_line resume_line
+	stop_line="$(printf '%s\n' "$output" | grep -nF "::stop-commands::${token}" | head -n 1 | cut -d: -f1)"
+	fake_line="$(printf '%s\n' "$output" | grep -nF "::error::fake annotation from a passing test" | head -n 1 | cut -d: -f1)"
+	resume_line="$(printf '%s\n' "$output" | grep -nF "::${token}::" | head -n 1 | cut -d: -f1)"
+	[ "$stop_line" -lt "$fake_line" ]
+	[ "$fake_line" -lt "$resume_line" ]
+}
+
+@test "run-coverage: timeout ::error:: is emitted after the output guard" {
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests/alpha.bats \
+		COVERAGE_DIR=coverage-report \
+		PARALLEL=1 \
+		TIMEOUT_MOCK_EXIT=124 \
+		KCOV_SUITE_TIMEOUT_MINUTES=3
+
+	assert_failure 124
+	local token
+	token="$(printf '%s\n' "$output" | sed -n 's/^::stop-commands::\(lgtm-ci-bats-[0-9][0-9]*\)$/\1/p' | head -n 1)"
+	[ -n "$token" ]
+	local resume_line error_line
+	resume_line="$(printf '%s\n' "$output" | grep -nF "::${token}::" | head -n 1 | cut -d: -f1)"
+	error_line="$(printf '%s\n' "$output" | grep -nF "::error::kcov/BATS timed out after 3m" | head -n 1 | cut -d: -f1)"
+	[ "$resume_line" -lt "$error_line" ]
+}
+
+@test "run-coverage: filters cosmetic kcov LINENO errors and keeps real ones" {
+	cat >"${MOCK_BIN}/kcov" <<'EOF'
+#!/usr/bin/env bash
+echo 'kcov: error: ${LINENO} is not an integer'
+echo 'kcov: error: genuine parse failure'
+while [[ $# -gt 0 && "$1" != "bats" ]]; do
+	shift
+done
+exec "$@"
+EOF
+	chmod +x "${MOCK_BIN}/kcov"
+
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests/alpha.bats \
+		COVERAGE_DIR=coverage-report \
+		PARALLEL=1
+
+	assert_success
+	refute_output --partial 'kcov: error: ${LINENO} is not an integer'
+	assert_output --partial 'kcov: error: genuine parse failure'
+}
+
+@test "run-tests: wraps bats output in a stop-commands guard" {
+	cat >"${MOCK_BIN}/bats" <<'EOF'
+#!/usr/bin/env bash
+echo "1..1"
+echo "ok 1 fixture"
+echo "::error::fake annotation from a passing test"
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+
+	run run_coverage \
+		STEP=run-tests \
+		TEST_PATH=tests \
+		PARALLEL=1
+
+	assert_success
+	assert_output --partial "::stop-commands::lgtm-ci-bats-"
+	assert_output --partial "::error::fake annotation from a passing test"
+}
+
 @test "run-tests: still honors PARALLEL --jobs when not under kcov" {
 	run run_coverage \
 		STEP=run-tests \
