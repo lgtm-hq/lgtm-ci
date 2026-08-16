@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.63.2] - 2026-08-16
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.63.1 (minor) (#807) (6450b1e)
+- **deps**: update github-actions (#822) (9109623)
+- **deps**: update dependency anchore/syft to v1.51.0 (minor) (#767) (3fcf4c0)
+
+### Fixed
+
+- **deps**: update lintro (#858) (c03d421)
+
 ## [0.63.1] - 2026-08-12
 
 ### Changed
@@ -2051,7 +2063,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.2...HEAD
+[0.63.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.1...v0.63.0
 [0.62.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.0...v0.62.1
