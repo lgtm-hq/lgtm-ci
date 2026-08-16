@@ -15,6 +15,13 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 
 HARDEN_SHA='05e31511f85b41b11d1cf0ef85d0992719546e2c' # v2.21.0
+# Tag is parsed from the HARDEN_SHA comment so Renovate's one-line bump
+# stays the error-message SSoT (do not hardcode vX.Y.Z here).
+HARDEN_TAG="$(sed -nE "s/^HARDEN_SHA='[a-f0-9]{40}' # (v[0-9.]+).*/\1/p" "${BASH_SOURCE[0]}")"
+if [[ -z "$HARDEN_TAG" ]]; then
+	echo "validate-harden-runner-action-ref: failed to parse version comment on HARDEN_SHA" >&2
+	exit 1
+fi
 STEP_SECURITY_HARDEN_RE="^[[:space:]]+uses:[[:space:]]+step-security/harden-runner@${HARDEN_SHA}([[:space:]]+#.*)?[[:space:]]*$"
 TOOLING_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 TOOLING_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/harden-runner[[:space:]]*$'
@@ -330,7 +337,7 @@ while IFS= read -r -d '' file; do
 			violations=$((violations + 1))
 		fi
 		if [[ "$line" =~ $ANY_STEP_SECURITY_HARDEN_RE ]] && ! [[ "$line" =~ $STEP_SECURITY_HARDEN_RE ]]; then
-			echo "$file:$line_num: step-security/harden-runner must be pinned to ${HARDEN_SHA} # v2.20.0" >&2
+			echo "$file:$line_num: step-security/harden-runner must be pinned to ${HARDEN_SHA} # ${HARDEN_TAG}" >&2
 			echo "  $line" >&2
 			violations=$((violations + 1))
 		fi
