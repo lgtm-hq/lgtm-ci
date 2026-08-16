@@ -135,9 +135,18 @@ if [[ "$PROTECT_REFERENCED" == "true" && "$total_count" -gt 0 ]]; then
 	fi
 
 	if [[ -n "$referenced_digests_text" ]]; then
+		# File, not here-string: keep kcov from dumping the list (#856).
+		digests_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-cleanup-digest-list.XXXXXX")" ||
+			die "Could not create temporary file for referenced digest list"
+		_ghcr_write_var_to_file referenced_digests_text "$digests_file"
+		if [[ -s "$digests_file" ]]; then
+			printf '\n' >>"$digests_file"
+		fi
+		referenced_digests_text=""
 		while IFS= read -r digest; do
 			[[ -n "$digest" ]] && referenced_digests+=("$digest")
-		done <<<"$referenced_digests_text"
+		done <"$digests_file"
+		rm -f "$digests_file"
 		log_info "Collected ${#referenced_digests[@]} referenced digest(s) for protection"
 	fi
 fi

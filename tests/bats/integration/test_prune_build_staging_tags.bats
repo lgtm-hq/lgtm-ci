@@ -309,16 +309,25 @@ write_large_index_manifest() {
 		{"id":111,"name":"sha256:staging-old","updated_at":"2020-01-01T00:00:00Z","metadata":{"container":{"tags":["build-100-linux-amd64"]}}}
 	]'
 
-	run bash "$SCRIPT"
+	# #856: do not assert_output on the full $output — bats-assert's
+	# [[ $output == *pattern* ]] is xtraced and dumps the payload.
+	local out="${BATS_TEST_TMPDIR}/prune-large.out"
+	local status=0
+	bash "$SCRIPT" >"$out" 2>&1 || status=$?
+	[ "$status" -eq 0 ]
+	run grep -F "Argument list too long" "$out"
+	assert_failure
+	run grep -F "Collected 24002 referenced digest(s)" "$out"
 	assert_success
-	refute_output --partial "Argument list too long"
-	assert_output --partial "Collected 24002 referenced digest(s)"
 
 	# Protection semantics survive the large-set path: the referenced staging
 	# digest is skipped, the unreferenced one is pruned.
-	assert_output --partial "Pruned staging version 111"
-	assert_output --partial "still referenced by a live release"
-	refute_output --partial "Pruned staging version 333"
+	run grep -F "Pruned staging version 111" "$out"
+	assert_success
+	run grep -F "still referenced by a live release" "$out"
+	assert_success
+	run grep -F "Pruned staging version 333" "$out"
+	assert_failure
 
 	run cat "${BATS_TEST_TMPDIR}/bin/.gh_deletes"
 	assert_output --partial "versions/111"
@@ -344,10 +353,14 @@ write_large_index_manifest() {
 		{"id":111,"name":"sha256:staging-old","updated_at":"2020-01-01T00:00:00Z","metadata":{"container":{"tags":["build-100-linux-amd64"]}}}
 	]'
 
-	run bash "$SCRIPT"
+	local out="${BATS_TEST_TMPDIR}/prune-large-dryrun.out"
+	local status=0
+	bash "$SCRIPT" >"$out" 2>&1 || status=$?
+	[ "$status" -eq 0 ]
+	run grep -F "[dry-run] Would prune staging version 111" "$out"
 	assert_success
-	assert_output --partial "[dry-run] Would prune staging version 111"
-	refute_output --partial "Would prune staging version 333"
+	run grep -F "Would prune staging version 333" "$out"
+	assert_failure
 
 	# DRY_RUN must issue no DELETE at all, not merely spare version 111.
 	run cat "${BATS_TEST_TMPDIR}/bin/.gh_deletes"

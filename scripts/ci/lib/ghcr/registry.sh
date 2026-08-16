@@ -24,6 +24,44 @@ readonly _GHCR_MANIFEST_ACCEPT
 
 readonly _GHCR_REFERRERS_ACCEPT="application/vnd.oci.image.index.v1+json"
 
+# Write a nameref's value to a file with xtrace off so kcov's PS4 tracer
+# cannot dump a multi-megabyte payload as unprefixed continuation lines
+# (#856). The call site must pass the *name*, not the payload.
+_ghcr_xtrace_off() {
+	case "$-" in
+	*x*) _GHCR_XTRACE_RESTORE=1 ;;
+	*) _GHCR_XTRACE_RESTORE=0 ;;
+	esac
+	set +x
+}
+
+_ghcr_xtrace_restore() {
+	if [[ "${_GHCR_XTRACE_RESTORE:-0}" -eq 1 ]]; then
+		set -x
+	fi
+}
+
+_ghcr_write_var_to_file() {
+	local -n _ghcr_src="${1:?variable name required}"
+	local _ghcr_dest="${2:?destination path required}"
+	_ghcr_xtrace_off
+	printf '%s' "$_ghcr_src" >"$_ghcr_dest"
+	_ghcr_xtrace_restore
+}
+
+# Write unique lines from a nameref array to a file with xtrace off (#856).
+_ghcr_write_unique_lines() {
+	local -n _ghcr_arr="${1:?array name required}"
+	local _ghcr_dest="${2:?destination path required}"
+	_ghcr_xtrace_off
+	if ((${#_ghcr_arr[@]} > 0)); then
+		printf '%s\n' "${_ghcr_arr[@]}" | sort -u >"$_ghcr_dest"
+	else
+		: >"$_ghcr_dest"
+	fi
+	_ghcr_xtrace_restore
+}
+
 # Exchange GITHUB_TOKEN for a ghcr.io registry pull bearer token.
 # Args:
 #   $1 - package owner (org/user)
@@ -57,12 +95,15 @@ ghcr_exchange_registry_token() {
 # Fetch a manifest from ghcr.io by digest.
 # Returns manifest JSON on stdout; prints "404" when genuinely absent;
 # prints "ERROR" and returns 1 on transient failures.
+# Optional $5: destination path. On success the JSON is written there and
+# nothing is printed; on 404 the file is truncated. Use this for large
+# indexes so the body never re-enters an xtraced command (#856).
 ghcr_fetch_manifest() {
 	local owner="${1:?owner required}"
 	local package_name="${2:?package required}"
 	local digest="${3:?digest required}"
 	local registry_token="${4:?registry token required}"
-	local url http_code body
+	local url http_code body dest="${5:-}"
 
 	url="https://ghcr.io/v2/${owner}/${package_name}/manifests/${digest}"
 	body=$(
@@ -79,15 +120,35 @@ ghcr_fetch_manifest() {
 
 	case "$http_code" in
 	404)
+		if [[ -n "$dest" ]]; then
+			: >"$dest"
+			return 0
+		fi
 		printf '404\n'
 		return 0
 		;;
 	2?? | 3??)
-		if ! jq -e 'type == "object"' <<<"$body" >/dev/null 2>&1; then
+		# Validate via a file so kcov cannot dump the body as a
+		# here-string continuation (#856).
+		local body_file
+		body_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-manifest.XXXXXX")" || {
+			printf 'ERROR\n'
+			return 1
+		}
+		_ghcr_write_var_to_file body "$body_file"
+		if ! jq -e 'type == "object"' "$body_file" >/dev/null 2>&1; then
+			rm -f "$body_file"
 			printf 'ERROR\n'
 			return 1
 		fi
-		printf '%s' "$body"
+		# Optional dest ($5): leave the JSON on disk and print nothing
+		# so a large index never re-enters the caller's xtrace stream.
+		if [[ -n "$dest" ]]; then
+			mv "$body_file" "$dest"
+			return 0
+		fi
+		cat "$body_file"
+		rm -f "$body_file"
 		return 0
 		;;
 	*)
@@ -158,7 +219,13 @@ ghcr_collect_referenced_digests() {
 	local digests_var="${6:?digests var required}"
 	local -a digests=()
 	local complete=true
-	local digest manifest referrers_json
+	local digest referrers_json
+	local manifest_file versions_file unique_file
+	manifest_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-manifest.XXXXXX")" || return 1
+	versions_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-versions.XXXXXX")" || return 1
+	unique_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-collect-digests.XXXXXX")" || return 1
+
+	_ghcr_write_var_to_file versions_json "$versions_file"
 
 	while IFS= read -r digest; do
 		[[ -z "$digest" ]] && continue
@@ -166,32 +233,34 @@ ghcr_collect_referenced_digests() {
 		# P1: protect the root tagged digest itself
 		digests+=("$digest")
 
-		manifest=$(ghcr_fetch_manifest \
+		# Fetch to a file so a 24k-entry index never lands in a
+		# here-string that kcov dumps to the job log (#856).
+		: >"$manifest_file"
+		if ! ghcr_fetch_manifest \
 			"$owner" \
 			"$package_name" \
 			"$digest" \
-			"$registry_token") || {
-			complete=false
-			continue
-		}
-
-		if [[ "$manifest" == "ERROR" ]]; then
+			"$registry_token" \
+			"$manifest_file" \
+			>/dev/null; then
 			complete=false
 			continue
 		fi
 
-		if [[ "$manifest" != "404" ]]; then
+		# dest-mode 404 leaves an empty file: no children/subject, but
+		# referrers can still exist and must still be collected.
+		if [[ -s "$manifest_file" ]]; then
 			while IFS= read -r child; do
 				[[ -n "$child" ]] && digests+=("$child")
 			done < <(
 				jq -r '.manifests[]? | select(type == "object") | .digest // empty' \
-					<<<"$manifest"
+					"$manifest_file"
 			)
 			while IFS= read -r subject; do
 				[[ -n "$subject" ]] && digests+=("$subject")
 			done < <(
 				jq -r '.subject | select(type == "object") | .digest // empty' \
-					<<<"$manifest"
+					"$manifest_file"
 			)
 		fi
 
@@ -218,16 +287,25 @@ ghcr_collect_referenced_digests() {
 			select((.metadata.container.tags | length) > 0) |
 			select(.name | startswith("sha256:")) |
 			.name
-		' <<<"$versions_json"
+		' "$versions_file"
 	)
 
 	printf -v "$complete_var" '%s' "$complete"
-	if ((${#digests[@]} > 0)); then
-		printf -v "$digests_var" '%s' "$(printf '%s\n' "${digests[@]}" | sort -u)"
+	_ghcr_write_unique_lines digests "$unique_file"
+	# Populate the nameref from the file (xtrace off) so a 24k-line
+	# digest list is not expanded on a traced command line (#856).
+	# read -d '' keeps the trailing newline that $(cat) would strip.
+	_ghcr_xtrace_off
+	if [[ -s "$unique_file" ]]; then
+		IFS= read -r -d '' "$digests_var" <"$unique_file" || true
 	else
 		printf -v "$digests_var" ''
 	fi
+	_ghcr_xtrace_restore
+	rm -f -- "$manifest_file" "$versions_file" "$unique_file"
 }
 
 export -f ghcr_exchange_registry_token ghcr_fetch_manifest ghcr_fetch_referrers
 export -f ghcr_collect_referenced_digests
+export -f _ghcr_xtrace_off _ghcr_xtrace_restore
+export -f _ghcr_write_var_to_file _ghcr_write_unique_lines

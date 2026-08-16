@@ -181,9 +181,21 @@ if [[ "$PROTECT_REFERENCED" == "true" ]]; then
 	fi
 
 	if [[ -n "$referenced_digests_text" ]]; then
+		# Read from a file, not a here-string: kcov dumps every
+		# continuation line of <<<"$24k_digests" into the job log (#856).
+		digests_file="$(mktemp "${TMPDIR:-/tmp}/prune-staging-digest-list.XXXXXX")" ||
+			die "Could not create temporary file for referenced digest list"
+		_ghcr_write_var_to_file referenced_digests_text "$digests_file"
+		# $(cat) / printf -v strip a trailing newline; put it back so
+		# `read` cannot drop the last digest (#856).
+		if [[ -s "$digests_file" ]]; then
+			printf '\n' >>"$digests_file"
+		fi
+		referenced_digests_text=""
 		while IFS= read -r digest; do
 			[[ -n "$digest" ]] && referenced_digests+=("$digest")
-		done <<<"$referenced_digests_text"
+		done <"$digests_file"
+		rm -f "$digests_file"
 	fi
 	log_info "Collected ${#referenced_digests[@]} referenced digest(s) for protection"
 else

@@ -135,6 +135,40 @@ teardown() {
 	assert_output "ERROR"
 }
 
+@test "ghcr_fetch_manifest: dest path writes JSON and prints nothing" {
+	mock_command_multi "curl" '
+		*manifests/sha256:index*) printf "%s\n200\n" "{\"manifests\":[{\"digest\":\"sha256:child\"}]}";;
+		*) exit 1;;
+	'
+
+	local dest="${BATS_TEST_TMPDIR}/manifest.json"
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_manifest "test-org" "pkg" "sha256:index" "bearer" "$1"
+	' _ "$dest"
+	assert_success
+	assert_output ""
+	run jq -r '.manifests[0].digest' "$dest"
+	assert_output "sha256:child"
+}
+
+@test "ghcr_fetch_manifest: dest path 404 truncates the file" {
+	mock_command_multi "curl" '
+		*manifests/sha256:missing*) printf "%s\n404\n" "{}";;
+		*) exit 1;;
+	'
+
+	local dest="${BATS_TEST_TMPDIR}/manifest.json"
+	printf 'stale\n' >"$dest"
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_manifest "test-org" "pkg" "sha256:missing" "bearer" "$1"
+	' _ "$dest"
+	assert_success
+	assert_output ""
+	[ ! -s "$dest" ]
+}
+
 @test "ghcr_fetch_manifest: returns ERROR for non-object JSON body" {
 	mock_command_multi "curl" '
 		*manifests/sha256:badjson*) printf "%s\n200\n" "[]";;
