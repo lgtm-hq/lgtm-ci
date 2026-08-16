@@ -430,12 +430,15 @@ _call_count() {
 
 	: >"$RERUN_CALLS"
 	: >"$FETCH_CALLS"
+	: >"$GITHUB_STEP_SUMMARY"
 	export RUN_ATTEMPT="4"
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "exceeds MAX_RERUNS=3"
 	[ ! -s "$RERUN_CALLS" ]
 	[ ! -s "$FETCH_CALLS" ]
+	run grep -F "Attempt 4 exceeds the max of 3 automatic re-run(s); leaving run ${RUN_ID} failed for a human." "$GITHUB_STEP_SUMMARY"
+	assert_success
 }
 
 # =============================================================================
