@@ -2,7 +2,7 @@
 # Auto re-run on transient infra failures: when a listed workflow fails and
 # its failed-job logs match a known GitHub-side outage signature ("Failed to
 # resolve action download info", runner shutdowns, …), re-run only the failed
-# jobs — once. Copy into your repository as
+# jobs up to max-reruns times. Copy into your repository as
 # .github/workflows/auto-rerun-on-infra-failure.yml and list the workflows
 # to watch by their `name:`.
 #
@@ -33,7 +33,10 @@ jobs:
       # as the strings the reusable workflow inputs expect.
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
-      # max-reruns: "1"
+      # Default is 1. Raise above 1 so a kill on attempt 1 *and* 2 still
+      # converges — runner-shutdown streaks commonly eat the first retry
+      # (#833). The reusable workflow still hands off to a human past the cap.
+      max-reruns: "3"
       # signatures: |
       #   Some extra transient failure signature
       egress-policy: block
