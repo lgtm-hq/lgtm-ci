@@ -1436,7 +1436,7 @@ jobs:
 | `cosign-sign`        | `false` | Keyless Cosign signature on pushed manifests                  |
 | `no-cache`           | `false` | Disable GHA/registry cache for clean release builds           |
 | `free-disk-space`    | `false` | Reclaim unused ubuntu-24.04 amd64 toolchains before the build |
-| `resource-monitor`   | `false` | Sample memory/disk every 30s; dump the tail at job end        |
+| `resource-monitor`   | `false` | Sample memory/disk every 30s; tee into the live job log       |
 | `provenance`         | `true`  | Generate provenance attestation (only when `push: true`)      |
 | `sbom`               | `true`  | Generate SBOM attestation (only when `push: true`)            |
 
@@ -1481,11 +1481,12 @@ unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go,
 Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node) and prints `df -h /`
 before and after. Missing paths are skipped, so ARM/lean runners are a
 no-op. `resource-monitor: true` backgrounds a 30s `date` / `free -m` /
-`df -h /` sampler into `$RUNNER_TEMP/resource-monitor.log` (flushed each
-iteration). Start is best-effort (`continue-on-error`) so a sampler fault
-does not skip the image build. The last ~100 lines dump with
-`if: always()` so the next resource failure is attributable as memory vs
-disk when the runner survives long enough for the dump step.
+`df -h /` sampler. Each line is prefixed `[resource-monitor]` and teed
+to stdout (live job log, retained up to a VM kill) and
+`$RUNNER_TEMP/resource-monitor.log` (flushed each iteration). Start is
+best-effort (`continue-on-error`) so a sampler fault does not skip the
+image build. The last ~100 lines still dump with `if: always()` when
+the runner survives; do not treat that dump as the kill-case signal.
 
 ```yaml
 with:

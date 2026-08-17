@@ -216,9 +216,10 @@ on:
         default: false
       resource-monitor:
         description: >-
-          Background a 30s memory/disk sampler into $RUNNER_TEMP and dump
-          the tail at job end so resource kills are attributable. Start
-          is best-effort and does not fail the build.
+          Background a 30s memory/disk sampler that tees [resource-monitor]
+          lines into the live job log and $RUNNER_TEMP. Dump the tail at
+          job end when the runner survives. Start is best-effort and does
+          not fail the build.
         required: false
         type: boolean
         default: false

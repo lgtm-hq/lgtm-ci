@@ -76,7 +76,7 @@ _wait_for_sample() {
 	local i
 	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
 		if [[ -f "$log_file" ]] &&
-			grep -qF "2026-08-15T09:00:00Z" "$log_file" &&
+			grep -qF "[resource-monitor] 2026-08-15T09:00:00Z" "$log_file" &&
 			grep -qE "Mem:|free:" "$log_file" &&
 			grep -qE "/dev/root|df:" "$log_file"; then
 			return 0
@@ -133,27 +133,72 @@ _assert_no_sampler_for() {
 	local log_file="${RUNNER_TEMP}/resource-monitor.log"
 	_wait_for_sample "$log_file"
 	assert_file_exists "$log_file"
-	assert_file_contains_literal "$log_file" "2026-08-15T09:00:00Z"
+	assert_file_contains_literal "$log_file" "[resource-monitor] 2026-08-15T09:00:00Z"
 	assert_file_contains_literal "$log_file" "Mem:"
 	assert_file_contains_literal "$log_file" "/dev/root"
+}
+
+@test "resource-monitor.sh: start writes a [resource-monitor] line to stdout" {
+	_mock_free_df_date
+	export RESOURCE_MONITOR_INTERVAL=30
+	export RESOURCE_MONITOR_MAX_SAMPLES=1
+
+	run bash "$SCRIPT" start
+	assert_success
+	assert_output --partial "[resource-monitor]"
+	assert_output --partial "Mem:"
+	assert_output --partial "/dev/root"
 }
 
 @test "resource-monitor.sh: start is idempotent when the loop is running" {
 	_mock_free_df_date
 	# Finite loop so a missed teardown cannot pin kcov until the suite timeout.
+	# Redirect to a file (not `run`): the live sampler keeps stdout open, and
+	# bats `run` waits for every writer to close.
 	export RESOURCE_MONITOR_INTERVAL=1
 	export RESOURCE_MONITOR_MAX_SAMPLES=30
 
-	run bash "$SCRIPT" start
-	assert_success
-	assert_output --partial "Started resource monitor"
+	local start_out="${BATS_TEST_TMPDIR}/start.out"
+	local again_out="${BATS_TEST_TMPDIR}/start-again.out"
+	bash "$SCRIPT" start >"$start_out" 2>&1
+	assert_equal "0" "$?"
+	assert_file_contains_literal "$start_out" "Started resource monitor"
 	local first_pid
 	first_pid="$(cat "${RUNNER_TEMP}/resource-monitor.pid")"
 
-	run bash "$SCRIPT" start
-	assert_success
-	assert_output --partial "already running"
+	bash "$SCRIPT" start >"$again_out" 2>&1
+	assert_equal "0" "$?"
+	assert_file_contains_literal "$again_out" "already running"
 	assert_equal "$first_pid" "$(cat "${RUNNER_TEMP}/resource-monitor.pid")"
+}
+
+@test "resource-monitor.sh: later samples still append after stdout is closed" {
+	_mock_free_df_date
+	export RESOURCE_MONITOR_INTERVAL=1
+	export RESOURCE_MONITOR_MAX_SAMPLES=4
+
+	local err_file="${BATS_TEST_TMPDIR}/start.err"
+	# Process substitution reader exits immediately so later prints EPIPE.
+	# File append must still land (stdout failure is best-effort).
+	bash "$SCRIPT" start > >(true) 2>"$err_file"
+	assert_equal "0" "$?"
+	assert_file_contains_literal "$err_file" "Started resource monitor"
+
+	local log_file="${RUNNER_TEMP}/resource-monitor.log"
+	_wait_for_sample "$log_file"
+
+	# One extra append can land before SIGPIPE kills an untrapped sampler.
+	# Require three prefixed timestamps so the loop outlived the closed pipe.
+	local i sample_count
+	sample_count=0
+	for i in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30 31 32 33 34 35 36 37 38 39 40; do
+		sample_count="$(grep -cF "[resource-monitor] 2026-08-15T09:00:00Z" "$log_file" || true)"
+		if [[ "$sample_count" -ge 3 ]]; then
+			break
+		fi
+		sleep 0.2
+	done
+	[[ "$sample_count" -ge 3 ]]
 }
 
 @test "resource-monitor.sh: dump prints last 100 lines" {
