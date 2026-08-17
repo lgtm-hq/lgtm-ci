@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.63.7] - 2026-08-17
+
+### Fixed
+
+- **ci**: shard BATS+kcov coverage in reusable-test-shell (#875) (75c607f)
+
 ## [0.63.6] - 2026-08-17
 
 ### Fixed
@@ -2099,7 +2105,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.6...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.7...HEAD
+[0.63.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.6...v0.63.7
 [0.63.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.5...v0.63.6
 [0.63.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.4...v0.63.5
 [0.63.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.3...v0.63.4
