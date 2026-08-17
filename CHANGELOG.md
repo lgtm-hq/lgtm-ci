@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.63.3] - 2026-08-17
+
+### Changed
+
+- **deps**: lock file maintenance (#864) (f65d390)
+- **deps**: update step-security/harden-runner (#840) (239e85f)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.63.2 (patch) (#861) (1248c51)
+- **deps**: update astral-sh/setup-uv action to v10.0.1 (major) (#851) (79160e6)
+
+### Fixed
+
+- **ci**: pin grype-version to v0.117.0 in scan-vulnerabilities (#866) (42a01b4)
+
 ## [0.63.2] - 2026-08-16
 
 ### Changed
@@ -2063,7 +2076,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.3...HEAD
+[0.63.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.2...v0.63.3
 [0.63.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.0...v0.63.1
 [0.63.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.62.1...v0.63.0
