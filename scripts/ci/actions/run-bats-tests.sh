@@ -25,6 +25,37 @@ set -euo pipefail
 : "${GITHUB_OUTPUT:=/dev/null}"
 : "${GITHUB_STEP_SUMMARY:=/dev/null}"
 
+# #856 Part 3: fixture `::error::` / `::warning::` / `::notice::` lines must
+# not become real job annotations. Wrap BATS stdout/stderr in a
+# stop-commands region. Real annotations from this script (timeout, missing
+# path, coverage threshold) are emitted outside the guarded region.
+bats_stop_token="lgtm-ci-bats-${RANDOM}${RANDOM}"
+
+begin_bats_output_guard() {
+	printf '::stop-commands::%s\n' "$bats_stop_token"
+}
+
+end_bats_output_guard() {
+	printf '::%s::\n' "$bats_stop_token"
+}
+
+# #856 Part 4: kcov's bash engine finds `kcov@` anywhere in a line. A nested
+# shell traces the unexpanded `PS4='kcov@${BASH_SOURCE}@${LINENO}@'`
+# assignment, and the parser then errors on the literal `${LINENO}`. Cosmetic
+# only — coverage output is unaffected. Drop that one message; keep others.
+filter_kcov_console() {
+	# grep -v exits 1 when every line matches; `set +e` callers tolerate it.
+	# The ${LINENO} is kcov's literal error text, not a shell expansion (#856).
+	# -x keeps other kcov errors that merely contain this diagnostic.
+	local filter_status=0
+	# shellcheck disable=SC2016
+	grep -vFx 'kcov: error: ${LINENO} is not an integer' || filter_status=$?
+	if [[ "$filter_status" -eq 0 || "$filter_status" -eq 1 ]]; then
+		return 0
+	fi
+	return "$filter_status"
+}
+
 # =============================================================================
 # Step: install-bats - Install BATS core and helper libraries
 # =============================================================================
@@ -159,9 +190,10 @@ if [[ "$STEP" == "run-tests" ]]; then
 
 	# Run tests
 	echo "Running: bats ${BATS_ARGS[*]} $TEST_PATH"
+	begin_bats_output_guard
 	bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
-
 	TEST_EXIT_CODE=${PIPESTATUS[0]}
+	end_bats_output_guard
 
 	# Store raw output for parsing
 	echo "exit-code=$TEST_EXIT_CODE" >>"$GITHUB_OUTPUT"
@@ -254,6 +286,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	# --exclude-pattern: Skip test infrastructure files
 	# --kill-after: if bats/kcov ignore SIGTERM, SIGKILL after grace so timeout(1)
 	# itself cannot hang waiting on an uninterruptible child (#556 / Greptile).
+	begin_bats_output_guard
 	timeout --signal=TERM --kill-after=30s "${SUITE_TIMEOUT_MINUTES}m" \
 		kcov \
 		--cobertura \
@@ -261,10 +294,14 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		--include-path="${REPO_ROOT}/scripts/ci/lib" \
 		--exclude-pattern="/tests/,/tmp/,/bats-" \
 		"$COVERAGE_DIR" \
-		bats "${BATS_ARGS[@]}" "${TEST_FILES[@]}" 2>&1 | tee bats-output.tap
+		bats "${BATS_ARGS[@]}" "${TEST_FILES[@]}" 2>&1 |
+		filter_kcov_console |
+		tee bats-output.tap
 	PIPE_STATUS=("${PIPESTATUS[@]}")
 	KCOV_EXIT=${PIPE_STATUS[0]:-0}
-	TEE_EXIT=${PIPE_STATUS[1]:-0}
+	FILTER_EXIT=${PIPE_STATUS[1]:-0}
+	TEE_EXIT=${PIPE_STATUS[2]:-0}
+	end_bats_output_guard
 
 	end_ts="$(date +%s)"
 	elapsed=$((end_ts - start_ts))
@@ -276,6 +313,8 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		EXIT_CODE=124
 	elif [[ "$KCOV_EXIT" -ne 0 ]]; then
 		EXIT_CODE="$KCOV_EXIT"
+	elif [[ "$FILTER_EXIT" -ne 0 ]]; then
+		EXIT_CODE="$FILTER_EXIT"
 	else
 		EXIT_CODE="$TEE_EXIT"
 	fi

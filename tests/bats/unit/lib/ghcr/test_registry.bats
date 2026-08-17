@@ -17,6 +17,36 @@ teardown() {
 	teardown_temp_dir
 }
 
+# Load versions JSON from a fixture file with xtrace off so kcov cannot dump
+# the payload as a BATS `run` argument continuation (#856).
+_collect_from_versions_file() {
+	local versions_json="$1"
+	local digests_file="$2"
+	local extra_printf="${3:-}"
+	local versions_file="${BATS_TEST_TMPDIR}/versions.json"
+	printf '%s' "$versions_json" >"$versions_file"
+	bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		_ghcr_xtrace_off
+		versions=$(<"$1")
+		_ghcr_xtrace_restore
+		ghcr_collect_referenced_digests \
+			"test-org" \
+			"pkg" \
+			versions \
+			"bearer" \
+			referenced_complete \
+			"$2"
+		printf "complete=%s\n" "$referenced_complete"
+		if [[ "$3" == "digests-prefix" ]]; then
+			printf "digests="
+		fi
+		if [[ -s "$2" ]]; then
+			cat "$2"
+		fi
+	' _ "$versions_file" "$digests_file" "$extra_printf"
+}
+
 # =============================================================================
 # ghcr_exchange_registry_token
 # =============================================================================
@@ -135,6 +165,40 @@ teardown() {
 	assert_output "ERROR"
 }
 
+@test "ghcr_fetch_manifest: dest path writes JSON and prints nothing" {
+	mock_command_multi "curl" '
+		*manifests/sha256:index*) printf "%s\n200\n" "{\"manifests\":[{\"digest\":\"sha256:child\"}]}";;
+		*) exit 1;;
+	'
+
+	local dest="${BATS_TEST_TMPDIR}/manifest.json"
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_manifest "test-org" "pkg" "sha256:index" "bearer" "$1"
+	' _ "$dest"
+	assert_success
+	assert_output ""
+	run jq -r '.manifests[0].digest' "$dest"
+	assert_output "sha256:child"
+}
+
+@test "ghcr_fetch_manifest: dest path 404 truncates the file" {
+	mock_command_multi "curl" '
+		*manifests/sha256:missing*) printf "%s\n404\n" "{}";;
+		*) exit 1;;
+	'
+
+	local dest="${BATS_TEST_TMPDIR}/manifest.json"
+	printf 'stale\n' >"$dest"
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_manifest "test-org" "pkg" "sha256:missing" "bearer" "$1"
+	' _ "$dest"
+	assert_success
+	assert_output ""
+	[ ! -s "$dest" ]
+}
+
 @test "ghcr_fetch_manifest: returns ERROR for non-object JSON body" {
 	mock_command_multi "curl" '
 		*manifests/sha256:badjson*) printf "%s\n200\n" "[]";;
@@ -210,19 +274,9 @@ teardown() {
 		{"name":"sha256:root","metadata":{"container":{"tags":["v1.0.0"]}}},
 		{"name":"sha256:untagged","metadata":{"container":{"tags":[]}}}
 	]'
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
 
-	run bash -c "
-		source \"\$LIB_DIR/ghcr/registry.sh\"
-		ghcr_collect_referenced_digests \
-			'test-org' \
-			'pkg' \
-			'$versions' \
-			'bearer' \
-			referenced_complete \
-			referenced_digests
-		printf 'complete=%s\n' \"\$referenced_complete\"
-		printf '%s\n' \"\$referenced_digests\"
-	"
+	run _collect_from_versions_file "$versions" "$digests_file"
 	assert_success
 	assert_output --partial "complete=true"
 	assert_output --partial "sha256:root"
@@ -240,18 +294,9 @@ teardown() {
 	'
 
 	local versions='[{"name":"sha256:root","metadata":{"container":{"tags":["v1.0.0"]}}}]'
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
 
-	run bash -c "
-		source \"\$LIB_DIR/ghcr/registry.sh\"
-		ghcr_collect_referenced_digests \
-			'test-org' \
-			'pkg' \
-			'$versions' \
-			'bearer' \
-			referenced_complete \
-			referenced_digests
-		printf 'complete=%s\n' \"\$referenced_complete\"
-	"
+	run _collect_from_versions_file "$versions" "$digests_file"
 	assert_success
 	assert_output --partial "complete=false"
 }
@@ -264,38 +309,97 @@ teardown() {
 	'
 
 	local versions='[{"name":"sha256:root","metadata":{"container":{"tags":["v1.0.0"]}}}]'
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
 
-	run bash -c "
-		source \"\$LIB_DIR/ghcr/registry.sh\"
-		ghcr_collect_referenced_digests \
-			'test-org' \
-			'pkg' \
-			'$versions' \
-			'bearer' \
-			referenced_complete \
-			referenced_digests
-		printf 'complete=%s\n' \"\$referenced_complete\"
-	"
+	run _collect_from_versions_file "$versions" "$digests_file"
 	assert_success
 	assert_output --partial "complete=false"
 }
 
 @test "ghcr_collect_referenced_digests: returns empty digests for untagged-only versions" {
-	run bash -c '
-		source "$LIB_DIR/ghcr/registry.sh"
-		ghcr_collect_referenced_digests \
-			"test-org" \
-			"pkg" \
-			"[{\"name\":\"sha256:orphan\",\"metadata\":{\"container\":{\"tags\":[]}}}]" \
-			"bearer" \
-			referenced_complete \
-			referenced_digests
-		printf "complete=%s\n" "$referenced_complete"
-		printf "digests=%s\n" "$referenced_digests"
-	'
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
+	local versions='[{"name":"sha256:orphan","metadata":{"container":{"tags":[]}}}]'
+	run _collect_from_versions_file "$versions" "$digests_file" "digests-prefix"
 	assert_success
 	assert_output --partial "complete=true"
 	assert_output --partial "digests="
+	[ ! -s "$digests_file" ]
+}
+
+@test "_ghcr_write_var_to_file: returns failure when dest is not writable" {
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		payload="hello"
+		_ghcr_write_var_to_file payload /dev/full
+	'
+	assert_failure
+}
+
+@test "ghcr_fetch_manifest: dest path mv failure returns ERROR" {
+	mock_command_multi "curl" '
+		*manifests/sha256:index*) printf "%s\n200\n" "{\"manifests\":[{\"digest\":\"sha256:child\"}]}";;
+		*) exit 1;;
+	'
+
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_manifest "test-org" "pkg" "sha256:index" "bearer" "/this/does/not/exist/manifest.json"
+	'
+	assert_failure
+	assert_output --partial "ERROR"
+}
+
+@test "ghcr_fetch_manifest: dest path 404 write failure returns ERROR" {
+	mock_command_multi "curl" '
+		*manifests/sha256:missing*) printf "%s\n404\n" "{}";;
+		*) exit 1;;
+	'
+
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_manifest "test-org" "pkg" "sha256:missing" "bearer" "/this/does/not/exist/manifest.json"
+	'
+	assert_failure
+	assert_output --partial "ERROR"
+}
+
+@test "ghcr_fetch_referrers: dest path 404 write failure returns ERROR" {
+	mock_command_multi "curl" '
+		*referrers/sha256:missing*) printf "%s\n404\n" "{}";;
+		*) exit 1;;
+	'
+
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_referrers "test-org" "pkg" "sha256:missing" "bearer" "/this/does/not/exist/referrers.json"
+	'
+	assert_failure
+	assert_output --partial "ERROR"
+}
+
+@test "ghcr_collect_referenced_digests: fails closed when digests file cannot be written" {
+	mock_command_multi "curl" '
+		*manifests/sha256:root*) printf "%s\n200\n" "{\"manifests\":[]}";;
+		*referrers/sha256:root*) printf "%s\n200\n" "{\"manifests\":[]}";;
+		*) exit 1;;
+	'
+
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		versions="[{\"name\":\"sha256:root\",\"metadata\":{\"container\":{\"tags\":[\"v1\"]}}}]"
+		ghcr_collect_referenced_digests \
+			"test-org" \
+			"pkg" \
+			versions \
+			"bearer" \
+			referenced_complete \
+			"/this/does/not/exist/digests.txt"
+		status=$?
+		printf "complete=%s\n" "$referenced_complete"
+		exit "$status"
+	'
+	assert_failure
+	assert_output --partial "complete=false"
 }
 
 @test "ghcr/registry.sh: second source is a no-op when already loaded" {

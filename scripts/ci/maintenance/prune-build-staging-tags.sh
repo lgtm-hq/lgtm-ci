@@ -165,26 +165,34 @@ if [[ "$PROTECT_REFERENCED" == "true" ]]; then
 	fi
 
 	referenced_complete=true
-	referenced_digests_text=""
-	ghcr_collect_referenced_digests \
+	# File path, not a payload: expanding $non_build_versions or the digest
+	# list under xtrace dumps 24k fixture lines into the kcov log (#856).
+	digests_file="$(mktemp "${TMPDIR:-/tmp}/prune-staging-digest-list.XXXXXX")" ||
+		die "Could not create temporary file for referenced digest list"
+	if ! ghcr_collect_referenced_digests \
 		"$GITHUB_ORG" \
 		"$PACKAGE_NAME" \
-		"$non_build_versions" \
+		non_build_versions \
 		"$registry_token" \
 		referenced_complete \
-		referenced_digests_text
+		"$digests_file"; then
+		rm -f "$digests_file"
+		die "Failed to write referenced-digest set for ${PACKAGE_NAME}"
+	fi
 
 	if [[ "$referenced_complete" != "true" ]]; then
+		rm -f "$digests_file"
 		log_warning "Skipping prune for ${PACKAGE_NAME} (referenced-digest collection incomplete)"
 		emit_skip_summary ":warning: Skipped (incomplete reference protection)"
 		exit 0
 	fi
 
-	if [[ -n "$referenced_digests_text" ]]; then
+	if [[ -s "$digests_file" ]]; then
 		while IFS= read -r digest; do
 			[[ -n "$digest" ]] && referenced_digests+=("$digest")
-		done <<<"$referenced_digests_text"
+		done <"$digests_file"
 	fi
+	rm -f "$digests_file"
 	log_info "Collected ${#referenced_digests[@]} referenced digest(s) for protection"
 else
 	log_warning "PROTECT_REFERENCED=false: referenced-digest safety gate disabled"
