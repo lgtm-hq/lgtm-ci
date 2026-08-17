@@ -14,8 +14,11 @@ covered when hits > 0). The integer percent (rounded half-up) is printed to
 stdout and written to ``GITHUB_OUTPUT`` as ``coverage-percent`` when that
 file is set.
 
-Stdlib only (``argparse``, ``xml.etree.ElementTree``). Do not pass
-``kcov --merge``; it yields empty bash coverage.
+Parsing is regex-based on the Cobertura schema kcov emits (``class`` /
+``line`` tags). That keeps this script stdlib-only and avoids
+``xml.etree.ElementTree``, which bandit B314/B405 and semgrep XXE rules
+flag even for trusted CI artifacts. Do not pass ``kcov --merge``; it yields
+empty bash coverage.
 
 Usage:
     python3 scripts/ci/actions/merge-cobertura.py \\
@@ -26,69 +29,106 @@ from __future__ import annotations
 
 import argparse
 import os
+import re
 import sys
-import xml.etree.ElementTree as ET
 from pathlib import Path
 
-
-def _local_tag(tag: str) -> str:
-    """Return the element tag without an XML namespace prefix.
-
-    Args:
-        tag: Raw ElementTree tag, possibly ``{namespace}name``.
-
-    Returns:
-        The local name.
-    """
-    if tag.startswith("{") and "}" in tag:
-        return tag.split("}", 1)[1]
-    return tag
+_CLASS_BLOCK = re.compile(
+    r"<((?:[\w.-]+:)?class)\b([^>]*)>(.*?)</\1\s*>",
+    flags=re.DOTALL | re.IGNORECASE,
+)
+_LINE_TAG = re.compile(
+    r"<(?:[\w.-]+:)?line\b([^>]*)/?>",
+    flags=re.IGNORECASE,
+)
+_ATTR = re.compile(r'([\w:.-]+)\s*=\s*"([^"]*)"')
 
 
-def _iter_class_elements(root: ET.Element) -> list[ET.Element]:
-    """Return every Cobertura ``class`` element under ``root``.
+def _unescape_xml(value: str) -> str:
+    """Decode the XML predefined entities in ``value``.
 
     Args:
-        root: Parsed coverage document root.
+        value: Attribute text that may contain ``&amp;`` / ``&lt;`` / etc.
 
     Returns:
-        Class elements that carry a ``filename`` attribute.
+        The unescaped string. ``&amp;`` is decoded last so ``&amp;lt;``
+        stays ``&lt;``.
     """
-    classes: list[ET.Element] = []
-    for elem in root.iter():
-        if _local_tag(elem.tag) != "class":
+    return (
+        value.replace("&quot;", '"')
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&amp;", "&")
+    )
+
+
+def _escape_xml(value: str) -> str:
+    """Escape XML special characters for an attribute or text node.
+
+    Args:
+        value: Raw string.
+
+    Returns:
+        XML-safe string. ``&`` is escaped first.
+    """
+    return (
+        value.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
+def _attrs(raw: str) -> dict[str, str]:
+    """Parse ``name="value"`` pairs from a tag's attribute blob.
+
+    Args:
+        raw: Text between the tag name and ``>``.
+
+    Returns:
+        Local attribute name (prefix stripped) to unescaped value.
+    """
+    found: dict[str, str] = {}
+    for match in _ATTR.finditer(raw):
+        name = match.group(1)
+        if ":" in name:
+            name = name.rsplit(":", 1)[1]
+        found[name] = _unescape_xml(match.group(2))
+    return found
+
+
+def _iter_class_hits(text: str) -> list[tuple[str, list[tuple[int, int]]]]:
+    """Return ``(filename, [(line, hits), ...])`` from a Cobertura document.
+
+    Args:
+        text: Raw Cobertura XML.
+
+    Returns:
+        Class entries that carry a ``filename`` attribute. Malformed
+        ``number``/``hits`` values are skipped.
+    """
+    classes: list[tuple[str, list[tuple[int, int]]]] = []
+    for class_match in _CLASS_BLOCK.finditer(text):
+        filename = _attrs(class_match.group(2)).get("filename")
+        if filename is None or filename == "":
             continue
-        if "filename" not in elem.attrib:
-            continue
-        classes.append(elem)
+        hits: list[tuple[int, int]] = []
+        for line_match in _LINE_TAG.finditer(class_match.group(3)):
+            line_attrs = _attrs(line_match.group(1))
+            raw_number = line_attrs.get("number")
+            if raw_number is None:
+                continue
+            try:
+                number = int(raw_number)
+                count = int(line_attrs.get("hits", "0"))
+            except ValueError:
+                continue
+            if number < 0 or count < 0:
+                continue
+            hits.append((number, count))
+        classes.append((filename, hits))
     return classes
-
-
-def _iter_line_hits(class_elem: ET.Element) -> list[tuple[int, int]]:
-    """Return ``(line_number, hits)`` pairs for one class.
-
-    Args:
-        class_elem: A Cobertura ``class`` element.
-
-    Returns:
-        Line hits. Malformed ``number``/``hits`` values are skipped.
-    """
-    hits: list[tuple[int, int]] = []
-    for elem in class_elem.iter():
-        if _local_tag(elem.tag) != "line":
-            continue
-        raw_number = elem.attrib.get("number")
-        if raw_number is None:
-            continue
-        try:
-            number = int(raw_number)
-            count = int(elem.attrib.get("hits", "0"))
-        except ValueError:
-            continue
-        if number < 0 or count < 0:
-            continue
-        hits.append((number, count))
-    return hits
 
 
 def merge_line_hits(input_paths: list[Path]) -> dict[str, dict[int, int]]:
@@ -105,18 +145,17 @@ def merge_line_hits(input_paths: list[Path]) -> dict[str, dict[int, int]]:
         Mapping of filename to line-number → max hits.
 
     Raises:
-        ValueError: When a path cannot be parsed as Cobertura XML.
+        ValueError: When a path cannot be read as text.
     """
     merged: dict[str, dict[int, int]] = {}
     for path in input_paths:
         try:
-            tree = ET.parse(path)
-        except (ET.ParseError, OSError) as exc:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
             raise ValueError(f"cannot parse Cobertura XML {path}: {exc}") from exc
-        for class_elem in _iter_class_elements(tree.getroot()):
-            filename = class_elem.attrib["filename"]
+        for filename, hits in _iter_class_hits(text):
             file_hits = merged.setdefault(filename, {})
-            for number, count in _iter_line_hits(class_elem):
+            for number, count in hits:
                 file_hits[number] = max(file_hits.get(number, 0), count)
     return merged
 
@@ -164,61 +203,40 @@ def write_cobertura(
         for count in file_hits.values():
             if count > 0:
                 lines_covered += 1
-    coverage = ET.Element(
-        "coverage",
-        {
-            "line-rate": line_rate,
-            "branch-rate": "0",
-            "lines-covered": str(lines_covered),
-            "lines-valid": str(lines_valid),
-            "version": "lgtm-ci-merge-cobertura",
-        },
-    )
-    sources = ET.SubElement(coverage, "sources")
-    ET.SubElement(sources, "source").text = "."
-    packages = ET.SubElement(coverage, "packages")
-    package = ET.SubElement(
-        packages,
-        "package",
-        {
-            "name": "merged",
-            "line-rate": line_rate,
-            "complexity": "0",
-        },
-    )
-    classes = ET.SubElement(package, "classes")
+
+    chunks: list[str] = [
+        '<?xml version="1.0" encoding="utf-8"?>',
+        (
+            f'<coverage line-rate="{line_rate}" branch-rate="0" '
+            f'lines-covered="{lines_covered}" lines-valid="{lines_valid}" '
+            'version="lgtm-ci-merge-cobertura">'
+        ),
+        "<sources><source>.</source></sources>",
+        "<packages>",
+        (f'<package name="merged" line-rate="{line_rate}" complexity="0">'),
+        "<classes>",
+    ]
     for filename in sorted(merged):
         file_hits = merged[filename]
         file_total = len(file_hits)
         file_covered = sum(1 for count in file_hits.values() if count > 0)
         file_rate = f"{(file_covered / file_total) if file_total else 0:.4f}"
-        class_elem = ET.SubElement(
-            classes,
-            "class",
-            {
-                "filename": filename,
-                "name": Path(filename).name,
-                "line-rate": file_rate,
-            },
+        escaped_name = _escape_xml(filename)
+        escaped_basename = _escape_xml(Path(filename).name)
+        chunks.append(
+            f'<class filename="{escaped_name}" name="{escaped_basename}" '
+            f'line-rate="{file_rate}">',
         )
-        ET.SubElement(class_elem, "methods")
-        lines_elem = ET.SubElement(class_elem, "lines")
+        chunks.append("<methods />")
+        chunks.append("<lines>")
         for number in sorted(file_hits):
-            ET.SubElement(
-                lines_elem,
-                "line",
-                {
-                    "number": str(number),
-                    "hits": str(file_hits[number]),
-                },
+            chunks.append(
+                f'<line number="{number}" hits="{file_hits[number]}" />',
             )
-    tree = ET.ElementTree(coverage)
+        chunks.append("</lines></class>")
+    chunks.append("</classes></package></packages></coverage>")
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    tree.write(
-        output_path,
-        encoding="utf-8",
-        xml_declaration=True,
-    )
+    output_path.write_text("\n".join(chunks) + "\n", encoding="utf-8")
 
 
 def _emit_percent(percent: int) -> None:

@@ -445,7 +445,9 @@ covered by BATS). Do not use `matrix.`, `format(`, or ternary `&& … ||`
 expressions in `job.name` on jobs that have `if:`. Documented exceptions live
 in that script; `reusable-test-shell.yml` `test-sharded` and `aggregate` are
 excepted so coverage shards can use derived names while the fan-in job keeps
-the caller `job-name` required-check context (#874).
+the caller `job-name` required-check context (#874). Sharded TAP/coverage
+artifacts include `inputs.comment-marker` so two workflow calls in one run
+cannot mix load-bearing fan-in inputs.
 
 ### Tooling sparse-checkout
 

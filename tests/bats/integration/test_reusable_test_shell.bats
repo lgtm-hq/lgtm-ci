@@ -44,10 +44,14 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	assert_success
 }
 
-@test "reusable-test-shell: shard artifact names are suffix-unique" {
-	run grep -F 'name: shell-test-results-shard-${{ matrix.shard }}' "$WORKFLOW"
+@test "reusable-test-shell: shard artifact names include comment-marker" {
+	run grep -F 'name: shell-test-results-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}' "$WORKFLOW"
 	assert_success
-	run grep -F 'name: shell-coverage-shard-${{ matrix.shard }}' "$WORKFLOW"
+	run grep -F 'name: shell-coverage-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}' "$WORKFLOW"
+	assert_success
+	run grep -F 'pattern: shell-test-results-${{ inputs.comment-marker }}-shard-*' "$WORKFLOW"
+	assert_success
+	run grep -F 'pattern: shell-coverage-${{ inputs.comment-marker }}-shard-*' "$WORKFLOW"
 	assert_success
 	# Default single-job path keeps unsuffixed names.
 	run grep -E '^          name: shell-test-results$' "$WORKFLOW"
@@ -75,6 +79,20 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 			in_step = 0
 		}
 		in_step && /^        timeout-minutes: 20/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-shell: aggregate uploads merged coverage as shell-coverage" {
+	run awk '
+		/^  aggregate:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate:/ { in_job = 0 }
+		in_job && /^      - name: Upload merged coverage report/ { in_step = 1 }
+		in_job && in_step && /^      - name:/ && !/^      - name: Upload merged coverage report/ {
+			in_step = 0
+		}
+		in_step && /name: shell-coverage$/ { found = 1 }
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success

@@ -24,7 +24,7 @@
 #              exit 124 on expiry. Kept below the coverage-run step timeout (45).
 #   SHARD_ARTIFACTS_DIR - Directory of downloaded shard TAP artifacts
 #              (aggregate-results). Expected layout:
-#              shell-test-results-shard-*/bats-output.tap
+#              shell-test-results-<comment-marker>-shard-*/bats-output.tap
 #   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts
 #              (merge-coverage). Each shard dir contributes cov.xml or
 #              cobertura.xml.
@@ -585,6 +585,8 @@ if [[ "$STEP" == "merge-coverage" ]]; then
 		xml=""
 		if [[ -f "$shard_dir/cov.xml" ]]; then
 			xml="$shard_dir/cov.xml"
+		elif [[ -f "$shard_dir/kcov-merged/cov.xml" ]]; then
+			xml="$shard_dir/kcov-merged/cov.xml"
 		elif [[ -f "$shard_dir/cobertura.xml" ]]; then
 			xml="$shard_dir/cobertura.xml"
 		else

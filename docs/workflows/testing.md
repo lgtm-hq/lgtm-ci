@@ -81,7 +81,12 @@ keeps today's single job named `job-name`. When `coverage: true` and
 (`cksum(path) % N`) and a fan-in job named `job-name` merges TAP totals
 plus Cobertura XML (max per-line hits) and enforces `coverage-threshold`.
 kcov v43 cannot merge bash coverage itself, so do not pass `kcov --merge`.
-This repo's `ci.yml` opts in with `coverage-shards: 4`.
+Shard TAP/coverage artifacts are named
+`shell-test-results-<comment-marker>-shard-*` and
+`shell-coverage-<comment-marker>-shard-*` so two invocations in one
+run do not mix results (set a distinct `comment-marker` per call, the
+same isolation used for PR comments). This repo's `ci.yml` opts in
+with `coverage-shards: 4`.
 
 ```yaml
 jobs:

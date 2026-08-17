@@ -123,6 +123,34 @@ PY
 	assert_output --partial "not found"
 }
 
+@test "merge-cobertura.py: does not expand DTD entities" {
+	cat >"${BATS_TEST_TMPDIR}/xxe.xml" <<'EOF'
+<?xml version="1.0"?>
+<!DOCTYPE coverage [
+  <!ENTITY injected SYSTEM "file:///etc/passwd">
+]>
+<coverage>
+  <packages>
+    <package name="pkg">
+      <classes>
+        <class filename="&injected;" name="x">
+          <lines>
+            <line number="1" hits="1" />
+          </lines>
+        </class>
+      </classes>
+    </package>
+  </packages>
+</coverage>
+EOF
+	run python3 "${SCRIPT}" --output "${OUT}" "${BATS_TEST_TMPDIR}/xxe.xml"
+	assert_success
+	run grep -F '/etc/passwd' "${OUT}"
+	assert_failure
+	run grep -E 'filename="(&amp;|&)injected;"' "${OUT}"
+	assert_success
+}
+
 @test "merge-coverage step discovers cov.xml per shard directory" {
 	local cov_dir="${BATS_TEST_TMPDIR}/shard-coverage"
 	mkdir -p "${cov_dir}/shell-coverage-shard-0"
