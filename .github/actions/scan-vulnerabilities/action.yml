@@ -74,6 +74,10 @@ runs:
       # Pinned to SHA for supply chain security
       uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
       with:
+        # Grype must stay >= v0.115.0 to read the CycloneDX 1.7 SBOMs that
+        # syft >= 1.44 emits; the scan-action default lags behind (#865).
+        # renovate: datasource=github-releases depName=anchore/grype
+        grype-version: v0.117.0
         path: ${{ inputs.target-type == 'dir' && steps.target.outputs.path || '' }}
         image: ${{ inputs.target-type == 'image' && steps.target.outputs.path || '' }}
         sbom: ${{ inputs.target-type == 'sbom' && steps.target.outputs.path || '' }}

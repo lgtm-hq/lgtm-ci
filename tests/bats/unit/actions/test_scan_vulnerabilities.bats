@@ -128,3 +128,27 @@ EOF
 	assert_failure
 	assert_output --partial "TARGET_TYPE is required"
 }
+
+@test "scan-vulnerabilities action: pins grype-version able to read CycloneDX 1.7 (#865)" {
+	local action_file="${PROJECT_ROOT}/.github/actions/scan-vulnerabilities/action.yml"
+	run grep -E '^\s+grype-version: v[0-9]+\.[0-9]+\.[0-9]+$' "$action_file"
+	assert_success
+	local version
+	version="$(grep -Eo 'grype-version: v[0-9]+\.[0-9]+\.[0-9]+' "$action_file" |
+		grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')"
+	local minor
+	minor="$(echo "$version" | cut -d. -f2)"
+	local major
+	major="$(echo "$version" | cut -d. -f1)"
+	# grype >= 0.115.0 is required to parse CycloneDX 1.7 SBOMs from syft >= 1.44
+	if [ "$major" -eq 0 ]; then
+		[ "$minor" -ge 115 ]
+	fi
+}
+
+@test "scan-vulnerabilities action: grype-version pin has renovate annotation (#865)" {
+	local action_file="${PROJECT_ROOT}/.github/actions/scan-vulnerabilities/action.yml"
+	run grep -B1 'grype-version: v' "$action_file"
+	assert_success
+	assert_output --partial "renovate: datasource=github-releases depName=anchore/grype"
+}
