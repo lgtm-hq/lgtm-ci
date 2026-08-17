@@ -47,8 +47,13 @@ filter_kcov_console() {
 	# grep -v exits 1 when every line matches; `set +e` callers tolerate it.
 	# The ${LINENO} is kcov's literal error text, not a shell expansion (#856).
 	# -x keeps other kcov errors that merely contain this diagnostic.
+	local filter_status=0
 	# shellcheck disable=SC2016
-	grep -vFx 'kcov: error: ${LINENO} is not an integer' || true
+	grep -vFx 'kcov: error: ${LINENO} is not an integer' || filter_status=$?
+	if [[ "$filter_status" -eq 0 || "$filter_status" -eq 1 ]]; then
+		return 0
+	fi
+	return "$filter_status"
 }
 
 # =============================================================================
@@ -294,7 +299,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		tee bats-output.tap
 	PIPE_STATUS=("${PIPESTATUS[@]}")
 	KCOV_EXIT=${PIPE_STATUS[0]:-0}
-	# PIPE_STATUS[1] is the filter (always 0); tee is last.
+	FILTER_EXIT=${PIPE_STATUS[1]:-0}
 	TEE_EXIT=${PIPE_STATUS[2]:-0}
 	end_bats_output_guard
 
@@ -308,6 +313,8 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		EXIT_CODE=124
 	elif [[ "$KCOV_EXIT" -ne 0 ]]; then
 		EXIT_CODE="$KCOV_EXIT"
+	elif [[ "$FILTER_EXIT" -ne 0 ]]; then
+		EXIT_CODE="$FILTER_EXIT"
 	else
 		EXIT_CODE="$TEE_EXIT"
 	fi

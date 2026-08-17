@@ -182,7 +182,10 @@ ghcr_fetch_manifest() {
 	404)
 		rm -f "$body_file"
 		if [[ -n "$dest" ]]; then
-			: >"$dest"
+			if ! : >"$dest"; then
+				printf 'ERROR\n'
+				return 1
+			fi
 			return 0
 		fi
 		printf '404\n'
@@ -261,7 +264,10 @@ ghcr_fetch_referrers() {
 	404)
 		rm -f "$body_file"
 		if [[ -n "$dest" ]]; then
-			printf '[]' >"$dest"
+			if ! printf '[]' >"$dest"; then
+				printf 'ERROR\n'
+				return 1
+			fi
 			return 0
 		fi
 		printf '[]'
