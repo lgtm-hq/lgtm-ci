@@ -134,7 +134,7 @@ Two boolean inputs (default `false`, so existing callers are unchanged) on
 | Input              | Default | Behavior                                                                                          |
 | ------------------ | ------- | ------------------------------------------------------------------------------------------------- |
 | `free-disk-space`  | `false` | Before the build, run `scripts/ci/docker/free-disk-space.sh` on `github-hosted` runners only: print `df -h /` before/after and remove unused ubuntu-24.04 amd64 toolchains (`/usr/share/dotnet`, `/usr/local/lib/android`, `/opt/ghc`, `/usr/local/share/powershell`, and unused `$AGENT_TOOLSDIRECTORY` entries: CodeQL, go, Java_Temurin-Hotspot_jdk, PyPy, Python, Ruby, node). Existence-guarded; no-op on lean/ARM images. |
-| `resource-monitor` | `false` | Before the build, start `scripts/ci/docker/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /`, each line prefixed `[resource-monitor]` and teed to stdout plus `$RUNNER_TEMP/resource-monitor.log`). Start is best-effort (`continue-on-error`) so a sampler fault does not skip the image build. Stdout is the kill-case signal: a VM shutdown cancels remaining steps, so the `if: always()` dump of the last ~100 lines only runs when the runner survives. |
+| `resource-monitor` | `false` | Before the build, start `scripts/ci/actions/resource-monitor.sh start` (30s loop of `date` + `free -m` + `df -h /`, each line prefixed `[resource-monitor]` and teed to stdout plus `$RUNNER_TEMP/resource-monitor.log`). Start is best-effort (`continue-on-error`) so a sampler fault does not skip the image build. Stdout is the kill-case signal: a VM shutdown cancels remaining steps, so the `if: always()` dump of the last ~100 lines only runs when the runner survives. |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -442,7 +442,12 @@ is skipped by `if:`. lgtm-ci uses a **hybrid** policy (issue #168 §12):
 
 Contract enforcement: `scripts/ci/quality/validate-static-job-names.sh` (also
 covered by BATS). Do not use `matrix.`, `format(`, or ternary `&& … ||`
-expressions in `job.name` on jobs that have `if:`.
+expressions in `job.name` on jobs that have `if:`. Documented exceptions live
+in that script; `reusable-test-shell.yml` `test-sharded` and `aggregate` are
+excepted so coverage shards can use derived names while the fan-in job keeps
+the caller `job-name` required-check context (#874). Sharded TAP/coverage
+artifacts include `inputs.comment-marker` so two workflow calls in one run
+cannot mix load-bearing fan-in inputs.
 
 ### Tooling sparse-checkout
 

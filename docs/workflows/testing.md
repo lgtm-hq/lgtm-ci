@@ -73,6 +73,48 @@ inputs as the Vitest workflow.
 **Outputs:** `passed`, `pages-coverage-artifact-name`,
 `pages-coverage-uploaded`.
 
+### reusable-test-shell.yml
+
+BATS tests with optional kcov coverage. `coverage-shards` (default `1`)
+keeps today's single job named `job-name`. When `coverage: true` and
+`coverage-shards > 1`, each shard runs a subset of `.bats` files
+(`cksum(path) % N`) and a fan-in job named `job-name` merges TAP totals
+plus Cobertura XML (max per-line hits) and enforces `coverage-threshold`.
+kcov v43 cannot merge bash coverage itself, so do not pass `kcov --merge`.
+Shard TAP/coverage artifacts are named
+`shell-test-results-<comment-marker>-shard-*` and
+`shell-coverage-<comment-marker>-shard-*` so two invocations in one
+run do not mix results (set a distinct `comment-marker` per call, the
+same isolation used for PR comments). This repo's `ci.yml` opts in
+with `coverage-shards: 4`.
+
+```yaml
+jobs:
+  shell:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
+    with:
+      job-name: "🐚 Shell Tests"
+      test-path: tests/bats
+      coverage: true
+      coverage-threshold: 84
+      coverage-shards: 4
+      upload-coverage: true
+```
+
+**Inputs:** `bats-version` (default `1.10.0`), `test-path` (default
+`tests/bats`), `coverage` (default false), `coverage-threshold` (default
+0), `coverage-shards` (default 1), `upload-coverage` (default false),
+`parallel` (default 1; ignored under kcov), `comment-marker` (default
+`shell-test-results`; must be unique per invocation in the same run so
+shard artifacts do not mix), plus standard `tooling-ref` / egress /
+`job-name` / `draft-pr-skip` inputs.
+
+**Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
+`coverage-percent`, `passed`.
+
 ### reusable-test-e2e.yml
 
 ```yaml

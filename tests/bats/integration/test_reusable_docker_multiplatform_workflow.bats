@@ -160,8 +160,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
 		in_start && /continue-on-error: true/ { start_coe = 1 }
 		in_start && /^      - name: / && $0 !~ /Start resource monitor/ { in_start = 0 }
 		in_job && /scripts\/ci\/docker\/free-disk-space\.sh/ { free_script = 1 }
-		in_job && /scripts\/ci\/docker\/resource-monitor\.sh start/ { start_script = 1 }
-		in_job && /scripts\/ci\/docker\/resource-monitor\.sh dump/ { dump_script = 1 }
+        in_job && /scripts\/ci\/actions\/resource-monitor\.sh start/ { start_script = 1 }
+        in_job && /scripts\/ci\/actions\/resource-monitor\.sh dump/ { dump_script = 1 }
 		END {
 			exit !(cah && free && start && build && dump &&
 				cah < free && free < start && start < build && build < dump &&

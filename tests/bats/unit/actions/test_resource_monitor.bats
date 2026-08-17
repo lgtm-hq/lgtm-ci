@@ -1,11 +1,11 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Unit tests for scripts/ci/docker/resource-monitor.sh
+# Purpose: Unit tests for scripts/ci/actions/resource-monitor.sh
 
 load "../../../helpers/common"
 load "../../../helpers/mocks"
 
-SCRIPT="${PROJECT_ROOT}/scripts/ci/docker/resource-monitor.sh"
+SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/resource-monitor.sh"
 
 setup() {
 	setup_temp_dir
@@ -244,4 +244,39 @@ _assert_no_sampler_for() {
 	assert_output --partial "Cannot create PID file parent directory"
 	_assert_no_sampler_for "${blocker}/monitor.pid"
 	_assert_no_sampler_for "${RUNNER_TEMP}/resource-monitor.log"
+}
+
+@test "resource-monitor.sh: stop kills a running sampler and removes the PID file" {
+	_mock_free_df_date
+	export RESOURCE_MONITOR_INTERVAL=1
+	export RESOURCE_MONITOR_MAX_SAMPLES=30
+
+	local start_out="${BATS_TEST_TMPDIR}/start.out"
+	bash "$SCRIPT" start >"$start_out" 2>&1
+	assert_equal "0" "$?"
+	local pid_file="${RUNNER_TEMP}/resource-monitor.pid"
+	assert_file_exists "$pid_file"
+	local pid
+	pid="$(cat "$pid_file")"
+	kill -0 "$pid"
+
+	run bash "$SCRIPT" stop
+	assert_success
+	assert_output --partial "Stopped resource monitor"
+	assert_file_not_exists "$pid_file"
+	! kill -0 "$pid" 2>/dev/null
+}
+
+@test "resource-monitor.sh: stop succeeds when the sampler is not running" {
+	run bash "$SCRIPT" stop
+	assert_success
+	assert_output --partial "Resource monitor not running"
+}
+
+@test "resource-monitor.sh: stop rejects PID 0 without signalling the process group" {
+	echo "0" >"${RUNNER_TEMP}/resource-monitor.pid"
+	run bash "$SCRIPT" stop
+	assert_success
+	assert_output --partial "invalid PID file"
+	assert_file_not_exists "${RUNNER_TEMP}/resource-monitor.pid"
 }

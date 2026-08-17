@@ -46,6 +46,7 @@ jobs:
       test-path: tests/bats
       coverage: true
       coverage-threshold: 84
+      coverage-shards: 4
       upload-coverage: true
       tooling-ref: ${{ github.sha }}
 
