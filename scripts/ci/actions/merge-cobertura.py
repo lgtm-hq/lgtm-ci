@@ -54,13 +54,11 @@ def _unescape_xml(value: str) -> str:
         The unescaped string. ``&amp;`` is decoded last so ``&amp;lt;``
         stays ``&lt;``.
     """
-    return (
-        value.replace("&quot;", '"')
-        .replace("&apos;", "'")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&amp;", "&")
-    )
+    unescaped = value.replace("&quot;", '"')
+    unescaped = unescaped.replace("&apos;", "'")
+    unescaped = unescaped.replace("&lt;", "<")
+    unescaped = unescaped.replace("&gt;", ">")
+    return unescaped.replace("&amp;", "&")
 
 
 def _escape_xml(value: str) -> str:
@@ -72,12 +70,10 @@ def _escape_xml(value: str) -> str:
     Returns:
         XML-safe string. ``&`` is escaped first.
     """
-    return (
-        value.replace("&", "&amp;")
-        .replace("<", "&lt;")
-        .replace(">", "&gt;")
-        .replace('"', "&quot;")
-    )
+    escaped = value.replace("&", "&amp;")
+    escaped = escaped.replace("<", "&lt;")
+    escaped = escaped.replace(">", "&gt;")
+    return escaped.replace('"', "&quot;")
 
 
 def _attrs(raw: str) -> dict[str, str]:
@@ -206,14 +202,28 @@ def write_cobertura(
 
     chunks: list[str] = [
         '<?xml version="1.0" encoding="utf-8"?>',
-        (
-            f'<coverage line-rate="{line_rate}" branch-rate="0" '
-            f'lines-covered="{lines_covered}" lines-valid="{lines_valid}" '
-            'version="lgtm-ci-merge-cobertura">'
+        "".join(
+            [
+                "<coverage",
+                f' line-rate="{line_rate}"',
+                ' branch-rate="0"',
+                f' lines-covered="{lines_covered}"',
+                f' lines-valid="{lines_valid}"',
+                ' version="lgtm-ci-merge-cobertura"',
+                ">",
+            ],
         ),
         "<sources><source>.</source></sources>",
         "<packages>",
-        (f'<package name="merged" line-rate="{line_rate}" complexity="0">'),
+        "".join(
+            [
+                "<package",
+                ' name="merged"',
+                f' line-rate="{line_rate}"',
+                ' complexity="0"',
+                ">",
+            ],
+        ),
         "<classes>",
     ]
     for filename in sorted(merged):
@@ -223,10 +233,16 @@ def write_cobertura(
         file_rate = f"{(file_covered / file_total) if file_total else 0:.4f}"
         escaped_name = _escape_xml(filename)
         escaped_basename = _escape_xml(Path(filename).name)
-        chunks.append(
-            f'<class filename="{escaped_name}" name="{escaped_basename}" '
-            f'line-rate="{file_rate}">',
+        class_open = "".join(
+            [
+                "<class",
+                f' filename="{escaped_name}"',
+                f' name="{escaped_basename}"',
+                f' line-rate="{file_rate}"',
+                ">",
+            ],
         )
+        chunks.append(class_open)
         chunks.append("<methods />")
         chunks.append("<lines>")
         for number in sorted(file_hits):
