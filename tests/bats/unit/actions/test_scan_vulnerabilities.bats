@@ -136,14 +136,9 @@ EOF
 	local version
 	version="$(grep -Eo 'grype-version: v[0-9]+\.[0-9]+\.[0-9]+' "$action_file" |
 		grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')"
-	local minor
-	minor="$(echo "$version" | cut -d. -f2)"
-	local major
-	major="$(echo "$version" | cut -d. -f1)"
 	# grype >= 0.115.0 is required to parse CycloneDX 1.7 SBOMs from syft >= 1.44
-	if [ "$major" -eq 0 ]; then
-		[ "$minor" -ge 115 ]
-	fi
+	run sort -C -V <(printf '0.115.0\n%s\n' "$version")
+	assert_success
 }
 
 @test "scan-vulnerabilities action: grype-version pin has renovate annotation (#865)" {
@@ -151,4 +146,14 @@ EOF
 	run grep -B1 'grype-version: v' "$action_file"
 	assert_success
 	assert_output --partial "renovate: datasource=github-releases depName=anchore/grype"
+}
+
+@test "scan-vulnerabilities action: renovate.json manager covers the grype pin (#865)" {
+	local renovate_file="${PROJECT_ROOT}/renovate.json"
+	# The custom manager must target the action file...
+	run grep -F 'scan-vulnerabilities/action\\.yml' "$renovate_file"
+	assert_success
+	# ...and its matchString must expect the grype-version line shape used in action.yml
+	run grep -F 'grype-version: v(?<currentValue>' "$renovate_file"
+	assert_success
 }
