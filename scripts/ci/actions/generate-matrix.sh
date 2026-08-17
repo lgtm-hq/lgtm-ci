@@ -98,6 +98,10 @@ coverage-shards)
 		log_error "SHARD_TOTAL must be a positive integer, got: $SHARD_TOTAL"
 		exit 1
 	fi
+	if [[ "$SHARD_TOTAL" -gt 256 ]]; then
+		log_error "SHARD_TOTAL exceeds the GitHub matrix limit of 256, got: $SHARD_TOTAL"
+		exit 1
+	fi
 
 	shards="["
 	i=0

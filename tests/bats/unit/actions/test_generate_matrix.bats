@@ -35,3 +35,10 @@ teardown() {
 	assert_failure
 	assert_output --partial "SHARD_TOTAL must be a positive integer"
 }
+
+@test "generate-matrix coverage-shards: rejects totals above 256" {
+	run env STEP=coverage-shards SHARD_TOTAL=257 GITHUB_OUTPUT="${GITHUB_OUTPUT}" \
+		bash "${SCRIPT}"
+	assert_failure
+	assert_output --partial "GitHub matrix limit of 256"
+}

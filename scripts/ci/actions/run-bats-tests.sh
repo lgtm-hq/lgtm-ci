@@ -25,6 +25,8 @@
 #   SHARD_ARTIFACTS_DIR - Directory of downloaded shard TAP artifacts
 #              (aggregate-results). Expected layout:
 #              shell-test-results-<comment-marker>-shard-*/bats-output.tap
+#   EXPECTED_SHARDS - Optional positive integer (aggregate-results). When
+#              set, fail unless that many bats-output.tap files were found.
 #   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts
 #              (merge-coverage). Each shard dir contributes cov.xml or
 #              cobertura.xml.
@@ -301,7 +303,12 @@ if [[ "$STEP" == "run-coverage" ]]; then
 				filtered_files+=("$test_file")
 			fi
 		done
-		TEST_FILES=("${filtered_files[@]}")
+		if [[ ${#filtered_files[@]} -gt 0 ]]; then
+			TEST_FILES=("${filtered_files[@]}")
+		else
+			# Bash 3.2 + set -u errors on "${arr[@]}" when arr is empty.
+			TEST_FILES=()
+		fi
 	fi
 
 	# Empty shard (every file hashed elsewhere) is success with 0 tests — do
@@ -530,8 +537,10 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 	TOTAL=0
 	PASSED=0
 	FAILED=0
+	TAP_COUNT=0
 
 	while IFS= read -r tap_file; do
+		TAP_COUNT=$((TAP_COUNT + 1))
 		file_total=$(grep -Ec "^(ok|not ok)" "$tap_file" 2>/dev/null) || file_total=0
 		file_passed=$(grep -c "^ok " "$tap_file" 2>/dev/null) || file_passed=0
 		file_failed=$(grep -c "^not ok" "$tap_file" 2>/dev/null) || file_failed=0
@@ -540,6 +549,17 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 		FAILED=$((FAILED + file_failed))
 		echo "aggregate-tap file=${tap_file} total=${file_total} passed=${file_passed} failed=${file_failed}"
 	done < <(find "$SHARD_ARTIFACTS_DIR" -type f -name 'bats-output.tap' | LC_ALL=C sort)
+
+	if [[ -n "${EXPECTED_SHARDS:-}" ]]; then
+		if ! [[ "$EXPECTED_SHARDS" =~ ^[1-9][0-9]*$ ]]; then
+			echo "::error::EXPECTED_SHARDS must be a positive integer, got: ${EXPECTED_SHARDS}"
+			exit 1
+		fi
+		if [[ "$TAP_COUNT" -ne "$EXPECTED_SHARDS" ]]; then
+			echo "::error::Expected ${EXPECTED_SHARDS} shard TAP files, found ${TAP_COUNT}"
+			exit 1
+		fi
+	fi
 
 	if [[ "$TOTAL" -gt 0 ]]; then
 		TESTS_RAN="true"

@@ -234,6 +234,11 @@ stop_monitor() {
 		log_info "Resource monitor not running (empty PID file)"
 		return 0
 	fi
+	if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then
+		rm -f "$pid_file"
+		log_info "Resource monitor not running (invalid PID file)"
+		return 0
+	fi
 	if ! kill -0 "$pid" 2>/dev/null; then
 		rm -f "$pid_file"
 		log_info "Resource monitor not running (stale pid ${pid})"

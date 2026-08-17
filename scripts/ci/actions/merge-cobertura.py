@@ -189,9 +189,10 @@ def write_cobertura(
     Args:
         merged: Filename → line-number → hits mapping.
         output_path: Destination XML path.
-        percent: Already-rounded integer line-rate percent.
+        percent: Already-rounded integer line-rate percent used as the
+            GITHUB_OUTPUT gate value. XML ``line-rate`` uses exact
+            covered/valid, not this rounded percent.
     """
-    line_rate = f"{percent / 100:.4f}"
     lines_covered = 0
     lines_valid = 0
     for file_hits in merged.values():
@@ -199,6 +200,7 @@ def write_cobertura(
         for count in file_hits.values():
             if count > 0:
                 lines_covered += 1
+    line_rate = f"{(lines_covered / lines_valid) if lines_valid else 0:.4f}"
 
     chunks: list[str] = [
         '<?xml version="1.0" encoding="utf-8"?>',

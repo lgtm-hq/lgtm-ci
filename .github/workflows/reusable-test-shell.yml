@@ -601,6 +601,7 @@ jobs:
         env:
           STEP: aggregate-results
           SHARD_ARTIFACTS_DIR: ${{ runner.temp }}/shard-taps
+          EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
       - name: Merge shard Cobertura reports
         id: merge

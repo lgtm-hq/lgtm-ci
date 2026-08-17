@@ -68,6 +68,8 @@ PY
 	assert_success
 	assert_line "67"
 	grep -qx 'coverage-percent=67' "${GITHUB_OUTPUT}"
+	run grep -F 'line-rate="0.6667"' "${OUT}"
+	assert_success
 	run grep -F 'scripts/ci/lib/a.sh' "${OUT}"
 	assert_success
 	run grep -F 'scripts/ci/lib/b.sh' "${OUT}"

@@ -272,3 +272,11 @@ _assert_no_sampler_for() {
 	assert_success
 	assert_output --partial "Resource monitor not running"
 }
+
+@test "resource-monitor.sh: stop rejects PID 0 without signalling the process group" {
+	echo "0" >"${RUNNER_TEMP}/resource-monitor.pid"
+	run bash "$SCRIPT" stop
+	assert_success
+	assert_output --partial "invalid PID file"
+	assert_file_not_exists "${RUNNER_TEMP}/resource-monitor.pid"
+}

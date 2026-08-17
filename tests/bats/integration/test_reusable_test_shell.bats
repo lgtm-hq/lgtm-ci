@@ -56,7 +56,12 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	# Default single-job path keeps unsuffixed names.
 	run grep -E '^          name: shell-test-results$' "$WORKFLOW"
 	assert_success
-	run grep -E '^          name: shell-coverage$' "$WORKFLOW"
+	run awk '
+		/^  test:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
+		in_job && $0 == "          name: shell-coverage" { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
 	assert_success
 }
 

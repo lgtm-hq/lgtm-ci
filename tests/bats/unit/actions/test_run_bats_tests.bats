@@ -473,6 +473,23 @@ EOF
 	grep -qx 'tests-ran=true' "$GITHUB_OUTPUT"
 }
 
+@test "aggregate-results: EXPECTED_SHARDS fails when a TAP file is missing" {
+	local artifacts="$BATS_TEST_TMPDIR/shard-taps"
+	mkdir -p "$artifacts/shell-test-results-shard-0"
+	cat >"$artifacts/shell-test-results-shard-0/bats-output.tap" <<'EOF'
+1..1
+ok 1 alpha
+EOF
+
+	run run_coverage \
+		STEP=aggregate-results \
+		SHARD_ARTIFACTS_DIR="$artifacts" \
+		EXPECTED_SHARDS=2
+
+	assert_failure
+	assert_output --partial "Expected 2 shard TAP files, found 1"
+}
+
 @test "aggregate-results: empty shards report tests-ran=false" {
 	local artifacts="$BATS_TEST_TMPDIR/shard-taps"
 	mkdir -p "$artifacts/shell-test-results-shard-0"
