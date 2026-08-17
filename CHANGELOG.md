@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.63.5] - 2026-08-17
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.63.3 (patch) (#869) (75ba915)
+
+### Fixed
+
+- **ci**: shrink shell-tests log noise (kcov debris, annotations, LINENO) (#863)
+  (16a7a7e)
+
 ## [0.63.4] - 2026-08-17
 
 ### Fixed
@@ -2082,7 +2093,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.4...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.5...HEAD
+[0.63.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.4...v0.63.5
 [0.63.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.3...v0.63.4
 [0.63.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.2...v0.63.3
 [0.63.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.1...v0.63.2
