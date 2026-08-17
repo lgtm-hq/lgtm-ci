@@ -29,6 +29,13 @@ inputs:
     description: "Upload SARIF report to GitHub Security tab"
     required: false
     default: "false"
+  grype-version:
+    description:
+      "Grype version to install (must stay >= v0.115.0 to read the CycloneDX 1.7
+      SBOMs that syft >= 1.44 emits, #865)"
+    required: false
+    # renovate: datasource=github-releases depName=anchore/grype
+    default: "v0.117.0"
 
 outputs:
   vulnerabilities-found:
@@ -74,6 +81,8 @@ runs:
       # Pinned to SHA for supply chain security
       uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
       with:
+        # The scan-action default grype lags behind CycloneDX 1.7 support (#865)
+        grype-version: ${{ inputs.grype-version }}
         path: ${{ inputs.target-type == 'dir' && steps.target.outputs.path || '' }}
         image: ${{ inputs.target-type == 'image' && steps.target.outputs.path || '' }}
         sbom: ${{ inputs.target-type == 'sbom' && steps.target.outputs.path || '' }}
@@ -100,6 +109,7 @@ runs:
         STEP: sarif
         TARGET: ${{ steps.target.outputs.path }}
         TARGET_TYPE: ${{ inputs.target-type }}
+        GRYPE_VERSION: ${{ inputs.grype-version }}
       run: $SCRIPTS_DIR/ci/actions/scan-vulnerabilities.sh
 
     - name: Upload SARIF to GitHub Security
