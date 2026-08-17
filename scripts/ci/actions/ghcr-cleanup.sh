@@ -114,16 +114,23 @@ if [[ "$PROTECT_REFERENCED" == "true" && "$total_count" -gt 0 ]]; then
 		exit 0
 	fi
 
-	referenced_digests_text=""
-	ghcr_collect_referenced_digests \
+	# File path, not a payload: expanding $all_versions or the digest list
+	# under xtrace dumps 24k fixture lines into the kcov log (#856).
+	digests_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-cleanup-digest-list.XXXXXX")" ||
+		die "Could not create temporary file for referenced digest list"
+	if ! ghcr_collect_referenced_digests \
 		"$GITHUB_ORG" \
 		"$PACKAGE_NAME" \
-		"$all_versions" \
+		all_versions \
 		"$registry_token" \
 		referenced_complete \
-		referenced_digests_text
+		"$digests_file"; then
+		rm -f "$digests_file"
+		die "Failed to write referenced-digest set for ${PACKAGE_NAME}"
+	fi
 
 	if [[ "$referenced_complete" != "true" ]]; then
+		rm -f "$digests_file"
 		log_warning "Skipping prune for ${PACKAGE_NAME} (referenced-digest collection incomplete)"
 		add_github_summary "## GHCR Cleanup"
 		add_github_summary ""
@@ -134,21 +141,13 @@ if [[ "$PROTECT_REFERENCED" == "true" && "$total_count" -gt 0 ]]; then
 		exit 0
 	fi
 
-	if [[ -n "$referenced_digests_text" ]]; then
-		# File, not here-string: keep kcov from dumping the list (#856).
-		digests_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-cleanup-digest-list.XXXXXX")" ||
-			die "Could not create temporary file for referenced digest list"
-		_ghcr_write_var_to_file referenced_digests_text "$digests_file"
-		if [[ -s "$digests_file" ]]; then
-			printf '\n' >>"$digests_file"
-		fi
-		referenced_digests_text=""
+	if [[ -s "$digests_file" ]]; then
 		while IFS= read -r digest; do
 			[[ -n "$digest" ]] && referenced_digests+=("$digest")
 		done <"$digests_file"
-		rm -f "$digests_file"
 		log_info "Collected ${#referenced_digests[@]} referenced digest(s) for protection"
 	fi
+	rm -f "$digests_file"
 fi
 
 # =============================================================================

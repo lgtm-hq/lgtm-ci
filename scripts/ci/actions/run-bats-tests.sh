@@ -46,8 +46,9 @@ end_bats_output_guard() {
 filter_kcov_console() {
 	# grep -v exits 1 when every line matches; `set +e` callers tolerate it.
 	# The ${LINENO} is kcov's literal error text, not a shell expansion (#856).
+	# -x keeps other kcov errors that merely contain this diagnostic.
 	# shellcheck disable=SC2016
-	grep -vF 'kcov: error: ${LINENO} is not an integer' || true
+	grep -vFx 'kcov: error: ${LINENO} is not an integer' || true
 }
 
 # =============================================================================

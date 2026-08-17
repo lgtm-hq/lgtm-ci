@@ -220,6 +220,7 @@ EOF
 	cat >"${MOCK_BIN}/kcov" <<'EOF'
 #!/usr/bin/env bash
 echo 'kcov: error: ${LINENO} is not an integer'
+echo 'kcov: error: ${LINENO} is not an integer (with suffix)'
 echo 'kcov: error: genuine parse failure'
 while [[ $# -gt 0 && "$1" != "bats" ]]; do
 	shift
@@ -235,7 +236,8 @@ EOF
 		PARALLEL=1
 
 	assert_success
-	refute_output --partial 'kcov: error: ${LINENO} is not an integer'
+	refute_output --partial $'kcov: error: ${LINENO} is not an integer\n'
+	assert_output --partial 'kcov: error: ${LINENO} is not an integer (with suffix)'
 	assert_output --partial 'kcov: error: genuine parse failure'
 }
 
@@ -256,6 +258,14 @@ EOF
 	assert_success
 	assert_output --partial "::stop-commands::lgtm-ci-bats-"
 	assert_output --partial "::error::fake annotation from a passing test"
+	local token stop_line fake_line resume_line
+	token="$(printf '%s\n' "$output" | sed -n 's/^::stop-commands::\(lgtm-ci-bats-[0-9][0-9]*\)$/\1/p' | head -n 1)"
+	[ -n "$token" ]
+	stop_line="$(printf '%s\n' "$output" | grep -nF "::stop-commands::${token}" | head -n 1 | cut -d: -f1)"
+	fake_line="$(printf '%s\n' "$output" | grep -nF "::error::fake annotation from a passing test" | head -n 1 | cut -d: -f1)"
+	resume_line="$(printf '%s\n' "$output" | grep -nF "::${token}::" | head -n 1 | cut -d: -f1)"
+	[ "$stop_line" -lt "$fake_line" ]
+	[ "$fake_line" -lt "$resume_line" ]
 }
 
 @test "run-tests: still honors PARALLEL --jobs when not under kcov" {

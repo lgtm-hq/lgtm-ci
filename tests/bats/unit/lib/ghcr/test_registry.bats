@@ -244,19 +244,21 @@ teardown() {
 		{"name":"sha256:root","metadata":{"container":{"tags":["v1.0.0"]}}},
 		{"name":"sha256:untagged","metadata":{"container":{"tags":[]}}}
 	]'
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
 
-	run bash -c "
-		source \"\$LIB_DIR/ghcr/registry.sh\"
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		versions="$1"
 		ghcr_collect_referenced_digests \
-			'test-org' \
-			'pkg' \
-			'$versions' \
-			'bearer' \
+			"test-org" \
+			"pkg" \
+			versions \
+			"bearer" \
 			referenced_complete \
-			referenced_digests
-		printf 'complete=%s\n' \"\$referenced_complete\"
-		printf '%s\n' \"\$referenced_digests\"
-	"
+			"$2"
+		printf "complete=%s\n" "$referenced_complete"
+		cat "$2"
+	' _ "$versions" "$digests_file"
 	assert_success
 	assert_output --partial "complete=true"
 	assert_output --partial "sha256:root"
@@ -274,18 +276,20 @@ teardown() {
 	'
 
 	local versions='[{"name":"sha256:root","metadata":{"container":{"tags":["v1.0.0"]}}}]'
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
 
-	run bash -c "
-		source \"\$LIB_DIR/ghcr/registry.sh\"
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		versions="$1"
 		ghcr_collect_referenced_digests \
-			'test-org' \
-			'pkg' \
-			'$versions' \
-			'bearer' \
+			"test-org" \
+			"pkg" \
+			versions \
+			"bearer" \
 			referenced_complete \
-			referenced_digests
-		printf 'complete=%s\n' \"\$referenced_complete\"
-	"
+			"$2"
+		printf "complete=%s\n" "$referenced_complete"
+	' _ "$versions" "$digests_file"
 	assert_success
 	assert_output --partial "complete=false"
 }
@@ -298,38 +302,92 @@ teardown() {
 	'
 
 	local versions='[{"name":"sha256:root","metadata":{"container":{"tags":["v1.0.0"]}}}]'
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
 
-	run bash -c "
-		source \"\$LIB_DIR/ghcr/registry.sh\"
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		versions="$1"
 		ghcr_collect_referenced_digests \
-			'test-org' \
-			'pkg' \
-			'$versions' \
-			'bearer' \
+			"test-org" \
+			"pkg" \
+			versions \
+			"bearer" \
 			referenced_complete \
-			referenced_digests
-		printf 'complete=%s\n' \"\$referenced_complete\"
-	"
+			"$2"
+		printf "complete=%s\n" "$referenced_complete"
+	' _ "$versions" "$digests_file"
 	assert_success
 	assert_output --partial "complete=false"
 }
 
 @test "ghcr_collect_referenced_digests: returns empty digests for untagged-only versions" {
+	local digests_file="${BATS_TEST_TMPDIR}/digests.txt"
 	run bash -c '
 		source "$LIB_DIR/ghcr/registry.sh"
+		versions="[{\"name\":\"sha256:orphan\",\"metadata\":{\"container\":{\"tags\":[]}}}]"
 		ghcr_collect_referenced_digests \
 			"test-org" \
 			"pkg" \
-			"[{\"name\":\"sha256:orphan\",\"metadata\":{\"container\":{\"tags\":[]}}}]" \
+			versions \
 			"bearer" \
 			referenced_complete \
-			referenced_digests
+			"$1"
 		printf "complete=%s\n" "$referenced_complete"
-		printf "digests=%s\n" "$referenced_digests"
-	'
+		printf "digests="
+		cat "$1"
+	' _ "$digests_file"
 	assert_success
 	assert_output --partial "complete=true"
 	assert_output --partial "digests="
+	[ ! -s "$digests_file" ]
+}
+
+@test "_ghcr_write_var_to_file: returns failure when dest is not writable" {
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		payload="hello"
+		_ghcr_write_var_to_file payload /dev/full
+	'
+	assert_failure
+}
+
+@test "ghcr_fetch_manifest: dest path mv failure returns ERROR" {
+	mock_command_multi "curl" '
+		*manifests/sha256:index*) printf "%s\n200\n" "{\"manifests\":[{\"digest\":\"sha256:child\"}]}";;
+		*) exit 1;;
+	'
+
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		ghcr_fetch_manifest "test-org" "pkg" "sha256:index" "bearer" "/this/does/not/exist/manifest.json"
+	'
+	assert_failure
+	assert_output --partial "ERROR"
+}
+
+@test "ghcr_collect_referenced_digests: fails closed when digests file cannot be written" {
+	mock_command_multi "curl" '
+		*manifests/sha256:root*) printf "%s\n200\n" "{\"manifests\":[]}";;
+		*referrers/sha256:root*) printf "%s\n200\n" "{\"manifests\":[]}";;
+		*) exit 1;;
+	'
+
+	run bash -c '
+		source "$LIB_DIR/ghcr/registry.sh"
+		versions="[{\"name\":\"sha256:root\",\"metadata\":{\"container\":{\"tags\":[\"v1\"]}}}]"
+		ghcr_collect_referenced_digests \
+			"test-org" \
+			"pkg" \
+			versions \
+			"bearer" \
+			referenced_complete \
+			"/this/does/not/exist/digests.txt"
+		status=$?
+		printf "complete=%s\n" "$referenced_complete"
+		exit "$status"
+	'
+	assert_failure
+	assert_output --partial "complete=false"
 }
 
 @test "ghcr/registry.sh: second source is a no-op when already loaded" {
