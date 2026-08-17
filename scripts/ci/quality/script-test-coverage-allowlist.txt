@@ -6,7 +6,6 @@ actions/collect-coverage.sh
 actions/deploy-pages.sh
 actions/generate-coverage-badge.sh
 actions/generate-lintro-comment.sh
-actions/generate-matrix.sh
 actions/generate-sbom.sh
 actions/merge-node-coverage.sh
 actions/merge-playwright-reports.sh

@@ -24,6 +24,16 @@ on:
         required: false
         type: number
         default: 0
+      coverage-shards:
+        description: >-
+          kcov v43 cannot merge bash coverage across invocations, so each shard
+          is one kcov process over a cksum-partitioned .bats subset. Fan-in
+          merges Cobertura XML (max per-line hits) and enforces the threshold.
+          Default 1 is today's single-job path. Values > 1 require coverage:
+          true; the non-coverage run-tests path never shards.
+        required: false
+        type: number
+        default: 1
       upload-coverage:
         description: "Upload coverage report as artifact"
         required: false
@@ -122,19 +132,34 @@ on:
     outputs:
       tests-passed:
         description: "Number of tests passed"
-        value: ${{ jobs.test.outputs.tests-passed }}
+        value: >-
+          ${{ fromJson(format('["{0}","{1}"]',
+            jobs.test.outputs.tests-passed,
+            jobs.aggregate.outputs.tests-passed))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
       tests-failed:
         description: "Number of tests failed"
-        value: ${{ jobs.test.outputs.tests-failed }}
+        value: >-
+          ${{ fromJson(format('["{0}","{1}"]',
+            jobs.test.outputs.tests-failed,
+            jobs.aggregate.outputs.tests-failed))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
       tests-total:
         description: "Total number of tests"
-        value: ${{ jobs.test.outputs.tests-total }}
+        value: >-
+          ${{ fromJson(format('["{0}","{1}"]',
+            jobs.test.outputs.tests-total,
+            jobs.aggregate.outputs.tests-total))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
       coverage-percent:
         description: "Coverage percentage"
-        value: ${{ jobs.test.outputs.coverage-percent }}
+        value: >-
+          ${{ fromJson(format('["{0}","{1}"]',
+            jobs.test.outputs.coverage-percent,
+            jobs.aggregate.outputs.coverage-percent))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
       passed:
         description: "Whether all tests passed"
-        value: ${{ jobs.test.outputs.passed }}
+        value: >-
+          ${{ fromJson(format('["{0}","{1}"]',
+            jobs.test.outputs.passed,
+            jobs.aggregate.outputs.passed))[inputs.coverage && inputs.coverage-shards > 1 && 1 || 0] }}
 
 jobs:
   test:
@@ -142,9 +167,12 @@ jobs:
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
-      !inputs.draft-pr-skip ||
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.draft == false
+      (!inputs.coverage || inputs.coverage-shards <= 1)
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
     permissions:
       contents: read
 
@@ -300,8 +328,306 @@ jobs:
         shell: bash
         run: |
           echo "::warning::Coverage report upload failed; the test result is unaffected."
+
+  shard-setup:
+    name: Coverage shard matrix
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    if: >-
+      inputs.coverage && inputs.coverage-shards > 1
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    outputs:
+      matrix: ${{ steps.matrix.outputs.matrix }}
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Generate coverage shard matrix
+        id: matrix
+        shell: bash
+        env:
+          STEP: coverage-shards
+          SHARD_TOTAL: ${{ inputs.coverage-shards }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-matrix.sh
+
+  test-sharded:
+    name: ${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})
+    needs: shard-setup
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    if: >-
+      inputs.coverage && inputs.coverage-shards > 1
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJson(needs.shard-setup.outputs.matrix) }}
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Start resource monitor
+        continue-on-error: true
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
+      - name: Install BATS and helpers
+        shell: bash
+        env:
+          STEP: install-bats
+          BATS_VERSION: ${{ inputs.bats-version }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Install kcov for coverage
+        shell: bash
+        env:
+          STEP: install-kcov
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Run BATS tests with coverage
+        id: coverage-run
+        timeout-minutes: 20
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          STEP: run-coverage
+          TEST_PATH: ${{ inputs.test-path }}
+          TEST_FILTER: ${{ inputs.test-filter }}
+          PARALLEL: ${{ inputs.parallel }}
+          COVERAGE_DIR: coverage-report
+          SHARD_INDEX: ${{ matrix.shard }}
+          SHARD_TOTAL: ${{ inputs.coverage-shards }}
+          KCOV_SUITE_TIMEOUT_MINUTES: "15"
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
+      - name: Upload test results
+        id: upload-results
+        if: always()
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shell-test-results-shard-${{ matrix.shard }}
+          path: |
+            ${{ inputs.working-directory }}/bats-output.tap
+          retention-days: 7
+          if-no-files-found: ignore
+          overwrite: true
+      - name: Warn on failed test results upload
+        if: always() && steps.upload-results.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Test results upload failed; the test result is unaffected."
+      - name: Upload coverage report
+        id: upload-coverage-report
+        if: always()
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: shell-coverage-shard-${{ matrix.shard }}
+          path: |
+            ${{ inputs.working-directory }}/coverage-report
+          retention-days: 7
+          if-no-files-found: ignore
+          overwrite: true
+      - name: Warn on failed coverage report upload
+        if: always() && steps.upload-coverage-report.outcome == 'failure'
+        shell: bash
+        run: |
+          echo "::warning::Coverage report upload failed; the test result is unaffected."
+      - name: Dump resource monitor
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh dump
+      - name: Stop resource monitor
+        if: always()
+        continue-on-error: true
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh stop
+
+  aggregate:
+    name: ${{ inputs.job-name }}
+    needs: test-sharded
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    if: >-
+      always()
+      && inputs.coverage
+      && inputs.coverage-shards > 1
+      && (
+        !inputs.draft-pr-skip ||
+        github.event_name != 'pull_request' ||
+        github.event.pull_request.draft == false
+      )
+    permissions:
+      contents: read
+    outputs:
+      tests-passed: ${{ steps.results.outputs.tests-passed }}
+      tests-failed: ${{ steps.results.outputs.tests-failed }}
+      tests-total: ${{ steps.results.outputs.tests-total }}
+      coverage-percent: ${{ steps.merge.outputs.coverage-percent }}
+      passed: >-
+        ${{ needs.test-sharded.result == 'success'
+        && steps.results.outputs.tests-ran == 'true'
+        && steps.results.outputs.tests-failed == '0' }}
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Download shard TAP artifacts
+        if: always()
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: shell-test-results-shard-*
+          path: ${{ runner.temp }}/shard-taps
+          merge-multiple: false
+      - name: Download shard coverage artifacts
+        if: always()
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: shell-coverage-shard-*
+          path: ${{ runner.temp }}/shard-coverage
+          merge-multiple: false
+      - name: Aggregate shard TAP results
+        id: results
+        if: always()
+        shell: bash
+        env:
+          STEP: aggregate-results
+          SHARD_ARTIFACTS_DIR: ${{ runner.temp }}/shard-taps
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Merge shard Cobertura reports
+        id: merge
+        if: always()
+        shell: bash
+        env:
+          STEP: merge-coverage
+          SHARD_COVERAGE_DIR: ${{ runner.temp }}/shard-coverage
+          MERGED_COVERAGE_FILE: ${{ runner.temp }}/merged-cobertura.xml
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Check coverage threshold
+        if: always() && inputs.coverage-threshold > 0 && steps.merge.outcome == 'success'
+        shell: bash
+        env:
+          STEP: check-threshold
+          COVERAGE_PERCENT: ${{ steps.merge.outputs.coverage-percent }}
+          COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Fail if a coverage shard failed
+        if: always() && needs.test-sharded.result != 'success'
+        shell: bash
+        run: |
+          echo "::error::One or more coverage shards failed; the required check fails instead of skipping."
+          exit 1
+
   publish-test-summary:
-    needs: test
+    needs: [test, aggregate]
     if: >-
       always()
       && github.event_name == 'pull_request'
@@ -318,11 +644,26 @@ jobs:
     with:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
-      tests-passed: ${{ needs.test.outputs.tests-passed }}
-      tests-failed: ${{ needs.test.outputs.tests-failed }}
-      tests-total: ${{ needs.test.outputs.tests-total }}
-      coverage-percent: ${{ needs.test.outputs.coverage-percent }}
+      tests-passed: >-
+        ${{ fromJson(format('["{0}","{1}"]',
+          needs.aggregate.outputs.tests-passed,
+          needs.test.outputs.tests-passed))[needs.aggregate.result == 'skipped' && 1 || 0] }}
+      tests-failed: >-
+        ${{ fromJson(format('["{0}","{1}"]',
+          needs.aggregate.outputs.tests-failed,
+          needs.test.outputs.tests-failed))[needs.aggregate.result == 'skipped' && 1 || 0] }}
+      tests-total: >-
+        ${{ fromJson(format('["{0}","{1}"]',
+          needs.aggregate.outputs.tests-total,
+          needs.test.outputs.tests-total))[needs.aggregate.result == 'skipped' && 1 || 0] }}
+      coverage-percent: >-
+        ${{ fromJson(format('["{0}","{1}"]',
+          needs.aggregate.outputs.coverage-percent,
+          needs.test.outputs.coverage-percent))[needs.aggregate.result == 'skipped' && 1 || 0] }}
       coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
-      job-result: ${{ needs.test.result }}
+      job-result: >-
+        ${{ needs.aggregate.result != 'skipped'
+        && needs.aggregate.result
+        || needs.test.result }}
       tooling-ref: ${{ inputs.tooling-ref }}

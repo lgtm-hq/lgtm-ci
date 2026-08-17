@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Sample runner memory and disk during Docker builds.
+# Purpose: Sample runner memory and disk during long CI jobs (Docker builds,
+#          sharded BATS+kcov coverage).
 #
 # Subcommands:
 #   start - Background a 30s loop of date + free -m + df -h /. Each sample
@@ -11,6 +12,7 @@
 #           is the kill-case signal. Idempotent when the loop is already
 #           running. Stdout write failures are ignored (best-effort).
 #   dump  - Print the last ~100 lines of the log to the job log.
+#   stop  - Kill the sampler (and its children) and remove the PID file.
 #
 # Environment variables:
 #   RUNNER_TEMP                 - Log/pid directory (required)
@@ -22,6 +24,7 @@
 # Usage:
 #   resource-monitor.sh start
 #   resource-monitor.sh dump
+#   resource-monitor.sh stop
 
 set -euo pipefail
 
@@ -30,7 +33,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/log.sh"
 
 usage() {
-	echo "Usage: $(basename "$0") {start|dump}" >&2
+	echo "Usage: $(basename "$0") {start|dump|stop}" >&2
 }
 
 require_runner_temp() {
@@ -216,6 +219,42 @@ dump_monitor() {
 	tail -n 100 "$log_file"
 }
 
+stop_monitor() {
+	require_runner_temp
+
+	local pid_file pid
+	pid_file="$(pid_path)"
+	if [[ ! -f "$pid_file" ]]; then
+		log_info "Resource monitor not running (no PID file)"
+		return 0
+	fi
+	pid="$(cat "$pid_file" 2>/dev/null || true)"
+	if [[ -z "${pid:-}" ]]; then
+		rm -f "$pid_file"
+		log_info "Resource monitor not running (empty PID file)"
+		return 0
+	fi
+	if ! kill -0 "$pid" 2>/dev/null; then
+		rm -f "$pid_file"
+		log_info "Resource monitor not running (stale pid ${pid})"
+		return 0
+	fi
+	pkill -P "$pid" 2>/dev/null || true
+	kill "$pid" 2>/dev/null || true
+	local i
+	for i in 1 2 3 4 5 6 7 8 9 10; do
+		if ! kill -0 "$pid" 2>/dev/null; then
+			break
+		fi
+		sleep 0.1
+	done
+	if kill -0 "$pid" 2>/dev/null; then
+		kill -9 "$pid" 2>/dev/null || true
+	fi
+	rm -f "$pid_file"
+	log_info "Stopped resource monitor (pid ${pid})"
+}
+
 if [[ $# -lt 1 ]]; then
 	usage
 	exit 2
@@ -227,6 +266,9 @@ start)
 	;;
 dump)
 	dump_monitor
+	;;
+stop)
+	stop_monitor
 	;;
 -h | --help)
 	usage

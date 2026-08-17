@@ -324,7 +324,7 @@ jobs:
         if: inputs.resource-monitor
         continue-on-error: true
         shell: bash
-        run: .lgtm-ci-tooling/scripts/ci/docker/resource-monitor.sh start
+        run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
       - name: Setup QEMU
         if: ${{ matrix.qemu }}
         # Pinned to SHA for supply chain security
@@ -471,7 +471,7 @@ jobs:
       - name: Dump resource monitor
         if: always() && inputs.resource-monitor
         shell: bash
-        run: .lgtm-ci-tooling/scripts/ci/docker/resource-monitor.sh dump
+        run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh dump
   # Optional per-platform smoke test gate (push path only). Runs against each
   # staging image on its native runner before manifest merge.
   verify-per-platform:

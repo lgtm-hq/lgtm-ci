@@ -3,7 +3,7 @@
 # Purpose: Generate GitHub Actions matrix JSON from comma-separated inputs
 #
 # Required environment variables:
-#   STEP - Which step to run: e2e-matrix, shard-config
+#   STEP - Which step to run: e2e-matrix, shard-config, coverage-shards
 #
 # For e2e-matrix step:
 #   SUITES - Comma-separated test suites (e.g., "smoke,visual,a11y")
@@ -13,6 +13,9 @@
 # For shard-config step:
 #   SHARD - Current shard number
 #   TOTAL_SHARDS - Total number of shards
+#
+# For coverage-shards step:
+#   SHARD_TOTAL - Number of coverage shards (positive integer)
 
 set -euo pipefail
 
@@ -86,6 +89,29 @@ shard-config)
 		log_info "Sharding disabled"
 		set_github_output "config" ""
 	fi
+	;;
+
+coverage-shards)
+	: "${SHARD_TOTAL:=1}"
+
+	if ! [[ "$SHARD_TOTAL" =~ ^[1-9][0-9]*$ ]]; then
+		log_error "SHARD_TOTAL must be a positive integer, got: $SHARD_TOTAL"
+		exit 1
+	fi
+
+	shards="["
+	i=0
+	while [[ "$i" -lt "$SHARD_TOTAL" ]]; do
+		if [[ "$i" -gt 0 ]]; then
+			shards+=","
+		fi
+		shards+="${i}"
+		i=$((i + 1))
+	done
+	shards+="]"
+	matrix="{\"shard\":${shards}}"
+	set_github_output "matrix" "$matrix"
+	log_success "Generated coverage shard matrix: $matrix"
 	;;
 
 *)

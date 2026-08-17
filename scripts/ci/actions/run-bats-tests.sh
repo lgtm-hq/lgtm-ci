@@ -4,7 +4,8 @@
 #
 # Environment variables:
 #   STEP - Which step to run: install-bats, install-kcov, run-tests,
-#          run-coverage, parse-results, parse-coverage, check-threshold
+#          run-coverage, parse-results, parse-coverage, check-threshold,
+#          aggregate-results, merge-coverage
 #   BATS_VERSION - BATS version to install (for install-bats step)
 #   KCOV_VERSION - kcov version to install (for install-kcov step, default: v43)
 #   TEST_PATH - Path to test files (for run-tests/run-coverage steps)
@@ -12,14 +13,28 @@
 #   PARALLEL - Number of parallel jobs (optional, must be a positive integer).
 #              Under run-coverage, PARALLEL > 1 is ignored (kcov + parallel BATS
 #              is deadlock-prone); non-coverage runs still honor it.
+#   SHARD_INDEX - Coverage shard index (run-coverage, default 0). Must satisfy
+#              0 <= SHARD_INDEX < SHARD_TOTAL. Invalid values warn and fall
+#              back to 0/1 (same style as PARALLEL).
+#   SHARD_TOTAL - Coverage shard count (run-coverage, default 1). 1 is a
+#              no-op filter so the kcov invocation matches today's behavior.
 #   COVERAGE_DIR - Directory for coverage output (for run-coverage step)
 #   KCOV_SUITE_TIMEOUT_MINUTES - Suite timeout for kcov/BATS under
 #              run-coverage (default: 40). Uses timeout(1) with --kill-after;
 #              exit 124 on expiry. Kept below the coverage-run step timeout (45).
+#   SHARD_ARTIFACTS_DIR - Directory of downloaded shard TAP artifacts
+#              (aggregate-results). Expected layout:
+#              shell-test-results-shard-*/bats-output.tap
+#   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts
+#              (merge-coverage). Each shard dir contributes cov.xml or
+#              cobertura.xml.
+#   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
 #   COVERAGE_THRESHOLD - Minimum coverage threshold (for check-threshold step)
 
 set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 
 : "${STEP:=run-tests}"
 : "${GITHUB_OUTPUT:=/dev/null}"
@@ -222,6 +237,16 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		PARALLEL=1
 	fi
 
+	SHARD_INDEX="${SHARD_INDEX:-0}"
+	SHARD_TOTAL="${SHARD_TOTAL:-1}"
+	if ! [[ "$SHARD_TOTAL" =~ ^[1-9][0-9]*$ ]] ||
+		! [[ "$SHARD_INDEX" =~ ^(0|[1-9][0-9]*)$ ]] ||
+		[[ "$SHARD_INDEX" -ge "$SHARD_TOTAL" ]]; then
+		echo "::warning::SHARD_INDEX='${SHARD_INDEX}' SHARD_TOTAL='${SHARD_TOTAL}' is invalid (need integers 0 <= SHARD_INDEX < SHARD_TOTAL), defaulting to 0/1"
+		SHARD_INDEX=0
+		SHARD_TOTAL=1
+	fi
+
 	# Validate suite timeout is a positive integer (minutes)
 	if ! [[ "$SUITE_TIMEOUT_MINUTES" =~ ^[1-9][0-9]*$ ]]; then
 		echo "::warning::KCOV_SUITE_TIMEOUT_MINUTES='$SUITE_TIMEOUT_MINUTES' is not a valid positive integer, defaulting to 40"
@@ -266,8 +291,31 @@ if [[ "$STEP" == "run-coverage" ]]; then
 		exit 1
 	fi
 
+	# cksum(path) % N assignment. SHARD_TOTAL=1 skips filtering so the bats
+	# argv stays byte-for-byte today's list (#874).
+	if [[ "$SHARD_TOTAL" -gt 1 ]]; then
+		filtered_files=()
+		for test_file in "${TEST_FILES[@]}"; do
+			shard=$(($(printf '%s' "$test_file" | cksum | cut -d' ' -f1) % SHARD_TOTAL))
+			if [[ "$shard" -eq "$SHARD_INDEX" ]]; then
+				filtered_files+=("$test_file")
+			fi
+		done
+		TEST_FILES=("${filtered_files[@]}")
+	fi
+
+	# Empty shard (every file hashed elsewhere) is success with 0 tests — do
+	# not reuse the "No .bats files found" error.
+	if [[ ${#TEST_FILES[@]} -eq 0 ]]; then
+		echo "coverage-plan shard=${SHARD_INDEX}/${SHARD_TOTAL} empty"
+		: >bats-output.tap
+		echo "exit-code=0" >>"$GITHUB_OUTPUT"
+		echo "coverage-dir=$COVERAGE_DIR" >>"$GITHUB_OUTPUT"
+		exit 0
+	fi
+
 	for test_file in "${TEST_FILES[@]}"; do
-		echo "coverage-plan file=${test_file}"
+		echo "coverage-plan shard=${SHARD_INDEX}/${SHARD_TOTAL} file=${test_file}"
 	done
 
 	BATS_ARGS=(--tap)
@@ -467,7 +515,103 @@ if [[ "$STEP" == "check-threshold" ]]; then
 	exit 0
 fi
 
+# =============================================================================
+# Step: aggregate-results - Sum TAP totals across coverage shards
+# =============================================================================
+if [[ "$STEP" == "aggregate-results" ]]; then
+	: "${SHARD_ARTIFACTS_DIR:?SHARD_ARTIFACTS_DIR is required}"
+
+	if [[ ! -d "$SHARD_ARTIFACTS_DIR" ]]; then
+		echo "::warning::SHARD_ARTIFACTS_DIR is missing: ${SHARD_ARTIFACTS_DIR}"
+		mkdir -p "$SHARD_ARTIFACTS_DIR"
+	fi
+
+	TESTS_RAN="false"
+	TOTAL=0
+	PASSED=0
+	FAILED=0
+
+	while IFS= read -r tap_file; do
+		file_total=$(grep -Ec "^(ok|not ok)" "$tap_file" 2>/dev/null) || file_total=0
+		file_passed=$(grep -c "^ok " "$tap_file" 2>/dev/null) || file_passed=0
+		file_failed=$(grep -c "^not ok" "$tap_file" 2>/dev/null) || file_failed=0
+		TOTAL=$((TOTAL + file_total))
+		PASSED=$((PASSED + file_passed))
+		FAILED=$((FAILED + file_failed))
+		echo "aggregate-tap file=${tap_file} total=${file_total} passed=${file_passed} failed=${file_failed}"
+	done < <(find "$SHARD_ARTIFACTS_DIR" -type f -name 'bats-output.tap' | LC_ALL=C sort)
+
+	if [[ "$TOTAL" -gt 0 ]]; then
+		TESTS_RAN="true"
+	fi
+
+	{
+		echo "tests-total=$TOTAL"
+		echo "tests-passed=$PASSED"
+		echo "tests-failed=$FAILED"
+		echo "tests-ran=$TESTS_RAN"
+	} >>"$GITHUB_OUTPUT"
+
+	{
+		echo "### Test Results"
+		echo ""
+		echo "| Metric | Count |"
+		echo "|--------|-------|"
+		echo "| Total | $TOTAL |"
+		echo "| Passed | $PASSED |"
+		echo "| Failed | $FAILED |"
+	} >>"$GITHUB_STEP_SUMMARY"
+	exit 0
+fi
+
+# =============================================================================
+# Step: merge-coverage - Merge per-shard Cobertura XML via merge-cobertura.py
+# =============================================================================
+if [[ "$STEP" == "merge-coverage" ]]; then
+	: "${SHARD_COVERAGE_DIR:?SHARD_COVERAGE_DIR is required}"
+	MERGED_COVERAGE_FILE="${MERGED_COVERAGE_FILE:-merged-cobertura.xml}"
+
+	if [[ ! -d "$SHARD_COVERAGE_DIR" ]]; then
+		echo "::error::SHARD_COVERAGE_DIR is not a directory: ${SHARD_COVERAGE_DIR}"
+		exit 1
+	fi
+
+	xml_files=()
+	shopt -s nullglob
+	for shard_dir in "$SHARD_COVERAGE_DIR"/*; do
+		if [[ ! -d "$shard_dir" ]]; then
+			continue
+		fi
+		xml=""
+		if [[ -f "$shard_dir/cov.xml" ]]; then
+			xml="$shard_dir/cov.xml"
+		elif [[ -f "$shard_dir/cobertura.xml" ]]; then
+			xml="$shard_dir/cobertura.xml"
+		else
+			xml="$(find "$shard_dir" -type f -name 'cov.xml' | LC_ALL=C sort | head -n 1 || true)"
+			if [[ -z "$xml" ]]; then
+				xml="$(find "$shard_dir" -type f -name 'cobertura.xml' | LC_ALL=C sort | head -n 1 || true)"
+			fi
+		fi
+		if [[ -n "$xml" ]]; then
+			xml_files+=("$xml")
+			echo "merge-coverage input=${xml}"
+		fi
+	done
+	shopt -u nullglob
+
+	if [[ ${#xml_files[@]} -eq 0 ]]; then
+		echo "::error::No cov.xml or cobertura.xml found under ${SHARD_COVERAGE_DIR}"
+		exit 1
+	fi
+
+	python3 "${SCRIPT_DIR}/merge-cobertura.py" \
+		--output "$MERGED_COVERAGE_FILE" \
+		"${xml_files[@]}"
+	exit $?
+fi
+
 # Unknown step
 echo "::error::Unknown STEP: $STEP"
-echo "Valid steps: install-bats, install-kcov, run-tests, run-coverage, parse-results, parse-coverage, check-threshold"
+echo "Valid steps: install-bats, install-kcov, run-tests, run-coverage, parse-results, parse-coverage, check-threshold, aggregate-results, merge-coverage"
 exit 1
