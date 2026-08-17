@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.63.4] - 2026-08-17
+
+### Fixed
+
+- **ci**: raise auto-rerun max-reruns to 3 for kill streaks (#862) (14f3d80)
+
 ## [0.63.3] - 2026-08-17
 
 ### Changed
@@ -2076,7 +2082,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.4...HEAD
+[0.63.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.3...v0.63.4
 [0.63.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.2...v0.63.3
 [0.63.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.1...v0.63.2
 [0.63.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.0...v0.63.1
