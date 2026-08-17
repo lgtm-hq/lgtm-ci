@@ -129,13 +129,13 @@ EOF
 	assert_output --partial "TARGET_TYPE is required"
 }
 
-@test "scan-vulnerabilities action: pins grype-version able to read CycloneDX 1.7 (#865)" {
+@test "scan-vulnerabilities action: grype-version default reads CycloneDX 1.7 (#865)" {
 	local action_file="${PROJECT_ROOT}/.github/actions/scan-vulnerabilities/action.yml"
-	run grep -E '^\s+grype-version: v[0-9]+\.[0-9]+\.[0-9]+$' "$action_file"
-	assert_success
 	local version
-	version="$(grep -Eo 'grype-version: v[0-9]+\.[0-9]+\.[0-9]+' "$action_file" |
+	version="$(grep -A6 '^  grype-version:' "$action_file" |
+		grep -Eo 'default: "v[0-9]+\.[0-9]+\.[0-9]+"' |
 		grep -Eo '[0-9]+\.[0-9]+\.[0-9]+')"
+	[ -n "$version" ]
 	# grype >= 0.115.0 is required to parse CycloneDX 1.7 SBOMs from syft >= 1.44
 	run sort -C -V <(printf '0.115.0\n%s\n' "$version")
 	assert_success
@@ -143,9 +143,17 @@ EOF
 
 @test "scan-vulnerabilities action: grype-version pin has renovate annotation (#865)" {
 	local action_file="${PROJECT_ROOT}/.github/actions/scan-vulnerabilities/action.yml"
-	run grep -B1 'grype-version: v' "$action_file"
+	run grep -B1 'default: "v' "$action_file"
 	assert_success
 	assert_output --partial "renovate: datasource=github-releases depName=anchore/grype"
+}
+
+@test "scan-vulnerabilities action: scan and sarif steps both use the pin (#865, #867)" {
+	local action_file="${PROJECT_ROOT}/.github/actions/scan-vulnerabilities/action.yml"
+	run grep -F 'grype-version: ${{ inputs.grype-version }}' "$action_file"
+	assert_success
+	run grep -F 'GRYPE_VERSION: ${{ inputs.grype-version }}' "$action_file"
+	assert_success
 }
 
 @test "scan-vulnerabilities action: renovate.json manager covers the grype pin (#865)" {
@@ -153,7 +161,43 @@ EOF
 	# The custom manager must target the action file...
 	run grep -F 'scan-vulnerabilities/action\\.yml' "$renovate_file"
 	assert_success
-	# ...and its matchString must expect the grype-version line shape used in action.yml
-	run grep -F 'grype-version: v(?<currentValue>' "$renovate_file"
+	# ...and its matchString must expect the quoted default line shape used there
+	run grep -F 'default: \"v(?<currentValue>' "$renovate_file"
 	assert_success
+}
+
+_run_sarif() {
+	run env \
+		STEP=sarif \
+		TARGET="$1" \
+		TARGET_TYPE=sbom \
+		GRYPE_VERSION="${2:-}" \
+		RUNNER_TOOL_CACHE="${3:-${BATS_TEST_TMPDIR}/no-cache}" \
+		RUNNER_TEMP="$BATS_TEST_TMPDIR" \
+		SARIF_FILE="${BATS_TEST_TMPDIR}/out.sarif" \
+		PATH="$PATH" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/scan-vulnerabilities.sh"
+}
+
+@test "scan-vulnerabilities sarif: uses pinned grype from tool cache (#867)" {
+	local cache="${BATS_TEST_TMPDIR}/toolcache"
+	mkdir -p "$cache/grype/0.117.0/x64"
+	printf '#!/usr/bin/env bash\necho "pinned-sarif"\n' >"$cache/grype/0.117.0/x64/grype"
+	chmod +x "$cache/grype/0.117.0/x64/grype"
+	printf '{}' >"${BATS_TEST_TMPDIR}/sbom.json"
+
+	_run_sarif "${BATS_TEST_TMPDIR}/sbom.json" "v0.117.0" "$cache"
+
+	assert_success
+	assert_output --partial "Using pinned grype v0.117.0 from tool cache"
+	assert_file_contains "${BATS_TEST_TMPDIR}/out.sarif" '^pinned-sarif$'
+}
+
+@test "scan-vulnerabilities sarif: warns and falls back to PATH grype when pin absent (#867)" {
+	printf '{}' >"${BATS_TEST_TMPDIR}/sbom.json"
+
+	_run_sarif "${BATS_TEST_TMPDIR}/sbom.json" "v0.117.0"
+
+	assert_success
+	assert_output --partial "not in tool cache; using PATH grype"
 }

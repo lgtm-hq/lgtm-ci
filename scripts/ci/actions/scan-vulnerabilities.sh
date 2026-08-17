@@ -190,8 +190,24 @@ sarif)
 
 	log_info "Generating SARIF report..."
 
+	# Prefer the grype the scan step pinned: scan-action installs it into the
+	# runner tool cache by absolute path without exporting PATH, so bare
+	# `grype` here would use an unrelated (or missing) binary (#867).
+	GRYPE_BIN="grype"
+	if [[ -n "${GRYPE_VERSION:-}" ]]; then
+		pinned_grype="$(find \
+			"${RUNNER_TOOL_CACHE:-/opt/hostedtoolcache}/grype/${GRYPE_VERSION#v}" \
+			-type f -name grype 2>/dev/null | head -n 1 || true)"
+		if [[ -n "$pinned_grype" ]]; then
+			GRYPE_BIN="$pinned_grype"
+			log_info "Using pinned grype ${GRYPE_VERSION} from tool cache"
+		else
+			log_warn "Pinned grype ${GRYPE_VERSION} not in tool cache; using PATH grype"
+		fi
+	fi
+
 	# Run grype with SARIF output (never fail here, just generate report)
-	grype "$GRYPE_TARGET" -o sarif >"$SARIF_FILE" 2>/dev/null || true
+	"$GRYPE_BIN" "$GRYPE_TARGET" -o sarif >"$SARIF_FILE" 2>/dev/null || true
 
 	if [[ -f "$SARIF_FILE" ]]; then
 		log_success "SARIF report generated: $SARIF_FILE"
