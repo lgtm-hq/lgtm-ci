@@ -29,3 +29,10 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/install-ai-review-cli.sh"
 	assert_failure
 	assert_output --partial "exact X.Y.Z"
 }
+
+@test "install-ai-review-cli: Cursor download uses download_with_retries" {
+	run grep -F "download_with_retries" "$SCRIPT"
+	assert_success
+	run grep -F "lib/network/download.sh" "$SCRIPT"
+	assert_success
+}

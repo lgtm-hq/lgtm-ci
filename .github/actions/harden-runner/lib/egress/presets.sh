@@ -275,6 +275,9 @@ egress_ai_review_provider_endpoints() {
 
 	case "$provider" in
 	anthropic)
+		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
+			return 0
+		fi
 		printf '%s\n' api.anthropic.com:443
 		if [[ -z "$transport" || "$transport" == "cli" ]]; then
 			printf '%s\n' \
@@ -283,6 +286,10 @@ egress_ai_review_provider_endpoints() {
 		fi
 		;;
 	cursor)
+		# Cursor has no api transport. Empty transport keeps the fallback.
+		if [[ -n "$transport" && "$transport" != "cli" ]]; then
+			return 0
+		fi
 		printf '%s\n' \
 			downloads.cursor.com:443 \
 			api2.cursor.sh:443 \
@@ -291,6 +298,9 @@ egress_ai_review_provider_endpoints() {
 			repo42.cursor.sh:443
 		;;
 	openai)
+		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
+			return 0
+		fi
 		printf '%s\n' api.openai.com:443
 		if [[ -z "$transport" || "$transport" == "cli" ]]; then
 			printf '%s\n' \

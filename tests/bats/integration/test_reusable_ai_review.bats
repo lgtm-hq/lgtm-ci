@@ -60,6 +60,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 }
 
+@test "reusable-ai-review: lintro-version default meets the #2143 floor" {
+	run awk '/^      lintro-version:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f&&/default:/{gsub(/"/,""); print $2; exit}' "$WORKFLOW"
+	assert_success
+	[[ -n "$output" ]]
+	printf '%s\n' "0.125.0" "$output" | sort -C -V
+}
+
 @test "reusable-ai-review: declares optional secrets by org name" {
 	run awk '/^    secrets:/{f=1} f{print}' "$WORKFLOW"
 	assert_success
@@ -136,6 +143,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	run grep -c "GITHUB_TOKEN: \${{ steps.lintro-review-app.outputs.token }}" "$WORKFLOW"
 	assert_success
 	assert_output "1"
+}
+
+@test "reusable-ai-review: fails early when App credentials are missing" {
+	run grep -F "Require lintro-review App credentials" "$WORKFLOW"
+	assert_success
+	run grep -F "APP_KEY_PRESENT" "$WORKFLOW"
+	assert_success
+	run grep -F "are required to post as lintro-review[bot]" "$WORKFLOW"
+	assert_success
 }
 
 @test "reusable-ai-review: provider credentials are gated on resolve outputs" {

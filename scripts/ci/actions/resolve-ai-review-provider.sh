@@ -27,17 +27,83 @@ source "${SCRIPT_DIR}/../lib/ai_review_matrix.sh"
 # shellcheck source=../lib/egress/presets.sh
 source "${SCRIPT_DIR}/../lib/egress/presets.sh"
 
+# Trim leading and trailing whitespace from a scalar.
+_ai_review_trim() {
+	local value="${1:-}"
+	value="${value#"${value%%[![:space:]]*}"}"
+	value="${value%"${value##*[![:space:]]}"}"
+	printf '%s' "$value"
+}
+
+# Strip a trailing YAML comment. Values we read (provider/transport) have no `#`.
+_ai_review_strip_comment() {
+	local value="${1:-}"
+	printf '%s' "${value%%#*}"
+}
+
+# Unquote a single- or double-quoted YAML scalar.
+_ai_review_unquote() {
+	local value
+	value="$(_ai_review_trim "${1:-}")"
+	if [[ "$value" == \"*\" ]]; then
+		value="${value#\"}"
+		value="${value%\"}"
+	elif [[ "$value" == \'*\' ]]; then
+		value="${value#\'}"
+		value="${value%\'}"
+	fi
+	printf '%s' "$value"
+}
+
+# Extract `field` from a YAML flow mapping blob that contains `{...}`.
+_ai_review_flow_field() {
+	local field="$1"
+	local blob="$2"
+	local inside pair key value
+	local -a pairs
+
+	inside="${blob#*\{}"
+	inside="${inside%%\}*}"
+	inside="${inside//$'\n'/,}"
+
+	local IFS=','
+	read -ra pairs <<<"$inside" || true
+
+	for pair in "${pairs[@]}"; do
+		pair="$(_ai_review_trim "$(_ai_review_strip_comment "$pair")")"
+		[[ -n "$pair" && "$pair" == *:* ]] || continue
+		key="$(_ai_review_trim "${pair%%:*}")"
+		value="$(_ai_review_unquote "$(_ai_review_strip_comment "${pair#*:}")")"
+		if [[ "$key" == "$field" ]]; then
+			printf '%s' "$value"
+			return 0
+		fi
+	done
+}
+
 # Read ai.provider / ai.transport from a lintro YAML config without PyYAML.
-# Only the top-level `ai:` mapping is considered; nested mappings stop the scan.
+# Accepts a top-level block mapping (`ai:\n  provider: ...`), `ai: # comment`
+# then children, and a flow mapping (`ai: {provider: ..., transport: ...}`),
+# including a wrapped `{` / `}` pair. Nested mappings stop the block scan.
 _ai_review_config_field() {
 	local field="$1"
 	local path="$2"
 	local in_ai=false
-	local line value
+	local line rest value stripped
 
 	[[ -f "$path" ]] || return 0
 	while IFS= read -r line || [[ -n "$line" ]]; do
-		if [[ "$line" =~ ^ai:[[:space:]]*$ ]]; then
+		line="${line%$'\r'}"
+		if [[ "$line" =~ ^ai:[[:space:]]*(.*)$ ]]; then
+			rest="$(_ai_review_trim "${BASH_REMATCH[1]}")"
+			if [[ "$rest" == \{* ]]; then
+				while [[ "$rest" != *\}* ]]; do
+					IFS= read -r line || break
+					rest+=$'\n'"${line%$'\r'}"
+				done
+				_ai_review_flow_field "$field" "$rest"
+				return 0
+			fi
 			in_ai=true
 			continue
 		fi
@@ -47,18 +113,11 @@ _ai_review_config_field() {
 		if [[ "$in_ai" != true ]]; then
 			continue
 		fi
-		stripped="${line#"${line%%[![:space:]]*}"}"
+		stripped="$(_ai_review_trim "$(_ai_review_strip_comment "$line")")"
 		if [[ "$stripped" != "${field}:"* ]]; then
 			continue
 		fi
-		value="${stripped#"${field}:"}"
-		value="${value#"${value%%[![:space:]]*}"}"
-		value="${value%%#*}"
-		value="${value%"${value##*[![:space:]]}"}"
-		value="${value%\"}"
-		value="${value#\"}"
-		value="${value%\'}"
-		value="${value#\'}"
+		value="$(_ai_review_unquote "${stripped#"${field}:"}")"
 		printf '%s' "$value"
 		return 0
 	done <"$path"
@@ -74,6 +133,27 @@ first_nonempty() {
 		fi
 	done
 }
+
+# Harden-runner compares the raw input / Actions variable to lowercase
+# literals and cannot fold case. Reject mixed-case overlays; config-file
+# values may still be normalized because they never expand that allowlist.
+require_lowercase_overlay() {
+	local name="$1"
+	local value="${2:-}"
+	local lowered
+
+	[[ -z "$value" ]] && return 0
+	lowered="$(printf '%s' "$value" | tr '[:upper:]' '[:lower:]')"
+	if [[ "$value" != "$lowered" ]]; then
+		echo "ERROR: ${name} must be lowercase (got '${value}'). The harden-runner allowlist compares the raw input or Actions variable and cannot fold case." >&2
+		exit 1
+	fi
+}
+
+require_lowercase_overlay PROVIDER_INPUT "${PROVIDER_INPUT:-}"
+require_lowercase_overlay TRANSPORT_INPUT "${TRANSPORT_INPUT:-}"
+require_lowercase_overlay VAR_PROVIDER "${VAR_PROVIDER:-}"
+require_lowercase_overlay VAR_TRANSPORT "${VAR_TRANSPORT:-}"
 
 config_path="${CONFIG_PATH:-.lintro-config.yaml}"
 config_provider=""
@@ -96,7 +176,7 @@ fi
 extra_endpoints="$(egress_ai_review_provider_endpoints "$provider" "$transport" | paste -sd' ' - || true)"
 
 resolved="false"
-if [[ -n "$provider" ]]; then
+if [[ -n "$provider" && -n "$credential_env" ]]; then
 	resolved="true"
 fi
 
@@ -110,5 +190,9 @@ set_github_output "resolved" "$resolved"
 
 echo "ai-review resolve: provider=${provider:-<unset>} transport=${transport:-<unset>} credential=${credential_env:-<none>} needs-cli=${needs_cli}"
 if [[ "$resolved" != "true" ]]; then
-	echo "ai-review resolve: provider unset. Set the workflow provider input, the LINTRO_AI_PROVIDER Actions variable, or ai.provider in the repo lintro config."
+	if [[ -n "$provider" ]]; then
+		echo "ai-review resolve: unsupported pair provider=${provider} transport=${transport:-<unset>}. Supported pairs: anthropic/api, anthropic/cli, cursor/cli, openai/api, openai/cli."
+	else
+		echo "ai-review resolve: provider unset. Set the workflow provider input, the LINTRO_AI_PROVIDER Actions variable, or ai.provider in the repo lintro config."
+	fi
 fi

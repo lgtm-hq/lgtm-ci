@@ -1740,7 +1740,14 @@ the row that matches the resolved pair):
 `LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)
 and mint the posting token. That token is in scope **only** for the review
 step (`GITHUB_TOKEN`); `GH_TOKEN` stays the workflow token for fetching the
-diff.
+diff. The GitHub App **installation** must grant `issues: write` and
+`pull-requests: write` — those are App permissions, not the caller's
+`pull-requests: read` job grant. Token minting fails if the installation
+lacks them.
+
+`provider` / `transport` inputs and `LINTRO_AI_PROVIDER` /
+`LINTRO_AI_TRANSPORT` variables must be lowercase. Harden-runner compares
+the raw values and cannot fold case.
 
 <!-- markdownlint-disable MD013 -- wide input reference table -->
 

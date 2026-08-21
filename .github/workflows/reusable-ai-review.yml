@@ -183,6 +183,8 @@ jobs:
       pull-requests: read
     env:
       # Visible pair for harden-runner extras (input → var only).
+      # Must already be lowercase — GitHub expressions cannot fold case, so
+      # `Anthropic` would inject a credential and then block provider egress.
       AI_REVIEW_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
       AI_REVIEW_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
       # Keep in sync with egress_ai_review_provider_endpoints cursor row.
@@ -245,6 +247,19 @@ jobs:
           BASE_REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
+      - name: Require lintro-review App credentials
+        if: steps.preflight.outputs.should-run == 'true'
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+          APP_KEY_PRESENT: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY != '' }}
+        run: |
+          if [[ -z "${APP_ID}" || "${APP_KEY_PRESENT}" != "true" ]]; then
+            echo "::error::LINTRO_REVIEW_APP_ID and LINTRO_REVIEW_APP_PRIVATE_KEY"
+            echo "::error::are required to post as lintro-review[bot]."
+            echo "::error::They are org-wide all-repo secrets; pass them with secrets: inherit."
+            exit 1
+          fi
       - name: Resolve provider matrix
         id: resolve
         if: steps.preflight.outputs.should-run == 'true'

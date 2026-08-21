@@ -148,6 +148,15 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	refute_output --partial 'api.openai.com'
 }
 
+@test "egress_ai_review_provider_endpoints: unsupported populated transport prints nothing" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor api"
+	assert_success
+	assert_output ""
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic grpc"
+	assert_success
+	assert_output ""
+}
+
 @test "egress preset osv-scanner includes release assets and OSV API hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints osv-scanner"
 	assert_success

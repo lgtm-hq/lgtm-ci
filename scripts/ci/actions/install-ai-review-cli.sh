@@ -23,6 +23,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "${SCRIPT_DIR}/../lib/ai_review_matrix.sh"
 # shellcheck source=../lib/github/output.sh
 source "${SCRIPT_DIR}/../lib/github/output.sh"
+# shellcheck source=../lib/network/download.sh
+source "${SCRIPT_DIR}/../lib/network/download.sh"
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.232}"
@@ -82,7 +84,10 @@ install_cursor_agent() {
 	tmp="$(mktemp -d)"
 	trap 'rm -rf "$tmp"' EXIT
 	echo "Installing Cursor agent ${CURSOR_AGENT_VERSION} (${arch})..."
-	curl -fsSL "$url" -o "${tmp}/agent-cli-package.tar.gz"
+	if ! download_with_retries "$url" "${tmp}/agent-cli-package.tar.gz"; then
+		echo "ERROR: failed to download Cursor agent tarball from ${url}" >&2
+		exit 1
+	fi
 	echo "${expected}  ${tmp}/agent-cli-package.tar.gz" | sha256sum -c -
 	mkdir -p "${prefix}/bin" "$dir"
 	tar -xzf "${tmp}/agent-cli-package.tar.gz" -C "$dir" --strip-components=1
