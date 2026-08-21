@@ -71,7 +71,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-semantic-pr-title.yml` | Conventional PR title validation + comments |
 | `reusable-security-audit.yml` | lintro/osv-scanner audit + comment artifact |
 | `reusable-publish-security-audit-comment.yml` | Publish security audit PR comment |
-| `reusable-ai-review.yml` | Org-wide AI code review (sticky PR comment) |
+| `reusable-ai-review.yml` | Org-wide AI code review (`lintro-review[bot]` sticky comment) |
 | `reusable-pr-auto-assign.yml` | PR auto-assignment |
 | `reusable-pr-labeler.yml` | PR auto-labeling |
 

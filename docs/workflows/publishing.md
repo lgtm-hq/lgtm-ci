@@ -140,9 +140,10 @@ jobs:
 image and uploads a comment artifact; pair with
 `reusable-publish-security-audit-comment.yml` (same split pattern as
 quality lint + publish-quality-summary). `reusable-ai-review.yml` installs
-a pinned `lintro[ai]` from PyPI and posts one sticky, telemetry-rich PR
-comment updated in place each run — `ANTHROPIC_API_KEY` is an lgtm-hq
-org-wide secret, so callers just forward it. Both are non-blocking on
-missing secrets/fork PRs; see the "PR Automation And Security" section of
-[reusable-workflows.md](../reusable-workflows.md#pr-automation-and-security)
-for hardening guarantees and the sticky-comment state format.
+a pinned `lintro[ai]` from PyPI and posts one sticky PR comment as
+`lintro-review[bot]` via `lintro review --post`. Callers use
+`secrets: inherit` (or the explicit org-secret list); only the credential
+for the resolved `(provider, transport)` pair is injected. Fork PRs skip.
+See the "AI code review" section of
+[reusable-workflows.md](../reusable-workflows.md#ai-code-review-reusable-ai-reviewyml)
+for the caller snippet, permissions block, and credential matrix.

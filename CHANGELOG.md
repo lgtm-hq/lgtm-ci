@@ -11,6 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **workflows**: rewrite reusable-ai-review as a provider-agnostic published-lintro
+  reviewer that posts as lintro-review[bot] (#853)
+
 ### Deprecated
 
 ### Removed

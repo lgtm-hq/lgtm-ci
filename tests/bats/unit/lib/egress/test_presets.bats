@@ -110,16 +110,42 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
-@test "egress preset ai-review includes PyPI, uv, and Anthropic hosts" {
+@test "egress preset ai-review includes PyPI and uv hosts without provider inference" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints ai-review"
 	assert_success
 	assert_output --partial 'pypi.org:443'
 	assert_output --partial 'files.pythonhosted.org:443'
 	assert_output --partial 'astral.sh:443'
 	assert_output --partial 'releases.astral.sh:443'
-	assert_output --partial 'api.anthropic.com:443'
 	assert_output --partial 'raw.githubusercontent.com:443'
 	assert_output --partial 'api.github.com:443'
+	refute_output --partial 'api.anthropic.com:443'
+	refute_output --partial 'api.openai.com:443'
+	refute_output --partial 'cursor.sh'
+}
+
+@test "egress_ai_review_provider_endpoints: empty provider prints nothing" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints '' ''"
+	assert_success
+	assert_output ""
+}
+
+@test "egress_ai_review_provider_endpoints: anthropic api is provider-scoped" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic api"
+	assert_success
+	assert_output --partial 'api.anthropic.com:443'
+	refute_output --partial 'api.openai.com'
+	refute_output --partial 'cursor.sh'
+	refute_output --partial 'registry.npmjs.org'
+}
+
+@test "egress_ai_review_provider_endpoints: cursor hosts exclude other providers" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor cli"
+	assert_success
+	assert_output --partial 'downloads.cursor.com:443'
+	assert_output --partial 'api2.cursor.sh:443'
+	refute_output --partial 'api.anthropic.com'
+	refute_output --partial 'api.openai.com'
 }
 
 @test "egress preset osv-scanner includes release assets and OSV API hosts" {
