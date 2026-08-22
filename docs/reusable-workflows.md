@@ -1701,9 +1701,10 @@ run (py-lintro tracks adding the override).
 **Caller snippet** (same shape for every provider; listed alphabetically, none
 recommended). Enumerate the secrets explicitly — least privilege: `secrets:
 inherit` would hand the reusable the caller's entire secret set, while it
-only ever declares the seven below — the two App secrets go solely to the
-token-minting step, and of the five provider credentials the run step
-receives only the one for the resolved `(provider, transport)` pair:
+only ever declares the seven below — the two App secrets reach only the
+credential-guard and token-minting steps, and of the five provider
+credentials the run step receives only the one for the resolved
+`(provider, transport)` pair:
 
 ```yaml
 # any lgtm-hq repo: .github/workflows/ai-review.yml
