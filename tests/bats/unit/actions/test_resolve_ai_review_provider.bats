@@ -131,6 +131,23 @@ YAML
 	assert_output --partial "resolved=true"
 }
 
+@test "resolve: quoted block-style child keys are unquoted before matching" {
+	cat >"${BATS_TEST_TMPDIR}/cfg.yaml" <<'YAML'
+ai:
+  "provider": cursor
+  "transport": cli
+YAML
+	PROVIDER_INPUT="" TRANSPORT_INPUT="" VAR_PROVIDER="" VAR_TRANSPORT="" \
+		EGRESS_POLICY="audit" \
+		CONFIG_PATH="${BATS_TEST_TMPDIR}/cfg.yaml" \
+		run bash "$SCRIPT"
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "provider=cursor"
+	assert_output --partial "transport=cli"
+	assert_output --partial "resolved=true"
+}
+
 @test "resolve: quoted flow-mapping keys are unquoted before matching" {
 	cat >"${BATS_TEST_TMPDIR}/cfg.yaml" <<'YAML'
 "ai": {"provider": cursor, "transport": cli}

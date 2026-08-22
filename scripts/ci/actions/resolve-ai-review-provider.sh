@@ -124,10 +124,13 @@ _ai_review_config_field() {
 			continue
 		fi
 		stripped="$(_ai_review_trim "$(_ai_review_strip_comment "$line")")"
-		if [[ "$stripped" != "${field}:"* ]]; then
+		# Child keys may be quoted too — unquote before comparing, mirroring
+		# the flow-mapping path, so the whole quoted-key class stays closed.
+		[[ "$stripped" == *:* ]] || continue
+		if [[ "$(_ai_review_unquote "${stripped%%:*}")" != "$field" ]]; then
 			continue
 		fi
-		value="$(_ai_review_unquote "${stripped#"${field}:"}")"
+		value="$(_ai_review_unquote "${stripped#*:}")"
 		printf '%s' "$value"
 		return 0
 	done <"$path"
