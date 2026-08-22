@@ -61,7 +61,7 @@ on:
         required: false
         type: string
         # renovate: datasource=pypi depName=lintro
-        default: "0.128.0"
+        default: "0.129.0"
       python-version:
         description: "CPython version for the scratch venv that installs lintro"
         required: false
