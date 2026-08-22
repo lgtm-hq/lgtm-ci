@@ -1,0 +1,30 @@
+# SPDX-License-Identifier: MIT
+---
+name: AI Review
+
+# Pilot caller for reusable-ai-review.yml (#888, parent #853): reviews this
+# repo's PRs with a pinned published lintro and posts the sticky review
+# comment as lintro-review[bot].
+#
+# Provider and transport come from the LINTRO_AI_PROVIDER /
+# LINTRO_AI_TRANSPORT Actions variables (lowercase; required under the
+# reusable's default block egress — a config-file-only provider is a hard
+# resolve error by design). Swap providers by changing the variables; no
+# workflow edit needed. Non-blocking: the reusable's `blocking` default keeps
+# a changes-requested verdict from failing the check.
+
+"on":
+  pull_request:
+
+jobs:
+  ai-review:
+    # Same-repo PRs only: fork PRs have no secrets and the reusable skips
+    # them anyway; the gate keeps the check from even starting there.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    uses: ./.github/workflows/reusable-ai-review.yml
+    permissions:
+      # Checkout + PR diff. Posting uses the lintro-review App token minted
+      # inside the reusable, not this job grant.
+      contents: read
+      pull-requests: read
+    secrets: inherit
