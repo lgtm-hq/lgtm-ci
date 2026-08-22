@@ -43,6 +43,8 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/install-ai-review-cli.sh"
 	# step. tmp must not be declared local, and the trap must default-expand.
 	run grep -F 'trap '\''rm -rf "${tmp:-}"'\'' EXIT' "$SCRIPT"
 	assert_success
-	run bash -c "grep -E '^[[:space:]]*local .* tmp( |$)|^[[:space:]]*local tmp( |$)' '$SCRIPT'"
+	# Match every local declaration form: bare (`local tmp`), listed
+	# (`local a tmp b`), and assignment (`local tmp=...`).
+	run bash -c "grep -E '\blocal\b[^#]*\btmp\b' '$SCRIPT'"
 	assert_failure
 }
