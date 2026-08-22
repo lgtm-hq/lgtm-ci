@@ -28,6 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.63.8] - 2026-08-20
+
+### Fixed
+
+- **deps**: update dependency lintro to 0.123.2 (patch) (#883) (90eb7a6)
+- **deps**: update lintro (#882) (33c78f0)
+- **deps**: update lintro (#880) (bc29ee5)
+- **deps**: update lintro (#879) (b25acf4)
+- **deps**: update lintro (#877) (c7eb17e)
+
 ## [0.63.7] - 2026-08-17
 
 ### Fixed
@@ -2114,7 +2124,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.7...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.8...HEAD
+[0.63.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.7...v0.63.8
 [0.63.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.6...v0.63.7
 [0.63.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.5...v0.63.6
 [0.63.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.4...v0.63.5
