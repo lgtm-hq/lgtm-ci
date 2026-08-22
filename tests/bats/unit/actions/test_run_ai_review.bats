@@ -147,14 +147,13 @@ run_review() {
 	chmod +x "$bin"
 	run run_review LINTRO_BIN="$bin" BLOCKING=false
 	assert_success
-	run cat "$argv_file"
-	assert_line "x/y"
-	# Flag tokens start with --, which the assert_line fallback rejects as an
-	# option; assert them with fixed whole-line greps instead.
-	run grep -Fx -- "--repo" "$argv_file"
-	assert_success
-	run grep -Fx -- "--pr" "$argv_file"
-	assert_success
+	# Bind each option to its value — presence alone would pass with --repo
+	# pointing at another repository. (Flag tokens start with --, which the
+	# assert_line fallback rejects as an option, hence grep.)
+	run bash -c "grep -Fx -A1 -- '--repo' '$argv_file' | tail -1"
+	assert_output "x/y"
+	run bash -c "grep -Fx -A1 -- '--pr' '$argv_file' | tail -1"
+	assert_output "1"
 }
 
 @test "run: exit 2 is no-review and succeeds when non-blocking" {

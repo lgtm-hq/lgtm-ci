@@ -1755,7 +1755,7 @@ the raw values and cannot fold case.
 | ----------------- | ------- | ----- |
 | `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
 | `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
-| `lintro-version`  | pinned  | Renovate-managed. Floor = 0.127.0 (py-lintro#2144: no schema default for provider); never pin lower. |
+| `lintro-version`  | pinned  | Renovate-managed. Floor = 0.127.0 (py-lintro#2144, part of py-lintro#2143: no schema default for provider); never pin lower. |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL`. |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD`. |
@@ -1783,8 +1783,8 @@ the raw values and cannot fold case.
   resolve step **fails the job with guidance** when the provider comes only
   from the repo config — set the input or the variable so the matching hosts
   are allowlisted (`egress-policy: audit` lifts the guard). A rotated Cursor
-  shard appears in the failed run's
-  harden-runner summary; add it to `egress_ai_review_provider_endpoints` and
+  shard appears in the failed run's harden-runner summary; add it to
+  `egress_ai_review_provider_endpoints` and
   `AI_REVIEW_CURSOR_EGRESS` together. No wildcards.
 
 **The sticky comment.** `lintro review --post` owns the `<!-- lintro-ai-review -->`

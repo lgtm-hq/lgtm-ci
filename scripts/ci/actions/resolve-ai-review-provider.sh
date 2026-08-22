@@ -79,7 +79,9 @@ _ai_review_flow_field() {
 	for pair in "${pairs[@]}"; do
 		pair="$(_ai_review_trim "$(_ai_review_strip_comment "$pair")")"
 		[[ -n "$pair" && "$pair" == *:* ]] || continue
-		key="$(_ai_review_trim "${pair%%:*}")"
+		# Keys may be quoted (`{"provider": cursor}` is valid YAML) — unquote
+		# before matching or the field never resolves.
+		key="$(_ai_review_unquote "${pair%%:*}")"
 		value="$(_ai_review_unquote "$(_ai_review_strip_comment "${pair#*:}")")"
 		if [[ "$key" == "$field" ]]; then
 			printf '%s' "$value"

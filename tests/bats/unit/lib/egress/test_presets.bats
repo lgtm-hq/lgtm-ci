@@ -180,6 +180,7 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai api"
 	assert_success
 	assert_output --partial 'api.openai.com:443'
+	refute_output --partial 'nodejs.org'
 	refute_output --partial 'registry.npmjs.org'
 	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai cli"
 	assert_success

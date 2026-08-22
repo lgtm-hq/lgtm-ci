@@ -190,6 +190,24 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	} | sort -u")
 }
 
+@test "reusable-ai-review: each provider host is bound to its provider condition" {
+	# Presence alone is not enough — a host attached to the wrong provider
+	# condition (or appended unconditionally) must fail. Assert the exact
+	# gating expression for each provider's hosts.
+	run grep -F "AI_REVIEW_PROVIDER == 'anthropic' && 'api.anthropic.com:443'" "$WORKFLOW"
+	assert_success
+	run grep -F "AI_REVIEW_PROVIDER == 'openai' && 'api.openai.com:443'" "$WORKFLOW"
+	assert_success
+	run grep -F "AI_REVIEW_PROVIDER == 'cursor' && env.AI_REVIEW_CURSOR_EGRESS" "$WORKFLOW"
+	assert_success
+	# Cursor shards live only in the gated env var, npm hosts only in the
+	# anthropic/openai-conditioned env var — never in an unconditional list.
+	run bash -c "grep -F 'downloads.cursor.com:443' '$WORKFLOW' | grep -vc AI_REVIEW_CURSOR_EGRESS"
+	assert_output "0"
+	run bash -c "grep -F 'registry.npmjs.org:443' '$WORKFLOW' | grep -vc AI_REVIEW_NPM_EGRESS"
+	assert_output "0"
+}
+
 @test "reusable-ai-review: resolve step receives the egress policy for the visibility guard" {
 	run grep -F 'EGRESS_POLICY: ${{ inputs.egress-policy }}' "$WORKFLOW"
 	assert_success
