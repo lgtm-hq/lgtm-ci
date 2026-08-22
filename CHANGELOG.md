@@ -11,12 +11,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **workflows**: rewrite reusable-ai-review as a provider-agnostic published-lintro
-  reviewer that posts as lintro-review[bot] (#853)
-
 ### Deprecated
 
 ### Removed
+
+### Fixed
+
+### Security
+
+## [0.64.0] - 2026-08-22
+
+### Added
+
+- **workflows**: rewrite reusable-ai-review as a provider-agnostic published-lintro
+  reviewer (#885) (ac1b4ae)
+
+### Changed
+
+- **workflows**: rewrite reusable-ai-review as a provider-agnostic published-lintro
+  reviewer that posts as lintro-review[bot] (#853)
 
 ### Fixed
 
@@ -25,8 +38,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **workflows**: reject mixed-case provider overlays, gate resolution and
   egress on supported pairs, fail early without App credentials, and bound
   the Cursor agent download (#853)
-
-### Security
 
 ## [0.63.8] - 2026-08-20
 
@@ -2124,7 +2135,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.8...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.64.0...HEAD
+[0.64.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.8...v0.64.0
 [0.63.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.7...v0.63.8
 [0.63.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.6...v0.63.7
 [0.63.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.5...v0.63.6
