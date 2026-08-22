@@ -60,7 +60,10 @@ install_npm_cli() {
 }
 
 install_cursor_agent() {
-	local arch machine expected url dir tmp prefix
+	# NOTE: tmp is deliberately NOT local — the EXIT trap below runs at script
+	# exit, outside this function's scope, and `set -u` would kill the trap
+	# (and fail the step) on an unbound local.
+	local arch machine expected url dir prefix
 	if [[ ! "${CURSOR_AGENT_VERSION}" =~ ^[0-9]{4}\.[0-9]{2}\.[0-9]{2}-[A-Za-z0-9]+$ ]]; then
 		echo "ERROR: CURSOR_AGENT_VERSION must be a calendar build id (YYYY.MM.DD-<rev>)" >&2
 		exit 1
@@ -82,7 +85,7 @@ install_cursor_agent() {
 	url="https://downloads.cursor.com/lab/${CURSOR_AGENT_VERSION}/linux/${arch}/agent-cli-package.tar.gz"
 	dir="${prefix}/cursor/${CURSOR_AGENT_VERSION}"
 	tmp="$(mktemp -d)"
-	trap 'rm -rf "$tmp"' EXIT
+	trap 'rm -rf "${tmp:-}"' EXIT
 	echo "Installing Cursor agent ${CURSOR_AGENT_VERSION} (${arch})..."
 	if ! download_with_retries "$url" "${tmp}/agent-cli-package.tar.gz"; then
 		echo "ERROR: failed to download Cursor agent tarball from ${url}" >&2

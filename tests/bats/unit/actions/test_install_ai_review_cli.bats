@@ -36,3 +36,15 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/install-ai-review-cli.sh"
 	run grep -F "lib/network/download.sh" "$SCRIPT"
 	assert_success
 }
+
+@test "install-ai-review-cli: EXIT trap is safe under set -u outside function scope" {
+	# Regression (#889 pilot run): the EXIT trap fires at script exit, where a
+	# function-local tmp is out of scope — set -u then kills the trap and the
+	# step. tmp must not be declared local, and the trap must default-expand.
+	run grep -F 'trap '\''rm -rf "${tmp:-}"'\'' EXIT' "$SCRIPT"
+	assert_success
+	# Match every local declaration form: bare (`local tmp`), listed
+	# (`local a tmp b`), and assignment (`local tmp=...`).
+	run bash -c "grep -E '\blocal\b[^#]*\btmp\b' '$SCRIPT'"
+	assert_failure
+}

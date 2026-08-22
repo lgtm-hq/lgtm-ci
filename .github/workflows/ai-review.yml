@@ -1,0 +1,51 @@
+# SPDX-License-Identifier: MIT
+---
+name: AI Review
+
+# Pilot caller for reusable-ai-review.yml (#888, parent #853): reviews this
+# repo's PRs with a pinned published lintro and posts the sticky review
+# comment as lintro-review[bot].
+#
+# Provider and transport come from the LINTRO_AI_PROVIDER /
+# LINTRO_AI_TRANSPORT Actions variables (lowercase; required under the
+# reusable's default block egress — a config-file-only provider is a hard
+# resolve error by design). Swap providers by changing the variables; no
+# workflow edit needed. Non-blocking: the reusable's `blocking` default keeps
+# a changes-requested verdict from failing the check.
+
+"on":
+  pull_request:
+
+concurrency:
+  group: ai-review-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ai-review:
+    # Same-repo PRs only: fork PRs have no secrets and the reusable skips
+    # them anyway; the gate keeps the check from even starting there.
+    if: github.event.pull_request.head.repo.full_name == github.repository
+    # Local path on purpose: this repo OWNS the reusable, and dogfooding the
+    # PR's own copy is what lets reusable changes verify themselves before
+    # merge (it caught three live bugs during the pilot). The trust cost —
+    # the PR ref defines the called workflow — is bounded to same-repo
+    # write-access authors (fork PRs are gated off above and carry no
+    # secrets), which is this org's accepted posture. Consumer repos do NOT
+    # copy this shape: they pin `lgtm-hq/lgtm-ci/...@<sha>` per the docs.
+    uses: ./.github/workflows/reusable-ai-review.yml
+    permissions:
+      # Checkout + PR diff. Posting uses the lintro-review App token minted
+      # inside the reusable, not this job grant.
+      contents: read
+      pull-requests: read
+    # Explicit enumeration instead of `secrets: inherit`: the PR-ref workflow
+    # sees exactly the seven secrets the reusable declares (the docs'
+    # "equivalent explicit secrets" block) and nothing else in the org set.
+    secrets:
+      LINTRO_REVIEW_APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+      LINTRO_REVIEW_APP_PRIVATE_KEY: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}

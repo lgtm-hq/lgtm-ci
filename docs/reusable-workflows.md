@@ -1692,6 +1692,12 @@ py-lintro's dogfood does **not** transfer here.
 Actions variable → the consuming repo's lintro config → lintro's own validation
 error. Inputs map onto that env overlay surface; there is no workflow fallback.
 
+**Prerequisite in the consuming repo:** set `ai.review: true` in
+`.lintro-config.yaml`. The reusable forces `ai.enabled` through
+`LINTRO_AI_ENABLED`, but `ai.review` has no `LINTRO_AI_*` env override in
+lintro today, so a repo without it gets `outcome=no-review` (exit 2) on every
+run (py-lintro tracks adding the override).
+
 **Caller snippet** (same shape for every provider; listed alphabetically, none
 recommended). Prefer `secrets: inherit` so org secrets flow through. The
 reusable injects **only** the credential for the resolved `(provider,
