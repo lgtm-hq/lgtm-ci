@@ -1699,9 +1699,12 @@ lintro today, so a repo without it gets `outcome=no-review` (exit 2) on every
 run (py-lintro tracks adding the override).
 
 **Caller snippet** (same shape for every provider; listed alphabetically, none
-recommended). Prefer `secrets: inherit` so org secrets flow through. The
-reusable injects **only** the credential for the resolved `(provider,
-transport)` pair:
+recommended). Enumerate the secrets explicitly — least privilege: `secrets:
+inherit` would hand the reusable the caller's entire secret set, while it
+only ever declares the seven below — the two App secrets reach only the
+credential-guard and token-minting steps, and of the five provider
+credentials the run step receives only the one for the resolved
+`(provider, transport)` pair:
 
 ```yaml
 # any lgtm-hq repo: .github/workflows/ai-review.yml
@@ -1715,16 +1718,6 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    secrets: inherit
-    with:
-      tooling-ref: "<sha>"
-      # provider/transport empty = Actions var, then repo lintro config
-```
-
-Equivalent explicit secrets (still inherit-or-list; the reusable requires only
-the row that matches the resolved pair):
-
-```yaml
     secrets:
       LINTRO_REVIEW_APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
       LINTRO_REVIEW_APP_PRIVATE_KEY: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
@@ -1733,7 +1726,14 @@ the row that matches the resolved pair):
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+    with:
+      tooling-ref: "<sha>"
+      # provider/transport empty = Actions var, then repo lintro config
 ```
+
+`secrets: inherit` also works (all seven are org-wide, so it is the
+zero-maintenance shape) but is discouraged: it grants the called workflow
+access to every secret the caller can see, not just these seven.
 
 | provider | transport | binary | credential (env) |
 | -------- | --------- | ------ | ---------------- |
