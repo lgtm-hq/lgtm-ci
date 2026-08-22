@@ -1755,7 +1755,7 @@ the raw values and cannot fold case.
 | ----------------- | ------- | ----- |
 | `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
 | `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
-| `lintro-version`  | pinned  | Renovate-managed. Floor = py-lintro release containing #2143 (no schema default for provider). |
+| `lintro-version`  | pinned  | Renovate-managed. Floor = 0.127.0 (py-lintro#2144: no schema default for provider); never pin lower. |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL`. |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD`. |

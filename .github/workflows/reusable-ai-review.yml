@@ -21,12 +21,11 @@ name: Reusable AI Review
 #   Credentials, CLI installs, and extra egress are keyed on the resolved
 #   (provider, transport) pair. Adding a provider is one matrix row.
 #
-# lintro-version floor:
-#   The pin must be the py-lintro release that contains #2143 (provider has
-#   no schema default). Older versions silently resolve an unset provider to
-#   anthropic, which would make the "fail with guidance" contract a lie.
-#   Bump the Renovate pin when that release ships; do not add a workflow
-#   fallback to compensate.
+# lintro-version floor: 0.127.0 (py-lintro#2144, part of #2143).
+#   That release removes the provider schema default. Older versions silently
+#   resolve an unset provider to anthropic, which would make the "fail with
+#   guidance" contract a lie. Renovate bumps the pin forward; never lower it
+#   below the floor, and do not add a workflow fallback to compensate.
 #
 # Egress:
 #   The ai-review preset is GitHub + PyPI/uv only. Provider hosts are
@@ -60,7 +59,7 @@ on:
         required: false
         type: string
         # renovate: datasource=pypi depName=lintro
-        default: "0.125.0"
+        default: "0.128.0"
       python-version:
         description: "CPython version for the scratch venv that installs lintro"
         required: false
