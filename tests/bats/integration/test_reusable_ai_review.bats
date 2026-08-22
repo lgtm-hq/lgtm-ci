@@ -206,6 +206,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output "0"
 	run bash -c "grep -F 'registry.npmjs.org:443' '$WORKFLOW' | grep -vc AI_REVIEW_NPM_EGRESS"
 	assert_output "0"
+	# And the npm env var's own definition must carry the anthropic/openai
+	# gate — an unconditional definition would grant npm egress to cursor.
+	# yamllint disable-line rule:line-length
+	run grep -F "== 'anthropic' || (inputs.provider || vars.LINTRO_AI_PROVIDER) == 'openai') && 'nodejs.org:443 registry.npmjs.org:443'" "$WORKFLOW"
+	assert_success
 }
 
 @test "reusable-ai-review: resolve step receives the egress policy for the visibility guard" {
