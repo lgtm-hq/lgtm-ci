@@ -133,7 +133,7 @@ YAML
 
 @test "resolve: quoted flow-mapping keys are unquoted before matching" {
 	cat >"${BATS_TEST_TMPDIR}/cfg.yaml" <<'YAML'
-ai: {"provider": cursor, "transport": cli}
+"ai": {"provider": cursor, "transport": cli}
 YAML
 	PROVIDER_INPUT="" TRANSPORT_INPUT="" VAR_PROVIDER="" VAR_TRANSPORT="" \
 		EGRESS_POLICY="audit" \

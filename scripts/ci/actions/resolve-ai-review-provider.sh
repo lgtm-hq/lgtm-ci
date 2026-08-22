@@ -103,7 +103,8 @@ _ai_review_config_field() {
 	[[ -f "$path" ]] || return 0
 	while IFS= read -r line || [[ -n "$line" ]]; do
 		line="${line%$'\r'}"
-		if [[ "$line" =~ ^ai:[[:space:]]*(.*)$ ]]; then
+		# The top-level key may be quoted (`"ai":` is valid YAML).
+		if [[ "$line" =~ ^[\"\']?ai[\"\']?:[[:space:]]*(.*)$ ]]; then
 			rest="$(_ai_review_trim "${BASH_REMATCH[1]}")"
 			if [[ "$rest" == \{* ]]; then
 				while [[ "$rest" != *\}* ]]; do
