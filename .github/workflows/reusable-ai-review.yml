@@ -3,44 +3,56 @@
 ---
 name: Reusable AI Review
 
-# Org-wide AI code review. Installs a pinned lintro[ai] from PyPI, runs
-# `lintro review` hardened in CI, and publishes a single sticky, telemetry-rich
-# PR comment (updated in place; cumulative state embedded in an HTML comment).
+# Org-wide AI code review. Installs a pinned lintro[ai] from a *published
+# PyPI release* (never from the reviewed repo), runs `lintro review --post`,
+# and publishes a sticky PR comment as lintro-review[bot].
 #
-# Trusted-install invariant (security): the job only installs a *pinned lintro
-# from PyPI* and runs `lintro review`, which reads the PR diff via the GitHub API
-# and calls the model. It never installs or executes the PR's own code (no
-# `uv sync`, no `pip install .`, no build hooks), so ANTHROPIC_API_KEY is scoped
-# to the single "Run AI review" step and is never in scope while PR-controlled
-# code could execute. The job is non-blocking (continue-on-error) and skips
-# gracefully on fork PRs, when no key is present, and off same-repo PRs.
+# Trust model — why pull_request (not pull_request_target):
+#   The reviewer binary comes from a pinned PyPI release. The consuming PR
+#   cannot control that code, so the pull_request_target / base-ref trusted-
+#   install machinery used by py-lintro's dogfood does NOT apply here. The
+#   job checks out the default merge ref with persist-credentials: false and
+#   never installs or executes the PR's own package (no uv sync, no
+#   pip install ., no build hooks). Do not "fix" this to pull_request_target.
 #
-# Org secret rollout: lgtm-hq provisions ANTHROPIC_API_KEY as an org-wide
-# secret, so callers just forward it (or `secrets: inherit`) with zero per-repo
-# setup. The missing-key skip path is the fork/safety-net case, not the norm.
+# Provider-agnostic contract:
+#   No baked-in default provider or transport. Inputs map onto LINTRO_AI_*
+#   (input → Actions variable → repo lintro config → lintro's own error).
+#   Credentials, CLI installs, and extra egress are keyed on the resolved
+#   (provider, transport) pair. Adding a provider is one matrix row.
+#
+# lintro-version floor: 0.127.0 (py-lintro#2144, part of #2143).
+#   That release removes the provider schema default. Older versions silently
+#   resolve an unset provider to anthropic, which would make the "fail with
+#   guidance" contract a lie. Renovate bumps the pin forward; never lower it
+#   below the floor, and do not add a workflow fallback to compensate.
+#
+# Egress:
+#   The ai-review preset is GitHub + PyPI/uv only. Provider hosts are
+#   appended from the pair visible at harden time (input →
+#   vars.LINTRO_AI_*). Repo-config-only resolution cannot expand this list
+#   before harden-runner, so under egress-policy `block` the resolve step
+#   FAILS the job with guidance when the provider comes only from the repo
+#   config — set the input or the Actions variable so the matching hosts are
+#   allowlisted (egress-policy `audit` lifts this). A rotated Cursor shard (e.g.
+#   repo43.cursor.sh) is named in the failed run's harden-runner summary —
+#   add it to egress_ai_review_provider_endpoints and AI_REVIEW_CURSOR_EGRESS
+#   together. No wildcards.
 
 on:
   workflow_call:
     inputs:
-      depth:
-        description: "Review depth (1=checklist, 2=+questions, 3=+adversarial)"
-        required: false
-        type: number
-        default: 1
-      post:
-        description: "Post/update the sticky PR comment"
-        required: false
-        type: boolean
-        default: true
-      max-cost-usd:
-        description: "Advisory per-run cost cap in USD (annotated when exceeded)"
+      provider:
+        description: >-
+          Inference provider overlay (anthropic, cursor, openai). Empty
+          resolves via LINTRO_AI_PROVIDER then the repo lintro config.
         required: false
         type: string
-        default: "0.50"
-      paths:
+        default: ""
+      transport:
         description: >-
-          Optional path prefixes to limit the review to (newline/comma/space
-          separated). Empty reviews the whole diff.
+          Transport overlay (cli or api). Empty resolves via
+          LINTRO_AI_TRANSPORT then the repo lintro config. No default.
         required: false
         type: string
         default: ""
@@ -49,19 +61,33 @@ on:
         required: false
         type: string
         # renovate: datasource=pypi depName=lintro
-        default: "0.123.3" # v0.65.0
-      strictness:
-        description: "Review sensitivity: focused | balanced | thorough"
+        default: "0.128.0"
+      python-version:
+        description: "CPython version for the scratch venv that installs lintro"
         required: false
         type: string
-        default: "balanced"
+        default: "3.12"
       model:
         description: >-
-          Optional model override passed through to lintro (no default; lintro
-          uses its own configured default when empty)
+          Optional model overlay passed through as LINTRO_AI_MODEL (empty =
+          lintro config / provider default)
         required: false
         type: string
         default: ""
+      max-cost-usd:
+        description: >-
+          Optional USD cap overlay passed through as LINTRO_AI_MAX_COST_USD
+          (empty = lintro config)
+        required: false
+        type: string
+        default: ""
+      blocking:
+        description: >-
+          When true, a no-review outcome (exit 2) or a changes-requested
+          verdict fails the job. Default is non-blocking.
+        required: false
+        type: boolean
+        default: false
 
       # --- Standard reusable contract inputs -------------------------------
       tooling-ref:
@@ -77,7 +103,7 @@ on:
       egress-preset:
         description: >-
           Named allowlist when allowed-endpoints is empty and egress-policy is
-          block (defaults to ai-review)
+          block (defaults to ai-review: GitHub + PyPI/uv, no provider hosts)
         required: false
         type: string
         default: "ai-review"
@@ -98,7 +124,6 @@ on:
           files.pythonhosted.org:443
           astral.sh:443
           releases.astral.sh:443
-          api.anthropic.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -115,31 +140,61 @@ on:
         description: "Job timeout in minutes"
         required: false
         type: number
-        default: 15
+        default: 30
       job-name:
         description: "GitHub check name"
         required: false
         type: string
         default: "AI Review"
     secrets:
-      anthropic-api-key:
-        description: >-
-          Anthropic API key. Forward the lgtm-hq org secret ANTHROPIC_API_KEY
-          or use `secrets: inherit`. Absent on fork PRs (skips gracefully).
+      LINTRO_REVIEW_APP_ID:
+        description: "GitHub App ID for lintro-review[bot] posting"
         required: false
+      LINTRO_REVIEW_APP_PRIVATE_KEY:
+        description: "GitHub App private key for lintro-review[bot] posting"
+        required: false
+      ANTHROPIC_API_KEY:
+        description: "anthropic + api credential"
+        required: false
+      CLAUDE_CODE_OAUTH_TOKEN:
+        description: "anthropic + cli credential"
+        required: false
+      OPENAI_API_KEY:
+        description: "openai + api credential"
+        required: false
+      CODEX_API_KEY:
+        description: "openai + cli credential"
+        required: false
+      CURSOR_API_KEY:
+        description: "cursor + cli credential"
+        required: false
+
+permissions: {}
 
 jobs:
   ai-review:
     name: ${{ inputs.job-name }}
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
-    # Non-blocking: AI review never fails a PR check.
-    continue-on-error: true
     permissions:
-      # Checkout repository and lgtm-ci tooling.
+      # Checkout the PR merge ref and lgtm-ci tooling.
       contents: read
-      # Post/update the sticky review comment on the PR.
-      pull-requests: write
+      # `gh` / lintro fetch the PR diff with the workflow token. Posting uses
+      # the App token (lintro-review[bot]), not this permission.
+      pull-requests: read
+    env:
+      # Visible pair for harden-runner extras (input → var only).
+      # Must already be lowercase — GitHub expressions cannot fold case, so
+      # `Anthropic` would inject a credential and then block provider egress.
+      AI_REVIEW_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
+      AI_REVIEW_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
+      # Keep in sync with egress_ai_review_provider_endpoints cursor row.
+      # yamllint disable-line rule:line-length
+      AI_REVIEW_CURSOR_EGRESS: downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443 agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443
+      # npm/node hosts for anthropic|openai CLI install. Extra on api-only
+      # rows is harmless and keeps this expression from reading sibling env.
+      # yamllint disable-line rule:line-length
+      AI_REVIEW_NPM_EGRESS: ${{ ((inputs.provider || vars.LINTRO_AI_PROVIDER) == 'anthropic' || (inputs.provider || vars.LINTRO_AI_PROVIDER) == 'openai') && 'nodejs.org:443 registry.npmjs.org:443' || '' }}
 
     steps:
       - name: Harden runner
@@ -148,7 +203,19 @@ jobs:
         uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          # Baseline from the input default (GitHub + PyPI/uv). Provider hosts
+          # are gated on the pair visible here — never the union. These inline
+          # lists are the production append (no checkout exists yet, so no
+          # script can compute them); egress_ai_review_provider_endpoints in
+          # scripts/ci/lib/egress/presets.sh is the canonical matrix, and
+          # integration bats cross-check these expressions against it — edit
+          # them together.
+          allowed-endpoints: >
+            ${{ inputs.allowed-endpoints }}
+            ${{ env.AI_REVIEW_PROVIDER == 'anthropic' && 'api.anthropic.com:443' || '' }}
+            ${{ env.AI_REVIEW_PROVIDER == 'openai' && 'api.openai.com:443' || '' }}
+            ${{ env.AI_REVIEW_PROVIDER == 'cursor' && env.AI_REVIEW_CURSOR_EGRESS || '' }}
+            ${{ env.AI_REVIEW_NPM_EGRESS }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -175,10 +242,7 @@ jobs:
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
-            .github/actions/post-pr-comment
             scripts/ci/
-      - name: Set up uv
-        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
       - name: Preflight guards
         id: preflight
         shell: bash
@@ -187,70 +251,100 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           BASE_REPO: ${{ github.repository }}
-          HAS_KEY: ${{ secrets.anthropic-api-key != '' }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
-
-      # ANTHROPIC_API_KEY is in scope ONLY here — after checkout/harden, running
-      # a pinned PyPI lintro that never executes PR-controlled code.
+      - name: Require lintro-review App credentials
+        if: steps.preflight.outputs.should-run == 'true'
+        shell: bash
+        env:
+          APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+          APP_KEY_PRESENT: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY != '' }}
+        run: |
+          if [[ -z "${APP_ID}" || "${APP_KEY_PRESENT}" != "true" ]]; then
+            echo "::error::LINTRO_REVIEW_APP_ID and LINTRO_REVIEW_APP_PRIVATE_KEY"
+            echo "::error::are required to post as lintro-review[bot]."
+            echo "::error::They are org-wide all-repo secrets; pass them with secrets: inherit."
+            exit 1
+          fi
+      - name: Resolve provider matrix
+        id: resolve
+        if: steps.preflight.outputs.should-run == 'true'
+        shell: bash
+        env:
+          PROVIDER_INPUT: ${{ inputs.provider }}
+          TRANSPORT_INPUT: ${{ inputs.transport }}
+          VAR_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER }}
+          VAR_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT }}
+          # Egress visibility guard: a provider resolved only from the repo
+          # config cannot have reached the harden allowlist above; under
+          # `block` the resolve script fails loudly instead of letting a
+          # doomed provider call burn spend (see the script header).
+          EGRESS_POLICY: ${{ inputs.egress-policy }}
+          CONFIG_PATH: .lintro-config.yaml
+        run: .lgtm-ci-tooling/scripts/ci/actions/resolve-ai-review-provider.sh
+      - name: Set up uv
+        if: steps.preflight.outputs.should-run == 'true'
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      - name: Set up Node
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.resolve.outputs.needs-cli == 'true'
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+      - name: Install provider CLI
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.resolve.outputs.needs-cli == 'true'
+        shell: bash
+        env:
+          PROVIDER: ${{ steps.resolve.outputs.provider }}
+          TRANSPORT: ${{ steps.resolve.outputs.transport }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/install-ai-review-cli.sh
+      - name: Mint lintro-review App token
+        id: lintro-review-app
+        if: steps.preflight.outputs.should-run == 'true'
+        # Repo-scoped installation token. Default current-repo scope — do not
+        # pass `owner:` without `repositories:`. Only the review step sees
+        # outputs.token; inference credentials stay separate.
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+          private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
+          permission-issues: write
+          permission-pull-requests: write
       - name: Run AI review
         id: review
         if: steps.preflight.outputs.should-run == 'true'
         shell: bash
         env:
           STEP: run
-          ANTHROPIC_API_KEY: ${{ secrets.anthropic-api-key }}
+          # Workflow token fetches the PR diff. App token posts as the bot.
           GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LINTRO_VERSION: ${{ inputs.lintro-version }}
-          DEPTH: ${{ inputs.depth }}
-          STRICTNESS: ${{ inputs.strictness }}
-          MODEL: ${{ inputs.model }}
-          MAX_COST_USD: ${{ inputs.max-cost-usd }}
-          PATHS: ${{ inputs.paths }}
-          RUN_FILE: ${{ runner.temp }}/ai-review-run.json
+          PYTHON_VERSION: ${{ inputs.python-version }}
+          BLOCKING: ${{ inputs.blocking }}
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
+          LINTRO_AI_ENABLED: "1"
+          LINTRO_AI_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
+          LINTRO_AI_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
+          LINTRO_AI_MODEL: ${{ inputs.model }}
+          LINTRO_AI_MAX_COST_USD: ${{ inputs.max-cost-usd }}
+          # Only the credential for the resolved pair — never the union.
+          # yamllint disable-line rule:line-length
+          ANTHROPIC_API_KEY: ${{ steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport == 'api' && secrets.ANTHROPIC_API_KEY || '' }}
+          # yamllint disable-line rule:line-length
+          CLAUDE_CODE_OAUTH_TOKEN: ${{ steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport == 'cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
+          # yamllint disable-line rule:line-length
+          OPENAI_API_KEY: ${{ steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport == 'api' && secrets.OPENAI_API_KEY || '' }}
+          # yamllint disable-line rule:line-length
+          CODEX_API_KEY: ${{ steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport == 'cli' && secrets.CODEX_API_KEY || '' }}
+          # yamllint disable-line rule:line-length
+          CURSOR_API_KEY: ${{ steps.resolve.outputs.provider == 'cursor' && steps.resolve.outputs.transport == 'cli' && secrets.CURSOR_API_KEY || '' }}
+          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
+          DISABLE_AUTOUPDATER: "1"
         run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
-      - name: Fetch existing comment state
-        id: fetch-state
-        if: >-
-          inputs.post &&
-          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
-          steps.preflight.outputs.skip-reason != 'fork'
-        shell: bash
-        env:
-          STEP: fetch-state
-          GH_TOKEN: ${{ github.token }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          STATE_FILE: ${{ runner.temp }}/ai-review-state.json
-        run: .lgtm-ci-tooling/scripts/ci/actions/render-ai-review-comment.sh
-      - name: Render comment body
-        id: render
-        if: >-
-          inputs.post &&
-          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
-          steps.preflight.outputs.skip-reason != 'fork'
-        shell: bash
-        env:
-          STEP: render
-          STATE_FILE: ${{ runner.temp }}/ai-review-state.json
-          RUN_FILE: ${{ runner.temp }}/ai-review-run.json
-          SKIP_REASON: >-
-            ${{ steps.preflight.outputs.should-run == 'true' && ''
-            || steps.preflight.outputs.skip-reason }}
-          OUTPUT_FILE: ${{ runner.temp }}/ai-review-comment.md
-        run: .lgtm-ci-tooling/scripts/ci/actions/render-ai-review-comment.sh
-      - name: Post sticky review comment
-        if: >-
-          inputs.post &&
-          steps.preflight.outputs.skip-reason != 'not-a-pr' &&
-          steps.preflight.outputs.skip-reason != 'fork'
-        uses: ./.lgtm-ci-tooling/.github/actions/post-pr-comment
-        with:
-          file: ${{ runner.temp }}/ai-review-comment.md
-          marker: lintro-ai-review
-          mode: upsert
-          pr-number: ${{ github.event.pull_request.number }}

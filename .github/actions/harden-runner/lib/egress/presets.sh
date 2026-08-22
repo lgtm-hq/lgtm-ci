@@ -215,7 +215,11 @@ egress_preset_endpoints() {
 		;;
 	ai-review)
 		# AI code review (reusable-ai-review.yml): GitHub checkout/tooling + gh PR
-		# diff API, uv/PyPI install of pinned lintro[ai], and the Anthropic API.
+		# diff API and uv/PyPI install of pinned lintro[ai]. Provider inference
+		# hosts are NOT in this baseline — reusable-ai-review.yml appends them
+		# inline at harden time from the visible (input → Actions variable)
+		# pair; egress_ai_review_provider_endpoints below is the canonical
+		# matrix those inline lists are cross-checked against.
 		# raw.githubusercontent.com is required (astral setup-uv/self-checks fetch
 		# from it — its omission previously broke py-lintro's dogfood workflow).
 		egress_preset_endpoints github-tooling
@@ -223,8 +227,7 @@ egress_preset_endpoints() {
 			pypi.org:443 \
 			files.pythonhosted.org:443 \
 			astral.sh:443 \
-			releases.astral.sh:443 \
-			api.anthropic.com:443
+			releases.astral.sh:443
 		;;
 	rust-release)
 		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
@@ -256,6 +259,60 @@ egress_preset_endpoints() {
 	*)
 		echo "unknown egress preset: $preset" >&2
 		return 1
+		;;
+	esac
+}
+
+# Canonical harden-runner host matrix for one (provider, transport) pair.
+# This function is NOT on the production harden path: harden-runner runs
+# before any checkout, so reusable-ai-review.yml appends provider hosts via
+# inline YAML expressions instead. Integration bats cross-check those inline
+# lists against this function — edit them together, never one side alone.
+# Empty provider prints nothing — no provider's hosts belong in the baseline.
+# When transport is empty but provider is set, both that provider's api and
+# cli hosts are included so an unresolved transport cannot silently block.
+# A rotated Cursor shard (e.g. repo43.cursor.sh) is named in the failed run's
+# harden-runner summary; add it here and in the workflow env list together.
+egress_ai_review_provider_endpoints() {
+	local provider="${1:-}"
+	local transport="${2:-}"
+	provider="$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')"
+	transport="$(printf '%s' "$transport" | tr '[:upper:]' '[:lower:]')"
+
+	case "$provider" in
+	anthropic)
+		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
+			return 0
+		fi
+		printf '%s\n' api.anthropic.com:443
+		if [[ -z "$transport" || "$transport" == "cli" ]]; then
+			printf '%s\n' \
+				nodejs.org:443 \
+				registry.npmjs.org:443
+		fi
+		;;
+	cursor)
+		# Cursor has no api transport. Empty transport keeps the fallback.
+		if [[ -n "$transport" && "$transport" != "cli" ]]; then
+			return 0
+		fi
+		printf '%s\n' \
+			downloads.cursor.com:443 \
+			api2.cursor.sh:443 \
+			api3.cursor.sh:443 \
+			agentn.global.api5.cursor.sh:443 \
+			repo42.cursor.sh:443
+		;;
+	openai)
+		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
+			return 0
+		fi
+		printf '%s\n' api.openai.com:443
+		if [[ -z "$transport" || "$transport" == "cli" ]]; then
+			printf '%s\n' \
+				nodejs.org:443 \
+				registry.npmjs.org:443
+		fi
 		;;
 	esac
 }

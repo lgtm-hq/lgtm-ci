@@ -1676,15 +1676,26 @@ jobs:
 
 ### AI code review (`reusable-ai-review.yml`)
 
-Org-wide AI code review. Installs a pinned `lintro[ai]` from PyPI, runs
-`lintro review` hardened in CI, and publishes **one sticky, telemetry-rich PR
-comment** updated in place on every run. The engine is py-lintro (`lintro
-review`, released on PyPI); this reusable is the CI orchestration +
-comment-publishing layer — the same shape as `reusable-validate-lintro-version.yml`.
+Org-wide AI code review. Installs a **pinned `lintro[ai]` from PyPI** (never
+from the reviewed repo), runs `lintro review --pr --post`, and publishes one
+sticky PR comment as **`lintro-review[bot]`**. Posting, round state, and the
+verdict legend live in the published CLI — this reusable does not re-implement
+comment markup.
 
-**Zero-setup for consumers.** `ANTHROPIC_API_KEY` is provisioned as an lgtm-hq
-**org-wide secret**, so callers just forward it (or use `secrets: inherit`) with
-no per-repo key management:
+**Trust model.** The reviewer binary comes from a release, so the consuming PR
+cannot control it. Use a plain `pull_request` trigger (same-repo gate
+recommended). `pull_request_target` / base-ref trusted-install reasoning from
+py-lintro's dogfood does **not** transfer here.
+
+**Provider-agnostic.** The workflow never hardcodes a provider. Resolution is
+`provider` / `transport` input → `LINTRO_AI_PROVIDER` / `LINTRO_AI_TRANSPORT`
+Actions variable → the consuming repo's lintro config → lintro's own validation
+error. Inputs map onto that env overlay surface; there is no workflow fallback.
+
+**Caller snippet** (same shape for every provider; listed alphabetically, none
+recommended). Prefer `secrets: inherit` so org secrets flow through. The
+reusable injects **only** the credential for the resolved `(provider,
+transport)` pair:
 
 ```yaml
 # any lgtm-hq repo: .github/workflows/ai-review.yml
@@ -1693,82 +1704,94 @@ no per-repo key management:
 
 jobs:
   ai-review:
+    if: github.event.pull_request.head.repo.full_name == github.repository
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@<sha>
     permissions:
       contents: read
-      pull-requests: write
+      pull-requests: read
+    secrets: inherit
     with:
-      depth: 1 # 1=checklist, 2=+questions, 3=+adversarial
-      post: true
-      max-cost-usd: "0.50"
-    secrets:
-      anthropic-api-key: ${{ secrets.ANTHROPIC_API_KEY }} # inherited org secret
+      tooling-ref: "<sha>"
+      # provider/transport empty = Actions var, then repo lintro config
 ```
 
-| Input            | Default       | Notes                                             |
-| ---------------- | ------------- | ------------------------------------------------- |
-| `depth`          | `1`           | Review depth (clamped to 1..3)                    |
-| `post`           | `true`        | Post/update the sticky PR comment                 |
-| `max-cost-usd`   | `"0.50"`      | Advisory per-run cost cap (annotated if exceeded) |
-| `paths`          | `""`          | Optional path prefixes; empty reviews whole diff  |
-| `lintro-version` | pinned        | Renovate-managed centrally (grouped with lintro)  |
-| `strictness`     | `balanced`    | `focused` \| `balanced` \| `thorough`             |
-| `model`          | `""`          | Optional pass-through; no default (lintro decides)|
-| `egress-preset`  | `ai-review`   | Allowlists PyPI, uv, Anthropic, GitHub + raw CDN  |
-| `timeout-minutes`| `15`          | Job timeout                                       |
-| `job-name`       | `AI Review`   | Check name                                        |
+Equivalent explicit secrets (still inherit-or-list; the reusable requires only
+the row that matches the resolved pair):
+
+```yaml
+    secrets:
+      LINTRO_REVIEW_APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
+      LINTRO_REVIEW_APP_PRIVATE_KEY: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+      CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+      CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+```
+
+| provider | transport | binary | credential (env) |
+| -------- | --------- | ------ | ---------------- |
+| anthropic | cli | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
+| anthropic | api | — | `ANTHROPIC_API_KEY` |
+| cursor | cli | `agent` | `CURSOR_API_KEY` |
+| openai | cli | `codex` | `CODEX_API_KEY` |
+| openai | api | — | `OPENAI_API_KEY` |
+
+`LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)
+and mint the posting token. That token is in scope **only** for the review
+step (`GITHUB_TOKEN`); `GH_TOKEN` stays the workflow token for fetching the
+diff. The GitHub App **installation** must grant `issues: write` and
+`pull-requests: write` — those are App permissions, not the caller's
+`pull-requests: read` job grant. Token minting fails if the installation
+lacks them.
+
+`provider` / `transport` inputs and `LINTRO_AI_PROVIDER` /
+`LINTRO_AI_TRANSPORT` variables must be lowercase. Harden-runner compares
+the raw values and cannot fold case.
+
+<!-- markdownlint-disable MD013 -- wide input reference table -->
+
+| Input             | Default | Notes |
+| ----------------- | ------- | ----- |
+| `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
+| `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
+| `lintro-version`  | pinned  | Renovate-managed. Floor = 0.127.0 (py-lintro#2144, part of py-lintro#2143: no schema default for provider); never pin lower. |
+| `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
+| `model`           | `""`    | Overlay → `LINTRO_AI_MODEL`. |
+| `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD`. |
+| `blocking`        | `false` | When true, exit 2 (no review) or a changes-requested verdict fails the job. |
+| `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair. |
+| `timeout-minutes` | `30`    | Raise for long CLI reviews. |
+| `job-name`        | `AI Review` | Check name. |
+
+<!-- markdownlint-enable MD013 -->
 
 **Hardening guarantees:**
 
-- **Trusted install.** The job only installs a *pinned lintro from PyPI* and
-  runs `lintro review` (which reads the PR diff via the GitHub API and calls the
-  model). It never installs or executes the PR's own code (no `uv sync`, no
-  `pip install .`, no build hooks), so `ANTHROPIC_API_KEY` is scoped to the
-  single "Run AI review" step and is never in scope while PR-controlled code
-  could execute.
-- **Graceful skip (exit 0).** Skips with an informative note when no key is
-  present, on **fork PRs** (no secret access), and off same-repo PRs. The job is
-  **non-blocking** (`continue-on-error: true`) — AI review never fails a check.
-- **Cost + depth caps.** Depth is clamped to 1..3; per-run cost is compared to
-  `max-cost-usd` and annotated when exceeded. (Pre-spend budget enforcement
-  requires a lintro budget flag — tracked upstream.)
-- **Egress allowlist.** The `ai-review` preset covers PyPI
-  (`pypi.org`, `files.pythonhosted.org`), uv (`astral.sh`, `releases.astral.sh`),
-  Anthropic (`api.anthropic.com`), GitHub, and `raw.githubusercontent.com`.
+- **Trusted install.** Pinned lintro from PyPI only. The job never installs or
+  executes the PR's own code, so inference credentials and the App token are
+  scoped to the single "Run AI review" step.
+- **Same-repo / fork skip.** Fork PRs skip (exit 0) because they cannot read
+  org secrets. Put the same-repo `if:` on the caller as well.
+- **Exit-code contract.** lintro exit `2` is "no review produced" (error
+  envelope on stdout), not a crash. Exit `1` is a produced review with P1 /
+  changes-requested. Default `blocking: false` keeps the check non-blocking.
+- **Egress.** The `ai-review` preset has no provider hosts. Extra hosts come
+  from the `(provider, transport)` pair visible at harden time (input or
+  `LINTRO_AI_*` variable). Repo-config-only resolution cannot expand that list
+  before harden-runner, so under the default `egress-policy: block` the
+  resolve step **fails the job with guidance** when the provider comes only
+  from the repo config — set the input or the variable so the matching hosts
+  are allowlisted (`egress-policy: audit` lifts the guard). A rotated Cursor
+  shard appears in the failed run's harden-runner summary; add it to
+  `egress_ai_review_provider_endpoints` and
+  `AI_REVIEW_CURSOR_EGRESS` together. No wildcards.
 
-**The sticky comment.** One comment per PR (marker `lintro-ai-review`), with
-machine-readable state embedded in a trailing HTML comment
-(`<!-- lintro-ai-review-state: {"runs":[...]} -->`) so cumulative data survives
-across runs without external storage. Layout, top → bottom:
+**The sticky comment.** `lintro review --post` owns the `<!-- lintro-ai-review -->`
+marker, in-place updates, and telemetry. Author is `lintro-review[bot]`.
 
-1. **Cumulative (always visible):** total tokens (in/out/combined), total cost
-   USD, per-model counts (e.g. `claude-sonnet-4 ×3`), and run count.
-2. **Latest run:** findings (from `lintro review --output json`) plus per-run
-   mechanics (model, provider, tokens, cost, depth, duration).
-3. **Previous runs:** collapsible `<details>` with per-run mechanics. History is
-   bounded to the last 20 runs.
-
-Errored runs are recorded (status `error`, 0 tokens) and shown in the
-collapsible, contributing 0 to cumulative totals. Provider errors are formatted
-in the comment (401 invalid key, 429 rate limited, quota/no-credits,
-5xx/timeout) rather than failing silently.
-
-**Security (untrusted model output).** Review content derives from an untrusted
-PR diff. Before posting, model-derived text has `@mentions` neutralized and HTML
-comment delimiters escaped (so injected text cannot forge the state marker), is
-length-capped, and the comment is labelled as automated.
-
-**Error-contract note.** py-lintro 0.65.0 does not yet expose a machine-readable
-error contract for `lintro review --output json` (errors surface as
-`click.ClickException` on stderr with an overloaded exit code). The workflow
-degrades gracefully: it treats "valid review JSON on stdout" as success and uses
-a narrow, documented interim heuristic on the stable `AIError` message prefixes
-for the 401/429/quota classification. A structured contract is requested in
-lgtm-hq/py-lintro#1095.
-
-**Rollout.** py-lintro will migrate its bespoke `ai-review.yml` to a thin caller
-of this reusable (out of scope here) so lintro dogfoods the same reusable
-everyone uses.
+**Rollout.** First consumer is a follow-up PR (one repo). py-lintro keeps its
+own dogfood workflow (different trust model).
 
 ### Vulnerability suppression check (osv-scanner)
 

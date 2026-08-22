@@ -110,16 +110,93 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
-@test "egress preset ai-review includes PyPI, uv, and Anthropic hosts" {
+@test "egress preset ai-review includes PyPI and uv hosts without provider inference" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints ai-review"
 	assert_success
 	assert_output --partial 'pypi.org:443'
 	assert_output --partial 'files.pythonhosted.org:443'
 	assert_output --partial 'astral.sh:443'
 	assert_output --partial 'releases.astral.sh:443'
-	assert_output --partial 'api.anthropic.com:443'
 	assert_output --partial 'raw.githubusercontent.com:443'
 	assert_output --partial 'api.github.com:443'
+	refute_output --partial 'api.anthropic.com:443'
+	refute_output --partial 'api.openai.com:443'
+	refute_output --partial 'cursor.sh'
+}
+
+@test "egress_ai_review_provider_endpoints: empty provider prints nothing" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints '' ''"
+	assert_success
+	assert_output ""
+}
+
+@test "egress_ai_review_provider_endpoints: anthropic api is provider-scoped" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic api"
+	assert_success
+	assert_output --partial 'api.anthropic.com:443'
+	refute_output --partial 'api.openai.com'
+	refute_output --partial 'cursor.sh'
+	refute_output --partial 'registry.npmjs.org'
+}
+
+@test "egress_ai_review_provider_endpoints: cursor hosts exclude other providers" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor cli"
+	assert_success
+	assert_output --partial 'downloads.cursor.com:443'
+	assert_output --partial 'api2.cursor.sh:443'
+	refute_output --partial 'api.anthropic.com'
+	refute_output --partial 'api.openai.com'
+}
+
+@test "egress_ai_review_provider_endpoints: unsupported populated transport prints nothing" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor api"
+	assert_success
+	assert_output ""
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic grpc"
+	assert_success
+	assert_output ""
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai grpc"
+	assert_success
+	assert_output ""
+}
+
+@test "egress_ai_review_provider_endpoints: empty transport includes api and cli hosts" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic ''"
+	assert_success
+	assert_output --partial 'api.anthropic.com:443'
+	assert_output --partial 'nodejs.org:443'
+	assert_output --partial 'registry.npmjs.org:443'
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai ''"
+	assert_success
+	assert_output --partial 'api.openai.com:443'
+	assert_output --partial 'registry.npmjs.org:443'
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor ''"
+	assert_success
+	assert_output --partial 'downloads.cursor.com:443'
+	assert_output --partial 'repo42.cursor.sh:443'
+}
+
+@test "egress_ai_review_provider_endpoints: openai rows are transport-scoped" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai api"
+	assert_success
+	assert_output --partial 'api.openai.com:443'
+	refute_output --partial 'nodejs.org'
+	refute_output --partial 'registry.npmjs.org'
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai cli"
+	assert_success
+	assert_output --partial 'api.openai.com:443'
+	assert_output --partial 'nodejs.org:443'
+	assert_output --partial 'registry.npmjs.org:443'
+}
+
+@test "egress_ai_review_provider_endpoints: cursor cli lists the full shard set" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor cli"
+	assert_success
+	assert_output --partial 'downloads.cursor.com:443'
+	assert_output --partial 'api2.cursor.sh:443'
+	assert_output --partial 'api3.cursor.sh:443'
+	assert_output --partial 'agentn.global.api5.cursor.sh:443'
+	assert_output --partial 'repo42.cursor.sh:443'
 }
 
 @test "egress preset osv-scanner includes release assets and OSV API hosts" {

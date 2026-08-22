@@ -11,11 +11,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **workflows**: rewrite reusable-ai-review as a provider-agnostic published-lintro
+  reviewer that posts as lintro-review[bot] (#853)
+
 ### Deprecated
 
 ### Removed
 
 ### Fixed
+
+- **workflows**: read flow-style `ai:` mappings in reusable-ai-review provider
+  resolution (#853)
+- **workflows**: reject mixed-case provider overlays, gate resolution and
+  egress on supported pairs, fail early without App credentials, and bound
+  the Cursor agent download (#853)
 
 ### Security
 
