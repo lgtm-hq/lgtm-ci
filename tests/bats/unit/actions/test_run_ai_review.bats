@@ -115,6 +115,48 @@ run_review() {
 	assert_output --partial "verdict=changes_requested"
 }
 
+@test "run: exit 1 with empty verdict fails when blocking" {
+	local bin
+	bin="$(write_fake_lintro '{}' "" 1)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=true
+	assert_failure
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=findings"
+	assert_output --partial "verdict="
+}
+
+@test "run: exit 1 approve verdict succeeds even when blocking" {
+	local bin
+	bin="$(write_fake_lintro '{"verdict":"approve"}' "" 1)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=true
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=findings"
+	assert_output --partial "verdict=approve"
+}
+
+@test "run: review argv targets the PR repo" {
+	local bin="${BATS_TEST_TMPDIR}/lintro"
+	local argv_file="${BATS_TEST_TMPDIR}/argv"
+	{
+		echo '#!/usr/bin/env bash'
+		printf 'printf "%%s\\n" "$@" >"%s"\n' "$argv_file"
+		printf 'cat <<'\''LINTRO_OUT'\''\n%s\nLINTRO_OUT\n' "$(success_json)"
+		echo "exit 0"
+	} >"$bin"
+	chmod +x "$bin"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_success
+	run cat "$argv_file"
+	assert_line "x/y"
+	# Flag tokens start with --, which the assert_line fallback rejects as an
+	# option; assert them with fixed whole-line greps instead.
+	run grep -Fx -- "--repo" "$argv_file"
+	assert_success
+	run grep -Fx -- "--pr" "$argv_file"
+	assert_success
+}
+
 @test "run: exit 2 is no-review and succeeds when non-blocking" {
 	local bin
 	bin="$(write_fake_lintro "$(error_json)" "" 2)"

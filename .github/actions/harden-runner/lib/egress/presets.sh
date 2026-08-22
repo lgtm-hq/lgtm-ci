@@ -216,8 +216,10 @@ egress_preset_endpoints() {
 	ai-review)
 		# AI code review (reusable-ai-review.yml): GitHub checkout/tooling + gh PR
 		# diff API and uv/PyPI install of pinned lintro[ai]. Provider inference
-		# hosts are NOT in this baseline — they are appended from the resolved
-		# (provider, transport) row via egress_ai_review_provider_endpoints.
+		# hosts are NOT in this baseline — reusable-ai-review.yml appends them
+		# inline at harden time from the visible (input → Actions variable)
+		# pair; egress_ai_review_provider_endpoints below is the canonical
+		# matrix those inline lists are cross-checked against.
 		# raw.githubusercontent.com is required (astral setup-uv/self-checks fetch
 		# from it — its omission previously broke py-lintro's dogfood workflow).
 		egress_preset_endpoints github-tooling
@@ -261,7 +263,11 @@ egress_preset_endpoints() {
 	esac
 }
 
-# Extra harden-runner hosts for one resolved (provider, transport) pair.
+# Canonical harden-runner host matrix for one (provider, transport) pair.
+# This function is NOT on the production harden path: harden-runner runs
+# before any checkout, so reusable-ai-review.yml appends provider hosts via
+# inline YAML expressions instead. Integration bats cross-check those inline
+# lists against this function — edit them together, never one side alone.
 # Empty provider prints nothing — no provider's hosts belong in the baseline.
 # When transport is empty but provider is set, both that provider's api and
 # cli hosts are included so an unresolved transport cannot silently block.

@@ -31,8 +31,10 @@ name: Reusable AI Review
 #   The ai-review preset is GitHub + PyPI/uv only. Provider hosts are
 #   appended from the pair visible at harden time (input →
 #   vars.LINTRO_AI_*). Repo-config-only resolution cannot expand this list
-#   before harden-runner; set the input or the Actions variable so the
-#   matching hosts are allowlisted. A rotated Cursor shard (e.g.
+#   before harden-runner, so under egress-policy `block` the resolve step
+#   FAILS the job with guidance when the provider comes only from the repo
+#   config — set the input or the Actions variable so the matching hosts are
+#   allowlisted (egress-policy `audit` lifts this). A rotated Cursor shard (e.g.
 #   repo43.cursor.sh) is named in the failed run's harden-runner summary —
 #   add it to egress_ai_review_provider_endpoints and AI_REVIEW_CURSOR_EGRESS
 #   together. No wildcards.
@@ -202,7 +204,12 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           # Baseline from the input default (GitHub + PyPI/uv). Provider hosts
-          # are gated on the pair visible here — never the union.
+          # are gated on the pair visible here — never the union. These inline
+          # lists are the production append (no checkout exists yet, so no
+          # script can compute them); egress_ai_review_provider_endpoints in
+          # scripts/ci/lib/egress/presets.sh is the canonical matrix, and
+          # integration bats cross-check these expressions against it — edit
+          # them together.
           allowed-endpoints: >
             ${{ inputs.allowed-endpoints }}
             ${{ env.AI_REVIEW_PROVIDER == 'anthropic' && 'api.anthropic.com:443' || '' }}
@@ -268,6 +275,11 @@ jobs:
           TRANSPORT_INPUT: ${{ inputs.transport }}
           VAR_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER }}
           VAR_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT }}
+          # Egress visibility guard: a provider resolved only from the repo
+          # config cannot have reached the harden allowlist above; under
+          # `block` the resolve script fails loudly instead of letting a
+          # doomed provider call burn spend (see the script header).
+          EGRESS_POLICY: ${{ inputs.egress-policy }}
           CONFIG_PATH: .lintro-config.yaml
         run: .lgtm-ci-tooling/scripts/ci/actions/resolve-ai-review-provider.sh
       - name: Set up uv

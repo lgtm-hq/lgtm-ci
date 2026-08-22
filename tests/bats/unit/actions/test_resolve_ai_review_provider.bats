@@ -89,25 +89,46 @@ YAML
 	assert_output --partial "cli-binary=claude"
 }
 
-@test "resolve: extra-endpoints are provider-scoped" {
-	PROVIDER_INPUT="cursor" TRANSPORT_INPUT="cli" \
-		CONFIG_PATH="${BATS_TEST_TMPDIR}/missing.yaml" \
+@test "resolve: config-only provider under block egress fails loudly" {
+	cat >"${BATS_TEST_TMPDIR}/.lintro-config.yaml" <<'YAML'
+ai:
+  provider: cursor
+  transport: cli
+YAML
+	PROVIDER_INPUT="" TRANSPORT_INPUT="" VAR_PROVIDER="" VAR_TRANSPORT="" \
+		EGRESS_POLICY="block" \
+		CONFIG_PATH="${BATS_TEST_TMPDIR}/.lintro-config.yaml" \
 		run bash "$SCRIPT"
-	assert_success
-	run cat "$GITHUB_OUTPUT"
-	assert_output --partial "downloads.cursor.com:443"
-	refute_output --partial "api.anthropic.com"
-	refute_output --partial "api.openai.com"
+	assert_failure
+	assert_output --partial "harden-runner cannot see"
+	assert_output --partial "LINTRO_AI_PROVIDER"
 }
 
-@test "resolve: anthropic api extra-endpoints exclude npm hosts" {
-	PROVIDER_INPUT="anthropic" TRANSPORT_INPUT="api" \
+@test "resolve: config-only provider is allowed under audit egress" {
+	cat >"${BATS_TEST_TMPDIR}/.lintro-config.yaml" <<'YAML'
+ai:
+  provider: cursor
+  transport: cli
+YAML
+	PROVIDER_INPUT="" TRANSPORT_INPUT="" VAR_PROVIDER="" VAR_TRANSPORT="" \
+		EGRESS_POLICY="audit" \
+		CONFIG_PATH="${BATS_TEST_TMPDIR}/.lintro-config.yaml" \
+		run bash "$SCRIPT"
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "provider=cursor"
+	assert_output --partial "resolved=true"
+}
+
+@test "resolve: var-visible provider passes the block-egress guard" {
+	PROVIDER_INPUT="" TRANSPORT_INPUT="" \
+		VAR_PROVIDER="cursor" VAR_TRANSPORT="cli" \
+		EGRESS_POLICY="block" \
 		CONFIG_PATH="${BATS_TEST_TMPDIR}/missing.yaml" \
 		run bash "$SCRIPT"
 	assert_success
 	run cat "$GITHUB_OUTPUT"
-	assert_output --partial "api.anthropic.com:443"
-	refute_output --partial "registry.npmjs.org"
+	assert_output --partial "resolved=true"
 }
 
 @test "resolve: flow-style ai mapping is read when input and var are empty" {

@@ -155,6 +155,47 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic grpc"
 	assert_success
 	assert_output ""
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai grpc"
+	assert_success
+	assert_output ""
+}
+
+@test "egress_ai_review_provider_endpoints: empty transport includes api and cli hosts" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints anthropic ''"
+	assert_success
+	assert_output --partial 'api.anthropic.com:443'
+	assert_output --partial 'nodejs.org:443'
+	assert_output --partial 'registry.npmjs.org:443'
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai ''"
+	assert_success
+	assert_output --partial 'api.openai.com:443'
+	assert_output --partial 'registry.npmjs.org:443'
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor ''"
+	assert_success
+	assert_output --partial 'downloads.cursor.com:443'
+	assert_output --partial 'repo42.cursor.sh:443'
+}
+
+@test "egress_ai_review_provider_endpoints: openai rows are transport-scoped" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai api"
+	assert_success
+	assert_output --partial 'api.openai.com:443'
+	refute_output --partial 'registry.npmjs.org'
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai cli"
+	assert_success
+	assert_output --partial 'api.openai.com:443'
+	assert_output --partial 'nodejs.org:443'
+	assert_output --partial 'registry.npmjs.org:443'
+}
+
+@test "egress_ai_review_provider_endpoints: cursor cli lists the full shard set" {
+	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints cursor cli"
+	assert_success
+	assert_output --partial 'downloads.cursor.com:443'
+	assert_output --partial 'api2.cursor.sh:443'
+	assert_output --partial 'api3.cursor.sh:443'
+	assert_output --partial 'agentn.global.api5.cursor.sh:443'
+	assert_output --partial 'repo42.cursor.sh:443'
 }
 
 @test "egress preset osv-scanner includes release assets and OSV API hosts" {

@@ -8,14 +8,19 @@ MATRIX="${PROJECT_ROOT}/scripts/ci/lib/ai_review_matrix.sh"
 
 @test "ai_review_credential_env: matrix rows" {
 	run bash -c "source '$MATRIX' && ai_review_credential_env anthropic api"
+	assert_success
 	assert_output "ANTHROPIC_API_KEY"
 	run bash -c "source '$MATRIX' && ai_review_credential_env anthropic cli"
+	assert_success
 	assert_output "CLAUDE_CODE_OAUTH_TOKEN"
 	run bash -c "source '$MATRIX' && ai_review_credential_env cursor cli"
+	assert_success
 	assert_output "CURSOR_API_KEY"
 	run bash -c "source '$MATRIX' && ai_review_credential_env openai api"
+	assert_success
 	assert_output "OPENAI_API_KEY"
 	run bash -c "source '$MATRIX' && ai_review_credential_env openai cli"
+	assert_success
 	assert_output "CODEX_API_KEY"
 }
 
@@ -33,16 +38,39 @@ MATRIX="${PROJECT_ROOT}/scripts/ci/lib/ai_review_matrix.sh"
 
 @test "ai_review_cli_binary: only cli transport" {
 	run bash -c "source '$MATRIX' && ai_review_cli_binary anthropic cli"
+	assert_success
 	assert_output "claude"
 	run bash -c "source '$MATRIX' && ai_review_cli_binary cursor cli"
+	assert_success
 	assert_output "agent"
 	run bash -c "source '$MATRIX' && ai_review_cli_binary openai cli"
+	assert_success
 	assert_output "codex"
 	run bash -c "source '$MATRIX' && ai_review_cli_binary anthropic api"
+	assert_success
+	assert_output ""
+	run bash -c "source '$MATRIX' && ai_review_cli_binary unknown cli"
+	assert_success
 	assert_output ""
 }
 
 @test "ai_review_normalize: case fold" {
 	run bash -c "source '$MATRIX' && ai_review_normalize AnThRoPiC"
+	assert_success
 	assert_output "anthropic"
+	run bash -c "source '$MATRIX' && ai_review_normalize ''"
+	assert_success
+	assert_output ""
+}
+
+@test "ai_review_needs_cli: true only for cli pairs" {
+	run bash -c "source '$MATRIX' && ai_review_needs_cli cursor cli && echo yes"
+	assert_success
+	assert_output "yes"
+	run bash -c "source '$MATRIX' && ai_review_needs_cli anthropic api || echo no"
+	assert_success
+	assert_output "no"
+	run bash -c "source '$MATRIX' && ai_review_needs_cli '' cli || echo no"
+	assert_success
+	assert_output "no"
 }

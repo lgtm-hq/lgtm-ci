@@ -68,7 +68,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 }
 
 @test "reusable-ai-review: declares optional secrets by org name" {
-	run awk '/^    secrets:/{f=1} f{print}' "$WORKFLOW"
+	# Scope to the workflow_call secrets block only — printing through to the
+	# job body would also match the run step's env keys and mask a removed
+	# secret declaration.
+	run awk '/^    secrets:/{f=1;next} f&&/^[^ ]/{exit} f{print}' "$WORKFLOW"
 	assert_success
 	assert_output --partial "LINTRO_REVIEW_APP_ID:"
 	assert_output --partial "LINTRO_REVIEW_APP_PRIVATE_KEY:"
@@ -165,7 +168,30 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 		/- name: Run AI review/ { seen = 1 }
 		seen && /if: steps.preflight.outputs.should-run == .true./ { found = 1; exit }
 		seen && /- name:/ && !/Run AI review/ { exit }
+		END { exit !found }
 	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-ai-review: harden inline provider hosts match the canonical matrix" {
+	# The harden step cannot run scripts (no checkout yet), so provider hosts
+	# are inline YAML. Assert every host the canonical matrix knows for the
+	# supported pairs appears verbatim in the workflow, so the two cannot drift.
+	local host
+	while IFS= read -r host; do
+		run grep -F "$host" "$WORKFLOW"
+		assert_success
+	done < <(bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh' && {
+		egress_ai_review_provider_endpoints anthropic api
+		egress_ai_review_provider_endpoints anthropic cli
+		egress_ai_review_provider_endpoints cursor cli
+		egress_ai_review_provider_endpoints openai api
+		egress_ai_review_provider_endpoints openai cli
+	} | sort -u")
+}
+
+@test "reusable-ai-review: resolve step receives the egress policy for the visibility guard" {
+	run grep -F 'EGRESS_POLICY: ${{ inputs.egress-policy }}' "$WORKFLOW"
 	assert_success
 }
 

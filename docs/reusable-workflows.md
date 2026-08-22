@@ -1779,8 +1779,11 @@ the raw values and cannot fold case.
 - **Egress.** The `ai-review` preset has no provider hosts. Extra hosts come
   from the `(provider, transport)` pair visible at harden time (input or
   `LINTRO_AI_*` variable). Repo-config-only resolution cannot expand that list
-  before harden-runner — set the input or the variable so the matching hosts
-  are allowlisted. A rotated Cursor shard appears in the failed run's
+  before harden-runner, so under the default `egress-policy: block` the
+  resolve step **fails the job with guidance** when the provider comes only
+  from the repo config — set the input or the variable so the matching hosts
+  are allowlisted (`egress-policy: audit` lifts the guard). A rotated Cursor
+  shard appears in the failed run's
   harden-runner summary; add it to `egress_ai_review_provider_endpoints` and
   `AI_REVIEW_CURSOR_EGRESS` together. No wildcards.
 
