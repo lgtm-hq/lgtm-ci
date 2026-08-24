@@ -60,11 +60,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 }
 
-@test "reusable-ai-review: lintro-version default meets the #2143 floor" {
+@test "reusable-ai-review: lintro-version default meets the LINTRO_AI_REVIEW floor" {
 	run awk '/^      lintro-version:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f&&/default:/{gsub(/"/,""); print $2; exit}' "$WORKFLOW"
 	assert_success
 	[[ -n "$output" ]]
-	printf '%s\n' "0.127.0" "$output" | sort -C -V
+	printf '%s\n' "0.130.0" "$output" | sort -C -V
 }
 
 @test "reusable-ai-review: declares optional secrets by org name" {
@@ -131,13 +131,22 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 }
 
 @test "reusable-ai-review: maps inputs onto LINTRO_AI_* overlays" {
-	run grep -E "LINTRO_AI_(PROVIDER|TRANSPORT|MODEL|MAX_COST_USD|ENABLED):" "$WORKFLOW"
+	run grep -E "LINTRO_AI_(PROVIDER|TRANSPORT|MODEL|MAX_COST_USD|ENABLED|REVIEW):" "$WORKFLOW"
 	assert_success
 	assert_output --partial "LINTRO_AI_PROVIDER:"
 	assert_output --partial "LINTRO_AI_TRANSPORT:"
 	assert_output --partial "LINTRO_AI_MODEL:"
 	assert_output --partial "LINTRO_AI_MAX_COST_USD:"
 	assert_output --partial "LINTRO_AI_ENABLED:"
+	assert_output --partial "LINTRO_AI_REVIEW:"
+}
+
+@test "reusable-ai-review: run step forces ai.review via LINTRO_AI_REVIEW" {
+	# The env replaces the deleted consumer ai.review config prerequisite —
+	# dropping it while keeping the >=0.130.0 pin would silently produce
+	# no-review for repos without an ai block, green under blocking=false.
+	run grep -F 'LINTRO_AI_REVIEW: "1"' "$WORKFLOW"
+	assert_success
 }
 
 @test "reusable-ai-review: App token is minted and scoped to the run step" {

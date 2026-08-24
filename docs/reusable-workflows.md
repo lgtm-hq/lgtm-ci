@@ -1692,12 +1692,6 @@ py-lintro's dogfood does **not** transfer here.
 Actions variable → the consuming repo's lintro config → lintro's own validation
 error. Inputs map onto that env overlay surface; there is no workflow fallback.
 
-**Prerequisite in the consuming repo:** set `ai.review: true` in
-`.lintro-config.yaml`. The reusable forces `ai.enabled` through
-`LINTRO_AI_ENABLED`, but `ai.review` has no `LINTRO_AI_*` env override in
-lintro today, so a repo without it gets `outcome=no-review` (exit 2) on every
-run (py-lintro tracks adding the override).
-
 **Caller snippet** (same shape for every provider; listed alphabetically, none
 recommended). Enumerate the secrets explicitly — least privilege: `secrets:
 inherit` would hand the reusable the caller's entire secret set, while it
@@ -1761,7 +1755,7 @@ the raw values and cannot fold case.
 | ----------------- | ------- | ----- |
 | `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
 | `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
-| `lintro-version`  | pinned  | Renovate-managed. Floor = 0.127.0 (py-lintro#2144, part of py-lintro#2143: no schema default for provider); never pin lower. |
+| `lintro-version`  | pinned  | Renovate-managed. Floor = 0.130.0 (py-lintro#2159: LINTRO_AI_REVIEW override; also covers #2144, no schema default for provider); never pin lower. |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL`. |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD`. |
