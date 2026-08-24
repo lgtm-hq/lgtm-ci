@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.66.0] - 2026-08-24
+
+### Added
+
+- **workflows**: force ai.review via LINTRO_AI_REVIEW — floor 0.130.0, drop consumer
+  config prerequisite (#895) (dcd603d)
+
+### Changed
+
+- **workflows**: make explicit secrets enumeration the recommended ai-review caller
+  shape (#892) (a8594f5)
+- **deps**: lock file maintenance (#894) (69efecf)
+
 ## [0.65.0] - 2026-08-22
 
 ### Added
@@ -2142,7 +2155,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.65.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.66.0...HEAD
+[0.66.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.65.0...v0.66.0
 [0.65.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.8...v0.64.0
 [0.63.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.7...v0.63.8
