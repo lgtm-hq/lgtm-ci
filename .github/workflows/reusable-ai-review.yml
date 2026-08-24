@@ -21,11 +21,13 @@ name: Reusable AI Review
 #   Credentials, CLI installs, and extra egress are keyed on the resolved
 #   (provider, transport) pair. Adding a provider is one matrix row.
 #
-# lintro-version floor: 0.127.0 (py-lintro#2144, part of #2143).
-#   That release removes the provider schema default. Older versions silently
-#   resolve an unset provider to anthropic, which would make the "fail with
-#   guidance" contract a lie. Renovate bumps the pin forward; never lower it
-#   below the floor, and do not add a workflow fallback to compensate.
+# lintro-version floor: 0.130.0 (py-lintro#2159, LINTRO_AI_REVIEW override;
+#   supersedes the 0.127.0 floor from py-lintro#2144's provider no-default).
+#   Below it, LINTRO_AI_REVIEW is ignored and repos without `ai.review: true`
+#   in their lintro config silently produce no review; below 0.127.0 an unset
+#   provider silently resolves to anthropic. Renovate bumps the pin forward;
+#   never lower it below the floor, and do not add a workflow fallback to
+#   compensate.
 #
 # Egress:
 #   The ai-review preset is GitHub + PyPI/uv only. Provider hosts are
@@ -61,7 +63,7 @@ on:
         required: false
         type: string
         # renovate: datasource=pypi depName=lintro
-        default: "0.128.0"
+        default: "0.131.0"
       python-version:
         description: "CPython version for the scratch venv that installs lintro"
         required: false
@@ -330,6 +332,9 @@ jobs:
           BLOCKING: ${{ inputs.blocking }}
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
           LINTRO_AI_ENABLED: "1"
+          # Requires the 0.130.0 floor (py-lintro#2159): forces ai.review on
+          # so consuming repos need no ai block in their lintro config.
+          LINTRO_AI_REVIEW: "1"
           LINTRO_AI_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
           LINTRO_AI_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
           LINTRO_AI_MODEL: ${{ inputs.model }}

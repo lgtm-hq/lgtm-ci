@@ -60,11 +60,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 }
 
-@test "reusable-ai-review: lintro-version default meets the #2143 floor" {
+@test "reusable-ai-review: lintro-version default meets the LINTRO_AI_REVIEW floor" {
 	run awk '/^      lintro-version:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f&&/default:/{gsub(/"/,""); print $2; exit}' "$WORKFLOW"
 	assert_success
 	[[ -n "$output" ]]
-	printf '%s\n' "0.127.0" "$output" | sort -C -V
+	printf '%s\n' "0.130.0" "$output" | sort -C -V
 }
 
 @test "reusable-ai-review: declares optional secrets by org name" {

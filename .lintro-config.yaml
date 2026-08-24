@@ -73,10 +73,3 @@ tools:
   bats:
     enabled: true
     path: "tests/bats"
-
-# AI review (#888 pilot): the reusable ai-review workflow forces ai.enabled
-# via LINTRO_AI_ENABLED, but ai.review has no env override in lintro's
-# LINTRO_AI_* surface, so it must be enabled here. Provider/transport come
-# from the LINTRO_AI_PROVIDER / LINTRO_AI_TRANSPORT Actions variables.
-ai:
-  review: true
