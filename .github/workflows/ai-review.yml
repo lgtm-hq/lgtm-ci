@@ -35,9 +35,11 @@ jobs:
     uses: ./.github/workflows/reusable-ai-review.yml
     permissions:
       # Checkout + PR diff. Posting uses the lintro-review App token minted
-      # inside the reusable, not this job grant.
+      # inside the reusable, not this job grant. actions: read lets the
+      # reusable list/download prior review-state artifacts (#893).
       contents: read
       pull-requests: read
+      actions: read
     # Explicit enumeration instead of `secrets: inherit`: the PR-ref workflow
     # sees exactly the seven secrets the reusable declares (the docs'
     # "equivalent explicit secrets" block) and nothing else in the org set.

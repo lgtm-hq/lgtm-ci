@@ -97,8 +97,14 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 # --- Hardening ----------------------------------------------------------------
 
 @test "reusable-ai-review: does not use job-level continue-on-error" {
-	run grep -F "continue-on-error:" "$WORKFLOW"
+	# Step-level continue-on-error is required on locate/download so a
+	# missing prior artifact cannot skip the review. Job-level is still
+	# forbidden — it would rewrite a red INCOMPLETE conclusion to green.
+	run grep -E '^    continue-on-error:' "$WORKFLOW"
 	assert_failure
+	run grep -c 'continue-on-error: true' "$WORKFLOW"
+	assert_success
+	[[ "$output" -ge 2 ]]
 }
 
 @test "reusable-ai-review: defaults to the ai-review egress preset" {
@@ -146,6 +152,41 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	# dropping it while keeping the >=0.130.0 pin would silently produce
 	# no-review for repos without an ai block, green under blocking=false.
 	run grep -F 'LINTRO_AI_REVIEW: "1"' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-ai-review: has a per-PR concurrency group that cancels in progress" {
+	run awk '/^concurrency:/{f=1} f{print} /^jobs:/{exit}' "$WORKFLOW"
+	assert_success
+	assert_output --partial "ai-review-"
+	assert_output --partial "github.event.pull_request.number"
+	assert_output --partial "cancel-in-progress: true"
+}
+
+@test "reusable-ai-review: locates and uploads consuming-repo review-state artifacts" {
+	run grep -F "Locate prior review-state" "$WORKFLOW"
+	assert_success
+	run grep -F "Download prior review-state artifacts" "$WORKFLOW"
+	assert_success
+	run grep -F "Upload review-state artifacts" "$WORKFLOW"
+	assert_success
+	run grep -F "lintro-review-state-pr-" "$WORKFLOW"
+	assert_success
+	run grep -F "retention-days: 30" "$WORKFLOW"
+	assert_success
+	run grep -F "overwrite: true" "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-ai-review: mints the App token immediately before the review step" {
+	run awk '
+		/- name: / {
+			if ($0 ~ /Mint lintro-review App token/) { seen_mint = 1; next }
+			if (seen_mint && $0 ~ /Run AI review/) { found = 1; exit }
+			if (seen_mint) { exit }
+		}
+		END { exit !found }
+	' "$WORKFLOW"
 	assert_success
 }
 
@@ -260,7 +301,18 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 	assert_output --partial "contents: read"
 	assert_output --partial "pull-requests: read"
+	assert_output --partial "actions: read"
 	refute_output --partial "pull-requests: write"
+}
+
+@test "reusable-ai-review: caller grants actions read for artifact provenance" {
+	run awk '
+		/^    permissions:/ { f = 1; next }
+		f && /^    [a-z]/ { exit }
+		f { print }
+	' "${PROJECT_ROOT}/.github/workflows/ai-review.yml"
+	assert_success
+	assert_output --partial "actions: read"
 }
 
 @test "reusable-ai-review: persist-credentials is false on checkouts" {

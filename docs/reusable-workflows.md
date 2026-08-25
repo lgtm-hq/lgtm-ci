@@ -1712,6 +1712,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
+      actions: read
     secrets:
       LINTRO_REVIEW_APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
       LINTRO_REVIEW_APP_PRIVATE_KEY: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
@@ -1755,11 +1756,11 @@ the raw values and cannot fold case.
 | ----------------- | ------- | ----- |
 | `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
 | `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
-| `lintro-version`  | pinned  | Renovate-managed. Floor = 0.130.0 (py-lintro#2159: LINTRO_AI_REVIEW override; also covers #2144, no schema default for provider); never pin lower. |
+| `lintro-version`  | `0.131.0` | Renovate-managed. Floor = 0.130.0 (py-lintro#2159). Default is 0.131.0 so resume / INCOMPLETE work; persist-on-timeout needs 0.131.2+. |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL`. |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD`. |
-| `blocking`        | `false` | When true, exit 2 (no review) or a changes-requested verdict fails the job. |
+| `blocking`        | `false` | When true, exit 2 (no review) or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
 | `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair. |
 | `timeout-minutes` | `30`    | Raise for long CLI reviews. |
 | `job-name`        | `AI Review` | Check name. |
@@ -1775,7 +1776,16 @@ the raw values and cannot fold case.
   org secrets. Put the same-repo `if:` on the caller as well.
 - **Exit-code contract.** lintro exit `2` is "no review produced" (error
   envelope on stdout), not a crash. Exit `1` is a produced review with P1 /
-  changes-requested. Default `blocking: false` keeps the check non-blocking.
+  changes-requested. Default `blocking: false` keeps those outcomes
+  non-blocking. **INCOMPLETE** coverage-at-HEAD always reddens the check.
+- **Per-PR concurrency.** The reusable cancels in-progress runs for the same
+  consuming-repo PR so overlapping pushes do not race on state artifacts.
+- **Review resume.** `actions: read` on the caller job lets the reusable
+  locate the newest completed trusted run that uploaded
+  `lintro-review-state-pr-<N>-*` (conclusion irrelevant) and download it
+  onto the consuming repo's next run. The final upload sets `overwrite: true`
+  so a same-attempt retry does not 409. The App token is minted immediately
+  before the review step. No `*.blob.core.windows.net` wildcard.
 - **Egress.** The `ai-review` preset has no provider hosts. Extra hosts come
   from the `(provider, transport)` pair visible at harden time (input or
   `LINTRO_AI_*` variable). Repo-config-only resolution cannot expand that list
