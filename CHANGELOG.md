@@ -9,10 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **workflows**: reusable-ai-review adopts review resume — `actions: read`,
-  per-PR concurrency, consuming-repo state artifacts, and INCOMPLETE gating
-  (#893). `LINTRO_AI_REVIEW=1` and the 0.131.0 pin already shipped in 0.66.0.
-
 ### Changed
 
 ### Deprecated
@@ -21,12 +17,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.67.0] - 2026-08-25
+
+### Added
+
+- **workflows**: adopt lintro review resume in reusable-ai-review (#898) (6dcec17)
+- **workflows**: reusable-ai-review adopts review resume — `actions: read`,
+  per-PR concurrency, consuming-repo state artifacts, and INCOMPLETE gating
+  (#893). `LINTRO_AI_REVIEW=1` and the 0.131.0 pin already shipped in 0.66.0.
+
+### Fixed
+
 - **workflows**: review-state upload-artifact sets `overwrite: true` (#893).
 - **workflows**: locate picks the newest completed review-state run
   (`unique_by(.id)` then `created_at` desc; `jq unique` had re-sorted oldest-first)
   and treats JSON `coverage.complete=false` as INCOMPLETE (no `jq //`) (#893).
-
-### Security
 
 ## [0.66.0] - 2026-08-24
 
@@ -2164,7 +2171,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.66.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.67.0...HEAD
+[0.67.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.66.0...v0.67.0
 [0.66.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.65.0...v0.66.0
 [0.65.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.64.0...v0.65.0
 [0.64.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.63.8...v0.64.0
