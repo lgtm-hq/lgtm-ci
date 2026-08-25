@@ -1783,7 +1783,8 @@ the raw values and cannot fold case.
 - **Review resume.** `actions: read` on the caller job lets the reusable
   locate the newest completed trusted run that uploaded
   `lintro-review-state-pr-<N>-*` (conclusion irrelevant) and download it
-  onto the consuming repo's next run. The App token is minted immediately
+  onto the consuming repo's next run. The final upload sets `overwrite: true`
+  so a same-attempt retry does not 409. The App token is minted immediately
   before the review step. No `*.blob.core.windows.net` wildcard.
 - **Egress.** The `ai-review` preset has no provider hosts. Extra hosts come
   from the `(provider, transport)` pair visible at harden time (input or

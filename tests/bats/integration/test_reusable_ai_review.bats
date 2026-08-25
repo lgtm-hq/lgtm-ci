@@ -174,6 +174,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 	run grep -F "retention-days: 30" "$WORKFLOW"
 	assert_success
+	run grep -F "overwrite: true" "$WORKFLOW"
+	assert_success
 }
 
 @test "reusable-ai-review: mints the App token immediately before the review step" {

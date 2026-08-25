@@ -410,3 +410,6 @@ jobs:
           path: ai-review-state/
           if-no-files-found: ignore
           retention-days: 30
+          # Same-attempt retry (or a second upload in one run) 409s without
+          # overwrite; the latest blob is the authoritative review-state.
+          overwrite: true
