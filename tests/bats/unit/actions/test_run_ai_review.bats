@@ -184,6 +184,33 @@ run_review() {
 	assert_output --partial "outcome=broken"
 }
 
+@test "run: incomplete coverage reddens the check even when non-blocking" {
+	local bin
+	bin="$(write_fake_lintro '{"readiness_verdict":"incomplete","coverage":{"complete":false,"covered_at_head":2,"eligible":5},"verdict":"nits"}' "" 0)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_failure
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=incomplete"
+	assert_output --partial "verdict=incomplete"
+}
+
+@test "run: complete coverage does not trip the incomplete gate" {
+	local bin
+	bin="$(write_fake_lintro "$(success_json)" "" 0)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=reviewed"
+}
+
+@test "locate: writes empty run-id when gh is unavailable or lists nothing" {
+	PATH="/usr/bin:/bin" STEP=locate GITHUB_REPOSITORY="x/y" PR_NUMBER=1 \
+		GITHUB_RUN_ID=9 run bash "$SCRIPT"
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "run-id="
+}
+
 @test "run: invokes lintro with --pr --post --output json" {
 	local bin="${BATS_TEST_TMPDIR}/lintro"
 	{

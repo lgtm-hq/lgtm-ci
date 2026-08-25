@@ -25,9 +25,11 @@ name: Reusable AI Review
 #   supersedes the 0.127.0 floor from py-lintro#2144's provider no-default).
 #   Below it, LINTRO_AI_REVIEW is ignored and repos without `ai.review: true`
 #   in their lintro config silently produce no review; below 0.127.0 an unset
-#   provider silently resolves to anthropic. Renovate bumps the pin forward;
-#   never lower it below the floor, and do not add a workflow fallback to
-#   compensate.
+#   provider silently resolves to anthropic. File-level resume and INCOMPLETE
+#   need 0.131.0+ (py-lintro#2154). Persist-on-timeout is 0.131.2+
+#   (py-lintro#2167); Renovate can bump when a caller wants it. Artifact
+#   steps no-op until that pin lands. Renovate bumps the pin forward; never
+#   lower it below the floor, and do not add a workflow fallback to compensate.
 #
 # Egress:
 #   The ai-review preset is GitHub + PyPI/uv only. Provider hosts are
@@ -86,7 +88,8 @@ on:
       blocking:
         description: >-
           When true, a no-review outcome (exit 2) or a changes-requested
-          verdict fails the job. Default is non-blocking.
+          verdict fails the job. Default is non-blocking. INCOMPLETE
+          coverage-at-HEAD always reddens the check.
         required: false
         type: boolean
         default: false
@@ -173,6 +176,13 @@ on:
 
 permissions: {}
 
+concurrency:
+  # Per consuming-repo PR so overlapping pushes cancel the superseded
+  # HEAD instead of racing on state artifacts (#893).
+  group: >-
+    ai-review-${{ github.repository }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
 jobs:
   ai-review:
     name: ${{ inputs.job-name }}
@@ -184,6 +194,9 @@ jobs:
       # `gh` / lintro fetch the PR diff with the workflow token. Posting uses
       # the App token (lintro-review[bot]), not this permission.
       pull-requests: read
+      # Cross-run artifact list/download uses the workflow token (#893).
+      # Provenance is the consuming repo's workflow run, not lgtm-ci.
+      actions: read
     env:
       # Visible pair for harden-runner extras (input → var only).
       # Must already be lowercase — GitHub expressions cannot fold case, so
@@ -303,6 +316,35 @@ jobs:
           PROVIDER: ${{ steps.resolve.outputs.provider }}
           TRANSPORT: ${{ steps.resolve.outputs.transport }}
         run: .lgtm-ci-tooling/scripts/ci/actions/install-ai-review-cli.sh
+      - name: Locate prior review-state
+        # Newest completed trusted run with a valid artifact. Conclusion is
+        # irrelevant (#893). Empty run-id is the no-op (first review, or
+        # no valid prior). continue-on-error keeps a locator failure from
+        # skipping the review.
+        id: prior-state
+        if: steps.preflight.outputs.should-run == 'true'
+        continue-on-error: true
+        shell: bash
+        env:
+          STEP: locate
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GH_TOKEN: ${{ github.token }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
+      - name: Download prior review-state artifacts
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.prior-state.outputs.run-id != ''
+        continue-on-error: true
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          run-id: ${{ steps.prior-state.outputs.run-id }}
+          pattern: lintro-review-state-pr-${{ github.event.pull_request.number }}-*
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          path: ai-review-state
       - name: Mint lintro-review App token
         id: lintro-review-app
         if: steps.preflight.outputs.should-run == 'true'
@@ -335,6 +377,7 @@ jobs:
           # Requires the 0.130.0 floor (py-lintro#2159): forces ai.review on
           # so consuming repos need no ai block in their lintro config.
           LINTRO_AI_REVIEW: "1"
+          LINTRO_REVIEW_STATE_DIR: ai-review-state
           LINTRO_AI_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
           LINTRO_AI_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
           LINTRO_AI_MODEL: ${{ inputs.model }}
@@ -353,3 +396,17 @@ jobs:
           CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
           DISABLE_AUTOUPDATER: "1"
         run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
+      - name: Upload review-state artifacts
+        # Best-effort final upload. if-no-files-found: ignore so pre-0.131.0
+        # pins no-op. Provenance is this consuming-repo run (#893). No
+        # *.blob.core.windows.net wildcard — pipelines.actions is already
+        # on the default allowlist.
+        if: always() && steps.preflight.outputs.should-run == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # yamllint disable-line rule:line-length
+          name: lintro-review-state-pr-${{ github.event.pull_request.number }}-attempt-${{ github.run_attempt }}-final
+          path: ai-review-state/
+          if-no-files-found: ignore
+          retention-days: 30
