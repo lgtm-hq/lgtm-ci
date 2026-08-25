@@ -3,6 +3,7 @@
 # Purpose: Tests for scripts/ci/actions/run-ai-review.sh (preflight + exit contract)
 
 load "../../../helpers/common"
+load "../../../helpers/mocks"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/run-ai-review.sh"
 
@@ -13,6 +14,7 @@ setup() {
 }
 
 teardown() {
+	restore_path
 	teardown_temp_dir
 }
 
@@ -194,6 +196,17 @@ run_review() {
 	assert_output --partial "verdict=incomplete"
 }
 
+@test "run: coverage.complete false alone reddens incomplete without readiness_verdict" {
+	# jq // treats JSON false as missing; the gate must still fire on complete:false.
+	local bin
+	bin="$(write_fake_lintro '{"coverage":{"complete":false,"covered_at_head":2,"eligible":5},"verdict":"nits"}' "" 0)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_failure
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=incomplete"
+	assert_output --partial "verdict=incomplete"
+}
+
 @test "run: complete coverage does not trip the incomplete gate" {
 	local bin
 	bin="$(write_fake_lintro "$(success_json)" "" 0)"
@@ -209,6 +222,89 @@ run_review() {
 	assert_success
 	run cat "$GITHUB_OUTPUT"
 	assert_output --partial "run-id="
+}
+
+# Mock gh that applies --jq to a fixture (same as real `gh api --jq`) and
+# answers run-status lookups. Artifact created_at order is newest-wins;
+# numeric unique must not flip that to oldest-first.
+_mock_gh_locate() {
+	local artifacts_json="$1"
+	local status_map="$2"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	printf '%s' "$artifacts_json" >"${BATS_TEST_TMPDIR}/artifacts.json"
+	printf '%s' "$status_map" >"${BATS_TEST_TMPDIR}/run_status.json"
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+jq_filter=""
+url=""
+while [[ \$# -gt 0 ]]; do
+	case "\$1" in
+	--jq)
+		jq_filter="\$2"
+		shift 2
+		;;
+	--paginate)
+		shift
+		;;
+	api)
+		shift
+		;;
+	*)
+		if [[ -z "\$url" && "\$1" == repos/* ]]; then
+			url="\$1"
+		fi
+		shift
+		;;
+	esac
+done
+if [[ "\$url" == *"/actions/artifacts"* ]]; then
+	if [[ -n "\$jq_filter" ]]; then
+		jq -r "\$jq_filter" "${BATS_TEST_TMPDIR}/artifacts.json"
+	else
+		cat "${BATS_TEST_TMPDIR}/artifacts.json"
+	fi
+	exit 0
+fi
+if [[ "\$url" == *"/actions/runs/"* ]]; then
+	run_id="\${url##*/}"
+	status="\$(jq -r --arg id "\$run_id" '.[\$id] // empty' "${BATS_TEST_TMPDIR}/run_status.json")"
+	if [[ -n "\$jq_filter" ]]; then
+		jq -r "\$jq_filter" <<<"{\"status\": \"\${status}\"}"
+	else
+		printf '%s\n' "\$status"
+	fi
+	exit 0
+fi
+echo "unexpected gh call url=\$url" >&2
+exit 1
+EOF
+	chmod +x "${mock_bin}/gh"
+	save_path
+	export PATH="${mock_bin}:$PATH"
+}
+
+@test "locate: newest completed trusted run wins (not oldest unique id)" {
+	# Older completed 100, newer completed 200, newest in-progress 300.
+	# jq unique re-sorts ids 100,200,300 and would pick 100; newest-wins is 200.
+	_mock_gh_locate "$(
+		cat <<'JSON'
+{"artifacts":[
+  {"expired":false,"name":"lintro-review-state-pr-1-old","workflow_run":{"id":100},"created_at":"2020-01-01T00:00:00Z"},
+  {"expired":false,"name":"lintro-review-state-pr-1-new","workflow_run":{"id":200},"created_at":"2024-01-01T00:00:00Z"},
+  {"expired":false,"name":"lintro-review-state-pr-1-live","workflow_run":{"id":300},"created_at":"2025-01-01T00:00:00Z"},
+  {"expired":false,"name":"lintro-review-state-pr-1-self","workflow_run":{"id":9},"created_at":"2026-01-01T00:00:00Z"}
+]}
+JSON
+	)" '{"100":"completed","200":"completed","300":"in_progress","9":"completed"}'
+	STEP=locate GITHUB_REPOSITORY="x/y" PR_NUMBER=1 GITHUB_RUN_ID=9 \
+		run bash "$SCRIPT"
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "run-id=200"
+	# Guard against oldest-wins regressing while still matching the partial.
+	run bash -c "grep -E '^run-id=' '$GITHUB_OUTPUT'"
+	assert_output "run-id=200"
 }
 
 @test "run: invokes lintro with --pr --post --output json" {

@@ -21,6 +21,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **workflows**: locate picks the newest completed review-state run
+  (`unique_by(.id)` then `created_at` desc; `jq unique` had re-sorted oldest-first)
+  and treats JSON `coverage.complete=false` as INCOMPLETE (no `jq //`) (#893).
+
 ### Security
 
 ## [0.66.0] - 2026-08-24

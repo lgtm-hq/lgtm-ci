@@ -131,13 +131,12 @@ if [[ "$STEP" == "locate" ]]; then
 								(env.CURRENT_RUN_ID | length) == 0
 								or .workflow_run.id != (env.CURRENT_RUN_ID | tonumber)
 							)
-						 | {id: .workflow_run.id, created_at}
+						| {id: .workflow_run.id, created_at}
 						]
+						| unique_by(.id)
 						| sort_by(.created_at)
 						| reverse
-						| [.[].id]
-						| unique
-						| .[]
+						| .[].id
 					' 2>/dev/null || true
 			)"
 			if [[ -n "$candidate_ids" ]]; then
@@ -222,7 +221,7 @@ if [[ "$STEP" == "run" ]]; then
 	# INCOMPLETE reddens the check even when blocking is false. lintro's
 	# exit code stays 0/1 when a partial review was produced (#2154/#893).
 	if [[ "$outcome" == "reviewed" || "$outcome" == "findings" ]]; then
-		coverage_complete="$(jq -r '.coverage.complete // empty' "$out_file" 2>/dev/null || true)"
+		coverage_complete="$(jq -r '.coverage.complete' "$out_file" 2>/dev/null || true)"
 		readiness="$(jq -r '.readiness_verdict // empty' "$out_file" 2>/dev/null || true)"
 		if [[ "$coverage_complete" == "false" || "$readiness" == "incomplete" ]]; then
 			outcome="incomplete"
