@@ -1758,8 +1758,8 @@ the raw values and cannot fold case.
 | `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
 | `lintro-version`  | `0.131.5` | Renovate-managed. Floor = 0.130.0 (py-lintro#2159). Default includes resume / INCOMPLETE work and persist-on-timeout support. |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
-| `model`           | `""`    | Overlay → `LINTRO_AI_MODEL`. |
-| `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD`. |
+| `model`           | `""`    | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`). |
+| `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → var). |
 | `blocking`        | `false` | When true, exit 2 (no review) or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
 | `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair. |
 | `timeout-minutes` | `30`    | Raise for long CLI reviews. |

@@ -143,6 +143,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output --partial "LINTRO_AI_TRANSPORT:"
 	assert_output --partial "LINTRO_AI_MODEL:"
 	assert_output --partial "LINTRO_AI_MAX_COST_USD:"
+	assert_output --partial "inputs.model || vars.LINTRO_AI_MODEL"
+	assert_output --partial "inputs.max-cost-usd || vars.LINTRO_AI_MAX_COST_USD"
 	assert_output --partial "LINTRO_AI_ENABLED:"
 	assert_output --partial "LINTRO_AI_REVIEW:"
 }

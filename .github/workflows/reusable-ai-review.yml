@@ -380,8 +380,8 @@ jobs:
           LINTRO_REVIEW_STATE_DIR: ai-review-state
           LINTRO_AI_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
           LINTRO_AI_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
-          LINTRO_AI_MODEL: ${{ inputs.model }}
-          LINTRO_AI_MAX_COST_USD: ${{ inputs.max-cost-usd }}
+          LINTRO_AI_MODEL: ${{ inputs.model || vars.LINTRO_AI_MODEL }}
+          LINTRO_AI_MAX_COST_USD: ${{ inputs.max-cost-usd || vars.LINTRO_AI_MAX_COST_USD }}
           # Only the credential for the resolved pair — never the union.
           # yamllint disable-line rule:line-length
           ANTHROPIC_API_KEY: ${{ steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport == 'api' && secrets.ANTHROPIC_API_KEY || '' }}
