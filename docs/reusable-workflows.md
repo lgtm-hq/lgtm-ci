@@ -1723,7 +1723,9 @@ jobs:
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
       tooling-ref: "<sha>"
-      # provider/transport empty = Actions var, then repo lintro config
+      # provider/transport/model/max-cost-usd empty = Actions var, then
+      # repo lintro config (vars.LINTRO_AI_PROVIDER / _TRANSPORT /
+      # _MODEL / _MAX_COST_USD)
 ```
 
 `secrets: inherit` also works (all seven are org-wide, so it is the
@@ -1759,7 +1761,7 @@ the raw values and cannot fold case.
 | `lintro-version`  | `0.131.5` | Renovate-managed. Floor = 0.130.0 (py-lintro#2159). Default includes resume / INCOMPLETE work and persist-on-timeout support. |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`). |
-| `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → var). |
+| `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → `vars.LINTRO_AI_MAX_COST_USD`). |
 | `blocking`        | `false` | When true, exit 2 (no review) or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
 | `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair. |
 | `timeout-minutes` | `30`    | Raise for long CLI reviews. |

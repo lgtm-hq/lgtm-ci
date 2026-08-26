@@ -326,6 +326,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output --partial "actions: read"
 }
 
+@test "reusable-ai-review: local caller forwards model and max-cost vars" {
+	local caller="${PROJECT_ROOT}/.github/workflows/ai-review.yml"
+	run grep -F "ready_for_review" "$caller"
+	assert_success
+	run grep -F 'model: ${{ vars.LINTRO_AI_MODEL }}' "$caller"
+	assert_success
+	run grep -F 'max-cost-usd: ${{ vars.LINTRO_AI_MAX_COST_USD }}' "$caller"
+	assert_success
+}
+
 @test "reusable-ai-review: persist-credentials is false on checkouts" {
 	run grep -c "persist-credentials: false" "$WORKFLOW"
 	assert_success
