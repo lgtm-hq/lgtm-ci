@@ -34,7 +34,7 @@ teardown() {
 	teardown_temp_dir
 }
 
-# Mock gh: serve versions JSON for list calls, record DELETEs to a file.
+# Mock gh: serve versions JSON for list calls, record DELETE requests to a file.
 mock_gh_versions() {
 	local versions_json="$1"
 	local delete_exit="${2:-0}"
@@ -134,7 +134,7 @@ write_large_index_manifest() {
 	assert_output --partial "No build-* staging tags to prune"
 }
 
-@test "prune-staging: deletes an old, UNreferenced build-* staging tag" {
+@test "prune-staging: deletes an old, unreferenced build-* staging tag" {
 	mock_registry_release_index
 	mock_gh_versions '[
 		{"id":222,"name":"sha256:release-index","updated_at":"2024-01-01T00:00:00Z","metadata":{"container":{"tags":["v1.0.0"]}}},

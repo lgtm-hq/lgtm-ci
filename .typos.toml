@@ -2,10 +2,11 @@
 extend-exclude = ["CHANGELOG.md"]
 
 [default.extend-words]
-# Valid project/domain terms and deliberate shell/test fragments.
-ba = "ba"
-DELET = "DELET"
+# Valid project/domain terms.
 hass = "hass"
-mis = "mis"
-Nreferenced = "Nreferenced"
 unparseable = "unparseable"
+
+[default.extend-identifiers]
+# Deliberate shell and test identifiers.
+ba = "ba"
+mis = "mis"
