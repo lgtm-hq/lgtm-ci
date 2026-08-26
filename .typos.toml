@@ -1,12 +1,11 @@
 [files]
 extend-exclude = ["CHANGELOG.md"]
 
+[default]
+# Limit false positives to the exact regex and prose fragments that trigger them.
+extend-ignore-re = ["\\(ba\\)\\?sh", "mis-ordered"]
+
 [default.extend-words]
 # Valid project/domain terms.
 hass = "hass"
 unparseable = "unparseable"
-
-[default.extend-identifiers]
-# Deliberate shell and test identifiers.
-ba = "ba"
-mis = "mis"
