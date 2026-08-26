@@ -1723,9 +1723,9 @@ jobs:
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
       tooling-ref: "<sha>"
-      # provider/transport/model/max-cost-usd empty = Actions var, then
-      # repo lintro config (vars.LINTRO_AI_PROVIDER / _TRANSPORT /
-      # _MODEL / _MAX_COST_USD)
+      # provider/transport/model/max-cost-usd empty = Actions var
+      # (vars.LINTRO_AI_PROVIDER / _TRANSPORT / _MODEL / _MAX_COST_USD),
+      # then repo lintro config
 ```
 
 `secrets: inherit` also works (all seven are org-wide, so it is the
