@@ -328,7 +328,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 
 @test "reusable-ai-review: local caller forwards model and max-cost vars" {
 	local caller="${PROJECT_ROOT}/.github/workflows/ai-review.yml"
-	run grep -F "ready_for_review" "$caller"
+	run grep -F "types: [opened, synchronize, reopened, ready_for_review]" "$caller"
 	assert_success
 	run grep -F 'model: ${{ vars.LINTRO_AI_MODEL }}' "$caller"
 	assert_success
