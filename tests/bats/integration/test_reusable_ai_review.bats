@@ -143,8 +143,19 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output --partial "LINTRO_AI_TRANSPORT:"
 	assert_output --partial "LINTRO_AI_MODEL:"
 	assert_output --partial "LINTRO_AI_MAX_COST_USD:"
+	assert_output --partial "inputs.model || vars.LINTRO_AI_MODEL"
+	assert_output --partial "inputs.max-cost-usd || vars.LINTRO_AI_MAX_COST_USD"
 	assert_output --partial "LINTRO_AI_ENABLED:"
 	assert_output --partial "LINTRO_AI_REVIEW:"
+}
+
+@test "reusable-ai-review: model and max-cost input descriptions document vars fall-through" {
+	run awk '/^      model:$/{f=1;next} f&&/^      [a-z]/{exit} f{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial "resolves via LINTRO_AI_MODEL"
+	run awk '/^      max-cost-usd:$/{f=1;next} f&&/^      [a-z]/{exit} f{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial "resolves via LINTRO_AI_MAX_COST_USD"
 }
 
 @test "reusable-ai-review: run step forces ai.review via LINTRO_AI_REVIEW" {
@@ -313,6 +324,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	' "${PROJECT_ROOT}/.github/workflows/ai-review.yml"
 	assert_success
 	assert_output --partial "actions: read"
+}
+
+@test "reusable-ai-review: local caller forwards model and max-cost vars" {
+	local caller="${PROJECT_ROOT}/.github/workflows/ai-review.yml"
+	run grep -F "types: [opened, synchronize, reopened, ready_for_review]" "$caller"
+	assert_success
+	run grep -F 'model: ${{ vars.LINTRO_AI_MODEL }}' "$caller"
+	assert_success
+	run grep -F 'max-cost-usd: ${{ vars.LINTRO_AI_MAX_COST_USD }}' "$caller"
+	assert_success
 }
 
 @test "reusable-ai-review: persist-credentials is false on checkouts" {

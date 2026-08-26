@@ -6,15 +6,18 @@ name: AI Review
 # repo's PRs with a pinned published lintro and posts the sticky review
 # comment as lintro-review[bot].
 #
-# Provider and transport come from the LINTRO_AI_PROVIDER /
-# LINTRO_AI_TRANSPORT Actions variables (lowercase; required under the
+# Provider, transport, model, and spend ceiling come from LINTRO_AI_*
+# Actions variables (lowercase provider/transport; required under the
 # reusable's default block egress — a config-file-only provider is a hard
 # resolve error by design). Swap providers by changing the variables; no
 # workflow edit needed. Non-blocking: the reusable's `blocking` default keeps
 # a changes-requested verdict from failing the check.
+# Caller concurrency uses github.ref so it does not collide with the
+# reusable's per-PR group (same group + cancel-in-progress cancels the caller).
 
 "on":
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
 
 concurrency:
   group: ai-review-${{ github.ref }}
@@ -51,3 +54,6 @@ jobs:
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
+    with:
+      model: ${{ vars.LINTRO_AI_MODEL }}
+      max-cost-usd: ${{ vars.LINTRO_AI_MAX_COST_USD }}

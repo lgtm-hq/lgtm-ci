@@ -73,15 +73,17 @@ on:
         default: "3.12"
       model:
         description: >-
-          Optional model overlay passed through as LINTRO_AI_MODEL (empty =
-          lintro config / provider default)
+          Optional model overlay passed through as LINTRO_AI_MODEL. Empty
+          resolves via LINTRO_AI_MODEL then the repo lintro config /
+          provider default.
         required: false
         type: string
         default: ""
       max-cost-usd:
         description: >-
-          Optional USD cap overlay passed through as LINTRO_AI_MAX_COST_USD
-          (empty = lintro config)
+          Optional USD cap overlay passed through as LINTRO_AI_MAX_COST_USD.
+          Empty resolves via LINTRO_AI_MAX_COST_USD then the repo lintro
+          config.
         required: false
         type: string
         default: ""
@@ -380,8 +382,8 @@ jobs:
           LINTRO_REVIEW_STATE_DIR: ai-review-state
           LINTRO_AI_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
           LINTRO_AI_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
-          LINTRO_AI_MODEL: ${{ inputs.model }}
-          LINTRO_AI_MAX_COST_USD: ${{ inputs.max-cost-usd }}
+          LINTRO_AI_MODEL: ${{ inputs.model || vars.LINTRO_AI_MODEL }}
+          LINTRO_AI_MAX_COST_USD: ${{ inputs.max-cost-usd || vars.LINTRO_AI_MAX_COST_USD }}
           # Only the credential for the resolved pair — never the union.
           # yamllint disable-line rule:line-length
           ANTHROPIC_API_KEY: ${{ steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport == 'api' && secrets.ANTHROPIC_API_KEY || '' }}
