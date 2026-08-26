@@ -17,9 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **ai-review**: update Cursor agent past the long headless-session hang.
-
 ### Security
+
+## [0.68.1] - 2026-08-26
+
+### Fixed
+
+- **ai-review**: update Cursor agent past the long headless-session hang (d273630).
 
 ## [0.68.0] - 2026-08-26
 
@@ -2183,7 +2187,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.68.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.68.1...HEAD
+[0.68.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.68.0...v0.68.1
 [0.68.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.67.0...v0.68.0
 [0.67.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.66.0...v0.67.0
 [0.66.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.65.0...v0.66.0
