@@ -73,15 +73,17 @@ on:
         default: "3.12"
       model:
         description: >-
-          Optional model overlay passed through as LINTRO_AI_MODEL (empty =
-          lintro config / provider default)
+          Optional model overlay passed through as LINTRO_AI_MODEL. Empty
+          resolves via LINTRO_AI_MODEL then the repo lintro config /
+          provider default.
         required: false
         type: string
         default: ""
       max-cost-usd:
         description: >-
-          Optional USD cap overlay passed through as LINTRO_AI_MAX_COST_USD
-          (empty = lintro config)
+          Optional USD cap overlay passed through as LINTRO_AI_MAX_COST_USD.
+          Empty resolves via LINTRO_AI_MAX_COST_USD then the repo lintro
+          config.
         required: false
         type: string
         default: ""

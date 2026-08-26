@@ -149,6 +149,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output --partial "LINTRO_AI_REVIEW:"
 }
 
+@test "reusable-ai-review: model and max-cost input descriptions document vars fall-through" {
+	run awk '/^      model:$/{f=1;next} f&&/^      [a-z]/{exit} f{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial "resolves via LINTRO_AI_MODEL"
+	run awk '/^      max-cost-usd:$/{f=1;next} f&&/^      [a-z]/{exit} f{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial "resolves via LINTRO_AI_MAX_COST_USD"
+}
+
 @test "reusable-ai-review: run step forces ai.review via LINTRO_AI_REVIEW" {
 	# The env replaces the deleted consumer ai.review config prerequisite —
 	# dropping it while keeping the >=0.130.0 pin would silently produce
