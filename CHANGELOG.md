@@ -17,6 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **ai-review**: update Cursor agent past the long headless-session hang.
+
 ### Security
 
 ## [0.68.0] - 2026-08-26

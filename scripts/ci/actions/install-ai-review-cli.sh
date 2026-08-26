@@ -31,9 +31,10 @@ CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.232}"
 # renovate: datasource=npm depName=@openai/codex
 CODEX_VERSION="${CODEX_VERSION:-0.147.0}"
 # Cursor publishes no registry feed; bump by hand with both checksums.
-CURSOR_AGENT_VERSION="${CURSOR_AGENT_VERSION:-2026.07.23-e383d2b}"
-CURSOR_AGENT_SHA256_X64="${CURSOR_AGENT_SHA256_X64:-702ad595213bee5df0268be9f80a19f29fcceaa2a42fc55e39f2b5199051f0c4}"
-CURSOR_AGENT_SHA256_ARM64="${CURSOR_AGENT_SHA256_ARM64:-f40b99647cb24e0da885e97620a2048034f1fe8961910d573d827d77c4d26dcb}"
+# 2026.08.11 fixes wedged uploads silently stalling long headless sessions.
+CURSOR_AGENT_VERSION="${CURSOR_AGENT_VERSION:-2026.08.11-e8db854}"
+CURSOR_AGENT_SHA256_X64="${CURSOR_AGENT_SHA256_X64:-bfff4bf6f4e9dd30c1d0ef0a70b6077b074015dd2948e4c50685d53afdcfce5a}"
+CURSOR_AGENT_SHA256_ARM64="${CURSOR_AGENT_SHA256_ARM64:-ea13f92e295f523a99ce8d8f57d6894d21e5d1e2d030ffad718ccd5955ca2eed}"
 
 provider="$(ai_review_normalize "${PROVIDER:-}")"
 transport="$(ai_review_normalize "${TRANSPORT:-}")"
