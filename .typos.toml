@@ -1,0 +1,11 @@
+[files]
+extend-exclude = ["CHANGELOG.md"]
+
+[default.extend-words]
+# Valid project/domain terms and deliberate shell/test fragments.
+ba = "ba"
+DELET = "DELET"
+hass = "hass"
+mis = "mis"
+Nreferenced = "Nreferenced"
+unparseable = "unparseable"
