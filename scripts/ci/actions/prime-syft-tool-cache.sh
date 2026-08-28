@@ -50,7 +50,7 @@ source "$SCRIPT_DIR/../lib/platform.sh"
 # drifts the cache simply misses and sbom-action downloads as before, so drift
 # degrades the fix rather than breaking the job.
 # renovate: datasource=github-releases depName=anchore/syft
-SYFT_PINNED_VERSION="1.51.0"
+SYFT_PINNED_VERSION="1.51.1"
 
 SYFT_DOWNLOAD_BASE_URL="${SYFT_DOWNLOAD_BASE_URL:-https://github.com/anchore/syft/releases/download}"
 SYFT_DOWNLOAD_ATTEMPTS="${SYFT_DOWNLOAD_ATTEMPTS:-3}"
