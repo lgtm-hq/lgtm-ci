@@ -57,12 +57,22 @@ name: Reusable - Auto Re-run on Infra Failure
         description: "Allowed endpoints when egress-policy is block"
         required: false
         type: string
+        # The github-minimal set, plus the two results-storage hosts the #794
+        # ingestion probe needs. `GET /actions/jobs/{id}/logs` answers 302 to
+        # GitHub's results blob storage, so under a block policy without these
+        # every probe would die at the network layer and the evidence table
+        # would read "unavailable" for every job — a uniform failure that looks
+        # exactly like "the raw endpoint has nothing", which is the one
+        # conclusion the probe must not fake. Added here rather than to the
+        # shared github-minimal preset: no other job needs blob egress.
         default: >
           github.com:443
           api.github.com:443
           codeload.github.com:443
           objects.githubusercontent.com:443
           pipelines.actions.githubusercontent.com:443
+          productionresults.blob.core.windows.net:443
+          results-receiver.actions.githubusercontent.com:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -130,12 +140,19 @@ jobs:
           # failure notifier): the tooling checkout and preset resolution run
           # after this step, so an empty caller allowed-endpoints must not
           # leave block-policy egress with an empty allowlist.
+          # Carries the same two results-storage hosts as the input default:
+          # this bootstrap allowlist is what governs the rerun step when a
+          # caller passes its own (empty) allowed-endpoints, and a #794 probe
+          # blocked at the network layer produces evidence that reads like an
+          # empty endpoint.
           allowed-endpoints: >
             github.com:443
             api.github.com:443
             codeload.github.com:443
             objects.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
+            productionresults.blob.core.windows.net:443
+            results-receiver.actions.githubusercontent.com:443
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

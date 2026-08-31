@@ -22,6 +22,7 @@ setup() {
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
 	unset LOG_PROBE_MAX_JOBS LOG_PROBE_MAX_CALLS LOG_PROBE_CMD_TIMEOUT
+	unset LOG_PROBE_TIME_BUDGET
 }
 
 teardown() {
@@ -118,7 +119,9 @@ _probe_listing() {
 }
 
 # Set the raw log the stub serves for one job id (or "default" for all others):
-# _probe_job_log <job-id|default> <exit-code> <payload>
+# _probe_job_log <job-id|default> <exit-code> <payload>, or exit-code "hang"
+# with the payload as a number of seconds to block for, so the probe's own
+# timeout is what ends the call.
 _probe_job_log() {
 	local job_id="$1" status="$2" payload="$3"
 	printf '%s' "$payload" >"${PROBE_DIR}/joblog.${job_id}"
@@ -143,8 +146,13 @@ _gh_api_case() {
 		if [[ ! -f "\$job_file" ]]; then
 			job_file='${PROBE_DIR}/joblog.default'
 		fi
+		job_status="\$(cat "\${job_file}.status")"
+		if [[ "\$job_status" == "hang" ]]; then
+			hang_for="\$(cat "\$job_file")"
+$(_gh_hang_snippet)
+		fi
 		cat "\$job_file"
-		exit "\$(cat "\${job_file}.status")"
+		exit "\$job_status"
 		;;
 EOF
 }
@@ -1317,6 +1325,128 @@ EOF
 	assert_output --partial "::warning::Inconclusive"
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable."
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "not probed:"
+}
+
+@test "rerun-on-infra-failure: LOG_PROBE_MAX_CALLS of zero disables the probe silently" {
+	# A documented off switch has to be off: no calls, no rows, and no evidence
+	# section explaining that there is no evidence.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_PROBE_MAX_CALLS="0"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "0" "$(_call_count "$API_CALLS")"
+	run grep -cE "Log-ingestion probe evidence|not probed" "$GITHUB_STEP_SUMMARY"
+	assert_failure
+}
+
+@test "rerun-on-infra-failure: stalled probes never cost the fetch loop an attempt" {
+	# Probe time is credited back to the loop's deadline. Without the credit the
+	# three probe stalls below (2s each) would push attempt 3 past
+	# LOG_FETCH_DEADLINE=10s, and a payload arriving on that attempt would go
+	# unmatched — the instrumentation changing the verdict.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="3"
+	export LOG_FETCH_DEADLINE="10"
+	export GH_CMD_TIMEOUT="1"
+	export LOG_PROBE_CMD_TIMEOUT="2"
+	export LOG_PROBE_MAX_JOBS="3"
+	_probe_listing "0" \
+		"$(printf '55501\tfailure\t2026-08-31T10:00:00Z')" \
+		"$(printf '55502\tfailure\t2026-08-31T10:00:00Z')" \
+		"$(printf '55503\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "default" "hang" "30"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "3" "$(_call_count "$FETCH_CALLS")"
+	assert_output --partial "::warning::Inconclusive"
+	refute_output --partial "Log-fetch deadline of"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable."
+}
+
+@test "rerun-on-infra-failure: total probe spend respects LOG_PROBE_TIME_BUDGET" {
+	# The other half of the credit: unbounded probe spend would push the script
+	# into WATCHDOG_DEADLINE, whose SIGKILL lands before the evidence is
+	# flushed. Each stalled probe costs 2s, so a 10s budget stops well short of
+	# the nine probes this listing and attempt count would otherwise make.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="3"
+	export LOG_PROBE_CMD_TIMEOUT="2"
+	export LOG_PROBE_TIME_BUDGET="10"
+	export LOG_PROBE_MAX_JOBS="3"
+	_probe_listing "0" \
+		"$(printf '55501\tfailure\t2026-08-31T10:00:00Z')" \
+		"$(printf '55502\tfailure\t2026-08-31T10:00:00Z')" \
+		"$(printf '55503\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "default" "hang" "30"
+	local start=$SECONDS
+	run bash "$SCRIPT"
+	local elapsed=$((SECONDS - start))
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "probe time budget spent"
+	# Nine probes would be 18s of stalling; the budget keeps the whole run well
+	# under that.
+	[ "$elapsed" -lt 15 ]
+}
+
+@test "rerun-on-infra-failure: a failing probe records a sanitized stderr tail" {
+	# An egress block and a genuine 404 both surface as a non-zero gh exit. The
+	# first line of stderr is what tells them apart, and #794's evidence is
+	# worthless if it cannot.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "1" ""
+	# The stub writes the log payload to stdout; make it talk on stderr instead.
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+case "\$*" in
+	run\ view\ *--log-failed*)
+		echo "\$*" >> '${FETCH_CALLS}'
+		exit 0
+		;;
+	"api "*"/attempts/"*"/jobs"*)
+		echo "\$*" >> '${API_CALLS}'
+		cat '${PROBE_DIR}/listing'
+		;;
+	"api "*"/actions/jobs/"*"/logs"*)
+		echo "\$*" >> '${API_CALLS}'
+		echo 'dial tcp 20.150.0.1:443: i/o timeout' >&2
+		exit 1
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${mock_bin}/gh"
+	run bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "dial tcp 20.150.0.1:443: i/o timeout"
+	assert_output --partial "dial tcp 20.150.0.1:443: i/o timeout"
+}
+
+@test "rerun-on-infra-failure: non-numeric LOG_PROBE_TIME_BUDGET fails with a clear error" {
+	export LOG_PROBE_TIME_BUDGET="a minute"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_PROBE_TIME_BUDGET must be a positive integer (got 'a minute')"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: LOG_PROBE_TIME_BUDGET of zero is rejected" {
+	export LOG_PROBE_TIME_BUDGET="0"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_PROBE_TIME_BUDGET must be a positive integer (got '0')"
+	[ ! -s "$RERUN_CALLS" ]
 }
 
 @test "rerun-on-infra-failure: non-numeric LOG_PROBE_CMD_TIMEOUT fails with a clear error" {
