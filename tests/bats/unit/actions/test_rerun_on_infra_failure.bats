@@ -21,7 +21,7 @@ setup() {
 	export PROBE_DIR="${BATS_TEST_TMPDIR}/gh_probe"
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
-	unset LOG_PROBE_MAX_JOBS LOG_PROBE_MAX_CALLS
+	unset LOG_PROBE_MAX_JOBS LOG_PROBE_MAX_CALLS LOG_PROBE_CMD_TIMEOUT
 }
 
 teardown() {
@@ -1246,6 +1246,95 @@ EOF
 	assert_success
 	# Five empty attempts would spend ten calls unbounded; the budget caps it.
 	assert_equal "3" "$(_call_count "$API_CALLS")"
+	# An exhausted budget is stated, never a silent gap in the table: otherwise
+	# "the later attempts found nothing" and "the later attempts went unprobed"
+	# read identically.
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "not probed: call budget of 3 spent"
+}
+
+@test "rerun-on-infra-failure: the attempt-jobs listing is fetched once and reused" {
+	# The run is complete and the attempt is pinned, so its job conclusions are
+	# immutable — refetching the listing per attempt would just burn the call
+	# budget that the per-job probes need.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="3"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" "some raw log"
+	run bash "$SCRIPT"
+	assert_success
+	run grep -cF "actions/runs/${RUN_ID}/attempts/1/jobs" "$API_CALLS"
+	assert_output "1"
+	# One listing plus one per-job probe on each of the three empty attempts.
+	assert_equal "4" "$(_call_count "$API_CALLS")"
+}
+
+@test "rerun-on-infra-failure: an empty listing is retried rather than cached" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="3"
+	_probe_listing "0"
+	run bash "$SCRIPT"
+	assert_success
+	run grep -cF "actions/runs/${RUN_ID}/attempts/1/jobs" "$API_CALLS"
+	assert_output "3"
+}
+
+@test "rerun-on-infra-failure: probe calls run under their own short timeout" {
+	# Not GH_CMD_TIMEOUT: that bound is sized for a log-archive download, and
+	# the probe must never be able to spend the fetch loop's time budget.
+	export TIMEOUT_CALLS="${BATS_TEST_TMPDIR}/timeout_calls"
+	export LOG_PROBE_CMD_TIMEOUT="7"
+	export LOG_FETCH_ATTEMPTS="1"
+	: >"$TIMEOUT_CALLS"
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" "some raw log"
+	run bash "$SCRIPT"
+	assert_success
+	run grep -c -- "7 gh api" "$TIMEOUT_CALLS"
+	assert_output "2"
+}
+
+@test "rerun-on-infra-failure: the probe is skipped when the fetch deadline has no room" {
+	# The invariant that keeps the probe observational: it runs between two
+	# deadline checks, so unbudgeted probe calls could push the next check past
+	# LOG_FETCH_DEADLINE and cost the run attempts 2-5 — a rerun lost *because*
+	# of the instrumentation.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_DEADLINE="90"
+	export GH_CMD_TIMEOUT="80"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" "some raw log"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "0" "$(_call_count "$API_CALLS")"
+	# The fetch loop is untouched: all five attempts still run, and the verdict
+	# is the one the loop reached on its own.
+	assert_equal "5" "$(_call_count "$FETCH_CALLS")"
+	assert_output --partial "::warning::Inconclusive"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable."
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "not probed:"
+}
+
+@test "rerun-on-infra-failure: non-numeric LOG_PROBE_CMD_TIMEOUT fails with a clear error" {
+	export LOG_PROBE_CMD_TIMEOUT="quick"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_PROBE_CMD_TIMEOUT must be a positive integer (got 'quick')"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: LOG_PROBE_CMD_TIMEOUT of zero is rejected" {
+	export LOG_PROBE_CMD_TIMEOUT="0"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_PROBE_CMD_TIMEOUT must be a positive integer (got '0')"
+	[ ! -s "$RERUN_CALLS" ]
 }
 
 @test "rerun-on-infra-failure: LOG_PROBE_MAX_JOBS of zero disables the probe" {
