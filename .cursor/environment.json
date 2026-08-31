@@ -1,0 +1,5 @@
+{
+  "name": "lgtm-ci",
+  "user": "ubuntu",
+  "install": "bash .cursor/install.sh"
+}
