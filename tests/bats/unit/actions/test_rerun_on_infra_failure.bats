@@ -17,8 +17,11 @@ setup() {
 	export RERUN_CALLS="${BATS_TEST_TMPDIR}/rerun_calls"
 	export FETCH_CALLS="${BATS_TEST_TMPDIR}/fetch_calls"
 	export SLEEP_CALLS="${BATS_TEST_TMPDIR}/sleep_calls"
+	export API_CALLS="${BATS_TEST_TMPDIR}/api_calls"
+	export PROBE_DIR="${BATS_TEST_TMPDIR}/gh_probe"
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
+	unset LOG_PROBE_MAX_JOBS LOG_PROBE_MAX_CALLS
 }
 
 teardown() {
@@ -88,6 +91,64 @@ _gh_hang_snippet() {
 EOF
 }
 
+# Fixture store for the #794 ingestion probe: the attempt-jobs listing and the
+# raw per-job logs the gh stub serves for `gh api`. Reset by every gh mock, so
+# a test that says nothing about the probe still gets a well-defined, quiet
+# stub (an empty listing) instead of an "unexpected gh call" error.
+_init_probe_dir() {
+	rm -rf "$PROBE_DIR"
+	mkdir -p "$PROBE_DIR"
+	: >"${PROBE_DIR}/listing"
+	printf '0' >"${PROBE_DIR}/listing.status"
+	: >"${PROBE_DIR}/joblog.default"
+	printf '0' >"${PROBE_DIR}/joblog.default.status"
+	: >"$API_CALLS"
+}
+
+# Set the attempt-jobs listing the stub returns: "<exit-code>" then zero or more
+# "<job-id>	<conclusion>	<completed-at>" rows.
+_probe_listing() {
+	local status="$1" row
+	shift
+	printf '%s' "$status" >"${PROBE_DIR}/listing.status"
+	: >"${PROBE_DIR}/listing"
+	for row in "$@"; do
+		printf '%s\n' "$row" >>"${PROBE_DIR}/listing"
+	done
+}
+
+# Set the raw log the stub serves for one job id (or "default" for all others):
+# _probe_job_log <job-id|default> <exit-code> <payload>
+_probe_job_log() {
+	local job_id="$1" status="$2" payload="$3"
+	printf '%s' "$payload" >"${PROBE_DIR}/joblog.${job_id}"
+	printf '%s' "$status" >"${PROBE_DIR}/joblog.${job_id}.status"
+}
+
+# `gh api` branches for the mock, serving the probe fixtures and recording every
+# call so tests can assert on the flags used and on the call count.
+_gh_api_case() {
+	cat <<EOF
+	"api "*"/attempts/"*"/jobs"*)
+		echo "\$*" >> '${API_CALLS}'
+		cat '${PROBE_DIR}/listing'
+		exit "\$(cat '${PROBE_DIR}/listing.status')"
+		;;
+	"api "*"/actions/jobs/"*"/logs"*)
+		echo "\$*" >> '${API_CALLS}'
+		api_args="\$*"
+		job_id="\${api_args##*/actions/jobs/}"
+		job_id="\${job_id%%/logs*}"
+		job_file='${PROBE_DIR}'"/joblog.\${job_id}"
+		if [[ ! -f "\$job_file" ]]; then
+			job_file='${PROBE_DIR}/joblog.default'
+		fi
+		cat "\$job_file"
+		exit "\$(cat "\${job_file}.status")"
+		;;
+EOF
+}
+
 # Mock gh: serve the given failed-job logs for `run view --log-failed` and
 # record `run rerun` invocations. Optional arguments make `run rerun` block for
 # that many seconds, and exit with that status.
@@ -101,6 +162,7 @@ _mock_gh() {
 	printf '%s\n' "$logs" >"$logs_file"
 	: >"$RERUN_CALLS"
 	: >"$FETCH_CALLS"
+	_init_probe_dir
 
 	cat >"${mock_bin}/gh" <<EOF
 #!/usr/bin/env bash
@@ -109,6 +171,7 @@ case "\$*" in
 		echo "\$*" >> '${FETCH_CALLS}'
 		cat '${logs_file}'
 		;;
+$(_gh_api_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
 		hang_for='${rerun_hang}'
@@ -139,6 +202,7 @@ _mock_gh_attempts() {
 	mkdir -p "$mock_bin" "$spec_dir"
 	: >"$RERUN_CALLS"
 	: >"$FETCH_CALLS"
+	_init_probe_dir
 
 	local count=0 spec
 	for spec in "$@"; do
@@ -167,6 +231,7 @@ $(_gh_hang_snippet)
 		cat "\${spec_dir}/\${attempt}.log"
 		exit "\$status"
 		;;
+$(_gh_api_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
 		;;
@@ -868,6 +933,7 @@ _mock_gh_large_log() {
 	mkdir -p "$mock_bin"
 	: >"$RERUN_CALLS"
 	: >"$FETCH_CALLS"
+	_init_probe_dir
 
 	cat >"${mock_bin}/gh" <<EOF
 #!/usr/bin/env bash
@@ -1028,4 +1094,197 @@ EOF
 	assert_success
 	run bash -c 'shopt -s nullglob; leftovers=("$1"/rerun-on-infra-failure.*); echo "${#leftovers[@]}"' _ "$TMPDIR"
 	assert_output "0"
+}
+
+# =============================================================================
+# Log-ingestion probe instrumentation (#794)
+# =============================================================================
+#
+# Evidence gathering, not a behaviour change: on every empty `--log-failed`
+# attempt the script also asks the raw per-job log endpoint what it has, and
+# records both answers in the step summary. The tests below pin down the two
+# properties that make that safe — it is bounded, and it never touches the
+# verdict.
+
+@test "rerun-on-infra-failure: an empty log payload probes the raw per-job logs" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" "##[error]The runner has received a shutdown signal"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "2" "$(_call_count "$API_CALLS")"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Log-ingestion probe evidence (#794)"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "\`55501\` (failure)"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "available"
+	assert_output --partial "#794 probe: attempt 1, job 55501"
+}
+
+@test "rerun-on-infra-failure: the probe lists the attempt jobs with --paginate" {
+	# A matrix run can exceed the endpoint's 100-jobs-per-page limit, so an
+	# unpaginated listing would quietly drop the very jobs worth probing.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	run bash "$SCRIPT"
+	assert_success
+	run grep -c -- "--paginate" "$API_CALLS"
+	assert_output "1"
+	run grep -cF "actions/runs/${RUN_ID}/attempts/1/jobs" "$API_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: the probe selects failed and cancelled jobs only" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	run bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$API_CALLS" 'select(.conclusion == "failure" or .conclusion == "cancelled")'
+}
+
+@test "rerun-on-infra-failure: probe evidence does not change the inconclusive verdict" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" "The runner has received a shutdown signal"
+	run bash "$SCRIPT"
+	# A signature in the *probed* log is evidence, never a trigger: the raw log
+	# is not the matcher's input until #794's evidence gate passes.
+	assert_success
+	assert_output --partial "::warning::Inconclusive"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable."
+}
+
+@test "rerun-on-infra-failure: probe evidence does not change a matched verdict" {
+	_mock_gh_attempts "0:" "0:Failed to resolve action download info"
+	_mock_sleep
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" "nothing infra-shaped here"
+	run bash "$SCRIPT"
+	assert_success
+	run grep -c -- "--failed" "$RERUN_CALLS"
+	assert_output "1"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Log-ingestion probe evidence (#794)"
+}
+
+@test "rerun-on-infra-failure: probe evidence does not change an unmatched verdict" {
+	_mock_gh_attempts "0:" "0:assertion failed: expected 200 got 500"
+	_mock_sleep
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" "The runner has received a shutdown signal"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "No infra signature matched"
+	[ ! -s "$RERUN_CALLS" ]
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "The failure looks real"
+}
+
+@test "rerun-on-infra-failure: a failing job listing is recorded, not fatal" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	_probe_listing "1"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::Inconclusive"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "job listing failed (gh exit 1)"
+}
+
+@test "rerun-on-infra-failure: a failing per-job log probe is recorded, not fatal" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "1" "BlobNotFound"
+	run bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "unavailable (gh exit 1)"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable."
+}
+
+@test "rerun-on-infra-failure: an empty per-job log body is recorded as empty" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	_probe_listing "0" "$(printf '55501\tcancelled\t2026-08-31T10:00:00Z')"
+	_probe_job_log "55501" "0" ""
+	run bash "$SCRIPT"
+	assert_success
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "\`55501\` (cancelled) | empty | 0 |"
+}
+
+@test "rerun-on-infra-failure: the probe stops at its per-attempt job ceiling" {
+	# A big matrix must not turn the safety net into an API storm: one listing
+	# plus at most LOG_PROBE_MAX_JOBS log fetches per empty attempt.
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_FETCH_ATTEMPTS="1"
+	local rows=() i
+	for i in 1 2 3 4 5 6 7 8; do
+		rows+=("$(printf '5550%s\tfailure\t2026-08-31T10:00:00Z' "$i")")
+	done
+	_probe_listing "0" "${rows[@]}"
+	_probe_job_log "default" "0" "some raw log"
+	run bash "$SCRIPT"
+	assert_success
+	# 1 listing + 5 job logs, never 1 + 8.
+	assert_equal "6" "$(_call_count "$API_CALLS")"
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "probe ceiling reached"
+}
+
+@test "rerun-on-infra-failure: LOG_PROBE_MAX_CALLS bounds the probe across attempts" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_PROBE_MAX_CALLS="3"
+	_probe_listing "0" "$(printf '55501\tfailure\t2026-08-31T10:00:00Z')"
+	_probe_job_log "default" "0" "some raw log"
+	run bash "$SCRIPT"
+	assert_success
+	# Five empty attempts would spend ten calls unbounded; the budget caps it.
+	assert_equal "3" "$(_call_count "$API_CALLS")"
+}
+
+@test "rerun-on-infra-failure: LOG_PROBE_MAX_JOBS of zero disables the probe" {
+	_mock_gh_attempts "0:"
+	_mock_sleep
+	export LOG_PROBE_MAX_JOBS="0"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "0" "$(_call_count "$API_CALLS")"
+	run grep -cF "Log-ingestion probe evidence" "$GITHUB_STEP_SUMMARY"
+	assert_failure
+}
+
+@test "rerun-on-infra-failure: non-numeric LOG_PROBE_MAX_JOBS fails with a clear error" {
+	export LOG_PROBE_MAX_JOBS="five"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_PROBE_MAX_JOBS must be a non-negative integer (got 'five')"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: non-numeric LOG_PROBE_MAX_CALLS fails with a clear error" {
+	export LOG_PROBE_MAX_CALLS="lots"
+	_mock_gh "Failed to resolve action download info"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::LOG_PROBE_MAX_CALLS must be a non-negative integer (got 'lots')"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: a non-empty log payload never probes" {
+	# The happy path pays nothing for the instrumentation: no listing, no log
+	# fetch, no evidence section.
+	_mock_gh_attempts "0:The runner has received a shutdown signal"
+	_mock_sleep
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "0" "$(_call_count "$API_CALLS")"
+	run grep -cF "Log-ingestion probe evidence" "$GITHUB_STEP_SUMMARY"
+	assert_failure
 }

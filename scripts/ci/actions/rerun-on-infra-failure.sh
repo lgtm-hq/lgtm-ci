@@ -27,6 +27,11 @@
 #   WATCHDOG_DEADLINE - Wall-clock budget in seconds for the whole script, at
 #                       least 1 (default: 420). On expiry the script prints
 #                       diagnostics and exits 0 (#776)
+#   LOG_PROBE_MAX_JOBS - Max raw per-job log probes per empty `--log-failed`
+#                       attempt; 0 disables the #794 probe (default: 5)
+#   LOG_PROBE_MAX_CALLS - Max probe `gh api` calls for the whole invocation,
+#                       listing pages included; 0 disables the probe
+#                       (default: 12)
 #   GITHUB_REPOSITORY - owner/repo (provided by GitHub Actions)
 #   GH_TOKEN          - Token with actions:write scope
 
@@ -56,6 +61,8 @@ printf '[INFO] rerun-on-infra-failure: starting (run=%s attempt=%s)\n' \
 : "${LOG_FETCH_DEADLINE:=180}"
 : "${GH_CMD_TIMEOUT:=60}"
 : "${WATCHDOG_DEADLINE:=420}"
+: "${LOG_PROBE_MAX_JOBS:=5}"
+: "${LOG_PROBE_MAX_CALLS:=12}"
 
 # `timeout` exits 124 when it kills the command it wrapped. That is the one
 # non-zero status this script must not treat as a generic `gh` error.
@@ -101,6 +108,16 @@ fi
 # would mean "expired before starting", so this bound is positive too.
 if [[ ! "$WATCHDOG_DEADLINE" =~ ^[1-9][0-9]*$ ]]; then
 	echo "::error::WATCHDOG_DEADLINE must be a positive integer (got '${WATCHDOG_DEADLINE}')"
+	exit 1
+fi
+# Both probe bounds are non-negative: zero is the documented off switch for the
+# #794 instrumentation, which is observational and must always be droppable.
+if [[ ! "$LOG_PROBE_MAX_JOBS" =~ ^[0-9]+$ ]]; then
+	echo "::error::LOG_PROBE_MAX_JOBS must be a non-negative integer (got '${LOG_PROBE_MAX_JOBS}')"
+	exit 1
+fi
+if [[ ! "$LOG_PROBE_MAX_CALLS" =~ ^[0-9]+$ ]]; then
+	echo "::error::LOG_PROBE_MAX_CALLS must be a non-negative integer (got '${LOG_PROBE_MAX_CALLS}')"
 	exit 1
 fi
 
@@ -222,6 +239,144 @@ payload_has_content() {
 	[[ "$1" == *[![:space:]]* ]]
 }
 
+# =============================================================================
+# Ingestion probe instrumentation (#794) — observational only
+# =============================================================================
+#
+# #794 proposes reading the raw per-job log endpoint instead of
+# `gh run view --log-failed`, on the theory that the run archive lags behind it
+# and the safety net therefore matches against an empty payload. That theory is
+# unproven: the two endpoints have only ever been compared *after* ingestion
+# finished. Nothing here changes the verdict — it records, for each empty
+# `--log-failed` attempt, what the raw endpoint returned at the same instant,
+# so a handful of natural runner-loss failures settle the question with
+# evidence instead of argument.
+#
+# Every failure mode of the probe (HTTP error, BlobNotFound, empty body,
+# missing jq output, a killed `gh`) is recorded and swallowed: the safety net
+# already exists to keep a red run from needing a human, and instrumentation
+# that can redden it would be worse than no instrumentation at all.
+
+# Markdown rows accumulated by the probe, flushed once by emit_probe_evidence.
+PROBE_EVIDENCE=()
+# `gh api` calls the probe has spent, against the LOG_PROBE_MAX_CALLS budget.
+PROBE_CALLS=0
+
+# True while the probe still has budget for one more `gh api` call.
+probe_has_budget() {
+	((PROBE_CALLS < LOG_PROBE_MAX_CALLS))
+}
+
+# Seconds between an ISO-8601 timestamp and now, or "unknown" when the stamp is
+# absent or unparseable. GNU `date -d` first, BSD `date -j -f` second, so this
+# reads the same on a runner and on a developer's mac.
+seconds_since() {
+	local ts="$1" epoch="" now
+	if [[ -z "$ts" || "$ts" == "null" ]]; then
+		printf 'unknown\n'
+		return 0
+	fi
+	epoch="$(date -u -d "$ts" +%s 2>/dev/null)" || epoch=""
+	if [[ -z "$epoch" ]]; then
+		epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$ts" +%s 2>/dev/null)" || epoch=""
+	fi
+	if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+		printf 'unknown\n'
+		return 0
+	fi
+	now="$(date -u +%s)"
+	printf '%s\n' "$((now - epoch))"
+}
+
+# Outputs of probe_one_job_log. Globals rather than a printed result because
+# a command substitution would run the probe in a subshell, where the
+# PROBE_CALLS budget it spends would be discarded on return — an unbounded
+# probe wearing the appearance of a bounded one.
+PROBE_JOB_STATE=""
+PROBE_JOB_BYTES=0
+
+# Fetch the raw log of one job and describe what came back. Never fails.
+probe_one_job_log() {
+	local job_id="$1" body status=0
+	PROBE_CALLS=$((PROBE_CALLS + 1))
+	PROBE_JOB_STATE=""
+	PROBE_JOB_BYTES=0
+	body="$(gh_bounded api "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" 2>/dev/null)" || status=$?
+	if ((status == TIMEOUT_EXIT_STATUS)); then
+		PROBE_JOB_STATE="timed out"
+	elif ((status != 0)); then
+		PROBE_JOB_STATE="unavailable (gh exit ${status})"
+	elif payload_has_content "$body"; then
+		PROBE_JOB_STATE="available"
+		PROBE_JOB_BYTES=${#body}
+	else
+		PROBE_JOB_STATE="empty"
+	fi
+}
+
+# Record, for one empty `--log-failed` attempt, what the raw per-job log
+# endpoint returns for the failed jobs of the current attempt.
+#
+# Job selection mirrors what #794 proposes for the real switch — conclusion
+# `failure` or `cancelled` — and is done by `gh`'s built-in jq so the probe adds
+# no dependency of its own. Pagination is explicit (`--paginate`): a matrix run
+# can exceed the endpoint's 100-jobs-per-page limit, and a relevant job on page
+# two would otherwise silently drop out of the evidence.
+probe_raw_job_logs() {
+	local attempt="$1" listing status=0 probed=0 job_id conclusion completed_at age
+
+	((LOG_PROBE_MAX_JOBS > 0)) || return 0
+	if ! probe_has_budget; then
+		return 0
+	fi
+
+	PROBE_CALLS=$((PROBE_CALLS + 1))
+	listing="$(gh_bounded api \
+		"repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+		--paginate \
+		--jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [(.id|tostring), .conclusion, (.completed_at // "")] | @tsv' \
+		2>/dev/null)" || status=$?
+	if ((status != 0)); then
+		log_warn "#794 probe: listing the failed jobs of run ${RUN_ID} attempt ${RUN_ATTEMPT} exited ${status} (attempt ${attempt})"
+		PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | job listing failed (gh exit ${status}) | 0 |")
+		return 0
+	fi
+	if ! payload_has_content "$listing"; then
+		PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | no failed/cancelled job in the listing | 0 |")
+		return 0
+	fi
+
+	while IFS=$'\t' read -r job_id conclusion completed_at; do
+		[[ -n "$job_id" ]] || continue
+		if ((probed >= LOG_PROBE_MAX_JOBS)) || ! probe_has_budget; then
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | probe ceiling reached (${probed} job(s) probed, ${PROBE_CALLS} call(s) spent) | 0 |")
+			break
+		fi
+		probed=$((probed + 1))
+		age="$(seconds_since "$completed_at")"
+		probe_one_job_log "$job_id"
+		log_info "#794 probe: attempt ${attempt}, job ${job_id} (${conclusion}, completed ${age}s ago) raw log ${PROBE_JOB_STATE}, ${PROBE_JOB_BYTES} bytes"
+		PROBE_EVIDENCE+=("| ${attempt} | ${age} | 0 | \`${job_id}\` (${conclusion}) | ${PROBE_JOB_STATE} | ${PROBE_JOB_BYTES} |")
+	done <<<"$listing"
+}
+
+# Flush the probe rows into the step summary, clearly labelled as evidence for
+# #794 rather than as part of the verdict above it. No rows, no section.
+emit_probe_evidence() {
+	local row
+	((${#PROBE_EVIDENCE[@]} > 0)) || return 0
+	add_github_summary ""
+	add_github_summary "### Log-ingestion probe evidence (#794)"
+	add_github_summary ""
+	add_github_summary "Temporary instrumentation, **observational only** — it does not affect the verdict above. Each row is one \`gh run view --log-failed\` attempt that came back empty, alongside what the raw per-job log endpoint (\`/actions/jobs/{job_id}/logs\`) returned at that same moment. #794 is implemented only if the raw endpoint is shown to have content while \`--log-failed\` is still empty."
+	add_github_summary ""
+	add_github_summary "| attempt | job completed (s ago) | \`--log-failed\` bytes | job | raw log | raw bytes |"
+	add_github_summary "| --- | --- | --- | --- | --- | --- |"
+	for row in "${PROBE_EVIDENCE[@]}"; do
+		add_github_summary "$row"
+	done
+}
+
 # Outputs of fetch_failed_logs_with_retry: the log payload and why the loop
 # ended ("ok", "empty", "error" or "timeout"). Set as globals because the
 # payload can be large and command substitution would strip the outcome.
@@ -289,6 +444,10 @@ fetch_failed_logs_with_retry() {
 		else
 			FETCH_OUTCOME="empty"
 			log_warn "Failed-job logs for run ${RUN_ID} are still empty (attempt ${attempt}/${LOG_FETCH_ATTEMPTS}); GitHub may not have ingested them yet"
+			# The one moment worth measuring for #794: the run archive has
+			# nothing, so ask the raw per-job endpoint what it has right now.
+			# Best-effort and verdict-neutral by construction.
+			probe_raw_job_logs "$attempt" || true
 		fi
 
 		if ((attempt < LOG_FETCH_ATTEMPTS && LOG_FETCH_DELAY > 0)); then
@@ -322,7 +481,7 @@ match_signature() {
 	return 1
 }
 
-main() {
+evaluate_and_rerun() {
 	log_phase "Checking re-run eligibility for run ${RUN_ID} (attempt ${RUN_ATTEMPT}, max ${MAX_RERUNS})"
 	if [[ "$RUN_ATTEMPT" -gt "$MAX_RERUNS" ]]; then
 		log_info "Run ${RUN_ID} attempt ${RUN_ATTEMPT} exceeds MAX_RERUNS=${MAX_RERUNS}; not re-running"
@@ -409,6 +568,17 @@ main() {
 	add_github_summary ""
 	add_github_summary "Matched transient infra signature \`${matched}\` in the failed-job logs of run ${RUN_ID} (attempt ${RUN_ATTEMPT}); re-ran the failed jobs."
 	log_success "Re-ran failed jobs of run ${RUN_ID}"
+}
+
+# The verdict first, then the #794 evidence appended beneath it, so the summary
+# still opens with what the safety net decided. The probe never contributes to
+# the exit status: it is instrumentation, and instrumentation that can change
+# an outcome is not measuring the outcome any more.
+main() {
+	local status=0
+	evaluate_and_rerun || status=$?
+	emit_probe_evidence
+	return "$status"
 }
 
 # =============================================================================
