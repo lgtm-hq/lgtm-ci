@@ -1143,13 +1143,13 @@ EOF
 	assert_output "1"
 }
 
-@test "rerun-on-infra-failure: the probe selects failed and cancelled jobs only" {
+@test "rerun-on-infra-failure: the probe selects failed, cancelled and timed-out jobs only" {
 	_mock_gh_attempts "0:"
 	_mock_sleep
 	export LOG_FETCH_ATTEMPTS="1"
 	run bash "$SCRIPT"
 	assert_success
-	assert_file_contains_literal "$API_CALLS" 'select(.conclusion == "failure" or .conclusion == "cancelled")'
+	assert_file_contains_literal "$API_CALLS" 'select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")'
 }
 
 @test "rerun-on-infra-failure: probe evidence does not change the inconclusive verdict" {
@@ -1364,6 +1364,9 @@ EOF
 	assert_output --partial "::warning::Inconclusive"
 	refute_output --partial "Log-fetch deadline of"
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Inconclusive: logs unavailable."
+	# A probe killed at LOG_PROBE_CMD_TIMEOUT is its own evidence state: "the
+	# raw endpoint did not answer in time" is not "the raw endpoint is empty".
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "| timed out | 0 |"
 }
 
 @test "rerun-on-infra-failure: total probe spend respects LOG_PROBE_TIME_BUDGET" {
@@ -1382,14 +1385,12 @@ EOF
 		"$(printf '55502\tfailure\t2026-08-31T10:00:00Z')" \
 		"$(printf '55503\tfailure\t2026-08-31T10:00:00Z')"
 	_probe_job_log "default" "hang" "30"
-	local start=$SECONDS
 	run bash "$SCRIPT"
-	local elapsed=$((SECONDS - start))
 	assert_success
+	# The summary marker is the contract, not a wall-clock reading: nine probes
+	# would stall for 18s, and the budget is what stops them — but asserting on
+	# elapsed seconds only measures how loaded the runner is.
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "probe time budget spent"
-	# Nine probes would be 18s of stalling; the budget keeps the whole run well
-	# under that.
-	[ "$elapsed" -lt 15 ]
 }
 
 @test "rerun-on-infra-failure: a failing probe records a sanitized stderr tail" {

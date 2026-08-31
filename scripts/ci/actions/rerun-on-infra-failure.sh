@@ -440,8 +440,11 @@ probe_one_job_log() {
 # endpoint returns for the failed jobs of the current attempt.
 #
 # Job selection mirrors what #794 proposes for the real switch — conclusion
-# `failure` or `cancelled` — and is done by `gh`'s built-in jq so the probe adds
-# no dependency of its own. Pagination is explicit (`--paginate`): a matrix run
+# `failure`, `cancelled` or `timed_out` — and is done by `gh`'s built-in jq so
+# the probe adds no dependency of its own. `timed_out` is in the set because a
+# `timeout-minutes` kill is squarely the evidence class #794 is about: the job
+# died mid-step, which is exactly when the run archive and the raw endpoint are
+# most likely to disagree. Pagination is explicit (`--paginate`): a matrix run
 # can exceed the endpoint's 100-jobs-per-page limit, and a relevant job on page
 # two would otherwise silently drop out of the evidence.
 probe_raw_job_logs() {
@@ -481,7 +484,7 @@ probe_raw_job_logs() {
 		listing="$(gh_probe_bounded api \
 			"repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
 			--paginate \
-			--jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled") | [(.id|tostring), .conclusion, (.completed_at // "")] | @tsv' \
+			--jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out") | [(.id|tostring), .conclusion, (.completed_at // "")] | @tsv' \
 			2>"$err_file")" || status=$?
 		probe_bill_since "$started"
 		if ((status != 0)); then
