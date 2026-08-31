@@ -32,6 +32,10 @@ dev = [
   "ruff>=0.14.0",
   "black>=25.0.0",
   "tomli-w>=1.0.0",
+  # Invoked by lintro from the project venv, so they must be locked here.
+  "yamllint>=1.37.1",
+  "bandit>=1.9.4",
+  "mypy>=1.19.1",
 ]
 
 [tool.lintro]
