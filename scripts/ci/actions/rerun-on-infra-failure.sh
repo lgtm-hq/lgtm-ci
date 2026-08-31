@@ -27,6 +27,20 @@
 #   WATCHDOG_DEADLINE - Wall-clock budget in seconds for the whole script, at
 #                       least 1 (default: 420). On expiry the script prints
 #                       diagnostics and exits 0 (#776)
+#   LOG_PROBE_MAX_JOBS - Max raw per-job log probes per empty `--log-failed`
+#                       attempt; 0 disables the #794 probe (default: 5)
+#   LOG_PROBE_MAX_CALLS - Max probe `gh api` calls for the whole invocation; a
+#                       `--paginate`d listing counts as one call however many
+#                       pages it walks. 0 disables the probe (default: 12)
+#   LOG_PROBE_CMD_TIMEOUT - Wall-clock bound in seconds on each probe `gh` call,
+#                       at least 1 (default: 15). Deliberately far below
+#                       GH_CMD_TIMEOUT: the probe is instrumentation and must
+#                       never eat the log-fetch loop's own time budget
+#   LOG_PROBE_TIME_BUDGET - Total wall clock in seconds the probe may spend
+#                       across the whole invocation, at least 1 (default: 60).
+#                       Bounds how far probing can push the script out past
+#                       LOG_FETCH_DEADLINE and keeps the WATCHDOG_DEADLINE
+#                       margin intact
 #   GITHUB_REPOSITORY - owner/repo (provided by GitHub Actions)
 #   GH_TOKEN          - Token with actions:write scope
 
@@ -56,6 +70,10 @@ printf '[INFO] rerun-on-infra-failure: starting (run=%s attempt=%s)\n' \
 : "${LOG_FETCH_DEADLINE:=180}"
 : "${GH_CMD_TIMEOUT:=60}"
 : "${WATCHDOG_DEADLINE:=420}"
+: "${LOG_PROBE_MAX_JOBS:=5}"
+: "${LOG_PROBE_MAX_CALLS:=12}"
+: "${LOG_PROBE_CMD_TIMEOUT:=15}"
+: "${LOG_PROBE_TIME_BUDGET:=60}"
 
 # `timeout` exits 124 when it kills the command it wrapped. That is the one
 # non-zero status this script must not treat as a generic `gh` error.
@@ -101,6 +119,28 @@ fi
 # would mean "expired before starting", so this bound is positive too.
 if [[ ! "$WATCHDOG_DEADLINE" =~ ^[1-9][0-9]*$ ]]; then
 	echo "::error::WATCHDOG_DEADLINE must be a positive integer (got '${WATCHDOG_DEADLINE}')"
+	exit 1
+fi
+# Both probe bounds are non-negative: zero is the documented off switch for the
+# #794 instrumentation, which is observational and must always be droppable.
+if [[ ! "$LOG_PROBE_MAX_JOBS" =~ ^[0-9]+$ ]]; then
+	echo "::error::LOG_PROBE_MAX_JOBS must be a non-negative integer (got '${LOG_PROBE_MAX_JOBS}')"
+	exit 1
+fi
+if [[ ! "$LOG_PROBE_MAX_CALLS" =~ ^[0-9]+$ ]]; then
+	echo "::error::LOG_PROBE_MAX_CALLS must be a non-negative integer (got '${LOG_PROBE_MAX_CALLS}')"
+	exit 1
+fi
+# Positive, like the other per-call bound: zero would hand `timeout` a "no
+# limit" argument and let one probe call run unbounded inside the fetch loop.
+if [[ ! "$LOG_PROBE_CMD_TIMEOUT" =~ ^[1-9][0-9]*$ ]]; then
+	echo "::error::LOG_PROBE_CMD_TIMEOUT must be a positive integer (got '${LOG_PROBE_CMD_TIMEOUT}')"
+	exit 1
+fi
+# Positive: the off switches are LOG_PROBE_MAX_JOBS=0 and LOG_PROBE_MAX_CALLS=0,
+# and a zero time budget would be a third, silently different one.
+if [[ ! "$LOG_PROBE_TIME_BUDGET" =~ ^[1-9][0-9]*$ ]]; then
+	echo "::error::LOG_PROBE_TIME_BUDGET must be a positive integer (got '${LOG_PROBE_TIME_BUDGET}')"
 	exit 1
 fi
 
@@ -222,6 +262,297 @@ payload_has_content() {
 	[[ "$1" == *[![:space:]]* ]]
 }
 
+# =============================================================================
+# Ingestion probe instrumentation (#794) — observational only
+# =============================================================================
+#
+# #794 proposes reading the raw per-job log endpoint instead of
+# `gh run view --log-failed`, on the theory that the run archive lags behind it
+# and the safety net therefore matches against an empty payload. That theory is
+# unproven: the two endpoints have only ever been compared *after* ingestion
+# finished. Nothing here changes the verdict — it records, for each empty
+# `--log-failed` attempt, what the raw endpoint returned at the same instant,
+# so a handful of natural runner-loss failures settle the question with
+# evidence instead of argument.
+#
+# Every failure mode of the probe (HTTP error, BlobNotFound, empty body,
+# missing jq output, a killed `gh`) is recorded and swallowed: the safety net
+# already exists to keep a red run from needing a human, and instrumentation
+# that can redden it would be worse than no instrumentation at all.
+
+# Markdown rows accumulated by the probe, flushed once by emit_probe_evidence.
+PROBE_EVIDENCE=()
+# `gh api` calls the probe has spent, against the LOG_PROBE_MAX_CALLS budget. A
+# `--paginate`d listing debits one call however many pages it walks.
+PROBE_CALLS=0
+# The attempt-jobs listing, cached after the first successful non-empty fetch.
+# The run is complete and the attempt is pinned, so its job conclusions cannot
+# change under us; per-row age is computed at probe time, so nothing is lost by
+# not asking again. An errored or empty listing is not cached — those are the
+# two cases where asking again can legitimately give a different answer.
+PROBE_LISTING_CACHE=""
+
+# True while the probe still has budget for one more `gh api` call.
+probe_has_budget() {
+	((PROBE_CALLS < LOG_PROBE_MAX_CALLS))
+}
+
+# Wall clock left in the log-fetch loop's LOG_FETCH_DEADLINE, from the loop's
+# own start. Set by fetch_failed_logs_with_retry; before the loop runs, the
+# whole deadline is nominally left.
+PROBE_LOOP_START=$SECONDS
+# Seconds spent inside probe `gh` calls. Credited back to the fetch loop, whose
+# deadline check subtracts it, so probing can never cost the loop an attempt:
+# with the credit, "elapsed" means "elapsed doing the loop's own work".
+PROBE_TIME_SPENT=0
+
+# Bill the wall clock since $1 to the probe. Called after the call rather than
+# around it: probe calls read their output through a command substitution, and
+# a subshell's increment of PROBE_TIME_SPENT would be discarded on return.
+probe_bill_since() {
+	PROBE_TIME_SPENT=$((PROBE_TIME_SPENT + SECONDS - $1))
+}
+
+probe_time_remaining() {
+	printf '%s\n' "$((LOG_FETCH_DEADLINE - (SECONDS - PROBE_LOOP_START - PROBE_TIME_SPENT)))"
+}
+
+# Seconds of total probe spend still allowed by LOG_PROBE_TIME_BUDGET.
+probe_spend_remaining() {
+	printf '%s\n' "$((LOG_PROBE_TIME_BUDGET - PROBE_TIME_SPENT))"
+}
+
+# True while one more worst-case probe call fits in the total spend budget.
+#
+# Crediting probe time back to the fetch loop protects the loop's attempts, but
+# on its own it lets probing push the whole script out by an unbounded amount —
+# straight into WATCHDOG_DEADLINE, whose SIGKILL lands before the evidence is
+# flushed. This is the second bound: LOG_FETCH_DEADLINE (180) plus this budget
+# (60) plus startup stays comfortably inside WATCHDOG_DEADLINE (420).
+probe_has_spend_budget() {
+	(($(probe_spend_remaining) >= LOG_PROBE_CMD_TIMEOUT + PROBE_KILL_GRACE))
+}
+
+# True while one more probe call fits in the loop's remaining wall clock with a
+# full real fetch still left over.
+#
+# This is the invariant that keeps the instrumentation observational (#794
+# review). The probe runs *between* two LOG_FETCH_DEADLINE checks, which happen
+# only at the top of the loop, so unbudgeted probe calls could push the next
+# check past the deadline: attempts 2-5 would never run, a payload that would
+# have arrived on attempt 3 would never be matched, and a genuine infra failure
+# would go un-re-run *because* of the instrumentation. Worst case it would also
+# blow WATCHDOG_DEADLINE, whose SIGKILL lands before emit_probe_evidence and
+# would take the evidence with it.
+#
+# Reserved: this call's own bound plus the kill grace, and GH_CMD_TIMEOUT for
+# the next real fetch, so the probe can only ever spend slack the fetch loop
+# was never going to use.
+probe_has_time_budget() {
+	local needed=$((LOG_PROBE_CMD_TIMEOUT + PROBE_KILL_GRACE + GH_CMD_TIMEOUT))
+	(($(probe_time_remaining) >= needed))
+}
+
+# Seconds `timeout` waits after SIGTERM before SIGKILL on a probe call.
+readonly PROBE_KILL_GRACE=5
+
+# `gh` under the probe's own, much shorter bound. Never gh_bounded: a probe is
+# allowed to give up, and GH_CMD_TIMEOUT is sized for a log-archive download
+# the probe is not doing.
+gh_probe_bounded() {
+	"$TIMEOUT_BIN" --kill-after="${PROBE_KILL_GRACE}s" "$LOG_PROBE_CMD_TIMEOUT" gh "$@" </dev/null
+}
+
+# Seconds between an ISO-8601 timestamp and now, or "unknown" when the stamp is
+# absent or unparseable. GNU `date -d` first, BSD `date -j -f` second, so this
+# reads the same on a runner and on a developer's mac.
+seconds_since() {
+	local ts="$1" epoch="" now
+	if [[ -z "$ts" || "$ts" == "null" ]]; then
+		printf 'unknown\n'
+		return 0
+	fi
+	epoch="$(date -u -d "$ts" +%s 2>/dev/null)" || epoch=""
+	if [[ -z "$epoch" ]]; then
+		epoch="$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' "$ts" +%s 2>/dev/null)" || epoch=""
+	fi
+	if [[ ! "$epoch" =~ ^[0-9]+$ ]]; then
+		printf 'unknown\n'
+		return 0
+	fi
+	now="$(date -u +%s)"
+	printf '%s\n' "$((now - epoch))"
+}
+
+# First line of a probe `gh` call's stderr, squeezed onto one line and cut to
+# 120 characters. Enough to tell an egress block ("dial tcp … i/o timeout")
+# from a genuine 404/BlobNotFound, which is the difference between "the raw
+# endpoint has nothing" and "this runner could not reach the raw endpoint" —
+# and therefore between valid and invalid evidence for #794.
+probe_stderr_tail() {
+	local file="$1" line=""
+	[[ -s "$file" ]] || return 0
+	IFS= read -r line <"$file" || true
+	line="${line//[[:cntrl:]]/ }"
+	printf '%s' "${line:0:120}"
+}
+
+# Outputs of probe_one_job_log. Globals rather than a printed result because
+# a command substitution would run the probe in a subshell, where the
+# PROBE_CALLS budget it spends would be discarded on return — an unbounded
+# probe wearing the appearance of a bounded one.
+PROBE_JOB_STATE=""
+PROBE_JOB_BYTES=0
+PROBE_JOB_DETAIL=""
+
+# Fetch the raw log of one job and describe what came back. Never fails.
+probe_one_job_log() {
+	local job_id="$1" body status=0 started=$SECONDS
+	local err_file="${WATCHDOG_STATE_DIR}/probe.err"
+	PROBE_CALLS=$((PROBE_CALLS + 1))
+	PROBE_JOB_STATE=""
+	PROBE_JOB_BYTES=0
+	PROBE_JOB_DETAIL=""
+	: >"$err_file"
+	body="$(gh_probe_bounded api "repos/${GITHUB_REPOSITORY}/actions/jobs/${job_id}/logs" 2>"$err_file")" || status=$?
+	probe_bill_since "$started"
+	if ((status == TIMEOUT_EXIT_STATUS)); then
+		PROBE_JOB_STATE="timed out"
+		PROBE_JOB_DETAIL="$(probe_stderr_tail "$err_file")"
+	elif ((status != 0)); then
+		PROBE_JOB_STATE="unavailable (gh exit ${status})"
+		PROBE_JOB_DETAIL="$(probe_stderr_tail "$err_file")"
+	elif payload_has_content "$body"; then
+		PROBE_JOB_STATE="available"
+		# Bytes, not characters: ${#body} counts characters in the ambient
+		# locale, and a raw job log is arbitrary bytes. LC_ALL=C makes the
+		# expansion byte-wise. Note the count is of the payload as bash holds
+		# it, so trailing newlines stripped by the command substitution are not
+		# included — the figure is a floor, which is all the evidence needs.
+		local LC_ALL=C
+		PROBE_JOB_BYTES=${#body}
+	else
+		PROBE_JOB_STATE="empty"
+	fi
+}
+
+# Record, for one empty `--log-failed` attempt, what the raw per-job log
+# endpoint returns for the failed jobs of the current attempt.
+#
+# Job selection mirrors what #794 proposes for the real switch — conclusion
+# `failure`, `cancelled` or `timed_out` — and is done by `gh`'s built-in jq so
+# the probe adds no dependency of its own. `timed_out` is in the set because a
+# `timeout-minutes` kill is squarely the evidence class #794 is about: the job
+# died mid-step, which is exactly when the run archive and the raw endpoint are
+# most likely to disagree. Pagination is explicit (`--paginate`): a matrix run
+# can exceed the endpoint's 100-jobs-per-page limit, and a relevant job on page
+# two would otherwise silently drop out of the evidence.
+probe_raw_job_logs() {
+	local attempt="$1" listing status=0 probed=0 job_id conclusion completed_at age
+	local started err_file="${WATCHDOG_STATE_DIR}/probe.err" detail listing_state age_phrase
+
+	# The two off switches, before any recording: with the probe disabled there
+	# must be no rows, no evidence section and no log lines at all, or "off"
+	# would still be visible in every run's summary.
+	((LOG_PROBE_MAX_JOBS > 0)) || return 0
+	((LOG_PROBE_MAX_CALLS > 0)) || return 0
+	# An exhausted budget, by contrast, is recorded rather than silent: a table
+	# that simply stops has no way to say whether the later attempts found logs
+	# or went unprobed, and an unexplained gap is not evidence.
+	if ! probe_has_budget; then
+		log_info "#794 probe: call budget of ${LOG_PROBE_MAX_CALLS} spent; attempt ${attempt} went unprobed"
+		PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | not probed: call budget of ${LOG_PROBE_MAX_CALLS} spent | 0 |")
+		return 0
+	fi
+	if ! probe_has_spend_budget; then
+		log_info "#794 probe: probe time budget of ${LOG_PROBE_TIME_BUDGET}s spent (${PROBE_TIME_SPENT}s used); attempt ${attempt} went unprobed"
+		PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | not probed: probe time budget spent (${PROBE_TIME_SPENT}s of ${LOG_PROBE_TIME_BUDGET}s) | 0 |")
+		return 0
+	fi
+	if ! probe_has_time_budget; then
+		log_info "#794 probe: only $(probe_time_remaining)s of the log-fetch deadline left; attempt ${attempt} went unprobed"
+		PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | not probed: $(probe_time_remaining)s of log-fetch deadline left | 0 |")
+		return 0
+	fi
+
+	if payload_has_content "$PROBE_LISTING_CACHE"; then
+		listing="$PROBE_LISTING_CACHE"
+	else
+		PROBE_CALLS=$((PROBE_CALLS + 1))
+		started=$SECONDS
+		: >"$err_file"
+		listing="$(gh_probe_bounded api \
+			"repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/attempts/${RUN_ATTEMPT}/jobs" \
+			--paginate \
+			--jq '.jobs[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out") | [(.id|tostring), .conclusion, (.completed_at // "")] | @tsv' \
+			2>"$err_file")" || status=$?
+		probe_bill_since "$started"
+		if ((status != 0)); then
+			detail="$(probe_stderr_tail "$err_file")"
+			# Same wording as a killed per-job probe: a listing the probe's own
+			# bound cut short is a timeout, not an API error.
+			if ((status == TIMEOUT_EXIT_STATUS)); then
+				listing_state="job listing timed out"
+			else
+				listing_state="job listing failed (gh exit ${status})"
+			fi
+			log_warn "#794 probe: listing the failed jobs of run ${RUN_ID} attempt ${RUN_ATTEMPT} exited ${status} (attempt ${attempt})${detail:+: ${detail}}"
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | ${listing_state}${detail:+ — ${detail}} | 0 |")
+			return 0
+		fi
+		if ! payload_has_content "$listing"; then
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | no failed/cancelled/timed_out job in the listing | 0 |")
+			return 0
+		fi
+		PROBE_LISTING_CACHE="$listing"
+	fi
+
+	while IFS=$'\t' read -r job_id conclusion completed_at; do
+		[[ -n "$job_id" ]] || continue
+		if ((probed >= LOG_PROBE_MAX_JOBS)) || ! probe_has_budget; then
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | probe ceiling reached (${probed} job(s) probed, ${PROBE_CALLS} call(s) spent) | 0 |")
+			break
+		fi
+		if ! probe_has_spend_budget; then
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | probe stopped: probe time budget spent (${PROBE_TIME_SPENT}s of ${LOG_PROBE_TIME_BUDGET}s) | 0 |")
+			break
+		fi
+		if ! probe_has_time_budget; then
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | probe stopped: $(probe_time_remaining)s of log-fetch deadline left | 0 |")
+			break
+		fi
+		probed=$((probed + 1))
+		age="$(seconds_since "$completed_at")"
+		# "completed unknown" rather than "completed unknowns ago" when the
+		# timestamp was missing or unparseable.
+		if [[ "$age" == "unknown" ]]; then
+			age_phrase="completed unknown"
+		else
+			age_phrase="completed ${age}s ago"
+		fi
+		probe_one_job_log "$job_id"
+		log_info "#794 probe: attempt ${attempt}, job ${job_id} (${conclusion}, ${age_phrase}) raw log ${PROBE_JOB_STATE}, ${PROBE_JOB_BYTES} bytes${PROBE_JOB_DETAIL:+ (${PROBE_JOB_DETAIL})}"
+		PROBE_EVIDENCE+=("| ${attempt} | ${age} | 0 | \`${job_id}\` (${conclusion}) | ${PROBE_JOB_STATE}${PROBE_JOB_DETAIL:+ — ${PROBE_JOB_DETAIL}} | ${PROBE_JOB_BYTES} |")
+	done <<<"$listing"
+}
+
+# Flush the probe rows into the step summary, clearly labelled as evidence for
+# #794 rather than as part of the verdict above it. No rows, no section.
+emit_probe_evidence() {
+	local row
+	((${#PROBE_EVIDENCE[@]} > 0)) || return 0
+	add_github_summary ""
+	add_github_summary "### Log-ingestion probe evidence (#794)"
+	add_github_summary ""
+	add_github_summary "Temporary instrumentation, **observational only** — it does not affect the verdict above. Each row is one \`gh run view --log-failed\` attempt that came back empty, alongside what the raw per-job log endpoint (\`/actions/jobs/{job_id}/logs\`) returned at that same moment. #794 is implemented only if the raw endpoint is shown to have content while \`--log-failed\` is still empty."
+	add_github_summary ""
+	add_github_summary "| attempt | job completed (s ago) | \`--log-failed\` bytes | job | raw log | raw bytes |"
+	add_github_summary "| --- | --- | --- | --- | --- | --- |"
+	for row in "${PROBE_EVIDENCE[@]}"; do
+		add_github_summary "$row"
+	done
+}
+
 # Outputs of fetch_failed_logs_with_retry: the log payload and why the loop
 # ended ("ok", "empty", "error" or "timeout"). Set as globals because the
 # payload can be large and command substitution would strip the outcome.
@@ -250,6 +581,9 @@ FETCH_ELAPSED=0
 fetch_failed_logs_with_retry() {
 	local attempt logs status start=$SECONDS
 
+	# Same clock the deadline is measured from, so the probe can tell how much
+	# of it is left before spending any of it (#794 review).
+	PROBE_LOOP_START=$start
 	FETCHED_LOGS=""
 	FETCH_OUTCOME="empty"
 	FETCH_TIMEOUT_REASON="command"
@@ -257,11 +591,17 @@ fetch_failed_logs_with_retry() {
 
 	for ((attempt = 1; attempt <= LOG_FETCH_ATTEMPTS; attempt++)); do
 		FETCH_ELAPSED=$((SECONDS - start))
+		# The deadline measures the loop's own work, so time spent inside #794
+		# probe calls is credited back. Without the credit, stalled probes eat
+		# attempts the loop would otherwise have made — an attempt due at t=170
+		# no longer fits — and the instrumentation changes the verdict, which is
+		# exactly what it must never do. LOG_PROBE_TIME_BUDGET is what stops the
+		# credit from pushing the script into WATCHDOG_DEADLINE.
 		# Attempt 1 always runs: LOG_FETCH_DEADLINE is positive and elapsed is 0.
-		if ((FETCH_ELAPSED >= LOG_FETCH_DEADLINE)); then
+		if (((FETCH_ELAPSED - PROBE_TIME_SPENT) >= LOG_FETCH_DEADLINE)); then
 			FETCH_OUTCOME="timeout"
 			FETCH_TIMEOUT_REASON="deadline"
-			log_warn "Log-fetch deadline of ${LOG_FETCH_DEADLINE}s reached after ${FETCH_ELAPSED}s for run ${RUN_ID}; abandoning the remaining attempt(s) of ${LOG_FETCH_ATTEMPTS}"
+			log_warn "Log-fetch deadline of ${LOG_FETCH_DEADLINE}s reached after ${FETCH_ELAPSED}s for run ${RUN_ID} (${PROBE_TIME_SPENT}s of it spent probing, not counted); abandoning the remaining attempt(s) of ${LOG_FETCH_ATTEMPTS}"
 			return 1
 		fi
 
@@ -289,6 +629,10 @@ fetch_failed_logs_with_retry() {
 		else
 			FETCH_OUTCOME="empty"
 			log_warn "Failed-job logs for run ${RUN_ID} are still empty (attempt ${attempt}/${LOG_FETCH_ATTEMPTS}); GitHub may not have ingested them yet"
+			# The one moment worth measuring for #794: the run archive has
+			# nothing, so ask the raw per-job endpoint what it has right now.
+			# Best-effort and verdict-neutral by construction.
+			probe_raw_job_logs "$attempt" || true
 		fi
 
 		if ((attempt < LOG_FETCH_ATTEMPTS && LOG_FETCH_DELAY > 0)); then
@@ -322,7 +666,7 @@ match_signature() {
 	return 1
 }
 
-main() {
+evaluate_and_rerun() {
 	log_phase "Checking re-run eligibility for run ${RUN_ID} (attempt ${RUN_ATTEMPT}, max ${MAX_RERUNS})"
 	if [[ "$RUN_ATTEMPT" -gt "$MAX_RERUNS" ]]; then
 		log_info "Run ${RUN_ID} attempt ${RUN_ATTEMPT} exceeds MAX_RERUNS=${MAX_RERUNS}; not re-running"
@@ -409,6 +753,20 @@ main() {
 	add_github_summary ""
 	add_github_summary "Matched transient infra signature \`${matched}\` in the failed-job logs of run ${RUN_ID} (attempt ${RUN_ATTEMPT}); re-ran the failed jobs."
 	log_success "Re-ran failed jobs of run ${RUN_ID}"
+}
+
+# The verdict first, then the #794 evidence appended beneath it, so the summary
+# still opens with what the safety net decided. The probe never contributes to
+# the exit status: it is instrumentation, and instrumentation that can change
+# an outcome is not measuring the outcome any more.
+main() {
+	local status=0
+	evaluate_and_rerun || status=$?
+	# `|| true` because the flush runs under `set -e`: a failed summary write —
+	# a full disk, a GITHUB_STEP_SUMMARY that vanished — must not turn a green
+	# verdict red. Losing the evidence is the acceptable half of that trade.
+	emit_probe_evidence || true
+	return "$status"
 }
 
 # =============================================================================

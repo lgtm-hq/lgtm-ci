@@ -46,6 +46,22 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	assert_success
 }
 
+@test "auto-rerun: allows the results storage the #794 probe needs" {
+	# `GET /actions/jobs/{id}/logs` answers 302 straight to GitHub's results
+	# blob storage. Under the default block policy without it every probe dies
+	# at the network layer, and the evidence table reads "unavailable" for every
+	# job — indistinguishable from the raw endpoint genuinely having nothing,
+	# which is the one conclusion the probe must not fake.
+	#
+	# Wildcarded because the redirect target is sharded (productionresultssa4
+	# and productionresultssa11 observed live); the unsharded host is never the
+	# target.
+	run grep -cF "*.blob.core.windows.net:443" "$WORKFLOW"
+	assert_success
+	# Both the bootstrap allowlist and the allowed-endpoints input default.
+	assert_output "2"
+}
+
 @test "auto-rerun: delegates to the rerun script with no inline shell" {
 	run grep -F "rerun-on-infra-failure.sh" "$WORKFLOW"
 	assert_success
