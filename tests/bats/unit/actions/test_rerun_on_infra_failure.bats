@@ -1124,8 +1124,8 @@ EOF
 	assert_success
 	assert_equal "2" "$(_call_count "$API_CALLS")"
 	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "Log-ingestion probe evidence (#794)"
-	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "\`55501\` (failure)"
-	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "available"
+	# Table-shaped needle: a bare "available" also matches "unavailable".
+	assert_file_contains_literal "$GITHUB_STEP_SUMMARY" "\`55501\` (failure) | available |"
 	assert_output --partial "#794 probe: attempt 1, job 55501"
 }
 

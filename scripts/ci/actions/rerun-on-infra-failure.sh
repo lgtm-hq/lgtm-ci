@@ -449,7 +449,7 @@ probe_one_job_log() {
 # two would otherwise silently drop out of the evidence.
 probe_raw_job_logs() {
 	local attempt="$1" listing status=0 probed=0 job_id conclusion completed_at age
-	local started err_file="${WATCHDOG_STATE_DIR}/probe.err" detail
+	local started err_file="${WATCHDOG_STATE_DIR}/probe.err" detail listing_state age_phrase
 
 	# The two off switches, before any recording: with the probe disabled there
 	# must be no rows, no evidence section and no log lines at all, or "off"
@@ -489,12 +489,19 @@ probe_raw_job_logs() {
 		probe_bill_since "$started"
 		if ((status != 0)); then
 			detail="$(probe_stderr_tail "$err_file")"
+			# Same wording as a killed per-job probe: a listing the probe's own
+			# bound cut short is a timeout, not an API error.
+			if ((status == TIMEOUT_EXIT_STATUS)); then
+				listing_state="job listing timed out"
+			else
+				listing_state="job listing failed (gh exit ${status})"
+			fi
 			log_warn "#794 probe: listing the failed jobs of run ${RUN_ID} attempt ${RUN_ATTEMPT} exited ${status} (attempt ${attempt})${detail:+: ${detail}}"
-			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | job listing failed (gh exit ${status})${detail:+ — ${detail}} | 0 |")
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | ${listing_state}${detail:+ — ${detail}} | 0 |")
 			return 0
 		fi
 		if ! payload_has_content "$listing"; then
-			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | no failed/cancelled job in the listing | 0 |")
+			PROBE_EVIDENCE+=("| ${attempt} | unknown | 0 | — | no failed/cancelled/timed_out job in the listing | 0 |")
 			return 0
 		fi
 		PROBE_LISTING_CACHE="$listing"
@@ -516,8 +523,15 @@ probe_raw_job_logs() {
 		fi
 		probed=$((probed + 1))
 		age="$(seconds_since "$completed_at")"
+		# "completed unknown" rather than "completed unknowns ago" when the
+		# timestamp was missing or unparseable.
+		if [[ "$age" == "unknown" ]]; then
+			age_phrase="completed unknown"
+		else
+			age_phrase="completed ${age}s ago"
+		fi
 		probe_one_job_log "$job_id"
-		log_info "#794 probe: attempt ${attempt}, job ${job_id} (${conclusion}, completed ${age}s ago) raw log ${PROBE_JOB_STATE}, ${PROBE_JOB_BYTES} bytes${PROBE_JOB_DETAIL:+ (${PROBE_JOB_DETAIL})}"
+		log_info "#794 probe: attempt ${attempt}, job ${job_id} (${conclusion}, ${age_phrase}) raw log ${PROBE_JOB_STATE}, ${PROBE_JOB_BYTES} bytes${PROBE_JOB_DETAIL:+ (${PROBE_JOB_DETAIL})}"
 		PROBE_EVIDENCE+=("| ${attempt} | ${age} | 0 | \`${job_id}\` (${conclusion}) | ${PROBE_JOB_STATE}${PROBE_JOB_DETAIL:+ — ${PROBE_JOB_DETAIL}} | ${PROBE_JOB_BYTES} |")
 	done <<<"$listing"
 }
