@@ -35,7 +35,7 @@ inputs:
       SBOMs that syft >= 1.44 emits, #865)"
     required: false
     # renovate: datasource=github-releases depName=anchore/grype
-    default: "v0.117.0"
+    default: "v0.118.0"
 
 outputs:
   vulnerabilities-found:
