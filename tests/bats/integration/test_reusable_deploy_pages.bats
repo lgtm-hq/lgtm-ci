@@ -101,7 +101,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-deploy-pages.yml"
 }
 
 @test "reusable-deploy-pages: deploy-pages action is SHA-pinned with version comment" {
-	run grep -F 'actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0' \
+	run grep -E 'actions/deploy-pages@[0-9a-f]{40} # v[0-9]+\.[0-9]+\.[0-9]+' \
 		"$WORKFLOW"
 	assert_success
 }
