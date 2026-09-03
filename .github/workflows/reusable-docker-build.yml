@@ -301,10 +301,10 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
       - name: Setup QEMU
         # Pinned to SHA for supply chain security
-        uses: docker/setup-qemu-action@96fe6ef7f33517b61c61be40b68a1882f3264fb8 # v4.2.0
+        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a # v4.3.0
       - name: Setup Docker Buildx
         # Pinned to SHA for supply chain security
-        uses: docker/setup-buildx-action@bb05f3f5519dd87d3ba754cc423b652a5edd6d2c # v4.2.0
+        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e # v4.3.0
       - name: Docker registry auth
         if: inputs.push
         uses: ./.lgtm-ci-tooling/.github/actions/docker-auth
@@ -451,7 +451,7 @@ jobs:
       - name: Upload Trivy scan results
         if: always() && inputs.scan && inputs.push == false
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: "trivy-results.sarif"
       - name: Generate artifact attestation
@@ -568,6 +568,6 @@ jobs:
           exit-code: ${{ inputs.scan-exit-code }}
       - name: Upload Trivy scan results
         # Pinned to SHA for supply chain security
-        uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+        uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
         with:
           sarif_file: "trivy-results.sarif"
