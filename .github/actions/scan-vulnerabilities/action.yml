@@ -79,7 +79,7 @@ runs:
     - name: Scan for vulnerabilities
       id: scan
       # Pinned to SHA for supply chain security
-      uses: anchore/scan-action@e1165082ffb1fe366ebaf02d8526e7c4989ea9d2 # v7.4.0
+      uses: anchore/scan-action@27805bf3b4e84b4a5c980df22ed233c00390a439 # v7.4.2
       with:
         # The scan-action default grype lags behind CycloneDX 1.7 support (#865)
         grype-version: ${{ inputs.grype-version }}
@@ -115,7 +115,7 @@ runs:
     - name: Upload SARIF to GitHub Security
       if: inputs.upload-sarif == 'true' && steps.sarif.outputs.sarif-file != ''
       # Pinned to SHA for supply chain security
-      uses: github/codeql-action/upload-sarif@ff2f1c621b7f889edc0d3c761ac2e6a3f8cdb0dd # v4.37.7
+      uses: github/codeql-action/upload-sarif@cdf488f595d80d6e07e03d4674febd5ab45fa938 # v4.37.9
       with:
         sarif_file: ${{ steps.sarif.outputs.sarif-file }}
         category: "vulnerability-scan"
