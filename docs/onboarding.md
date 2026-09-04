@@ -213,9 +213,9 @@ directly. Use the commit SHA in both places, always together:
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
 ```yaml
-uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@eb01982e334eaa7599709a0f767d97afbb015303 # v0.69.1
+uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@c14fbb654af2fc59c4abd7435e85a269a57057fc # v0.69.2
 with:
-  tooling-ref: "eb01982e334eaa7599709a0f767d97afbb015303" # v0.69.1
+  tooling-ref: "c14fbb654af2fc59c4abd7435e85a269a57057fc" # v0.69.2
 ```
 
 <!-- markdownlint-enable MD013 -->
