@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.69.2] - 2026-09-04
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.69.1 (minor) (#872) (31ae71f)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.22.0 (minor) (#891)
+  (59232c9)
+- **deps**: update dependency anchore/grype to 0.118.0 (minor) (#908) (9f2a823)
+- **deps**: update github-actions (#881) (158e865)
+
+### Fixed
+
+- **deps**: update lintro (#920) (ce674ee)
+- **deps**: update lintro (#919) (c978a12)
+- **deps**: update lintro (#917) (6cd7922)
+
 ## [0.69.1] - 2026-09-03
 
 ### Fixed
@@ -2205,7 +2221,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.2...HEAD
+[0.69.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.1...v0.69.2
 [0.69.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.0...v0.69.1
 [0.69.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.68.1...v0.69.0
 [0.68.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.68.0...v0.68.1
