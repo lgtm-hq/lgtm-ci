@@ -550,7 +550,7 @@ check out tooling and resolve the allowlist, then call step-security directly:
     persist-credentials: false
 
 - name: Harden runner
-  uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+  uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
   with:
     egress-policy: ${{ inputs.egress-policy }}
     # inputs.allowed-endpoints (not step outputs): harden-runner pre runs at job start
@@ -581,7 +581,7 @@ bootstrap/fallback flow in `reusable-validate-lintro-version`.
 
 ```yaml
 - name: Harden runner
-  uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+  uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
   with:
     egress-policy: ${{ inputs.egress-policy }}
     allowed-endpoints: ${{ inputs.allowed-endpoints }}
@@ -677,7 +677,7 @@ step when `enforce-egress` is `true`.
 
 - name: Harden runner
   if: steps.policy.outputs['enforce-egress'] == 'true'
-  uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+  uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
   with:
     egress-policy: block
     allowed-endpoints: ${{ inputs.allowed-endpoints }}

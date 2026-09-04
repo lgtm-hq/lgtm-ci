@@ -14,7 +14,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # dir containing only reusable-*.yml is safe.
 WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 
-HARDEN_SHA='05e31511f85b41b11d1cf0ef85d0992719546e2c' # v2.21.0
+HARDEN_SHA='e14015d583714f6e62063499dc959a02595150a1' # v2.21.1
 # Tag is parsed from the HARDEN_SHA comment so Renovate's one-line bump
 # stays the error-message SSoT (do not hardcode vX.Y.Z here).
 HARDEN_TAG="$(sed -nE "s/^HARDEN_SHA='[a-f0-9]{40}' # (v[0-9.]+).*/\1/p" "${BASH_SOURCE[0]}")"
