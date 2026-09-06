@@ -25,10 +25,11 @@ import tempfile
 from pathlib import Path
 
 try:
-    from toml_support import is_local_source, require_tomlkit
+    from toml_support import is_local_source, load_toml_document, require_tomlkit
 except ImportError:  # standalone execution: bootstrap the vendored lib/ path
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
-    from toml_support import is_local_source, require_tomlkit
+    sys.modules.pop("toml_support", None)  # a failed attribute import stays cached
+    from toml_support import is_local_source, load_toml_document, require_tomlkit
 
 tomlkit = require_tomlkit()
 
@@ -55,17 +56,7 @@ def main() -> None:
         print(f"ERROR: {lock_path} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        content = lock_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"ERROR: cannot read {lock_path}: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        doc = tomlkit.parse(content)
-    except ValueError as exc:
-        print(f"ERROR: failed to parse {lock_path}: {exc}", file=sys.stderr)
-        sys.exit(1)
+    doc = load_toml_document(lock_path)
 
     packages = doc.get("package")
     if packages is None:

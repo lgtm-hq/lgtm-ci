@@ -12,8 +12,9 @@ script. Importers put this directory on ``sys.path`` relative to their own
 from __future__ import annotations
 
 import sys
+from pathlib import Path
 from types import ModuleType
-from typing import Any
+from typing import Any, cast
 
 # Source table keys uv uses for local (non-registry) packages. The
 # project's own entry always carries one of these, which disambiguates
@@ -55,3 +56,29 @@ def is_local_source(package: dict[str, Any]) -> bool:
     """
     source = package.get("source") or {}
     return any(key in source for key in LOCAL_SOURCE_KEYS)
+
+
+def load_toml_document(path: Path) -> dict[str, Any]:
+    """Read and parse a TOML file with tomlkit.
+
+    Args:
+        path: TOML file to read.
+
+    Returns:
+        The parsed document, preserving formatting and comments.
+
+    Raises:
+        SystemExit: When the file cannot be read or parsed; prints a
+            formatted ``ERROR:`` line to stderr for the CI log.
+    """
+    tk = require_tomlkit()
+    try:
+        content = path.read_text(encoding="utf-8")
+    except OSError as exc:
+        print(f"ERROR: cannot read {path}: {exc}", file=sys.stderr)
+        sys.exit(1)
+    try:
+        return cast(dict[str, Any], tk.parse(content))
+    except (ValueError, tk.exceptions.TOMLKitError) as exc:
+        print(f"ERROR: failed to parse {path}: {exc}", file=sys.stderr)
+        sys.exit(1)

@@ -16,10 +16,11 @@ import sys
 from pathlib import Path
 
 try:
-    from toml_support import require_tomlkit
+    from toml_support import load_toml_document, require_tomlkit
 except ImportError:  # standalone execution: bootstrap the vendored lib/ path
+    sys.modules.pop("toml_support", None)  # a failed attribute import stays cached
     sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
-    from toml_support import require_tomlkit
+    from toml_support import load_toml_document, require_tomlkit
 
 tomlkit = require_tomlkit()
 
@@ -42,17 +43,7 @@ def main() -> None:
         print(f"ERROR: {pyproject_path} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        content = pyproject_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"ERROR: cannot read {pyproject_path}: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        doc = tomlkit.parse(content)
-    except ValueError as exc:
-        print(f"ERROR: failed to parse {pyproject_path}: {exc}", file=sys.stderr)
-        sys.exit(1)
+    doc = load_toml_document(pyproject_path)
 
     project = doc.get("project")
     if project is None:
