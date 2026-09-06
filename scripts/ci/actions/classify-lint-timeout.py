@@ -213,7 +213,10 @@ def _safe_tool_name(entry: dict[str, Any]) -> tuple[str, str | None]:
         ``(name, failure)``. ``failure`` is the reason string when the name
         is missing or unsafe; ``name`` is empty in that case.
     """
-    name = str(entry.get("tool") or "").strip()
+    raw = entry.get("tool")
+    if not isinstance(raw, str):
+        return "", f"results contains a non-string tool name ({raw!r})"
+    name = raw.strip()
     if not _SAFE_TOOL_NAME.match(name):
         return "", f"results contains an unsafe tool name ({name!r})"
     return name, None

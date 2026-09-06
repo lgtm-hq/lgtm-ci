@@ -5,8 +5,10 @@
 The Python scripts under ``scripts/ci`` are executed directly by path and
 are sometimes vendored individually together with this ``lib/`` directory,
 so shared TOML plumbing lives here instead of being cloned into each
-script. Importers put this directory on ``sys.path`` relative to their own
-``__file__`` and import what they need.
+script. Importers try a plain ``from toml_support import ...`` first and,
+when that fails, prepend this directory (resolved relative to their own
+``__file__``) to ``sys.path`` and retry, so a script never depends on an
+ambient installation of the module.
 """
 
 from __future__ import annotations
