@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.69.5] - 2026-09-06
+
+### Changed
+
+- **rulesets**: record the full checks-podex required-context list (#932) (5817eb6)
+- **deps**: update pnpm/action-setup action to v6.1.0 (minor) (#926) (1aa75de)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.69.4 (patch) (#929) (b205b56)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.23.0 (minor) (#931)
+  (af59001)
+
+### Fixed
+
+- **deps**: update lintro (#930) (5cfb894)
+
 ## [0.69.4] - 2026-09-05
 
 ### Changed
@@ -2243,7 +2257,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.4...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.5...HEAD
+[0.69.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.4...v0.69.5
 [0.69.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.3...v0.69.4
 [0.69.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.2...v0.69.3
 [0.69.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.1...v0.69.2
