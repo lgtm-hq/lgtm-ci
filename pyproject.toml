@@ -28,7 +28,7 @@ Issues = "https://github.com/lgtm-hq/lgtm-ci/issues"
 [project.optional-dependencies]
 dev = [
   # Keep in sync with LINTRO_IMAGE digest in reusable-quality-lint.yml / reusable-security-audit.yml / run-quality action
-  "lintro==0.146.0",
+  "lintro==0.147.3",
   "ruff>=0.14.0",
   "black>=25.0.0",
   "tomli-w>=1.0.0",
@@ -40,6 +40,21 @@ dev = [
 
 [tool.lintro]
 config_file = ".lintro-config.yaml"
+
+[tool.lintro.pylint]
+# Ratchet for pylint's duplicate-code checker (R0801). The recorded clones are
+# the deliberate shared boilerplate of the standalone scripts under scripts/ci
+# (import guards, argument handling), which stay self-contained by design so
+# consumers can vendor them individually. The count is measured by the pinned
+# lintro CI image; the baseline may only shrink.
+duplicate_code_baseline = 14
+
+[tool.pylint."messages control"]
+# lintro bundles pylint for duplicate-code (R0801) coverage that no other
+# bundled tool provides. Style and design checks stay with ruff, black and
+# mypy, which already gate this repo.
+disable = ["all"]
+enable = ["R0801"]
 
 [tool.ruff]
 line-length = 88
