@@ -2,6 +2,8 @@
 # SPDX-License-Identifier: MIT
 """Restore scripts/ci/ in tooling sparse-checkout when a job runs CI scripts."""
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 from __future__ import annotations
 
 import pathlib
@@ -138,12 +140,12 @@ def main() -> int:
     """
     updated = 0
     for path in sorted(WORKFLOWS.glob("reusable-*.yml")):
-        text = path.read_text()
+        text = path.read_text(encoding="utf-8")
         if ".lgtm-ci-tooling/scripts" not in text:
             continue
         new_text = fix_workflow(text)
         if new_text != text:
-            path.write_text(new_text)
+            path.write_text(new_text, encoding="utf-8")
             updated += 1
             print(path.name)
     print(f"updated {updated} workflow files")

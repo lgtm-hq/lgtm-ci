@@ -10,20 +10,28 @@ Usage:
     python3 update-python-version.py <pyproject-path> <new-version>
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 import sys
 from pathlib import Path
 
 try:
-    import tomlkit
-except ImportError:
-    print(
-        "ERROR: tomlkit is required. Install via: pip install tomlkit",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+    from toml_support import load_toml_document, require_tomlkit
+except ImportError:  # standalone execution: bootstrap the vendored lib/ path
+    sys.modules.pop("toml_support", None)  # a failed attribute import stays cached
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+    from toml_support import load_toml_document, require_tomlkit
+
+tomlkit = require_tomlkit()
 
 
 def main() -> None:
+    """Set ``[project].version`` in a pyproject.toml from ``sys.argv``.
+
+    Reads the pyproject path and new version from ``sys.argv``. Exits with
+    status 1 on usage errors, a missing file, unreadable/unparseable TOML,
+    or a write failure.
+    """
     if len(sys.argv) != 3:
         print(f"Usage: {sys.argv[0]} <pyproject-path> <new-version>", file=sys.stderr)
         sys.exit(1)
@@ -35,17 +43,7 @@ def main() -> None:
         print(f"ERROR: {pyproject_path} does not exist", file=sys.stderr)
         sys.exit(1)
 
-    try:
-        content = pyproject_path.read_text(encoding="utf-8")
-    except OSError as exc:
-        print(f"ERROR: cannot read {pyproject_path}: {exc}", file=sys.stderr)
-        sys.exit(1)
-
-    try:
-        doc = tomlkit.parse(content)
-    except Exception as exc:
-        print(f"ERROR: failed to parse {pyproject_path}: {exc}", file=sys.stderr)
-        sys.exit(1)
+    doc = load_toml_document(pyproject_path)
 
     project = doc.get("project")
     if project is None:

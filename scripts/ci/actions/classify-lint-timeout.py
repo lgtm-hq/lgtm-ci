@@ -65,6 +65,8 @@ Exit codes:
     2 — usage error (bad arguments)
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 from __future__ import annotations
 
 import argparse
@@ -182,6 +184,136 @@ def _summary_timed_out_tools(summary: dict[str, Any]) -> tuple[set[str] | None, 
     return set(raw), True
 
 
+def _summary_issue_failure(summary: dict[str, Any]) -> str | None:
+    """Check ``summary.total_issues`` and return a disqualifying reason.
+
+    Args:
+        summary: The ``summary`` object from the lintro report.
+
+    Returns:
+        The failure reason when ``total_issues`` is missing or malformed, or
+        non-zero (any real finding disqualifies the flake), else ``None``.
+    """
+    total_issues = summary.get("total_issues")
+    # bool is a subclass of int; reject it so `true` cannot pass as a count.
+    if isinstance(total_issues, bool) or not isinstance(total_issues, int):
+        return f"summary.total_issues is not an integer ({total_issues!r})"
+    if total_issues != 0:
+        return f"report has findings (total_issues={total_issues})"
+    return None
+
+
+def _safe_tool_name(entry: dict[str, Any]) -> tuple[str, str | None]:
+    """Extract and validate the tool name of a result entry.
+
+    Args:
+        entry: The result object whose ``tool`` name to validate.
+
+    Returns:
+        ``(name, failure)``. ``failure`` is the reason string when the name
+        is missing or unsafe; ``name`` is empty in that case.
+    """
+    raw = entry.get("tool")
+    if not isinstance(raw, str):
+        return "", f"results contains a non-string tool name ({raw!r})"
+    name = raw.strip()
+    if not _SAFE_TOOL_NAME.match(name):
+        return "", f"results contains an unsafe tool name ({name!r})"
+    return name, None
+
+
+def _timeout_verdict(entry: dict[str, Any], name: str) -> tuple[bool, str | None]:
+    """Classify one validated result as a timeout or a disqualifying failure.
+
+    Args:
+        entry: The validated result object.
+        name: The entry's validated tool name.
+
+    Returns:
+        ``(timed_out, failure)``. ``failure`` is the reason string when the
+        entry has a malformed issue count, failed for a non-timeout reason,
+        reported issues, or timed out while also reporting issues (a timeout
+        must not mask a finding it did report); ``timed_out`` is False in
+        that case.
+    """
+    issue_count = _result_issue_count(entry)
+    if issue_count is None:
+        return False, f"{name} has a malformed issue count"
+    if _timed_out(entry):
+        if issue_count:
+            return False, f"{name} timed out but reported {issue_count} issue(s)"
+        return True, None
+    if entry.get("success") is not True:
+        return False, f"{name} failed for a non-timeout reason"
+    if issue_count:
+        return False, f"{name} reported {issue_count} issue(s)"
+    return False, None
+
+
+def _timed_out_tools(results: list[Any]) -> tuple[list[str], str | None]:
+    """Collect the names of timed-out tools while validating every result.
+
+    Args:
+        results: The ``results`` array from the lintro report.
+
+    Returns:
+        A ``(timed_out, failure)`` pair. ``failure`` is the reason string when
+        any result is malformed, carries an unsafe name, failed for a
+        non-timeout reason, or reported issues (a timeout must not mask a
+        finding it did report); ``timed_out`` is empty in that case.
+    """
+    timed_out: list[str] = []
+    for entry in results:
+        if not isinstance(entry, dict):
+            return [], "results contains a non-object entry"
+        if entry.get("skipped") is True:
+            continue
+
+        name, failure = _safe_tool_name(entry)
+        if failure:
+            return [], failure
+
+        is_timeout, failure = _timeout_verdict(entry, name)
+        if failure:
+            return [], failure
+        if is_timeout:
+            timed_out.append(name)
+    return timed_out, None
+
+
+def _validate(payload: Any) -> tuple[dict[str, Any], list[str], str | None]:
+    """Validate a report and collect the tools that timed out.
+
+    Args:
+        payload: The parsed lintro JSON report document.
+
+    Returns:
+        A ``(summary, timed_out, failure)`` triple. ``failure`` is the reason
+        string when the report cannot prove a timeout flake (malformed shape,
+        disqualified summary, or a failing result), in which case ``summary``
+        is empty and ``timed_out`` is empty.
+    """
+    if not isinstance(payload, dict):
+        return {}, [], "report is not a JSON object"
+
+    results = payload.get("results")
+    if not isinstance(results, list):
+        return {}, [], "report has no 'results' array"
+
+    summary = payload.get("summary")
+    if not isinstance(summary, dict):
+        return {}, [], "report has no 'summary' object"
+
+    total_failure = _summary_issue_failure(summary)
+    if total_failure is not None:
+        return {}, [], total_failure
+
+    timed_out, results_failure = _timed_out_tools(results)
+    if results_failure is not None:
+        return {}, [], results_failure
+    return summary, timed_out, None
+
+
 def classify(payload: Any) -> Classification:
     """Classify a parsed lintro JSON report.
 
@@ -193,70 +325,9 @@ def classify(payload: Any) -> Classification:
         malformed payload, missing summary, any issue, any non-timeout tool
         failure, an inconsistent summary — yields ``timeout_flake=False``.
     """
-    if not isinstance(payload, dict):
-        return Classification(False, reason="report is not a JSON object")
-
-    results = payload.get("results")
-    if not isinstance(results, list):
-        return Classification(False, reason="report has no 'results' array")
-
-    summary = payload.get("summary")
-    if not isinstance(summary, dict):
-        return Classification(False, reason="report has no 'summary' object")
-
-    total_issues = summary.get("total_issues")
-    # bool is a subclass of int; reject it so `true` cannot pass as a count.
-    if isinstance(total_issues, bool) or not isinstance(total_issues, int):
-        return Classification(
-            False,
-            reason=f"summary.total_issues is not an integer ({total_issues!r})",
-        )
-    if total_issues != 0:
-        return Classification(
-            False,
-            reason=f"report has findings (total_issues={total_issues})",
-        )
-
-    timed_out: list[str] = []
-    for entry in results:
-        if not isinstance(entry, dict):
-            return Classification(False, reason="results contains a non-object entry")
-        if entry.get("skipped") is True:
-            continue
-
-        name = str(entry.get("tool") or "").strip()
-        if not _SAFE_TOOL_NAME.match(name):
-            return Classification(
-                False,
-                reason=f"results contains an unsafe tool name ({name!r})",
-            )
-
-        issue_count = _result_issue_count(entry)
-        if issue_count is None:
-            return Classification(
-                False,
-                reason=f"{name} has a malformed issue count",
-            )
-        if _timed_out(entry):
-            if issue_count:
-                return Classification(
-                    False,
-                    reason=f"{name} timed out but reported {issue_count} issue(s)",
-                )
-            timed_out.append(name)
-            continue
-
-        if entry.get("success") is not True:
-            return Classification(
-                False,
-                reason=f"{name} failed for a non-timeout reason",
-            )
-        if issue_count:
-            return Classification(
-                False,
-                reason=f"{name} reported {issue_count} issue(s)",
-            )
-
+    summary, timed_out, failure = _validate(payload)
+    if failure is not None:
+        return Classification(False, reason=failure)
     if not timed_out:
         return Classification(False, reason="no tool recorded an execution timeout")
 

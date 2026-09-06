@@ -83,11 +83,11 @@ def main() -> None:
 
     toml_path = Path(sys.argv[1])
     remove_ids = set(json.loads(os.environ["REMOVE_IDS_JSON"]))
-    original = toml_path.read_text()
+    original = toml_path.read_text(encoding="utf-8")
     rewritten, removed = remove_stale_ignored_vulns(original, remove_ids)
 
     if rewritten != original:
-        toml_path.write_text(rewritten)
+        toml_path.write_text(rewritten, encoding="utf-8")
 
     for vuln_id in sorted(removed):
         print(f"Removed: {vuln_id}", file=sys.stderr)
