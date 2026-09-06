@@ -3,9 +3,10 @@
 """Shared TOML helpers for the standalone CI scripts.
 
 The Python scripts under ``scripts/ci`` are executed directly by path and
-are sometimes vendored individually, so shared TOML plumbing lives here
-instead of being cloned into each script. Importers put this directory on
-``sys.path`` relative to their own ``__file__`` and import what they need.
+are sometimes vendored individually together with this ``lib/`` directory,
+so shared TOML plumbing lives here instead of being cloned into each
+script. Importers put this directory on ``sys.path`` relative to their own
+``__file__`` and import what they need.
 """
 
 from __future__ import annotations
