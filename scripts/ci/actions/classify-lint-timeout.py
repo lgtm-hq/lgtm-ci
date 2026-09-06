@@ -203,6 +203,50 @@ def _summary_issue_failure(summary: dict[str, Any]) -> str | None:
     return None
 
 
+def _safe_tool_name(entry: dict[str, Any]) -> tuple[str, str | None]:
+    """Extract and validate the tool name of a result entry.
+
+    Args:
+        entry: The result object whose ``tool`` name to validate.
+
+    Returns:
+        ``(name, failure)``. ``failure`` is the reason string when the name
+        is missing or unsafe; ``name`` is empty in that case.
+    """
+    name = str(entry.get("tool") or "").strip()
+    if not _SAFE_TOOL_NAME.match(name):
+        return "", f"results contains an unsafe tool name ({name!r})"
+    return name, None
+
+
+def _timeout_verdict(entry: dict[str, Any], name: str) -> tuple[bool, str | None]:
+    """Classify one validated result as a timeout or a disqualifying failure.
+
+    Args:
+        entry: The validated result object.
+        name: The entry's validated tool name.
+
+    Returns:
+        ``(timed_out, failure)``. ``failure`` is the reason string when the
+        entry has a malformed issue count, failed for a non-timeout reason,
+        reported issues, or timed out while also reporting issues (a timeout
+        must not mask a finding it did report); ``timed_out`` is False in
+        that case.
+    """
+    issue_count = _result_issue_count(entry)
+    if issue_count is None:
+        return False, f"{name} has a malformed issue count"
+    if _timed_out(entry):
+        if issue_count:
+            return False, f"{name} timed out but reported {issue_count} issue(s)"
+        return True, None
+    if entry.get("success") is not True:
+        return False, f"{name} failed for a non-timeout reason"
+    if issue_count:
+        return False, f"{name} reported {issue_count} issue(s)"
+    return False, None
+
+
 def _timed_out_tools(results: list[Any]) -> tuple[list[str], str | None]:
     """Collect the names of timed-out tools while validating every result.
 
@@ -222,23 +266,15 @@ def _timed_out_tools(results: list[Any]) -> tuple[list[str], str | None]:
         if entry.get("skipped") is True:
             continue
 
-        name = str(entry.get("tool") or "").strip()
-        if not _SAFE_TOOL_NAME.match(name):
-            return [], f"results contains an unsafe tool name ({name!r})"
+        name, failure = _safe_tool_name(entry)
+        if failure:
+            return [], failure
 
-        issue_count = _result_issue_count(entry)
-        if issue_count is None:
-            return [], f"{name} has a malformed issue count"
-        if _timed_out(entry):
-            if issue_count:
-                return [], f"{name} timed out but reported {issue_count} issue(s)"
+        is_timeout, failure = _timeout_verdict(entry, name)
+        if failure:
+            return [], failure
+        if is_timeout:
             timed_out.append(name)
-            continue
-
-        if entry.get("success") is not True:
-            return [], f"{name} failed for a non-timeout reason"
-        if issue_count:
-            return [], f"{name} reported {issue_count} issue(s)"
     return timed_out, None
 
 

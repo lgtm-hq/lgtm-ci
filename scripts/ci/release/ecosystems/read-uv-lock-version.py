@@ -18,9 +18,11 @@ a workspace member.
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
-
-from toml_support import is_local_source  # noqa: E402
+try:
+    from toml_support import is_local_source
+except ImportError:  # standalone execution: bootstrap the vendored lib/ path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+    from toml_support import is_local_source
 
 try:
     import tomllib

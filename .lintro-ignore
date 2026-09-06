@@ -2,3 +2,9 @@
 .lintro/
 .venv/
 node_modules/
+
+# CI-time self-vendoring of this repo's own tooling (the quality workflow
+# checks out scripts/ci here to exercise the vendoring contract). It is the
+# same code as scripts/ci, not a separate lint target; linting it would
+# double every finding and pair every file with its clone under R0801.
+.lgtm-ci-tooling/

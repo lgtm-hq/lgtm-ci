@@ -24,9 +24,11 @@ import sys
 import tempfile
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
-
-from toml_support import is_local_source, require_tomlkit  # noqa: E402
+try:
+    from toml_support import is_local_source, require_tomlkit
+except ImportError:  # standalone execution: bootstrap the vendored lib/ path
+    sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+    from toml_support import is_local_source, require_tomlkit
 
 tomlkit = require_tomlkit()
 
