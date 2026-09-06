@@ -42,19 +42,10 @@ dev = [
 config_file = ".lintro-config.yaml"
 
 [tool.lintro.pylint]
-# Ratchet for pylint's duplicate-code checker (R0801). The recorded clones are
-# the deliberate shared boilerplate of the standalone scripts under scripts/ci
-# (import guards, argument handling), which stay self-contained by design so
-# consumers can vendor them individually. The count is measured by the pinned
-# lintro CI image; the baseline may only shrink.
-duplicate_code_baseline = 14
-
-[tool.pylint."messages control"]
-# lintro bundles pylint for duplicate-code (R0801) coverage that no other
-# bundled tool provides. Style and design checks stay with ruff, black and
-# mypy, which already gate this repo.
-disable = ["all"]
-enable = ["R0801"]
+# Ratchet for pylint's duplicate-code checker (R0801). The baseline is zero:
+# shared code among the standalone scripts under scripts/ci must live in
+# scripts/ci/lib/ instead of being cloned. If a new clone appears, extract it.
+duplicate_code_baseline = 0
 
 [tool.ruff]
 line-length = 88

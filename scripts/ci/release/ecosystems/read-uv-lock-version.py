@@ -13,9 +13,14 @@ are considered — used to test whether a lockfile locks the project as
 a workspace member.
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 import sys
 from pathlib import Path
-from typing import Any
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
+
+from toml_support import is_local_source  # noqa: E402
 
 try:
     import tomllib
@@ -29,27 +34,15 @@ except ImportError:
         )
         sys.exit(1)
 
-# Source table keys uv uses for local (non-registry) packages. The
-# project's own entry always carries one of these, which disambiguates
-# it from a same-name registry package elsewhere in the lockfile.
-LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path", "workspace")
-
-
-def is_local_source(package: dict[str, Any]) -> bool:
-    """Return True when a [[package]] entry has a local source.
-
-    Args:
-        package: A parsed ``[[package]]`` table from uv.lock.
-
-    Returns:
-        True if the entry's source is editable, virtual, directory,
-        path, or workspace.
-    """
-    source = package.get("source") or {}
-    return any(key in source for key in LOCAL_SOURCE_KEYS)
-
 
 def main() -> None:
+    """Print the locked version of the named package from a uv.lock file.
+
+    Reads the lock path, package name, and optional ``--local-only`` flag
+    from ``sys.argv``. Exits with status 1 on usage errors, a missing
+    lockfile, or unreadable/unparseable TOML; prints an empty string when
+    the package is not present.
+    """
     args = sys.argv[1:]
     local_only = "--local-only" in args
     args = [a for a in args if a != "--local-only"]
@@ -73,7 +66,7 @@ def main() -> None:
     except OSError as exc:
         print(f"ERROR: cannot read {lock_path}: {exc}", file=sys.stderr)
         sys.exit(1)
-    except Exception as exc:
+    except ValueError as exc:
         print(f"ERROR: failed to parse {lock_path}: {exc}", file=sys.stderr)
         sys.exit(1)
 

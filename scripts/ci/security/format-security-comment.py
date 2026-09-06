@@ -14,12 +14,20 @@ Exit codes:
     1 - Invalid arguments or missing file
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 from __future__ import annotations
 
 import json
 import sys
 from datetime import date
 from pathlib import Path
+from typing import Any
+
+try:
+    import tomllib
+except ImportError:  # stdlib on Python >= 3.11; fallback omits TOML suppressions
+    tomllib = None  # type: ignore[assignment]
 
 
 def _escape_md_cell(value: str) -> str:
@@ -30,9 +38,7 @@ def _escape_md_cell(value: str) -> str:
 
 def _read_suppressions_from_toml() -> list[dict[str, object]]:
     """Read suppression entries from .osv-scanner.toml as a fallback."""
-    try:
-        import tomllib
-    except ImportError:
+    if tomllib is None:
         return []
 
     toml_path = Path(".osv-scanner.toml")
@@ -67,8 +73,17 @@ def _fence_code_block(text: str) -> str:
     return f"{fence}\n{text}\n{fence}"
 
 
-def format_comment(json_path: str) -> str | None:
-    """Format osv-scanner JSON results as markdown."""
+def _load_lintro_results(json_path: str) -> list[Any] | None:
+    """Read a lintro JSON report and return its ``results`` array.
+
+    Args:
+        json_path: Path to the lintro JSON output file.
+
+    Returns:
+        The ``results`` array, or ``None`` when the report is missing,
+        unreadable, or malformed. A diagnostic is printed to stderr for
+        every ``None`` case.
+    """
     path = Path(json_path)
     if not path.exists():
         print(
@@ -100,55 +115,91 @@ def format_comment(json_path: str) -> str | None:
     if not isinstance(results, list):
         print("Invalid JSON structure: 'results' is not a list", file=sys.stderr)
         return None
+    return results
 
-    osv_result = None
+
+def _osv_scanner_result(results: list[Any]) -> dict[str, Any] | None:
+    """Return the osv_scanner entry from a lintro ``results`` array.
+
+    Args:
+        results: The ``results`` array from a lintro report.
+
+    Returns:
+        The first result whose ``tool`` is ``osv_scanner``, or ``None``
+        when there is none.
+    """
     for result in results:
         if isinstance(result, dict) and result.get("tool") == "osv_scanner":
-            osv_result = result
-            break
+            return result
+    return None
 
-    if osv_result is None:
-        print("osv-scanner did not produce results.", file=sys.stderr)
-        return None
 
+def _ai_meta_suppressions(osv_result: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Extract classified suppressions from a result's AI metadata.
+
+    Args:
+        osv_result: The ``osv_scanner`` result object.
+
+    Returns:
+        The suppression entry list when ``ai_metadata.suppressions`` is
+        present and well-formed, else ``None``.
+    """
     ai_meta = osv_result.get("ai_metadata")
-    probe_suppressions: list[dict[str, object]] | None = None
-    if isinstance(ai_meta, dict) and isinstance(
-        ai_meta.get("suppressions"),
-        list,
-    ):
-        probe_suppressions = ai_meta["suppressions"]
+    if not isinstance(ai_meta, dict):
+        return None
+    suppressions = ai_meta.get("suppressions")
+    if isinstance(suppressions, list):
+        return suppressions
+    return None
 
-    sections: list[str] = []
 
-    sections.append("### 🔍 Checks Performed:")
-    sections.append(
-        "- **osv-scanner**: Scanned all lockfiles against the OSV database",
-    )
+def _add_issue_table(
+    sections: list[str],
+    osv_result: dict[str, Any],
+    issues_count: int,
+) -> None:
+    """Append the vulnerability table and recommended actions.
+
+    Args:
+        sections: Section list to append to.
+        osv_result: The ``osv_scanner`` result object.
+        issues_count: Number of reported vulnerabilities.
+    """
+    issues_list = osv_result.get("issues", [])
+    sections.append("### 🚨 Vulnerability Report:")
+    sections.append("| Vulnerability | File |")
+    sections.append("|---------------|------|")
+    if issues_list:
+        for issue in issues_list:
+            if not isinstance(issue, dict):
+                continue
+            msg = _escape_md_cell(str(issue.get("message") or "?"))
+            file = _escape_md_cell(str(issue.get("file") or "?"))
+            sections.append(f"| {msg} | `{file}` |")
+    else:
+        sections.append(
+            f"| {issues_count} vulnerabilities found (details unavailable) | — |",
+        )
     sections.append("")
+    sections.append("### 🔧 Recommended Actions:")
+    sections.append("1. Review the vulnerabilities above")
+    sections.append("2. Update affected packages if fixes are available")
+    sections.append("3. Suppress in .osv-scanner.toml when no fix exists")
 
+
+def _add_vulnerability_sections(
+    sections: list[str],
+    osv_result: dict[str, Any],
+) -> None:
+    """Append the findings, scanner-error, or clean section for a result.
+
+    Args:
+        sections: Section list to append to.
+        osv_result: The ``osv_scanner`` result object.
+    """
     issues_count = osv_result.get("issues_count", 0)
     if issues_count > 0:
-        issues_list = osv_result.get("issues", [])
-        sections.append("### 🚨 Vulnerability Report:")
-        sections.append("| Vulnerability | File |")
-        sections.append("|---------------|------|")
-        if issues_list:
-            for issue in issues_list:
-                if not isinstance(issue, dict):
-                    continue
-                msg = _escape_md_cell(str(issue.get("message") or "?"))
-                file = _escape_md_cell(str(issue.get("file") or "?"))
-                sections.append(f"| {msg} | `{file}` |")
-        else:
-            sections.append(
-                f"| {issues_count} vulnerabilities found (details unavailable) | — |",
-            )
-        sections.append("")
-        sections.append("### 🔧 Recommended Actions:")
-        sections.append("1. Review the vulnerabilities above")
-        sections.append("2. Update affected packages if fixes are available")
-        sections.append("3. Suppress in .osv-scanner.toml when no fix exists")
+        _add_issue_table(sections, osv_result, issues_count)
     elif osv_result.get("success") is False:
         output_text = osv_result.get("output", "")
         sections.append("### ⚠️ Scanner Error:")
@@ -160,48 +211,98 @@ def format_comment(json_path: str) -> str | None:
     else:
         sections.append("No security vulnerabilities found in dependencies.")
 
-    sections.append("")
+
+def _add_probe_suppression_table(
+    sections: list[str],
+    probe_suppressions: list[dict[str, Any]],
+) -> None:
+    """Append the classified suppression table from probe AI metadata.
+
+    Args:
+        sections: Section list to append to.
+        probe_suppressions: Classified suppression entries.
+    """
+    if not probe_suppressions:
+        sections.append("No suppressions configured.")
+        return
+    sections.append("| ID | Expires | Status | Reason |")
+    sections.append("|----|---------|--------|--------|")
+    for suppression in probe_suppressions:
+        if not isinstance(suppression, dict):
+            continue
+        sid = _escape_md_cell(str(suppression.get("id", "?")))
+        expires = _escape_md_cell(str(suppression.get("ignore_until", "?")))
+        status = str(suppression.get("status", "active"))
+        reason = _escape_md_cell(str(suppression.get("reason", "")))
+        if status == "expired":
+            icon = ":warning:"
+            state = f"**EXPIRED** {expires}"
+            row = f"| {icon} `{sid}` | {state} | {icon} Expired | {reason} |"
+        elif status == "stale":
+            note = ":warning: **Stale — safe to remove**"
+            row = f"| `{sid}` | {expires} | {note} | {reason} |"
+        else:
+            row = f"| `{sid}` | {expires} | Active | {reason} |"
+        sections.append(row)
+
+
+def _add_toml_suppression_table(sections: list[str]) -> None:
+    """Append the suppression table read from .osv-scanner.toml.
+
+    Args:
+        sections: Section list to append to.
+    """
+    toml_suppressions = _read_suppressions_from_toml()
+    if toml_suppressions:
+        sections.append("| ID | Expires | Reason |")
+        sections.append("|----|---------|--------|")
+        for suppression in toml_suppressions:
+            sid = _escape_md_cell(str(suppression.get("id", "?")))
+            expires = _escape_md_cell(str(suppression.get("ignoreUntil", "?")))
+            reason = _escape_md_cell(str(suppression.get("reason", "")))
+            sections.append(f"| `{sid}` | {expires} | {reason} |")
+    else:
+        sections.append("No suppressions configured.")
+
+
+def _add_suppression_sections(
+    sections: list[str],
+    probe_suppressions: list[dict[str, Any]] | None,
+) -> None:
+    """Append the suppressed-vulnerabilities section.
+
+    Args:
+        sections: Section list to append to.
+        probe_suppressions: Classified suppressions from the probe's AI
+            metadata, or ``None`` to fall back to .osv-scanner.toml.
+    """
     sections.append("### 🔇 Suppressed Vulnerabilities:")
     if probe_suppressions is not None:
-        if not probe_suppressions:
-            sections.append("No suppressions configured.")
-        else:
-            sections.append("| ID | Expires | Status | Reason |")
-            sections.append("|----|---------|--------|--------|")
-            for suppression in probe_suppressions:
-                if not isinstance(suppression, dict):
-                    continue
-                sid = _escape_md_cell(str(suppression.get("id", "?")))
-                expires = _escape_md_cell(str(suppression.get("ignore_until", "?")))
-                status = str(suppression.get("status", "active"))
-                reason = _escape_md_cell(str(suppression.get("reason", "")))
-                if status == "expired":
-                    sections.append(
-                        f"| :warning: `{sid}` | **EXPIRED** {expires} "
-                        f"| :warning: Expired | {reason} |",
-                    )
-                elif status == "stale":
-                    sections.append(
-                        f"| `{sid}` | {expires} "
-                        f"| :warning: **Stale — safe to remove** | {reason} |",
-                    )
-                else:
-                    sections.append(
-                        f"| `{sid}` | {expires} | Active | {reason} |",
-                    )
-    else:
-        toml_suppressions = _read_suppressions_from_toml()
-        if toml_suppressions:
-            sections.append("| ID | Expires | Reason |")
-            sections.append("|----|---------|--------|")
-            for suppression in toml_suppressions:
-                sid = _escape_md_cell(str(suppression.get("id", "?")))
-                expires = _escape_md_cell(str(suppression.get("ignoreUntil", "?")))
-                reason = _escape_md_cell(str(suppression.get("reason", "")))
-                sections.append(f"| `{sid}` | {expires} | {reason} |")
-        else:
-            sections.append("No suppressions configured.")
+        _add_probe_suppression_table(sections, probe_suppressions)
+        return
+    _add_toml_suppression_table(sections)
 
+
+def format_comment(json_path: str) -> str | None:
+    """Format osv-scanner JSON results as markdown."""
+    results = _load_lintro_results(json_path)
+    if results is None:
+        return None
+    osv_result = _osv_scanner_result(results)
+    if osv_result is None:
+        print("osv-scanner did not produce results.", file=sys.stderr)
+        return None
+
+    sections: list[str] = []
+    sections.append("### 🔍 Checks Performed:")
+    sections.append(
+        "- **osv-scanner**: Scanned all lockfiles against the OSV database",
+    )
+    sections.append("")
+
+    _add_vulnerability_sections(sections, osv_result)
+    sections.append("")
+    _add_suppression_sections(sections, _ai_meta_suppressions(osv_result))
     return "\n".join(sections)
 
 

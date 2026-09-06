@@ -16,43 +16,28 @@ The package name must already be normalized the way uv records it in
 uv.lock (PEP 503: lowercase, runs of ``-_.`` collapsed to a dash).
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 import contextlib
 import os
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any
 
-try:
-    import tomlkit
-except ImportError:
-    print(
-        "ERROR: tomlkit is required. Install via: pip install tomlkit",
-        file=sys.stderr,
-    )
-    sys.exit(1)
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "lib"))
 
-# Source table keys uv uses for local (non-registry) packages. The
-# project's own entry always carries one of these, which disambiguates
-# it from a same-name registry package elsewhere in the lockfile.
-LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path", "workspace")
+from toml_support import is_local_source, require_tomlkit  # noqa: E402
 
-
-def is_local_source(package: dict[str, Any]) -> bool:
-    """Return True when a [[package]] entry has a local source.
-
-    Args:
-        package: A parsed ``[[package]]`` table from uv.lock.
-
-    Returns:
-        True if the entry's source is editable, virtual, directory,
-        path, or workspace.
-    """
-    source = package.get("source") or {}
-    return any(key in source for key in LOCAL_SOURCE_KEYS)
+tomlkit = require_tomlkit()
 
 
 def main() -> None:
+    """Rewrite the own-package ``version`` in a uv.lock file from ``sys.argv``.
+
+    Reads the lock path, package name, and new version from ``sys.argv``.
+    Exits with status 1 on usage errors, a missing lockfile, unreadable or
+    unparseable TOML, a missing/ambiguous package entry, or a write failure.
+    """
     if len(sys.argv) != 4:
         print(
             f"Usage: {sys.argv[0]} <uv-lock-path> <package-name> <new-version>",
@@ -76,7 +61,7 @@ def main() -> None:
 
     try:
         doc = tomlkit.parse(content)
-    except Exception as exc:
+    except ValueError as exc:
         print(f"ERROR: failed to parse {lock_path}: {exc}", file=sys.stderr)
         sys.exit(1)
 

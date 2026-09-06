@@ -10,6 +10,8 @@ Examples:
     python3 read-pyproject-field.py pyproject.toml name
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 import sys
 from pathlib import Path
 
@@ -20,6 +22,12 @@ except ImportError:
 
 
 def main() -> None:
+    """Print a field from a pyproject.toml ``[project]`` table.
+
+    Reads the pyproject path and field name from ``sys.argv``. Exits with
+    status 1 on usage errors, a missing file, or unreadable/unparseable
+    TOML; prints an empty string when the field is absent.
+    """
     if len(sys.argv) != 3:
         print(
             f"Usage: {sys.argv[0]} <pyproject-path> <field>",
@@ -40,7 +48,7 @@ def main() -> None:
     except OSError as exc:
         print(f"ERROR: cannot read {pyproject_path}: {exc}", file=sys.stderr)
         sys.exit(1)
-    except Exception as exc:
+    except ValueError as exc:
         print(f"ERROR: failed to parse {pyproject_path}: {exc}", file=sys.stderr)
         sys.exit(1)
 

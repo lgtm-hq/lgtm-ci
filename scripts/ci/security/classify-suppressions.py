@@ -24,13 +24,14 @@ Exit codes:
     1 - Error
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 from __future__ import annotations
 
 import json
 import os
 import sys
 import tomllib
-import traceback
 from dataclasses import asdict, dataclass
 from datetime import date, datetime
 from pathlib import Path
@@ -184,8 +185,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception:
-        traceback.print_exc(file=sys.stderr)
-        sys.exit(1)
+    # Unhandled errors already print a traceback and exit non-zero, which is
+    # the contract the workflow caller relies on; no broad except needed.
+    main()

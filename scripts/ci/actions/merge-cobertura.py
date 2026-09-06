@@ -25,6 +25,8 @@ Usage:
         --output merged.xml shard0/cov.xml shard1/cov.xml
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 from __future__ import annotations
 
 import argparse
@@ -167,31 +169,21 @@ def coverage_percent(merged: dict[str, dict[int, int]]) -> int:
         Rounding is half-up so it matches awk ``printf '%.0f'`` used by
         ``parse-coverage``.
     """
-    total = 0
-    covered = 0
-    for file_hits in merged.values():
-        for count in file_hits.values():
-            total += 1
-            if count > 0:
-                covered += 1
-    if total == 0:
+    lines_covered, lines_valid = _coverage_counts(merged)
+    if lines_valid == 0:
         return 0
-    return int((covered / total) * 100 + 0.5)
+    return int((lines_covered / lines_valid) * 100 + 0.5)
 
 
-def write_cobertura(
-    merged: dict[str, dict[int, int]],
-    output_path: Path,
-    percent: int,
-) -> None:
-    """Write a Cobertura document for the merged hit map.
+def _coverage_counts(merged: dict[str, dict[int, int]]) -> tuple[int, int]:
+    """Count covered and valid lines across a merged hit map.
 
     Args:
         merged: Filename → line-number → hits mapping.
-        output_path: Destination XML path.
-        percent: Already-rounded integer line-rate percent used as the
-            GITHUB_OUTPUT gate value. XML ``line-rate`` uses exact
-            covered/valid, not this rounded percent.
+
+    Returns:
+        A ``(lines_covered, lines_valid)`` pair. A line is covered when
+        its hit count is greater than zero.
     """
     lines_covered = 0
     lines_valid = 0
@@ -200,9 +192,25 @@ def write_cobertura(
         for count in file_hits.values():
             if count > 0:
                 lines_covered += 1
-    line_rate = f"{(lines_covered / lines_valid) if lines_valid else 0:.4f}"
+    return lines_covered, lines_valid
 
-    chunks: list[str] = [
+
+def _coverage_header(
+    line_rate: str,
+    lines_covered: int,
+    lines_valid: int,
+) -> list[str]:
+    """Build the XML preamble up to the opening ``<classes>`` element.
+
+    Args:
+        line_rate: Formatted overall line rate.
+        lines_covered: Total number of covered lines.
+        lines_valid: Total number of valid lines.
+
+    Returns:
+        The opening XML chunks.
+    """
+    return [
         '<?xml version="1.0" encoding="utf-8"?>',
         "".join(
             [
@@ -228,14 +236,25 @@ def write_cobertura(
         ),
         "<classes>",
     ]
-    for filename in sorted(merged):
-        file_hits = merged[filename]
-        file_total = len(file_hits)
-        file_covered = sum(1 for count in file_hits.values() if count > 0)
-        file_rate = f"{(file_covered / file_total) if file_total else 0:.4f}"
-        escaped_name = _escape_xml(filename)
-        escaped_basename = _escape_xml(Path(filename).name)
-        class_open = "".join(
+
+
+def _class_chunk(filename: str, file_hits: dict[int, int]) -> list[str]:
+    """Build the ``<class>`` chunk for one merged file.
+
+    Args:
+        filename: File path as recorded by kcov.
+        file_hits: Line-number → max hits for the file.
+
+    Returns:
+        Chunk list covering the class element and its lines.
+    """
+    file_total = len(file_hits)
+    file_covered = sum(1 for count in file_hits.values() if count > 0)
+    file_rate = f"{(file_covered / file_total) if file_total else 0:.4f}"
+    escaped_name = _escape_xml(filename)
+    escaped_basename = _escape_xml(Path(filename).name)
+    chunks: list[str] = [
+        "".join(
             [
                 "<class",
                 f' filename="{escaped_name}"',
@@ -243,15 +262,35 @@ def write_cobertura(
                 f' line-rate="{file_rate}"',
                 ">",
             ],
+        ),
+        "<methods />",
+        "<lines>",
+    ]
+    for number in sorted(file_hits):
+        chunks.append(
+            f'<line number="{number}" hits="{file_hits[number]}" />',
         )
-        chunks.append(class_open)
-        chunks.append("<methods />")
-        chunks.append("<lines>")
-        for number in sorted(file_hits):
-            chunks.append(
-                f'<line number="{number}" hits="{file_hits[number]}" />',
-            )
-        chunks.append("</lines></class>")
+    chunks.append("</lines></class>")
+    return chunks
+
+
+def write_cobertura(merged: dict[str, dict[int, int]], output_path: Path) -> None:
+    """Write a Cobertura document for the merged hit map.
+
+    Args:
+        merged: Filename → line-number → hits mapping.
+        output_path: Destination XML path.
+    """
+    lines_covered, lines_valid = _coverage_counts(merged)
+    line_rate = f"{(lines_covered / lines_valid) if lines_valid else 0:.4f}"
+
+    chunks = _coverage_header(
+        line_rate=line_rate,
+        lines_covered=lines_covered,
+        lines_valid=lines_valid,
+    )
+    for filename in sorted(merged):
+        chunks.extend(_class_chunk(filename, merged[filename]))
     chunks.append("</classes></package></packages></coverage>")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text("\n".join(chunks) + "\n", encoding="utf-8")
@@ -312,7 +351,6 @@ def main(argv: list[str] | None = None) -> int:
         write_cobertura(
             merged=merged,
             output_path=Path(args.output),
-            percent=percent,
         )
     except ValueError as exc:
         print(f"[ERROR] {exc}", file=sys.stderr)
