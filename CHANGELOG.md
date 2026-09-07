@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.69.7] - 2026-09-07
+
+### Changed
+
+- **deps**: lock file maintenance (#940) (5ca0f83)
+- **deps**: update renovatebot/github-action action to v46.2.6 (patch) (#939) (eee7d8c)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.69.6 (patch) (#938) (9f53c44)
+
+### Fixed
+
+- **deps**: update lintro (#941) (f062d05)
+
 ## [0.69.6] - 2026-09-06
 
 ### Changed
@@ -2267,7 +2279,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.6...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.7...HEAD
+[0.69.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.6...v0.69.7
 [0.69.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.5...v0.69.6
 [0.69.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.4...v0.69.5
 [0.69.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.3...v0.69.4
