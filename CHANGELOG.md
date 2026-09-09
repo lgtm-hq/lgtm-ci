@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **deps**: renovate bump (#948) (65c9ab4)
 - **deps**: lgtm-ci 0.69.8 pin (#946) (9934edf)
 - **deps**: update dependency lgtm-hq/lgtm-ci to 0.69.7 (patch) (#945) (286e857)
 
