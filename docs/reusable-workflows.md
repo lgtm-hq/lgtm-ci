@@ -420,6 +420,39 @@ A caller that sets none of the new inputs and reads none of the new outputs
 behaves exactly as before: `exit-code` and `status` keep their existing
 meanings and still reflect the lint result alone.
 
+### Semgrep version check (`reusable-quality-lint.yml`)
+
+`semgrep --version` performs an update check against the Semgrep registry.
+On a runner where that call stalls, the round trip can outlast lintro's
+version-check timeout and the whole lint job hangs
+(lgtm-hq/py-lintro#2521). Set the input below to `"0"` to switch the update
+check off inside the lintro container.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                          | Type   | Required | Default | Purpose                                                    |
+| ------------------------------ | ------ | -------- | ------- | ---------------------------------------------------------- |
+| `semgrep-enable-version-check` | string | no       | `"1"`   | `SEMGREP_ENABLE_VERSION_CHECK` inside the lintro container |
+
+<!-- markdownlint-enable MD013 -->
+
+```yaml
+jobs:
+  quality:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
+    with:
+      semgrep-enable-version-check: "0"
+```
+
+It only removes the update notice; the scan itself is unchanged. Do **not**
+pair it with `SEMGREP_SEND_METRICS=off` — semgrep refuses `--config auto`
+(lintro's default) when metrics are disabled, which turns a flaky version
+check into a hard scan failure. The scan still reaches `semgrep.dev:443`
+for rule packs, so keep those endpoints on the egress allowlist.
+
 ### Org ruleset gate (`reusable-required-check.yml`)
 
 Thin aggregate-status gate for org rulesets. Like every `uses:` job, it
