@@ -15,10 +15,11 @@
 #   MAP_HOST_USER  true|false — map host UID/GID via docker --user (default: true
 #                  when GITHUB_ACTIONS=true, otherwise unset/false)
 #   SEMGREP_ENABLE_VERSION_CHECK
-#                  1|0 (default: 1) — forwarded into the container. 0 disables
-#                  semgrep's update check, which makes `semgrep --version` a
-#                  network round trip that can hang past lintro's version-check
-#                  timeout (lgtm-hq/py-lintro#2521).
+#                  1|0 (default: 1) — forwarded into the container. Semgrep's
+#                  update check turns `semgrep --version` into a network round
+#                  trip that can hang past lintro's version-check timeout; 0
+#                  disables the check and skips that request entirely
+#                  (lgtm-hq/py-lintro#2521).
 #
 # GITHUB_ACTIONS=true is forwarded into the container when set, so lintro
 # auto-emits .lintro/artifacts/{sarif,json}/ alongside the console output.

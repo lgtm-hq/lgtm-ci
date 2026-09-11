@@ -110,9 +110,9 @@ on:
       semgrep-enable-version-check:
         description: >-
           Value for SEMGREP_ENABLE_VERSION_CHECK inside the lintro container.
-          Set to "0" to disable semgrep's update check, which makes
-          `semgrep --version` a network round trip that can hang past
-          lintro's version-check timeout.
+          Semgrep's update check turns `semgrep --version` into a network
+          round trip that can hang past lintro's version-check timeout; set
+          "0" to disable the check, which skips that request entirely.
         required: false
         type: string
         default: "1"
