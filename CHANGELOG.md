@@ -19,16 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-## [0.69.9] - 2026-09-09
+## [0.69.9] - 2026-09-11
 
 ### Changed
 
+- **release**: 0.69.9 changelog (#951) (7c729f4)
 - **deps**: renovate bump (#948) (65c9ab4)
 - **deps**: lgtm-ci 0.69.8 pin (#946) (9934edf)
 - **deps**: update dependency lgtm-hq/lgtm-ci to 0.69.7 (patch) (#945) (286e857)
 
 ### Fixed
 
+- **quality-lint**: let callers disable semgrep's version check (#955) (c4fcc6f)
+- **actions**: accept arm64-only homebrew dispatch payloads (#956) (cfa01a5)
 - **deps**: update lintro (#950) (89530d2)
 - **deps**: update lintro (#949) (048867f)
 - **deps**: update lintro (#947) (3da5783)
