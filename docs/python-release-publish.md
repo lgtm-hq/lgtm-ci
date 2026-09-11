@@ -212,18 +212,21 @@ The `trigger-homebrew-update` action sends `repository_dispatch` with
 `event-type: update-formula`. Action inputs are mapped into `client_payload` as
 follows:
 
-| Action input        | `client_payload` field / location              |
-| ------------------- | ---------------------------------------------- |
-| `formula`           | `formula`                                      |
-| `version`           | `version`                                      |
-| `pypi-package`      | `pypi-package` (defaults to `formula`)         |
-| `binary-arm64-sha`  | `binary-assets.arm64-sha` (both SHAs required) |
-| `binary-x86-sha`    | `binary-assets.x86-sha` (both SHAs required)   |
+| Action input       | `client_payload` field / location                  |
+| ------------------ | -------------------------------------------------- |
+| `formula`          | `formula`                                          |
+| `version`          | `version`                                          |
+| `pypi-package`     | `pypi-package` (defaults to `formula`)             |
+| `binary-arm64-sha` | `binary-assets.arm64-sha`                          |
+| `binary-x86-sha`   | `binary-assets.x86-sha` (needs `binary-arm64-sha`) |
 
 Omit `binary-arm64-sha` and `binary-x86-sha` for PyPI-only products — the action
 then omits `binary-assets` from the payload entirely. When both SHA inputs are
-non-empty, `binary-assets` is included with `arm64-sha` and `x86-sha`. Providing
-only one SHA fails the step.
+non-empty, `binary-assets` is included with `arm64-sha` and `x86-sha`. When only
+`binary-arm64-sha` is set, `binary-assets` carries `arm64-sha` alone — the
+`x86-sha` key is absent rather than an empty string — for products that ship an
+arm64-only bottle. Setting `binary-x86-sha` without `binary-arm64-sha` fails the
+step.
 
 Resulting `client_payload` schema:
 
@@ -232,7 +235,7 @@ Resulting `client_payload` schema:
 | `formula`        | yes      | Homebrew formula name                            |
 | `version`        | yes      | Release version                                  |
 | `pypi-package`   | no       | PyPI project name (defaults to `formula`)        |
-| `binary-assets`  | no       | Object with `arm64-sha` and `x86-sha` (optional) |
+| `binary-assets`  | no       | Object with `arm64-sha` and optional `x86-sha`   |
 
 Version typically comes from `reusable-build-python-dist.yml` (`version` output),
 not from `reusable-github-release.yml`.

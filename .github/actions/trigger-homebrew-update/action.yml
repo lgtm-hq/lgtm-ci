@@ -31,11 +31,16 @@ inputs:
     required: false
     default: ""
   binary-arm64-sha:
-    description: "SHA256 of the macOS arm64 release asset (optional)"
+    description: >-
+      SHA256 of the macOS arm64 release asset (optional). Set on its own for
+      an arm64-only tap dispatch; `binary-assets` then carries `arm64-sha`
+      with no `x86-sha` key.
     required: false
     default: ""
   binary-x86-sha:
-    description: "SHA256 of the macOS x86_64 release asset (optional)"
+    description: >-
+      SHA256 of the macOS x86_64 release asset (optional). Requires
+      `binary-arm64-sha`; setting it alone fails the step.
     required: false
     default: ""
 
