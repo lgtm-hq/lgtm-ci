@@ -14,6 +14,12 @@
 #   OUTPUT_LOG     Log path for STEP=check tee (default: chk-output.txt)
 #   MAP_HOST_USER  true|false — map host UID/GID via docker --user (default: true
 #                  when GITHUB_ACTIONS=true, otherwise unset/false)
+#   SEMGREP_ENABLE_VERSION_CHECK
+#                  1|0 (default: 1) — forwarded into the container. Semgrep's
+#                  update check turns `semgrep --version` into a network round
+#                  trip that can hang past lintro's version-check timeout; 0
+#                  disables the check and skips that request entirely
+#                  (lgtm-hq/py-lintro#2521).
 #
 # GITHUB_ACTIONS=true is forwarded into the container when set, so lintro
 # auto-emits .lintro/artifacts/{sarif,json}/ alongside the console output.
@@ -26,7 +32,8 @@ run-lintro-docker.sh — run lintro inside the full py-lintro container.
 
 Requires: STEP=check|format, LINTRO_IMAGE=ghcr.io/lgtm-hq/py-lintro@sha256:...
 
-Optional: TOOLS, TOOL_OPTIONS, FAIL_ON_ERROR, WORKSPACE, OUTPUT_LOG, MAP_HOST_USER
+Optional: TOOLS, TOOL_OPTIONS, FAIL_ON_ERROR, WORKSPACE, OUTPUT_LOG, MAP_HOST_USER,
+          SEMGREP_ENABLE_VERSION_CHECK
 
 MAP_HOST_USER defaults to true on GitHub Actions so the workspace mount is writable.
 Local runs omit --user so the py-lintro entrypoint can gosu to the mount owner.
@@ -79,6 +86,7 @@ declare -a docker_args=(
 	docker run --rm
 	-e HOME=/tmp
 	-e LINTRO_AUTO_INSTALL_DEPS=1
+	-e SEMGREP_ENABLE_VERSION_CHECK="${SEMGREP_ENABLE_VERSION_CHECK:-1}"
 	-v "${WORKSPACE}:/code"
 	-w /code
 )

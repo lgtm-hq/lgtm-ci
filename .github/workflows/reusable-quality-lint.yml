@@ -107,6 +107,15 @@ on:
         required: false
         type: string
         default: ""
+      semgrep-enable-version-check:
+        description: >-
+          Value for SEMGREP_ENABLE_VERSION_CHECK inside the lintro container.
+          Semgrep's update check turns `semgrep --version` into a network
+          round trip that can hang past lintro's version-check timeout; set
+          "0" to disable the check, which skips that request entirely.
+        required: false
+        type: string
+        default: "1"
       lintro-image:
         description: "Pinned ghcr.io/lgtm-hq/py-lintro image (digest strongly recommended)"
         required: false
@@ -212,6 +221,7 @@ jobs:
           TOOL_OPTIONS: ${{ inputs.lintro-tool-options }}
           FAIL_ON_ERROR: ${{ inputs.fail-on-error }}
           MAP_HOST_USER: "true"
+          SEMGREP_ENABLE_VERSION_CHECK: ${{ inputs.semgrep-enable-version-check }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/quality/run-lintro-docker.sh"
       # Classify THIS run's own report. Runs on failure too (always()) because
       # a timeout is exactly the case where the lint step exited non-zero.

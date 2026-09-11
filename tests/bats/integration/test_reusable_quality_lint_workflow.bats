@@ -272,3 +272,29 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 	run grep -F 'classify-lint-timeout.py' "$action"
 	assert_success
 }
+
+# --------------------------------------------------------------------------
+# Semgrep version-check passthrough (lgtm-hq/py-lintro#2521)
+# --------------------------------------------------------------------------
+
+@test "reusable-quality-lint: semgrep-enable-version-check defaults to 1" {
+	run awk '/^      semgrep-enable-version-check:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: "1"'
+	assert_output --partial "type: string"
+}
+
+# The value only helps if it reaches the container: the lint step must export
+# it so run-lintro-docker.sh can forward it with -e.
+@test "reusable-quality-lint: lint step exports SEMGREP_ENABLE_VERSION_CHECK" {
+	run awk '
+		/- name: Run lintro quality checks/ { in_step = 1 }
+		in_step && /^      - name: / && !/Run lintro quality checks/ { exit }
+		in_step && /SEMGREP_ENABLE_VERSION_CHECK: \$\{\{ inputs\.semgrep-enable-version-check \}\}/ {
+			found = 1
+		}
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
