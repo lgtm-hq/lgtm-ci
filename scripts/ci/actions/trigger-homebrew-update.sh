@@ -10,7 +10,8 @@
 #   TAP_REPOSITORY: Tap owner/repo (default: lgtm-hq/homebrew-tap)
 #   PYPI_PACKAGE: PyPI package name (default: FORMULA)
 #   BINARY_ARM64_SHA: macOS arm64 release asset SHA256 (optional)
-#   BINARY_X86_SHA: macOS x86_64 release asset SHA256 (optional)
+#   BINARY_X86_SHA: macOS x86_64 release asset SHA256 (optional; requires
+#     BINARY_ARM64_SHA)
 set -euo pipefail
 
 : "${STEP:?STEP is required}"
@@ -53,11 +54,29 @@ dispatch)
 		--arg pypi_package "$pypi_package"
 	)
 
-	if [[ -n "${binary_arm64_sha// /}" || -n "${binary_x86_sha// /}" ]]; then
-		if [[ -z "${binary_arm64_sha// /}" || -z "${binary_x86_sha// /}" ]]; then
-			_set_dispatch_failure_outputs
-			die "binary-arm64-sha and binary-x86-sha must both be set or both omitted"
-		fi
+	if [[ -z "${binary_arm64_sha// /}" && -n "${binary_x86_sha// /}" ]]; then
+		_set_dispatch_failure_outputs
+		die "binary-x86-sha requires binary-arm64-sha"
+	fi
+
+	if [[ -n "${binary_arm64_sha// /}" && -z "${binary_x86_sha// /}" ]]; then
+		# arm64-only tap dispatch: emit binary-assets without an x86-sha key.
+		payload_args+=(
+			--arg arm64_sha "$binary_arm64_sha"
+		)
+		client_payload=$(
+			jq -n \
+				"${payload_args[@]}" \
+				'{
+					formula: $formula,
+					version: $version,
+					"pypi-package": $pypi_package,
+					"binary-assets": {
+						"arm64-sha": $arm64_sha
+					}
+				}'
+		)
+	elif [[ -n "${binary_arm64_sha// /}" && -n "${binary_x86_sha// /}" ]]; then
 		payload_args+=(
 			--arg arm64_sha "$binary_arm64_sha"
 			--arg x86_sha "$binary_x86_sha"

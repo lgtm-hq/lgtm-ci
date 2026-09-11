@@ -149,13 +149,36 @@ _run_dispatch() {
 	assert_success
 }
 
-@test "trigger-homebrew-update: fails when only one binary SHA is set" {
+@test "trigger-homebrew-update: dispatches arm64-only binary assets" {
 	_mock_gh_dispatch
 
 	_run_dispatch lintro 3.0.0 lgtm-hq/homebrew-tap lintro arm64sha
 
+	assert_success
+
+	run jq -c '.client_payload' "$MOCK_GH_INPUT"
+	assert_success
+	assert_output '{"formula":"lintro","version":"3.0.0","pypi-package":"lintro","binary-assets":{"arm64-sha":"arm64sha"}}'
+}
+
+@test "trigger-homebrew-update: arm64-only payload omits the x86-sha key" {
+	_mock_gh_dispatch
+
+	_run_dispatch lintro 3.0.0 lgtm-hq/homebrew-tap lintro arm64sha
+
+	assert_success
+
+	run jq -e '.client_payload["binary-assets"] | has("x86-sha") | not' "$MOCK_GH_INPUT"
+	assert_success
+}
+
+@test "trigger-homebrew-update: fails when only the x86 SHA is set" {
+	_mock_gh_dispatch
+
+	_run_dispatch lintro 3.0.0 lgtm-hq/homebrew-tap lintro "" x86sha
+
 	assert_failure
-	assert_output --partial "binary-arm64-sha and binary-x86-sha must both be set or both omitted"
+	assert_output --partial "binary-x86-sha requires binary-arm64-sha"
 	assert_github_output "dispatched" "false"
 }
 
