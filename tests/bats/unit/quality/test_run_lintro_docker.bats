@@ -124,6 +124,18 @@ EOF
 	assert_file_contains "${BATS_TEST_TMPDIR}/mock_calls_docker" "-e SEMGREP_ENABLE_VERSION_CHECK=1"
 }
 
+@test "run-lintro-docker.sh treats an empty SEMGREP_ENABLE_VERSION_CHECK as 1" {
+	mock_command_record docker ""
+	mkdir -p "${BATS_TEST_TMPDIR}/ws"
+	cd "${BATS_TEST_TMPDIR}/ws" || exit 1
+
+	run env SEMGREP_ENABLE_VERSION_CHECK='' STEP=check \
+		LINTRO_IMAGE=ghcr.io/test/img:tag MAP_HOST_USER=false bash "${SCRIPT}"
+
+	assert_success
+	assert_file_contains "${BATS_TEST_TMPDIR}/mock_calls_docker" "-e SEMGREP_ENABLE_VERSION_CHECK=1"
+}
+
 @test "run-lintro-docker.sh check passes --tool-options when TOOL_OPTIONS is set" {
 	mock_command_record docker ""
 	mkdir -p "${BATS_TEST_TMPDIR}/ws"
