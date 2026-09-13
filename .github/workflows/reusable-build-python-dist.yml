@@ -55,6 +55,10 @@ on:
           Create a GitHub build-provenance attestation for every file in
           dist/ before the artifact is uploaded (release-security policy,
           section 2). Never soft-fail: an attestation failure fails the build.
+          The build job requests id-token: write and attestations: write
+          regardless of this input, because GitHub validates a reusable
+          workflow's permissions statically; a caller must grant both even
+          with attest: false (which is out of policy for a release).
         required: false
         type: boolean
         default: true
@@ -214,6 +218,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           STEP: write-checksums
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: |
           "${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/python-dist.sh"
       - name: Upload Python distribution

@@ -270,9 +270,32 @@ _make_dist() {
 	printf 'abc  pkg-1.0.0.tar.gz\n' >dist/SHA256SUMS
 	STEP=stage-sidecars run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
 	assert_success
-	[ -f SHA256SUMS ]
+	[ -f .lgtm-ci-sidecars/SHA256SUMS ]
 	[ ! -e dist/SHA256SUMS ]
-	run grep 'checksums-path=SHA256SUMS' "$GITHUB_OUTPUT"
+	run grep 'checksums-path=.lgtm-ci-sidecars/SHA256SUMS' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "python-dist stage-sidecars: never touches a caller-owned SHA256SUMS" {
+	_make_dist
+	printf 'abc  pkg-1.0.0.tar.gz\n' >dist/SHA256SUMS
+	printf 'mine\n' >SHA256SUMS
+	STEP=stage-sidecars run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+	assert_success
+	run cat SHA256SUMS
+	assert_output "mine"
+	[ -f .lgtm-ci-sidecars/SHA256SUMS ]
+}
+
+@test "python-dist stage-sidecars and write-checksums: outputs are workspace-relative" {
+	mkdir -p python && cd python && _make_dist
+	WORKING_DIRECTORY=python STEP=write-checksums run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+	assert_success
+	run grep 'checksums-path=python/dist/SHA256SUMS' "$GITHUB_OUTPUT"
+	assert_success
+	WORKING_DIRECTORY=python/ STEP=stage-sidecars run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+	assert_success
+	run grep 'checksums-path=python/.lgtm-ci-sidecars/SHA256SUMS' "$GITHUB_OUTPUT"
 	assert_success
 }
 

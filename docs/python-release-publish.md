@@ -168,7 +168,8 @@ section 2). The layout is:
    `attest-build` composite as part of the build job (`attest: true`, the
    default; the caller grants `id-token: write` and `attestations: write`).
    There is no `continue-on-error`: an attestation failure fails the build and
-   nothing is published. The job also writes `dist/SHA256SUMS`.
+   nothing is published. The job also writes `dist/SHA256SUMS`. The grants are
+   requested statically, so a caller must grant them even with `attest: false`.
 2. `prepare-pypi-upload` verifies a valid attestation from the calling
    repository for every distribution file (`require-attestation: true`, the
    default; `signer-workflow` pins the signing workflow) and only then exposes

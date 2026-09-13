@@ -43,8 +43,9 @@ defined in the **caller** repository workflow.
 ```
 
 **Outputs:** `dist-path`, `validated`, `package-name`, `package-version`,
-`checksums-path` (the `SHA256SUMS` manifest staged beside `dist/`, never inside
-`dist-path`), `attestations-verified`. Requires `contents: read`,
+`checksums-path` (the `SHA256SUMS` manifest, staged into
+`<working-directory>/.lgtm-ci-sidecars/` and never inside `dist-path`),
+`attestations-verified`. Requires `contents: read`,
 `id-token: write`; `environment: pypi`. With `require-attestation: "true"`
 (default) the action runs `gh attestation verify --repo <caller>` for every
 distribution file and fails closed before `dist-path` is exposed, so the upload

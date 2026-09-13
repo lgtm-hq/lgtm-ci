@@ -130,8 +130,11 @@ _tooling_sparse_cone_ok() {
 		END { exit !(stage && validate && verify && meta && stage < validate && validate < verify && verify < meta) }
 	' "$action"
 	assert_success
-	run grep -q '^  require-attestation:$' "$action"
-	assert_success
-	run grep -q 'default: "true"' "$action"
+	run awk '
+		/^  require-attestation:$/ { in_input = 1; next }
+		in_input && /^  [a-z-]+:$/ { in_input = 0 }
+		in_input && /^    default: "true"$/ { ok = 1 }
+		END { exit !ok }
+	' "$action"
 	assert_success
 }

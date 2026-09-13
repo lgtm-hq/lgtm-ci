@@ -64,8 +64,9 @@ outputs:
     value: ${{ steps.extract-metadata.outputs.version }}
   checksums-path:
     description: >-
-      Path of the SHA256SUMS manifest staged beside dist/ (empty when the
-      artifact carried none); never inside dist-path
+      Workspace-relative path of the SHA256SUMS manifest, staged into
+      <working-directory>/.lgtm-ci-sidecars/ (empty when the artifact
+      carried none); never inside dist-path
     value: ${{ steps.stage-sidecars.outputs.checksums-path }}
   attestations-verified:
     description: >-
@@ -104,6 +105,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: stage-sidecars
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
       run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Setup Python

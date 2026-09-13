@@ -43,6 +43,20 @@ _validate_working_directory() {
 _validate_working_directory "$WORKING_DIRECTORY"
 cd "$WORKING_DIRECTORY"
 
+# Prefix a path relative to the current working directory with
+# WORKING_DIRECTORY (the caller's input) so outputs resolve from the workspace
+# root. "." and empty leave the path unchanged.
+_workspace_relative() {
+	local rel="$1"
+	local wd="${WORKING_DIRECTORY:-.}"
+	wd="${wd%/}"
+	if [[ -z "$wd" || "$wd" == "." ]]; then
+		printf '%s\n' "$rel"
+	else
+		printf '%s/%s\n' "$wd" "$rel"
+	fi
+}
+
 case "$STEP" in
 preflight)
 	: "${VERIFY_TAG_VERSION:=false}"
@@ -209,18 +223,24 @@ write-checksums)
 		(cd dist && shasum -a 256 "${dist_files[@]}") >dist/SHA256SUMS
 	fi
 	log_success "Wrote dist/SHA256SUMS for ${#dist_files[@]} file(s)"
-	set_github_output "checksums-path" "dist/SHA256SUMS"
+	# Workspace-relative, so a caller resolving the output from the
+	# workspace root finds it under a non-default working directory too.
+	set_github_output "checksums-path" "$(_workspace_relative "dist/SHA256SUMS")"
 	;;
 
 stage-sidecars)
 	# The python-dist artifact carries dist/ plus sidecar files that must not
 	# reach twine (`twine check` and `twine upload` reject a non-distribution
 	# file in packages-dir). Move them beside dist/ and expose their paths.
+	# Staged into a dedicated directory owned by this step, so a caller's
+	# own SHA256SUMS (or a directory of that name) is never overwritten.
 	checksums_path=""
 	if [[ -f "dist/SHA256SUMS" ]]; then
-		mv "dist/SHA256SUMS" "SHA256SUMS"
-		checksums_path="SHA256SUMS"
-		log_info "Staged dist/SHA256SUMS -> SHA256SUMS (kept out of packages-dir)"
+		rm -rf ".lgtm-ci-sidecars"
+		mkdir -p ".lgtm-ci-sidecars"
+		mv "dist/SHA256SUMS" ".lgtm-ci-sidecars/SHA256SUMS"
+		checksums_path="$(_workspace_relative ".lgtm-ci-sidecars/SHA256SUMS")"
+		log_info "Staged dist/SHA256SUMS -> ${checksums_path} (kept out of packages-dir)"
 	fi
 	set_github_output "checksums-path" "$checksums_path"
 	;;
