@@ -50,10 +50,10 @@ verifiable evidence.
 | -------------- | ------------------ | -------------- | ------------ |
 | Python sdist and wheel | GitHub build-provenance attestation (SLSA v1 predicate) whose subject digests match the uploaded files; PyPI PEP 740 attestation via trusted publishing | `actions/attest-build-provenance` on the built dist; `pypa/gh-action-pypi-publish` with trusted publishing | `gh attestation verify <file> --repo <owner>/<repo>`; PyPI integrity page `https://pypi.org/integrity/<project>/<version>/<file>/provenance` |
 | Platform binaries and archives | One GitHub build-provenance attestation per file; a `SHA256SUMS` manifest attached to the GitHub Release | `actions/attest-build-provenance` with the file as subject; `sha256sum` in the build job | `gh attestation verify <file> --repo <owner>/<repo>`; `sha256sum --check SHA256SUMS` |
-| Container images | BuildKit provenance and SBOM pushed to the registry with the image index; GitHub attestation by image digest, pushed to the registry; keyless Cosign signature on the digest | `docker/build-push-action` with `provenance` and `sbom` enabled; `actions/attest-build-provenance` with `push-to-registry: true`; `cosign sign` keyless | `gh attestation verify oci://<image>@<digest> --repo <owner>/<repo>`; `cosign verify <image>@<digest> --certificate-identity-regexp '^https://github.com/<owner>/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`; `docker buildx imagetools inspect <image>@<digest> --format '{{ json .Provenance }}'` and `'{{ json .SBOM }}'` |
+| Container images | BuildKit provenance and SBOM pushed to the registry with the image index; GitHub attestation by image digest, pushed to the registry; keyless Cosign signature on the digest | `docker/build-push-action` with `provenance` and `sbom` enabled; `actions/attest-build-provenance` with `push-to-registry: true`; `cosign sign` keyless | `gh attestation verify oci://<image>@<digest> --repo <owner>/<repo>`; `cosign verify <image>@<digest> --certificate-identity-regexp '^https://github\\.com/<owner>/<repo>/\\.github/workflows/[^@]+@' --certificate-oidc-issuer https://token.actions.githubusercontent.com`; `docker buildx imagetools inspect <image>@<digest> --format '{{ json .Provenance }}'` and `'{{ json .SBOM }}'` |
 | npm packages | GitHub build-provenance attestation on the packed tarball; npm-native provenance via `npm publish --provenance` under trusted publishing; every binary packed inside MUST have been verified against its GitHub attestation before packing | `actions/attest-build-provenance` on the `npm pack` output; `npm publish --provenance`; `gh attestation verify` in the pack step | `npm audit signatures`; `npm view <pkg>@<version> dist.attestations` |
 | RubyGems | GitHub build-provenance attestation on the built `.gem` file; publish via RubyGems trusted publishing (OIDC), never an API key | `actions/attest-build-provenance` on the `gem build` output; `rubygems/release-gem` or `gem push` under trusted publishing | `gh attestation verify <file>.gem --repo <owner>/<repo>` |
-| Homebrew tap formula | The formula MUST reference an artifact that carries its own class's evidence (a GitHub Release asset or PyPI sdist above) and pin its `sha256`; the tap dispatch is an irreversible write and follows section 2 | The consumer's release workflow dispatches the tap after the referenced artifact is published; the tap's handler computes and pins the digest | `brew fetch --formula <formula>` then `sha256sum` against the pinned digest; verify the referenced artifact with its own class's command |
+| Homebrew tap formula | The formula MUST reference an artifact that carries its own class's evidence (a GitHub Release asset or PyPI sdist above) and pin its `sha256`; the tap dispatch is an irreversible write and follows section 2 | The consumer's release workflow dispatches the tap after the referenced artifact is published; the tap's handler computes and pins the digest | `brew fetch --formula <formula>`, then `sha256sum --check` of the cached download against the formula's pinned `sha256` (section 9); verify the referenced artifact with its own class's command |
 | Release SBOM | An SBOM for the release artifacts, vulnerability-scanned at the consumer's declared severity gate, and attested | `reusable-sbom-release-upload.yml` (CycloneDX) with its scan gate; `actions/attest-build-provenance` or `actions/attest-sbom` | `gh attestation verify <sbom-file> --repo <owner>/<repo>` |
 
 <!-- markdownlint-enable MD013 -->
@@ -182,6 +182,14 @@ exemption is only that nothing is resumed.
 1. Every build artifact a tier-2 resume depends on (dists, binaries, archives,
    SBOMs, image digests recorded in the run) MUST be retained for the
    **recovery window of 90 days** from the run that built it.
+   For a container image the run artifact holds only the digest; the content
+   lives in the registry. The pushed image MUST therefore remain available in
+   the registry by digest for the window: it MUST be protected from
+   registry cleanup (a retention tag, or an exemption in the consumer's prune
+   configuration for digests younger than the window), or the image MUST be
+   archived by digest as a run artifact (an OCI layout via `oras` or
+   `docker save`) with the same 90-day retention. A digest the registry no
+   longer serves moves the release to tier 3.
 2. Consumers MUST set `retention-days: 90` on those artifacts' upload steps,
    or the repository-level artifact retention to at least 90 days. The
    reusables SHOULD apply this default for release builds
@@ -242,7 +250,7 @@ sha256sum --check SHA256SUMS
 # BuildKit provenance and SBOM attached to the index (both must be non-empty)
 gh attestation verify oci://ghcr.io/<owner>/<image>@sha256:<digest> --repo <owner>/<repo>
 cosign verify ghcr.io/<owner>/<image>@sha256:<digest> \
-  --certificate-identity-regexp '^https://github.com/<owner>/' \
+  --certificate-identity-regexp '^https://github\.com/<owner>/<repo>/\.github/workflows/[^@]+@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 docker buildx imagetools inspect ghcr.io/<owner>/<image>@sha256:<digest> \
   --format '{{ json .Provenance }}'
@@ -256,9 +264,11 @@ npm audit signatures
 # RubyGems
 gh attestation verify ./<gem>-<version>.gem --repo <owner>/<repo>
 
-# Homebrew tap formula: the pinned digest must match the referenced artifact,
-# which is verified with its own class's command above
-brew fetch --formula <tap>/<formula> && sha256sum "$(brew --cache <tap>/<formula>)"
+# Homebrew tap formula: the downloaded artifact must match the formula's pinned
+# digest, and the artifact itself is verified with its own class's command above
+brew fetch --formula <tap>/<formula>
+echo "$(brew info --json=v2 <tap>/<formula> | jq -r '.formulae[0].urls.stable.checksum')  $(brew --cache <tap>/<formula>)" \
+  | sha256sum --check
 
 # PyPI-side provenance (PEP 740)
 curl -fsSL https://pypi.org/integrity/<project>/<version>/<file>/provenance | jq .
