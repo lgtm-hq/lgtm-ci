@@ -46,6 +46,23 @@ on:
         required: false
         type: boolean
         default: false
+      checksums:
+        description: >-
+          Attach a SHA256SUMS manifest of the release assets. A manifest
+          shipped inside the artifact is attached as is; otherwise one is
+          written from the assets (release-security policy, section 1).
+        required: false
+        type: boolean
+        default: true
+      immutable-assets:
+        description: >-
+          On a rerun, never overwrite a published asset whose bytes differ
+          from the local file: an identical digest is a no-op, a different or
+          unverifiable digest fails the job with the recovery rule
+          (release-security policy, section 4).
+        required: false
+        type: boolean
+        default: true
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
@@ -185,6 +202,9 @@ jobs:
             ${{ inputs.files != '' && inputs.files ||
             format('{0}/*', inputs.artifact-path) }}
           REPO: ${{ github.repository }}
+          CHECKSUMS: ${{ inputs.checksums }}
+          ARTIFACT_PATH: ${{ inputs.artifact-path }}
+          IMMUTABLE_ASSETS: ${{ inputs.immutable-assets }}
           GH_TOKEN: ${{ github.token }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh

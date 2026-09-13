@@ -28,7 +28,8 @@ Typical caller jobs:
 2. **SBOM** — `reusable-sbom.yml`
 3. **Build** — `reusable-build-python-dist.yml`
 4. **Upload** — local job: `prepare-pypi-upload` → `pypa/gh-action-pypi-publish` → optional attestation
-5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`)
+5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`); attaches
+   `SHA256SUMS` and never overwrites a published asset on a rerun
 6. **Product-specific** — Homebrew dispatch, Docker, etc.
 
 Copy-paste starter: [`examples/publish-python-release.yml`](../examples/publish-python-release.yml).

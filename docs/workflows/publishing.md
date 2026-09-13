@@ -116,7 +116,18 @@ jobs:
     with:
       artifact-name: python-dist
       generate-release-notes: true
+      # checksums: true          # default; attaches SHA256SUMS (shipped or generated)
+      # immutable-assets: true   # default; a rerun never overwrites different bytes
 ```
+
+`checksums` (default `true`) attaches a `SHA256SUMS` manifest: one shipped inside
+the artifact (`reusable-build-python-dist.yml` writes it) is attached as is,
+otherwise one is written from the assets. `immutable-assets` (default `true`)
+makes a rerun converge without ever overwriting a published asset: an asset
+already published with the same digest is skipped, one that never landed is
+uploaded, and one whose published bytes differ (or whose digest the API cannot
+report) fails the job with the recovery rule of the
+[release-security policy](../release-security-policy.md) (section 4).
 
 **Outputs:** `release-url`, `release-id`. Requires `contents: write`.
 
