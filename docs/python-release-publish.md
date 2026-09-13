@@ -160,6 +160,14 @@ Cross-repo reusables cannot perform OIDC upload until PyPI supports it
 
 ## Provenance attestation
 
+> **Superseded by the [release-security policy](release-security-policy.md)**
+> (section 2): attestation is mandatory evidence and MUST be produced before the
+> first irreversible publish, never after the upload and never with
+> `continue-on-error`. The example layout on this page still shows the old
+> attest-after-upload step; the mechanical change lands in
+> [#963](https://github.com/lgtm-hq/lgtm-ci/issues/963). Until then, treat the
+> step below as the layout the policy withdraws.
+
 Run `attest-build-provenance` as a **caller-level** step with
 `continue-on-error: true` after a successful PyPI upload. Sigstore outages must
 not fail the release job — the wheel is already on the index and retries would
@@ -297,6 +305,8 @@ in the product repository release workflow.
 
 ## Related docs
 
+- [release-security-policy.md](release-security-policy.md) — the evidence,
+  ordering and recovery rules every release on this page is held to
 - [workflow-contract.md](workflow-contract.md)
 - [reusable-workflows.md](reusable-workflows.md)
 - [release-changelog.md](release-changelog.md) — migrating consumer changelogs

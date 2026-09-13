@@ -23,6 +23,7 @@ straight to a component index below.
 | [reusable-workflows.md](reusable-workflows.md) | Full per-workflow inputs/outputs/examples |
 | [pages-publishing.md](pages-publishing.md) | GitHub Pages Model A vs Model B, multi-publisher limits |
 | [python-release-publish.md](python-release-publish.md) | Production tag-push layout, PyPI trusted publishing, Homebrew tap dispatch |
+| [release-security-policy.md](release-security-policy.md) | Org-wide release policy: mandatory evidence per artifact class, build-then-publish ordering, blocking failures, partial states, recovery tiers, backfills |
 | [rust-testing.md](rust-testing.md) | Nextest config, fast-tests-vs-coverage, Rust workspace layouts |
 | [release-changelog.md](release-changelog.md) | Keep a Changelog migration for `reusable-release-version-pr.yml` |
 | [org-rulesets.md](org-rulesets.md) | Org ruleset registry, required check-name contract, sync tooling |
