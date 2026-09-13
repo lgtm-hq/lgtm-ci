@@ -351,7 +351,9 @@ EOF
 	]' 1 15000 7500)"
 
 	# Both jq filters read the set through the file: the untagged prune and
-	# the build-cache prune, so a referenced ephemeral tag must survive too.
+	# the build-cache prune. Under protection every tagged version is a root
+	# the collector protects, so the build-cache filter runs over the whole
+	# set and must keep both ephemeral entries (one also a manifest child).
 	export PROTECT_REFERENCED="true"
 	export PRUNE_BUILDCACHE="true"
 	export KEEP_LATEST="0"
@@ -366,11 +368,11 @@ EOF
 
 	run bash -c 'bash "$SCRIPT" 2>&1'
 	assert_success
-	assert_output --partial "Collected 15001 referenced digest(s)"
+	assert_output --partial "Collected 15002 referenced digest(s)"
 	assert_output --partial "Deleted untagged version 4"
 	refute_output --partial "Deleted untagged version 2"
 	refute_output --partial "Deleted untagged version 3"
-	assert_output --partial "Deleted build-cache version 6"
 	refute_output --partial "Deleted build-cache version 5"
+	refute_output --partial "Deleted build-cache version 6"
 	refute_output --partial "Argument list too long"
 }
