@@ -753,13 +753,13 @@ their least-privilege sets.
 
 <!-- markdownlint-disable MD013 -->
 
-| Input                 | Default                                    | Purpose                                                        |
-| --------------------- | ------------------------------------------ | -------------------------------------------------------------- |
-| `workflow-key`        | *(required)*                               | Stable key namespacing the dedup marker and issue title        |
-| `tag`                 | *(required)*                               | Tag whose publish is reported (usually `github.ref_name`)      |
-| `channels`            | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly    |
-| `max-reruns`          | `1`                                        | Match the caller's auto-rerun input; in-flight reruns stay quiet |
-| `failure-issue-labels`| `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped)  |
+| Input                  | Default                                    | Purpose                                                          |
+| ---------------------- | ------------------------------------------ | ---------------------------------------------------------------- |
+| `workflow-key`         | *(required)*                               | Stable key namespacing the dedup marker and issue title          |
+| `tag`                  | *(required)*                               | Tag whose publish is reported (usually `github.ref_name`)        |
+| `channels`             | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly      |
+| `max-reruns`           | `1`                                        | Match the caller's auto-rerun input; in-flight reruns stay quiet |
+| `failure-issue-labels` | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped)    |
 
 <!-- markdownlint-enable MD013 -->
 
