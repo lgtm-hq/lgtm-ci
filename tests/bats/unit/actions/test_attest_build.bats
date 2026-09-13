@@ -47,3 +47,33 @@ _run_prepare() {
 	run grep -qE -- '^subject-path=' "$GITHUB_OUTPUT"
 	assert_failure
 }
+
+@test "attest-build prepare: accepts a subject-path glob that matches files (#963)" {
+	mkdir -p "${BATS_TEST_TMPDIR}/dist"
+	printf 'w' >"${BATS_TEST_TMPDIR}/dist/a.whl"
+	printf 's' >"${BATS_TEST_TMPDIR}/dist/a.tar.gz"
+	STEP=prepare SUBJECT_PATH="${BATS_TEST_TMPDIR}/dist/*" \
+		run bash "${PROJECT_ROOT}/scripts/ci/actions/attest-build.sh"
+	assert_success
+	run grep "subject-path=${BATS_TEST_TMPDIR}/dist/\*" "$GITHUB_OUTPUT"
+	assert_success
+	run grep "subject-name=${BATS_TEST_TMPDIR}/dist/\*" "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "attest-build prepare: rejects a subject-path glob that matches nothing" {
+	mkdir -p "${BATS_TEST_TMPDIR}/dist"
+	STEP=prepare SUBJECT_PATH="${BATS_TEST_TMPDIR}/dist/*.whl" \
+		run bash "${PROJECT_ROOT}/scripts/ci/actions/attest-build.sh"
+	assert_failure
+	assert_output --partial "matches nothing"
+}
+
+@test "attest-build prepare: rejects subject-digest combined with a glob" {
+	mkdir -p "${BATS_TEST_TMPDIR}/dist"
+	printf 'w' >"${BATS_TEST_TMPDIR}/dist/a.whl"
+	STEP=prepare SUBJECT_PATH="${BATS_TEST_TMPDIR}/dist/*" SUBJECT_DIGEST="sha256:abc" \
+		run bash "${PROJECT_ROOT}/scripts/ci/actions/attest-build.sh"
+	assert_failure
+	assert_output --partial "cannot be combined"
+}

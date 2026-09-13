@@ -190,6 +190,78 @@ validate-dist)
 	fi
 	;;
 
+write-checksums)
+	# SHA256SUMS next to the distributions, so the GitHub Release can attach a
+	# manifest and a verifier can `sha256sum --check` (release-security
+	# policy, section 1). Written after the attestation step so the manifest
+	# is not itself an attestation subject. Only distribution files are
+	# listed; the manifest never lists itself.
+	if [[ ! -d "dist" ]]; then
+		die "dist/ directory not found"
+	fi
+	mapfile -t dist_files < <(find dist -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) -exec basename {} \; | sort)
+	if ((${#dist_files[@]} == 0)); then
+		die "No distribution files in dist/ to checksum"
+	fi
+	if command -v sha256sum >/dev/null 2>&1; then
+		(cd dist && sha256sum "${dist_files[@]}") >dist/SHA256SUMS
+	else
+		(cd dist && shasum -a 256 "${dist_files[@]}") >dist/SHA256SUMS
+	fi
+	log_success "Wrote dist/SHA256SUMS for ${#dist_files[@]} file(s)"
+	set_github_output "checksums-path" "dist/SHA256SUMS"
+	;;
+
+stage-sidecars)
+	# The python-dist artifact carries dist/ plus sidecar files that must not
+	# reach twine (`twine check` and `twine upload` reject a non-distribution
+	# file in packages-dir). Move them beside dist/ and expose their paths.
+	checksums_path=""
+	if [[ -f "dist/SHA256SUMS" ]]; then
+		mv "dist/SHA256SUMS" "SHA256SUMS"
+		checksums_path="SHA256SUMS"
+		log_info "Staged dist/SHA256SUMS -> SHA256SUMS (kept out of packages-dir)"
+	fi
+	set_github_output "checksums-path" "$checksums_path"
+	;;
+
+verify-attestations)
+	# Every distribution file must carry a valid GitHub build-provenance
+	# attestation from this repository before the caller's upload step runs
+	# (release-security policy, section 2). Fails closed: a missing gh, a
+	# missing attestation or a signer mismatch all stop the job.
+	: "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
+	: "${SIGNER_WORKFLOW:=}"
+	if [[ ! -d "dist" ]]; then
+		die "dist/ directory not found"
+	fi
+	if ! command -v gh >/dev/null 2>&1; then
+		die "gh is required to verify attestations"
+	fi
+	mapfile -t dist_files < <(find dist -maxdepth 1 -type f \( -name '*.whl' -o -name '*.tar.gz' -o -name '*.zip' \) | sort)
+	if ((${#dist_files[@]} == 0)); then
+		die "No distribution files in dist/ to verify"
+	fi
+	verify_args=(--repo "$GITHUB_REPOSITORY")
+	if [[ -n "$SIGNER_WORKFLOW" ]]; then
+		verify_args+=(--signer-workflow "$SIGNER_WORKFLOW")
+	fi
+	failed=0
+	for dist_file in "${dist_files[@]}"; do
+		if gh attestation verify "$dist_file" "${verify_args[@]}"; then
+			log_success "Attestation verified: $dist_file"
+		else
+			log_error "No valid attestation for $dist_file (repo ${GITHUB_REPOSITORY}${SIGNER_WORKFLOW:+, signer ${SIGNER_WORKFLOW}})"
+			failed=$((failed + 1))
+		fi
+	done
+	if ((failed > 0)); then
+		die "$failed of ${#dist_files[@]} distribution file(s) lack a valid attestation; nothing may be uploaded"
+	fi
+	log_success "All ${#dist_files[@]} distribution file(s) carry a valid attestation"
+	set_github_output "attestations-verified" "${#dist_files[@]}"
+	;;
+
 set-published)
 	set_github_output "published" "true"
 	;;

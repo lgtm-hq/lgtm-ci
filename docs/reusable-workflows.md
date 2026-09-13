@@ -1004,6 +1004,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@<sha>
     permissions:
       contents: read
+      id-token: write # attestation of dist/*
+      attestations: write
     with:
       tooling-ref: "<sha>" # vX.Y.Z
       artifact-name: python-dist
@@ -1043,17 +1045,13 @@ jobs:
         uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
         with:
           artifact-name: python-dist
+          require-attestation: "true"
           tooling-ref: "<sha>"
       - name: Upload to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           repository-url: https://upload.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}
-      - name: Attest build provenance
-        continue-on-error: true
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
-        with:
-          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
   github-release:
     needs: pypi-upload

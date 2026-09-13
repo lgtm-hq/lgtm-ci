@@ -30,6 +30,22 @@ inputs:
       lgtm-ci ref for setup-python (defaults to the ref of this action)
     required: false
     default: ""
+  require-attestation:
+    description: >-
+      Verify a GitHub build-provenance attestation from the calling
+      repository for every distribution file before exposing dist-path
+      (release-security policy, section 2). The caller's upload step must
+      be the last step of its job and must follow this action.
+    required: false
+    default: "true"
+  signer-workflow:
+    description: >-
+      Optional workflow identity the attestation must have been signed by
+      (`gh attestation verify --signer-workflow`), e.g.
+      owner/repo/.github/workflows/publish.yml. Empty accepts any workflow
+      of the calling repository.
+    required: false
+    default: ""
 
 outputs:
   dist-path:
@@ -46,6 +62,16 @@ outputs:
   package-version:
     description: "Package version extracted from dist/ or pyproject.toml"
     value: ${{ steps.extract-metadata.outputs.version }}
+  checksums-path:
+    description: >-
+      Path of the SHA256SUMS manifest staged beside dist/ (empty when the
+      artifact carried none); never inside dist-path
+    value: ${{ steps.stage-sidecars.outputs.checksums-path }}
+  attestations-verified:
+    description: >-
+      Number of distribution files whose attestation verified, or empty when
+      require-attestation is false
+    value: ${{ steps.verify-attestations.outputs.attestations-verified }}
 
 runs:
   using: "composite"
@@ -71,6 +97,14 @@ runs:
       with:
         name: ${{ inputs.artifact-name }}
         path: ${{ inputs.working-directory }}/dist
+
+    - name: Stage sidecar files out of dist/
+      id: stage-sidecars
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        STEP: stage-sidecars
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Setup Python
       uses: ./.lgtm-ci-tooling/.github/actions/setup-python
@@ -98,6 +132,17 @@ runs:
         TRUE_VALUE: "true"
         FALSE_VALUE: skipped
       run: "$SCRIPTS_DIR/ci/actions/set-conditional-output.sh"
+
+    - name: Verify build attestations
+      id: verify-attestations
+      if: inputs.require-attestation == 'true'
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
+        GH_TOKEN: ${{ github.token }}
+        STEP: verify-attestations
+        SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+      run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Extract package metadata
       id: extract-metadata

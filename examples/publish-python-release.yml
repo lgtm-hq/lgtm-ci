@@ -28,6 +28,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
+      id-token: write # GitHub build-provenance attestation of dist/*
+      attestations: write
     with:
       python-version: "3.12"
       artifact-name: python-dist
@@ -78,6 +80,11 @@ jobs:
             oauth2.sigstore.dev:443
             astral.sh:443
             releases.astral.sh:443
+      # prepare-pypi-upload verifies the build job's attestation for every
+      # distribution file and refuses to expose dist-path otherwise, so the
+      # upload below is provably behind attestation. The upload is the last
+      # step of the job: an irreversible write is never followed by a step
+      # that can fail (release-security policy, section 2).
       - name: Prepare PyPI upload
         id: prepare
         uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
@@ -85,16 +92,12 @@ jobs:
           artifact-name: python-dist
           python-version: "3.12"
           tooling-ref: "<sha>"
+          require-attestation: "true"
       - name: Upload to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
         with:
           repository-url: https://upload.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}
-      - name: Attest build provenance
-        continue-on-error: true
-        uses: actions/attest-build-provenance@a2bbfa25375fe432b6a289bc6b6cd05ecd0c4c32 # v4.1.0
-        with:
-          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
   github-release:
     name: Create GitHub Release

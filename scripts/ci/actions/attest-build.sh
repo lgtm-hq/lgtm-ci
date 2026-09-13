@@ -24,22 +24,38 @@ prepare)
 	: "${SUBJECT_NAME:=}"
 	: "${SUBJECT_DIGEST:=}"
 
-	# Validate subject exists
-	if [[ ! -e "$SUBJECT_PATH" ]]; then
+	# Validate subject exists. A glob (dist/*) is expanded by
+	# attest-build-provenance itself; here it only has to match something.
+	IS_GLOB=false
+	if [[ "$SUBJECT_PATH" == *[\*\?\[]* ]]; then
+		IS_GLOB=true
+		if ! compgen -G "$SUBJECT_PATH" >/dev/null; then
+			log_error "Subject glob matches nothing: $SUBJECT_PATH"
+			exit 1
+		fi
+	elif [[ ! -e "$SUBJECT_PATH" ]]; then
 		log_error "Subject not found: $SUBJECT_PATH"
 		exit 1
 	fi
 
 	USE_DIGEST=false
 	if [[ -n "$SUBJECT_DIGEST" ]]; then
+		if [[ "$IS_GLOB" == "true" ]]; then
+			log_error "subject-digest cannot be combined with a subject-path glob"
+			exit 1
+		fi
 		USE_DIGEST=true
-	elif [[ ! -f "$SUBJECT_PATH" ]]; then
+	elif [[ "$IS_GLOB" == "false" && ! -f "$SUBJECT_PATH" ]]; then
 		log_warn "Non-file subject; passing subject-path to attest-build-provenance"
 	fi
 
 	# Determine subject name if not provided
 	if [[ -z "$SUBJECT_NAME" ]]; then
-		SUBJECT_NAME=$(basename "$SUBJECT_PATH")
+		if [[ "$IS_GLOB" == "true" ]]; then
+			SUBJECT_NAME="$SUBJECT_PATH"
+		else
+			SUBJECT_NAME=$(basename "$SUBJECT_PATH")
+		fi
 	fi
 
 	log_info "Subject: $SUBJECT_NAME"

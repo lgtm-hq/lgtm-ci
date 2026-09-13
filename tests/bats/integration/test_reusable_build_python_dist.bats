@@ -56,7 +56,11 @@ _tooling_sparse_cone_ok() {
 	assert_success
 	run grep -q 'gh-action-pypi-publish@' "$example"
 	assert_success
+	# The attest-after-upload step is withdrawn (#963): the build job attests
+	# and prepare-pypi-upload verifies before the upload.
 	run grep -q 'attest-build-provenance@' "$example"
+	assert_failure
+	run grep -q 'require-attestation: "true"' "$example"
 	assert_success
 	run grep -q 'reusable-github-release.yml' "$example"
 	assert_success
@@ -83,5 +87,51 @@ _tooling_sparse_cone_ok() {
 	' "$workflow"
 	assert_success
 	run grep -Eq 'format\(\s*['\''"]\{0\}/\*\s*['\''"],\s*inputs\.artifact-path\s*\)' "$workflow"
+	assert_success
+}
+
+@test "reusable-build-python-dist: attests dist/* before upload, never soft-fail (#963)" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-build-python-dist.yml"
+	run awk '
+		/^  build:/ { in_build = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  build:/ { in_build = 0 }
+		in_build && /actions\/attest-build$/ { attest = NR }
+		in_build && /STEP: write-checksums/ { sums = NR }
+		in_build && /actions\/upload-artifact@/ { upload = NR }
+		in_build && !/^[[:space:]]*#/ && /continue-on-error/ { soft = 1 }
+		END { exit !(attest && sums && upload && attest < sums && sums < upload && !soft) }
+	' "$workflow"
+	assert_success
+	run grep -q 'subject-path: ${{ inputs.working-directory }}/dist/\*' "$workflow"
+	assert_success
+	run grep -q '^      attest:$' "$workflow"
+	assert_success
+}
+
+@test "reusable-build-python-dist: build job requests id-token and attestations write" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-build-python-dist.yml"
+	run awk '
+		/^  build:/ { in_build = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  build:/ { in_build = 0 }
+		in_build && /^      id-token: write/ { idt = 1 }
+		in_build && /^      attestations: write/ { att = 1 }
+		END { exit !(idt && att) }
+	' "$workflow"
+	assert_success
+}
+
+@test "prepare-pypi-upload: verifies attestations before exposing dist-path" {
+	local action="${PROJECT_ROOT}/.github/actions/prepare-pypi-upload/action.yml"
+	run awk '
+		/STEP: stage-sidecars/ { stage = NR }
+		/STEP: validate-dist/ { validate = NR }
+		/STEP: verify-attestations/ { verify = NR }
+		/STEP: extract-dist-metadata/ { meta = NR }
+		END { exit !(stage && validate && verify && meta && stage < validate && validate < verify && verify < meta) }
+	' "$action"
+	assert_success
+	run grep -q '^  require-attestation:$' "$action"
+	assert_success
+	run grep -q 'default: "true"' "$action"
 	assert_success
 }
