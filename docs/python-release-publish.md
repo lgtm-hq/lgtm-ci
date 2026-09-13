@@ -30,7 +30,8 @@ Typical caller jobs:
    writes `SHA256SUMS`
 4. **Upload** — local job: `prepare-pypi-upload` (verifies the attestations) →
    `pypa/gh-action-pypi-publish`, the last step of its job
-5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`)
+5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`); attaches
+   `SHA256SUMS` and never overwrites a published asset on a rerun
 6. **Product-specific** — Homebrew dispatch, Docker, etc.
 
 Copy-paste starter: [`examples/publish-python-release.yml`](../examples/publish-python-release.yml).

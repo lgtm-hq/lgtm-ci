@@ -26,7 +26,7 @@ case "$STEP" in
 setup | build | push | metadata | parse-tags | set-output-digest | classify | \
 	record-digest | resolve-local-health-check-image | resolve-local-scan-image | \
 	health-check | health-check-local | merge-manifests | verify-published | \
-	sign-image | summary | summarize-blocked-egress)
+	sign-image | summary | summarize-blocked-egress | enforce-evidence)
 	# shellcheck disable=SC1090
 	source "$SCRIPT_DIR/docker/${STEP}.sh"
 	;;

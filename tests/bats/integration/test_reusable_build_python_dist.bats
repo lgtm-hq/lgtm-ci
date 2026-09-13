@@ -138,3 +138,17 @@ _tooling_sparse_cone_ok() {
 	' "$action"
 	assert_success
 }
+@test "reusable-github-release: attaches SHA256SUMS and keeps published assets immutable by default (#963)" {
+	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-github-release.yml"
+	run awk '
+		/^      checksums:$/ { in_c = 1 } in_c && /default: true/ { c_default = 1; in_c = 0 }
+		/^      immutable-assets:$/ { in_i = 1 } in_i && /default: true/ { i_default = 1; in_i = 0 }
+		/Create GitHub Release/ { in_step = 1; next }
+		/^      - name:/ { in_step = 0 }
+		in_step && /CHECKSUMS: \$\{\{ inputs\.checksums \}\}/ { env_c = 1 }
+		in_step && /IMMUTABLE_ASSETS: \$\{\{ inputs\.immutable-assets \}\}/ { env_i = 1 }
+		in_step && /ARTIFACT_PATH: \$\{\{ inputs\.artifact-path \}\}/ { env_p = 1 }
+		END { exit !(c_default && i_default && env_c && env_i && env_p) }
+	' "$workflow"
+	assert_success
+}

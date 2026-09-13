@@ -13,12 +13,19 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-build.yml"
 	assert_output "1"
 }
 
-@test "reusable-docker-build: build job gates sbom and provenance on push" {
-	run grep -E '^[[:space:]]+provenance: \$\{\{ inputs\.provenance && inputs\.push' "$WORKFLOW"
+@test "reusable-docker-build: build job attaches sbom and provenance on every push (#963)" {
+	# The opt-out inputs no longer gate a pushed build: a published image
+	# always carries both (release-security policy, section 1).
+	run grep -E "^[[:space:]]+provenance: \\$\\{\\{ inputs\\.push && inputs\\.health-check-cmd == '' \\}\\}$" "$WORKFLOW"
 	assert_success
-
-	run grep -E '^[[:space:]]+sbom: \$\{\{ inputs\.sbom && inputs\.push' "$WORKFLOW"
+	run grep -E "^[[:space:]]+sbom: \\$\\{\\{ inputs\\.push && inputs\\.health-check-cmd == '' \\}\\}$" "$WORKFLOW"
 	assert_success
+	run grep -E '^[[:space:]]+if: inputs\.push && \(!inputs\.provenance \|\| !inputs\.sbom\)$' "$WORKFLOW"
+	assert_success
+	run grep -E '^[[:space:]]+STEP: enforce-evidence$' "$WORKFLOW"
+	assert_success
+	run grep -E '^[[:space:]]+if: inputs\.push && inputs\.provenance$' "$WORKFLOW"
+	assert_failure
 }
 
 @test "reusable-docker-build: build job does not pass raw sbom or provenance inputs" {

@@ -41,12 +41,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
 	assert_output "1"
 }
 
-@test "reusable-docker-multiplatform: build-per-platform job gates sbom on push" {
+@test "reusable-docker-multiplatform: build-per-platform job attaches an SBOM on every push (#963)" {
 	run awk '
 		/provenance: false/ { in_split = 1 }
-		in_split && /sbom: \$\{\{ inputs\.sbom && inputs\.push \}\}/ { found = 1; exit }
+		in_split && /sbom: \$\{\{ inputs\.push \}\}/ { found = 1; exit }
 		END { exit !found }
 	' "$WORKFLOW"
+	assert_success
+	run grep -E '^[[:space:]]+if: inputs\.push \|\| inputs\.provenance$' "$WORKFLOW"
+	assert_success
+	run grep -E '^[[:space:]]+STEP: enforce-evidence$' "$WORKFLOW"
 	assert_success
 }
 

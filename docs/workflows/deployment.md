@@ -40,8 +40,10 @@ jobs:
 **Inputs:** `context` (default '.'), `file` (default 'Dockerfile'),
 `platforms` (default 'linux/amd64,linux/arm64'), `registry` (ghcr.io or
 docker.io), `image-name` (default `github.repository`), `version` (semver
-tags), `push` (default false), `provenance`/`sbom` (default true, apply
-only when `push: true`), `scan` (default false), `runner-map` (JSON
+tags), `push` (default false), `provenance`/`sbom` (default true; apply only when
+`push: true`, and on a push an opt-out is overridden with a warning because a
+published image must carry both under the
+[release-security policy](../release-security-policy.md)), `scan` (default false), `runner-map` (JSON
 platform → runner label; unmapped platforms use `ubuntu-24.04` + QEMU),
 `smoke-test` (word-split command run inside each per-platform staging
 image) or `smoke-test-script` (caller-owned script with env `IMAGE`,
