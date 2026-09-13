@@ -51,13 +51,27 @@ verifiable evidence.
 | Python sdist and wheel | GitHub build-provenance attestation (SLSA v1 predicate) whose subject digests match the uploaded files; PyPI PEP 740 attestation via trusted publishing | `actions/attest-build-provenance` on the built dist; `pypa/gh-action-pypi-publish` with trusted publishing | `gh attestation verify <file> --repo <owner>/<repo>`; PyPI integrity page `https://pypi.org/integrity/<project>/<version>/<file>/provenance` |
 | Platform binaries and archives | One GitHub build-provenance attestation per file; a `SHA256SUMS` manifest attached to the GitHub Release | `actions/attest-build-provenance` with the file as subject; `sha256sum` in the build job | `gh attestation verify <file> --repo <owner>/<repo>`; `sha256sum --check SHA256SUMS` |
 | Container images | BuildKit provenance and SBOM pushed to the registry with the image index; GitHub attestation by image digest, pushed to the registry; keyless Cosign signature on the digest | `docker/build-push-action` with `provenance` and `sbom` enabled; `actions/attest-build-provenance` with `push-to-registry: true`; `cosign sign` keyless | `gh attestation verify oci://<image>@<digest> --repo <owner>/<repo>`; `cosign verify <image>@<digest> --certificate-identity-regexp '^https://github.com/<owner>/' --certificate-oidc-issuer https://token.actions.githubusercontent.com`; `docker buildx imagetools inspect <image>@<digest> --format '{{ json .Provenance }}'` and `'{{ json .SBOM }}'` |
-| npm packages | npm-native provenance via `npm publish --provenance` under trusted publishing; every binary packed inside MUST have been verified against its GitHub attestation before packing | `npm publish --provenance`; `gh attestation verify` in the pack step | `npm audit signatures`; `npm view <pkg>@<version> dist.attestations` |
+| npm packages | GitHub build-provenance attestation on the packed tarball; npm-native provenance via `npm publish --provenance` under trusted publishing; every binary packed inside MUST have been verified against its GitHub attestation before packing | `actions/attest-build-provenance` on the `npm pack` output; `npm publish --provenance`; `gh attestation verify` in the pack step | `npm audit signatures`; `npm view <pkg>@<version> dist.attestations` |
+| RubyGems | GitHub build-provenance attestation on the built `.gem` file; publish via RubyGems trusted publishing (OIDC), never an API key | `actions/attest-build-provenance` on the `gem build` output; `rubygems/release-gem` or `gem push` under trusted publishing | `gh attestation verify <file>.gem --repo <owner>/<repo>` |
+| Homebrew tap formula | The formula MUST reference an artifact that carries its own class's evidence (a GitHub Release asset or PyPI sdist above) and pin its `sha256`; the tap dispatch is an irreversible write and follows section 2 | The consumer's release workflow dispatches the tap after the referenced artifact is published; the tap's handler computes and pins the digest | `brew fetch --formula <formula>` then `sha256sum` against the pinned digest; verify the referenced artifact with its own class's command |
 | Release SBOM | An SBOM for the release artifacts, vulnerability-scanned at the consumer's declared severity gate, and attested | `reusable-sbom-release-upload.yml` (CycloneDX) with its scan gate; `actions/attest-build-provenance` or `actions/attest-sbom` | `gh attestation verify <sbom-file> --repo <owner>/<repo>` |
 
 <!-- markdownlint-enable MD013 -->
 
 A publish path that cannot produce an item in this table for its artifact class
 is not a permitted publish path (section 7).
+
+Evidence in the table is of two kinds, and section 2 treats them differently:
+
+- **Build-time evidence** is produced from the built artifact before anything is
+  published: every GitHub build-provenance attestation on a file or an image
+  digest, BuildKit provenance and SBOM attached at image build, the release SBOM
+  and its scan, and `SHA256SUMS`.
+- **Publish-native evidence** is produced by, or can only exist after, the
+  irreversible write itself: the PyPI PEP 740 attestation (created during the
+  trusted-publishing upload), npm provenance (created by `npm publish
+  --provenance`), the registry-side copy of a container attestation and the
+  Cosign signature on a pushed digest, and the Homebrew formula's pinned digest.
 
 ## 2. Ordering rule
 
@@ -67,20 +81,30 @@ Homebrew or mirror cross-repo dispatch, or any other write to a system outside
 the workflow run that cannot be undone by the run itself.
 
 1. Every irreversible external write MUST happen only after **all** builds and
-   **all** mandatory attestations for the **whole** release have succeeded.
-   Build-then-publish is the required shape: the build phase produces every
-   artifact and every piece of evidence in section 1, the publish phase writes
-   them out.
-2. An irreversible write MUST be the last step of its job. Nothing that can fail
+   **all build-time evidence** (section 1) for the **whole** release have
+   succeeded. Build-then-publish is the required shape: the build phase produces
+   every artifact and every piece of build-time evidence, the publish phase
+   writes them out. In particular the GitHub build-provenance attestation of a
+   file or image MUST exist, and MUST have been verified against the artifact
+   about to be written, before that artifact's irreversible write.
+2. **Publish-native evidence** is produced by the publish step itself or in a
+   job that `needs` it, and its failure is a blocking failure of that channel
+   (section 3, rule 2): a PyPI upload whose PEP 740 attestation is rejected, an
+   `npm publish --provenance` that fails, a registry attestation push or Cosign
+   signature that fails after the image push, are channel failures, not
+   acceptable degradations. For a container image the irreversible write is the
+   registry push; the digest-bound GitHub attestation and Cosign signature
+   follow it in a later job and MUST NOT carry `continue-on-error`.
+3. An irreversible write MUST be the last step of its job. Nothing that can fail
    MAY run after it in the same job. A step that must follow a publish (a
-   registry-side attestation push, a release-notes edit) belongs in a later job
-   that `needs` the publishing job, so a failure there is a distinct failed job
-   with the publish already complete.
-3. Attestation MUST NOT be placed after the upload it attests. The
+   registry-side attestation push, a Cosign signature, a release-notes edit)
+   belongs in a later job that `needs` the publishing job, so a failure there is
+   a distinct failed job with the publish already complete and visible.
+4. A build-time attestation MUST NOT be placed after the upload it attests. The
    "attest after upload with `continue-on-error`" layout is withdrawn (section
    10).
-4. Channels (PyPI, GitHub Release, npm, container registry, Homebrew, mirrors)
-   SHOULD be as atomic as practical: one job per channel, each consuming the
+5. Channels (PyPI, GitHub Release, npm, container registry, Homebrew, RubyGems,
+   mirrors) SHOULD be as atomic as practical: one job per channel, each consuming the
    already-built and already-attested artifacts, none rebuilding anything.
 
 ## 3. Blocking failures
@@ -128,7 +152,7 @@ published and whether the original artifacts are still available and verifiable.
 
 | Tier | State | Action |
 | ---- | ----- | ------ |
-| 1 | Nothing published | Fix the workflow, then re-run the **original tag** with the corrected workflow code. Artifacts are rebuilt because none were ever published; the version is unchanged. |
+| 1 | Nothing published | Fix the workflow on the default branch, then re-run the release for the **original tag** through the corrected code. A tag-triggered run is pinned to the tagged commit, so a plain re-run replays the broken workflow; the recovery is the consumer's dispatchable release path on the default branch, taking the tag (`backfill_version` / `source-ref`) as input and building from the tagged commit. The tag is never moved. Artifacts are rebuilt because none were ever published; the version is unchanged. |
 | 2 | Partially published | Resume the missing channels with the **exact original artifacts** from the run that published the first channel, each verified against its attestation before it is written. No rebuild. |
 | 3 | Artifacts must change, cannot be recovered, or cannot be verified | Cut a **new patch version**. The partial version stays as published, its incident issue records the outcome, and no channel of it is completed or retried. |
 
@@ -140,8 +164,12 @@ published and whether the original artifacts are still available and verifiable.
 - Tier 2 resume SHOULD be a dispatchable workflow (tracked in
   [#966](https://github.com/lgtm-hq/lgtm-ci/issues/966)) rather than a manual
   procedure, so the resume itself is recorded and reviewable.
-- Tier 1 re-run MUST go through the same workflow code path as a fresh tag
-  push; it MUST NOT bypass any gate.
+- Tier 1 re-run MUST go through the same gates as a fresh tag push; the
+  dispatch path MUST NOT bypass any of them, and it MUST build from the tagged
+  commit, not from the default branch's tree. A consumer whose release workflow
+  has no such dispatch path cannot recover at tier 1 and MUST add one before
+  relying on this policy (py-lintro's `backfill_version`/`backfill_ref` inputs
+  are the reference shape).
 
 **Prerelease exemption.** Prerelease tags (`aN`, `bN`, `rcN` and any other
 PEP 440 or SemVer prerelease suffix) are exempt from recovery. A failed or
@@ -198,8 +226,9 @@ exemption is only that nothing is resumed.
 
 ## 9. Verification
 
-A third party verifies each artifact class with one command. `<owner>/<repo>`
-is the publishing repository; every command fails closed.
+A third party verifies each artifact class with the fixed set of commands below,
+one per item of mandatory evidence; together they cover every row of section 1.
+`<owner>/<repo>` is the publishing repository; every command fails closed.
 
 ```bash
 # Python dist (wheel or sdist)
@@ -209,17 +238,33 @@ gh attestation verify ./dist/<file>.whl --repo <owner>/<repo>
 gh attestation verify ./<binary> --repo <owner>/<repo>
 sha256sum --check SHA256SUMS
 
-# Container image, by digest
+# Container image, by digest: GitHub attestation, Cosign signature, then the
+# BuildKit provenance and SBOM attached to the index (both must be non-empty)
 gh attestation verify oci://ghcr.io/<owner>/<image>@sha256:<digest> --repo <owner>/<repo>
 cosign verify ghcr.io/<owner>/<image>@sha256:<digest> \
   --certificate-identity-regexp '^https://github.com/<owner>/' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
+docker buildx imagetools inspect ghcr.io/<owner>/<image>@sha256:<digest> \
+  --format '{{ json .Provenance }}'
+docker buildx imagetools inspect ghcr.io/<owner>/<image>@sha256:<digest> \
+  --format '{{ json .SBOM }}'
 
-# npm package
+# npm package: the packed tarball's GitHub attestation, then npm provenance
+gh attestation verify ./<pkg>-<version>.tgz --repo <owner>/<repo>
 npm audit signatures
+
+# RubyGems
+gh attestation verify ./<gem>-<version>.gem --repo <owner>/<repo>
+
+# Homebrew tap formula: the pinned digest must match the referenced artifact,
+# which is verified with its own class's command above
+brew fetch --formula <tap>/<formula> && sha256sum "$(brew --cache <tap>/<formula>)"
 
 # PyPI-side provenance (PEP 740)
 curl -fsSL https://pypi.org/integrity/<project>/<version>/<file>/provenance | jq .
+
+# Release SBOM
+gh attestation verify ./<sbom>.cdx.json --repo <owner>/<repo>
 ```
 
 A consumer's `docs/` SHOULD carry these commands with the placeholders filled in
