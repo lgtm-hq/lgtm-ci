@@ -357,3 +357,23 @@ _cache_import_expressions() {
 	[ "$registry_exports" -eq 2 ]
 	[ "$gated" -eq "$registry_exports" ]
 }
+
+@test "reusable-docker: orchestrator forwards policy-enforced provenance and sbom to both nested calls (#963)" {
+	# classify computes effective-provenance / effective-sbom (an opt-out on a
+	# push is overridden with a warning); both nested calls must read those,
+	# never the raw inputs, so the enforcement cannot be bypassed.
+	run awk '
+		/^  classify:/ { in_classify = 1 }
+		/^  build:/ { in_classify = 0 }
+		in_classify && /PROVENANCE: \$\{\{ inputs\.provenance \}\}/ { env_p = 1 }
+		in_classify && /SBOM: \$\{\{ inputs\.sbom \}\}/ { env_s = 1 }
+		in_classify && /effective-provenance: \$\{\{ steps\.classify\.outputs\.effective-provenance \}\}/ { out_p = 1 }
+		in_classify && /effective-sbom: \$\{\{ steps\.classify\.outputs\.effective-sbom \}\}/ { out_s = 1 }
+		/provenance: \$\{\{ fromJSON\(needs\.classify\.outputs\.effective-provenance\) \}\}/ { fwd_p++ }
+		/sbom: \$\{\{ fromJSON\(needs\.classify\.outputs\.effective-sbom\) \}\}/ { fwd_s++ }
+		/provenance: \$\{\{ inputs\.provenance \}\}/ && !in_classify { raw++ }
+		/sbom: \$\{\{ inputs\.sbom \}\}/ && !in_classify { raw++ }
+		END { exit !(env_p && env_s && out_p && out_s && fwd_p == 2 && fwd_s == 2 && raw == 0) }
+	' "$WORKFLOW"
+	assert_success
+}

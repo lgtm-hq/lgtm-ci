@@ -36,6 +36,30 @@ source "$SCRIPT_DIR/health-lib.sh"
 : "${PLATFORMS:?PLATFORMS is required}"
 : "${PUSH:?PUSH is required}"
 : "${VALIDATE_ON_PR:=false}"
+: "${PROVENANCE:=true}"
+: "${SBOM:=true}"
+
+# Release-security policy, section 1: a pushed image MUST carry BuildKit
+# provenance and an SBOM, and the GitHub attestation the reusables gate on
+# `provenance`. An opt-out is honoured only for a build that does not push;
+# on a push it is overridden here, once, with a visible warning, so the
+# downstream jobs read one effective value.
+effective_provenance="$PROVENANCE"
+effective_sbom="$SBOM"
+if [[ "$PUSH" == "true" ]]; then
+	if [[ "$PROVENANCE" != "true" ]]; then
+		echo "::warning title=provenance enforced on push::provenance=${PROVENANCE} ignored: a pushed image must carry build provenance (lgtm-ci release-security policy, section 1); attesting anyway"
+		log_warn "provenance=${PROVENANCE} overridden to true for a pushed image (release-security policy)"
+		effective_provenance="true"
+	fi
+	if [[ "$SBOM" != "true" ]]; then
+		echo "::warning title=sbom enforced on push::sbom=${SBOM} ignored: a pushed image must carry an SBOM (lgtm-ci release-security policy, section 1); generating anyway"
+		log_warn "sbom=${SBOM} overridden to true for a pushed image (release-security policy)"
+		effective_sbom="true"
+	fi
+fi
+set_github_output "effective-provenance" "$effective_provenance"
+set_github_output "effective-sbom" "$effective_sbom"
 : "${RUNNER_MAP:={}}"
 : "${SMOKE_TEST:=}"
 : "${SMOKE_TEST_SCRIPT:=}"
