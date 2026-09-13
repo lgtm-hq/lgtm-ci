@@ -19,6 +19,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.70.0] - 2026-09-13
+
+### Added
+
+- **release**: attest in the Python build and verify before the PyPI upload (#969)
+  (32f5bb6)
+- **release**: attach SHA256SUMS and keep published release assets immutable (#971)
+  (9cc6e24)
+- **docker**: enforce provenance and SBOM on every pushed image (#970) (29d2660)
+
+### Changed
+
+- **release**: add the org-wide release-security policy (#968) (d56dd0b)
+
 ## [0.69.10] - 2026-09-13
 
 ### Fixed
@@ -2308,7 +2322,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.10...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.0...HEAD
+[0.70.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.10...v0.70.0
 [0.69.10]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.9...v0.69.10
 [0.69.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.8...v0.69.9
 [0.69.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.7...v0.69.8
