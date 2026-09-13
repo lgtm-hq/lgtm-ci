@@ -36,3 +36,15 @@ limits blast radius but does not remove it: once a consumer repins past a
 malicious merge, that consumer runs the compromised tooling. Review
 requirements on this repository are therefore a security control for every
 downstream consumer, not just for lgtm-ci itself.
+
+## Release integrity
+
+Every artifact an lgtm-hq repository publishes through lgtm-ci reusables, or
+alongside them, is held to the
+[release security policy](docs/release-security-policy.md): mandatory evidence
+per artifact class (GitHub build-provenance attestations, PyPI and npm
+provenance, container provenance, SBOM and Cosign signatures), build-then-publish
+ordering so no irreversible write happens before every attestation exists,
+blocking failures, a three-tier recovery rule with a 90-day artifact retention
+window, and the requirement that backfills carry the same evidence as tag
+builds. The policy lists the one-command verification for each artifact class.

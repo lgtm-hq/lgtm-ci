@@ -708,6 +708,11 @@ release:
 
 ### Release failure reporting
 
+What a release must guarantee before and after its first irreversible publish,
+and how a partial release is recovered, is defined by the
+[release security policy](release-security-policy.md); this section covers how
+a failure is reported.
+
 Both release reusables include an optional `report-release-failure` follow-up job
 that runs when the primary job fails (`needs.<job>.result == 'failure'`). The
 job uses `egress-preset: github-minimal` (GitHub API only) and declares its own
@@ -1735,3 +1740,10 @@ jobs:
         github.com:443
         registry.npmjs.org:443
 ```
+
+## Related docs
+
+- [release-security-policy.md](release-security-policy.md) — mandatory evidence,
+  build-then-publish ordering, blocking failures and recovery for every publish
+- [python-release-publish.md](python-release-publish.md) — Python tag-push layout
+- [reusable-workflows.md](reusable-workflows.md) — per-workflow inputs and outputs
