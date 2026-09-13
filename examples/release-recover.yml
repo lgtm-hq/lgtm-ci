@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: MIT
+# Recovery entry workflow for a partially published release (#966). Copy into
+# your repository as .github/workflows/release-recover.yml. Replace every
+# <sha> with a full lgtm-ci commit SHA.
+#
+# Runbook: docs/release-recovery.md (which tier applies, how to find the
+# source run, what the dry run shows). Always run with dry-run: true first.
+# npm trusted publishing validates THIS workflow file: add it to your npm
+# trusted-publisher registration and keep the entry-workflows input in sync.
+---
+name: Release Recovery
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to recover (e.g. v1.2.3)
+        required: true
+        type: string
+      source-run-id:
+        description: Original publish run ID
+        required: true
+        type: string
+      source-run-sha:
+        description: Head SHA of the original run (gh run view <id> --json headSha)
+        required: true
+        type: string
+      dry-run:
+        description: Detect and summarize only (always run this first)
+        required: false
+        type: boolean
+        default: true
+      channels:
+        description: Restrict to channels (JSON array); default auto
+        required: false
+        type: string
+        default: "auto"
+
+permissions: {}
+
+concurrency:
+  group: release-recover-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover release
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-recover.yml@<sha> # vX.Y.Z
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+      id-token: write
+    with:
+      tag: ${{ inputs.tag }}
+      source-run-id: ${{ inputs.source-run-id }}
+      source-run-sha: ${{ inputs.source-run-sha }}
+      dry-run: ${{ inputs.dry-run }}
+      channels: ${{ inputs.channels }}
+      pypi-package: <pypi-project>
+      npm-package: "@scope/meta-package"
+      npm-artifact-name: npm-dist
+      npm-packages-dir: npm-dist
+      npm-order: '["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "meta"]'
+      release-artifact-name: python-dist
+      signer-repo: <owner>/<repo>
+      signer-workflow: .github/workflows/publish-pypi-on-tag.yml
+      recovery-issue-workflow-key: release-publish
+      tooling-ref: "<sha>"

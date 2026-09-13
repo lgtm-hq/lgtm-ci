@@ -1088,6 +1088,34 @@ pass their top-level publish workflow via `entry-workflows` (empty disables
 the guard — not acceptable for live publishes) and keep their
 trusted-publisher registration pointed at that same file.
 
+### Release recovery contract
+
+`reusable-release-recover.yml` resumes a partially published release against
+the original immutable tag and the original attested artifacts (#966). The
+stages are fixed:
+
+1. `resolve` — refuses prerelease tags, refuses a tag that does not point at
+   the original run's head SHA (`source-run-sha`), verifies the downloaded
+   artifacts against their checksums manifest and provenance attestations,
+   probes every configured channel (PyPI, npm, GitHub Release, Docker,
+   Homebrew) and emits the missing set. `dry-run: true` (the default) stops
+   here; nothing has been written.
+2. `resume-*` — one job per channel, gated on membership in the missing set.
+   npm resumes through #965's `publish-set.sh`; the GitHub Release through
+   `create-github-release.sh` with `IMMUTABLE_ASSETS: true` (already-published
+   assets are skipped, never overwritten); the Homebrew dispatch is re-sent
+   only when the tap lacks the version. Complete channels are skipped, not
+   re-run; PyPI is never resumed (a version is burned on first upload — its
+   missing state is tier three).
+3. `record` — `if: always()`: posts the outcome table to the release-failure
+   issue the notifier (#964) opened, closing it when the recovery succeeded.
+
+Release-artifact retention defaults to the 90-day recovery window
+(`reusable-build-python-dist.yml` `artifact-retention-days`,
+`reusable-build-rust-binaries.yml` `retention-days`); consumers with local
+build workflows must match it. Runbook:
+[release-recovery.md](release-recovery.md).
+
 ### GitHub Release (artifact upload)
 
 ```yaml
