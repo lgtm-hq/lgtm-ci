@@ -33,7 +33,9 @@ echo "\$@" >>'${calls_file}'
 
 if [[ "\$1" == "release" && "\$2" == "view" ]]; then
 	if [[ -n "\${MOCK_EXISTING_TAG:-}" && "\$3" == "\${MOCK_EXISTING_TAG}" ]]; then
-		if [[ "\$*" == *"--json id"* ]]; then
+		if [[ "\$*" == *"--json assets"* ]]; then
+			printf '%s\n' "\${MOCK_EXISTING_ASSETS:-}"
+		elif [[ "\$*" == *"--json id"* ]]; then
 			echo "\${MOCK_EXISTING_RELEASE_ID}"
 		else
 			echo "\${MOCK_EXISTING_RELEASE_URL}"
@@ -96,6 +98,7 @@ setup() {
 	export MOCK_CREATED_RELEASE_URL="https://github.com/test-org/test-repo/releases/tag/v1.0.0"
 	export MOCK_CREATE_ERROR=""
 	export MOCK_UPLOAD_ERROR=""
+	export MOCK_EXISTING_ASSETS=""
 
 	mock_gh
 }
@@ -310,4 +313,150 @@ refute_gh_called_with() {
 	assert_output --partial "Failed to create release"
 	assert_output --partial "Resource not accessible by integration"
 	refute_output --partial "skipping creation"
+}
+
+_sha256() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	else
+		shasum -a 256 "$1" | awk '{print $1}'
+	fi
+}
+
+@test "create-github-release: CHECKSUMS writes a SHA256SUMS manifest and attaches it (#963)" {
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/a.tar.gz"
+	echo "two" >"$dir/b.whl"
+
+	TAG="v1.0.0" BODY="notes" CHECKSUMS="true" FILE_PATTERNS="$dir/*" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "Wrote $dir/SHA256SUMS for 2 asset(s)"
+	[ -f "$dir/SHA256SUMS" ]
+	run cat "$dir/SHA256SUMS"
+	assert_output --partial "$(_sha256 "$dir/a.tar.gz")  a.tar.gz"
+	assert_output --partial "$(_sha256 "$dir/b.whl")  b.whl"
+	refute_output --partial "SHA256SUMS SHA256SUMS"
+	assert_gh_called_with "$dir/SHA256SUMS"
+}
+
+@test "create-github-release: CHECKSUMS attaches a manifest shipped with the assets as is" {
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/a.tar.gz"
+	printf 'deadbeef  a.tar.gz\n' >"$dir/SHA256SUMS"
+
+	TAG="v1.0.0" BODY="notes" CHECKSUMS="true" FILE_PATTERNS="$dir/*" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "Attaching the SHA256SUMS manifest shipped with the assets"
+	run cat "$dir/SHA256SUMS"
+	assert_output "deadbeef  a.tar.gz"
+	assert_gh_called_with "$dir/SHA256SUMS"
+}
+
+@test "create-github-release: checksums and immutable assets together on a rerun (#963)" {
+	# The production default for both: the manifest is generated before the
+	# immutability check, so a regenerated manifest identical to the one
+	# already published is a no-op and a missing asset still uploads.
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/a.tar.gz"
+	echo "two" >"$dir/b.whl"
+	printf '%s  a.tar.gz\n%s  b.whl\n' "$(_sha256 "$dir/a.tar.gz")" "$(_sha256 "$dir/b.whl")" >"${BATS_TEST_TMPDIR}/expected-manifest"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'a.tar.gz\tsha256:%s\nSHA256SUMS\tsha256:%s' "$(_sha256 "$dir/a.tar.gz")" "$(_sha256 "${BATS_TEST_TMPDIR}/expected-manifest")")"
+
+	TAG="v1.0.0" BODY="notes" CHECKSUMS="true" IMMUTABLE_ASSETS="true" FILE_PATTERNS="$dir/*" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "Asset a.tar.gz already published with the same digest; skipping"
+	assert_output --partial "Asset SHA256SUMS already published with the same digest; skipping"
+	assert_output --partial "Uploading 1 asset(s) to existing release v1.0.0"
+	assert_gh_called_with "--clobber $dir/b.whl"
+	refute_gh_called_with "--clobber $dir/a.tar.gz"
+}
+
+@test "create-github-release: CHECKSUMS off leaves the assets alone" {
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/a.tar.gz"
+
+	TAG="v1.0.0" BODY="notes" FILE_PATTERNS="$dir/*" run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	[ ! -e "$dir/SHA256SUMS" ]
+	refute_gh_called_with "SHA256SUMS"
+}
+
+@test "create-github-release: immutable rerun skips an asset already published with the same bytes" {
+	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
+	echo "data" >"$asset"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'artifact.tar.gz\tsha256:%s' "$(_sha256 "$asset")")"
+
+	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILES="$asset" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "already published with the same digest; skipping"
+	assert_output --partial "nothing to upload"
+	refute_gh_called_with "release upload"
+}
+
+@test "create-github-release: immutable rerun refuses to overwrite an asset with different bytes" {
+	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
+	echo "data" >"$asset"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'artifact.tar.gz\tsha256:0000000000000000000000000000000000000000000000000000000000000000')"
+
+	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILES="$asset" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_failure
+	assert_output --partial "Refusing to overwrite published assets of release v1.0.0"
+	assert_output --partial "artifact.tar.gz (published sha256:0000"
+	assert_output --partial "recovery tier 2"
+	refute_gh_called_with "release upload"
+}
+
+@test "create-github-release: immutable rerun uploads only the assets that never landed" {
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/a.tar.gz"
+	echo "two" >"$dir/b.whl"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'a.tar.gz\tsha256:%s' "$(_sha256 "$dir/a.tar.gz")")"
+
+	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILE_PATTERNS="$dir/*" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "Uploading 1 asset(s) to existing release v1.0.0"
+	assert_gh_called_with "release upload v1.0.0 --repo test-org/test-repo --clobber $dir/b.whl"
+	refute_gh_called_with "--clobber $dir/a.tar.gz"
+}
+
+@test "create-github-release: immutable rerun fails closed when a published digest is unknown" {
+	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
+	echo "data" >"$asset"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'artifact.tar.gz\t')"
+
+	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILES="$asset" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_failure
+	assert_output --partial "published digest unknown; cannot verify"
+	refute_gh_called_with "release upload"
+}
+
+@test "create-github-release: immutable rerun matches an asset name containing spaces" {
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/my package.tar.gz"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'my package.tar.gz\tsha256:0000000000000000000000000000000000000000000000000000000000000000')"
+
+	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILE_PATTERNS="$dir/*" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_failure
+	assert_output --partial "my package.tar.gz (published sha256:0000"
+	refute_gh_called_with "release upload"
 }
