@@ -85,12 +85,18 @@ on:
         type: boolean
         default: false
       provenance:
-        description: "Generate provenance attestation"
+        description: >-
+          Generate provenance attestation. Honoured only when push is false:
+          a pushed image always carries provenance (release-security policy,
+          section 1); an opt-out on a push is overridden with a warning.
         required: false
         type: boolean
         default: true
       sbom:
-        description: "Generate SBOM attestation"
+        description: >-
+          Generate SBOM attestation. Honoured only when push is false: a
+          pushed image always carries an SBOM (release-security policy,
+          section 1); an opt-out on a push is overridden with a warning.
         required: false
         type: boolean
         default: true
@@ -307,6 +313,11 @@ jobs:
     outputs:
       use-split: ${{ steps.classify.outputs.use-split }}
       matrix: ${{ steps.classify.outputs.matrix }}
+      # Policy-enforced evidence flags: equal to the inputs unless push is
+      # true and an input opted out, in which case classify warns and forces
+      # true (release-security policy, section 1).
+      effective-provenance: ${{ steps.classify.outputs.effective-provenance }}
+      effective-sbom: ${{ steps.classify.outputs.effective-sbom }}
 
     steps:
       - name: Harden runner
@@ -353,6 +364,8 @@ jobs:
           PLATFORMS: ${{ inputs.platforms }}
           PUSH: ${{ inputs.push }}
           VALIDATE_ON_PR: ${{ inputs.validate-on-pr }}
+          PROVENANCE: ${{ inputs.provenance }}
+          SBOM: ${{ inputs.sbom }}
           RUNNER_MAP: ${{ inputs.runner-map }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
@@ -379,8 +392,8 @@ jobs:
       tag-latest: ${{ inputs.tag-latest }}
       exact-tags: ${{ inputs.exact-tags }}
       push: ${{ inputs.push }}
-      provenance: ${{ inputs.provenance }}
-      sbom: ${{ inputs.sbom }}
+      provenance: ${{ fromJSON(needs.classify.outputs.effective-provenance) }}
+      sbom: ${{ fromJSON(needs.classify.outputs.effective-sbom) }}
       scan: ${{ inputs.scan }}
       build-args: ${{ inputs.build-args }}
       target: ${{ inputs.target }}
@@ -424,8 +437,8 @@ jobs:
       tag-latest: ${{ inputs.tag-latest }}
       exact-tags: ${{ inputs.exact-tags }}
       push: ${{ inputs.push }}
-      provenance: ${{ inputs.provenance }}
-      sbom: ${{ inputs.sbom }}
+      provenance: ${{ fromJSON(needs.classify.outputs.effective-provenance) }}
+      sbom: ${{ fromJSON(needs.classify.outputs.effective-sbom) }}
       scan: ${{ inputs.scan }}
       build-args: ${{ inputs.build-args }}
       target: ${{ inputs.target }}

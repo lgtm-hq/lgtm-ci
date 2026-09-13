@@ -390,8 +390,22 @@ jobs:
             ${{ inputs.no-cache == false && (inputs.cache-registry-ref == '' || inputs.push == false) && format('type=gha,mode=max,scope={0},ignore-error=true', matrix.slug) || '' }}
             ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0}-{1},mode=max', inputs.cache-registry-ref, matrix.slug) || '' }}
           # yamllint enable rule:line-length
+          # Per-platform provenance stays off: the GitHub attestation is made
+          # by index digest after the manifest merge. The SBOM always ships
+          # on a push (release-security policy, section 1).
           provenance: false
-          sbom: ${{ inputs.sbom && inputs.push }}
+          sbom: ${{ inputs.push }}
+      - name: Enforce evidence on push
+        # A direct caller can opt out of provenance or SBOM only for a build
+        # that does not push (release-security policy, section 1).
+        if: inputs.push && (!inputs.provenance || !inputs.sbom)
+        shell: bash
+        env:
+          STEP: enforce-evidence
+          PUSH: ${{ inputs.push }}
+          PROVENANCE: ${{ inputs.provenance }}
+          SBOM: ${{ inputs.sbom }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
       - name: Summarize blocked egress
         if: ${{ failure() }}
         shell: bash
@@ -777,7 +791,9 @@ jobs:
           TARGET_TAGS: ${{ steps.meta.outputs.tags }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
       - name: Generate artifact attestation
-        if: inputs.provenance
+        # Always on a push: an opt-out applies only to non-push builds
+        # (release-security policy, section 1).
+        if: inputs.push || inputs.provenance
         # Pinned to SHA for supply chain security
         uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

@@ -177,3 +177,48 @@ _run_script() {
 	assert_failure
 	assert_output --partial "PUSH"
 }
+
+@test "classify: passes provenance and sbom through unchanged when push is true and both are true" {
+	export PROVENANCE="true"
+	export SBOM="true"
+
+	_run_script
+	assert_success
+	assert_github_output "effective-provenance" "true"
+	assert_github_output "effective-sbom" "true"
+	refute_output --partial "::warning"
+}
+
+@test "classify: honours a provenance/sbom opt-out when push is false" {
+	export PUSH="false"
+	export PROVENANCE="false"
+	export SBOM="false"
+
+	_run_script
+	assert_success
+	assert_github_output "effective-provenance" "false"
+	assert_github_output "effective-sbom" "false"
+	refute_output --partial "::warning"
+}
+
+@test "classify: overrides a provenance/sbom opt-out on push and warns (#963)" {
+	export PROVENANCE="false"
+	export SBOM="false"
+
+	_run_script
+	assert_success
+	assert_github_output "effective-provenance" "true"
+	assert_github_output "effective-sbom" "true"
+	assert_output --partial "::warning title=provenance enforced on push::"
+	assert_output --partial "::warning title=sbom enforced on push::"
+	assert_output --partial "release-security policy"
+}
+
+@test "classify: defaults provenance and sbom to true when unset" {
+	unset PROVENANCE SBOM
+
+	_run_script
+	assert_success
+	assert_github_output "effective-provenance" "true"
+	assert_github_output "effective-sbom" "true"
+}
