@@ -345,16 +345,22 @@ EOF
 		{"id": 1, "name": "sha256:tagged-index", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["v1.0.0"]}}},
 		{"id": 2, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
 		{"id": 3, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
-		{"id": 4, "name": "sha256:orphan", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}}
-	]' 1 15000)"
+		{"id": 4, "name": "sha256:orphan", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 5, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["pr-5"]}}},
+		{"id": 6, "name": "sha256:orphan-cache", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["pr-6"]}}}
+	]' 1 15000 7500)"
 
+	# Both jq filters read the set through the file: the untagged prune and
+	# the build-cache prune, so a referenced ephemeral tag must survive too.
 	export PROTECT_REFERENCED="true"
+	export PRUNE_BUILDCACHE="true"
 	export KEEP_LATEST="0"
 
 	mock_command_multi "curl" "
 		*ghcr.io/token*) printf '%s\n' '{\"token\":\"registry-bearer\"}';;
 		*manifests/sha256:tagged-index*) cat '${manifest_file}'; printf '\n200\n';;
-		*referrers/sha256:tagged-index*) printf '%s\n404\n' '{}';;
+		*manifests/*) printf '%s\n200\n' '{\"manifests\":[]}';;
+		*referrers/*) printf '%s\n404\n' '{}';;
 		*) exit 1;;
 	"
 
@@ -364,5 +370,7 @@ EOF
 	assert_output --partial "Deleted untagged version 4"
 	refute_output --partial "Deleted untagged version 2"
 	refute_output --partial "Deleted untagged version 3"
+	assert_output --partial "Deleted build-cache version 6"
+	refute_output --partial "Deleted build-cache version 5"
 	refute_output --partial "Argument list too long"
 }
