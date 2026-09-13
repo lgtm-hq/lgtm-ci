@@ -50,7 +50,7 @@ verifiable evidence.
 | -------------- | ------------------ | -------------- | ------------ |
 | Python sdist and wheel | GitHub build-provenance attestation (SLSA v1 predicate) whose subject digests match the uploaded files; PyPI PEP 740 attestation via trusted publishing | `actions/attest-build-provenance` on the built dist; `pypa/gh-action-pypi-publish` with trusted publishing | `gh attestation verify <file> --repo <owner>/<repo>`; PyPI integrity page `https://pypi.org/integrity/<project>/<version>/<file>/provenance` |
 | Platform binaries and archives | One GitHub build-provenance attestation per file; a `SHA256SUMS` manifest attached to the GitHub Release | `actions/attest-build-provenance` with the file as subject; `sha256sum` in the build job | `gh attestation verify <file> --repo <owner>/<repo>`; `sha256sum --check SHA256SUMS` |
-| Container images | BuildKit provenance and SBOM pushed to the registry with the image index; GitHub attestation by image digest, pushed to the registry; keyless Cosign signature on the digest | `docker/build-push-action` with `provenance` and `sbom` enabled; `actions/attest-build-provenance` with `push-to-registry: true`; `cosign sign` keyless | `gh attestation verify oci://<image>@<digest> --repo <owner>/<repo>`; `cosign verify <image>@<digest> --certificate-identity-regexp '^https://github\\.com/<owner>/<repo>/\\.github/workflows/[^@]+@' --certificate-oidc-issuer https://token.actions.githubusercontent.com`; `docker buildx imagetools inspect <image>@<digest> --format '{{ json .Provenance }}'` and `'{{ json .SBOM }}'` |
+| Container images | BuildKit provenance and SBOM pushed to the registry with the image index; GitHub attestation by image digest, pushed to the registry; keyless Cosign signature on the digest | `docker/build-push-action` with `provenance` and `sbom` enabled; `actions/attest-build-provenance` with `push-to-registry: true`; `cosign sign` keyless | `gh attestation verify oci://<image>@<digest> --repo <owner>/<repo>`; `cosign verify <image>@<digest> --certificate-identity-regexp '^https://github\\.com/<owner>/<repo>/\\.github/workflows/[^@]+@' --certificate-oidc-issuer https://token.actions.githubusercontent.com`; `docker buildx imagetools inspect <image>@<digest> --format '{{ json .Provenance }}'` and `'{{ json .SBOM }}'`, each piped to `jq -e` so an absent attestation exits non-zero (section 9) |
 | npm packages | GitHub build-provenance attestation on the packed tarball; npm-native provenance via `npm publish --provenance` under trusted publishing; every binary packed inside MUST have been verified against its GitHub attestation before packing | `actions/attest-build-provenance` on the `npm pack` output; `npm publish --provenance`; `gh attestation verify` in the pack step | `npm audit signatures`; `npm view <pkg>@<version> dist.attestations` |
 | RubyGems | GitHub build-provenance attestation on the built `.gem` file; publish via RubyGems trusted publishing (OIDC), never an API key | `actions/attest-build-provenance` on the `gem build` output; `rubygems/release-gem` or `gem push` under trusted publishing | `gh attestation verify <file>.gem --repo <owner>/<repo>` |
 | Homebrew tap formula | The formula MUST reference an artifact that carries its own class's evidence (a GitHub Release asset or PyPI sdist above) and pin its `sha256`; the tap dispatch is an irreversible write and follows section 2 | The consumer's release workflow dispatches the tap after the referenced artifact is published; the tap's handler computes and pins the digest | `brew fetch --formula <formula>`, then `sha256sum --check` of the cached download against the formula's pinned `sha256` (section 9); verify the referenced artifact with its own class's command |
@@ -247,15 +247,17 @@ gh attestation verify ./<binary> --repo <owner>/<repo>
 sha256sum --check SHA256SUMS
 
 # Container image, by digest: GitHub attestation, Cosign signature, then the
-# BuildKit provenance and SBOM attached to the index (both must be non-empty)
+# BuildKit provenance and SBOM attached to the index. `imagetools inspect`
+# exits 0 and prints null when nothing is attached, so `jq -e` supplies the
+# non-zero exit that makes the check fail closed.
 gh attestation verify oci://ghcr.io/<owner>/<image>@sha256:<digest> --repo <owner>/<repo>
 cosign verify ghcr.io/<owner>/<image>@sha256:<digest> \
   --certificate-identity-regexp '^https://github\.com/<owner>/<repo>/\.github/workflows/[^@]+@' \
   --certificate-oidc-issuer https://token.actions.githubusercontent.com
 docker buildx imagetools inspect ghcr.io/<owner>/<image>@sha256:<digest> \
-  --format '{{ json .Provenance }}'
+  --format '{{ json .Provenance }}' | jq -e 'type == "object" and length > 0' >/dev/null
 docker buildx imagetools inspect ghcr.io/<owner>/<image>@sha256:<digest> \
-  --format '{{ json .SBOM }}'
+  --format '{{ json .SBOM }}' | jq -e 'type == "object" and length > 0' >/dev/null
 
 # npm package: the packed tarball's GitHub attestation, then npm provenance
 gh attestation verify ./<pkg>-<version>.tgz --repo <owner>/<repo>
