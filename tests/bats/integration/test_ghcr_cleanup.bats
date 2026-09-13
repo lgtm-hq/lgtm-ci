@@ -326,3 +326,53 @@ EOF
 	assert_output --partial "Deleted build-cache version 10"
 	refute_output --partial "Deleted build-cache version 11"
 }
+
+@test "ghcr-cleanup: protects a referenced-digest set larger than the argv limit" {
+	# 15,000 digests is roughly 1.1 MiB of JSON: above Linux's 128 KiB
+	# per-argument limit and macOS's 1 MiB total limit, so passing the set
+	# to jq as an argument fails on both (#959).
+	local manifest_file="${BATS_TEST_TMPDIR}/big-manifest.json"
+	{
+		printf '{"manifests":['
+		for ((i = 1; i <= 15000; i++)); do
+			((i > 1)) && printf ','
+			printf '{"digest":"sha256:%064d"}' "$i"
+		done
+		printf ']}'
+	} >"$manifest_file"
+
+	mock_gh_versions "$(printf '[
+		{"id": 1, "name": "sha256:tagged-index", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["v1.0.0"]}}},
+		{"id": 2, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 3, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 4, "name": "sha256:orphan", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 5, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["pr-5"]}}},
+		{"id": 6, "name": "sha256:orphan-cache", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["pr-6"]}}}
+	]' 1 15000 7500)"
+
+	# Both jq filters read the set through the file: the untagged prune and
+	# the build-cache prune. Under protection every tagged version is a root
+	# the collector protects, so the build-cache filter runs over the whole
+	# set and must keep both ephemeral entries (one also a manifest child).
+	export PROTECT_REFERENCED="true"
+	export PRUNE_BUILDCACHE="true"
+	export KEEP_LATEST="0"
+
+	mock_command_multi "curl" "
+		*ghcr.io/token*) printf '%s\n' '{\"token\":\"registry-bearer\"}';;
+		*manifests/sha256:tagged-index*) cat '${manifest_file}'; printf '\n200\n';;
+		*manifests/*) printf '%s\n200\n' '{\"manifests\":[]}';;
+		*referrers/*) printf '%s\n404\n' '{}';;
+		*) exit 1;;
+	"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Collected 15002 referenced digest(s)"
+	assert_output --partial "Deleted untagged version 4"
+	refute_output --partial "Deleted untagged version 2"
+	refute_output --partial "Deleted untagged version 3"
+	refute_output --partial "Deleted build-cache version 5"
+	refute_output --partial "Deleted build-cache version 6"
+	refute_output --partial "Argument list too long"
+}

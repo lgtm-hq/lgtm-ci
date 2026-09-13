@@ -161,14 +161,22 @@ cutoff_date=$(date -u -v-"${MIN_AGE_DAYS}d" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
 
 log_info "Cutoff date: $cutoff_date (older than $MIN_AGE_DAYS days)"
 
+# The referenced-digest set reaches jq through a file, never argv: a few
+# thousand digests exceed the kernel's per-argument limit and jq fails to
+# exec with "Argument list too long" (#959). $refs_doc[0] is the array.
+refs_file="$(mktemp "${TMPDIR:-/tmp}/ghcr-cleanup-refs.XXXXXX")" ||
+	die "Could not create temporary file for referenced digest set"
+trap 'rm -f -- "$refs_file"' EXIT
 if ((${#referenced_digests[@]} > 0)); then
-	refs_json=$(printf '%s\n' "${referenced_digests[@]}" | jq -R . | jq -s .)
+	printf '%s\n' "${referenced_digests[@]}" | jq -R . | jq -s . >"$refs_file" ||
+		die "Could not write referenced digest set"
 else
-	refs_json='[]'
+	printf '[]\n' >"$refs_file"
 fi
 
-eligible_versions=$(echo "$all_versions" | jq --arg cutoff "$cutoff_date" --argjson refs "$refs_json" '
+eligible_versions=$(echo "$all_versions" | jq --arg cutoff "$cutoff_date" --slurpfile refs_doc "$refs_file" '
 	def version_time: .updated_at // .created_at // "";
+	$refs_doc[0] as $refs |
 	[ .[] |
 	  select((.metadata.container.tags | length) == 0) |
 	  select(version_time != "") |
@@ -206,8 +214,9 @@ if [[ "$PRUNE_BUILDCACHE" == "true" ]]; then
 		date -u -d "${BUILD_CACHE_PR_AGE_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
 		die "Could not compute buildcache cutoff date")
 
-	buildcache_candidates=$(echo "$all_versions" | jq --arg cutoff "$buildcache_cutoff" --argjson refs "$refs_json" '
+	buildcache_candidates=$(echo "$all_versions" | jq --arg cutoff "$buildcache_cutoff" --slurpfile refs_doc "$refs_file" '
 		def version_time: .updated_at // .created_at // "";
+		$refs_doc[0] as $refs |
 		[ .[] |
 		  select((.metadata.container.tags | length) > 0) |
 		  select(version_time != "") |
