@@ -214,12 +214,10 @@ log_phase() {
 # ../lib/infra-signatures.sh so the release-mode failure notifier
 # (report-release-failure.sh) can reuse the exact same classification when it
 # decides whether an automatic re-run may still be in flight. The SIGNATURES
-# environment variable still extends the built-in list: infra_build_signatures
-# reads it through INFRA_SIGNATURES, and the shim below keeps this script's
-# documented SIGNATURES input working.
-build_signatures() {
-	INFRA_SIGNATURES="${SIGNATURES:-}" infra_build_signatures
-}
+# environment variable still extends the built-in list: it is mapped onto the
+# lib's INFRA_SIGNATURES input, which infra_match_signature reads, so this
+# script's documented SIGNATURES input keeps working unchanged.
+INFRA_SIGNATURES="$SIGNATURES"
 
 # Run `gh` under a hard wall-clock bound. `gh run view --log-failed` downloads
 # the failed-job log archive, which stalled twice on 2026-07-25 and burned the
