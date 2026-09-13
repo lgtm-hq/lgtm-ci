@@ -238,9 +238,10 @@ stage-sidecars)
 	# own SHA256SUMS (or a directory of that name) is never overwritten.
 	checksums_path=""
 	if [[ -f "dist/SHA256SUMS" ]]; then
-		rm -rf ".lgtm-ci-sidecars"
+		# mkdir -p, never rm -rf: a second call in the same job must not wipe
+		# what an earlier call staged; only this manifest is replaced.
 		mkdir -p ".lgtm-ci-sidecars"
-		mv "dist/SHA256SUMS" ".lgtm-ci-sidecars/SHA256SUMS"
+		mv -f "dist/SHA256SUMS" ".lgtm-ci-sidecars/SHA256SUMS"
 		checksums_path="$(_workspace_relative ".lgtm-ci-sidecars/SHA256SUMS")"
 		log_info "Staged dist/SHA256SUMS -> ${checksums_path} (kept out of packages-dir)"
 	fi

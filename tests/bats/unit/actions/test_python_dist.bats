@@ -363,3 +363,15 @@ EOF
 		run /bin/bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
 	assert_failure
 }
+
+@test "python-dist stage-sidecars: keeps other files an earlier call staged" {
+	_make_dist
+	mkdir -p .lgtm-ci-sidecars
+	printf 'earlier\n' >.lgtm-ci-sidecars/other
+	printf 'abc  pkg-1.0.0.tar.gz\n' >dist/SHA256SUMS
+	STEP=stage-sidecars run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+	assert_success
+	run cat .lgtm-ci-sidecars/other
+	assert_output "earlier"
+	[ -f .lgtm-ci-sidecars/SHA256SUMS ]
+}

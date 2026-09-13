@@ -134,7 +134,11 @@ on:
         description: "Built package name"
         value: ${{ jobs.build.outputs.package-name }}
       checksums-path:
-        description: "Path of the SHA256SUMS manifest inside the artifact"
+        description: >-
+          Build-workspace-relative path of the SHA256SUMS manifest
+          (<working-directory>/dist/SHA256SUMS). Inside the uploaded artifact
+          the file sits at the root, because dist/ contents become the
+          artifact root.
         value: ${{ jobs.build.outputs.checksums-path }}
 
 jobs:
@@ -215,6 +219,7 @@ jobs:
           subject-path: ${{ inputs.working-directory }}/dist/*
       - name: Write SHA256SUMS
         id: checksums
+        shell: bash
         working-directory: ${{ inputs.working-directory }}
         env:
           STEP: write-checksums
