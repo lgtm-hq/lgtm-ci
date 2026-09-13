@@ -739,6 +739,40 @@ fall back to a visible tracking key footer
 marker is retained for backward compatibility. Recurring failures add comments
 to the same open issue.
 
+### Tag publish failure reporting (release mode)
+
+Every workflow performing an irreversible publish from a tag MUST end with the
+release-mode notifier, `reusable-release-failure-notifier.yml`
+(`## Closes #964`). The branch-keyed reporting above is silent on tag runs:
+`GITHUB_REF_NAME` is the tag, so the branch gate never matches. The
+release-mode notifier bypasses the gate and deduplicates by tag instead. Wire
+one call with `needs` covering every publish job and `if: always()` (see
+`examples/publish-python-release.yml`); the job grants itself only
+`actions: read`, `contents: read`, and `issues: write` — publish jobs keep
+their least-privilege sets.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                 | Default                                    | Purpose                                                        |
+| --------------------- | ------------------------------------------ | -------------------------------------------------------------- |
+| `workflow-key`        | *(required)*                               | Stable key namespacing the dedup marker and issue title        |
+| `tag`                 | *(required)*                               | Tag whose publish is reported (usually `github.ref_name`)      |
+| `channels`            | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly    |
+| `max-reruns`          | `1`                                        | Match the caller's auto-rerun input; in-flight reruns stay quiet |
+| `failure-issue-labels`| `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped)  |
+
+<!-- markdownlint-enable MD013 -->
+
+Behavior: every channel `success`/`skipped` comments on and closes the tag's
+issue; a failure on an attempt within `max-reruns` whose failed-job logs match
+an infra signature (the same classifier as the auto-rerun reusable) stays
+quiet; otherwise it files or updates one issue titled
+`fix(release): tag publish failed: <tag> (<workflow-key>)` with tracking key
+`release-failure:<workflow-key>:<tag>` and a channel/result/job-link/probe
+table. The issue body names the recovery tier per the
+[release security policy](release-security-policy.md); a later successful
+attempt or recovery run closes it.
+
 ### Cargo auto-tag contract
 
 `reusable-release-auto-tag.yml` supports Rust monorepos that tag from

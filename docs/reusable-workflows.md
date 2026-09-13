@@ -767,6 +767,53 @@ workflow declares. Grant at least `actions: read` and `issues: write` on the
 caller job, or pass `report-failures: false` when upgrading from a release that
 did not include failure reporting.
 
+### Release failure notifier (tag publishes)
+
+`reusable-release-failure-notifier.yml` is the tag-publish counterpart of the
+two notifiers above. The branch-keyed mechanisms go quiet on tag runs
+(`GITHUB_REF_NAME` is the tag, so a branch gate never matches), which is how a
+half-published release used to stay invisible. This reusable deduplicates by
+tag: one open issue per `<workflow-key>` + `<tag>` —
+`release-failure:<key>:<tag>` — titled
+`fix(release): tag publish failed: <tag> (<key>)`, labelled
+`bug,ci,release,automation,infrastructure` (missing labels are skipped; create
+`release` in the consumer if absent).
+
+```yaml
+release-failure-notifier:
+  name: Report release failure
+  needs: [pypi-build, pypi-upload, github-release]
+  if: always()
+  # yamllint disable-line rule:line-length
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@<sha> # vX.Y.Z
+  with:
+    workflow-key: publish-python-release # stable key: one open issue per key+tag
+    tag: ${{ github.ref_name }}
+    channels: ${{ toJson(needs) }}
+    max-reruns: 3 # match the caller's auto-rerun input
+  permissions:
+    actions: read
+    contents: read
+    issues: write
+```
+
+`channels` accepts `toJson(needs)` directly; per-job `url` (job link column)
+and an optional `probe` (whether the channel already has the version) can be
+added by building the JSON in a pre-step. Verdicts:
+
+- **every channel success/skipped** — comments on and closes the tag's issue.
+- **a channel failed, attempt within `max-reruns`, failed-job logs match an
+  infra signature** — the same classifier the auto-rerun reusable acts on —
+  the job stays quiet; an automatic re-run may still fix the run.
+- **otherwise** — files or updates the issue with a channel table
+  (channel, result, job link, probe) and the recovery tier per
+  [release-security-policy.md](release-security-policy.md).
+
+`max-reruns` must match the caller's auto-rerun input: too low files an issue
+while a re-run is still pending; too high stays silent after retries are
+exhausted. The contract section is
+[workflow-contract.md](workflow-contract.md#tag-publish-failure-reporting-release-mode).
+
 ### Auto re-run on infra failure
 
 `reusable-auto-rerun-on-infra-failure.yml` re-runs the failed jobs of a

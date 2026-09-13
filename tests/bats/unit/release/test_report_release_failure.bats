@@ -453,3 +453,295 @@ EOF
 	run grep -F "Custom failure summary sentence." "${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
 }
+
+# =============================================================================
+# Release mode (#964): tag publishes deduplicate by tag, bypass the branch
+# gate, render the channel table, and pair file-on-failure with
+# close-on-success under the same key.
+# =============================================================================
+
+@test "report-release-failure: notify_release_failure bypasses the branch gate and creates the tag issue" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	# A tag ref: the branch gate of notify_failure would skip this run entirely.
+	export GITHUB_REF_NAME=v1.2.3
+	export GITHUB_RUN_ATTEMPT=2
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	cat >"${BATS_TEST_TMPDIR}/bin/gh" <<EOF
+#!/usr/bin/env bash
+echo "\$@" >> '${BATS_TEST_TMPDIR}/mock_calls_gh'
+case "\$*" in
+	*issue*list*)
+		echo ""
+		;;
+	*label*view*)
+		exit 0
+		;;
+	*issue*create*)
+		while [[ \$# -gt 0 ]]; do
+			if [[ "\$1" == "--body-file" && -n "\${2:-}" ]]; then
+				cp "\$2" '${BATS_TEST_TMPDIR}/issue-body.md'
+			fi
+			shift
+		done
+		echo "https://github.com/lgtm-hq/lgtm-ci/issues/64"
+		exit 0
+		;;
+	*)
+		exit 1
+		;;
+esac
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	export PATH="${BATS_TEST_TMPDIR}/bin:${PATH}"
+	export CHANNELS_JSON='[{"name":"pypi","result":"success","probe":"published"},{"name":"npm","result":"failure","url":"https://github.com/lgtm-hq/lgtm-ci/actions/runs/9/job/8"}]'
+
+	run bash "$SCRIPT" notify_release_failure
+	assert_success
+	assert_output --partial "Created release failure issue: https://github.com/lgtm-hq/lgtm-ci/issues/64"
+	run grep -F 'release-failure:publish-python-release:v1.2.3' "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_success
+	run grep -F 'fix(release): tag publish failed: v1.2.3 (publish-python-release)' \
+		"${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_success
+	[[ -f "${BATS_TEST_TMPDIR}/issue-body.md" ]]
+	run grep -F '**Tracking key:** `release-failure:publish-python-release:v1.2.3`' \
+		"${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+	run grep -F '**Tag:** v1.2.3' "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+	run grep -F '| pypi | success | — | published |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+	run grep -F '| npm | failure | [job](https://github.com/lgtm-hq/lgtm-ci/actions/runs/9/job/8) | — |' \
+		"${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+}
+
+@test "report-release-failure: notify_release_failure accepts toJson(needs) object shape" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	mock_command_multi "gh" '
+		*issue*list*) echo "";;
+		*label*view*) exit 0;;
+		*issue*create*)
+			while [[ $# -gt 0 ]]; do
+				if [[ "$1" == "--body-file" && -n "${2:-}" ]]; then
+					cp "$2" "'"${BATS_TEST_TMPDIR}"'/issue-body.md"
+				fi
+				shift
+			done
+			echo "https://github.com/lgtm-hq/lgtm-ci/issues/65";;
+		*) exit 1;;
+	'
+	export CHANNELS_JSON='{"pypi":{"result":"success"},"npm":{"result":"failure"}}'
+
+	run bash "$SCRIPT" notify_release_failure
+	assert_success
+	run grep -F '| pypi | success | — | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+	run grep -F '| npm | failure | — | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+}
+
+@test "report-release-failure: notify_release_failure comments on the existing tag issue" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	mock_command_multi "gh" '
+		*issue*list*) echo "77";;
+		*issue*comment*) echo "commented";;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_release_failure
+	assert_success
+	assert_output --partial "Updated release failure issue #77"
+}
+
+@test "report-release-failure: notify_release_failure requires RELEASE_TAG" {
+	export WORKFLOW_KEY=publish-python-release
+	unset RELEASE_TAG
+
+	run bash "$SCRIPT" notify_release_failure
+	assert_failure
+	assert_output --partial "RELEASE_TAG is required"
+}
+
+@test "report-release-failure: close_release_failure comments and closes the tag issue" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	mock_command_multi "gh" '
+		*issue*list*) echo "77";;
+		*issue*close*) echo "closed";;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" close_release_failure
+	assert_success
+	assert_output --partial "Closed release failure issue #77"
+}
+
+@test "report-release-failure: close_release_failure is a no-op without an open issue" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	mock_command_multi "gh" '
+		*issue*list*) echo "";;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" close_release_failure
+	assert_success
+	assert_output --partial "No open release-failure issue for tag 'v1.2.3'"
+}
+
+@test "report-release-failure: close_release_failure survives a search API failure" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	mock_command_multi "gh" '
+		*issue*list*) echo "API rate limit exceeded" >&2; exit 1;;
+		*) exit 1;;
+	'
+
+	# The close job runs on a green publish run; a search hiccup must not redden it.
+	run bash "$SCRIPT" close_release_failure
+	assert_success
+	assert_output --partial "leaving it open"
+}
+
+@test "report-release-failure: classify returns success when every channel succeeded" {
+	export CHANNELS_JSON='[{"name":"pypi","result":"success"},{"name":"github-release","result":"success"}]'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	mock_command_multi "gh" '*) exit 1;;'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "success"
+}
+
+@test "report-release-failure: classify treats skipped channels as succeeded" {
+	export CHANNELS_JSON='{"pypi":{"result":"success"},"sbom":{"result":"skipped"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	mock_command_multi "gh" '*) exit 1;;'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "success"
+}
+
+@test "report-release-failure: classify never calls an empty channel list a success" {
+	export CHANNELS_JSON='[]'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	mock_command_multi "gh" '*) exit 1;;'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+}
+
+@test "report-release-failure: classify files when the channels payload is invalid JSON" {
+	export CHANNELS_JSON='not-json-at-all'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	mock_command_multi "gh" '*) exit 1;;'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+}
+
+@test "report-release-failure: classify files once the attempt exceeds max-reruns" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=2
+	export MAX_RERUNS=1
+	# Even a matching signature must not suppress the final attempt's report.
+	mock_command_multi "gh" '
+		*--log-failed*) echo "The runner has received a shutdown signal";;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+}
+
+@test "report-release-failure: classify stays quiet while an infra rerun may be in flight" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	mock_command_multi "gh" '
+		*--log-failed*) echo "error: lost communication with the server";;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "rerunning"
+}
+
+@test "report-release-failure: classify writes the verdict to GITHUB_OUTPUT" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	export GITHUB_OUTPUT="$output_file"
+	mock_command_multi "gh" '
+		*--log-failed*) echo "error: lost communication with the server";;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	run grep -F "verdict=rerunning" "$output_file"
+	assert_success
+}
+
+@test "report-release-failure: classify files when the failure does not match an infra signature" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	mock_command_multi "gh" '
+		*--log-failed*) echo "403 Forbidden: npm publish rejected the token";;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+}
+
+@test "report-release-failure: classify files when the failed-job logs are unavailable" {
+	# Inconclusive is not quiet: a visible duplicate costs less than silence.
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	mock_command_multi "gh" '
+		*--log-failed*) exit 1;;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+}
+
+@test "report-release-failure: classify honors INFRA_SIGNATURES extensions" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	export INFRA_SIGNATURES=$'my-custom-registry-flake'
+	mock_command_multi "gh" '
+		*--log-failed*) echo "upstream error: my-custom-registry-flake retry me";;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "rerunning"
+}

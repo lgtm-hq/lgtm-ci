@@ -1,0 +1,197 @@
+---
+name: Reusable - Release Failure Notifier
+
+# Release-mode failure notifier for tag publish runs (#964).
+#
+# reusable-main-failure-notifier.yml is keyed to a branch: on a tag-triggered
+# publish run GITHUB_REF_NAME is the tag, the branch gate never matches, and a
+# failed publish stays silent. This reusable bypasses that gate and dedups by
+# tag instead, so a partial release produces exactly one open issue per tag
+# with the per-channel state a human needs to pick a recovery tier
+# (docs/release-security-policy.md).
+#
+# Call from a publish workflow after every publish job (all channels in scope):
+#
+#   release-failure-notifier:
+#     name: Report release failure
+#     needs: [pypi-build, pypi-upload, github-release]
+#     if: always()
+#     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@<sha>
+#     with:
+#       workflow-key: publish-python-release
+#       tag: ${{ github.ref_name }}
+#       channels: ${{ toJson(needs) }}
+#     permissions:
+#       actions: read
+#       contents: read
+#       issues: write
+#
+# Behavior:
+#   - every channel success/skipped  → comments on and closes the tag's issue
+#   - a channel failed, attempt <= max-reruns and the failed-job logs match an
+#     infra signature (same classifier as the auto-rerun safety net) → quiet;
+#     an automatic re-run may still fix the run
+#   - otherwise → files or updates one deduplicated issue
+#     (`release-failure:<workflow-key>:<tag>`) with the channel table
+#
+# The channels payload accepts `toJson(needs)` directly (object keyed by job
+# name); per-job `url` and an optional `probe` (published or not) may be added
+# by building the JSON in a pre-step when the caller wants those columns.
+
+"on":
+  workflow_call:
+    inputs:
+      workflow-key:
+        description: >-
+          Stable key namespacing the dedup marker and issue title
+          (e.g. publish-python-release, publish-npm-set)
+        required: true
+        type: string
+      tag:
+        description: Release tag whose publish is being reported (e.g. v1.2.3)
+        required: true
+        type: string
+      channels:
+        description: >-
+          JSON of the caller's publish-job results, either an array of
+          {name, result, url, probe} or `toJson(needs)`; unknown shapes are
+          reported as a failure so the run stays visible
+        required: false
+        type: string
+        default: "[]"
+      max-reruns:
+        description: >-
+          Automatic re-runs the caller allows for this run (match the caller's
+          auto-rerun input); attempts within budget that match an infra
+          signature do not file yet
+        required: false
+        type: number
+        default: 1
+      failure-issue-labels:
+        description: Comma-separated labels for auto-opened failure issues
+        required: false
+        type: string
+        default: "bug,ci,release,automation,infrastructure"
+      runner-image:
+        description: Runner image for the notifier job
+        required: false
+        type: string
+        default: ubuntu-24.04
+      timeout-minutes:
+        description: Timeout for the notifier job
+        required: false
+        type: number
+        default: 10
+      egress-policy:
+        description: Egress policy for harden-runner (audit or block)
+        required: false
+        type: string
+        default: block
+      tooling-ref:
+        description: >-
+          lgtm-ci ref for tooling checkout. Empty uses the calling workflow's
+          pinned SHA.
+        required: false
+        type: string
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    name: Report release tag publish outcome
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # always(): the job both files on failure and closes on success, so the
+    # caller wires one call with needs covering every publish job and never
+    # gates it on outcome.
+    if: always()
+    permissions:
+      # Read workflow/job metadata and this run's failed-job logs for the
+      # infra-signature classification
+      actions: read
+      # Read repository context for the issue body
+      contents: read
+      # Create, comment on, and close failure notification issues
+      issues: write
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >
+            github.com:443
+            api.github.com:443
+            codeload.github.com:443
+            objects.githubusercontent.com:443
+            pipelines.actions.githubusercontent.com:443
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Resolve egress allowlist
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: github-minimal
+      - name: Classify tag publish outcome
+        id: classify
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_KEY: ${{ inputs.workflow-key }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CHANNELS_JSON: ${{ inputs.channels }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          MAX_RERUNS: ${{ inputs.max-reruns }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          classify_release_failure
+      - name: Write release trigger summary
+        if: steps.classify.outputs.verdict != 'success'
+        shell: bash
+        env:
+          WORKFLOW_KEY: ${{ inputs.workflow-key }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          FAILURE_HEADING_LABEL: Release Publish
+          PRIMARY_JOB_FAILED: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          write_trigger_summary
+      - name: File or update release failure issue
+        if: steps.classify.outputs.verdict == 'failure'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_KEY: ${{ inputs.workflow-key }}
+          RELEASE_TAG: ${{ inputs.tag }}
+          CHANNELS_JSON: ${{ inputs.channels }}
+          FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          notify_release_failure
+      - name: Close release failure issue
+        if: steps.classify.outputs.verdict == 'success'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          WORKFLOW_KEY: ${{ inputs.workflow-key }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
+          close_release_failure

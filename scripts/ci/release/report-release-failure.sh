@@ -5,8 +5,16 @@
 # (via reusable-main-failure-notifier.yml) can use the same mechanism.
 #
 # Subcommands:
-#   write_trigger_summary — append trigger context to $GITHUB_STEP_SUMMARY
-#   notify_failure        — create or comment on a deduplicated GitHub issue
+#   write_trigger_summary   — append trigger context to $GITHUB_STEP_SUMMARY
+#   notify_failure          — create or comment on a deduplicated GitHub issue
+#   notify_release_failure  — release mode: dedup by tag, branch gate bypassed,
+#                             publish-channel table in the body
+#   close_release_failure   — release mode: comment and close the deduplicated
+#                             issue when the tag publishes successfully
+#   classify_release_failure — release mode: print success|failure|rerunning
+#                             for the caller's publish channels; "rerunning"
+#                             means an automatic infra re-run may still be in
+#                             flight, so the notifier must stay quiet for now
 #
 # Required environment variables:
 #   WORKFLOW_KEY        — Stable workflow key for marker namespacing
@@ -33,14 +41,22 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/log.sh"
 # shellcheck source=../lib/github/summary.sh
 source "$SCRIPT_DIR/../lib/github/summary.sh"
+# Sourced for the transient-infrastructure signature matcher, which the
+# release-mode classifier reuses so "an automatic re-run may still fire" is
+# decided by exactly the same signatures the auto-rerun safety net acts on.
+# shellcheck source=../lib/infra-signatures.sh
+source "$SCRIPT_DIR/../lib/infra-signatures.sh"
 
 usage() {
 	cat <<'EOF'
 Usage: report-release-failure.sh <subcommand>
 
 Subcommands:
-  write_trigger_summary  Write release trigger context to $GITHUB_STEP_SUMMARY
-  notify_failure         Create or update a deduplicated GitHub issue on target branch
+  write_trigger_summary    Write release trigger context to $GITHUB_STEP_SUMMARY
+  notify_failure           Create or update a deduplicated GitHub issue on target branch
+  notify_release_failure   Release mode: dedup by tag, channel table in the body
+  close_release_failure    Release mode: comment and close the issue on success
+  classify_release_failure Release mode: print success|failure|rerunning
 EOF
 }
 
@@ -404,23 +420,36 @@ notify_failure() {
 		exit 0
 	fi
 
+	_notify_failure_for_target "$target_branch" render_failure_body
+}
+
+# Shared create-or-comment flow behind notify_failure and
+# notify_release_failure. $1 is the dedup target (branch or tag) already
+# validated against the caller's gate; $2 names the body renderer so each
+# mode keeps its own issue shape.
+_notify_failure_for_target() {
+	local target="$1"
+	local renderer="$2"
+	local body_file
+	local existing_issue
+
 	body_file="$(mktemp)"
 	trap 'rm -f "$body_file"' EXIT
-	render_failure_body "$target_branch" >"$body_file"
+	"$renderer" "$target" >"$body_file"
 
-	existing_issue="$(find_existing_issue "$target_branch")"
+	existing_issue="$(find_existing_issue "$target")"
 	if [[ -n "$existing_issue" ]]; then
 		comment_on_failure_issue "$existing_issue" "$body_file"
 	else
 		# Brief pause reduces duplicate issues when concurrent runs fail together.
 		sleep 2
-		existing_issue="$(find_existing_issue "$target_branch")"
+		existing_issue="$(find_existing_issue "$target")"
 		if [[ -n "$existing_issue" ]]; then
 			comment_on_failure_issue "$existing_issue" "$body_file"
-		elif create_failure_issue "$body_file" "$target_branch"; then
+		elif create_failure_issue "$body_file" "$target"; then
 			:
 		else
-			existing_issue="$(find_existing_issue "$target_branch")"
+			existing_issue="$(find_existing_issue "$target")"
 			if [[ -n "$existing_issue" ]]; then
 				comment_on_failure_issue "$existing_issue" "$body_file"
 			else
@@ -434,12 +463,268 @@ notify_failure() {
 	trap - EXIT
 }
 
+# =============================================================================
+# Release mode (tag publishes) — #964
+# =============================================================================
+#
+# A tag-triggered publish run has no branch to gate on (GITHUB_REF_NAME is the
+# tag), so the branch gate of notify_failure would silently swallow every
+# failure (report-release-failure.sh returned 0 for any non-branch ref). The
+# release mode deduplicates by tag instead, renders the caller's publish
+# channels as a table, and pairs file-on-failure with close-on-success under
+# the same key.
+
+release_tag() {
+	echo "${RELEASE_TAG:?RELEASE_TAG is required}"
+}
+
+# Validations shared by the release-mode issue-writing subcommands.
+_require_issue_access() {
+	if [[ -z "${GH_TOKEN:-}" ]]; then
+		log_error "GH_TOKEN is required"
+		exit 1
+	fi
+	if [[ -z "${GITHUB_REPOSITORY:-}" ]]; then
+		log_error "GITHUB_REPOSITORY is required"
+		exit 1
+	fi
+	if ! command -v gh >/dev/null 2>&1; then
+		log_error "gh CLI is required to report release automation failures"
+		exit 1
+	fi
+	workflow_key >/dev/null
+	if [[ -z "${RELEASE_TAG:-}" ]]; then
+		log_error "RELEASE_TAG is required"
+		exit 1
+	fi
+}
+
+# Rows of the publish-channel table from CHANNELS_JSON.
+#
+# Two payload shapes are accepted so callers can pass `toJson(needs)` (an
+# object keyed by job name) without reshaping it first:
+#   [{"name":"pypi","result":"failure","url":"https://...","probe":"absent"}]
+#   {"pypi":{"result":"failure"},"npm":{"result":"success"}}
+# `probe` is the optional published/not-yet-published check; when a caller
+# does not supply one the column renders an em dash rather than a lie.
+channel_table_rows() {
+	local channels="${CHANNELS_JSON:-[]}"
+	if ! printf '%s' "$channels" | jq -e . >/dev/null 2>&1; then
+		log_warn "CHANNELS_JSON is not valid JSON; the channel table will say so"
+		echo "| *(unparseable channel payload)* | | | |"
+		return 0
+	fi
+	jq -r '
+		(if type == "object" then [to_entries[] | (.value + {name: .key})] else . end)
+		| .[]
+		| [(.name // "unknown"), (.result // "unknown"), (.url // ""), ((.probe // "") | tostring)]
+		| "| " + .[0] + " | " + .[1] + " | " + (if .[2] == "" then "—" else "[job](" + .[2] + ")" end)
+		  + " | " + (if .[3] == "" then "—" else .[3] end) + " |"
+	' <<<"$channels"
+}
+
+render_channel_table() {
+	echo "| Channel | Result | Job | Probe |"
+	echo "| --- | --- | --- | --- |"
+	local rows
+	rows="$(channel_table_rows)"
+	if [[ -z "$rows" ]]; then
+		echo "| *(no channels reported)* | | | |"
+	else
+		printf '%s\n' "$rows"
+	fi
+}
+
+render_release_failure_body() {
+	local tag="${1:?tag is required}"
+	local sha
+	local current_run_url
+	local marker
+	local tracking_key
+	sha="$(release_sha)"
+	current_run_url="$(run_url)"
+	marker="$(issue_marker "$tag")"
+	tracking_key="$(marker_key "$tag")"
+
+	cat <<EOF
+$marker
+
+## Summary
+
+A tag publish for \`${tag}\` failed after automatic retries were exhausted. This issue keeps the partial release visible with the per-channel state needed to act. Recovery tiers are defined in [docs/release-security-policy.md](https://github.com/lgtm-hq/lgtm-ci/blob/main/docs/release-security-policy.md); the recovery runbook is tracked in lgtm-hq/lgtm-ci#966.
+
+## Failure Context
+
+- **Workflow:** ${GITHUB_WORKFLOW:-unknown}
+- **Workflow key:** $(workflow_key)
+- **Event:** ${GITHUB_EVENT_NAME:-unknown}
+- **Tag:** ${tag}
+- **Run attempt:** ${GITHUB_RUN_ATTEMPT:-unknown}
+- **Checkout SHA:** ${sha}
+- **Actor:** ${GITHUB_ACTOR:-unknown}
+- **Run:** ${current_run_url}
+
+## Publish Channels
+
+$(render_channel_table)
+
+## Failed Job or Step
+
+$(failed_step_summary)
+
+## Suggested Next Action
+
+- **Tier 1 (transient infra):** re-run the failed jobs — the known flake signatures are already covered by the automatic re-run safety net.
+- **Tier 2 (resume):** run the release recovery workflow against this tag and the original attested artifacts once available (lgtm-hq/lgtm-ci#966); it publishes only the missing channels.
+- **Tier 3 (new patch version):** required when any published bytes differ from the attested artifacts, or when PyPI uploaded partially — a PyPI version is burned on first upload and can never be resumed.
+
+---
+**Tracking key:** \`${tracking_key}\`
+EOF
+}
+
+notify_release_failure() {
+	_require_issue_access
+	# Release-mode namespace for the shared dedup machinery: same tracking-key
+	# footer and title lookup as the branch mode, keyed by tag instead.
+	FAILURE_MARKER_PREFIX="release-failure"
+	FAILURE_TITLE_PREFIX="fix(release): tag publish failed:"
+	_notify_failure_for_target "$(release_tag)" render_release_failure_body
+}
+
+close_release_failure() {
+	_require_issue_access
+	local tag
+	local title
+	local existing
+	tag="$(release_tag)"
+	FAILURE_MARKER_PREFIX="release-failure"
+	FAILURE_TITLE_PREFIX="fix(release): tag publish failed:"
+	title="$(failure_issue_title "$tag")"
+
+	# Soft lookups on purpose: the close job runs on a successful release run,
+	# and a search API hiccup must not redden a green publish. No open issue is
+	# the normal repeat-success case, not an error.
+	if ! existing="$(lookup_open_issue "\"${title}\" in:title")"; then
+		log_info "Title search unavailable; falling back to tracking key"
+		if ! existing="$(lookup_open_issue "\"release-failure:$(workflow_key):${tag}\"")"; then
+			log_warn "Could not search for the open release-failure issue; leaving it open"
+			exit 0
+		fi
+	fi
+	if [[ -z "$existing" ]]; then
+		log_info "No open release-failure issue for tag '${tag}'; nothing to close"
+		exit 0
+	fi
+
+	if ! gh issue close "$existing" \
+		--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
+		--comment "Resolved: tag \`${tag}\` is fully published (run: $(run_url)). Closing this issue." >/dev/null; then
+		log_error "Failed to close release failure issue #${existing}"
+		exit 1
+	fi
+	log_success "Closed release failure issue #${existing} (tag ${tag} fully published)"
+}
+
+# True when CHANNELS_JSON reports at least one channel whose result is neither
+# success nor skipped. An empty channel list is NOT "all succeeded": a caller
+# that wired no channels has told us nothing, and silence is the failure mode
+# this notifier exists to prevent.
+channels_all_succeeded() {
+	local channels="$1"
+	printf '%s' "$channels" | jq -e '
+		(if type == "object" then [to_entries[] | (.value + {name: .key})] else . end)
+		| length > 0
+		and all(.[]; ((.result // "unknown") == "success" or (.result // "unknown") == "skipped"))
+	' >/dev/null 2>&1
+}
+
+# Best-effort fetch of this run's failed-job logs. Empty output on any error:
+# the caller treats "logs unavailable" as inconclusive and files, because a
+# visible duplicate on the issue costs far less than a silently exhausted
+# release.
+fetch_infra_signature_logs() {
+	gh run view "${GITHUB_RUN_ID:-}" --repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" --log-failed 2>/dev/null || true
+}
+
+# True when this attempt can still be superseded by an automatic re-run:
+# the attempt is within the caller's re-run budget AND the failure matches an
+# infra signature (the same classifier the auto-rerun safety net acts on, so
+# the notifier and the re-runner can never disagree about what counts as
+# transient). Anything inconclusive — malformed attempt, empty logs — returns
+# false and files, because the cost asymmetry is entirely on the silent side.
+rerun_may_be_in_flight() {
+	local attempt="$1"
+	local max_reruns="$2"
+	local logs
+	[[ "$attempt" =~ ^[0-9]+$ ]] || return 1
+	[[ "$max_reruns" =~ ^[0-9]+$ ]] || return 1
+	((attempt <= max_reruns)) || return 1
+	logs="$(fetch_infra_signature_logs)"
+	[[ -n "$logs" ]] || return 1
+	infra_match_signature "$logs" >/dev/null
+}
+
+# Decide what the release-mode notifier should do for this run and print the
+# verdict (also written to $GITHUB_OUTPUT as `verdict=` when set):
+#   success   — every reported channel succeeded or was skipped: close the issue
+#   rerunning — a failed channel, but an automatic infra re-run may still be in
+#               flight: stay quiet for now
+#   failure   — retries exhausted (or unknowable): file or update the issue
+classify_release_failure() {
+	local channels="${CHANNELS_JSON:-[]}"
+	local attempt="${RUN_ATTEMPT:-}"
+	local max_reruns="${MAX_RERUNS:-1}"
+	local verdict
+
+	if [[ -n "$attempt" && ! "$attempt" =~ ^[0-9]+$ ]]; then
+		log_warn "RUN_ATTEMPT '${attempt}' is not an integer; treating this as the final attempt"
+		attempt=""
+	fi
+	if [[ -n "$max_reruns" && ! "$max_reruns" =~ ^[0-9]+$ ]]; then
+		log_warn "MAX_RERUNS '${max_reruns}' is not an integer; defaulting to 1"
+		max_reruns=1
+	fi
+
+	if ! printf '%s' "$channels" | jq -e . >/dev/null 2>&1; then
+		log_warn "CHANNELS_JSON is not valid JSON; filing a failure so the run stays visible"
+		verdict="failure"
+	elif channels_all_succeeded "$channels"; then
+		verdict="success"
+	elif rerun_may_be_in_flight "$attempt" "$max_reruns"; then
+		verdict="rerunning"
+	else
+		verdict="failure"
+	fi
+
+	if [[ "$verdict" == "rerunning" ]]; then
+		add_github_summary "## Release failure notifier"
+		add_github_summary ""
+		add_github_summary "Attempt ${attempt:-unknown} is within the automatic re-run budget (max-reruns ${max_reruns}) and the failed-job logs match a known transient-infrastructure signature, so a re-run may still be in flight. No issue filed yet; the final attempt files or closes."
+	fi
+
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		printf 'verdict=%s\n' "$verdict" >>"${GITHUB_OUTPUT}"
+	fi
+	log_info "Release-failure verdict: ${verdict}"
+	echo "$verdict"
+}
+
 case "${1:-}" in
 write_trigger_summary)
 	write_trigger_summary
 	;;
 notify_failure)
 	notify_failure
+	;;
+notify_release_failure)
+	notify_release_failure
+	;;
+close_release_failure)
+	close_release_failure
+	;;
+classify_release_failure)
+	classify_release_failure
 	;;
 --help | -h)
 	usage

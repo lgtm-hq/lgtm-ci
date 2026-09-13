@@ -175,13 +175,15 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/github/summary.sh
 source "$SCRIPT_DIR/../lib/github/summary.sh"
-# Sourced in this shell for COSIGN_OIDC_TRANSIENT_MARKERS, the single source of
-# the transient ambient-OIDC marker strings (#719). This script is not a signing
+# Sourced in this shell for the transient-infrastructure signatures, whose
+# single source is ../lib/infra-signatures.sh. The lib in turn sources
+# cosign.sh for COSIGN_OIDC_TRANSIENT_MARKERS, the single source of the
+# transient ambient-OIDC marker strings (#719); this script is not a signing
 # path, but the markers are cosign-emitted strings, so cosign.sh stays their
-# home; sourcing it here is side-effect-free (a load guard, function
+# home. Sourcing here is side-effect-free (a load guard, function
 # definitions, and two numeric defaults).
-# shellcheck source=../lib/cosign.sh
-source "$SCRIPT_DIR/../lib/cosign.sh"
+# shellcheck source=../lib/infra-signatures.sh
+source "$SCRIPT_DIR/../lib/infra-signatures.sh"
 
 # Scratch state shared between the work child and the watchdog parent (#776).
 # Removed on exit by whichever shell created it, so the background child cannot
@@ -208,26 +210,15 @@ log_phase() {
 	log_info "$phase"
 }
 
-# Known transient infra failure signatures (fixed strings, one per line).
-#
-# The trailing cosign markers are the ambient-OIDC flake class that
-# scripts/ci/lib/cosign.sh already retries in-step. The in-step retry is the
-# fast path; this matcher is the slow path for when that retry is exhausted and
-# the publish fails outright. Without them a persistent OIDC flake burned its
-# retries and then matched nothing here, leaving a human to press re-run (#719).
-DEFAULT_SIGNATURES="Failed to resolve action download info
-The runner has received a shutdown signal
-Error resolving allowed domain
-lost communication with the server
-${COSIGN_OIDC_TRANSIENT_MARKERS}"
-
-# Build the effective signature list: defaults plus optional SIGNATURES
-# extensions, blank lines dropped.
+# The transient-infra failure signatures and their matcher live in
+# ../lib/infra-signatures.sh so the release-mode failure notifier
+# (report-release-failure.sh) can reuse the exact same classification when it
+# decides whether an automatic re-run may still be in flight. The SIGNATURES
+# environment variable still extends the built-in list: infra_build_signatures
+# reads it through INFRA_SIGNATURES, and the shim below keeps this script's
+# documented SIGNATURES input working.
 build_signatures() {
-	printf '%s\n' "$DEFAULT_SIGNATURES"
-	if [[ -n "$SIGNATURES" ]]; then
-		printf '%s\n' "$SIGNATURES"
-	fi
+	INFRA_SIGNATURES="${SIGNATURES:-}" infra_build_signatures
 }
 
 # Run `gh` under a hard wall-clock bound. `gh run view --log-failed` downloads
@@ -645,25 +636,11 @@ fetch_failed_logs_with_retry() {
 }
 
 # Print the first signature found in the logs on stdin; return 1 when none
-# match.
-#
-# Matching stays case-sensitive (#719). Every signature is stored in the exact
-# case its source emits — including the cosign markers — so case-insensitive
-# matching would buy no extra true positives, while widening what auto-rerun
-# fires on across ALL signatures, not just the OIDC ones. The cost of a false
-# positive here is re-running a workflow that may have failed for real; the cost
-# of a miss is the pre-#719 status quo of a human pressing re-run. Strict is the
-# safe default for the safety net.
+# match. Delegates to the shared lib; see infra_match_signature for why
+# matching stays case-sensitive (#719).
 match_signature() {
-	local logs="$1" signature
-	while IFS= read -r signature; do
-		[[ -z "$signature" ]] && continue
-		if grep -qF -- "$signature" <<<"$logs"; then
-			printf '%s\n' "$signature"
-			return 0
-		fi
-	done < <(build_signatures)
-	return 1
+	local logs="$1"
+	infra_match_signature "$logs"
 }
 
 evaluate_and_rerun() {
