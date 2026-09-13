@@ -50,3 +50,4 @@ If you invoke lgtm-ci composites directly from your own workflow (instead of a
 reusable), pin each action to a commit SHA and check out lgtm-ci tooling before
 `resolve-egress-allowlist` and `harden-runner`. See
 [.github/actions/README.md](../.github/actions/README.md#usage-example).
+- [publish-npm-set.yml](publish-npm-set.yml) — ordered npm package-set release (trusted publishing, idempotent re-runs, verified)

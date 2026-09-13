@@ -57,27 +57,12 @@ the step fails if twine check cannot run. Do **not** nest
 
 ## publish-npm
 
-Build and publish Node.js packages to npm via **OIDC trusted publishing**
-(preferred) or an optional legacy token.
-
-```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/publish-npm@main
-  with:
-    dist-tag: "latest" # optional
-    provenance: "true" # optional; explicit --provenance intent
-    access: "public" # optional
-    dry-run: "false" # optional, build only
-    # npm-token: ${{ secrets.NPM_TOKEN }}  # legacy only; omit for OIDC
-```
-
-**Outputs:** `published`, `version`, `package-name`, `tarball`. Requires
-`id-token: write` and a GitHub-hosted runner. Use **Node 24+** (npm ≥ 11.5.1)
-for trusted publishing; never run `npm install -g npm`. Under trusted
-publishing provenance is automatic; `provenance: true` still passes
-`--provenance` as explicit intent. Optional `npm-token` input sets
-`NODE_AUTH_TOKEN` for legacy callers. Configure a trusted publisher on
-npmjs.com for the **caller** workflow (allow `npm publish`). See
-[workflows/publishing.md](../workflows/publishing.md#reusable-publish-npmyml).
+**Removed (#965).** The `publish-npm` composite action was retired with the
+single-package reusable: a single package is a one-element package set. Use
+[`reusable-publish-npm-set.yml`](../workflows/publishing.md) instead, which
+adds idempotent re-runs, pre-publish artifact verification, and post-publish
+registry verification. See
+[reusable-workflows.md](../reusable-workflows.md#npm-package-set-ordered-idempotent-verified).
 
 ## publish-gem
 

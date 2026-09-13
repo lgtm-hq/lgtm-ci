@@ -160,7 +160,8 @@ These reusables intentionally omit `runner-image`:
 | `reusable-scorecards.yml`            | Action-only wrapper                                    |
 | `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
 | `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
-| `reusable-publish-npm.yml`           | OIDC trusted publishing + npm provenance; Node 24      |
+| `reusable-publish-npm.yml`           | Deprecated wrapper → package-set reusable; OIDC only   |
+| `reusable-publish-npm-set.yml`       | Ordered npm package set; idempotent; pre/post verified |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->
@@ -1057,7 +1058,35 @@ egress-preset: npm-publish
 Includes `registry.npmjs.org:443`, Sigstore hosts, and
 `oauth2.sigstore.dev:443` for OIDC trusted publishing. Use Node 24 via
 `setup-node`; never `npm install -g npm`. See
-[workflows/publishing.md](workflows/publishing.md#reusable-publish-npmyml).
+[workflows/publishing.md](workflows/publishing.md#reusable-publish-npm-setyml).
+
+#### npm package set contract
+
+`reusable-publish-npm-set.yml` publishes a set of packages with a fixed step
+order that callers must not reorder around (asserted by
+`tests/bats/integration/test_reusable_publish_npm_set.bats`):
+
+1. `verify-artifacts` — when `checksums-file` is set: sha256 plus `gh
+   attestation verify` against `signer-repo`/`signer-workflow`, before any
+   `npm pack`. Tampered, missing, unlisted, or unattested artifacts fail the
+   job with nothing published.
+2. `publish-set` — the only writer. Ordered (`order`, meta package last),
+   idempotent on re-runs (`npm view` pre-check skip, `EPUBLISHCONFLICT`
+   conflict-as-success, read-before-write dist-tag reconcile), bounded
+   exponential backoff on transient Sigstore/5xx/429 errors only, auth
+   failures never retried. Outputs `published` (JSON array of `{name,
+   version, status, integrity}`) and `dist-tag-drift`; dist-tag drift (an
+   OIDC-scoped token cannot write `npm dist-tag`, npm/cli#8547) is deferred:
+   remaining packages publish first, then the job fails.
+3. `verify-published` — read-only and last: per-package
+   `dist.attestations` + `dist.integrity` required (bounded propagation
+   retry), `npm audit signatures` on a scratch install of the meta package,
+   optional `smoke-command`.
+
+npm trusted publishing validates the entry workflow file, so consumers must
+pass their top-level publish workflow via `entry-workflows` (empty disables
+the guard — not acceptable for live publishes) and keep their
+trusted-publisher registration pointed at that same file.
 
 ### GitHub Release (artifact upload)
 

@@ -979,7 +979,68 @@ before creating a new tag.
 
 ## Publishing And Deployment
 
+### npm package set (ordered, idempotent, verified)
+
+`reusable-publish-npm-set.yml` publishes a **set** of npm packages under npm
+trusted publishing (OIDC): platform packages first, meta package last, so
+consumers never resolve a meta-package whose optional dependencies are
+missing. It ports the audited py-lintro publish loop, including the
+read-before-write dist-tag reconcile (#2631 semantics): a live re-run skips
+already-published packages, reconciles their dist-tag without writing when
+the registry already matches, and records (rather than aborts on) OIDC
+dist-tag drift so the remaining packages still publish before the run goes
+red.
+
+The step order is the contract, asserted by the wiring test:
+
+1. **Verify artifacts** (when `checksums-file` is set): sha256 against the
+   manifest plus `gh attestation verify --repo <signer-repo>
+   --signer-workflow <signer-workflow>` per file — before any `npm pack`.
+   The release security policy forbids publishing unverified artifacts.
+2. **Publish package set**: the only step that writes to the registry.
+   Bounded exponential backoff on transient Sigstore/5xx/429 errors only;
+   `EPUBLISHCONFLICT` is an idempotent success; auth failures never retry.
+3. **Verify published** (read-only, last): `npm view` per package requires
+   `dist.attestations` and `dist.integrity` (bounded propagation retry);
+   `npm audit signatures` in a scratch install of the meta package; optional
+   `smoke-command` in that install.
+
 ```yaml
+jobs:
+  npm-set:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@<sha>
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      packages-dir: npm-dist
+      order: '["darwin-arm64", "linux-x64", "meta"]' # meta last
+      dry-run: false
+      entry-workflows: .github/workflows/publish-npm-set.yml
+      checksums-file: npm-dist/SHA256SUMS
+      files-to-verify: '["*/package.json", "*/bin/*"]'
+      signer-repo: <owner>/<repo>
+      signer-workflow: .github/workflows/build-binaries.yml
+```
+
+npm trusted publishing validates the **entry** workflow file of the run —
+your top-level workflow, not this reusable — so the consumer's
+trusted-publisher registration stays valid when it calls this reusable.
+Name that entry file via `entry-workflows` so the built-in guard enforces
+the binding before any publish. The caller job supplies the `npm`
+environment (reusables cannot set environments). No npm token: OIDC only.
+`setup-node` writes a placeholder `_authToken`; the publish script strips
+it. Do not self-upgrade npm in-place. Full example:
+[examples/publish-npm-set.yml](../examples/publish-npm-set.yml).
+
+The deprecated single-package wrapper `reusable-publish-npm.yml` forwards
+here with `order: "."`; it will be removed in a future release, and its
+`version`/`package-name`/`tarball` outputs are gone (read the `published`
+JSON instead).
+
+```yaml
+# Deprecated wrapper (migration aid only); prefer the package-set reusable.
 jobs:
   npm:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm.yml@<sha>
@@ -996,7 +1057,7 @@ jobs:
 Configure an npm trusted publisher for the **caller** workflow filename and
 allow the `npm publish` action. Use Node 24 (default); never
 `npm install -g npm`. Full recipe:
-[workflows/publishing.md](workflows/publishing.md#reusable-publish-npmyml).
+[workflows/publishing.md](workflows/publishing.md#reusable-publish-npm-setyml).
 
 ```yaml
 jobs:
