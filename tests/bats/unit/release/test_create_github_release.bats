@@ -370,7 +370,7 @@ _sha256() {
 	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
 	echo "data" >"$asset"
 	export MOCK_EXISTING_TAG="v1.0.0"
-	export MOCK_EXISTING_ASSETS="artifact.tar.gz sha256:$(_sha256 "$asset")"
+	export MOCK_EXISTING_ASSETS="$(printf 'artifact.tar.gz\tsha256:%s' "$(_sha256 "$asset")")"
 
 	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILES="$asset" \
 		run bash "${PROJECT_ROOT}/${SCRIPT}"
@@ -384,7 +384,7 @@ _sha256() {
 	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
 	echo "data" >"$asset"
 	export MOCK_EXISTING_TAG="v1.0.0"
-	export MOCK_EXISTING_ASSETS="artifact.tar.gz sha256:0000000000000000000000000000000000000000000000000000000000000000"
+	export MOCK_EXISTING_ASSETS="$(printf 'artifact.tar.gz\tsha256:0000000000000000000000000000000000000000000000000000000000000000')"
 
 	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILES="$asset" \
 		run bash "${PROJECT_ROOT}/${SCRIPT}"
@@ -401,7 +401,7 @@ _sha256() {
 	echo "one" >"$dir/a.tar.gz"
 	echo "two" >"$dir/b.whl"
 	export MOCK_EXISTING_TAG="v1.0.0"
-	export MOCK_EXISTING_ASSETS="a.tar.gz sha256:$(_sha256 "$dir/a.tar.gz")"
+	export MOCK_EXISTING_ASSETS="$(printf 'a.tar.gz\tsha256:%s' "$(_sha256 "$dir/a.tar.gz")")"
 
 	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILE_PATTERNS="$dir/*" \
 		run bash "${PROJECT_ROOT}/${SCRIPT}"
@@ -415,11 +415,25 @@ _sha256() {
 	local asset="${BATS_TEST_TMPDIR}/artifact.tar.gz"
 	echo "data" >"$asset"
 	export MOCK_EXISTING_TAG="v1.0.0"
-	export MOCK_EXISTING_ASSETS="artifact.tar.gz "
+	export MOCK_EXISTING_ASSETS="$(printf 'artifact.tar.gz\t')"
 
 	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILES="$asset" \
 		run bash "${PROJECT_ROOT}/${SCRIPT}"
 	assert_failure
 	assert_output --partial "published digest unknown; cannot verify"
+	refute_gh_called_with "release upload"
+}
+
+@test "create-github-release: immutable rerun matches an asset name containing spaces" {
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/my package.tar.gz"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'my package.tar.gz\tsha256:0000000000000000000000000000000000000000000000000000000000000000')"
+
+	TAG="v1.0.0" BODY="notes" IMMUTABLE_ASSETS="true" FILE_PATTERNS="$dir/*" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_failure
+	assert_output --partial "my package.tar.gz (published sha256:0000"
 	refute_gh_called_with "release upload"
 }

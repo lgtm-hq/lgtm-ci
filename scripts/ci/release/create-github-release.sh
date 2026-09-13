@@ -205,8 +205,11 @@ elif ((${#ASSET_FILES[@]} > 0)); then
 		# different bytes is a conflict that stops the rerun before any upload,
 		# and one whose digest the API cannot report cannot be verified and is
 		# treated the same way. Only assets that never landed are uploaded.
+		# Tab-separated "name<TAB>digest" so an asset name with spaces still
+		# matches its record; a lookup by whitespace field would miss it and
+		# clobber it.
 		if ! EXISTING_ASSETS=$(gh release view "$TAG" --repo "$REPO" --json assets \
-			--jq '.assets[] | "\(.name) \(.digest // "")"'); then
+			--jq '.assets[] | "\(.name)\t\(.digest // "")"'); then
 			log_error "Could not list the assets of existing release $TAG"
 			exit 1
 		fi
@@ -215,7 +218,7 @@ elif ((${#ASSET_FILES[@]} > 0)); then
 		for file in "${ASSET_FILES[@]}"; do
 			name="$(basename "$file")"
 			# "present <digest>" for a published asset, empty when it never landed.
-			remote_entry="$(awk -v n="$name" '$1 == n { print "present " $2; exit }' <<<"$EXISTING_ASSETS")"
+			remote_entry="$(awk -F '\t' -v n="$name" '$1 == n { print "present " $2; exit }' <<<"$EXISTING_ASSETS")"
 			if [[ -z "$remote_entry" ]]; then
 				UPLOAD_FILES+=("$file")
 				continue
