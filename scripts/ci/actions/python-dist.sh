@@ -43,12 +43,14 @@ _validate_working_directory() {
 _validate_working_directory "$WORKING_DIRECTORY"
 cd "$WORKING_DIRECTORY"
 
-# Prefix a path relative to the current working directory with
-# WORKING_DIRECTORY (the caller's input) so outputs resolve from the workspace
-# root. "." and empty leave the path unchanged.
+# Prefix a path relative to the current working directory with OUTPUT_PREFIX
+# (the caller's working-directory input, which the step already cd'ed into)
+# so outputs resolve from the workspace root. "." and empty leave the path
+# unchanged. Deliberately not WORKING_DIRECTORY: the build step reads that
+# as a directory to enter and validates it against the current directory.
 _workspace_relative() {
 	local rel="$1"
-	local wd="${WORKING_DIRECTORY:-.}"
+	local wd="${OUTPUT_PREFIX:-.}"
 	wd="${wd%/}"
 	if [[ -z "$wd" || "$wd" == "." ]]; then
 		printf '%s\n' "$rel"

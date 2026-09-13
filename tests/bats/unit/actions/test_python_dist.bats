@@ -289,11 +289,11 @@ _make_dist() {
 
 @test "python-dist stage-sidecars and write-checksums: outputs are workspace-relative" {
 	mkdir -p python && cd python && _make_dist
-	WORKING_DIRECTORY=python STEP=write-checksums run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+	OUTPUT_PREFIX=python STEP=write-checksums run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
 	assert_success
 	run grep 'checksums-path=python/dist/SHA256SUMS' "$GITHUB_OUTPUT"
 	assert_success
-	WORKING_DIRECTORY=python/ STEP=stage-sidecars run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+	OUTPUT_PREFIX=python/ STEP=stage-sidecars run bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
 	assert_success
 	run grep 'checksums-path=python/.lgtm-ci-sidecars/SHA256SUMS' "$GITHUB_OUTPUT"
 	assert_success

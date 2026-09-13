@@ -105,7 +105,7 @@ runs:
       working-directory: ${{ inputs.working-directory }}
       env:
         STEP: stage-sidecars
-        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        OUTPUT_PREFIX: ${{ inputs.working-directory }}
       run: "$SCRIPTS_DIR/ci/actions/python-dist.sh"
 
     - name: Setup Python

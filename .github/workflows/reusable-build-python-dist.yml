@@ -218,7 +218,7 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           STEP: write-checksums
-          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+          OUTPUT_PREFIX: ${{ inputs.working-directory }}
         run: |
           "${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/python-dist.sh"
       - name: Upload Python distribution
