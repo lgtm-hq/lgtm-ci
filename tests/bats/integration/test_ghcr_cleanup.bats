@@ -326,3 +326,43 @@ EOF
 	assert_output --partial "Deleted build-cache version 10"
 	refute_output --partial "Deleted build-cache version 11"
 }
+
+@test "ghcr-cleanup: protects a referenced-digest set larger than the argv limit" {
+	# 15,000 digests is roughly 1.1 MiB of JSON: above Linux's 128 KiB
+	# per-argument limit and macOS's 1 MiB total limit, so passing the set
+	# to jq as an argument fails on both (#959).
+	local manifest_file="${BATS_TEST_TMPDIR}/big-manifest.json"
+	{
+		printf '{"manifests":['
+		for ((i = 1; i <= 15000; i++)); do
+			((i > 1)) && printf ','
+			printf '{"digest":"sha256:%064d"}' "$i"
+		done
+		printf ']}'
+	} >"$manifest_file"
+
+	mock_gh_versions "$(printf '[
+		{"id": 1, "name": "sha256:tagged-index", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": ["v1.0.0"]}}},
+		{"id": 2, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 3, "name": "sha256:%064d", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}},
+		{"id": 4, "name": "sha256:orphan", "updated_at": "2020-01-01T00:00:00Z", "metadata": {"container": {"tags": []}}}
+	]' 1 15000)"
+
+	export PROTECT_REFERENCED="true"
+	export KEEP_LATEST="0"
+
+	mock_command_multi "curl" "
+		*ghcr.io/token*) printf '%s\n' '{\"token\":\"registry-bearer\"}';;
+		*manifests/sha256:tagged-index*) cat '${manifest_file}'; printf '\n200\n';;
+		*referrers/sha256:tagged-index*) printf '%s\n404\n' '{}';;
+		*) exit 1;;
+	"
+
+	run bash -c 'bash "$SCRIPT" 2>&1'
+	assert_success
+	assert_output --partial "Collected 15001 referenced digest(s)"
+	assert_output --partial "Deleted untagged version 4"
+	refute_output --partial "Deleted untagged version 2"
+	refute_output --partial "Deleted untagged version 3"
+	refute_output --partial "Argument list too long"
+}
