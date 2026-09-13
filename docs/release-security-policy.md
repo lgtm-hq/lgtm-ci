@@ -267,8 +267,8 @@ gh attestation verify ./<gem>-<version>.gem --repo <owner>/<repo>
 # Homebrew tap formula: the downloaded artifact must match the formula's pinned
 # digest, and the artifact itself is verified with its own class's command above
 brew fetch --formula <tap>/<formula>
-echo "$(brew info --json=v2 <tap>/<formula> | jq -r '.formulae[0].urls.stable.checksum')  $(brew --cache <tap>/<formula>)" \
-  | sha256sum --check
+expected=$(brew info --json=v2 <tap>/<formula> | jq -r '.formulae[0].urls.stable.checksum')
+echo "${expected}  $(brew --cache <tap>/<formula>)" | sha256sum --check
 
 # PyPI-side provenance (PEP 740)
 curl -fsSL https://pypi.org/integrity/<project>/<version>/<file>/provenance | jq .
