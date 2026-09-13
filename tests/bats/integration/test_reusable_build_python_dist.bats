@@ -91,7 +91,8 @@ _tooling_sparse_cone_ok() {
 	run awk '
 		/^      checksums:$/ { in_c = 1 } in_c && /default: true/ { c_default = 1; in_c = 0 }
 		/^      immutable-assets:$/ { in_i = 1 } in_i && /default: true/ { i_default = 1; in_i = 0 }
-		/Create GitHub Release/ { in_step = 1 }
+		/Create GitHub Release/ { in_step = 1; next }
+		/^      - name:/ { in_step = 0 }
 		in_step && /CHECKSUMS: \$\{\{ inputs\.checksums \}\}/ { env_c = 1 }
 		in_step && /IMMUTABLE_ASSETS: \$\{\{ inputs\.immutable-assets \}\}/ { env_i = 1 }
 		in_step && /ARTIFACT_PATH: \$\{\{ inputs\.artifact-path \}\}/ { env_p = 1 }

@@ -353,6 +353,29 @@ _sha256() {
 	assert_output --partial "Attaching the SHA256SUMS manifest shipped with the assets"
 	run cat "$dir/SHA256SUMS"
 	assert_output "deadbeef  a.tar.gz"
+	assert_gh_called_with "$dir/SHA256SUMS"
+}
+
+@test "create-github-release: checksums and immutable assets together on a rerun (#963)" {
+	# The production default for both: the manifest is generated before the
+	# immutability check, so a regenerated manifest identical to the one
+	# already published is a no-op and a missing asset still uploads.
+	local dir="${BATS_TEST_TMPDIR}/assets"
+	mkdir -p "$dir"
+	echo "one" >"$dir/a.tar.gz"
+	echo "two" >"$dir/b.whl"
+	printf '%s  a.tar.gz\n%s  b.whl\n' "$(_sha256 "$dir/a.tar.gz")" "$(_sha256 "$dir/b.whl")" >"${BATS_TEST_TMPDIR}/expected-manifest"
+	export MOCK_EXISTING_TAG="v1.0.0"
+	export MOCK_EXISTING_ASSETS="$(printf 'a.tar.gz\tsha256:%s\nSHA256SUMS\tsha256:%s' "$(_sha256 "$dir/a.tar.gz")" "$(_sha256 "${BATS_TEST_TMPDIR}/expected-manifest")")"
+
+	TAG="v1.0.0" BODY="notes" CHECKSUMS="true" IMMUTABLE_ASSETS="true" FILE_PATTERNS="$dir/*" \
+		run bash "${PROJECT_ROOT}/${SCRIPT}"
+	assert_success
+	assert_output --partial "Asset a.tar.gz already published with the same digest; skipping"
+	assert_output --partial "Asset SHA256SUMS already published with the same digest; skipping"
+	assert_output --partial "Uploading 1 asset(s) to existing release v1.0.0"
+	assert_gh_called_with "--clobber $dir/b.whl"
+	refute_gh_called_with "--clobber $dir/a.tar.gz"
 }
 
 @test "create-github-release: CHECKSUMS off leaves the assets alone" {
