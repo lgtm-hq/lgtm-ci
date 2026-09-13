@@ -19,6 +19,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.69.10] - 2026-09-13
+
+### Fixed
+
+- **ghcr-cleanup**: pass referenced digests to jq via file, not argv (#960) (48753e0)
+
 ## [0.69.9] - 2026-09-11
 
 ### Changed
@@ -2302,7 +2308,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.9...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.10...HEAD
+[0.69.10]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.9...v0.69.10
 [0.69.9]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.8...v0.69.9
 [0.69.8]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.7...v0.69.8
 [0.69.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.6...v0.69.7
