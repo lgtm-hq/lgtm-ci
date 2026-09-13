@@ -367,8 +367,9 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 |                       | `actions: read`, `issues: write`                     |                                              |
 | Release auto-tag      | `contents: write`, `actions: read`, `issues: write`  | `reusable-release-auto-tag.yml`              |
 | Release failure issue | `actions: read`, `contents: read`, `issues: write`   | `report-release-failure` follow-up job       |
-| PyPI upload (OIDC)    | `contents: read`; `id-token` + `attestations: write` | `prepare-pypi-upload` + pypa step            |
-| PyPI build            | `contents: read`                                     | `reusable-build-python-dist.yml`             |
+| PyPI upload (OIDC)    | `contents: read`, `id-token: write`                  | `prepare-pypi-upload` + pypa step            |
+| PyPI build            | `contents: read`, `id-token: write`,                 | `reusable-build-python-dist.yml`             |
+|                       | `attestations: write`                                | (attests `dist/*`; policy section 2)         |
 | Build artifact        | `contents: read`                                     | `reusable-build-artifact.yml`                |
 | GitHub Release assets | `contents: write`                                    | `reusable-github-release.yml`                |
 | SBOM (any mode)       | `contents: read`, `security-events: write`,          | `reusable-sbom.yml`; no job in it requests   |

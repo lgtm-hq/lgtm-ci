@@ -24,25 +24,37 @@ prepare)
 	: "${SUBJECT_NAME:=}"
 	: "${SUBJECT_DIGEST:=}"
 
-	# Validate subject exists
-	if [[ ! -e "$SUBJECT_PATH" ]]; then
+	# Validate subject exists. A glob (dist/*, dist/**/pkg-*) is passed
+	# through untouched: attest-build-provenance expands it with @actions/glob
+	# semantics (recursive ** included) and fails itself when nothing matches,
+	# so no bash-side precheck is attempted.
+	IS_GLOB=false
+	if [[ "$SUBJECT_PATH" == *[\*\?\[]* ]]; then
+		IS_GLOB=true
+	elif [[ ! -e "$SUBJECT_PATH" ]]; then
 		log_error "Subject not found: $SUBJECT_PATH"
 		exit 1
 	fi
 
 	USE_DIGEST=false
 	if [[ -n "$SUBJECT_DIGEST" ]]; then
+		if [[ "$IS_GLOB" == "true" ]]; then
+			log_error "subject-digest cannot be combined with a subject-path glob"
+			exit 1
+		fi
 		USE_DIGEST=true
-	elif [[ ! -f "$SUBJECT_PATH" ]]; then
+	elif [[ "$IS_GLOB" == "false" && ! -f "$SUBJECT_PATH" ]]; then
 		log_warn "Non-file subject; passing subject-path to attest-build-provenance"
 	fi
 
-	# Determine subject name if not provided
-	if [[ -z "$SUBJECT_NAME" ]]; then
+	# Determine subject name if not provided. For a glob it stays empty so
+	# attest-build-provenance derives each matched file's own basename; a
+	# single name would be stamped onto every subject in the provenance.
+	if [[ -z "$SUBJECT_NAME" && "$IS_GLOB" == "false" ]]; then
 		SUBJECT_NAME=$(basename "$SUBJECT_PATH")
 	fi
 
-	log_info "Subject: $SUBJECT_NAME"
+	log_info "Subject: ${SUBJECT_NAME:-<derived per file>}"
 	log_info "Path: $SUBJECT_PATH"
 	if [[ "$USE_DIGEST" == "true" ]]; then
 		log_info "Digest: $SUBJECT_DIGEST"

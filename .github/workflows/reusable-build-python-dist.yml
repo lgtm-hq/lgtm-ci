@@ -43,10 +43,25 @@ on:
         type: string
         default: "python-dist"
       artifact-retention-days:
-        description: "Days to retain the distribution artifact"
+        description: >-
+          Days to retain the distribution artifact. The release-security
+          policy's recovery window is 90 days; a caller that relies on
+          tier-2 resume must set 90.
         required: false
         type: number
         default: 7
+      attest:
+        description: >-
+          Create a GitHub build-provenance attestation for every file in
+          dist/ before the artifact is uploaded (release-security policy,
+          section 2). Never soft-fail: an attestation failure fails the build.
+          The build job requests id-token: write and attestations: write
+          regardless of this input, because GitHub validates a reusable
+          workflow's permissions statically; a caller must grant both even
+          with attest: false (which is out of policy for a release).
+        required: false
+        type: boolean
+        default: true
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -73,6 +88,12 @@ on:
           test.pypi.org:443
           upload.pypi.org:443
           upload.test.pypi.org:443
+          fulcio.sigstore.dev:443
+          rekor.sigstore.dev:443
+          timestamp.sigstore.dev:443
+          tuf-repo-cdn.sigstore.dev:443
+          sigstore-tuf-root.storage.googleapis.com:443
+          oauth2.sigstore.dev:443
       allowed-endpoints-mode:
         description: >-
           replace: non-empty allowed-endpoints overrides egress-preset; append:
@@ -112,6 +133,13 @@ on:
       package-name:
         description: "Built package name"
         value: ${{ jobs.build.outputs.package-name }}
+      checksums-path:
+        description: >-
+          Build-workspace-relative path of the SHA256SUMS manifest
+          (<working-directory>/dist/SHA256SUMS). Inside the uploaded artifact
+          the file sits at the root, because dist/ contents become the
+          artifact root.
+        value: ${{ jobs.build.outputs.checksums-path }}
 
 jobs:
   build:
@@ -120,10 +148,14 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
+      # Attestation of dist/* (inputs.attest); the caller must grant both.
+      id-token: write
+      attestations: write
 
     outputs:
       version: ${{ steps.build-package.outputs.version }}
       package-name: ${{ steps.build-package.outputs.package-name }}
+      checksums-path: ${{ steps.checksums.outputs.checksums-path }}
 
     steps:
       - name: Harden runner
@@ -176,6 +208,24 @@ jobs:
           ensure-tag-on-default-branch: ${{ inputs.ensure-tag-on-default-branch }}
           default-branch: ${{ inputs.default-branch }}
           working-directory: ${{ inputs.working-directory }}
+      # Attest before anything leaves the job: the artifact is what every
+      # publish channel consumes, and prepare-pypi-upload refuses to hand a
+      # dist-path to the upload step until each file verifies against this
+      # attestation (release-security policy, section 2). No continue-on-error.
+      - name: Attest build provenance
+        if: inputs.attest
+        uses: ./.lgtm-ci-tooling/.github/actions/attest-build
+        with:
+          subject-path: ${{ inputs.working-directory }}/dist/*
+      - name: Write SHA256SUMS
+        id: checksums
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          STEP: write-checksums
+          OUTPUT_PREFIX: ${{ inputs.working-directory }}
+        run: |
+          "${GITHUB_WORKSPACE}/.lgtm-ci-tooling/scripts/ci/actions/python-dist.sh"
       - name: Upload Python distribution
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:

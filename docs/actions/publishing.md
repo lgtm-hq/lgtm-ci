@@ -32,19 +32,28 @@ defined in the **caller** repository workflow.
     artifact-name: python-dist
     tooling-ref: "<sha>"
     python-version: "3.12"
+    require-attestation: "true" # default; verifies every dist file first
+    # signer-workflow: owner/repo/.github/workflows/publish.yml  # optional pin
 
-- name: Upload to PyPI
+- name: Upload to PyPI # the last step of the job
   uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
   with:
     repository-url: https://upload.pypi.org/legacy/
     packages-dir: ${{ steps.prepare.outputs.dist-path }}
 ```
 
-**Outputs:** `dist-path`, `validated`, `package-name`, `package-version`.
-Requires `contents: read`, `id-token: write`, `attestations: write`;
-`environment: pypi`. When `validate: true` (default), the step fails if
-twine check cannot run. Do **not** nest `pypa/gh-action-pypi-publish` inside
-lgtm-ci composites.
+**Outputs:** `dist-path`, `validated`, `package-name`, `package-version`,
+`checksums-path` (the `SHA256SUMS` manifest, staged into
+`<working-directory>/.lgtm-ci-sidecars/` and never inside `dist-path`),
+`attestations-verified`. Requires `contents: read`,
+`id-token: write`; `environment: pypi`. With `require-attestation: "true"`
+(default) the action runs `gh attestation verify --repo <caller>` for every
+distribution file and fails closed before `dist-path` is exposed, so the upload
+step that follows is provably behind attestation
+([release-security policy](../release-security-policy.md), section 2). The
+upload step must be the last step of its job. When `validate: true` (default),
+the step fails if twine check cannot run. Do **not** nest
+`pypa/gh-action-pypi-publish` inside lgtm-ci composites.
 
 ## publish-npm
 

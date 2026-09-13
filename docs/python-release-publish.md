@@ -26,8 +26,10 @@ Typical caller jobs:
 
 1. **Quality** — `reusable-quality-lint.yml`
 2. **SBOM** — `reusable-sbom.yml`
-3. **Build** — `reusable-build-python-dist.yml`
-4. **Upload** — local job: `prepare-pypi-upload` → `pypa/gh-action-pypi-publish` → optional attestation
+3. **Build (+ attest)** — `reusable-build-python-dist.yml` attests `dist/*` and
+   writes `SHA256SUMS`
+4. **Upload** — local job: `prepare-pypi-upload` (verifies the attestations) →
+   `pypa/gh-action-pypi-publish`, the last step of its job
 5. **GitHub Release** — `reusable-github-release.yml` (`needs: upload`); attaches
    `SHA256SUMS` and never overwrites a published asset on a rerun
 6. **Product-specific** — Homebrew dispatch, Docker, etc.
@@ -47,6 +49,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-build-python-dist.yml@<sha>
     permissions:
       contents: read
+      id-token: write # attestation of dist/*
+      attestations: write
     with:
       python-version: "3.12"
       tooling-ref: "<sha>"
@@ -94,23 +98,19 @@ jobs:
             rekor.sigstore.dev:443
             tuf-repo-cdn.sigstore.dev:443
             oauth2.sigstore.dev:443
-      - name: Prepare PyPI upload
+      - name: Prepare PyPI upload # verifies every dist file's attestation
         id: prepare
         uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
         with:
           artifact-name: python-dist
           tooling-ref: "<sha>"
           python-version: "3.12"
-      - name: Upload to PyPI
+          require-attestation: "true"
+      - name: Upload to PyPI # last step of the job: nothing that can fail follows
         uses: pypa/gh-action-pypi-publish@<pin> # v1.14.0
         with:
           repository-url: https://upload.pypi.org/legacy/
           packages-dir: ${{ steps.prepare.outputs.dist-path }}
-      - name: Attest build provenance
-        continue-on-error: true
-        uses: actions/attest-build-provenance@<pin> # v4.1.0
-        with:
-          subject-path: ${{ steps.prepare.outputs.dist-path }}/*
 
   github-release:
     needs: [pypi-upload]
@@ -161,18 +161,29 @@ Cross-repo reusables cannot perform OIDC upload until PyPI supports it
 
 ## Provenance attestation
 
-> **Superseded by the [release-security policy](release-security-policy.md)**
-> (section 2): attestation is mandatory evidence and MUST be produced before the
-> first irreversible publish, never after the upload and never with
-> `continue-on-error`. The example layout on this page still shows the old
-> attest-after-upload step; the mechanical change lands in
-> [#963](https://github.com/lgtm-hq/lgtm-ci/issues/963). Until then, treat the
-> step below as the layout the policy withdraws.
+Attestation is mandatory evidence and is produced **before** the first
+irreversible publish ([release-security policy](release-security-policy.md),
+section 2). The layout is:
 
-Run `attest-build-provenance` as a **caller-level** step with
-`continue-on-error: true` after a successful PyPI upload. Sigstore outages must
-not fail the release job — the wheel is already on the index and retries would
-not be idempotent.
+1. `reusable-build-python-dist.yml` attests every file in `dist/` with the
+   `attest-build` composite as part of the build job (`attest: true`, the
+   default; the caller grants `id-token: write` and `attestations: write`).
+   There is no `continue-on-error`: an attestation failure fails the build and
+   nothing is published. The job also writes `dist/SHA256SUMS`. The grants are
+   requested statically, so a caller must grant them even with `attest: false`.
+2. `prepare-pypi-upload` verifies a valid attestation from the calling
+   repository for every distribution file (`require-attestation: true`, the
+   default; `signer-workflow` pins the signing workflow) and only then exposes
+   `dist-path`. `SHA256SUMS` is staged beside `dist/` so twine never sees it.
+3. The caller's `pypa/gh-action-pypi-publish` step is the **last step of its
+   job**. An irreversible write is never followed by a step that can fail;
+   anything that must run after the upload belongs in a later job that
+   `needs` it.
+
+The former layout, a caller-level `attest-build-provenance` step with
+`continue-on-error: true` after the upload, is withdrawn: once the upload has
+succeeded a re-run can never reach the attestation step, because PyPI rejects
+the re-uploaded filenames first.
 
 ## Upload validation
 
