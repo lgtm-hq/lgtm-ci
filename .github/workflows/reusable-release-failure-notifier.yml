@@ -133,20 +133,6 @@ jobs:
       issues: write
 
     steps:
-      # harden-runner cannot enforce block mode on GitHub-hosted Windows/macOS
-      # (audit-only per docs/workflow-contract.md). The later steps run with
-      # GH_TOKEN and issues: write, so a block request that cannot be honored
-      # fails here, before any tokenized step, instead of running unprotected.
-      - name: Refuse block egress on runners that cannot enforce it
-        if: >-
-          inputs.egress-policy == 'block' &&
-          runner.os != 'Linux' &&
-          runner.environment != 'self-hosted'
-        shell: bash
-        run: |
-          echo "::error::egress-policy 'block' cannot be enforced on GitHub-hosted ${RUNNER_OS};" \
-            "use a GitHub-hosted Linux runner-image, a self-hosted runner, or egress-policy 'audit'"
-          exit 1
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -158,6 +144,22 @@ jobs:
             codeload.github.com:443
             objects.githubusercontent.com:443
             pipelines.actions.githubusercontent.com:443
+      # harden-runner cannot enforce block mode on GitHub-hosted Windows/macOS
+      # (audit-only per docs/workflow-contract.md). The later steps run with
+      # GH_TOKEN and issues: write, so a block request that cannot be honored
+      # fails here, right after the (skipped) harden step and before the
+      # tooling checkout and every tokenized step, instead of running
+      # unprotected. harden-runner itself must stay the first step (validator).
+      - name: Refuse block egress on runners that cannot enforce it
+        if: >-
+          inputs.egress-policy == 'block' &&
+          runner.os != 'Linux' &&
+          runner.environment != 'self-hosted'
+        shell: bash
+        run: |
+          echo "::error::egress-policy 'block' cannot be enforced on GitHub-hosted ${RUNNER_OS};" \
+            "use a GitHub-hosted Linux runner-image, a self-hosted runner, or egress-policy 'audit'"
+          exit 1
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
