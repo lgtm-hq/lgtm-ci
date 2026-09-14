@@ -13,6 +13,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **npm**: `reusable-publish-npm.yml` is deprecated in favour of
+  `reusable-publish-npm-set.yml` and now forwards to it as a compatibility
+  shim: the legacy `published`, `version` and `package-name` outputs are
+  preserved, `tarball` is always empty, the set JSON is exposed as
+  `published-set`, and the `npm-token` secret is refused with an error
+  (trusted publishing only). Removal target: v0.72.0 (#965)
+
 ### Removed
 
 ### Fixed

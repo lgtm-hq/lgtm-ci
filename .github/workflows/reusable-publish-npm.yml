@@ -7,13 +7,13 @@ name: Reusable npm Publishing Workflow (deprecated)
 # shape (order: "."). It will be removed in a future release — switch to
 # reusable-publish-npm-set.yml directly.
 #
-# Interface changes versus the original reusable:
-#   - `published` is now the package-set JSON array
-#     ([{name, version, status, integrity}]) instead of a boolean.
-#   - `version`, `package-name`, and `tarball` outputs are gone (read them
-#     from the `published` JSON instead).
-#   - The `npm-token` secret is accepted for signature compatibility but
-#     IGNORED: publishing runs under npm trusted publishing (OIDC) only.
+# The wrapper is a compatibility shim: the legacy output contract is kept
+# (`published` as 'true'/'false', `version`, `package-name`; `tarball` is
+# always empty because the set workflow packs in its own job) and the set
+# workflow's JSON is exposed as `published-set`. The `npm-token` secret is
+# refused with an error rather than silently ignored: publishing runs under
+# npm trusted publishing (OIDC) only, and a caller still relying on a token
+# has not migrated. Removal target: v0.72.0.
 
 "on":
   workflow_call:
@@ -107,15 +107,33 @@ name: Reusable npm Publishing Workflow (deprecated)
     secrets:
       npm-token:
         description: >-
-          Ignored (accepted for migration compatibility): publishing runs
-          under npm trusted publishing (OIDC) only.
+          Not supported: publishing runs under npm trusted publishing (OIDC)
+          only, and the wrapper fails with an error when this secret is
+          supplied so a token-based caller cannot silently lose auth.
         required: false
 
     outputs:
       published:
+        description: "Whether the package was published ('true'/'false')"
+        value: >-
+          ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].status == 'published'
+              && 'true' || 'false' }}
+      version:
+        description: "Published package version"
+        value: ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].version }}
+      package-name:
+        description: "Published package name"
+        value: ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].name }}
+      tarball:
         description: >-
-          JSON array of {name, version, status: skipped|published, integrity}
-          (one entry)
+          Deprecated, always empty: the package-set workflow packs inside its
+          own job and does not export the tarball path.
+        value: ""
+      published-set:
+        description: >-
+          The package-set JSON array ({name, version, status:
+          skipped|published, integrity}, one entry) from
+          reusable-publish-npm-set.yml
         value: ${{ jobs.publish.outputs.published }}
       dist-tag-drift:
         description: Whether the dist-tag could not be reconciled
@@ -137,9 +155,23 @@ jobs:
         env:
           GITHUB_WORKFLOW_REF_VALUE: ${{ github.workflow_ref }}
         run: |
-          echo "::warning::reusable-publish-npm.yml is deprecated and will be removed in a future release (#965)." \
+          echo "::warning::reusable-publish-npm.yml is deprecated and will be removed in v0.72.0 (#965)." \
             "Switch to reusable-publish-npm-set.yml (a single package is a set of one; see docs/reusable-workflows.md)."
           echo "Entry workflow: ${GITHUB_WORKFLOW_REF_VALUE:-unknown}"
+      # Fail before the publish job runs: a caller that still forwards a
+      # token has not migrated to trusted publishing, and ignoring the token
+      # would surface as an opaque auth failure inside the set workflow.
+      - name: Refuse the unsupported npm-token secret
+        shell: bash
+        env:
+          NPM_TOKEN_SUPPLIED: ${{ secrets.npm-token != '' }}
+        run: |
+          if [[ "$NPM_TOKEN_SUPPLIED" == "true" ]]; then
+            echo "::error::reusable-publish-npm.yml no longer accepts the npm-token secret:" \
+              "publishing runs under npm trusted publishing (OIDC) only. Remove the secret" \
+              "and configure a trusted publisher, or migrate to reusable-publish-npm-set.yml."
+            exit 1
+          fi
 
   publish:
     name: ${{ inputs.job-name }}

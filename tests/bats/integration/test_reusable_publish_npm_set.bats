@@ -109,3 +109,47 @@ input_required() {
 	run grep -F "deprecation-notice:" "$WRAPPER"
 	assert_success
 }
+
+# Print the `value:` of one workflow_call output block of the wrapper.
+wrapper_output_value() {
+	awk -v output="$1" '
+		$0 == "      " output ":" { in_output = 1; next }
+		in_output && /^      [a-z-]+:$/ { exit }
+		in_output && /^        value:/ { sub(/^        value: */, ""); print; exit }
+	' "$WRAPPER"
+}
+
+@test "reusable-publish-npm: keeps the legacy output contract as a compatibility shim" {
+	# `published` stays a 'true'/'false' string; `version` and `package-name`
+	# come from the set JSON; `tarball` is kept as an always-empty output.
+	run awk '
+		/^      published:$/ { in_output = 1; next }
+		in_output && /^      [a-z-]+:$/ { exit }
+		in_output { print }
+	' "$WRAPPER"
+	assert_output --partial "fromJSON(jobs.publish.outputs.published || '[]')[0].status == 'published'"
+	assert_output --partial "&& 'true' || 'false'"
+	run wrapper_output_value version
+	assert_output "\${{ fromJSON(jobs.publish.outputs.published || '[]')[0].version }}"
+	run wrapper_output_value package-name
+	assert_output "\${{ fromJSON(jobs.publish.outputs.published || '[]')[0].name }}"
+	run wrapper_output_value tarball
+	assert_output '""'
+	run wrapper_output_value published-set
+	assert_output "\${{ jobs.publish.outputs.published }}"
+}
+
+@test "reusable-publish-npm: refuses the npm-token secret before the publish job" {
+	# The guard lives in deprecation-notice, which publish needs, so a token
+	# caller fails before any npm command runs.
+	run awk '
+		/^  deprecation-notice:/ { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { in_job = 0 }
+		in_job && /NPM_TOKEN_SUPPLIED: \$\{\{ secrets.npm-token != .. \}\}/ { found_env = 1 }
+		in_job && /::error::reusable-publish-npm.yml no longer accepts the npm-token secret/ { found_error = 1 }
+		END { exit !(found_env && found_error) }
+	' "$WRAPPER"
+	assert_success
+	run grep -F "needs: [deprecation-notice]" "$WRAPPER"
+	assert_success
+}

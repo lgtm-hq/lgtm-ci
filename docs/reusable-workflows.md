@@ -1038,9 +1038,12 @@ it. Do not self-upgrade npm in-place. Full example:
 [examples/publish-npm-set.yml](../examples/publish-npm-set.yml).
 
 The deprecated single-package wrapper `reusable-publish-npm.yml` forwards
-here with `order: "."`; it will be removed in a future release, and its
-`version`/`package-name`/`tarball` outputs are gone (read the `published`
-JSON instead).
+here with `order: "."` as a compatibility shim until its removal in v0.72.0:
+the legacy `published` (`'true'`/`'false'`), `version` and `package-name`
+outputs are preserved, `tarball` is always empty (the set workflow packs in
+its own job), and the set JSON is exposed as `published-set`. The `npm-token`
+secret is refused with an error: publishing runs under npm trusted publishing
+(OIDC) only, and a caller still forwarding a token has not migrated.
 
 ```yaml
 # Deprecated wrapper (migration aid only); prefer the package-set reusable.
@@ -1053,8 +1056,7 @@ jobs:
       attestations: write
     with:
       node-version: "24"
-      # Prefer OIDC trusted publishing (no secrets). Optional legacy:
-      # secrets: { npm-token: ${{ secrets.NPM_TOKEN }} }
+      # OIDC trusted publishing only: do not pass secrets.npm-token.
 ```
 
 Configure an npm trusted publisher for the **caller** workflow filename and
