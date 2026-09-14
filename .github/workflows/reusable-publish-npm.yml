@@ -163,7 +163,9 @@ name: Reusable npm Publishing Workflow (deprecated)
 
     outputs:
       published:
-        description: "Whether the package was published ('true'/'false')"
+        description: >-
+          Whether the package was published ('true'/'false'); false for
+          dry-runs and for an already-published (skipped) version
         value: >-
           ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].status == 'published'
               && 'true' || 'false' }}
@@ -183,7 +185,7 @@ name: Reusable npm Publishing Workflow (deprecated)
       published-set:
         description: >-
           The package-set JSON array ({name, version, status:
-          skipped|published, integrity}, one entry) from
+          published|skipped|dry-run, integrity}, one entry) from
           reusable-publish-npm-set.yml
         value: ${{ jobs.publish.outputs.published }}
       dist-tag-drift:

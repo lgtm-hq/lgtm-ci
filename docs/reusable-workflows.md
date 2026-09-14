@@ -996,10 +996,12 @@ red.
 
 The step order is the contract, asserted by the wiring test:
 
-1. **Verify artifacts** (when `checksums-file` is set): sha256 against the
-   manifest plus `gh attestation verify --repo <signer-repo>
-   --signer-workflow <signer-workflow>` per file — before any `npm pack`.
-   The release security policy forbids publishing unverified artifacts.
+1. **Verify artifacts** (when `checksums-file` is set): every file `npm
+   pack --dry-run` would ship, plus `files-to-verify`, gets sha256 against
+   the manifest plus `gh attestation verify --repo <signer-repo>
+   --signer-workflow <signer-workflow>` — before the real `npm pack`. A
+   packed file the manifest does not list fails. The release security
+   policy forbids publishing unverified artifacts.
 2. **Publish package set**: the only step that writes to the registry.
    Bounded exponential backoff on transient Sigstore/5xx/429 errors only;
    `EPUBLISHCONFLICT` is an idempotent success; auth failures never retry.
@@ -1035,8 +1037,11 @@ trusted-publisher registration stays valid when it calls this reusable.
 Name that entry file via `entry-workflows` so the built-in guard enforces
 the binding before any publish. A live publish (`dry-run: false`) fails
 closed before anything is downloaded or packed unless `entry-workflows`,
-`checksums-file`, `signer-repo` and `signer-workflow` are set and the
-runner is GitHub-hosted; dry-runs stay permissive. A `uses:` job cannot
+`checksums-file`, `signer-repo` and `signer-workflow` are set, the
+runner is GitHub-hosted, and `access` is `public` while `provenance` or
+`post-publish-verify` is on (npm provenance and unauthenticated post-publish
+reads need a public package); dry-runs stay permissive. Dry-run packages are
+reported with `status: dry-run`, never `published`. A `uses:` job cannot
 declare `environment`, and the reusable's job declares none, so register
 the npm trusted publisher without an environment name. No npm token: OIDC
 only.

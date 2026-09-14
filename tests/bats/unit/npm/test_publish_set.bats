@@ -90,9 +90,14 @@ export -f not_published_reply
 	# post-publish integrity lookup (the mock's journal is the proof).
 	run grep -c "] view\|] dist-tag" "$CALLS"
 	assert_output 0
-	# Without a registry read the recorded integrity is null, never a guess.
+	# Without a registry read the recorded integrity is null, never a guess,
+	# and a rehearsal is reported as dry-run, never as published.
 	run grep -c '"integrity":null' "$output_file"
 	assert_output 1
+	run grep -o '"status":"dry-run"' "$output_file"
+	assert_line --index 2 '"status":"dry-run"'
+	run grep -F '"status":"published"' "$output_file"
+	assert_failure
 	run grep -F '"integrity":"' "$output_file"
 	assert_failure
 }

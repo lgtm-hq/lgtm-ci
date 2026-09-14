@@ -100,6 +100,9 @@ step_block() {
 	assert_line "          CHECKSUMS_FILE: \${{ inputs.checksums-file }}"
 	assert_line "          SIGNER_REPO: \${{ inputs.signer-repo }}"
 	assert_line "          SIGNER_WORKFLOW: \${{ inputs.signer-workflow }}"
+	assert_line "          ACCESS: \${{ inputs.access }}"
+	assert_line "          PROVENANCE: \${{ inputs.provenance == true && '1' || '0' }}"
+	assert_line "          POST_PUBLISH_VERIFY: \${{ inputs.post-publish-verify == true && '1' || '0' }}"
 	assert_output --partial "assert-live-publish-inputs.sh"
 	run awk '
 		/name: Assert live-publish preconditions/ { pre = NR }
@@ -154,6 +157,14 @@ output_value() {
 	assert_line "          LIVE: \${{ inputs.dry-run == false && '1' || '0' }}"
 	run step_block "Verify published packages"
 	assert_line "          DRY_RUN: \${{ inputs.dry-run == true && '1' || '0' }}"
+	# verify-published.sh does not read the dist-tag; nothing unused is wired.
+	refute_output --partial "DIST_TAG"
+}
+
+@test "reusable-publish-npm-set: verify-artifacts receives the order so it can enumerate packed files" {
+	run step_block "Verify artifacts"
+	assert_line "          ORDER: \${{ inputs.order }}"
+	assert_line "          FILES: \${{ inputs.files-to-verify }}"
 }
 
 @test "reusable-publish-npm: is a deprecated thin wrapper over the package-set reusable" {

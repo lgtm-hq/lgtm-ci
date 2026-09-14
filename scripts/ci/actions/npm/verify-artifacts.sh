@@ -4,6 +4,13 @@
 #          publish, BEFORE any irreversible step (pre-publish verification,
 #          per the release security policy).
 #
+# The file set is what `npm publish` will actually ship: for every package
+# in ORDER the script asks npm which files it would pack (`npm pack
+# --dry-run --json --ignore-scripts`, which writes nothing and runs no
+# package scripts) and requires each of those files to carry a manifest
+# entry. FILES may add further paths (build inputs that are not packed);
+# an empty FILES additionally verifies every manifest entry.
+#
 # Two checks per file:
 #   1. sha256 equality against a checksums manifest shipped with the build
 #      (`<hex>  <path>` lines, paths relative to PACKAGES_DIR), and
@@ -11,11 +18,15 @@
 #      --signer-workflow <signer-workflow>`, proving the artifact was built
 #      by the expected repository and workflow.
 #
-# Any tampered, missing, unlisted, or unattested file fails before npm pack
-# runs; a failure here can never have published anything.
+# Any tampered, missing, unlisted, or unattested file — including a packed
+# file the manifest does not know — fails before the real npm pack runs; a
+# failure here can never have published anything.
 #
 # Environment:
 #   PACKAGES_DIR      Directory containing one subdirectory per package (required)
+#   ORDER             Package subdirectories, as publish-set.sh takes them
+#                     (JSON array or comma/space separated; "." for the
+#                     single-directory shape) (required)
 #   CHECKSUMS_FILE    Path to the SHA256SUMS manifest (required), relative
 #                     to the workspace (e.g. npm-dist/SHA256SUMS); a path
 #                     relative to PACKAGES_DIR is accepted as a fallback.
@@ -32,10 +43,12 @@
 #                     qualified ([host/]owner/repo/.github/workflows/build.yml)
 #                     (required; the reusable's signer-workflow input)
 #   GH_CMD            gh binary name (overridable in tests; default gh)
+#   NPM_CMD           npm binary name (overridable in tests; default npm)
 
 set -euo pipefail
 
 : "${PACKAGES_DIR:?PACKAGES_DIR is required}"
+: "${ORDER:?ORDER is required}"
 : "${CHECKSUMS_FILE:?CHECKSUMS_FILE is required}"
 # Fail closed, naming the workflow input: checksums-file without a signer
 # would verify sha256 only, which is not the attestation the policy requires.
@@ -53,6 +66,16 @@ fi
 FILES="${FILES:-[]}"
 PACKAGES_DIR="${PACKAGES_DIR%/}"
 GH="${GH_CMD:-gh}"
+NPM="${NPM_CMD:-npm}"
+
+normalize_order() {
+	local order="$1"
+	if [[ "$order" == \[*\] ]]; then
+		printf '%s\n' "$order" | jq -r 'if type == "array" then .[] else empty end'
+	else
+		echo "$order" | tr ',' ' ' | tr -s ' ' '\n' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | grep -v '^$' || true
+	fi
+}
 
 # The manifest usually ships inside the staged set (artifact-name lands it in
 # PACKAGES_DIR), so accept a PACKAGES_DIR-relative path when the
@@ -73,6 +96,36 @@ fail() {
 	echo "ERROR: $1" >&2
 	exit 1
 }
+
+ORDERED_PACKAGES="$(normalize_order "$ORDER")"
+[[ -n "$ORDERED_PACKAGES" ]] || fail "ORDER resolved to no packages (got '$ORDER'); nothing to verify"
+
+# What npm would ship, per package: the authoritative file set. A package
+# that cannot be enumerated fails closed — an unknown file set cannot be
+# verified. `--dry-run` writes no tarball and `--ignore-scripts` keeps
+# prepack hooks from running before verification.
+declare -a PACKED=()
+while IFS= read -r pkg; do
+	[[ -n "$pkg" ]] || continue
+	if [[ "$pkg" == "." ]]; then
+		pkg_dir="$PACKAGES_DIR"
+		prefix=""
+	else
+		pkg_dir="$PACKAGES_DIR/$pkg"
+		prefix="$pkg/"
+	fi
+	[[ -f "$pkg_dir/package.json" ]] || fail "$pkg_dir/package.json not found (check the order input)"
+	echo "==> Enumerating files npm would pack for $pkg"
+	pack_json="$(cd "$pkg_dir" && "$NPM" pack --dry-run --json --ignore-scripts 2>/dev/null)" ||
+		fail "npm pack --dry-run failed for $pkg; cannot determine the file set to verify"
+	pack_paths="$(printf '%s' "$pack_json" | jq -r '.[0].files[]?.path' 2>/dev/null)" ||
+		fail "could not parse the npm pack file list for $pkg"
+	[[ -n "$pack_paths" ]] || fail "npm pack reported no files for $pkg; refusing to publish an empty package"
+	while IFS= read -r packed; do
+		[[ -n "$packed" ]] || continue
+		PACKED+=("${prefix}${packed}")
+	done <<<"$pack_paths"
+done <<<"$ORDERED_PACKAGES"
 
 # Expand the FILES globs (relative to PACKAGES_DIR) into a sorted file list.
 declare -a TARGETS=()
@@ -99,15 +152,50 @@ while IFS= read -r line; do
 	MANIFEST_PATHS+=("$manifest_path")
 done <"$CHECKSUMS_FILE"
 
+# Every packed file must be known to the manifest; otherwise a modified or
+# added publishable file would reach the registry unverified. Checked up
+# front so the error lists every offender at once.
+unlisted=()
+for packed in "${PACKED[@]}"; do
+	listed=0
+	for mp in "${MANIFEST_PATHS[@]+"${MANIFEST_PATHS[@]}"}"; do
+		if [[ "$mp" == "$packed" ]]; then
+			listed=1
+			break
+		fi
+	done
+	((listed)) || unlisted+=("$packed")
+done
+if ((${#unlisted[@]} > 0)); then
+	echo "ERROR: npm would pack file(s) the checksums manifest does not list; refusing to publish unverified artifacts:" >&2
+	printf '  - %s\n' "${unlisted[@]}" >&2
+	exit 1
+fi
+
 # An empty FILES list means "the manifest is the file list": every entry gets
 # the full sha256 + attestation check, so the reusable's default ("[]")
-# verifies the whole staged set rather than nothing.
+# verifies the whole staged set rather than nothing. A non-empty FILES that
+# matches nothing is a caller error.
 if [[ "$(printf '%s' "$FILES" | jq 'length')" -eq 0 ]]; then
 	TARGETS=("${MANIFEST_PATHS[@]+"${MANIFEST_PATHS[@]}"}")
-	((${#TARGETS[@]} > 0)) || fail "checksums manifest '$CHECKSUMS_FILE' lists no files; refusing to publish unverified artifacts"
 else
 	((${#TARGETS[@]} > 0)) || fail "no files matched the verify-artifacts file list; refusing to publish unverified artifacts"
 fi
+# The packed files are always verified; FILES only ever adds to that set.
+TARGETS=("${PACKED[@]}" "${TARGETS[@]+"${TARGETS[@]}"}")
+# Deduplicate, keeping first-seen order.
+declare -a UNIQUE_TARGETS=()
+for rel in "${TARGETS[@]}"; do
+	seen=0
+	for u in "${UNIQUE_TARGETS[@]+"${UNIQUE_TARGETS[@]}"}"; do
+		[[ "$u" == "$rel" ]] && {
+			seen=1
+			break
+		}
+	done
+	((seen)) || UNIQUE_TARGETS+=("$rel")
+done
+TARGETS=("${UNIQUE_TARGETS[@]}")
 
 failures=0
 for rel in "${TARGETS[@]}"; do

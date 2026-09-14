@@ -43,6 +43,7 @@
 #   RETRY_DELAY        Base backoff seconds; doubles each retry (default 5)
 #   MAX_DELAY          Backoff ceiling seconds (default 60)
 #   GITHUB_OUTPUT      Workflow output file: published=<json>, dist_tag_drift=<bool>
+#                      (status per package: published | skipped | dry-run)
 #   GITHUB_STEP_SUMMARY  Drift lines appended when set
 #   NPM_CMD            npm binary name (overridable in tests; default npm)
 
@@ -425,7 +426,13 @@ while IFS= read -r pkg; do
 		fi
 	fi
 	if publish_one "$pkg"; then
-		finish_package "$pkg" "published"
+		# A rehearsal is its own status: consumers (and the deprecated
+		# wrapper's boolean `published`) must never read a dry-run as live.
+		if [[ "$LIVE" == "1" ]]; then
+			finish_package "$pkg" "published"
+		else
+			finish_package "$pkg" "dry-run"
+		fi
 	else
 		exit 1
 	fi

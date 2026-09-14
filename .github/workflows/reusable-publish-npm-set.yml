@@ -67,7 +67,12 @@ name: Reusable npm Package-Set Publishing
         type: boolean
         default: true
       access:
-        description: npm access level
+        description: >-
+          npm access level. A live publish with any value other than public
+          is refused while provenance or post-publish-verify is on: npm
+          issues automatic provenance only for public packages from public
+          repositories, and post-publish verification reads the registry
+          unauthenticated.
         required: false
         type: string
         default: public
@@ -109,8 +114,9 @@ name: Reusable npm Package-Set Publishing
         default: ""
       files-to-verify:
         description: >-
-          JSON array of artifact globs (relative to packages-dir) to verify
-          against checksums-file. Empty array verifies every file the
+          JSON array of additional artifact globs (relative to packages-dir)
+          to verify against checksums-file, on top of every file npm would
+          pack (always verified). Empty array also verifies every file the
           manifest lists.
         required: false
         type: string
@@ -217,8 +223,9 @@ name: Reusable npm Package-Set Publishing
     outputs:
       published:
         description: >-
-          JSON array of {name, version, status: skipped|published, integrity}
-          per package
+          JSON array of {name, version, status: published|skipped|dry-run,
+          integrity} per package (dry-run: the rehearsal packed the package
+          and wrote nothing)
         value: ${{ jobs.publish.outputs.published }}
       dist-tag-drift:
         description: Whether any dist-tag could not be reconciled (OIDC write rejection)
@@ -310,6 +317,9 @@ jobs:
           CHECKSUMS_FILE: ${{ inputs.checksums-file }}
           SIGNER_REPO: ${{ inputs.signer-repo }}
           SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          ACCESS: ${{ inputs.access }}
+          PROVENANCE: ${{ inputs.provenance == true && '1' || '0' }}
+          POST_PUBLISH_VERIFY: ${{ inputs.post-publish-verify == true && '1' || '0' }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/assert-live-publish-inputs.sh
       # Jobs have isolated filesystems: a package set staged by another job
@@ -322,11 +332,14 @@ jobs:
           name: ${{ inputs.artifact-name }}
           path: ${{ inputs.packages-dir }}
       # Contract step 1 of 3: verify BEFORE anything is packed or written.
+      # Verifies every file npm would pack (npm pack --dry-run) plus
+      # files-to-verify; a packed file the manifest does not list fails.
       - name: Verify artifacts
         if: inputs.checksums-file != ''
         shell: bash
         env:
           PACKAGES_DIR: ${{ inputs.packages-dir }}
+          ORDER: ${{ inputs.order }}
           CHECKSUMS_FILE: ${{ inputs.checksums-file }}
           FILES: ${{ inputs.files-to-verify }}
           SIGNER_REPO: ${{ inputs.signer-repo }}
@@ -355,7 +368,6 @@ jobs:
         env:
           PACKAGES_DIR: ${{ inputs.packages-dir }}
           ORDER: ${{ inputs.order }}
-          DIST_TAG: ${{ inputs.dist-tag }}
           DRY_RUN: ${{ inputs.dry-run == true && '1' || '0' }}
           SMOKE: ${{ inputs.smoke-command }}
         run: >-

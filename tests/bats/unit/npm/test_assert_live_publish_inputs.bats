@@ -13,6 +13,9 @@ setup() {
 	export CHECKSUMS_FILE=npm-dist/SHA256SUMS
 	export SIGNER_REPO=lgtm-hq/lgtm-ci
 	export SIGNER_WORKFLOW=.github/workflows/build.yml
+	export ACCESS=public
+	export PROVENANCE=1
+	export POST_PUBLISH_VERIFY=1
 }
 
 @test "assert-live-publish-inputs: passes bash syntax check" {
@@ -54,6 +57,44 @@ setup() {
 	assert_output --partial "signer-workflow is empty"
 	refute_output --partial "signer-repo is empty"
 	refute_output --partial "checksums-file is empty"
+}
+
+@test "assert-live-publish-inputs: live restricted publish is refused while provenance is on" {
+	export LIVE=1
+	export ACCESS=restricted
+	export POST_PUBLISH_VERIFY=0
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "::error::npm package-set: access 'restricted' is incompatible"
+	assert_output --partial "public packages from public repositories"
+	assert_output --partial "Nothing was published"
+}
+
+@test "assert-live-publish-inputs: live restricted publish is refused while post-publish-verify is on" {
+	export LIVE=1
+	export ACCESS=restricted
+	export PROVENANCE=0
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "reads the registry unauthenticated"
+}
+
+@test "assert-live-publish-inputs: live restricted publish passes once provenance and verification are off" {
+	export LIVE=1
+	export ACCESS=restricted
+	export PROVENANCE=0
+	export POST_PUBLISH_VERIFY=0
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Live-publish preconditions satisfied"
+}
+
+@test "assert-live-publish-inputs: dry-run only notices a restricted access conflict" {
+	export LIVE=0
+	export ACCESS=restricted
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::notice::access is 'restricted'"
 }
 
 @test "assert-live-publish-inputs: live run refuses a self-hosted runner" {

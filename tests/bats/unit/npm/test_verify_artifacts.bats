@@ -36,6 +36,39 @@ setup() {
 	export SIGNER_REPO=lgtm-hq/lgtm-ci
 	export SIGNER_WORKFLOW=.github/workflows/build.yml
 	export FILES='["pkg-a/bin/tool", "pkg-a/package.json"]'
+	export ORDER='["pkg-a"]'
+	npm_pack_mock
+}
+
+# npm mock: `pack --dry-run --json` reports every regular file under the
+# current directory (what npm ships for a package with no files filter),
+# in the shape npm prints; anything else is unexpected.
+npm_pack_mock() {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/npm" <<'NPMMOCK'
+#!/usr/bin/env bash
+echo "npm [$PWD] $*" >> "${NPM_CALLS}"
+case "$*" in
+	*pack*--dry-run*--json*)
+		printf '[{"files":['
+		first=1
+		while IFS= read -r f; do
+			f="${f#./}"
+			if [ "$first" = 1 ]; then first=0; else printf ','; fi
+			printf '{"path":"%s"}' "$f"
+		done < <(find . -type f | sort)
+		printf ']}]\n'
+		;;
+	*) echo "npm: unexpected call: $*" >&2; exit 99;;
+esac
+NPMMOCK
+	chmod +x "${mock_bin}/npm"
+	export NPM_CALLS="${BATS_TEST_TMPDIR}/npm_calls.log"
+	: >"$NPM_CALLS"
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
 }
 
 teardown() {
@@ -62,6 +95,86 @@ attest_mock() {
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "All artifacts verified"
+	# The packed file set was enumerated without writing a tarball or
+	# running package scripts.
+	run grep -c "pack --dry-run --json --ignore-scripts" "$NPM_CALLS"
+	assert_output 1
+}
+
+@test "verify-artifacts: a file npm would pack that the manifest does not list fails closed" {
+	# A modified/added publishable file (not covered by FILES) must not
+	# reach the registry unverified.
+	mkdir -p "$PACKAGES_DIR/pkg-a/lib"
+	echo "console.log('sneaky')" >"$PACKAGES_DIR/pkg-a/lib/extra.js"
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "npm would pack file(s) the checksums manifest does not list"
+	assert_output --partial "pkg-a/lib/extra.js"
+	# Fails before any hashing/attestation of the listed files.
+	refute_output --partial "sha256 ok"
+}
+
+@test "verify-artifacts: packed files are verified even when files-to-verify names only some of them" {
+	# FILES covers package.json only; bin/tool is still packed, so it is
+	# still hashed and attested (and its tampering still caught).
+	export FILES='["pkg-a/package.json"]'
+	attest_mock 0
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Verifying pkg-a/bin/tool"
+
+	echo "tampered" >"$PACKAGES_DIR/pkg-a/bin/tool"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "sha256 mismatch for 'pkg-a/bin/tool'"
+}
+
+@test "verify-artifacts: a manifest covering every packed file across packages passes" {
+	mkdir -p "$PACKAGES_DIR/pkg-b"
+	echo "meta-b" >"$PACKAGES_DIR/pkg-b/package.json"
+	echo "lib-b" >"$PACKAGES_DIR/pkg-b/index.js"
+	printf '%s  pkg-b/package.json\n' "$(sha256_of "$PACKAGES_DIR/pkg-b/package.json")" >>"$CHECKSUMS_FILE"
+	printf '%s  pkg-b/index.js\n' "$(sha256_of "$PACKAGES_DIR/pkg-b/index.js")" >>"$CHECKSUMS_FILE"
+	export ORDER='["pkg-a", "pkg-b"]'
+	export FILES='[]'
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Verifying pkg-b/index.js"
+	run grep -c "pack --dry-run" "$NPM_CALLS"
+	assert_output 2
+}
+
+@test "verify-artifacts: single-directory order '.' enumerates the packages dir itself" {
+	export PACKAGES_DIR="${BATS_TEST_TMPDIR}/npm-dist/pkg-a"
+	export ORDER="."
+	export FILES='[]'
+	{
+		printf '%s  bin/tool\n' "$(sha256_of "$PACKAGES_DIR/bin/tool")"
+		printf '%s  package.json\n' "$(sha256_of "$PACKAGES_DIR/package.json")"
+	} >"$CHECKSUMS_FILE"
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Verifying bin/tool"
+}
+
+@test "verify-artifacts: an npm pack enumeration failure refuses to publish" {
+	# Replace the npm mock with one whose pack fails.
+	cat >"${BATS_TEST_TMPDIR}/bin/npm" <<'NPMMOCK'
+#!/usr/bin/env bash
+echo "npm error broken package.json" >&2
+exit 1
+NPMMOCK
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "cannot determine the file set to verify"
 }
 
 @test "verify-artifacts: fails on a tampered artifact before anything is packed" {
@@ -95,13 +208,15 @@ attest_mock() {
 }
 
 @test "verify-artifacts: fails when a target file has no manifest entry" {
-	echo "unlisted" >"$PACKAGES_DIR/pkg-a/bin/unlisted"
-	export FILES='["pkg-a/bin/unlisted"]'
+	# Outside the packed package (a build input), so only FILES names it.
+	mkdir -p "$PACKAGES_DIR/inputs"
+	echo "unlisted" >"$PACKAGES_DIR/inputs/unlisted"
+	export FILES='["inputs/unlisted"]'
 	attest_mock 0
 
 	run bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "no checksums-manifest entry for 'pkg-a/bin/unlisted'"
+	assert_output --partial "no checksums-manifest entry for 'inputs/unlisted'"
 }
 
 @test "verify-artifacts: fails when the file list matches nothing" {
@@ -137,7 +252,8 @@ attest_mock() {
 
 	run bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "lists no files"
+	# The packed files are unlisted, which is the first and fatal finding.
+	assert_output --partial "npm would pack file(s) the checksums manifest does not list"
 }
 
 @test "verify-artifacts: missing signer inputs fail closed naming the workflow input" {
@@ -186,11 +302,14 @@ attest_mock() {
 	run bash "$SCRIPT"
 	assert_success
 
-	echo "near-miss" >"$PACKAGES_DIR/pkg-a/binXtool"
-	export FILES='["pkg-a/binXtool"]'
+	# Near miss outside the packed set: `pkg-a/bin/tool` is listed, and a
+	# regex would let `.` match the `X`.
+	mkdir -p "$PACKAGES_DIR/inputs"
+	echo "near-miss" >"$PACKAGES_DIR/inputs/tool"
+	export FILES='["inputs/tool"]'
 	run bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "no checksums-manifest entry for 'pkg-a/binXtool'"
+	assert_output --partial "no checksums-manifest entry for 'inputs/tool'"
 }
 
 @test "verify-artifacts: fails on a missing checksums manifest" {
@@ -212,6 +331,7 @@ attest_mock() {
 
 	run bash "$SCRIPT"
 	assert_success
+	assert_output --partial "Verifying pkg-b/bin/tool"
 }
 
 @test "verify-artifacts: qualifies a bare signer-workflow path with the signer repo for gh" {

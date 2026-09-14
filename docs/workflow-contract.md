@@ -1065,16 +1065,18 @@ order that callers must not reorder around (asserted by
 `tests/bats/integration/test_reusable_publish_npm_set.bats`):
 
 1. `verify-artifacts` — required for live publishes, optional for dry-runs
-   (`checksums-file` set): sha256 plus `gh
-   attestation verify` against `signer-repo`/`signer-workflow`, before any
-   `npm pack`. Tampered, missing, unlisted, or unattested artifacts fail the
-   job with nothing published.
+   (`checksums-file` set): for every package, the files `npm pack --dry-run`
+   reports (plus `files-to-verify`) get sha256 plus `gh attestation verify`
+   against `signer-repo`/`signer-workflow`, before the real `npm pack`. A
+   packed file the manifest does not list, and any tampered, missing, or
+   unattested artifact, fails the job with nothing published.
 2. `publish-set` — the only writer. Ordered (`order`, meta package last),
    idempotent on re-runs (`npm view` pre-check skip, `EPUBLISHCONFLICT`
    conflict-as-success, read-before-write dist-tag reconcile), bounded
    exponential backoff on transient Sigstore/5xx/429 errors only, auth
    failures never retried. Outputs `published` (JSON array of `{name,
-   version, status, integrity}`) and `dist-tag-drift`; dist-tag drift (an
+   version, status: published|skipped|dry-run, integrity}`) and
+   `dist-tag-drift`; dist-tag drift (an
    OIDC-scoped token cannot write `npm dist-tag`, npm/cli#8547) is deferred:
    remaining packages publish first, then the job fails.
 3. `verify-published` — read-only and last: per-package
@@ -1089,9 +1091,14 @@ pass their top-level publish workflow via `entry-workflows` (a live publish
 fails before publishing when it is empty; a dry-run only warns) and keep
 their trusted-publisher registration pointed at that same file. The live
 preconditions (hosted runner, `checksums-file`, `signer-repo`,
-`signer-workflow`) are asserted by
+`signer-workflow`, and `access: public` while `provenance` or
+`post-publish-verify` is on) are asserted by
 `scripts/ci/actions/npm/assert-live-publish-inputs.sh` before any download
-or pack.
+or pack. The access rule exists because npm issues automatic provenance only
+for public packages from public repositories and the post-publish step reads
+the registry unauthenticated (trusted publishing authenticates publish
+commands only): a restricted package would publish irreversibly and then
+always fail verification.
 
 ### GitHub Release (artifact upload)
 
