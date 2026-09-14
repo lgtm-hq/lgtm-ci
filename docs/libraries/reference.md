@@ -134,7 +134,7 @@ scripts for standalone sourcing — the canonical versions are in `fs.sh` and
 - `get_pypi_download_url` / `get_pypi_sha256` (publish/registry.sh) - PyPI sdist lookup
 - `validate_pypi_package` / `validate_npm_package` / `validate_gem_package` (publish/validate.sh) - Package validation
 - `validate_version_format` (publish/validate.sh) - Validate version string format (semver)
-- `validate_pep440_version_format` (publish/validate.sh) - Validate a canonical PEP 440 version (`1.2.3a1`, `.postN`, `.devN`); used by the Python dist validate step
+- `validate_pep440_version_format` (publish/validate.sh) - Validate a canonical PEP 440 version (`[N!]N(.N)*`, `1.2.3a1`, `.postN`, `.devN`); used by the Python dist validate step
 - `extract_pypi_version` / `extract_pypi_name` (publish/version.sh) - Read `pyproject.toml` via stdlib tomllib
 - `extract_npm_version` (publish/version.sh) - Extract version from package.json
 - `extract_gem_version` (publish/version.sh) - Extract version from gemspec file

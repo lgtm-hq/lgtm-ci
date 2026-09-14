@@ -451,8 +451,20 @@ EOF
 	assert_output "invalid"
 }
 
-@test "validate_pep440_version_format: rejects 1" {
-	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1" || echo "invalid"'
+@test "validate_pep440_version_format: accepts single-component 1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts epoch 1!2.0" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1!2.0" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: rejects non-canonical epoch 0!1.0" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "0!1.0" || echo "invalid"'
 	assert_success
 	assert_output "invalid"
 }

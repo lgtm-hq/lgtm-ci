@@ -215,14 +215,15 @@ validate_version_format() {
 #
 # Python distributions carry PEP 440 versions, not SemVer: a prerelease is
 # 1.2.3a1 / 1.2.3b2 / 1.2.3rc1 (no hyphen), and .postN / .devN suffixes are
-# legal. Accepts N(.N)+ with optional {a|b|rc}N, .postN and .devN segments in
-# that order; rejects a v prefix, SemVer hyphenated prereleases, local
-# (+...) versions and non-canonical spellings (alpha, c, leading zeros).
+# legal. Accepts [N!]N(.N)* with optional {a|b|rc}N, .postN and .devN
+# segments in that order; rejects a v prefix, SemVer hyphenated prereleases,
+# local (+...) versions and non-canonical spellings (alpha, c, leading zeros,
+# an explicit 0! epoch).
 validate_pep440_version_format() {
 	local version="${1:-}"
 
 	local num='(0|[1-9][0-9]*)'
-	local pattern="^${num}(\\.${num})+"
+	local pattern="^([1-9][0-9]*!)?${num}(\\.${num})*"
 	pattern+="((a|b|rc)${num})?"
 	pattern+="(\\.post${num})?"
 	pattern+="(\\.dev${num})?$"
