@@ -104,6 +104,47 @@ attest_mock() {
 	assert_output --partial "no files matched"
 }
 
+@test "verify-artifacts: empty file list verifies every manifest entry" {
+	export FILES='[]'
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Verifying pkg-a/bin/tool"
+	assert_output --partial "Verifying pkg-a/package.json"
+	assert_output --partial "All artifacts verified"
+
+	# Tampering is still caught when the manifest drives the list.
+	echo "tampered" >"$PACKAGES_DIR/pkg-a/bin/tool"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "sha256 mismatch for 'pkg-a/bin/tool'"
+}
+
+@test "verify-artifacts: empty file list with an empty manifest refuses to publish" {
+	export FILES='[]'
+	: >"$CHECKSUMS_FILE"
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "lists no files"
+}
+
+@test "verify-artifacts: missing signer inputs fail closed naming the workflow input" {
+	attest_mock 0
+	unset SIGNER_REPO
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "signer-repo"
+
+	export SIGNER_REPO=lgtm-hq/lgtm-ci
+	unset SIGNER_WORKFLOW
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "signer-workflow"
+}
+
 @test "verify-artifacts: fails on a missing checksums manifest" {
 	export CHECKSUMS_FILE="${BATS_TEST_TMPDIR}/does-not-exist"
 	attest_mock 0

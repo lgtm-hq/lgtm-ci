@@ -172,8 +172,76 @@ BODY
 
 	run bash "$SCRIPT"
 	assert_success
-	run awk '/platform-a/{a=NR} /audit signatures/{m=NR} END{exit !(a && m)}' "$CALLS"
+	# Both registry reads are journaled; platform-a's must come before meta's,
+	# and the meta audit must come after both.
+	run awk '
+		/view @lgtm-hq\/pkg-platform-a@1.2.3/ { a = NR }
+		/view @lgtm-hq\/pkg@1.2.3/ { m = NR }
+		/audit signatures/ { audit = NR }
+		END { exit !(a && m && audit && a < m && m < audit) }
+	' "$CALLS"
 	assert_success
 	run grep -c "audit signatures" "$CALLS"
 	assert_output 1
+}
+
+@test "verify-published: retries when the version is visible before its attestation metadata" {
+	export ORDER='["meta"]'
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<BODY
+	*view*dist.attestations*)
+		if [ -f "${CALLS}.seen" ]; then
+			echo '{"dist.attestations":"x","dist.integrity":"sha512-abc"}'
+			exit 0
+		fi
+		touch "${CALLS}.seen"
+		echo '{"dist.integrity":"sha512-abc"}'
+		exit 0;;
+	*--pack-destination*)
+		for a in "\$@"; do
+			case "\$a" in /*) pack_dir="\$a";; esac
+		done
+		touch "\$pack_dir/@lgtm-hq__pkg-1.2.3.tgz"
+		exit 0;;
+	*audit*signatures*) exit 0;;
+	*install*) exit 0;;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "not yet present"
+	assert_output --partial "attempt 2/5"
+	assert_output --partial "Post-publish verification passed"
+}
+
+@test "verify-published: metadata still missing after all attempts fails with the attempt count" {
+	export ORDER='["meta"]'
+	export ATTEMPTS=3
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
+	*view*dist.attestations*) echo '{"dist.integrity":"sha512-abc"}';;
+	*--pack-destination*)
+		for a in "$@"; do
+			case "$a" in /*) pack_dir="$a";; esac
+		done
+		touch "$pack_dir/@lgtm-hq__pkg-1.2.3.tgz"
+		exit 0;;
+	*audit*signatures*) exit 0;;
+	*install*) exit 0;;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "missing dist.attestations/dist.integrity after 3 propagation attempts"
+	run grep -c "] view" "$CALLS"
+	assert_output 3
+}
+
+@test "verify-published: an order that resolves to no packages fails" {
+	export ORDER='[]'
+	make_npm_mock_from /dev/null
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "resolved to no packages"
 }

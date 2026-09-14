@@ -82,6 +82,34 @@ not_published_reply() {
 	run awk '/\/platform-a/{a=NR} /\/platform-b/{b=NR} /\/meta/{m=NR} END{exit !(a && b && m && a < b && b < m)}' "$CALLS"
 	assert_success
 	refute_output --partial "Skipping"
+	# No registry read of any kind: not the pre-check, not dist-tag, not the
+	# post-publish integrity lookup (the mock's journal is the proof).
+	run grep -c "] view\|] dist-tag" "$CALLS"
+	assert_output 0
+	run grep -F '"integrity":null' "$CALLS"
+	assert_failure
+}
+
+@test "publish-set: an order that resolves to no packages fails instead of publishing nothing" {
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	: >"$output_file"
+	export GITHUB_OUTPUT="$output_file"
+	make_npm_mock '*) echo "unexpected npm call" >&2; exit 99;;'
+
+	export ORDER='[]'
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "resolved to no packages"
+
+	export ORDER='  ,  '
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "resolved to no packages"
+
+	run grep -c "" "$CALLS"
+	assert_output 0
+	run grep -F "published=" "$output_file"
+	assert_failure
 }
 
 @test "publish-set: comma-separated order works and bad entries fail loudly" {
@@ -133,7 +161,7 @@ not_published_reply() {
 			*@lgtm-hq/pkg-platform-a@1.2.3*version*) not_published_reply @lgtm-hq/pkg-platform-a;;
 			*dist-tag\ ls*) echo "latest: 1.0.0";;
 			*dist-tag\ add*) exit 0;;
-			*publish*) echo "npm error code EPUBLISHCONFLICT"; echo "npm error cannot publish over the previously published versions"; exit 1;;
+			*publish*) echo "npm error code EPUBLISHCONFLICT" >&2; echo "npm error cannot publish over the previously published versions" >&2; exit 1;;
 			*view*dist.integrity*) echo sha512-abc;;
 	'
 
@@ -154,7 +182,7 @@ not_published_reply() {
 			*publish*)
 				if [ -f "'"$CALLS"'.p1" ]; then exit 0; fi
 				touch "'"$CALLS"'.p1"
-				echo "npm error code TLOG_CREATE_ENTRY_ERROR"; exit 1;;
+				echo "npm error code TLOG_CREATE_ENTRY_ERROR" >&2; exit 1;;
 			*dist-tag\ ls*) echo "latest: 1.2.3";;
 			*dist-tag\ add*) exit 0;;
 	'

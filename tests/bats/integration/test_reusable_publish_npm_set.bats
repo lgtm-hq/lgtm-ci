@@ -7,13 +7,23 @@ load "../../helpers/common"
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-npm-set.yml"
 WRAPPER="${PROJECT_ROOT}/.github/workflows/reusable-publish-npm.yml"
 
+# Print the `required:` value of one workflow_call input block.
+input_required() {
+	awk -v input="$1" '
+		$0 == "      " input ":" { in_input = 1; next }
+		in_input && /^      [a-z-]+:$/ { exit }
+		in_input && /^        required:/ { print $2; exit }
+	' "$WORKFLOW"
+}
+
 @test "reusable-publish-npm-set: requires packages-dir and order" {
-	run grep -F "packages-dir:" "$WORKFLOW"
-	assert_success
-	run grep -F "order:" "$WORKFLOW"
-	assert_success
-	run grep -F "required: true" "$WORKFLOW"
-	assert_success
+	run input_required packages-dir
+	assert_output "true"
+	run input_required order
+	assert_output "true"
+	# Sanity: an optional input reads false through the same helper.
+	run input_required dist-tag
+	assert_output "false"
 }
 
 @test "reusable-publish-npm-set: dry-run defaults to true" {
@@ -51,9 +61,24 @@ WRAPPER="${PROJECT_ROOT}/.github/workflows/reusable-publish-npm.yml"
 }
 
 @test "reusable-publish-npm-set: wires the entry-workflow guard before any publish" {
-	run grep -F "assert-entry-workflow.sh" "$WORKFLOW"
-	assert_success
 	run grep -F "ALLOWED_ENTRY_WORKFLOWS: \${{ inputs.entry-workflows }}" "$WORKFLOW"
+	assert_success
+	# The guard must run before the artifact download and the publish step.
+	run awk '
+		/assert-entry-workflow.sh/ { guard = NR }
+		/name: Download staged package set/ { download = NR }
+		/name: Publish package set/ { publish = NR }
+		END { exit !(guard && download && publish && guard < download && download < publish) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-publish-npm-set: exposes runner-image and downloads the staged artifact into packages-dir" {
+	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	assert_success
+	run grep -F "if: inputs.artifact-name != ''" "$WORKFLOW"
+	assert_success
+	run grep -F 'path: ${{ inputs.packages-dir }}' "$WORKFLOW"
 	assert_success
 }
 

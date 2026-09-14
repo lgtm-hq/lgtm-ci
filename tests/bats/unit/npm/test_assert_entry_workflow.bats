@@ -12,8 +12,9 @@ setup() {
 	save_path
 	export PROJECT_ROOT
 	export SCRIPT
-	# The shape GITHUB_WORKFLOW_REF actually has on a tag run.
-	export ENTRY_WORKFLOW_REF="refs/tags/v1.2.3/.github/workflows/publish-npm-set.yml@refs/tags/v1.2.3"
+	# The shape GITHUB_WORKFLOW_REF actually has on a tag run:
+	# owner/repository/.github/workflows/file.yml@ref
+	export ENTRY_WORKFLOW_REF="lgtm-hq/lgtm-ci/.github/workflows/publish-npm-set.yml@refs/tags/v1.2.3"
 }
 
 teardown() {
@@ -42,23 +43,33 @@ teardown() {
 	assert_output --partial "allowlisted"
 }
 
-@test "assert-entry-workflow: strips refs/tags prefix and @ref suffix" {
+@test "assert-entry-workflow: strips the owner/repo prefix and @ref suffix on a tag run" {
 	export ALLOWED_ENTRY_WORKFLOWS=".github/workflows/publish-npm-set.yml"
-	export ENTRY_WORKFLOW_REF="refs/tags/v1.2.3/.github/workflows/publish-npm-set.yml@refs/tags/v1.2.3"
+	export ENTRY_WORKFLOW_REF="lgtm-hq/lgtm-ci/.github/workflows/publish-npm-set.yml@refs/tags/v1.2.3"
 
 	run bash "$SCRIPT"
 	assert_success
+	assert_output --partial "Entry workflow '.github/workflows/publish-npm-set.yml' is allowlisted"
 }
 
-@test "assert-entry-workflow: handles bare path and refs/heads shapes" {
+@test "assert-entry-workflow: handles branch runs and a bare path" {
 	export ALLOWED_ENTRY_WORKFLOWS=".github/workflows/publish-npm-set.yml"
-	export ENTRY_WORKFLOW_REF="refs/heads/main/.github/workflows/publish-npm-set.yml"
+	export ENTRY_WORKFLOW_REF="lgtm-hq/lgtm-ci/.github/workflows/publish-npm-set.yml@refs/heads/main"
 
 	run bash "$SCRIPT"
 	assert_success
 	export ENTRY_WORKFLOW_REF=".github/workflows/publish-npm-set.yml"
 	run bash "$SCRIPT"
 	assert_success
+}
+
+@test "assert-entry-workflow: does not let the repository prefix satisfy the allowlist" {
+	# Only the workflow path is compared; a repo-qualified allowlist entry
+	# never matches, so a consumer cannot accidentally allow by repo name.
+	export ALLOWED_ENTRY_WORKFLOWS="lgtm-hq/lgtm-ci/.github/workflows/publish-npm-set.yml"
+
+	run bash "$SCRIPT"
+	assert_failure
 }
 
 @test "assert-entry-workflow: rejects an entry outside the allowlist" {

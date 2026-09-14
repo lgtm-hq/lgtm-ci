@@ -19,8 +19,8 @@
 #   ALLOWED_ENTRY_WORKFLOWS  Comma/newline-separated workflow paths, e.g.
 #                            ".github/workflows/publish-npm.yml". Empty: skip.
 #   ENTRY_WORKFLOW_REF       The run's entry workflow ref; defaults to
-#                            GITHUB_WORKFLOW_REF, e.g.
-#                            refs/tags/v1.2.3/.github/workflows/publish.yml@refs/tags/v1.2.3
+#                            GITHUB_WORKFLOW_REF, which GitHub supplies as
+#                            owner/repo/.github/workflows/publish.yml@refs/tags/v1.2.3
 
 set -euo pipefail
 
@@ -36,13 +36,13 @@ if [[ -z "$ENTRY_WORKFLOW_REF" ]]; then
 	exit 1
 fi
 
-# Normalize every observed GITHUB_WORKFLOW_REF shape —
-#   refs/tags/v1.2.3/.github/workflows/publish.yml@refs/tags/v1.2.3
-#   refs/heads/main/.github/workflows/publish.yml
-#   .github/workflows/publish.yml
-# — to the workflow path starting at .github/workflows/. The ref name precedes
-# the path and the @ref follows it, and both may contain slashes, so anchor on
-# the fixed .github/workflows/ marker rather than parsing ref segments.
+# Normalize the GITHUB_WORKFLOW_REF shape GitHub documents —
+#   owner/repo/.github/workflows/publish.yml@refs/tags/v1.2.3
+#   owner/repo/.github/workflows/publish.yml@refs/heads/main
+# — plus a bare .github/workflows/publish.yml, to the workflow path starting
+# at .github/workflows/. The owner/repo prefix precedes the path and the @ref
+# follows it, and both may contain slashes, so anchor on the fixed
+# .github/workflows/ marker rather than parsing segments.
 entry_path="${ENTRY_WORKFLOW_REF%%@*}"
 if [[ "$entry_path" == *".github/workflows/"* ]]; then
 	entry_path=".github/workflows/${entry_path#*".github/workflows/"}"

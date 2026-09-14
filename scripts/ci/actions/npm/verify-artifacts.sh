@@ -19,17 +19,22 @@
 #   CHECKSUMS_FILE    Path to the SHA256SUMS manifest (required)
 #   FILES             JSON array of glob patterns relative to PACKAGES_DIR,
 #                     e.g. ["pkg-linux-x64/bin/tool","meta/package.json"].
-#                     Empty array: verify only that every manifest entry exists.
-#   SIGNER_REPO       Repository provenance must attest to, e.g. lgtm-hq/lgtm-ci (required)
-#   SIGNER_WORKFLOW   Workflow path provenance must attest to (required)
+#                     Empty array (the default): verify every file the
+#                     manifest lists.
+#   SIGNER_REPO       Repository provenance must attest to, e.g. lgtm-hq/lgtm-ci
+#                     (required; the reusable's signer-repo input)
+#   SIGNER_WORKFLOW   Workflow path provenance must attest to
+#                     (required; the reusable's signer-workflow input)
 #   GH_CMD            gh binary name (overridable in tests; default gh)
 
 set -euo pipefail
 
 : "${PACKAGES_DIR:?PACKAGES_DIR is required}"
 : "${CHECKSUMS_FILE:?CHECKSUMS_FILE is required}"
-: "${SIGNER_REPO:?SIGNER_REPO is required}"
-: "${SIGNER_WORKFLOW:?SIGNER_WORKFLOW is required}"
+# Fail closed, naming the workflow input: checksums-file without a signer
+# would verify sha256 only, which is not the attestation the policy requires.
+: "${SIGNER_REPO:?SIGNER_REPO is required: set the signer-repo input whenever checksums-file is set}"
+: "${SIGNER_WORKFLOW:?SIGNER_WORKFLOW is required: set the signer-workflow input whenever checksums-file is set}"
 FILES="${FILES:-[]}"
 PACKAGES_DIR="${PACKAGES_DIR%/}"
 GH="${GH_CMD:-gh}"
@@ -61,6 +66,7 @@ done < <(printf '%s' "$FILES" | jq -r '.[]')
 
 # Every file named by the manifest must exist: a missing artifact is exactly
 # what this gate exists to catch, so it is checked even with an empty FILES.
+declare -a MANIFEST_PATHS=()
 while IFS= read -r line; do
 	[[ -n "$line" ]] || continue
 	# Strip the leading checksum: awk clears $1 (portable on BSD and GNU).
@@ -69,9 +75,18 @@ while IFS= read -r line; do
 	if [[ ! -f "$PACKAGES_DIR/$manifest_path" ]]; then
 		fail "manifest lists '$manifest_path' but it does not exist under $PACKAGES_DIR"
 	fi
+	MANIFEST_PATHS+=("$manifest_path")
 done <"$CHECKSUMS_FILE"
 
-((${#TARGETS[@]} > 0)) || fail "no files matched the verify-artifacts file list; refusing to publish unverified artifacts"
+# An empty FILES list means "the manifest is the file list": every entry gets
+# the full sha256 + attestation check, so the reusable's default ("[]")
+# verifies the whole staged set rather than nothing.
+if [[ "$(printf '%s' "$FILES" | jq 'length')" -eq 0 ]]; then
+	TARGETS=("${MANIFEST_PATHS[@]+"${MANIFEST_PATHS[@]}"}")
+	((${#TARGETS[@]} > 0)) || fail "checksums manifest '$CHECKSUMS_FILE' lists no files; refusing to publish unverified artifacts"
+else
+	((${#TARGETS[@]} > 0)) || fail "no files matched the verify-artifacts file list; refusing to publish unverified artifacts"
+fi
 
 failures=0
 for rel in "${TARGETS[@]}"; do

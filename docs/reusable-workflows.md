@@ -1017,6 +1017,7 @@ jobs:
       attestations: write
     with:
       packages-dir: npm-dist
+      artifact-name: npm-dist # upload-artifact name from the staging job
       order: '["darwin-arm64", "linux-x64", "meta"]' # meta last
       dry-run: false
       entry-workflows: .github/workflows/publish-npm-set.yml
