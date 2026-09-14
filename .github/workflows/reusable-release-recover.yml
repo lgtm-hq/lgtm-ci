@@ -15,7 +15,9 @@ name: Reusable Release Recovery
 # release that was cut before the fix.
 #
 # Stage layout (see docs/release-recovery.md for the runbook):
-#   resolve  — tag gate (prerelease refusal, same-commit check), artifact
+#   resolve  — tag gate (prerelease refusal; the source run must be this
+#              repository's publish workflow and must have built the tag's
+#              commit — read from the API, never trusted from inputs), artifact
 #              download + verification (manifest, attestation, and equality
 #              with any already-published GitHub Release asset), channel
 #              detection, summary table. `dry-run: true` (default) stops here.
@@ -26,7 +28,9 @@ name: Reusable Release Recovery
 #              Release resume goes through create-github-release.sh with
 #              IMMUTABLE_ASSETS so already-published assets are skipped.
 #   record   — always(): records the outcome on the release-failure issue the
-#              notifier (#964) opened, closing it on success.
+#              notifier (#964) opened; closes it only when the run was live
+#              and every detected-missing channel was resumed (a dry run or
+#              an unresumable channel — PyPI, Docker — keeps it open).
 #
 # Consumers wrap this in a `workflow_dispatch` entry workflow (see
 # examples/release-recover.yml); the entry file is what npm trusted
@@ -44,10 +48,12 @@ name: Reusable Release Recovery
         description: Original publish run whose artifacts are the recovery source
         required: true
         type: string
-      source-run-sha:
+      source-workflow:
         description: >-
-          Head SHA of the original run (gh run view <id> --json headSha); the
-          tag must point here for recovery to proceed
+          Path of the publish workflow the source run must belong to (e.g.
+          .github/workflows/publish-pypi-on-tag.yml). The run's repository,
+          workflow path and head SHA are read from the API and must match
+          this repository, this path, and the tag's commit.
         required: true
         type: string
       channels:
@@ -279,6 +285,7 @@ jobs:
     outputs:
       missing: ${{ steps.detect.outputs.missing }}
       missing-count: ${{ steps.detect.outputs.missing_count }}
+      unresumable: ${{ steps.detect.outputs.unresumable }}
     steps:
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
@@ -307,16 +314,18 @@ jobs:
           egress-preset: ${{ inputs.egress-preset }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
           allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      # Gate 1: the tag must exist, not be a prerelease, and point at the
-      # original run's commit (same commit = same version = the immutability
-      # check the workflow can make).
-      - name: Resolve tag
+      # Gate 1: the tag must exist and not be a prerelease; the source run
+      # must be this repository's publish workflow and must have built the
+      # tag's commit (same commit = same version = the immutability check
+      # the workflow can make). All read from the API, before any download.
+      - name: Resolve tag and source run
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
-          EXPECTED_SHA: ${{ inputs.source-run-sha }}
+          SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+          SOURCE_WORKFLOW: ${{ inputs.source-workflow }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/recover/resolve-tag.sh
       # The original artifacts ARE the recovery source; download them here so
@@ -361,7 +370,9 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/recover/verify-recovery-artifacts.sh
-      # Gate 3: probe every configured channel; emit the missing set.
+      # Gate 3: probe every configured channel; emit the missing and the
+      # unresumable sets. The GitHub Release is complete only when every
+      # manifest asset is published with the same digest.
       - name: Detect missing channels
         id: detect
         shell: bash
@@ -371,6 +382,8 @@ jobs:
           CHANNELS: ${{ inputs.channels }}
           PYPI_PACKAGE: ${{ inputs.pypi-package }}
           NPM_PACKAGE: ${{ inputs.npm-package }}
+          # yamllint disable-line rule:line-length
+          RELEASE_MANIFEST: ${{ inputs.release-artifact-name != '' && format('recovery-artifacts/release/{0}', inputs.release-checksums-file) || '' }}
           DOCKER_IMAGE: ${{ inputs.docker-image }}
           TAP_REPO: ${{ inputs.homebrew-tap-repo }}
           TAP_FORMULA: ${{ inputs.homebrew-tap-formula }}
@@ -681,6 +694,8 @@ jobs:
           RELEASE_RESULT: ${{ needs.resume-github-release.result }}
           HOMEBREW_RESULT: ${{ needs.resume-homebrew.result }}
           MISSING_SET: ${{ needs.resolve.outputs.missing }}
+          UNRESUMABLE_SET: ${{ needs.resolve.outputs.unresumable }}
           RESOLVE_RESULT: ${{ needs.resolve.result }}
+          DRY_RUN: ${{ inputs.dry-run == true && '1' || '0' }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/recover/record-recovery.sh

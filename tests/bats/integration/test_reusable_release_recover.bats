@@ -8,6 +8,16 @@ load "../../helpers/common"
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-recover.yml"
 EXAMPLE="${PROJECT_ROOT}/examples/release-recover.yml"
 
+# Print the lines of one job (from its key to the next job key).
+job_block() {
+	awk -v job="$1" '
+		$0 == "  " job ":" { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { exit }
+		in_job { print }
+	' "$WORKFLOW"
+}
+
+
 @test "reusable-release-recover: dry-run defaults to true" {
 	run awk '
 		/^      dry-run:/ { in_input = 1; next }
@@ -16,9 +26,26 @@ EXAMPLE="${PROJECT_ROOT}/examples/release-recover.yml"
 	assert_output --partial "true"
 }
 
-@test "reusable-release-recover: requires tag, source run id, and head sha" {
+@test "reusable-release-recover: requires tag, source run id, and the publish workflow path" {
 	run grep -cF "required: true" "$WORKFLOW"
 	assert_output 3
+	run grep -F "      source-workflow:" "$WORKFLOW"
+	assert_success
+	# The source run's identity is read from the API, never from an input.
+	run grep -F "source-run-sha" "$WORKFLOW"
+	assert_failure
+	run job_block resolve
+	assert_line "          SOURCE_RUN_ID: \${{ inputs.source-run-id }}"
+	assert_line "          SOURCE_WORKFLOW: \${{ inputs.source-workflow }}"
+}
+
+@test "reusable-release-recover: detection gets the verified release manifest and the record stage the closure inputs" {
+	run job_block resolve
+	assert_output --partial "RELEASE_MANIFEST: \${{ inputs.release-artifact-name != '' && format('recovery-artifacts/release/{0}', inputs.release-checksums-file) || '' }}"
+	assert_line "      unresumable: \${{ steps.detect.outputs.unresumable }}"
+	run job_block record
+	assert_line "          UNRESUMABLE_SET: \${{ needs.resolve.outputs.unresumable }}"
+	assert_line "          DRY_RUN: \${{ inputs.dry-run == true && '1' || '0' }}"
 }
 
 @test "reusable-release-recover: dry-run boundary stops before any resume job" {
@@ -32,15 +59,6 @@ EXAMPLE="${PROJECT_ROOT}/examples/release-recover.yml"
 @test "reusable-release-recover: resume jobs are gated on the detected missing set" {
 	run grep -cF "contains(fromJSON(needs.resolve.outputs.missing)" "$WORKFLOW"
 	assert_output 3
-}
-
-# Print the lines of one job (from its key to the next job key).
-job_block() {
-	awk -v job="$1" '
-		$0 == "  " job ":" { in_job = 1; next }
-		in_job && /^  [a-z-]+:$/ { exit }
-		in_job { print }
-	' "$WORKFLOW"
 }
 
 @test "reusable-release-recover: resumes through the same scripts and guards as the tag path" {
@@ -153,8 +171,10 @@ job_block() {
 	assert_success
 	run grep -F "default: true" "$EXAMPLE"
 	assert_success
-	run grep -F "source-run-sha" "$EXAMPLE"
+	run grep -F "source-workflow: .github/workflows/publish-pypi-on-tag.yml" "$EXAMPLE"
 	assert_success
+	run grep -F "source-run-sha" "$EXAMPLE"
+	assert_failure
 	# The example names its own file as the npm entry workflow and grants the
 	# union of the reusable's per-job permissions.
 	run grep -F "npm-entry-workflows: .github/workflows/release-recover.yml" "$EXAMPLE"

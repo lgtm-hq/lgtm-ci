@@ -24,10 +24,6 @@ name: Release Recovery
         description: Original publish run ID
         required: true
         type: string
-      source-run-sha:
-        description: Head SHA of the original run (gh run view <id> --json headSha)
-        required: true
-        type: string
       dry-run:
         description: Detect and summarize only (always run this first)
         required: false
@@ -61,7 +57,9 @@ jobs:
     with:
       tag: ${{ inputs.tag }}
       source-run-id: ${{ inputs.source-run-id }}
-      source-run-sha: ${{ inputs.source-run-sha }}
+      # The publish workflow the source run must belong to; its head SHA must
+      # be the tag's commit (both read from the API by the resolve stage).
+      source-workflow: .github/workflows/publish-pypi-on-tag.yml
       dry-run: ${{ inputs.dry-run }}
       channels: ${{ inputs.channels }}
       pypi-package: <pypi-project>

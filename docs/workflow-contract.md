@@ -1147,12 +1147,17 @@ always fail verification.
 the original immutable tag and the original attested artifacts (#966). The
 stages are fixed:
 
-1. `resolve` — refuses prerelease tags, refuses a tag that does not point at
-   the original run's head SHA (`source-run-sha`), verifies the downloaded
-   artifacts against their checksums manifest and provenance attestations,
-   probes every configured channel (PyPI, npm, GitHub Release, Docker,
-   Homebrew) and emits the missing set. `dry-run: true` (the default) stops
-   here; nothing has been written.
+1. `resolve` — refuses prerelease tags; reads the source run from the API
+   and refuses it unless it belongs to this repository, is a run of
+   `source-workflow` (the publish workflow), and built the tag's commit;
+   verifies the downloaded artifacts against their checksums manifest and
+   provenance attestations; probes every configured channel (PyPI, npm,
+   GitHub Release, Docker, Homebrew) and emits the missing set plus the
+   unresumable set. The GitHub Release is complete only when every manifest
+   asset is published with the same digest (a different digest is tier
+   three); the Homebrew formula's `version` string must equal the release
+   version exactly. `dry-run: true` (the default) stops here; nothing has
+   been written.
    The release artifacts are also compared with any asset already published
    under the tag: a different digest is tier three, refused here.
 2. `resume-*` — one job per channel, gated on membership in the missing set.
@@ -1168,7 +1173,10 @@ stages are fixed:
    re-run; PyPI is never resumed (a version is burned on first upload — its
    missing state is tier three).
 3. `record` — `if: always()`: posts the outcome table to the release-failure
-   issue the notifier (#964) opened, closing it when the recovery succeeded.
+   issue the notifier (#964) opened, closing it only when the run was live,
+   the resolve stage succeeded, every detected-missing channel has a
+   successful resume, and nothing unresumable (PyPI, Docker) is missing; a
+   dry run leaves it open.
 
 The recovery runs the default-branch workflow code: the consumer dispatches
 its entry workflow from the default branch, and every tooling checkout in

@@ -20,7 +20,11 @@
 #   CHECKSUMS_FILE   SHA256SUMS manifest inside it (required; relative to dir)
 #   FILES            Optional JSON glob list to restrict verification;
 #                    default: every manifest entry must exist and verify
-#   SIGNER_REPO, SIGNER_WORKFLOW  attestation bindings (required)
+#   SIGNER_REPO      Repository the attestations must come from (required)
+#   SIGNER_WORKFLOW  Workflow the attestations must come from: a path inside
+#                    SIGNER_REPO (.github/workflows/build.yml) or fully
+#                    qualified ([host/]owner/repo/.github/workflows/build.yml)
+#                    (required)
 #   GH_CMD           gh binary override (default gh)
 #   RELEASE_ASSET_DIGESTS  Optional JSON map {asset-name: "sha256:hex"} of
 #                    already-published GitHub Release assets to compare
@@ -36,6 +40,13 @@ set -euo pipefail
 : "${CHECKSUMS_FILE:?CHECKSUMS_FILE is required}"
 : "${SIGNER_REPO:?SIGNER_REPO is required}"
 : "${SIGNER_WORKFLOW:?SIGNER_WORKFLOW is required}"
+# `gh attestation verify --signer-workflow` wants `[host/]owner/repo/path`;
+# the input is documented as a path inside the signer repository. Same rule
+# as scripts/ci/actions/npm/verify-artifacts.sh: qualify a bare path with
+# SIGNER_REPO, pass a value that already names a repository through unchanged.
+if [[ "$SIGNER_WORKFLOW" != */.github/workflows/* ]]; then
+	SIGNER_WORKFLOW="${SIGNER_REPO}/${SIGNER_WORKFLOW#/}"
+fi
 FILES="${FILES:-[]}"
 RELEASE_ASSET_DIGESTS="${RELEASE_ASSET_DIGESTS:-}"
 RELEASE_TAG="${RELEASE_TAG:-}"

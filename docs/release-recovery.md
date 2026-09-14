@@ -27,8 +27,10 @@ original tag and the original attested artifacts. Tiers come from the
 ```bash
 # The original publish run (the one that failed):
 gh run list --repo <owner>/<repo> --workflow publish-pypi-on-tag.yml --limit 5
-# Its head SHA and artifacts:
-gh run view <source-run-id> --repo <owner>/<repo> --json headSha,conclusion
+# Its workflow, head SHA and artifacts (the resolve stage re-reads these
+# from the API: the run must be a run of `source-workflow` and must have
+# built the tag's commit):
+gh run view <source-run-id> --repo <owner>/<repo> --json workflowName,headSha,conclusion
 gh api "repos/<owner>/<repo>/actions/runs/<source-run-id>/artifacts" --jq '.artifacts[].name'
 # Confirm the tag still points at that SHA (it must):
 gh api "repos/<owner>/<repo>/commits/<tag>" --jq '.sha'
@@ -40,11 +42,20 @@ Wrap `reusable-release-recover.yml` in a `workflow_dispatch` workflow (see
 [examples/release-recover.yml](../examples/release-recover.yml)). Always run
 `dry-run: true` first:
 
-- The dry run verifies the tag and the downloaded artifacts (sha256 +
-  attestation), probes every configured channel, and posts the missing set to
-  the job summary. It changes nothing.
+- The dry run verifies the tag and the source run (this repository's publish
+  workflow, same commit as the tag), verifies the downloaded artifacts
+  (sha256 + attestation), probes every configured channel, and posts the
+  missing set to the job summary. It changes nothing, and it leaves the
+  release-failure issue open.
+- The GitHub Release counts as complete only when every asset in the
+  verified manifest is published with the same digest; a partial release is
+  resumed (missing assets only).
 - If the dry run reports a mismatch between a published asset's digest and
   the attested artifact — stop. That is tier three: cut a new patch version.
+- PyPI and Docker cannot be resumed by this workflow: a missing PyPI version
+  is tier three, and a missing image tag must be promoted from the original
+  staging digests by hand for now. Either keeps the release-failure issue
+  open after the run.
 - Otherwise re-run with `dry-run: false`. Only the missing channels run;
   complete channels are skipped, not re-run. npm and the GitHub Release
   resume through the same scripts the tag path uses (the #965 guard and
@@ -62,8 +73,8 @@ Wrap `reusable-release-recover.yml` in a `workflow_dispatch` workflow (see
   applies to it.
 
 On completion the recovery run updates the release-failure issue the notifier
-(#964) opened with the outcome table, and closes it when the recovery
-succeeded.
+(#964) opened with the outcome table, and closes it only when the run was
+live and every detected-missing channel was resumed successfully.
 
 ## Retention window
 

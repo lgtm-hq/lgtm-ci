@@ -36,9 +36,16 @@ teardown() {
 	assert_success
 }
 
+# The source run as the API reports it: repository, workflow path, head SHA.
+resolve_env() {
+	export TAG=v1.2.3
+	export SOURCE_RUN_ID=12345
+	export SOURCE_WORKFLOW=.github/workflows/publish-pypi-on-tag.yml
+}
+
 @test "resolve-tag: refuses prerelease tags with tier-three guidance" {
+	resolve_env
 	export TAG=v1.2.3-rc1
-	export EXPECTED_SHA=abc123
 	mock_command_multi "gh" '*) exit 1;;'
 
 	run bash "$RESOLVE"
@@ -48,8 +55,8 @@ teardown() {
 }
 
 @test "resolve-tag: refuses a missing tag" {
+	resolve_env
 	export TAG=v9.9.9
-	export EXPECTED_SHA=abc123
 	mock_command_multi "gh" '
 		*commits*v9.9.9*) echo "Not Found" >&2; exit 1;;
 	'
@@ -59,29 +66,71 @@ teardown() {
 	assert_output --partial "not found"
 }
 
-@test "resolve-tag: refuses a tag that moved off the original commit" {
-	export TAG=v1.2.3
-	export EXPECTED_SHA=aaa111
+@test "resolve-tag: refuses a tag that moved off the source run's commit" {
+	resolve_env
 	mock_command_multi "gh" '
-		*commits*v1.2.3*) echo "{\"sha\":\"bbb222\"}";;
+		*commits*v1.2.3*) echo "bbb222";;
+		*actions/runs/12345*) printf "lgtm-hq/lgtm-ci\t.github/workflows/publish-pypi-on-tag.yml\taaa111\n";;
 	'
 
 	run bash "$RESOLVE"
 	assert_failure
-	assert_output --partial "the tag moved"
+	assert_output --partial "source run 12345 built aaa111"
 	assert_output --partial "tier three"
 }
 
-@test "resolve-tag: accepts a tag pinned to the original run's commit" {
-	export TAG=v1.2.3
-	export EXPECTED_SHA=abc123def
+@test "resolve-tag: refuses a source run that is not found" {
+	resolve_env
 	mock_command_multi "gh" '
 		*commits*v1.2.3*) echo "abc123def";;
+		*actions/runs/12345*) echo "Not Found" >&2; exit 1;;
+	'
+
+	run bash "$RESOLVE"
+	assert_failure
+	assert_output --partial "source run 12345 not found"
+}
+
+@test "resolve-tag: refuses a source run from another repository" {
+	resolve_env
+	mock_command_multi "gh" '
+		*commits*v1.2.3*) echo "abc123def";;
+		*actions/runs/12345*) printf "someone-else/fork\t.github/workflows/publish-pypi-on-tag.yml\tabc123def\n";;
+	'
+
+	run bash "$RESOLVE"
+	assert_failure
+	assert_output --partial "belongs to 'someone-else/fork', not lgtm-hq/lgtm-ci"
+}
+
+@test "resolve-tag: refuses a source run of a different workflow even at the tag's commit" {
+	resolve_env
+	# Same commit, but a CI run (not the publish workflow): its artifacts are
+	# not the release's.
+	mock_command_multi "gh" '
+		*commits*v1.2.3*) echo "abc123def";;
+		*actions/runs/12345*) printf "lgtm-hq/lgtm-ci\t.github/workflows/ci.yml\tabc123def\n";;
+	'
+
+	run bash "$RESOLVE"
+	assert_failure
+	assert_output --partial "is a run of '.github/workflows/ci.yml', not the publish workflow '.github/workflows/publish-pypi-on-tag.yml'"
+}
+
+@test "resolve-tag: accepts a publish-workflow run that built the tag's commit" {
+	resolve_env
+	local output_file="${BATS_TEST_TMPDIR}/out"
+	export GITHUB_OUTPUT="$output_file"
+	mock_command_multi "gh" '
+		*commits*v1.2.3*) echo "abc123def";;
+		*actions/runs/12345*) printf "lgtm-hq/lgtm-ci\t.github/workflows/publish-pypi-on-tag.yml\tabc123def\n";;
 	'
 
 	run bash "$RESOLVE"
 	assert_success
-	assert_output --partial "matches the original run"
+	assert_output --partial "source run 12345 (.github/workflows/publish-pypi-on-tag.yml) built the same commit"
+	run grep -F "head_sha=abc123def" "$output_file"
+	assert_success
 }
 
 # =============================================================================
@@ -92,11 +141,27 @@ detect_env() {
 	export TAG=v1.2.3
 	export PYPI_PACKAGE=""
 	export NPM_PACKAGE=""
+	export RELEASE_MANIFEST=""
 	export DOCKER_IMAGE=""
 	export TAP_REPO=""
 	export TAP_FORMULA=""
 	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary.md"
 	: >"$GITHUB_STEP_SUMMARY"
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/detect-out"
+	: >"$GITHUB_OUTPUT"
+}
+
+# A verified release manifest with two assets; returns nothing, sets
+# RELEASE_MANIFEST and the digests H1/H2.
+release_manifest_env() {
+	local dir="${BATS_TEST_TMPDIR}/release"
+	mkdir -p "$dir"
+	echo "wheel-bytes" >"$dir/pkg-1.2.3-py3-none-any.whl"
+	echo "sdist-bytes" >"$dir/pkg-1.2.3.tar.gz"
+	H1="$(sha256_of "$dir/pkg-1.2.3-py3-none-any.whl")"
+	H2="$(sha256_of "$dir/pkg-1.2.3.tar.gz")"
+	printf '%s  pkg-1.2.3-py3-none-any.whl\n%s  pkg-1.2.3.tar.gz\n' "$H1" "$H2" >"$dir/SHA256SUMS"
+	export RELEASE_MANIFEST="$dir/SHA256SUMS"
 }
 
 @test "detect-channels: passes bash syntax check" {
@@ -106,34 +171,28 @@ detect_env() {
 
 @test "detect-channels: unconfigured channels are not applicable and nothing is missing" {
 	detect_env
-	mock_command_multi "gh" '
-		*release*view*--jq*) echo "2";;
-		*release*view*) echo "{}";;
-	'
+	mock_command_multi "gh" '*) echo "must not be called" >&2; exit 99;;'
 
 	run bash "$DETECT"
 	assert_success
 	assert_output --partial "Missing channels: []"
+	assert_output --partial "Unresumable channels: []"
 	run grep -cF "NOT-APPLICABLE" "$GITHUB_STEP_SUMMARY"
-	assert_output 4
+	assert_output 5
 }
 
-@test "detect-channels: npm missing lands in the missing set; pypi missing is terminal" {
+@test "detect-channels: npm missing lands in the missing set; pypi missing is terminal and unresumable" {
 	detect_env
 	export NPM_PACKAGE=@lgtm-hq/pkg
 	export PYPI_PACKAGE=pkg
 	mock_command_multi "npm" '*view*) exit 1;;'
 	mock_command_multi "curl" '*pypi.org*pkg*1.2.3*) printf "404"; exit 0;;'
-	mock_command_multi "gh" '
-		*release*view*--jq*) echo "0";;
-		*release*view*) echo "{}";;
-	'
 
-	local output_file="${BATS_TEST_TMPDIR}/out"
-	export GITHUB_OUTPUT="$output_file"
 	run bash "$DETECT"
 	assert_success
-	run grep -F "missing=[\"npm\",\"github-release\"]" "$output_file"
+	run grep -F 'missing=["npm"]' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -F 'unresumable=["pypi"]' "$GITHUB_OUTPUT"
 	assert_success
 	run grep -F "burned on first upload" "$GITHUB_STEP_SUMMARY"
 	assert_success
@@ -142,14 +201,124 @@ detect_env() {
 @test "detect-channels: done channels are excluded from the missing set" {
 	detect_env
 	export NPM_PACKAGE=@lgtm-hq/pkg
+	release_manifest_env
 	mock_command_multi "npm" '*view*) echo "1.2.3";;'
-	mock_command_multi "gh" '
-		*release*view*--jq*) echo "2";;
-	'
+	mock_command_multi "gh" "
+		*release*view*) printf 'pkg-1.2.3-py3-none-any.whl\tsha256:${H1}\npkg-1.2.3.tar.gz\tsha256:${H2}\nSHA256SUMS\tsha256:abc\n';;
+	"
 
 	run bash "$DETECT"
 	assert_success
 	assert_output --partial "Missing channels: []"
+	assert_output --partial "all 2 manifest assets published with matching digests"
+}
+
+@test "detect-channels: a release with some manifest assets is partial and resumed" {
+	detect_env
+	release_manifest_env
+	mock_command_multi "gh" "
+		*release*view*) printf 'pkg-1.2.3-py3-none-any.whl\tsha256:${H1}\n';;
+	"
+
+	run bash "$DETECT"
+	assert_success
+	assert_output --partial "1/2 manifest assets published; absent: pkg-1.2.3.tar.gz"
+	run grep -F 'missing=["github-release"]' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "detect-channels: a release that does not exist is missing" {
+	detect_env
+	release_manifest_env
+	mock_command_multi "gh" '
+		*release*view*) echo "release not found" >&2; exit 1;;
+	'
+
+	run bash "$DETECT"
+	assert_success
+	assert_output --partial "release does not exist"
+	run grep -F 'missing=["github-release"]' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "detect-channels: a published asset with a different digest is tier three and fails detection" {
+	detect_env
+	release_manifest_env
+	mock_command_multi "gh" "
+		*release*view*) printf 'pkg-1.2.3-py3-none-any.whl\tsha256:deadbeef\npkg-1.2.3.tar.gz\tsha256:${H2}\n';;
+	"
+
+	run bash "$DETECT"
+	assert_failure
+	assert_output --partial "MISMATCH"
+	assert_output --partial "pkg-1.2.3-py3-none-any.whl (published sha256:deadbeef"
+	assert_output --partial "tier three"
+	# Never offered for resume: a resume would overwrite different bytes.
+	run grep -F 'missing=[]' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -F 'unresumable=["github-release"]' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "detect-channels: a published asset without a digest cannot be proven identical" {
+	detect_env
+	release_manifest_env
+	mock_command_multi "gh" "
+		*release*view*) printf 'pkg-1.2.3-py3-none-any.whl\t\npkg-1.2.3.tar.gz\tsha256:${H2}\n';;
+	"
+
+	run bash "$DETECT"
+	assert_failure
+	assert_output --partial "published no digest"
+}
+
+@test "detect-channels: a missing Docker image is unresumable, not a resume target" {
+	detect_env
+	export DOCKER_IMAGE=ghcr.io/lgtm-hq/tool
+	mock_command_multi "crane" '*digest*) exit 1;;'
+
+	run bash "$DETECT"
+	assert_success
+	run grep -F 'missing=[]' "$GITHUB_OUTPUT"
+	assert_success
+	run grep -F 'unresumable=["docker"]' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "detect-channels: homebrew compares the formula version string exactly" {
+	detect_env
+	export TAP_REPO=lgtm-hq/homebrew-tap
+	export TAP_FORMULA=tool
+	# gh returns the base64 content of a formula; the version is 1.2.30, a
+	# superstring of 1.2.3 that a loose match would accept.
+	local formula
+	formula="$(printf 'class Tool < Formula\n  url "https://example/1.2.30.tar.gz"\n  version "1.2.30"\nend\n' | base64)"
+	mock_command_multi "gh" "
+		*contents/Formula/tool.rb*) echo '${formula}';;
+	"
+	run bash "$DETECT"
+	assert_success
+	assert_output --partial "formula version is 1.2.30, expected 1.2.3"
+	run grep -F 'missing=["homebrew"]' "$GITHUB_OUTPUT"
+	assert_success
+
+	formula="$(printf 'class Tool < Formula\n  version "1.2.3"\nend\n' | base64)"
+	mock_command_multi "gh" "
+		*contents/Formula/tool.rb*) echo '${formula}';;
+	"
+	run bash "$DETECT"
+	assert_success
+	assert_output --partial "formula version 1.2.3 matches"
+	assert_output --partial "Missing channels: []"
+
+	# No version string at all (or a missing formula) is missing.
+	formula="$(printf 'class Tool < Formula\n  url "https://example/1.2.3.tar.gz"\nend\n' | base64)"
+	mock_command_multi "gh" "
+		*contents/Formula/tool.rb*) echo '${formula}';;
+	"
+	run bash "$DETECT"
+	assert_success
+	assert_output --partial "has no version string"
 }
 
 @test "detect-channels: channel restriction limits probing" {
@@ -272,6 +441,30 @@ attest_mock() {
 	assert_output --partial "No published release under v1.2.3 yet"
 }
 
+@test "verify-recovery-artifacts: qualifies a bare signer-workflow with the signer repo for gh" {
+	verify_env
+	local calls="${BATS_TEST_TMPDIR}/gh-calls"
+	mock_command_multi "gh" "
+		*attestation*verify*) echo \"\$*\" >> '${calls}'; exit 0;;
+		*) exit 0;;
+	"
+
+	run bash "$VERIFY"
+	assert_success
+	run grep -F -- "--signer-workflow lgtm-hq/lgtm-ci/.github/workflows/publish.yml" "$calls"
+	assert_success
+
+	# Already qualified: passed through unchanged.
+	: >"$calls"
+	export SIGNER_WORKFLOW=other-org/builder/.github/workflows/build.yml
+	run bash "$VERIFY"
+	assert_success
+	run grep -F -- "--signer-workflow other-org/builder/.github/workflows/build.yml" "$calls"
+	assert_success
+	run grep -F -- "lgtm-hq/lgtm-ci/other-org" "$calls"
+	assert_failure
+}
+
 @test "verify-recovery-artifacts: manifest lookup is an exact path match" {
 	verify_env
 	echo "plus-bytes" >"$ARTIFACTS_DIR/tool+x64"
@@ -376,6 +569,67 @@ record_env() {
 	assert_output --partial "RECOVERY_STATUS must be"
 }
 
+# Per-job results for the derived-outcome tests; the mock refuses to close.
+derived_env() {
+	export TAG=v1.2.3
+	export WORKFLOW_KEY=release-publish
+	unset RECOVERY_STATUS RECOVERY_SUMMARY
+	export RESOLVE_RESULT=success
+	export NPM_RESULT=skipped
+	export RELEASE_RESULT=skipped
+	export HOMEBREW_RESULT=skipped
+	export MISSING_SET='[]'
+	export UNRESUMABLE_SET='[]'
+	export DRY_RUN=0
+	export BODY_FILE="${BATS_TEST_TMPDIR}/comment-body"
+	mock_command_multi "gh" "
+		*issue*list*) echo 77;;
+		*issue*comment*)
+			for a in \"\$@\"; do case \"\$a\" in /*) cp \"\$a\" '${BODY_FILE}';; esac; done
+			echo ok;;
+		*issue*close*) echo \"must not close\" >&2; exit 99;;
+	"
+}
+
+@test "record-recovery: a dry run records the table and leaves the issue open" {
+	derived_env
+	export DRY_RUN=1
+	export MISSING_SET='["npm"]'
+
+	run bash "$RECORD"
+	assert_success
+	refute_output --partial "Closed"
+	run cat "$BODY_FILE"
+	assert_output --partial "Release recovery run — dry-run"
+	assert_output --partial "this issue stays open"
+}
+
+@test "record-recovery: an unresumable missing channel (PyPI, Docker) keeps the issue open" {
+	derived_env
+	export UNRESUMABLE_SET='["pypi"]'
+	run bash "$RECORD"
+	assert_success
+	refute_output --partial "Closed"
+	run cat "$BODY_FILE"
+	assert_output --partial "pypi is missing and cannot be resumed by this workflow"
+
+	export UNRESUMABLE_SET='["docker"]'
+	run bash "$RECORD"
+	assert_success
+	refute_output --partial "Closed"
+}
+
+@test "record-recovery: a detected-missing channel whose resume did not run keeps the issue open" {
+	derived_env
+	# npm was missing but its resume job was skipped (gate not met).
+	export MISSING_SET='["npm"]'
+	run bash "$RECORD"
+	assert_success
+	refute_output --partial "Closed"
+	run cat "$BODY_FILE"
+	assert_output --partial "npm still missing (resume result: skipped)"
+}
+
 @test "record-recovery: derives the outcome from the per-job results" {
 	export TAG=v1.2.3
 	export WORKFLOW_KEY=release-publish
@@ -385,6 +639,8 @@ record_env() {
 	export RELEASE_RESULT=skipped
 	export HOMEBREW_RESULT=skipped
 	export MISSING_SET='["npm"]'
+	export UNRESUMABLE_SET='[]'
+	export DRY_RUN=0
 	local body="${BATS_TEST_TMPDIR}/comment-body"
 	mock_command_multi "gh" "
 		*issue*list*) echo 77;;
@@ -394,6 +650,7 @@ record_env() {
 		*issue*close*) echo closed;;
 	"
 
+	# Live run, resolve succeeded, the one missing channel resumed: close.
 	run bash "$RECORD"
 	assert_success
 	assert_output --partial "Closed release-failure issue #77"
