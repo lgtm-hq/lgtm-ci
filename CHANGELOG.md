@@ -23,7 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep a required status check), the publish job runs on `runner-image`
   (default `ubuntu-24.04`) instead of `ubuntu-latest`, and a live publish
   requires the forwarded `entry-workflows`, `checksums-file`, `signer-repo`
-  and `signer-workflow` inputs. Removal target: v0.72.0 (#965)
+  and `signer-workflow` inputs. Removal target: v0.73.0 (#965)
 
 ### Removed
 
