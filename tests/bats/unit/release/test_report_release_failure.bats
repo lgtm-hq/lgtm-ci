@@ -24,6 +24,11 @@ setup() {
 	export RELEASE_WORKFLOW_KEY=release-version-pr
 	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/step-summary.md"
 	: >"$GITHUB_STEP_SUMMARY"
+	# The classifier's bounded log fetch retries empty fetches until
+	# LOG_FETCH_DEADLINE; keep unit tests to a single attempt.
+	export GH_CMD_TIMEOUT=5
+	export LOG_FETCH_DEADLINE=1
+	export LOG_FETCH_RETRY_DELAY=0
 }
 
 teardown() {
@@ -510,7 +515,7 @@ EOF
 	assert_success
 	run grep -F '**Tag:** v1.2.3' "${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
-	run grep -F '| pypi | success | — | published |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	run grep -F '| pypi | success | [run](https://github.com/lgtm-hq/lgtm-ci/actions/runs/12345) | published |' "${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
 	run grep -F '| npm | failure | [job](https://github.com/lgtm-hq/lgtm-ci/actions/runs/9/job/8) | — |' \
 		"${BATS_TEST_TMPDIR}/issue-body.md"
@@ -538,9 +543,9 @@ EOF
 
 	run bash "$SCRIPT" notify_release_failure
 	assert_success
-	run grep -F '| pypi | success | — | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	run grep -F '| pypi | success | [run](https://github.com/lgtm-hq/lgtm-ci/actions/runs/12345) | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
-	run grep -F '| npm | failure | — | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	run grep -F '| npm | failure | [run](https://github.com/lgtm-hq/lgtm-ci/actions/runs/12345) | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
 }
 

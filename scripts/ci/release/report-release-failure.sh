@@ -499,12 +499,29 @@ _require_issue_access() {
 	fi
 }
 
+# jq filter shared by the channel table and the verdict: normalizes the two
+# accepted CHANNELS_JSON shapes to an array of objects, or fails on any other
+# shape. Accepted:
+#   [{"name":"pypi","result":"failure","url":"https://...","probe":"absent"}]
+#   {"pypi":{"result":"failure"},"npm":{"result":"success"}}   (toJson(needs))
+# Rejected (jq exits non-zero): null, scalars, arrays with non-object members,
+# objects with non-object values such as {"pypi":"failure"}.
+CHANNELS_NORMALIZE_JQ='
+	if type == "array" and all(.[]; type == "object") then .
+	elif type == "object" and all(.[]; type == "object") then [to_entries[] | (.value + {name: .key})]
+	else error("unrecognized channel payload shape") end
+'
+
+# True when CHANNELS_JSON parses and has one of the accepted shapes.
+channels_shape_ok() {
+	printf '%s' "$1" | jq -e "$CHANNELS_NORMALIZE_JQ" >/dev/null 2>&1
+}
+
 # Rows of the publish-channel table from CHANNELS_JSON.
 #
-# Two payload shapes are accepted so callers can pass `toJson(needs)` (an
-# object keyed by job name) without reshaping it first:
-#   [{"name":"pypi","result":"failure","url":"https://...","probe":"absent"}]
-#   {"pypi":{"result":"failure"},"npm":{"result":"success"}}
+# `toJson(needs)` carries job results and outputs but no job URLs, so a
+# channel without a `url` links to the run (which lists every job) rather
+# than rendering nothing: the issue must always give a responder a link.
 # `probe` is the optional published/not-yet-published check; when a caller
 # does not supply one the column renders an em dash rather than a lie.
 channel_table_rows() {
@@ -514,11 +531,16 @@ channel_table_rows() {
 		echo "| *(unparseable channel payload)* | | | |"
 		return 0
 	fi
-	jq -r '
-		(if type == "object" then [to_entries[] | (.value + {name: .key})] else . end)
+	if ! channels_shape_ok "$channels"; then
+		log_warn "CHANNELS_JSON has an unrecognized shape; the channel table will say so"
+		echo "| *(unrecognized channel payload shape; expected an array of objects or toJson(needs))* | | | |"
+		return 0
+	fi
+	jq -r --arg run_url "$(run_url)" "${CHANNELS_NORMALIZE_JQ}"'
 		| .[]
 		| [(.name // "unknown"), (.result // "unknown"), (.url // ""), ((.probe // "") | tostring)]
-		| "| " + .[0] + " | " + .[1] + " | " + (if .[2] == "" then "—" else "[job](" + .[2] + ")" end)
+		| "| " + .[0] + " | " + .[1] + " | "
+		  + (if .[2] == "" then "[run](" + $run_url + ")" else "[job](" + .[2] + ")" end)
 		  + " | " + (if .[3] == "" then "—" else .[3] end) + " |"
 	' <<<"$channels"
 }
@@ -533,6 +555,40 @@ render_channel_table() {
 	else
 		printf '%s\n' "$rows"
 	fi
+}
+
+# One sentence describing why the notifier is filing now, from the classify
+# step's `reason` output (FAILURE_REASON). Every filed issue used to claim
+# "retries were exhausted", which was false for a first-attempt failure with
+# no infra signature and sent responders to the wrong recovery tier.
+release_failure_summary_sentence() {
+	local tag="$1"
+	local attempt="${RUN_ATTEMPT:-unknown}"
+	local max_reruns="${MAX_RERUNS:-unknown}"
+	case "${FAILURE_REASON:-}" in
+	budget-exhausted)
+		if [[ "$max_reruns" == "0" ]]; then
+			echo "A tag publish for \`${tag}\` failed on attempt ${attempt} with automatic re-runs disabled (max-reruns 0), so no further attempt will fire."
+		else
+			echo "A tag publish for \`${tag}\` failed on attempt ${attempt} after the automatic re-run budget (max-reruns ${max_reruns}) was exhausted."
+		fi
+		;;
+	no-infra-signature)
+		echo "A tag publish for \`${tag}\` failed on attempt ${attempt}; the failed-job logs match no known transient-infrastructure signature, so no automatic re-run will fire."
+		;;
+	logs-unavailable)
+		echo "A tag publish for \`${tag}\` failed on attempt ${attempt}; the failed-job logs could not be classified in time, so this issue is filed now even though an automatic re-run may still be pending."
+		;;
+	attempt-invalid)
+		echo "A tag publish for \`${tag}\` failed and the run attempt could not be read, so this is treated as the final attempt."
+		;;
+	channels-invalid)
+		echo "A tag publish for \`${tag}\` reported a publish-channel payload the notifier could not parse, so it is filed as a failure to keep the run visible."
+		;;
+	*)
+		echo "A tag publish for \`${tag}\` failed."
+		;;
+	esac
 }
 
 render_release_failure_body() {
@@ -551,7 +607,7 @@ $marker
 
 ## Summary
 
-A tag publish for \`${tag}\` failed after automatic retries were exhausted. This issue keeps the partial release visible with the per-channel state needed to act. Recovery tiers are defined in [docs/release-security-policy.md](https://github.com/lgtm-hq/lgtm-ci/blob/main/docs/release-security-policy.md); the recovery runbook is tracked in lgtm-hq/lgtm-ci#966.
+$(release_failure_summary_sentence "$tag") This issue keeps the partial release visible with the per-channel state needed to act. Recovery tiers are defined in [docs/release-security-policy.md](https://github.com/lgtm-hq/lgtm-ci/blob/main/docs/release-security-policy.md); the recovery runbook is tracked in lgtm-hq/lgtm-ci#966.
 
 ## Failure Context
 
@@ -605,9 +661,16 @@ close_release_failure() {
 	# Soft lookups on purpose: the close job runs on a successful release run,
 	# and a search API hiccup must not redden a green publish. No open issue is
 	# the normal repeat-success case, not an error.
+	# Fall through to the visible tracking key both when the title search is
+	# unavailable and when it succeeds with no match: an operator who edited
+	# the issue title still keeps the key footer, and a green publish must
+	# close that issue rather than leave it open.
 	if ! existing="$(lookup_open_issue "\"${title}\" in:title")"; then
 		log_info "Title search unavailable; falling back to tracking key"
-		if ! existing="$(lookup_open_issue "\"release-failure:$(workflow_key):${tag}\"")"; then
+		existing=""
+	fi
+	if [[ -z "$existing" ]]; then
+		if ! existing="$(lookup_open_issue "\"$(marker_key "$tag")\"")"; then
 			log_warn "Could not search for the open release-failure issue; leaving it open"
 			exit 0
 		fi
@@ -632,20 +695,93 @@ close_release_failure() {
 # this notifier exists to prevent.
 channels_all_succeeded() {
 	local channels="$1"
-	printf '%s' "$channels" | jq -e '
-		(if type == "object" then [to_entries[] | (.value + {name: .key})] else . end)
+	printf '%s' "$channels" | jq -e "${CHANNELS_NORMALIZE_JQ}"'
 		| length > 0
 		and all(.[]; ((.result // "unknown") == "success" or (.result // "unknown") == "skipped"))
 	' >/dev/null 2>&1
 }
 
-# Best-effort fetch of this run's failed-job logs. Empty output on any error:
-# the caller treats "logs unavailable" as inconclusive and files, because a
-# visible duplicate on the issue costs far less than a silently exhausted
-# release.
-fetch_infra_signature_logs() {
-	gh run view "${GITHUB_RUN_ID:-}" --repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" --log-failed 2>/dev/null || true
+# Bounds on the classifier's log fetch, mirroring the auto-rerun safety net
+# (scripts/ci/actions/rerun-on-infra-failure.sh): an unbounded
+# `gh run view --log-failed` has stalled for a whole job before, and a
+# notifier that never writes a verdict is exactly the silent failure this
+# mode exists to prevent. Log ingestion can also lag the completion event, so
+# an empty fetch is retried until LOG_FETCH_DEADLINE (seconds) runs out.
+#   GH_CMD_TIMEOUT        wall-clock bound in seconds on each gh call
+#   LOG_FETCH_DEADLINE    wall-clock budget in seconds for the whole fetch loop
+#   LOG_FETCH_RETRY_DELAY seconds between empty fetches
+#   TIMEOUT_BIN           coreutils timeout binary (default: timeout/gtimeout)
+: "${GH_CMD_TIMEOUT:=60}"
+: "${LOG_FETCH_DEADLINE:=180}"
+: "${LOG_FETCH_RETRY_DELAY:=15}"
+
+_positive_int_or() {
+	local value="$1"
+	local fallback="$2"
+	local name="$3"
+	if [[ "$value" =~ ^[0-9]+$ ]]; then
+		echo "$value"
+	else
+		log_warn "${name} '${value}' is not a non-negative integer; using ${fallback}"
+		echo "$fallback"
+	fi
 }
+
+_timeout_bin() {
+	local candidate
+	if [[ -n "${TIMEOUT_BIN:-}" ]]; then
+		command -v "$TIMEOUT_BIN" && return 0
+		return 1
+	fi
+	for candidate in timeout gtimeout; do
+		command -v "$candidate" && return 0
+	done
+	return 1
+}
+
+# Best-effort, bounded fetch of this run's failed-job logs. Empty output when
+# the logs stay unavailable within the deadline (or when no coreutils timeout
+# is on PATH to bound gh): the caller treats that as inconclusive and files,
+# because a visible duplicate on the issue costs far less than a silently
+# exhausted release.
+fetch_infra_signature_logs() {
+	local timeout_bin
+	local cmd_timeout
+	local deadline
+	local retry_delay
+	local started
+	local logs
+	if ! timeout_bin="$(_timeout_bin)"; then
+		log_warn "coreutils timeout is not on PATH; cannot bound the log fetch, classifying logs as unavailable"
+		return 0
+	fi
+	cmd_timeout="$(_positive_int_or "$GH_CMD_TIMEOUT" 60 GH_CMD_TIMEOUT)"
+	deadline="$(_positive_int_or "$LOG_FETCH_DEADLINE" 180 LOG_FETCH_DEADLINE)"
+	retry_delay="$(_positive_int_or "$LOG_FETCH_RETRY_DELAY" 15 LOG_FETCH_RETRY_DELAY)"
+	started=$SECONDS
+	while :; do
+		logs="$("$timeout_bin" --kill-after=10s "$cmd_timeout" \
+			gh run view "${GITHUB_RUN_ID:-}" \
+			--repo "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}" \
+			--log-failed 2>/dev/null </dev/null || true)"
+		if [[ -n "$logs" ]]; then
+			printf '%s\n' "$logs"
+			return 0
+		fi
+		if ((SECONDS - started + retry_delay + cmd_timeout > deadline)); then
+			log_warn "Failed-job logs unavailable after ${deadline}s; classifying logs as unavailable"
+			return 0
+		fi
+		log_info "Failed-job logs not available yet; retrying in ${retry_delay}s"
+		sleep "$retry_delay"
+	done
+}
+
+# Why rerun_may_be_in_flight last returned false; read by
+# classify_release_failure and surfaced as the `reason` output so the filed
+# issue can say what actually happened instead of always claiming that the
+# retries were exhausted.
+RERUN_BLOCK_REASON=""
 
 # True when this attempt can still be superseded by an automatic re-run:
 # the attempt is within the caller's re-run budget AND the failure matches an
@@ -657,44 +793,67 @@ rerun_may_be_in_flight() {
 	local attempt="$1"
 	local max_reruns="$2"
 	local logs
-	[[ "$attempt" =~ ^[0-9]+$ ]] || return 1
-	[[ "$max_reruns" =~ ^[0-9]+$ ]] || return 1
-	((attempt <= max_reruns)) || return 1
+	RERUN_BLOCK_REASON=""
+	if [[ ! "$attempt" =~ ^[0-9]+$ ]]; then
+		RERUN_BLOCK_REASON="attempt-invalid"
+		return 1
+	fi
+	[[ "$max_reruns" =~ ^[0-9]+$ ]] || max_reruns=0
+	if ((attempt > max_reruns)); then
+		RERUN_BLOCK_REASON="budget-exhausted"
+		return 1
+	fi
 	logs="$(fetch_infra_signature_logs)"
-	[[ -n "$logs" ]] || return 1
-	infra_match_signature "$logs" >/dev/null
+	if [[ -z "$logs" ]]; then
+		RERUN_BLOCK_REASON="logs-unavailable"
+		return 1
+	fi
+	if ! infra_match_signature "$logs" >/dev/null; then
+		RERUN_BLOCK_REASON="no-infra-signature"
+		return 1
+	fi
 }
 
 # Decide what the release-mode notifier should do for this run and print the
-# verdict (also written to $GITHUB_OUTPUT as `verdict=` when set):
+# verdict (also written to $GITHUB_OUTPUT as `verdict=` when set, with a
+# `reason=` line explaining a failure verdict):
 #   success   — every reported channel succeeded or was skipped: close the issue
 #   rerunning — a failed channel, but an automatic infra re-run may still be in
 #               flight: stay quiet for now
-#   failure   — retries exhausted (or unknowable): file or update the issue
+#   failure   — file or update the issue; `reason` is one of channels-invalid,
+#               attempt-invalid, budget-exhausted, logs-unavailable,
+#               no-infra-signature
+#
+# Suppression is opt-in: MAX_RERUNS defaults to 0, so a caller that has not
+# wired the auto-rerun reusable never gets a `rerunning` verdict on a first
+# failure that nothing will actually re-run (Greptile on #973).
 classify_release_failure() {
 	local channels="${CHANNELS_JSON:-[]}"
 	local attempt="${RUN_ATTEMPT:-}"
-	local max_reruns="${MAX_RERUNS:-1}"
+	local max_reruns="${MAX_RERUNS:-0}"
 	local verdict
+	local reason=""
 
 	if [[ -n "$attempt" && ! "$attempt" =~ ^[0-9]+$ ]]; then
 		log_warn "RUN_ATTEMPT '${attempt}' is not an integer; treating this as the final attempt"
 		attempt=""
 	fi
 	if [[ -n "$max_reruns" && ! "$max_reruns" =~ ^[0-9]+$ ]]; then
-		log_warn "MAX_RERUNS '${max_reruns}' is not an integer; defaulting to 1"
-		max_reruns=1
+		log_warn "MAX_RERUNS '${max_reruns}' is not an integer; defaulting to 0 (no suppression)"
+		max_reruns=0
 	fi
 
-	if ! printf '%s' "$channels" | jq -e . >/dev/null 2>&1; then
-		log_warn "CHANNELS_JSON is not valid JSON; filing a failure so the run stays visible"
+	if ! channels_shape_ok "$channels"; then
+		log_warn "CHANNELS_JSON is not valid JSON or has an unrecognized shape; filing a failure so the run stays visible"
 		verdict="failure"
+		reason="channels-invalid"
 	elif channels_all_succeeded "$channels"; then
 		verdict="success"
 	elif rerun_may_be_in_flight "$attempt" "$max_reruns"; then
 		verdict="rerunning"
 	else
 		verdict="failure"
+		reason="$RERUN_BLOCK_REASON"
 	fi
 
 	if [[ "$verdict" == "rerunning" ]]; then
@@ -705,8 +864,9 @@ classify_release_failure() {
 
 	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 		printf 'verdict=%s\n' "$verdict" >>"${GITHUB_OUTPUT}"
+		printf 'reason=%s\n' "$reason" >>"${GITHUB_OUTPUT}"
 	fi
-	log_info "Release-failure verdict: ${verdict}"
+	log_info "Release-failure verdict: ${verdict}${reason:+ (${reason})}"
 	echo "$verdict"
 }
 
