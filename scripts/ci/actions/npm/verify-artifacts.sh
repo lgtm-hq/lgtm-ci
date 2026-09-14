@@ -23,7 +23,9 @@
 #                     manifest lists.
 #   SIGNER_REPO       Repository provenance must attest to, e.g. lgtm-hq/lgtm-ci
 #                     (required; the reusable's signer-repo input)
-#   SIGNER_WORKFLOW   Workflow path provenance must attest to
+#   SIGNER_WORKFLOW   Workflow provenance must attest to, either a path inside
+#                     SIGNER_REPO (.github/workflows/build.yml) or fully
+#                     qualified ([host/]owner/repo/.github/workflows/build.yml)
 #                     (required; the reusable's signer-workflow input)
 #   GH_CMD            gh binary name (overridable in tests; default gh)
 
@@ -35,6 +37,15 @@ set -euo pipefail
 # would verify sha256 only, which is not the attestation the policy requires.
 : "${SIGNER_REPO:?SIGNER_REPO is required: set the signer-repo input whenever checksums-file is set}"
 : "${SIGNER_WORKFLOW:?SIGNER_WORKFLOW is required: set the signer-workflow input whenever checksums-file is set}"
+
+# `gh attestation verify --signer-workflow` wants `[host/]owner/repo/path`,
+# while the workflow input is documented as a path inside the signer
+# repository (`.github/workflows/build.yml`). Accept both: a bare path is
+# qualified with SIGNER_REPO; a value that already names a repository (or a
+# host and repository) is passed through unchanged.
+if [[ "$SIGNER_WORKFLOW" != */.github/workflows/* ]]; then
+	SIGNER_WORKFLOW="${SIGNER_REPO}/${SIGNER_WORKFLOW#/}"
+fi
 FILES="${FILES:-[]}"
 PACKAGES_DIR="${PACKAGES_DIR%/}"
 GH="${GH_CMD:-gh}"

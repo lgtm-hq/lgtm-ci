@@ -112,8 +112,11 @@ name: Reusable npm Package-Set Publishing
         default: ""
       signer-workflow:
         description: >-
-          Workflow path the artifact attestations must come from (e.g.
-          .github/workflows/build.yml). Required when checksums-file is set.
+          Workflow the artifact attestations must come from: a path inside
+          signer-repo (e.g. .github/workflows/build.yml, qualified with
+          signer-repo for gh) or a fully qualified
+          owner/repo/.github/workflows/build.yml. Required when
+          checksums-file is set.
         required: false
         type: string
         default: ""

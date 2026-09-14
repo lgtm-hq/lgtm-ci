@@ -165,3 +165,31 @@ attest_mock() {
 	run bash "$SCRIPT"
 	assert_success
 }
+
+@test "verify-artifacts: qualifies a bare signer-workflow path with the signer repo for gh" {
+	# gh wants [host/]owner/repo/path; the input is documented as a path.
+	mock_command_multi "gh" '
+		*attestation*verify*) echo "$*" >> "'"${BATS_TEST_TMPDIR}"'/gh-calls"; exit 0;;
+		*) exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	run grep -F -- '--signer-workflow lgtm-hq/lgtm-ci/.github/workflows/build.yml' "${BATS_TEST_TMPDIR}/gh-calls"
+	assert_success
+	run grep -F -- '--signer-workflow .github/workflows/build.yml' "${BATS_TEST_TMPDIR}/gh-calls"
+	assert_failure
+}
+
+@test "verify-artifacts: passes a fully qualified signer-workflow through unchanged" {
+	export SIGNER_WORKFLOW=github.com/lgtm-hq/other/.github/workflows/build.yml
+	mock_command_multi "gh" '
+		*attestation*verify*) echo "$*" >> "'"${BATS_TEST_TMPDIR}"'/gh-calls"; exit 0;;
+		*) exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	run grep -F -- '--signer-workflow github.com/lgtm-hq/other/.github/workflows/build.yml' "${BATS_TEST_TMPDIR}/gh-calls"
+	assert_success
+}
