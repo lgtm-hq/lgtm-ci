@@ -159,6 +159,11 @@ package_field() {
 
 registry_integrity() {
 	# Post-publish registry read; empty (never a lie) when the lookup fails.
+	# Dry-runs never touch the registry, not even to read: a dry-run must not
+	# depend on network state, and its result is "packed", not "on the registry".
+	if [[ "$LIVE" != "1" ]]; then
+		return 0
+	fi
 	"$NPM" view "$1@$2" dist.integrity 2>/dev/null || true
 }
 
@@ -366,6 +371,15 @@ else
 	echo "LIVE mode: packages WILL be published to the registry (dist-tag=$DIST_TAG)."
 fi
 
+# An empty order must fail loudly: a loop over nothing would emit
+# published=[] and exit 0, and a release could go green having published
+# nothing. Resolve the list up front so the check happens before any work.
+ORDERED_PACKAGES="$(normalize_order "$ORDER")"
+if [[ -z "$ORDERED_PACKAGES" ]]; then
+	echo "ERROR: ORDER resolved to no packages (got '$ORDER'); refusing to publish an empty set" >&2
+	exit 1
+fi
+
 while IFS= read -r pkg; do
 	[[ -n "$pkg" ]] || continue
 	if [[ "$pkg" == "." ]]; then
@@ -419,7 +433,7 @@ while IFS= read -r pkg; do
 	else
 		exit 1
 	fi
-done < <(normalize_order "$ORDER")
+done <<<"$ORDERED_PACKAGES"
 
 # Deferred drift exit (#2631): every package has been processed, so the run
 # can now go red for the tags that could not be reconciled. The output lets

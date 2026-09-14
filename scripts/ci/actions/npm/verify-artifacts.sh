@@ -63,7 +63,7 @@ done < <(printf '%s' "$FILES" | jq -r '.[]')
 # what this gate exists to catch, so it is checked even with an empty FILES.
 while IFS= read -r line; do
 	[[ -n "$line" ]] || continue
-# Strip the leading checksum: awk clears $1 (portable on BSD and GNU).
+	# Strip the leading checksum: awk clears $1 (portable on BSD and GNU).
 	manifest_path="$(printf '%s\n' "$line" | awk '{ $1 = ""; sub(/^[[:space:]]+/, ""); print }')"
 	[[ -n "$manifest_path" ]] || continue
 	if [[ ! -f "$PACKAGES_DIR/$manifest_path" ]]; then

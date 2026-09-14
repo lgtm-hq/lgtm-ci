@@ -30,7 +30,10 @@ name: Reusable npm Package-Set Publishing
   workflow_call:
     inputs:
       packages-dir:
-        description: Directory containing one subdirectory per package
+        description: >-
+          Directory containing one subdirectory per package. When
+          artifact-name is set, the artifact is downloaded into this
+          directory before verification.
         required: true
         type: string
       order:
@@ -64,6 +67,16 @@ name: Reusable npm Package-Set Publishing
         required: false
         type: number
         default: 3
+      artifact-name:
+        description: >-
+          Workflow artifact (actions/upload-artifact) holding the staged
+          package set, downloaded into packages-dir before verification.
+          Jobs have isolated filesystems, so a caller that stages the
+          packages in another job must hand them over this way. Empty
+          expects packages-dir to already exist in the checkout.
+        required: false
+        type: string
+        default: ""
       entry-workflows:
         description: >-
           Allowlisted consumer entry workflow path(s) for npm trusted
@@ -75,23 +88,32 @@ name: Reusable npm Package-Set Publishing
       checksums-file:
         description: >-
           SHA256SUMS manifest for pre-publish artifact verification (paths
-          relative to packages-dir). Empty disables verification, which the
-          release security policy forbids for live publishes.
+          relative to packages-dir). Requires signer-repo and
+          signer-workflow; the verify step fails closed when either is
+          empty. Empty disables verification, which the release security
+          policy forbids for live publishes.
         required: false
         type: string
         default: ""
       files-to-verify:
-        description: JSON array of artifact globs (relative to packages-dir) to verify
+        description: >-
+          JSON array of artifact globs (relative to packages-dir) to verify
+          against checksums-file. Empty array verifies every file the
+          manifest lists.
         required: false
         type: string
         default: "[]"
       signer-repo:
-        description: Repository the artifact attestations must come from
+        description: >-
+          Repository the artifact attestations must come from (e.g.
+          owner/repo). Required when checksums-file is set.
         required: false
         type: string
         default: ""
       signer-workflow:
-        description: Workflow path the artifact attestations must come from
+        description: >-
+          Workflow path the artifact attestations must come from (e.g.
+          .github/workflows/build.yml). Required when checksums-file is set.
         required: false
         type: string
         default: ""
@@ -136,6 +158,8 @@ name: Reusable npm Package-Set Publishing
           codeload.github.com:443
           objects.githubusercontent.com:443
           raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          *.blob.core.windows.net:443
           registry.npmjs.org:443
           fulcio.sigstore.dev:443
           rekor.sigstore.dev:443
@@ -160,6 +184,13 @@ name: Reusable npm Package-Set Publishing
         required: false
         type: string
         default: Publish npm package set
+      runner-image:
+        description: >-
+          GitHub-hosted runner image label. Must stay GitHub-hosted: npm
+          provenance attestation is not issued on self-hosted runners.
+        required: false
+        type: string
+        default: ubuntu-24.04
       timeout-minutes:
         description: Job timeout in minutes
         required: false
@@ -183,7 +214,7 @@ jobs:
   publish:
     name: ${{ inputs.job-name }}
     # GitHub-hosted runner only: provenance attestation requires it.
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Read repository context (checkout of the consumer repo)
@@ -251,6 +282,15 @@ jobs:
           ALLOWED_ENTRY_WORKFLOWS: ${{ inputs.entry-workflows }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/assert-entry-workflow.sh
+      # Jobs have isolated filesystems: a package set staged by another job
+      # arrives as a workflow artifact and lands in packages-dir here.
+      - name: Download staged package set
+        if: inputs.artifact-name != ''
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.packages-dir }}
       # Contract step 1 of 3: verify BEFORE anything is packed or written.
       - name: Verify artifacts
         if: inputs.checksums-file != ''

@@ -79,22 +79,29 @@ declare -a FAILURES=()
 verify_one() {
 	local name="$1" version="$2"
 	local attempt view
+	local visible=0
 	for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
 		echo "==> Verifying registry state for $name@$version (attempt $attempt/$ATTEMPTS)"
 		if view="$("$NPM" view "$name@$version" dist.attestations dist.integrity --json 2>/dev/null)"; then
-			if printf '%s' "$view" | jq -e '."dist.attestations"' >/dev/null 2>&1 \
-				&& printf '%s' "$view" | jq -e '."dist.integrity"' >/dev/null 2>&1; then
+			visible=1
+			if printf '%s' "$view" | jq -e '."dist.attestations"' >/dev/null 2>&1 &&
+				printf '%s' "$view" | jq -e '."dist.integrity"' >/dev/null 2>&1; then
 				echo "    provenance attestation and integrity present"
 				return 0
 			fi
-			echo "ERROR: $name@$version is on the registry without provenance attestation or integrity" >&2
-			FAILURES+=("$name@$version missing dist.attestations/dist.integrity")
-			return 0
+			# Visible but incomplete: attestation/integrity metadata propagates
+			# separately from the version itself, so keep waiting.
+			echo "    visible, but provenance attestation or integrity not yet present"
 		fi
 		if ((attempt < ATTEMPTS)); then
 			sleep "$DELAY"
 		fi
 	done
+	if ((visible)); then
+		echo "ERROR: $name@$version is on the registry without provenance attestation or integrity after $ATTEMPTS attempts" >&2
+		FAILURES+=("$name@$version missing dist.attestations/dist.integrity after $ATTEMPTS propagation attempts")
+		return 0
+	fi
 	echo "ERROR: $name@$version not visible on the registry after $ATTEMPTS attempts" >&2
 	FAILURES+=("$name@$version not found after $ATTEMPTS propagation attempts")
 }
@@ -148,6 +155,13 @@ if [[ "$DRY_RUN" == "1" ]]; then
 	exit 0
 fi
 
+# Same guard as publish-set.sh: an empty order would verify nothing and pass.
+ORDERED_PACKAGES="$(normalize_order "$ORDER")"
+if [[ -z "$ORDERED_PACKAGES" ]]; then
+	echo "ERROR: ORDER resolved to no packages (got '$ORDER'); nothing to verify" >&2
+	exit 1
+fi
+
 meta_pkg=""
 while IFS= read -r pkg; do
 	[[ -n "$pkg" ]] || continue
@@ -157,7 +171,7 @@ while IFS= read -r pkg; do
 	verify_one "$name" "$version"
 	# ORDER's last entry is the meta package; its tarball gets the audit.
 	meta_pkg="$pkg_dir"
-done < <(normalize_order "$ORDER")
+done <<<"$ORDERED_PACKAGES"
 
 if [[ -n "$meta_pkg" ]]; then
 	audit_meta_signatures "$meta_pkg"
