@@ -120,6 +120,36 @@ _run_build() {
 	assert_output --partial "Tag commit is not on main"
 }
 
+_run_validate() {
+	run env \
+		STEP=validate \
+		WORKING_DIRECTORY=. \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+}
+
+@test "python-dist validate: accepts a PEP 440 prerelease version" {
+	_write_pyproject "0.160.3a2"
+	_run_validate
+	assert_success
+	assert_output --partial "Package metadata valid"
+	assert_output --partial "@0.160.3a2"
+}
+
+@test "python-dist validate: accepts .post and .dev suffixes" {
+	_write_pyproject "1.2.3rc1.post1.dev2"
+	_run_validate
+	assert_success
+	assert_output --partial "@1.2.3rc1.post1.dev2"
+}
+
+@test "python-dist validate: rejects a SemVer hyphenated prerelease" {
+	_write_pyproject "1.2.3-alpha.1"
+	_run_validate
+	assert_failure
+	assert_output --partial "Invalid version format: 1.2.3-alpha.1"
+	assert_output --partial "PEP 440"
+}
+
 @test "python-dist build: refuses filesystem root WORKING_DIRECTORY" {
 	_init_repo_on_main "1.0.0"
 

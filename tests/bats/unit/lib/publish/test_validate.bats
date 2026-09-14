@@ -382,6 +382,148 @@ EOF
 }
 
 # =============================================================================
+# validate_pep440_version_format tests
+# =============================================================================
+
+@test "validate_pep440_version_format: accepts 1.2.3" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.2.3" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 1.2" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.2" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 0.160.3a2" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "0.160.3a2" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 1.0.0b1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0b1" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 1.0.0rc1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0rc1" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 1.0.0.post1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0.post1" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 1.0.0.dev1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0.dev1" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 1.0.0rc1.post2.dev3" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0rc1.post2.dev3" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts 2026.9" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "2026.9" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: rejects empty string" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects v1.2.3" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "v1.2.3" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: accepts single-component 1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: accepts epoch 1!2.0" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1!2.0" && echo "valid"'
+	assert_success
+	assert_output "valid"
+}
+
+@test "validate_pep440_version_format: rejects non-canonical epoch 0!1.0" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "0!1.0" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.0.0-alpha.1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0-alpha.1" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.0.0-rc.1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0-rc.1" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.0.0alpha1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0alpha1" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.0.0c1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0c1" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.0.0+build" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0+build" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.0.0a" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0a" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.01.0" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.01.0" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects abc" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "abc" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+@test "validate_pep440_version_format: rejects 1.0.0.dev1.post1" {
+	run bash -c 'source "$LIB_DIR/publish/validate.sh" && validate_pep440_version_format "1.0.0.dev1.post1" || echo "invalid"'
+	assert_success
+	assert_output "invalid"
+}
+
+# =============================================================================
 # Function export tests
 # =============================================================================
 
@@ -393,6 +535,12 @@ EOF
 
 @test "validate.sh: exports validate_npm_package function" {
 	run bash -c 'source "$LIB_DIR/log.sh" && source "$LIB_DIR/publish/validate.sh" && declare -f validate_npm_package >/dev/null && echo "ok"'
+	assert_success
+	assert_output "ok"
+}
+
+@test "validate.sh: exports validate_pep440_version_format function" {
+	run bash -c 'source "$LIB_DIR/log.sh" && source "$LIB_DIR/publish/validate.sh" && declare -f validate_pep440_version_format >/dev/null && echo "ok"'
 	assert_success
 	assert_output "ok"
 }

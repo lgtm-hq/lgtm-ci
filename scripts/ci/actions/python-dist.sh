@@ -107,8 +107,10 @@ validate)
 
 	# Extract and validate version
 	version=$(extract_pypi_version ".") || die "Could not extract version from pyproject.toml"
-	if ! validate_version_format "$version"; then
-		die "Invalid version format: $version"
+	# Python dists are PEP 440 by definition (1.2.3a1, not 1.2.3-alpha.1); the
+	# SemVer validator stays for the non-Python callers.
+	if ! validate_pep440_version_format "$version"; then
+		die "Invalid version format: $version (expected canonical PEP 440)"
 	fi
 
 	# Extract name
