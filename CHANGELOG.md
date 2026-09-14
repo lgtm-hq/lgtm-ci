@@ -13,6 +13,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.72.0] - 2026-09-14
+
+### Added
+
+- **npm**: reusable ordered npm package-set publish with idempotent re-runs (#975)
+  (dc13240)
+
+### Deprecated
+
 - **npm**: `reusable-publish-npm.yml` is deprecated in favour of
   `reusable-publish-npm-set.yml` and now forwards to it as a compatibility
   shim: the legacy `published`, `version` and `package-name` outputs are
@@ -23,13 +38,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   keep a required status check), the publish job runs on `runner-image`
   (default `ubuntu-24.04`) instead of `ubuntu-latest`, and a live publish
   requires the forwarded `entry-workflows`, `checksums-file`, `signer-repo`
-  and `signer-workflow` inputs. Removal target: v0.72.0 (#965)
-
-### Removed
+  and `signer-workflow` inputs. Removal target: v0.73.0 (#965)
 
 ### Fixed
 
-### Security
+- **npm**: move the deprecated wrapper's removal target to v0.73.0 (#983) (e4c40d5)
 
 ## [0.71.0] - 2026-09-14
 
@@ -2356,7 +2369,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.71.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.72.0...HEAD
+[0.72.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.71.0...v0.72.0
 [0.71.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.1...v0.71.0
 [0.70.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.0...v0.70.1
 [0.70.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.10...v0.70.0
