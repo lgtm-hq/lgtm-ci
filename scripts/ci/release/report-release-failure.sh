@@ -170,6 +170,11 @@ write_trigger_summary() {
 	add_github_summary "- **Checkout SHA:** ${sha}"
 	add_github_summary "- **Actor:** ${GITHUB_ACTOR:-unknown}"
 	add_github_summary "- **Run:** ${current_run_url}"
+	# Release mode passes the classify verdict so the summary distinguishes a
+	# run that is waiting on an automatic re-run from one that filed an issue.
+	if [[ -n "${FAILURE_VERDICT:-}" ]]; then
+		add_github_summary "- **Verdict:** ${FAILURE_VERDICT}${FAILURE_REASON:+ (${FAILURE_REASON})}"
+	fi
 
 	if [[ "${GITHUB_EVENT_NAME:-}" == "workflow_run" ]]; then
 		add_github_summary ""

@@ -811,7 +811,7 @@ EOF
 	assert_success
 	# More than one attempt within the deadline: log ingestion can lag.
 	run wc -l <"${BATS_TEST_TMPDIR}/log-fetches"
-	[[ "${output// /}" -ge 2 ]]
+	assert_output --regexp '^[[:space:]]*([2-9]|[1-9][0-9]+)$'
 }
 
 @test "report-release-failure: classify files when the channel payload has an unrecognized shape" {
@@ -932,4 +932,21 @@ EOF
 	assert_output --partial "GH_CMD_TIMEOUT '0' is not a positive integer; using 60"
 	assert_output --partial "LOG_FETCH_DEADLINE '0' is not a positive integer; using 180"
 	assert_output --partial "rerunning"
+}
+
+@test "report-release-failure: write_trigger_summary records the release verdict and reason" {
+	export FAILURE_VERDICT=rerunning
+	export FAILURE_REASON=""
+	run bash "$SCRIPT" write_trigger_summary
+	assert_success
+	run grep -F -- "- **Verdict:** rerunning" "$GITHUB_STEP_SUMMARY"
+	assert_success
+
+	export FAILURE_VERDICT=failure
+	export FAILURE_REASON=no-infra-signature
+	: >"$GITHUB_STEP_SUMMARY"
+	run bash "$SCRIPT" write_trigger_summary
+	assert_success
+	run grep -F -- "- **Verdict:** failure (no-infra-signature)" "$GITHUB_STEP_SUMMARY"
+	assert_success
 }

@@ -176,3 +176,13 @@ input_required_value() {
 	' "$EXAMPLE"
 	assert_success
 }
+
+@test "reusable-release-failure-notifier: the trigger summary receives the verdict and reason" {
+	run awk '
+		/- name: Write release trigger summary/ { in_step = 1; next }
+		in_step && /^      - name:/ { exit }
+		in_step { print }
+	' "$WORKFLOW"
+	assert_output --partial "FAILURE_VERDICT: \${{ steps.classify.outputs.verdict }}"
+	assert_output --partial "FAILURE_REASON: \${{ steps.classify.outputs.reason }}"
+}

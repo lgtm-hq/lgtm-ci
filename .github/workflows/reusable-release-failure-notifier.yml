@@ -203,6 +203,8 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           FAILURE_HEADING_LABEL: Release Publish
           PRIMARY_JOB_FAILED: "true"
+          FAILURE_VERDICT: ${{ steps.classify.outputs.verdict }}
+          FAILURE_REASON: ${{ steps.classify.outputs.reason }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
           write_trigger_summary
