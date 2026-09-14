@@ -750,3 +750,133 @@ EOF
 	assert_success
 	assert_output "rerunning"
 }
+
+@test "report-release-failure: classify never suppresses by default (max-reruns 0 is opt-in)" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	unset MAX_RERUNS
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	export GITHUB_OUTPUT="$output_file"
+	# A matching infra signature must still file: nothing will re-run this.
+	mock_command_multi "gh" '
+		*--log-failed*) echo "error: lost communication with the server";;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+	run grep -F 'reason=budget-exhausted' "$output_file"
+	assert_success
+}
+
+@test "report-release-failure: classify reports no-infra-signature within budget" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=3
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	export GITHUB_OUTPUT="$output_file"
+	mock_command_multi "gh" '
+		*--log-failed*) echo "npm ERR! 403 Forbidden";;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+	run grep -F 'reason=no-infra-signature' "$output_file"
+	assert_success
+}
+
+@test "report-release-failure: classify retries an empty log fetch and reports logs-unavailable" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=3
+	export GH_CMD_TIMEOUT=1
+	export LOG_FETCH_DEADLINE=4
+	export LOG_FETCH_RETRY_DELAY=0
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	export GITHUB_OUTPUT="$output_file"
+	mock_command_multi "gh" '
+		*--log-failed*) echo "fetch" >> "'"${BATS_TEST_TMPDIR}"'/log-fetches"; exit 0;;
+		*) exit 1;;
+	'
+
+	run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+	assert_success
+	assert_output "failure"
+	run grep -F 'reason=logs-unavailable' "$output_file"
+	assert_success
+	# More than one attempt within the deadline: log ingestion can lag.
+	run wc -l <"${BATS_TEST_TMPDIR}/log-fetches"
+	[[ "${output// /}" -ge 2 ]]
+}
+
+@test "report-release-failure: classify files when the channel payload has an unrecognized shape" {
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=1
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	export GITHUB_OUTPUT="$output_file"
+	mock_command_multi "gh" '*) exit 1;;'
+
+	for payload in 'null' '"pypi"' '{"pypi":"failure"}' '[1]'; do
+		export CHANNELS_JSON="$payload"
+		: >"$output_file"
+		run bash -c "bash \"$SCRIPT\" classify_release_failure 2>/dev/null"
+		assert_success
+		assert_output "failure"
+		run grep -F 'reason=channels-invalid' "$output_file"
+		assert_success
+	done
+}
+
+@test "report-release-failure: notify_release_failure renders an invalid-shape row and the reason wording" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	export FAILURE_REASON=no-infra-signature
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=3
+	mock_command_multi "gh" '
+		*issue*list*) echo "";;
+		*label*view*) exit 0;;
+		*issue*create*)
+			while [[ $# -gt 0 ]]; do
+				if [[ "$1" == "--body-file" && -n "${2:-}" ]]; then
+					cp "$2" "'"${BATS_TEST_TMPDIR}"'/issue-body.md"
+				fi
+				shift
+			done
+			echo "https://github.com/lgtm-hq/lgtm-ci/issues/66";;
+		*) exit 1;;
+	'
+	export CHANNELS_JSON='{"pypi":"failure"}'
+
+	run bash "$SCRIPT" notify_release_failure
+	assert_success
+	run grep -F 'unrecognized channel payload shape' "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+	run grep -F 'failed on attempt 1; the failed-job logs match no known transient-infrastructure signature' \
+		"${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+	run grep -F 'retries were exhausted' "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_failure
+}
+
+@test "report-release-failure: close_release_failure falls back to the tracking key when the title search is empty" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	# A retitled issue: the title search succeeds with no match, the visible
+	# tracking key still finds it.
+	mock_command_multi "gh" '
+		*issue*list*in:title*) echo "";;
+		*issue*list*release-failure:publish-python-release:v1.2.3*) echo "78";;
+		*issue*close*) echo "closed";;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" close_release_failure
+	assert_success
+	assert_output --partial "Closed release failure issue #78"
+}

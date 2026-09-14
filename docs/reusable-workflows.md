@@ -790,7 +790,7 @@ release-failure-notifier:
     workflow-key: publish-python-release # stable key: one open issue per key+tag
     tag: ${{ github.ref_name }}
     channels: ${{ toJson(needs) }}
-    max-reruns: 3 # match the caller's auto-rerun input
+    max-reruns: 3 # only with the auto-rerun reusable wired; default 0 files every failure
   permissions:
     actions: read
     contents: read
@@ -799,7 +799,8 @@ release-failure-notifier:
 
 `channels` accepts `toJson(needs)` directly; per-job `url` (job link column)
 and an optional `probe` (whether the channel already has the version) can be
-added by building the JSON in a pre-step. Verdicts:
+added by building the JSON in a pre-step. Without a `url` the job column links
+to the run, which lists every job. Verdicts:
 
 - **every channel success/skipped** — comments on and closes the tag's issue.
 - **a channel failed, attempt within `max-reruns`, failed-job logs match an
@@ -809,9 +810,16 @@ added by building the JSON in a pre-step. Verdicts:
   (channel, result, job link, probe) and the recovery tier per
   [release-security-policy.md](release-security-policy.md).
 
-`max-reruns` must match the caller's auto-rerun input: too low files an issue
-while a re-run is still pending; too high stays silent after retries are
-exhausted. The contract section is
+Suppression is opt-in. The default `max-reruns: 0` files on every failure;
+set it to the caller's `reusable-auto-rerun-on-infra-failure.yml` input only
+when that reusable watches this workflow, and pass the same `signatures`
+extension to both so they classify alike. Too low files an issue while a
+re-run is still pending; too high stays silent after retries are exhausted.
+The failed-job log fetch is bounded like the auto-rerun script's
+(`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`); logs that stay unavailable file
+rather than wait. The filed issue's summary states the classification reason
+(re-run budget exhausted, no infra signature, logs unavailable). The contract
+section is
 [workflow-contract.md](workflow-contract.md#tag-publish-failure-reporting-release-mode).
 
 ### Auto re-run on infra failure

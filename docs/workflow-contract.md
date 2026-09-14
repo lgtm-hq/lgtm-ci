@@ -758,7 +758,8 @@ their least-privilege sets.
 | `workflow-key`         | *(required)*                               | Stable key namespacing the dedup marker and issue title          |
 | `tag`                  | *(required)*                               | Tag whose publish is reported (usually `github.ref_name`)        |
 | `channels`             | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly      |
-| `max-reruns`           | `1`                                        | Match the caller's auto-rerun input; in-flight reruns stay quiet |
+| `max-reruns`           | `0`                                        | Opt-in: match the auto-rerun input when that reusable watches the run |
+| `signatures`           | *(empty)*                                  | Extra infra signatures; pass the auto-rerun reusable's value     |
 | `failure-issue-labels` | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped)    |
 
 <!-- markdownlint-enable MD013 -->
@@ -769,7 +770,12 @@ an infra signature (the same classifier as the auto-rerun reusable) stays
 quiet; otherwise it files or updates one issue titled
 `fix(release): tag publish failed: <tag> (<workflow-key>)` with tracking key
 `release-failure:<workflow-key>:<tag>` and a channel/result/job-link/probe
-table. The issue body names the recovery tier per the
+table (a channel without a job URL links to the run). Suppression is opt-in:
+with the default `max-reruns: 0` every failure files, because a caller that
+has not wired `reusable-auto-rerun-on-infra-failure.yml` has nothing that
+would re-run. The log fetch behind the classification is bounded
+(`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`, as in the auto-rerun script) and an
+unclassifiable failure files with a `reason` that the issue summary states. The issue body names the recovery tier per the
 [release security policy](release-security-policy.md); a later successful
 attempt or recovery run closes it.
 

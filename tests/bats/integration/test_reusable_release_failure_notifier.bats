@@ -12,12 +12,61 @@ EXAMPLE="${PROJECT_ROOT}/examples/publish-python-release.yml"
 	assert_success
 }
 
+# Print the `required:` value of one workflow_call input, scoped to that
+# input's block so a `required: true` elsewhere cannot satisfy the check.
+input_required_value() {
+	local input="$1"
+	awk -v input="$input" '
+		$0 ~ "^      " input ":$" { in_input = 1; next }
+		in_input && /^      [A-Za-z_-]+:$/ { in_input = 0 }
+		in_input && /^        required:/ { print $2; exit }
+	' "$WORKFLOW"
+}
+
 @test "reusable-release-failure-notifier: requires workflow-key and tag inputs" {
-	run grep -F "workflow-key:" "$WORKFLOW"
+	run input_required_value "workflow-key"
+	assert_output "true"
+	run input_required_value "tag"
+	assert_output "true"
+	# The opt-in inputs stay optional.
+	run input_required_value "max-reruns"
+	assert_output "false"
+}
+
+@test "reusable-release-failure-notifier: rerun suppression is opt-in and shares the signature extension" {
+	# Default 0: a caller without the auto-rerun reusable never gets a silent
+	# "rerunning" verdict for a re-run nothing will start.
+	run awk '
+		/^      max-reruns:$/ { in_input = 1; next }
+		in_input && /^      [A-Za-z_-]+:$/ { in_input = 0 }
+		in_input && /^        default:/ { print $2; exit }
+	' "$WORKFLOW"
+	assert_output "0"
+	run grep -F "INFRA_SIGNATURES: \${{ inputs.signatures }}" "$WORKFLOW"
 	assert_success
-	run grep -F "tag:" "$WORKFLOW"
+	run grep -F "FAILURE_REASON: \${{ steps.classify.outputs.reason }}" "$WORKFLOW"
 	assert_success
-	run grep -F "required: true" "$WORKFLOW"
+}
+
+@test "reusable-release-failure-notifier: serializes runs per repository, key and tag" {
+	run awk '
+		/^  notify:/ { in_job = 1; next }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ { in_job = 0 }
+		in_job && /group: release-failure-\$\{\{ github.repository \}\}-\$\{\{ inputs.workflow-key \}\}-\$\{\{ inputs.tag \}\}/ { found_group = 1 }
+		in_job && /cancel-in-progress: false/ { found_no_cancel = 1 }
+		END { exit !(found_group && found_no_cancel) }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-release-failure-notifier: refuses unenforceable block egress before tokenized steps" {
+	# The guard must be the first step: nothing with GH_TOKEN may run before it.
+	run awk '
+		/^    steps:/ { in_steps = 1; next }
+		in_steps && /^      - name:/ { print; exit }
+	' "$WORKFLOW"
+	assert_output --partial "Refuse block egress"
+	run grep -F "if: inputs.egress-policy == 'block' && runner.os != 'Linux' && runner.environment != 'self-hosted'" "$WORKFLOW"
 	assert_success
 }
 
@@ -88,8 +137,11 @@ EXAMPLE="${PROJECT_ROOT}/examples/publish-python-release.yml"
 @test "example publish-python-release: wires the release-mode notifier last" {
 	run grep -F "release-failure-notifier:" "$EXAMPLE"
 	assert_success
+	# Scoped to the notifier job: the scan stops at the next top-level job, so
+	# a later job cannot satisfy these checks.
 	run awk '
-		/release-failure-notifier:/ { in_job = 1 }
+		/^  release-failure-notifier:/ { in_job = 1; next }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ { in_job = 0 }
 		in_job && /needs: \[pypi-build, pypi-upload, github-release\]/ { found_needs = 1 }
 		in_job && /if: always\(\)/ { found_always = 1 }
 		in_job && /reusable-release-failure-notifier\.yml/ { found_reusable = 1 }
@@ -97,11 +149,20 @@ EXAMPLE="${PROJECT_ROOT}/examples/publish-python-release.yml"
 		END { exit !(found_needs && found_always && found_reusable && found_channels) }
 	' "$EXAMPLE"
 	assert_success
+	# docs/workflow-contract.md: every tag-publish workflow MUST end with the
+	# release-mode notifier, so no top-level job may follow it.
+	run awk '
+		/^  release-failure-notifier:/ { seen = 1; next }
+		seen && /^  [A-Za-z_][A-Za-z0-9_-]*:/ { print "job after notifier: " $1; exit 1 }
+	' "$EXAMPLE"
+	assert_success
+	assert_output ""
 }
 
 @test "example publish-python-release: notifier job grants issues write" {
 	run awk '
-		/release-failure-notifier:/ { in_job = 1 }
+		/^  release-failure-notifier:/ { in_job = 1; next }
+		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ { in_job = 0 }
 		in_job && /issues: write/ { found = 1 }
 		END { exit !found }
 	' "$EXAMPLE"

@@ -61,12 +61,22 @@ name: Reusable - Release Failure Notifier
         default: "[]"
       max-reruns:
         description: >-
-          Automatic re-runs the caller allows for this run (match the caller's
-          auto-rerun input); attempts within budget that match an infra
-          signature do not file yet
+          Automatic re-runs the caller allows for this run. Suppression is
+          opt-in: leave 0 unless reusable-auto-rerun-on-infra-failure.yml
+          watches this workflow, then match its max-reruns input; attempts
+          within budget whose failed-job logs match an infra signature do not
+          file yet
         required: false
         type: number
-        default: 1
+        default: 0
+      signatures:
+        description: >-
+          Extra newline-separated failure-log signatures appended to the
+          built-in transient-infra defaults; pass the same value as the
+          auto-rerun reusable so the two classifiers cannot disagree
+        required: false
+        type: string
+        default: ""
       failure-issue-labels:
         description: Comma-separated labels for auto-opened failure issues
         required: false
@@ -107,6 +117,12 @@ jobs:
     # caller wires one call with needs covering every publish job and never
     # gates it on outcome.
     if: always()
+    # GitHub neither enforces unique issue titles nor makes issue creation
+    # idempotent: two notifier jobs for the same key+tag overlapping the
+    # search-then-create window would file twice. Serialize them.
+    concurrency:
+      group: release-failure-${{ github.repository }}-${{ inputs.workflow-key }}-${{ inputs.tag }}
+      cancel-in-progress: false
     permissions:
       # Read workflow/job metadata and this run's failed-job logs for the
       # infra-signature classification
@@ -117,6 +133,16 @@ jobs:
       issues: write
 
     steps:
+      # harden-runner cannot enforce block mode on GitHub-hosted Windows/macOS
+      # (audit-only per docs/workflow-contract.md). The later steps run with
+      # GH_TOKEN and issues: write, so a block request that cannot be honored
+      # fails here, before any tokenized step, instead of running unprotected.
+      - name: Refuse block egress on runners that cannot enforce it
+        if: inputs.egress-policy == 'block' && runner.os != 'Linux' && runner.environment != 'self-hosted'
+        shell: bash
+        run: |
+          echo "::error::egress-policy 'block' cannot be enforced on GitHub-hosted ${RUNNER_OS}; use a GitHub-hosted Linux runner-image, a self-hosted runner, or egress-policy 'audit'"
+          exit 1
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
@@ -157,6 +183,7 @@ jobs:
           CHANNELS_JSON: ${{ inputs.channels }}
           RUN_ATTEMPT: ${{ github.run_attempt }}
           MAX_RERUNS: ${{ inputs.max-reruns }}
+          INFRA_SIGNATURES: ${{ inputs.signatures }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_RUN_ID: ${{ github.run_id }}
         run: >-
@@ -182,6 +209,11 @@ jobs:
           RELEASE_TAG: ${{ inputs.tag }}
           CHANNELS_JSON: ${{ inputs.channels }}
           FAILURE_ISSUE_LABELS: ${{ inputs.failure-issue-labels }}
+          # The issue summary is worded from the classify reason, so it never
+          # claims "retries exhausted" for a first-attempt non-infra failure.
+          FAILURE_REASON: ${{ steps.classify.outputs.reason }}
+          RUN_ATTEMPT: ${{ github.run_attempt }}
+          MAX_RERUNS: ${{ inputs.max-reruns }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/report-release-failure.sh
           notify_release_failure
