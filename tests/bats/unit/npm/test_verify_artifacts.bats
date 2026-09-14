@@ -145,6 +145,45 @@ attest_mock() {
 	assert_output --partial "signer-workflow"
 }
 
+@test "verify-artifacts: non-array FILES fails with a clear message" {
+	attest_mock 0
+	export FILES='"not-an-array"'
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "FILES must be a JSON array"
+}
+
+@test "verify-artifacts: accepts a manifest path relative to packages-dir as a fallback" {
+	mv "$CHECKSUMS_FILE" "$PACKAGES_DIR/SHA256SUMS"
+	export CHECKSUMS_FILE=SHA256SUMS
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "All artifacts verified"
+}
+
+@test "verify-artifacts: manifest lookup is an exact path match, not a regex" {
+	# `+` and `(` are ERE metacharacters; the path must still be found, and
+	# a near-miss entry (dot as wildcard) must not satisfy it.
+	mkdir -p "$PACKAGES_DIR/pkg+c/bin"
+	echo "payload-c" >"$PACKAGES_DIR/pkg+c/bin/tool(1)"
+	h="$(shasum -a 256 "$PACKAGES_DIR/pkg+c/bin/tool(1)" | awk '{print $1}')"
+	printf '%s  pkg+c/bin/tool(1)\n' "$h" >>"$CHECKSUMS_FILE"
+	export FILES='["pkg+c/bin/tool(1)"]'
+	attest_mock 0
+
+	run bash "$SCRIPT"
+	assert_success
+
+	echo "near-miss" >"$PACKAGES_DIR/pkg-a/binXtool"
+	export FILES='["pkg-a/binXtool"]'
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "no checksums-manifest entry for 'pkg-a/binXtool'"
+}
+
 @test "verify-artifacts: fails on a missing checksums manifest" {
 	export CHECKSUMS_FILE="${BATS_TEST_TMPDIR}/does-not-exist"
 	attest_mock 0

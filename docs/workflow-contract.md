@@ -1065,7 +1065,8 @@ Includes `registry.npmjs.org:443`, Sigstore hosts, and
 order that callers must not reorder around (asserted by
 `tests/bats/integration/test_reusable_publish_npm_set.bats`):
 
-1. `verify-artifacts` — when `checksums-file` is set: sha256 plus `gh
+1. `verify-artifacts` — required for live publishes, optional for dry-runs
+   (`checksums-file` set): sha256 plus `gh
    attestation verify` against `signer-repo`/`signer-workflow`, before any
    `npm pack`. Tampered, missing, unlisted, or unattested artifacts fail the
    job with nothing published.
@@ -1083,9 +1084,13 @@ order that callers must not reorder around (asserted by
    optional `smoke-command`.
 
 npm trusted publishing validates the entry workflow file, so consumers must
-pass their top-level publish workflow via `entry-workflows` (empty disables
-the guard — not acceptable for live publishes) and keep their
-trusted-publisher registration pointed at that same file.
+pass their top-level publish workflow via `entry-workflows` (a live publish
+fails before publishing when it is empty; a dry-run only warns) and keep
+their trusted-publisher registration pointed at that same file. The live
+preconditions (hosted runner, `checksums-file`, `signer-repo`,
+`signer-workflow`) are asserted by
+`scripts/ci/actions/npm/assert-live-publish-inputs.sh` before any download
+or pack.
 
 ### GitHub Release (artifact upload)
 

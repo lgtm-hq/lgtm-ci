@@ -1021,7 +1021,7 @@ jobs:
       order: '["darwin-arm64", "linux-x64", "meta"]' # meta last
       dry-run: false
       entry-workflows: .github/workflows/publish-npm-set.yml
-      checksums-file: npm-dist/SHA256SUMS
+      checksums-file: npm-dist/SHA256SUMS # workspace-relative; entries are packages-dir-relative
       files-to-verify: '["*/package.json", "*/bin/*"]'
       signer-repo: <owner>/<repo>
       signer-workflow: .github/workflows/build-binaries.yml
@@ -1031,8 +1031,13 @@ npm trusted publishing validates the **entry** workflow file of the run —
 your top-level workflow, not this reusable — so the consumer's
 trusted-publisher registration stays valid when it calls this reusable.
 Name that entry file via `entry-workflows` so the built-in guard enforces
-the binding before any publish. The caller job supplies the `npm`
-environment (reusables cannot set environments). No npm token: OIDC only.
+the binding before any publish. A live publish (`dry-run: false`) fails
+closed before anything is downloaded or packed unless `entry-workflows`,
+`checksums-file`, `signer-repo` and `signer-workflow` are set and the
+runner is GitHub-hosted; dry-runs stay permissive. A `uses:` job cannot
+declare `environment`, and the reusable's job declares none, so register
+the npm trusted publisher without an environment name. No npm token: OIDC
+only.
 `setup-node` writes a placeholder `_authToken`; the publish script strips
 it. Do not self-upgrade npm in-place. Full example:
 [examples/publish-npm-set.yml](../examples/publish-npm-set.yml).

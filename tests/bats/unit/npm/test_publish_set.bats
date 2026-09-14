@@ -66,8 +66,10 @@ not_published_reply() {
 }
 
 @test "publish-set: dry-run publishes every package with --dry-run and never inspects the registry" {
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	: >"$output_file"
+	export GITHUB_OUTPUT="$output_file"
 	export ORDER='["platform-a", "platform-b", "meta"]'
-	export DRYRUN_PROOF=1
 	make_npm_mock '
 			*publish*--dry-run*) echo "npm notice; exit 0";;
 			*view*|*dist-tag*) echo "unexpected registry read in dry-run" >&2; exit 99;;
@@ -86,7 +88,10 @@ not_published_reply() {
 	# post-publish integrity lookup (the mock's journal is the proof).
 	run grep -c "] view\|] dist-tag" "$CALLS"
 	assert_output 0
-	run grep -F '"integrity":null' "$CALLS"
+	# Without a registry read the recorded integrity is null, never a guess.
+	run grep -c '"integrity":null' "$output_file"
+	assert_output 1
+	run grep -F '"integrity":"' "$output_file"
 	assert_failure
 }
 

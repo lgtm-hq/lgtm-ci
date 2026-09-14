@@ -63,7 +63,9 @@ jobs:
       dist-tag: "latest"
       dry-run: false
       entry-workflows: .github/workflows/publish-npm-set.yml
-      # Live publishes must verify: sha256 + attestation before any npm pack.
+      # Live publishes fail closed without entry-workflows, checksums-file,
+      # signer-repo and signer-workflow. The manifest path is workspace-
+      # relative; the entries inside it are relative to packages-dir.
       checksums-file: npm-dist/SHA256SUMS
       files-to-verify: "[]" # empty: every file the manifest lists
       signer-repo: <owner>/<repo>

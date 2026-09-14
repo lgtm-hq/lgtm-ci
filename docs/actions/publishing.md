@@ -59,7 +59,8 @@ the step fails if twine check cannot run. Do **not** nest
 
 **Removed (#965).** The `publish-npm` composite action was retired with the
 single-package reusable: a single package is a one-element package set. Use
-[`reusable-publish-npm-set.yml`](../workflows/publishing.md) instead, which
+[`reusable-publish-npm-set.yml`](../workflows/publishing.md#reusable-publish-npm-setyml)
+instead, which
 adds idempotent re-runs, pre-publish artifact verification, and post-publish
 registry verification. See
 [reusable-workflows.md](../reusable-workflows.md#npm-package-set-ordered-idempotent-verified).
