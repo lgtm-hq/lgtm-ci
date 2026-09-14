@@ -91,10 +91,13 @@ on:
         type: string
         default: ""
       retention-days:
-        description: "Days to retain build artifacts"
+        description: >-
+          Days to retain build artifacts. Defaults to the 90-day recovery
+          window from the release-security policy so a tier-2 resume stays
+          possible without caller action.
         required: false
         type: number
-        default: 7
+        default: 90
       runner-image:
         description: "GitHub-hosted runner image (Linux only for strict tier)"
         required: false

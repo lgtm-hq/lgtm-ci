@@ -1,0 +1,87 @@
+# SPDX-License-Identifier: MIT
+# Recovery entry workflow for a partially published release (#966). Copy into
+# your repository as .github/workflows/release-recover.yml. Replace every
+# <sha> with a full lgtm-ci commit SHA.
+#
+# Runbook: docs/release-recovery.md (which tier applies, how to find the
+# source run, what the dry run shows). Always run with dry-run: true first.
+# Dispatch it from the DEFAULT branch: the recovery runs the default-branch
+# workflow code (this file, plus lgtm-ci tooling pinned by tooling-ref to
+# the same <sha> as the uses: line; never the tag), so a fix merged on main
+# applies to a release cut before it. Release tags must be protected by a
+# ruleset (see docs/release-recovery.md, "Prerequisites").
+# npm trusted publishing validates THIS workflow file: add it to your npm
+# trusted-publisher registration and keep npm-entry-workflows in sync.
+---
+name: Release Recovery
+
+"on":
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to recover (e.g. v1.2.3)
+        required: true
+        type: string
+      source-run-id:
+        description: Original publish run ID
+        required: true
+        type: string
+      dry-run:
+        description: Detect and summarize only (always run this first)
+        required: false
+        type: boolean
+        default: true
+      channels:
+        description: Restrict to channels (JSON array); default auto
+        required: false
+        type: string
+        default: "auto"
+
+permissions: {}
+
+concurrency:
+  group: release-recover-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  recover:
+    name: Recover release
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-recover.yml@<sha> # vX.Y.Z
+    # Union of the reusable's per-job permissions: contents write for the
+    # GitHub Release resume, id-token + attestations for the npm resume,
+    # issues write for the outcome record.
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      id-token: write
+      attestations: write
+    with:
+      tag: ${{ inputs.tag }}
+      source-run-id: ${{ inputs.source-run-id }}
+      # The publish workflow the source run must belong to; its head SHA must
+      # be the tag's commit (both read from the API by the resolve stage).
+      source-workflow: .github/workflows/publish-pypi-on-tag.yml
+      dry-run: ${{ inputs.dry-run }}
+      channels: ${{ inputs.channels }}
+      pypi-package: <pypi-project>
+      npm-package: "@scope/meta-package"
+      # The artifact publish-npm-set.yml uploaded from its packages dir, so
+      # the package subdirectories sit at the artifact root ("." below).
+      npm-artifact-name: npm-dist
+      npm-packages-dir: "."
+      npm-order: '["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "meta"]'
+      npm-checksums-file: SHA256SUMS
+      # This file: the npm trusted publisher must be registered for it.
+      npm-entry-workflows: .github/workflows/release-recover.yml
+      npm-access: public
+      release-artifact-name: python-dist
+      release-checksums-file: SHA256SUMS
+      signer-repo: <owner>/<repo>
+      signer-workflow: .github/workflows/publish-pypi-on-tag.yml
+      recovery-issue-workflow-key: release-publish
+      tooling-ref: "<sha>"
+    # Only needed with homebrew-dispatch-repo: a token with actions: write on
+    # that repository (github.token cannot dispatch across repositories).
+    secrets:
+      homebrew-dispatch-token: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}

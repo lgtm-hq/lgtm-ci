@@ -44,12 +44,12 @@ on:
         default: "python-dist"
       artifact-retention-days:
         description: >-
-          Days to retain the distribution artifact. The release-security
-          policy's recovery window is 90 days; a caller that relies on
-          tier-2 resume must set 90.
+          Days to retain the distribution artifact. Defaults to the 90-day
+          recovery window from the release-security policy so a tier-2 resume
+          stays possible without caller action.
         required: false
         type: number
-        default: 7
+        default: 90
       attest:
         description: >-
           Create a GitHub build-provenance attestation for every file in

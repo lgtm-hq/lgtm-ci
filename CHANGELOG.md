@@ -11,6 +11,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **release**: `reusable-release-recover.yml` (#966) requires `tooling-ref`
+  (no `github.workflow_sha` fallback: in a called workflow that SHA belongs
+  to the caller's repository), takes only a complete literal
+  `allowed-endpoints` for block-mode egress (no `egress-preset` /
+  `allowed-endpoints-mode` inputs), and needs the `homebrew-dispatch-token`
+  secret to re-send the Homebrew dispatch
+
 ### Deprecated
 
 ### Removed

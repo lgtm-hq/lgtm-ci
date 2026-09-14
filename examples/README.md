@@ -21,6 +21,7 @@ Sample caller layouts for lgtm-hq repositories. Copy and adapt into your
 | [publish-python-release.yml](publish-python-release.yml)                       | Publish to PyPI on tag (trusted publishing + attestation)                      |
 | [auto-rerun-on-infra-failure.yml](auto-rerun-on-infra-failure.yml)             | Re-run failed jobs up to `max-reruns` on a transient infra outage              |
 | [publish-npm-set.yml](publish-npm-set.yml)                                     | Ordered npm package-set release (trusted publishing, idempotent, verified)     |
+| [release-recover.yml](release-recover.yml)                                     | Resume a partially published release from the original attested artifacts      |
 
 <!-- markdownlint-enable MD013 -->
 
