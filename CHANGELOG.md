@@ -19,6 +19,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.71.0] - 2026-09-14
+
+### Added
+
+- **release**: release-mode failure notifier for tag publish runs (#973) (4373254)
+
+### Changed
+
+- **deps**: lock file maintenance (#979) (70c4bb2)
+
+### Fixed
+
+- **deps**: update dependency lintro to 0.160.2 (patch) (#980) (39b4598)
+- **deps**: update lintro (#978) (a0192c7)
+- **deps**: update dependency lintro to 0.159.7 (patch) (#976) (aeb90ce)
+
 ## [0.70.1] - 2026-09-13
 
 ### Fixed
@@ -2328,7 +2344,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.71.0...HEAD
+[0.71.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.1...v0.71.0
 [0.70.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.0...v0.70.1
 [0.70.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.10...v0.70.0
 [0.69.10]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.9...v0.69.10
