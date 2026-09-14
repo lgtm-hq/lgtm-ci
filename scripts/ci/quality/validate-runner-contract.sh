@@ -31,7 +31,6 @@ RUNNER_PINNING_EXCEPTIONS = {
     "reusable-scorecards.yml",
     "reusable-semantic-pr-title.yml",
     "reusable-pr-labeler.yml",
-    "reusable-publish-npm.yml",
     "reusable-publish-gem.yml",
 }
 

@@ -43,8 +43,9 @@
 #   RETRY_DELAY        Base backoff seconds; doubles each retry (default 5)
 #   MAX_DELAY          Backoff ceiling seconds (default 60)
 #   GITHUB_OUTPUT      Workflow output file: published=<json>, dist_tag_drift=<bool>
+#                      (status per package: published | skipped | dry-run)
 #   GITHUB_STEP_SUMMARY  Drift lines appended when set
-#   GH_CMD             npm binary name (overridable in tests; default npm)
+#   NPM_CMD            npm binary name (overridable in tests; default npm)
 
 set -euo pipefail
 
@@ -58,7 +59,7 @@ ACCESS="${ACCESS:-public}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 RETRY_DELAY="${RETRY_DELAY:-5}"
 MAX_DELAY="${MAX_DELAY:-60}"
-NPM="${GH_CMD:-npm}"
+NPM="${NPM_CMD:-npm}"
 
 if [[ -z "$DIST_TAG" ]]; then
 	echo "ERROR: DIST_TAG must be non-empty (use 'latest' for normal releases)" >&2
@@ -159,6 +160,11 @@ package_field() {
 
 registry_integrity() {
 	# Post-publish registry read; empty (never a lie) when the lookup fails.
+	# Dry-runs never touch the registry, not even to read: a dry-run must not
+	# depend on network state, and its result is "packed", not "on the registry".
+	if [[ "$LIVE" != "1" ]]; then
+		return 0
+	fi
 	"$NPM" view "$1@$2" dist.integrity 2>/dev/null || true
 }
 
@@ -251,7 +257,12 @@ reconcile_dist_tag() {
 			fi
 			continue
 		fi
+		# Unclassified failure: neither auth nor transient. Still drift — the
+		# tag is not where it should be — so record it, or the callers'
+		# `|| true` would let the run go green.
+		_record_dist_tag_drift "$dt_name" "$dt_version" "${dt_actual:-unknown}"
 		echo "ERROR: could not reconcile dist-tag '$DIST_TAG' for $dt_name@$dt_version (exit $dt_rc)." >&2
+		echo "::warning::Dist-tag drift for $dt_name: '$DIST_TAG' should point at $dt_version but reads '${dt_actual:-unknown}' on the registry, and the reconcile write failed with an unclassified error (see above). The remaining packages are still published; the run fails after the loop."
 		return 1
 	done
 }
@@ -318,14 +329,6 @@ publish_one() {
 	done
 }
 
-publish_flags_setup() {
-	if [[ "$PROVENANCE" != "0" ]]; then
-		provenance_flag="--provenance"
-	else
-		provenance_flag=""
-	fi
-}
-
 # Build the result entry for one package and remember it for the output.
 finish_package() {
 	local pkg="$1"
@@ -349,7 +352,6 @@ finish_package() {
 	RESULT_JSON+=("$(printf '{"name":"%s","version":"%s","status":"%s","integrity":%s}' "$name" "$version" "$status" "$integrity_json")")
 }
 
-publish_flags_setup
 if [[ "$PROVENANCE" != "0" ]]; then
 	provenance_flag="--provenance"
 else
@@ -364,6 +366,15 @@ if [[ "$LIVE" != "1" ]]; then
 	echo "DRY-RUN mode: no packages will be published. Set LIVE=1 (or dry-run: false) to publish."
 else
 	echo "LIVE mode: packages WILL be published to the registry (dist-tag=$DIST_TAG)."
+fi
+
+# An empty order must fail loudly: a loop over nothing would emit
+# published=[] and exit 0, and a release could go green having published
+# nothing. Resolve the list up front so the check happens before any work.
+ORDERED_PACKAGES="$(normalize_order "$ORDER")"
+if [[ -z "$ORDERED_PACKAGES" ]]; then
+	echo "ERROR: ORDER resolved to no packages (got '$ORDER'); refusing to publish an empty set" >&2
+	exit 1
 fi
 
 while IFS= read -r pkg; do
@@ -415,11 +426,17 @@ while IFS= read -r pkg; do
 		fi
 	fi
 	if publish_one "$pkg"; then
-		finish_package "$pkg" "published"
+		# A rehearsal is its own status: consumers (and the deprecated
+		# wrapper's boolean `published`) must never read a dry-run as live.
+		if [[ "$LIVE" == "1" ]]; then
+			finish_package "$pkg" "published"
+		else
+			finish_package "$pkg" "dry-run"
+		fi
 	else
 		exit 1
 	fi
-done < <(normalize_order "$ORDER")
+done <<<"$ORDERED_PACKAGES"
 
 # Deferred drift exit (#2631): every package has been processed, so the run
 # can now go red for the tags that could not be reconciled. The output lets

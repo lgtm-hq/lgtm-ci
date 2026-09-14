@@ -241,8 +241,11 @@ jobs:
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
-[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables and
-npm/gem publish workflows do not expose `runner-image`; see
+[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables
+and the gem publish workflow do not expose `runner-image`;
+`reusable-publish-npm-set.yml` and the deprecated `reusable-publish-npm.yml`
+wrapper (which forwards it) do, GitHub-hosted labels only, since npm
+provenance needs a hosted runner; see
 [workflow-contract.md](workflow-contract.md#runner-pinning).
 
 **Action-only reusables** (labeler, dependency review, semantic PR title,
@@ -767,6 +770,61 @@ workflow declares. Grant at least `actions: read` and `issues: write` on the
 caller job, or pass `report-failures: false` when upgrading from a release that
 did not include failure reporting.
 
+### Release failure notifier (tag publishes)
+
+`reusable-release-failure-notifier.yml` is the tag-publish counterpart of the
+two notifiers above. The branch-keyed mechanisms go quiet on tag runs
+(`GITHUB_REF_NAME` is the tag, so a branch gate never matches), which is how a
+half-published release used to stay invisible. This reusable deduplicates by
+tag: one open issue per `<workflow-key>` + `<tag>` —
+`release-failure:<key>:<tag>` — titled
+`fix(release): tag publish failed: <tag> (<key>)`, labelled
+`bug,ci,release,automation,infrastructure` (missing labels are skipped; create
+`release` in the consumer if absent).
+
+```yaml
+release-failure-notifier:
+  name: Report release failure
+  needs: [pypi-build, pypi-upload, github-release]
+  if: always()
+  # yamllint disable-line rule:line-length
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@<sha> # vX.Y.Z
+  with:
+    workflow-key: publish-python-release # stable key: one open issue per key+tag
+    tag: ${{ github.ref_name }}
+    channels: ${{ toJson(needs) }}
+    max-reruns: 3 # only with the auto-rerun reusable wired; default 0 files every failure
+  permissions:
+    actions: read
+    contents: read
+    issues: write
+```
+
+`channels` accepts `toJson(needs)` directly; per-job `url` (job link column)
+and an optional `probe` (whether the channel already has the version) can be
+added by building the JSON in a pre-step. Without a `url` the job column links
+to the run, which lists every job. Verdicts:
+
+- **every channel success/skipped** — comments on and closes the tag's issue.
+- **a channel failed, attempt within `max-reruns`, failed-job logs match an
+  infra signature** — the same classifier the auto-rerun reusable acts on —
+  the job stays quiet; an automatic re-run may still fix the run.
+- **otherwise** — files or updates the issue with a channel table
+  (channel, result, job link, probe) and the recovery tier per
+  [release-security-policy.md](release-security-policy.md).
+
+Suppression is opt-in. The default `max-reruns: 0` files on every failure;
+set it to the caller's `reusable-auto-rerun-on-infra-failure.yml` input only
+when that reusable watches this workflow, and pass the same `signatures`
+extension to both so they classify alike. Too low files an issue while a
+re-run is still pending; too high stays silent after retries are exhausted.
+The failed-job log fetch is bounded like the auto-rerun script's
+(`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`); logs that stay unavailable file
+rather than wait. The filed issue's summary states the classification reason
+(re-run budget exhausted, no infra signature, logs unavailable). The contract
+section is
+[workflow-contract.md](workflow-contract.md#tag-publish-failure-reporting-release-mode).
+
 ### Auto re-run on infra failure
 
 `reusable-auto-rerun-on-infra-failure.yml` re-runs the failed jobs of a
@@ -993,17 +1051,20 @@ red.
 
 The step order is the contract, asserted by the wiring test:
 
-1. **Verify artifacts** (when `checksums-file` is set): sha256 against the
-   manifest plus `gh attestation verify --repo <signer-repo>
-   --signer-workflow <signer-workflow>` per file — before any `npm pack`.
-   The release security policy forbids publishing unverified artifacts.
+1. **Verify artifacts** (when `checksums-file` is set): every file `npm
+   pack --dry-run` would ship, plus `files-to-verify`, gets sha256 against
+   the manifest plus `gh attestation verify --repo <signer-repo>
+   --signer-workflow <signer-workflow>` — before the real `npm pack`. A
+   packed file the manifest does not list fails. The release security
+   policy forbids publishing unverified artifacts.
 2. **Publish package set**: the only step that writes to the registry.
    Bounded exponential backoff on transient Sigstore/5xx/429 errors only;
    `EPUBLISHCONFLICT` is an idempotent success; auth failures never retry.
 3. **Verify published** (read-only, last): `npm view` per package requires
    `dist.attestations` and `dist.integrity` (bounded propagation retry);
    `npm audit signatures` in a scratch install of the meta package; optional
-   `smoke-command` in that install.
+   `smoke-command` in that install. `post-publish-verify: false` skips this
+   step; not recommended for live releases.
 
 ```yaml
 jobs:
@@ -1015,10 +1076,11 @@ jobs:
       attestations: write
     with:
       packages-dir: npm-dist
+      artifact-name: npm-dist # upload-artifact name from the staging job
       order: '["darwin-arm64", "linux-x64", "meta"]' # meta last
       dry-run: false
       entry-workflows: .github/workflows/publish-npm-set.yml
-      checksums-file: npm-dist/SHA256SUMS
+      checksums-file: npm-dist/SHA256SUMS # workspace-relative; entries are packages-dir-relative
       files-to-verify: '["*/package.json", "*/bin/*"]'
       signer-repo: <owner>/<repo>
       signer-workflow: .github/workflows/build-binaries.yml
@@ -1028,16 +1090,27 @@ npm trusted publishing validates the **entry** workflow file of the run —
 your top-level workflow, not this reusable — so the consumer's
 trusted-publisher registration stays valid when it calls this reusable.
 Name that entry file via `entry-workflows` so the built-in guard enforces
-the binding before any publish. The caller job supplies the `npm`
-environment (reusables cannot set environments). No npm token: OIDC only.
+the binding before any publish. A live publish (`dry-run: false`) fails
+closed before anything is downloaded or packed unless `entry-workflows`,
+`checksums-file`, `signer-repo` and `signer-workflow` are set, the
+runner is GitHub-hosted, and `access` is `public` while `provenance` or
+`post-publish-verify` is on (npm provenance and unauthenticated post-publish
+reads need a public package); dry-runs stay permissive. Dry-run packages are
+reported with `status: dry-run`, never `published`. A `uses:` job cannot
+declare `environment`, and the reusable's job declares none, so register
+the npm trusted publisher without an environment name. No npm token: OIDC
+only.
 `setup-node` writes a placeholder `_authToken`; the publish script strips
 it. Do not self-upgrade npm in-place. Full example:
 [examples/publish-npm-set.yml](../examples/publish-npm-set.yml).
 
 The deprecated single-package wrapper `reusable-publish-npm.yml` forwards
-here with `order: "."`; it will be removed in a future release, and its
-`version`/`package-name`/`tarball` outputs are gone (read the `published`
-JSON instead).
+here with `order: "."` as a compatibility shim until its removal in v0.72.0:
+the legacy `published` (`'true'`/`'false'`), `version` and `package-name`
+outputs are preserved, `tarball` is always empty (the set workflow packs in
+its own job), and the set JSON is exposed as `published-set`. The `npm-token`
+secret is refused with an error: publishing runs under npm trusted publishing
+(OIDC) only, and a caller still forwarding a token has not migrated.
 
 ```yaml
 # Deprecated wrapper (migration aid only); prefer the package-set reusable.
@@ -1050,8 +1123,7 @@ jobs:
       attestations: write
     with:
       node-version: "24"
-      # Prefer OIDC trusted publishing (no secrets). Optional legacy:
-      # secrets: { npm-token: ${{ secrets.NPM_TOKEN }} }
+      # OIDC trusted publishing only: do not pass secrets.npm-token.
 ```
 
 Configure an npm trusted publisher for the **caller** workflow filename and

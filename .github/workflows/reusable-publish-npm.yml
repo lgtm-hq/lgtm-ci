@@ -7,13 +7,25 @@ name: Reusable npm Publishing Workflow (deprecated)
 # shape (order: "."). It will be removed in a future release — switch to
 # reusable-publish-npm-set.yml directly.
 #
-# Interface changes versus the original reusable:
-#   - `published` is now the package-set JSON array
-#     ([{name, version, status, integrity}]) instead of a boolean.
-#   - `version`, `package-name`, and `tarball` outputs are gone (read them
-#     from the `published` JSON instead).
-#   - The `npm-token` secret is accepted for signature compatibility but
-#     IGNORED: publishing runs under npm trusted publishing (OIDC) only.
+# The wrapper is a compatibility shim: the legacy output contract is kept
+# (`published` as 'true'/'false', `version`, `package-name`; `tarball` is
+# always empty because the set workflow packs in its own job) and the set
+# workflow's JSON is exposed as `published-set`. The `npm-token` secret is
+# refused with an error rather than silently ignored: publishing runs under
+# npm trusted publishing (OIDC) only, and a caller still relying on a token
+# has not migrated. Removal target: v0.72.0.
+#
+# Migration notes for callers of this wrapper:
+#   - The publish job runs on the set workflow's `runner-image` (default
+#     ubuntu-24.04, GitHub-hosted only) instead of ubuntu-latest; pass
+#     `runner-image` to pin another hosted label.
+#   - The GitHub check name defaults to "Publish to npm (deprecated wrapper)"
+#     instead of "Publish to npm"; callers with a required status check on
+#     the old name must pass `job-name: Publish to npm` until they migrate.
+#   - A live publish (dry-run: false) now fails closed unless
+#     `entry-workflows`, `checksums-file`, `signer-repo` and
+#     `signer-workflow` are set; they are forwarded verbatim to the set
+#     workflow. Dry-runs stay permissive.
 
 "on":
   workflow_call:
@@ -52,6 +64,43 @@ name: Reusable npm Publishing Workflow (deprecated)
         required: false
         type: string
         default: "."
+      entry-workflows:
+        description: >-
+          Allowlisted consumer entry workflow path(s) for npm trusted
+          publishing (forwarded to reusable-publish-npm-set.yml). Required
+          for a live publish.
+        required: false
+        type: string
+        default: ""
+      checksums-file:
+        description: >-
+          SHA256SUMS manifest for pre-publish artifact verification
+          (forwarded; required for a live publish)
+        required: false
+        type: string
+        default: ""
+      files-to-verify:
+        description: JSON array of artifact globs to verify (forwarded)
+        required: false
+        type: string
+        default: "[]"
+      signer-repo:
+        description: Repository the artifact attestations must come from (forwarded)
+        required: false
+        type: string
+        default: ""
+      signer-workflow:
+        description: Workflow path the artifact attestations must come from (forwarded)
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: >-
+          GitHub-hosted runner image label for the publish job (forwarded;
+          default ubuntu-24.04)
+        required: false
+        type: string
+        default: ubuntu-24.04
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -107,15 +156,37 @@ name: Reusable npm Publishing Workflow (deprecated)
     secrets:
       npm-token:
         description: >-
-          Ignored (accepted for migration compatibility): publishing runs
-          under npm trusted publishing (OIDC) only.
+          Not supported: publishing runs under npm trusted publishing (OIDC)
+          only, and the wrapper fails with an error when this secret is
+          supplied so a token-based caller cannot silently lose auth.
         required: false
 
     outputs:
       published:
         description: >-
-          JSON array of {name, version, status: skipped|published, integrity}
-          (one entry)
+          Whether the package was published ('true'/'false'); false for
+          dry-runs and for an already-published (skipped) version
+        value: >-
+          ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].status == 'published'
+              && 'true' || 'false' }}
+      version:
+        description: "Published package version"
+        value: ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].version }}
+      package-name:
+        description: "Published package name"
+        value: ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].name }}
+      tarball:
+        description: >-
+          Deprecated, always empty: the package-set workflow packs inside its
+          own job and does not export the tarball path.
+        # actionlint rejects a literal empty string here; the expression
+        # evaluates to the same empty output.
+        value: ${{ '' }}
+      published-set:
+        description: >-
+          The package-set JSON array ({name, version, status:
+          published|skipped|dry-run, integrity}, one entry) from
+          reusable-publish-npm-set.yml
         value: ${{ jobs.publish.outputs.published }}
       dist-tag-drift:
         description: Whether the dist-tag could not be reconciled
@@ -127,7 +198,7 @@ permissions:
 jobs:
   deprecation-notice:
     name: Deprecation notice
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -137,8 +208,23 @@ jobs:
         env:
           GITHUB_WORKFLOW_REF_VALUE: ${{ github.workflow_ref }}
         run: |
-          echo "::warning::reusable-publish-npm.yml is deprecated and will be removed in a future release (#965). Switch to reusable-publish-npm-set.yml (a single package is a set of one; see docs/reusable-workflows.md)."
+          echo "::warning::reusable-publish-npm.yml is deprecated and will be removed in v0.72.0 (#965)." \
+            "Switch to reusable-publish-npm-set.yml (a single package is a set of one; see docs/reusable-workflows.md)."
           echo "Entry workflow: ${GITHUB_WORKFLOW_REF_VALUE:-unknown}"
+      # Fail before the publish job runs: a caller that still forwards a
+      # token has not migrated to trusted publishing, and ignoring the token
+      # would surface as an opaque auth failure inside the set workflow.
+      - name: Refuse the unsupported npm-token secret
+        shell: bash
+        env:
+          NPM_TOKEN_SUPPLIED: ${{ secrets.npm-token != '' }}
+        run: |
+          if [[ "$NPM_TOKEN_SUPPLIED" == "true" ]]; then
+            echo "::error::reusable-publish-npm.yml no longer accepts the npm-token secret:" \
+              "publishing runs under npm trusted publishing (OIDC) only. Remove the secret" \
+              "and configure a trusted publisher, or migrate to reusable-publish-npm-set.yml."
+            exit 1
+          fi
 
   publish:
     name: ${{ inputs.job-name }}
@@ -157,6 +243,12 @@ jobs:
       provenance: ${{ inputs.provenance }}
       access: ${{ inputs.access }}
       node-version: ${{ inputs.node-version }}
+      entry-workflows: ${{ inputs.entry-workflows }}
+      checksums-file: ${{ inputs.checksums-file }}
+      files-to-verify: ${{ inputs.files-to-verify }}
+      signer-repo: ${{ inputs.signer-repo }}
+      signer-workflow: ${{ inputs.signer-workflow }}
+      runner-image: ${{ inputs.runner-image }}
       tooling-ref: ${{ inputs.tooling-ref }}
       egress-policy: ${{ inputs.egress-policy }}
       allowed-endpoints: ${{ inputs.allowed-endpoints }}

@@ -13,11 +13,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **npm**: `reusable-publish-npm.yml` is deprecated in favour of
+  `reusable-publish-npm-set.yml` and now forwards to it as a compatibility
+  shim: the legacy `published`, `version` and `package-name` outputs are
+  preserved, `tarball` is always empty, the set JSON is exposed as
+  `published-set`, and the `npm-token` secret is refused with an error
+  (trusted publishing only). Migration notes: the check name now defaults to
+  `Publish to npm (deprecated wrapper)` (pass `job-name: Publish to npm` to
+  keep a required status check), the publish job runs on `runner-image`
+  (default `ubuntu-24.04`) instead of `ubuntu-latest`, and a live publish
+  requires the forwarded `entry-workflows`, `checksums-file`, `signer-repo`
+  and `signer-workflow` inputs. Removal target: v0.72.0 (#965)
+
 ### Removed
 
 ### Fixed
 
 ### Security
+
+## [0.71.0] - 2026-09-14
+
+### Added
+
+- **release**: release-mode failure notifier for tag publish runs (#973) (4373254)
+
+### Changed
+
+- **deps**: lock file maintenance (#979) (70c4bb2)
+
+### Fixed
+
+- **deps**: update dependency lintro to 0.160.2 (patch) (#980) (39b4598)
+- **deps**: update lintro (#978) (a0192c7)
+- **deps**: update dependency lintro to 0.159.7 (patch) (#976) (aeb90ce)
 
 ## [0.70.1] - 2026-09-13
 
@@ -2328,7 +2356,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.71.0...HEAD
+[0.71.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.1...v0.71.0
 [0.70.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.0...v0.70.1
 [0.70.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.10...v0.70.0
 [0.69.10]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.69.9...v0.69.10

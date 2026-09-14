@@ -160,8 +160,6 @@ These reusables intentionally omit `runner-image`:
 | `reusable-scorecards.yml`            | Action-only wrapper                                    |
 | `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
 | `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
-| `reusable-publish-npm.yml`           | Deprecated wrapper → package-set reusable; OIDC only   |
-| `reusable-publish-npm-set.yml`       | Ordered npm package set; idempotent; pre/post verified |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->
@@ -740,6 +738,47 @@ fall back to a visible tracking key footer
 marker is retained for backward compatibility. Recurring failures add comments
 to the same open issue.
 
+### Tag publish failure reporting (release mode)
+
+Every workflow performing an irreversible publish from a tag MUST end with the
+release-mode notifier, `reusable-release-failure-notifier.yml`
+(`## Closes #964`). The branch-keyed reporting above is silent on tag runs:
+`GITHUB_REF_NAME` is the tag, so the branch gate never matches. The
+release-mode notifier bypasses the gate and deduplicates by tag instead. Wire
+one call with `needs` covering every publish job and `if: always()` (see
+`examples/publish-python-release.yml`); the job grants itself only
+`actions: read`, `contents: read`, and `issues: write` — publish jobs keep
+their least-privilege sets.
+
+<!-- markdownlint-disable MD013 -->
+
+| Input                  | Default                                    | Purpose                                                          |
+| ---------------------- | ------------------------------------------ | ---------------------------------------------------------------- |
+| `workflow-key`         | *(required)*                               | Stable key namespacing the dedup marker and issue title          |
+| `tag`                  | *(required)*                               | Tag whose publish is reported (usually `github.ref_name`)        |
+| `channels`             | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly      |
+| `max-reruns`           | `0`                                        | Opt-in; match the auto-rerun input only when it is wired         |
+| `signatures`           | *(empty)*                                  | Extra infra signatures; pass the auto-rerun reusable's value     |
+| `failure-issue-labels` | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped)    |
+
+<!-- markdownlint-enable MD013 -->
+
+Behavior: every channel `success`/`skipped` comments on and closes the tag's
+issue; a failure on an attempt within `max-reruns` whose failed-job logs match
+an infra signature (the same classifier as the auto-rerun reusable) stays
+quiet; otherwise it files or updates one issue titled
+`fix(release): tag publish failed: <tag> (<workflow-key>)` with tracking key
+`release-failure:<workflow-key>:<tag>` and a channel/result/job-link/probe
+table (a channel without a job URL links to the run). Suppression is opt-in:
+with the default `max-reruns: 0` every failure files, because a caller that
+has not wired `reusable-auto-rerun-on-infra-failure.yml` has nothing that
+would re-run. The log fetch behind the classification is bounded
+(`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`, as in the auto-rerun script) and an
+unclassifiable failure files with a `reason` that the issue summary states.
+The issue body names the recovery tier per the
+[release security policy](release-security-policy.md); a later successful
+attempt or recovery run closes it.
+
 ### Cargo auto-tag contract
 
 `reusable-release-auto-tag.yml` supports Rust monorepos that tag from
@@ -1066,27 +1105,41 @@ Includes `registry.npmjs.org:443`, Sigstore hosts, and
 order that callers must not reorder around (asserted by
 `tests/bats/integration/test_reusable_publish_npm_set.bats`):
 
-1. `verify-artifacts` — when `checksums-file` is set: sha256 plus `gh
-   attestation verify` against `signer-repo`/`signer-workflow`, before any
-   `npm pack`. Tampered, missing, unlisted, or unattested artifacts fail the
-   job with nothing published.
+1. `verify-artifacts` — required for live publishes, optional for dry-runs
+   (`checksums-file` set): for every package, the files `npm pack --dry-run`
+   reports (plus `files-to-verify`) get sha256 plus `gh attestation verify`
+   against `signer-repo`/`signer-workflow`, before the real `npm pack`. A
+   packed file the manifest does not list, and any tampered, missing, or
+   unattested artifact, fails the job with nothing published.
 2. `publish-set` — the only writer. Ordered (`order`, meta package last),
    idempotent on re-runs (`npm view` pre-check skip, `EPUBLISHCONFLICT`
    conflict-as-success, read-before-write dist-tag reconcile), bounded
    exponential backoff on transient Sigstore/5xx/429 errors only, auth
    failures never retried. Outputs `published` (JSON array of `{name,
-   version, status, integrity}`) and `dist-tag-drift`; dist-tag drift (an
+   version, status: published|skipped|dry-run, integrity}`) and
+   `dist-tag-drift`; dist-tag drift (an
    OIDC-scoped token cannot write `npm dist-tag`, npm/cli#8547) is deferred:
    remaining packages publish first, then the job fails.
 3. `verify-published` — read-only and last: per-package
    `dist.attestations` + `dist.integrity` required (bounded propagation
    retry), `npm audit signatures` on a scratch install of the meta package,
-   optional `smoke-command`.
+   optional `smoke-command`. Callers can opt out with
+   `post-publish-verify: false` (default `true`); not recommended for live
+   releases.
 
 npm trusted publishing validates the entry workflow file, so consumers must
-pass their top-level publish workflow via `entry-workflows` (empty disables
-the guard — not acceptable for live publishes) and keep their
-trusted-publisher registration pointed at that same file.
+pass their top-level publish workflow via `entry-workflows` (a live publish
+fails before publishing when it is empty; a dry-run only warns) and keep
+their trusted-publisher registration pointed at that same file. The live
+preconditions (hosted runner, `checksums-file`, `signer-repo`,
+`signer-workflow`, and `access: public` while `provenance` or
+`post-publish-verify` is on) are asserted by
+`scripts/ci/actions/npm/assert-live-publish-inputs.sh` before any download
+or pack. The access rule exists because npm issues automatic provenance only
+for public packages from public repositories and the post-publish step reads
+the registry unauthenticated (trusted publishing authenticates publish
+commands only): a restricted package would publish irreversibly and then
+always fail verification.
 
 ### Release recovery contract
 
@@ -1449,8 +1502,8 @@ are kept forever. See
 | `tooling-ref` | `""` | lgtm-ci git ref |
 | `runner-image` | `ubuntu-24.04` | Runner image label |
 
-Grant `contents: read` and `packages: write` on the caller job. Forward `secrets.token` with
-`packages:write` scope (or `secrets: inherit`).
+Grant `contents: read` and `packages: write` on the caller job. Forward
+`secrets.token` with `packages:write` scope (or `secrets: inherit`).
 
 ## Documentation site quality
 
