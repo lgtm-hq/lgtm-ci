@@ -13,14 +13,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
-- **npm**: `reusable-publish-npm.yml` removal deferred; not before 2026-10-15
-  (#965)
-
 ### Removed
 
 ### Fixed
 
 ### Security
+
+## [0.73.1] - 2026-09-14
+
+### Deprecated
+
+- **npm**: `reusable-publish-npm.yml` removal deferred; not before 2026-10-15
+  (#965)
+
+### Fixed
+
+- **npm**: make the deprecated wrapper's removal target date-based (#986) (ee3d72b)
 
 ## [0.73.0] - 2026-09-14
 
@@ -2388,7 +2396,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.1...HEAD
+[0.73.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.0...v0.73.1
 [0.73.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.72.0...v0.73.0
 [0.72.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.71.0...v0.72.0
 [0.71.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.1...v0.71.0
