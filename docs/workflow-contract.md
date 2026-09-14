@@ -758,7 +758,7 @@ their least-privilege sets.
 | `workflow-key`         | *(required)*                               | Stable key namespacing the dedup marker and issue title          |
 | `tag`                  | *(required)*                               | Tag whose publish is reported (usually `github.ref_name`)        |
 | `channels`             | `[]`                                       | JSON of publish-job results; `toJson(needs)` works directly      |
-| `max-reruns`           | `0`                                        | Opt-in: match the auto-rerun input when that reusable watches the run |
+| `max-reruns`           | `0`                                        | Opt-in; match the auto-rerun input only when it is wired         |
 | `signatures`           | *(empty)*                                  | Extra infra signatures; pass the auto-rerun reusable's value     |
 | `failure-issue-labels` | `bug,ci,release,automation,infrastructure` | Labels on auto-opened failure issues (missing labels skipped)    |
 
@@ -775,7 +775,8 @@ with the default `max-reruns: 0` every failure files, because a caller that
 has not wired `reusable-auto-rerun-on-infra-failure.yml` has nothing that
 would re-run. The log fetch behind the classification is bounded
 (`GH_CMD_TIMEOUT`, `LOG_FETCH_DEADLINE`, as in the auto-rerun script) and an
-unclassifiable failure files with a `reason` that the issue summary states. The issue body names the recovery tier per the
+unclassifiable failure files with a `reason` that the issue summary states.
+The issue body names the recovery tier per the
 [release security policy](release-security-policy.md); a later successful
 attempt or recovery run closes it.
 
@@ -1432,8 +1433,8 @@ are kept forever. See
 | `tooling-ref` | `""` | lgtm-ci git ref |
 | `runner-image` | `ubuntu-24.04` | Runner image label |
 
-Grant `contents: read` and `packages: write` on the caller job. Forward `secrets.token` with
-`packages:write` scope (or `secrets: inherit`).
+Grant `contents: read` and `packages: write` on the caller job. Forward
+`secrets.token` with `packages:write` scope (or `secrets: inherit`).
 
 ## Documentation site quality
 

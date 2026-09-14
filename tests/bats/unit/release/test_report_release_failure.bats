@@ -880,3 +880,52 @@ EOF
 	assert_success
 	assert_output --partial "Closed release failure issue #78"
 }
+
+@test "report-release-failure: notify_release_failure renders non-string channel fields instead of aborting" {
+	export WORKFLOW_KEY=publish-python-release
+	export RELEASE_TAG=v1.2.3
+	export GITHUB_REF_NAME=v1.2.3
+	mock_command_multi "gh" '
+		*issue*list*) echo "";;
+		*label*view*) exit 0;;
+		*issue*create*)
+			while [[ $# -gt 0 ]]; do
+				if [[ "$1" == "--body-file" && -n "${2:-}" ]]; then
+					cp "$2" "'"${BATS_TEST_TMPDIR}"'/issue-body.md"
+				fi
+				shift
+			done
+			echo "https://github.com/lgtm-hq/lgtm-ci/issues/67";;
+		*) exit 1;;
+	'
+	export CHANNELS_JSON='[{"name":"pypi","result":3,"url":{"x":1}},{"name":7,"result":"failure"}]'
+
+	run bash "$SCRIPT" notify_release_failure
+	assert_success
+	run grep -F '| pypi | 3 | [job]({"x":1}) | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+	run grep -F '| 7 | failure | [run](https://github.com/lgtm-hq/lgtm-ci/actions/runs/12345) | — |' \
+		"${BATS_TEST_TMPDIR}/issue-body.md"
+	assert_success
+}
+
+@test "report-release-failure: classify rejects a zero command timeout and deadline" {
+	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
+	export RUN_ATTEMPT=1
+	export MAX_RERUNS=3
+	export GH_CMD_TIMEOUT=0
+	export LOG_FETCH_DEADLINE=0
+	export LOG_FETCH_RETRY_DELAY=0
+	mock_command_multi "gh" '
+		*--log-failed*) echo "error: lost communication with the server";;
+		*) exit 1;;
+	'
+
+	# Zero would disable GNU timeout; the defaults apply and the fetch still
+	# runs bounded, so a matching signature is classified normally.
+	run bash "$SCRIPT" classify_release_failure
+	assert_success
+	assert_output --partial "GH_CMD_TIMEOUT '0' is not a positive integer; using 60"
+	assert_output --partial "LOG_FETCH_DEADLINE '0' is not a positive integer; using 180"
+	assert_output --partial "rerunning"
+}

@@ -536,9 +536,13 @@ channel_table_rows() {
 		echo "| *(unrecognized channel payload shape; expected an array of objects or toJson(needs))* | | | |"
 		return 0
 	fi
+	# Every field goes through tostring: a caller-built array may carry a
+	# number or object where a string is expected, and a jq type error here
+	# would abort the render and leave the release failure unfiled.
 	jq -r --arg run_url "$(run_url)" "${CHANNELS_NORMALIZE_JQ}"'
 		| .[]
-		| [(.name // "unknown"), (.result // "unknown"), (.url // ""), ((.probe // "") | tostring)]
+		| [((.name // "unknown") | tostring), ((.result // "unknown") | tostring),
+		   ((.url // "") | tostring), ((.probe // "") | tostring)]
 		| "| " + .[0] + " | " + .[1] + " | "
 		  + (if .[2] == "" then "[run](" + $run_url + ")" else "[job](" + .[2] + ")" end)
 		  + " | " + (if .[3] == "" then "—" else .[3] end) + " |"
@@ -697,7 +701,8 @@ channels_all_succeeded() {
 	local channels="$1"
 	printf '%s' "$channels" | jq -e "${CHANNELS_NORMALIZE_JQ}"'
 		| length > 0
-		and all(.[]; ((.result // "unknown") == "success" or (.result // "unknown") == "skipped"))
+		and all(.[]; (((.result // "unknown") | tostring) == "success"
+			or ((.result // "unknown") | tostring) == "skipped"))
 	' >/dev/null 2>&1
 }
 
@@ -715,7 +720,7 @@ channels_all_succeeded() {
 : "${LOG_FETCH_DEADLINE:=180}"
 : "${LOG_FETCH_RETRY_DELAY:=15}"
 
-_positive_int_or() {
+_nonnegative_int_or() {
 	local value="$1"
 	local fallback="$2"
 	local name="$3"
@@ -723,6 +728,20 @@ _positive_int_or() {
 		echo "$value"
 	else
 		log_warn "${name} '${value}' is not a non-negative integer; using ${fallback}"
+		echo "$fallback"
+	fi
+}
+
+# Zero is not a bound: GNU timeout treats 0 as "no timeout" and a zero
+# deadline would never retry, so the command and deadline knobs must be >= 1.
+_positive_int_or() {
+	local value="$1"
+	local fallback="$2"
+	local name="$3"
+	if [[ "$value" =~ ^[1-9][0-9]*$ ]]; then
+		echo "$value"
+	else
+		log_warn "${name} '${value}' is not a positive integer; using ${fallback}"
 		echo "$fallback"
 	fi
 }
@@ -757,7 +776,7 @@ fetch_infra_signature_logs() {
 	fi
 	cmd_timeout="$(_positive_int_or "$GH_CMD_TIMEOUT" 60 GH_CMD_TIMEOUT)"
 	deadline="$(_positive_int_or "$LOG_FETCH_DEADLINE" 180 LOG_FETCH_DEADLINE)"
-	retry_delay="$(_positive_int_or "$LOG_FETCH_RETRY_DELAY" 15 LOG_FETCH_RETRY_DELAY)"
+	retry_delay="$(_nonnegative_int_or "$LOG_FETCH_RETRY_DELAY" 15 LOG_FETCH_RETRY_DELAY)"
 	started=$SECONDS
 	while :; do
 		logs="$("$timeout_bin" --kill-after=10s "$cmd_timeout" \

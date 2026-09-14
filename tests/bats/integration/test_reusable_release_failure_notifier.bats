@@ -66,8 +66,14 @@ input_required_value() {
 		in_steps && /^      - name:/ { print; exit }
 	' "$WORKFLOW"
 	assert_output --partial "Refuse block egress"
-	run grep -F "if: inputs.egress-policy == 'block' && runner.os != 'Linux' && runner.environment != 'self-hosted'" "$WORKFLOW"
-	assert_success
+	run awk '
+		/Refuse block egress/ { in_step = 1; next }
+		in_step && /^      - name:/ { exit }
+		in_step { print }
+	' "$WORKFLOW"
+	assert_output --partial "inputs.egress-policy == 'block' &&"
+	assert_output --partial "runner.os != 'Linux' &&"
+	assert_output --partial "runner.environment != 'self-hosted'"
 }
 
 @test "reusable-release-failure-notifier: classifies then files or closes" {

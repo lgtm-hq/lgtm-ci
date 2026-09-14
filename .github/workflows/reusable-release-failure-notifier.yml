@@ -138,10 +138,14 @@ jobs:
       # GH_TOKEN and issues: write, so a block request that cannot be honored
       # fails here, before any tokenized step, instead of running unprotected.
       - name: Refuse block egress on runners that cannot enforce it
-        if: inputs.egress-policy == 'block' && runner.os != 'Linux' && runner.environment != 'self-hosted'
+        if: >-
+          inputs.egress-policy == 'block' &&
+          runner.os != 'Linux' &&
+          runner.environment != 'self-hosted'
         shell: bash
         run: |
-          echo "::error::egress-policy 'block' cannot be enforced on GitHub-hosted ${RUNNER_OS}; use a GitHub-hosted Linux runner-image, a self-hosted runner, or egress-policy 'audit'"
+          echo "::error::egress-policy 'block' cannot be enforced on GitHub-hosted ${RUNNER_OS};" \
+            "use a GitHub-hosted Linux runner-image, a self-hosted runner, or egress-policy 'audit'"
           exit 1
       - name: Harden runner
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
