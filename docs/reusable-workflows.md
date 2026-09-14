@@ -241,10 +241,11 @@ jobs:
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
-[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables,
-the deprecated `reusable-publish-npm.yml` wrapper, and the gem publish
-workflow do not expose `runner-image`; `reusable-publish-npm-set.yml` does
-(GitHub-hosted labels only, since provenance needs a hosted runner); see
+[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables
+and the gem publish workflow do not expose `runner-image`;
+`reusable-publish-npm-set.yml` and the deprecated `reusable-publish-npm.yml`
+wrapper (which forwards it) do, GitHub-hosted labels only, since npm
+provenance needs a hosted runner; see
 [workflow-contract.md](workflow-contract.md#runner-pinning).
 
 **Action-only reusables** (labeler, dependency review, semantic PR title,
@@ -1005,7 +1006,8 @@ The step order is the contract, asserted by the wiring test:
 3. **Verify published** (read-only, last): `npm view` per package requires
    `dist.attestations` and `dist.integrity` (bounded propagation retry);
    `npm audit signatures` in a scratch install of the meta package; optional
-   `smoke-command` in that install.
+   `smoke-command` in that install. `post-publish-verify: false` skips this
+   step; not recommended for live releases.
 
 ```yaml
 jobs:

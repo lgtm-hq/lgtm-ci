@@ -196,7 +196,7 @@ permissions:
 jobs:
   deprecation-notice:
     name: Deprecation notice
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 5
     permissions:
       contents: read

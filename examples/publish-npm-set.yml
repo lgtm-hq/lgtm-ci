@@ -46,7 +46,7 @@ jobs:
       - name: Stage packages from release assets
         run: |
           echo "Build/stage one subdirectory per package under ./npm-dist"
-          echo "(platform packages first in `order`, meta package last)"
+          echo '(platform packages first in `order`, meta package last)'
           echo "and the build's SHA256SUMS manifest at ./npm-dist/SHA256SUMS"
       # Jobs have isolated filesystems: hand the staged set to the reusable as
       # a workflow artifact (it downloads `artifact-name` into `packages-dir`).

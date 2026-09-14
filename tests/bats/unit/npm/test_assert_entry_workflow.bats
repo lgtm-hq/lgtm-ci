@@ -107,6 +107,21 @@ teardown() {
 	assert_output --partial "allowlisted"
 }
 
+@test "assert-entry-workflow: falls back to GITHUB_WORKFLOW_REF when no override is set" {
+	# The production shape: only the runner-provided variable exists.
+	export ALLOWED_ENTRY_WORKFLOWS=".github/workflows/publish-npm-set.yml"
+	unset ENTRY_WORKFLOW_REF
+	export GITHUB_WORKFLOW_REF="lgtm-hq/lgtm-ci/.github/workflows/publish-npm-set.yml@refs/tags/v1.2.3"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Entry workflow '.github/workflows/publish-npm-set.yml' is allowlisted"
+
+	export GITHUB_WORKFLOW_REF="lgtm-hq/lgtm-ci/.github/workflows/other.yml@refs/tags/v1.2.3"
+	run bash "$SCRIPT"
+	assert_failure
+}
+
 @test "assert-entry-workflow: fails when the entry ref cannot be determined" {
 	export ALLOWED_ENTRY_WORKFLOWS=".github/workflows/publish-npm-set.yml"
 	unset ENTRY_WORKFLOW_REF

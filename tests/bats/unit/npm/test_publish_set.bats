@@ -52,13 +52,15 @@ NPMMOCK
 	fi
 }
 
+# Mirrors npm's 404 shape: the E404 text must arrive on stderr for the
+# script's redirect-order-sensitive capture. Exported so the generated mock
+# (a separate bash process) can call it; the E404 test below proves it does.
 not_published_reply() {
-	# Mirrors npm's 404 shape: the E404 text must arrive on stderr for the
-	# script's redirect-order-sensitive capture.
 	echo "npm error code E404" >&2
 	echo "npm error 404 Not Found - GET https://registry.npmjs.org/$1" >&2
 	exit 1
 }
+export -f not_published_reply
 
 @test "publish-set: passes bash syntax check" {
 	run bash -n "$SCRIPT"
@@ -196,6 +198,50 @@ not_published_reply() {
 	assert_success
 	run grep -c "publish --access" "$CALLS"
 	assert_output 2
+}
+
+@test "publish-set: E404 pre-check is classified as absent, not as a lookup failure" {
+	export ORDER='["platform-a"]'
+	export LIVE=1
+	make_npm_mock '
+			*@lgtm-hq/pkg-platform-a@1.2.3*version*) not_published_reply @lgtm-hq/pkg-platform-a;;
+			*publish*) exit 0;;
+			*view*dist.integrity*) echo sha512-new;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	# A working E404 reply takes the silent "absent → publish" path; the
+	# "could not verify" warning would mean the mock function was not found.
+	refute_output --partial "could not verify"
+	refute_output --partial "command not found"
+	run grep -c "publish --access" "$CALLS"
+	assert_output 1
+}
+
+@test "publish-set: unclassified dist-tag write failure records drift and fails after the loop" {
+	local output_file="${BATS_TEST_TMPDIR}/github-output"
+	: >"$output_file"
+	export GITHUB_OUTPUT="$output_file"
+	export ORDER='["platform-a", "meta"]'
+	export LIVE=1
+	make_npm_mock '
+			*@lgtm-hq/pkg-platform-a@1.2.3*version*) exit 0;;
+			*dist-tag\ ls*platform-a*) echo "latest: 1.0.0";;
+			*dist-tag\ add*) echo "npm error something entirely unexpected" >&2; exit 1;;
+			*publish*) exit 0;;
+			*view*) exit 1;;
+	'
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "unclassified error"
+	assert_output --partial "dist-tag drift remains"
+	run grep -F "dist_tag_drift=true" "$output_file"
+	assert_success
+	# The meta package still published before the deferred failure.
+	run grep -c "publish --access" "$CALLS"
+	assert_output 1
 }
 
 @test "publish-set: non-retryable auth failure stops without retrying" {

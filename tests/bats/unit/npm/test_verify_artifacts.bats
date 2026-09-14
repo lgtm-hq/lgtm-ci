@@ -7,6 +7,15 @@ load "../../../helpers/mocks"
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/npm/verify-artifacts.sh"
 
+# Same preference order as the script: GNU coreutils first, shasum fallback.
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	else
+		shasum -a 256 "$1" | awk '{print $1}'
+	fi
+}
+
 setup() {
 	setup_temp_dir
 	save_path
@@ -18,8 +27,8 @@ setup() {
 	echo "meta-json" >"$PACKAGES_DIR/pkg-a/package.json"
 	# Manifest over the real bytes, like the build job would ship it.
 	{
-		h1="$(shasum -a 256 "$PACKAGES_DIR/pkg-a/bin/tool" | awk '{print $1}')"
-		h2="$(shasum -a 256 "$PACKAGES_DIR/pkg-a/package.json" | awk '{print $1}')"
+		h1="$(sha256_of "$PACKAGES_DIR/pkg-a/bin/tool")"
+		h2="$(sha256_of "$PACKAGES_DIR/pkg-a/package.json")"
 		printf '%s  pkg-a/bin/tool\n' "$h1"
 		printf '%s  pkg-a/package.json\n' "$h2"
 	} >"${BATS_TEST_TMPDIR}/SHA256SUMS"
@@ -75,7 +84,7 @@ attest_mock() {
 
 @test "verify-artifacts: fails when a manifest entry does not exist" {
 	echo "gone" >"$PACKAGES_DIR/pkg-a/extra"
-	h="$(shasum -a 256 "$PACKAGES_DIR/pkg-a/extra" | awk '{print $1}')"
+	h="$(sha256_of "$PACKAGES_DIR/pkg-a/extra")"
 	printf '%s  pkg-a/extra\n' "$h" >>"$CHECKSUMS_FILE"
 	rm "$PACKAGES_DIR/pkg-a/extra"
 	attest_mock 0
@@ -169,7 +178,7 @@ attest_mock() {
 	# a near-miss entry (dot as wildcard) must not satisfy it.
 	mkdir -p "$PACKAGES_DIR/pkg+c/bin"
 	echo "payload-c" >"$PACKAGES_DIR/pkg+c/bin/tool(1)"
-	h="$(shasum -a 256 "$PACKAGES_DIR/pkg+c/bin/tool(1)" | awk '{print $1}')"
+	h="$(sha256_of "$PACKAGES_DIR/pkg+c/bin/tool(1)")"
 	printf '%s  pkg+c/bin/tool(1)\n' "$h" >>"$CHECKSUMS_FILE"
 	export FILES='["pkg+c/bin/tool(1)"]'
 	attest_mock 0
@@ -196,7 +205,7 @@ attest_mock() {
 @test "verify-artifacts: globs expand across packages" {
 	mkdir -p "$PACKAGES_DIR/pkg-b/bin"
 	echo "payload-b" >"$PACKAGES_DIR/pkg-b/bin/tool"
-	h="$(shasum -a 256 "$PACKAGES_DIR/pkg-b/bin/tool" | awk '{print $1}')"
+	h="$(sha256_of "$PACKAGES_DIR/pkg-b/bin/tool")"
 	printf '%s  pkg-b/bin/tool\n' "$h" >>"$CHECKSUMS_FILE"
 	export FILES='["*/bin/tool"]'
 	attest_mock 0

@@ -46,6 +46,16 @@ setup() {
 	assert_output --partial "signer-workflow is empty"
 }
 
+@test "assert-live-publish-inputs: live run without signer-workflow alone names only that input" {
+	export LIVE=1
+	export SIGNER_WORKFLOW=""
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "signer-workflow is empty"
+	refute_output --partial "signer-repo is empty"
+	refute_output --partial "checksums-file is empty"
+}
+
 @test "assert-live-publish-inputs: live run refuses a self-hosted runner" {
 	export LIVE=1
 	export RUNNER_ENVIRONMENT=self-hosted
@@ -63,5 +73,13 @@ setup() {
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "not enforced"
-	assert_output --partial "::notice::checksums-file is empty"
+	assert_output --partial "::notice::checksums-file signer-repo empty"
+}
+
+@test "assert-live-publish-inputs: dry-run notices a missing signer even when the manifest is set" {
+	export LIVE=0
+	export SIGNER_REPO=""
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::notice::signer-repo empty"
 }

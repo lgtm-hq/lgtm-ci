@@ -160,7 +160,6 @@ These reusables intentionally omit `runner-image`:
 | `reusable-scorecards.yml`            | Action-only wrapper                                    |
 | `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
 | `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
-| `reusable-publish-npm.yml`           | Deprecated wrapper → package-set reusable; OIDC only   |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->
@@ -1081,7 +1080,9 @@ order that callers must not reorder around (asserted by
 3. `verify-published` — read-only and last: per-package
    `dist.attestations` + `dist.integrity` required (bounded propagation
    retry), `npm audit signatures` on a scratch install of the meta package,
-   optional `smoke-command`.
+   optional `smoke-command`. Callers can opt out with
+   `post-publish-verify: false` (default `true`); not recommended for live
+   releases.
 
 npm trusted publishing validates the entry workflow file, so consumers must
 pass their top-level publish workflow via `entry-workflows` (a live publish

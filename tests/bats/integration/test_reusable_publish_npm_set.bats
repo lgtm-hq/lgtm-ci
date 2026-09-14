@@ -216,7 +216,7 @@ wrapper_output_value() {
 @test "reusable-publish-npm: forwards the live-publish and runner inputs to the set workflow" {
 	run awk '
 		/^  publish:$/ { in_job = 1; next }
-		in_job && /^  [a-z-]+:$/ { in_job = 0 }
+		in_job && /^  [a-z-]+:$/ { in_job = 0; in_with = 0 }
 		in_job && /^    with:$/ { in_with = 1; next }
 		in_with && /^      [a-z-]+: / { print }
 	' "$WRAPPER"

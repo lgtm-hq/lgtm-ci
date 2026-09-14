@@ -256,7 +256,12 @@ reconcile_dist_tag() {
 			fi
 			continue
 		fi
+		# Unclassified failure: neither auth nor transient. Still drift — the
+		# tag is not where it should be — so record it, or the callers'
+		# `|| true` would let the run go green.
+		_record_dist_tag_drift "$dt_name" "$dt_version" "${dt_actual:-unknown}"
 		echo "ERROR: could not reconcile dist-tag '$DIST_TAG' for $dt_name@$dt_version (exit $dt_rc)." >&2
+		echo "::warning::Dist-tag drift for $dt_name: '$DIST_TAG' should point at $dt_version but reads '${dt_actual:-unknown}' on the registry, and the reconcile write failed with an unclassified error (see above). The remaining packages are still published; the run fails after the loop."
 		return 1
 	done
 }

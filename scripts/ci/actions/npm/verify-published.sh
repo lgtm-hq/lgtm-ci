@@ -27,7 +27,6 @@
 # Environment:
 #   PACKAGES_DIR   Directory containing one subdirectory per package (required)
 #   ORDER          Same order input publish-set.sh took; meta package last (required)
-#   DIST_TAG       Dist-tag used by the publish (default latest)
 #   DRY_RUN        1 when the publish was a dry-run (default 0)
 #   SMOKE          Optional command to run inside the scratch install
 #   ATTEMPTS       Propagation lookup attempts (default 5)
@@ -39,7 +38,6 @@ set -euo pipefail
 : "${PACKAGES_DIR:?PACKAGES_DIR is required}"
 : "${ORDER:?ORDER is required}"
 PACKAGES_DIR="${PACKAGES_DIR%/}"
-DIST_TAG="${DIST_TAG-latest}"
 DRY_RUN="${DRY_RUN:-0}"
 SMOKE="${SMOKE:-}"
 ATTEMPTS="${ATTEMPTS:-5}"
@@ -128,9 +126,12 @@ audit_meta_signatures() {
 		FAILURES+=("$spec scratch install from the registry failed")
 		return 0
 	}
-	if (cd "$scratch" && "$NPM" audit signatures >/dev/null 2>&1); then
+	# Quiet on success; on failure the audit's own report is the diagnostic.
+	local audit_out
+	if audit_out="$(cd "$scratch" && "$NPM" audit signatures 2>&1)"; then
 		echo "    npm audit signatures passed for $spec"
 	else
+		printf '%s\n' "$audit_out" >&2
 		echo "ERROR: npm audit signatures failed for $spec" >&2
 		FAILURES+=("$spec npm audit signatures failed")
 	fi

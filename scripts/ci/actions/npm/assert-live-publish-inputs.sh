@@ -28,8 +28,12 @@ SIGNER_WORKFLOW="${SIGNER_WORKFLOW:-}"
 
 if [[ "$LIVE" != "1" ]]; then
 	echo "Dry-run: live-publish preconditions (hosted runner, checksums-file, signer-repo, signer-workflow) are not enforced."
-	if [[ -z "$CHECKSUMS_FILE" ]]; then
-		echo "::notice::checksums-file is empty; a live publish with these inputs would be refused. Set checksums-file, signer-repo and signer-workflow before switching dry-run off."
+	missing=()
+	[[ -n "$CHECKSUMS_FILE" ]] || missing+=("checksums-file")
+	[[ -n "$SIGNER_REPO" ]] || missing+=("signer-repo")
+	[[ -n "$SIGNER_WORKFLOW" ]] || missing+=("signer-workflow")
+	if ((${#missing[@]} > 0)); then
+		echo "::notice::${missing[*]} empty; a live publish with these inputs would be refused. Set checksums-file, signer-repo and signer-workflow before switching dry-run off."
 	fi
 	exit 0
 fi
