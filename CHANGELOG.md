@@ -13,6 +13,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **npm**: `reusable-publish-npm.yml` removal deferred; not before 2026-10-15
+  (#965)
+
 ### Removed
 
 ### Fixed
