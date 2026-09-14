@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.73.2] - 2026-09-14
+
+### Fixed
+
+- **python**: accept PEP 440 prerelease versions in the Python dist validator (#988)
+  (b7cedb1)
+
 ## [0.73.1] - 2026-09-14
 
 ### Deprecated
@@ -2396,7 +2403,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.2...HEAD
+[0.73.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.1...v0.73.2
 [0.73.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.0...v0.73.1
 [0.73.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.72.0...v0.73.0
 [0.72.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.71.0...v0.72.0
