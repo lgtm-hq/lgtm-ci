@@ -538,11 +538,12 @@ channel_table_rows() {
 	fi
 	# Every field goes through tostring: a caller-built array may carry a
 	# number or object where a string is expected, and a jq type error here
-	# would abort the render and leave the release failure unfiled.
+	# would abort the render and leave the release failure unfiled. A url
+	# that is not a string cannot be linked, so it falls back to the run link.
 	jq -r --arg run_url "$(run_url)" "${CHANNELS_NORMALIZE_JQ}"'
 		| .[]
 		| [((.name // "unknown") | tostring), ((.result // "unknown") | tostring),
-		   ((.url // "") | tostring), ((.probe // "") | tostring)]
+		   (.url | if type == "string" then . else "" end), ((.probe // "") | tostring)]
 		| "| " + .[0] + " | " + .[1] + " | "
 		  + (if .[2] == "" then "[run](" + $run_url + ")" else "[job](" + .[2] + ")" end)
 		  + " | " + (if .[3] == "" then "—" else .[3] end) + " |"

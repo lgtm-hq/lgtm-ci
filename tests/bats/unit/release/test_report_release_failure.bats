@@ -792,8 +792,10 @@ EOF
 	export CHANNELS_JSON='{"npm":{"result":"failure"}}'
 	export RUN_ATTEMPT=1
 	export MAX_RERUNS=3
+	# Real wall clock, kept to about one second: the loop stops once
+	# elapsed + retry delay + command timeout would exceed the deadline.
 	export GH_CMD_TIMEOUT=1
-	export LOG_FETCH_DEADLINE=4
+	export LOG_FETCH_DEADLINE=2
 	export LOG_FETCH_RETRY_DELAY=0
 	local output_file="${BATS_TEST_TMPDIR}/github-output"
 	export GITHUB_OUTPUT="$output_file"
@@ -902,7 +904,9 @@ EOF
 
 	run bash "$SCRIPT" notify_release_failure
 	assert_success
-	run grep -F '| pypi | 3 | [job]({"x":1}) | — |' "${BATS_TEST_TMPDIR}/issue-body.md"
+	# A non-string url cannot be a link: it falls back to the run link.
+	run grep -F '| pypi | 3 | [run](https://github.com/lgtm-hq/lgtm-ci/actions/runs/12345) | — |' \
+		"${BATS_TEST_TMPDIR}/issue-body.md"
 	assert_success
 	run grep -F '| 7 | failure | [run](https://github.com/lgtm-hq/lgtm-ci/actions/runs/12345) | — |' \
 		"${BATS_TEST_TMPDIR}/issue-body.md"
