@@ -27,12 +27,23 @@ teardown() {
 	assert_success
 }
 
-@test "assert-entry-workflow: empty allowlist skips with a warning" {
+@test "assert-entry-workflow: empty allowlist skips with a warning on a dry-run" {
 	unset ALLOWED_ENTRY_WORKFLOWS
+	export LIVE=0
 
 	run bash "$SCRIPT"
 	assert_success
-	assert_output --partial "skipping the npm entry-workflow guard"
+	assert_output --partial "skipping the npm entry-workflow guard for this dry-run"
+}
+
+@test "assert-entry-workflow: empty allowlist fails closed on a live publish" {
+	unset ALLOWED_ENTRY_WORKFLOWS
+	export LIVE=1
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "live npm publish requires the 'entry-workflows' input"
+	assert_output --partial "Nothing was published"
 }
 
 @test "assert-entry-workflow: allows the allowlisted entry workflow" {
@@ -86,6 +97,14 @@ teardown() {
 
 	run bash "$SCRIPT"
 	assert_success
+}
+
+@test "assert-entry-workflow: supports a newline-separated allowlist" {
+	export ALLOWED_ENTRY_WORKFLOWS=$'.github/workflows/ci.yml\n.github/workflows/publish-npm-set.yml'
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "allowlisted"
 }
 
 @test "assert-entry-workflow: fails when the entry ref cannot be determined" {

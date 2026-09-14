@@ -16,7 +16,11 @@
 #
 # Environment:
 #   PACKAGES_DIR      Directory containing one subdirectory per package (required)
-#   CHECKSUMS_FILE    Path to the SHA256SUMS manifest (required)
+#   CHECKSUMS_FILE    Path to the SHA256SUMS manifest (required), relative
+#                     to the workspace (e.g. npm-dist/SHA256SUMS); a path
+#                     relative to PACKAGES_DIR is accepted as a fallback.
+#                     The entries INSIDE the manifest are relative to
+#                     PACKAGES_DIR.
 #   FILES             JSON array of glob patterns relative to PACKAGES_DIR,
 #                     e.g. ["pkg-linux-x64/bin/tool","meta/package.json"].
 #                     Empty array (the default): verify every file the
@@ -50,8 +54,14 @@ FILES="${FILES:-[]}"
 PACKAGES_DIR="${PACKAGES_DIR%/}"
 GH="${GH_CMD:-gh}"
 
+# The manifest usually ships inside the staged set (artifact-name lands it in
+# PACKAGES_DIR), so accept a PACKAGES_DIR-relative path when the
+# workspace-relative one does not exist.
+if [[ ! -f "$CHECKSUMS_FILE" && -f "$PACKAGES_DIR/$CHECKSUMS_FILE" ]]; then
+	CHECKSUMS_FILE="$PACKAGES_DIR/$CHECKSUMS_FILE"
+fi
 if [[ ! -f "$CHECKSUMS_FILE" ]]; then
-	echo "ERROR: checksums manifest '$CHECKSUMS_FILE' not found" >&2
+	echo "ERROR: checksums manifest '$CHECKSUMS_FILE' not found (looked in the workspace and under $PACKAGES_DIR)" >&2
 	exit 1
 fi
 if ! printf '%s' "$FILES" | jq -e 'type == "array"' >/dev/null 2>&1; then
@@ -103,9 +113,10 @@ failures=0
 for rel in "${TARGETS[@]}"; do
 	file="$PACKAGES_DIR/$rel"
 	echo "==> Verifying $rel"
-	# `|| true` inside the substitution: a no-entry grep is the handled case,
-	# and pipefail would otherwise kill the script before the error is printed.
-	expected="$(grep -E "[[:space:]]${rel//./\\.}\$" "$CHECKSUMS_FILE" | awk '{print $1}' | tail -1 || true)"
+	# Exact string match on the path (no regex: package paths may contain
+	# +, [, ] and the like); the same "$1 is the hash, the rest is the path"
+	# split as the existence check above. Last entry wins on duplicates.
+	expected="$(awk -v p="$rel" '{ h = $1; $1 = ""; sub(/^[[:space:]]+/, ""); if ($0 == p) print h }' "$CHECKSUMS_FILE" | tail -1)"
 	if [[ -z "$expected" ]]; then
 		echo "ERROR: no checksums-manifest entry for '$rel'" >&2
 		failures=$((failures + 1))

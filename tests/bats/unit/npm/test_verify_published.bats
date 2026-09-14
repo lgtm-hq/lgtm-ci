@@ -2,8 +2,8 @@
 # SPDX-License-Identifier: MIT
 # Purpose: Unit tests for scripts/ci/actions/npm/verify-published.sh (#965)
 #
-# npm is mocked per test. The pack branch of every "good registry" mock
-# creates the tarball the scratch install step looks for.
+# npm is mocked per test. The audit installs the exact published spec from
+# the (mocked) registry, so the install branch must match name@version.
 
 load "../../../helpers/common"
 load "../../../helpers/mocks"
@@ -48,19 +48,13 @@ make_npm_mock_from() {
 	fi
 }
 
-# A registry where the publish succeeded and propagated. PACK and the
-# attestation payload are what the script's contract needs.
+# A registry where the publish succeeded and propagated: the attestation
+# payload and a registry install of the exact spec are what the contract needs.
 write_good_mock() {
 	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
 	*view*dist.attestations*) echo '{"dist.attestations":"https://registry.npmjs.org/-/npm/v1/attestations/","dist.integrity":"sha512-abc"}';;
-	*--pack-destination*)
-		for a in "$@"; do
-			case "$a" in /*) pack_dir="$a";; esac
-		done
-		touch "$pack_dir/@lgtm-hq__pkg-1.2.3.tgz"
-		exit 0;;
 	*audit*signatures*) exit 0;;
-	*install*) exit 0;;
+	*install*@lgtm-hq/pkg@1.2.3*) exit 0;;
 BODY
 	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
 }
@@ -91,18 +85,49 @@ BODY
 	assert_output --partial "Post-publish verification passed"
 	run grep -c "audit signatures" "$CALLS"
 	assert_output 1
+	# The audited package is the exact published spec installed from the
+	# registry, never a local re-pack of the staged directory.
+	run grep -c "install .*@lgtm-hq/pkg@1.2.3" "$CALLS"
+	assert_output 1
+	run grep -c "] pack" "$CALLS"
+	assert_output 0
+}
+
+@test "verify-published: scratch install from the registry failing is recorded and fails the run" {
+	export ORDER='["meta"]'
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
+	*view*dist.attestations*) echo '{"dist.attestations":"x","dist.integrity":"sha512-abc"}';;
+	*install*@lgtm-hq/pkg@1.2.3*) echo "npm error E404" >&2; exit 1;;
+	*audit*signatures*) echo "unexpected audit after a failed install" >&2; exit 99;;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "scratch install of @lgtm-hq/pkg@1.2.3 from the registry failed"
+	assert_output --partial "post-publish verification failed"
+	run grep -c "audit signatures" "$CALLS"
+	assert_output 0
+}
+
+@test "verify-published: npm audit signatures failure is recorded and fails the run" {
+	export ORDER='["meta"]'
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
+	*view*dist.attestations*) echo '{"dist.attestations":"x","dist.integrity":"sha512-abc"}';;
+	*install*@lgtm-hq/pkg@1.2.3*) exit 0;;
+	*audit*signatures*) echo "1 package has an invalid registry signature" >&2; exit 1;;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "npm audit signatures failed for @lgtm-hq/pkg@1.2.3"
 }
 
 @test "verify-published: fails a package missing dist.attestations" {
 	export ORDER='["meta"]'
 	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
 	*view*dist.attestations*) echo '{"dist.integrity":"sha512-abc"}';;
-	*--pack-destination*)
-		for a in "$@"; do
-			case "$a" in /*) pack_dir="$a";; esac
-		done
-		touch "$pack_dir/@lgtm-hq__pkg-1.2.3.tgz"
-		exit 0;;
 	*audit*signatures*) exit 0;;
 	*install*) exit 0;;
 BODY
@@ -125,12 +150,6 @@ BODY
 		touch "${CALLS}.seen"
 		echo "npm error 404" >&2
 		exit 1;;
-	*--pack-destination*)
-		for a in "\$@"; do
-			case "\$a" in /*) pack_dir="\$a";; esac
-		done
-		touch "\$pack_dir/@lgtm-hq__pkg-1.2.3.tgz"
-		exit 0;;
 	*audit*signatures*) exit 0;;
 	*install*) exit 0;;
 BODY
@@ -154,14 +173,16 @@ BODY
 	assert_output --partial "not visible on the registry"
 }
 
-@test "verify-published: smoke command failure fails the run" {
+@test "verify-published: smoke command failure fails the run and keeps its output" {
 	export ORDER='["meta"]'
-	export SMOKE="false"
+	export SMOKE="echo smoke-diagnostic-line; false"
 	write_good_mock
 
 	run bash "$SCRIPT"
 	assert_failure
 	assert_output --partial "smoke command failed"
+	# The smoke command's own output is the diagnostic; it must not be lost.
+	assert_output --partial "smoke-diagnostic-line"
 }
 
 @test "verify-published: checks every package in order, meta last" {
@@ -196,12 +217,6 @@ BODY
 		touch "${CALLS}.seen"
 		echo '{"dist.integrity":"sha512-abc"}'
 		exit 0;;
-	*--pack-destination*)
-		for a in "\$@"; do
-			case "\$a" in /*) pack_dir="\$a";; esac
-		done
-		touch "\$pack_dir/@lgtm-hq__pkg-1.2.3.tgz"
-		exit 0;;
 	*audit*signatures*) exit 0;;
 	*install*) exit 0;;
 BODY
@@ -219,12 +234,6 @@ BODY
 	export ATTEMPTS=3
 	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
 	*view*dist.attestations*) echo '{"dist.integrity":"sha512-abc"}';;
-	*--pack-destination*)
-		for a in "$@"; do
-			case "$a" in /*) pack_dir="$a";; esac
-		done
-		touch "$pack_dir/@lgtm-hq__pkg-1.2.3.tgz"
-		exit 0;;
 	*audit*signatures*) exit 0;;
 	*install*) exit 0;;
 BODY

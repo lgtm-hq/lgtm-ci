@@ -21,10 +21,15 @@ name: Reusable npm Package-Set Publishing
 # valid. Name the entry file via the `entry-workflows` input so the guard can
 # enforce it.
 #
-# The caller job supplies the npm environment (reusables cannot set
-# `environment`); npm trusted publishing needs OIDC only — no
+# A job that calls a reusable (`uses:`) cannot declare `environment`, and
+# this reusable's job declares none, so register the npm trusted publisher
+# WITHOUT an environment name. npm trusted publishing needs OIDC only — no
 # NODE_AUTH_TOKEN. Do not self-upgrade npm in-place (`npm install -g npm`
 # corrupts the toolcache and breaks --provenance).
+#
+# Live publishes fail closed before anything is downloaded or packed unless
+# entry-workflows, checksums-file, signer-repo and signer-workflow are set
+# and the runner is GitHub-hosted; dry-runs stay permissive.
 
 "on":
   workflow_call:
@@ -48,7 +53,11 @@ name: Reusable npm Package-Set Publishing
         type: string
         default: latest
       dry-run:
-        description: Pack only, do not publish; skips registry verification
+        description: >-
+          Pack only, do not publish; skips registry verification. Defaults to
+          true so a caller must opt in to writing to the registry; a live
+          publish additionally requires entry-workflows, checksums-file,
+          signer-repo and signer-workflow.
         required: false
         type: boolean
         default: true
@@ -80,18 +89,21 @@ name: Reusable npm Package-Set Publishing
       entry-workflows:
         description: >-
           Allowlisted consumer entry workflow path(s) for npm trusted
-          publishing, e.g. .github/workflows/publish-npm.yml. Empty disables
-          the guard (not recommended for live publishes).
+          publishing, e.g. .github/workflows/publish-npm.yml. Required for a
+          live publish (the job fails before publishing when empty); a
+          dry-run only warns.
         required: false
         type: string
         default: ""
       checksums-file:
         description: >-
-          SHA256SUMS manifest for pre-publish artifact verification (paths
-          relative to packages-dir). Requires signer-repo and
-          signer-workflow; the verify step fails closed when either is
-          empty. Empty disables verification, which the release security
-          policy forbids for live publishes.
+          SHA256SUMS manifest for pre-publish artifact verification. The
+          path is relative to the workspace (e.g. npm-dist/SHA256SUMS; a
+          packages-dir-relative path is accepted as a fallback); the entries
+          inside the manifest are relative to packages-dir. Requires
+          signer-repo and signer-workflow. Required for a live publish (the
+          job fails before publishing when empty); a dry-run may leave it
+          empty to skip verification.
         required: false
         type: string
         default: ""
@@ -106,7 +118,8 @@ name: Reusable npm Package-Set Publishing
       signer-repo:
         description: >-
           Repository the artifact attestations must come from (e.g.
-          owner/repo). Required when checksums-file is set.
+          owner/repo). Required for a live publish and whenever
+          checksums-file is set.
         required: false
         type: string
         default: ""
@@ -115,8 +128,8 @@ name: Reusable npm Package-Set Publishing
           Workflow the artifact attestations must come from: a path inside
           signer-repo (e.g. .github/workflows/build.yml, qualified with
           signer-repo for gh) or a fully qualified
-          owner/repo/.github/workflows/build.yml. Required when
-          checksums-file is set.
+          owner/repo/.github/workflows/build.yml. Required for a live
+          publish and whenever checksums-file is set.
         required: false
         type: string
         default: ""
@@ -190,7 +203,8 @@ name: Reusable npm Package-Set Publishing
       runner-image:
         description: >-
           GitHub-hosted runner image label. Must stay GitHub-hosted: npm
-          provenance attestation is not issued on self-hosted runners.
+          trusted publishing and provenance are not available on self-hosted
+          runners, and a live publish refuses to run on one.
         required: false
         type: string
         default: ubuntu-24.04
@@ -283,8 +297,21 @@ jobs:
         shell: bash
         env:
           ALLOWED_ENTRY_WORKFLOWS: ${{ inputs.entry-workflows }}
+          LIVE: ${{ inputs.dry-run == false && '1' || '0' }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/assert-entry-workflow.sh
+      # Live publishes fail closed here: hosted runner, checksums manifest and
+      # signer inputs are mandatory before anything is downloaded or packed.
+      - name: Assert live-publish preconditions
+        shell: bash
+        env:
+          LIVE: ${{ inputs.dry-run == false && '1' || '0' }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CHECKSUMS_FILE: ${{ inputs.checksums-file }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/assert-live-publish-inputs.sh
       # Jobs have isolated filesystems: a package set staged by another job
       # arrives as a workflow artifact and lands in packages-dir here.
       - name: Download staged package set

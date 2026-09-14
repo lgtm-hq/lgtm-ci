@@ -44,7 +44,7 @@
 #   MAX_DELAY          Backoff ceiling seconds (default 60)
 #   GITHUB_OUTPUT      Workflow output file: published=<json>, dist_tag_drift=<bool>
 #   GITHUB_STEP_SUMMARY  Drift lines appended when set
-#   GH_CMD             npm binary name (overridable in tests; default npm)
+#   NPM_CMD            npm binary name (overridable in tests; default npm)
 
 set -euo pipefail
 
@@ -58,7 +58,7 @@ ACCESS="${ACCESS:-public}"
 MAX_ATTEMPTS="${MAX_ATTEMPTS:-3}"
 RETRY_DELAY="${RETRY_DELAY:-5}"
 MAX_DELAY="${MAX_DELAY:-60}"
-NPM="${GH_CMD:-npm}"
+NPM="${NPM_CMD:-npm}"
 
 if [[ -z "$DIST_TAG" ]]; then
 	echo "ERROR: DIST_TAG must be non-empty (use 'latest' for normal releases)" >&2
@@ -323,14 +323,6 @@ publish_one() {
 	done
 }
 
-publish_flags_setup() {
-	if [[ "$PROVENANCE" != "0" ]]; then
-		provenance_flag="--provenance"
-	else
-		provenance_flag=""
-	fi
-}
-
 # Build the result entry for one package and remember it for the output.
 finish_package() {
 	local pkg="$1"
@@ -354,7 +346,6 @@ finish_package() {
 	RESULT_JSON+=("$(printf '{"name":"%s","version":"%s","status":"%s","integrity":%s}' "$name" "$version" "$status" "$integrity_json")")
 }
 
-publish_flags_setup
 if [[ "$PROVENANCE" != "0" ]]; then
 	provenance_flag="--provenance"
 else

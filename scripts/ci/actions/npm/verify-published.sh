@@ -13,9 +13,13 @@
 #   - Bounded retry for registry propagation: a fresh publish can take a few
 #     seconds to become visible through `npm view`.
 # For the meta package (last in ORDER):
-#   - `npm audit signatures` in a scratch install of the packed tarball.
+#   - `npm install <name>@<version>` from the REGISTRY into a scratch
+#     directory, then `npm audit signatures` there. The audit verifies the
+#     registry's signatures and attestations for registry-resolved packages,
+#     so it must run against the published tarball, never a local re-pack.
 # Optional:
-#   - SMOKE command run in the scratch install directory (host platform).
+#   - SMOKE command run in the scratch install directory (host platform);
+#     its output is shown so a failure is diagnosable from the log.
 #
 # Dry-runs never touched the registry, so with DRY_RUN=1 this script only
 # reports what it would have checked and exits 0.
@@ -28,7 +32,7 @@
 #   SMOKE          Optional command to run inside the scratch install
 #   ATTEMPTS       Propagation lookup attempts (default 5)
 #   DELAY          Seconds between propagation attempts (default 3)
-#   GH_CMD         npm binary name (overridable in tests; default npm)
+#   NPM_CMD        npm binary name (overridable in tests; default npm)
 
 set -euo pipefail
 
@@ -40,7 +44,7 @@ DRY_RUN="${DRY_RUN:-0}"
 SMOKE="${SMOKE:-}"
 ATTEMPTS="${ATTEMPTS:-5}"
 DELAY="${DELAY:-3}"
-NPM="${GH_CMD:-npm}"
+NPM="${NPM_CMD:-npm}"
 
 if [[ ! "$ATTEMPTS" =~ ^[1-9][0-9]*$ ]]; then
 	echo "ERROR: ATTEMPTS must be a positive integer (got '$ATTEMPTS')" >&2
@@ -106,41 +110,34 @@ verify_one() {
 	FAILURES+=("$name@$version not found after $ATTEMPTS propagation attempts")
 }
 
+# Args: $1 package name, $2 version — the exact published spec.
 audit_meta_signatures() {
-	local pkg="$1"
+	local name="$1" version="$2"
+	local spec="$name@$version"
 	# Global on purpose: the EXIT trap below fires at script exit, outside
 	# this function's scope, where a function-local would be unbound under
 	# set -u.
 	SCRATCH_DIR="$(mktemp -d)"
 	trap 'rm -rf "$SCRATCH_DIR"' EXIT
 	local scratch="$SCRATCH_DIR"
-	echo "==> Packing and scratch-installing $pkg for npm audit signatures"
-	(cd "$pkg" && "$NPM" pack --silent --pack-destination "$scratch" >/dev/null 2>&1) || {
-		echo "ERROR: failed to pack $pkg for the signature audit" >&2
-		FAILURES+=("$pkg npm pack for signature audit failed")
-		return 0
-	}
-	local tarball
-	tarball="$(find "$scratch" -maxdepth 1 -name '*.tgz' | head -1)"
-	if [[ -z "$tarball" ]]; then
-		echo "ERROR: no tarball produced for the signature audit" >&2
-		FAILURES+=("signature audit: no tarball")
-		return 0
-	fi
-	(cd "$scratch" && "$NPM" install --silent --no-audit --no-fund --ignore-scripts "$tarball" >/dev/null 2>&1) || {
-		echo "ERROR: scratch install of $pkg failed" >&2
-		FAILURES+=("$pkg scratch install failed")
+	echo "==> Installing $spec from the registry into a scratch directory for npm audit signatures"
+	# Exact spec from the registry (not a local re-pack): the audit checks the
+	# registry's signature/attestation for what consumers will actually get.
+	(cd "$scratch" && "$NPM" install --silent --no-audit --no-fund --ignore-scripts "$spec" >/dev/null 2>&1) || {
+		echo "ERROR: scratch install of $spec from the registry failed" >&2
+		FAILURES+=("$spec scratch install from the registry failed")
 		return 0
 	}
 	if (cd "$scratch" && "$NPM" audit signatures >/dev/null 2>&1); then
-		echo "    npm audit signatures passed"
+		echo "    npm audit signatures passed for $spec"
 	else
-		echo "ERROR: npm audit signatures failed for $pkg" >&2
-		FAILURES+=("$pkg npm audit signatures failed")
+		echo "ERROR: npm audit signatures failed for $spec" >&2
+		FAILURES+=("$spec npm audit signatures failed")
 	fi
 	if [[ -n "$SMOKE" ]]; then
 		echo "==> Running smoke command: $SMOKE"
-		if (cd "$scratch" && bash -c "$SMOKE" >/dev/null 2>&1); then
+		# Output stays visible: it is the only diagnostic when the smoke fails.
+		if (cd "$scratch" && bash -c "$SMOKE"); then
 			echo "    smoke command passed"
 		else
 			echo "ERROR: smoke command failed: $SMOKE" >&2
@@ -162,19 +159,21 @@ if [[ -z "$ORDERED_PACKAGES" ]]; then
 	exit 1
 fi
 
-meta_pkg=""
+meta_name=""
+meta_version=""
 while IFS= read -r pkg; do
 	[[ -n "$pkg" ]] || continue
 	pkg_dir="$(package_dir_for "$pkg")"
 	name="$(package_field "$pkg_dir" name)"
 	version="$(package_field "$pkg_dir" version)"
 	verify_one "$name" "$version"
-	# ORDER's last entry is the meta package; its tarball gets the audit.
-	meta_pkg="$pkg_dir"
+	# ORDER's last entry is the meta package; its published spec gets the audit.
+	meta_name="$name"
+	meta_version="$version"
 done <<<"$ORDERED_PACKAGES"
 
-if [[ -n "$meta_pkg" ]]; then
-	audit_meta_signatures "$meta_pkg"
+if [[ -n "$meta_name" ]]; then
+	audit_meta_signatures "$meta_name" "$meta_version"
 fi
 
 if ((${#FAILURES[@]} > 0)); then

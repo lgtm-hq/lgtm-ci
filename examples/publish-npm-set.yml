@@ -7,10 +7,11 @@
 # npm trusted publishing validates THIS workflow file (the entry workflow),
 # so your npm trusted-publisher registration must name it — and the
 # `entry-workflows` input below must repeat that path so the pre-publish
-# guard can enforce the binding. The caller job supplies the `npm`
-# environment (reusables cannot set environments). Trusted publishing needs
-# OIDC only; do not pass an npm token. See docs/reusable-workflows.md and
-# docs/workflow-contract.md.
+# guard can enforce the binding. A job that calls a reusable (`uses:`)
+# cannot declare `environment`, and the reusable's job declares none, so
+# register the trusted publisher WITHOUT an environment name. Trusted
+# publishing needs OIDC only; do not pass an npm token. See
+# docs/reusable-workflows.md and docs/workflow-contract.md.
 #
 # Prepare the packages directory before this workflow runs (build and stage
 # platform binaries, then one subdirectory per package with its
@@ -33,13 +34,10 @@ concurrency:
 
 jobs:
   npm-publish-set:
-    name: Publish npm package set
+    name: Stage npm package set
     runs-on: ubuntu-latest
-    environment: npm
     permissions:
       contents: read
-      id-token: write
-      attestations: write
     steps:
       - name: Harden runner
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
@@ -60,6 +58,9 @@ jobs:
           if-no-files-found: error
           overwrite: true
 
+  # The publish job. It calls a reusable, so it cannot carry `environment:`
+  # (GitHub rejects the key on `uses:` jobs): the npm trusted publisher for
+  # this repository must be registered without an environment name.
   npm-release:
     name: Release npm package set
     needs: [npm-publish-set]
@@ -79,7 +80,11 @@ jobs:
       provenance: true
       access: public
       max-attempts: 3
+      # Live publishes require entry-workflows, checksums-file, signer-repo
+      # and signer-workflow; the job fails before publishing without them.
       entry-workflows: .github/workflows/publish-npm-set.yml
+      # Workspace-relative path to the manifest that shipped inside the
+      # artifact; the entries inside it are relative to packages-dir.
       checksums-file: npm-dist/SHA256SUMS
       # Empty ("[]", the default) verifies every file the manifest lists.
       files-to-verify: '["*/package.json", "*/bin/*"]'
