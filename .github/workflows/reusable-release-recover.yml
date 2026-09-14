@@ -7,23 +7,31 @@ name: Reusable Release Recovery
 # checksums manifest and provenance attestations before use, and only
 # publishes channels the detection stage proved missing.
 #
+# The recovery runs the DEFAULT-BRANCH workflow code, never the tagged
+# commit's: the consumer dispatches it from its default branch, and every
+# tooling checkout below pins `github.workflow_sha` (the SHA of the workflow
+# that is running) or the explicit `tooling-ref` — nothing here checks out
+# `inputs.tag`. That is what lets a workflow defect fixed on main repair a
+# release that was cut before the fix.
+#
 # Stage layout (see docs/release-recovery.md for the runbook):
 #   resolve  — tag gate (prerelease refusal, same-commit check), artifact
-#              download + verification, channel detection, summary table.
-#              `dry-run: true` (default) stops here.
+#              download + verification (manifest, attestation, and equality
+#              with any already-published GitHub Release asset), channel
+#              detection, summary table. `dry-run: true` (default) stops here.
 #   resume-* — one job per channel, gated on membership in the missing set;
 #              channels that are already complete are skipped, not re-run.
-#              npm resumes through reusable-publish-npm-set.yml (#965) so the
-#              resume path and the tag path cannot drift; the GitHub Release
-#              resume goes through reusable-github-release.yml, whose
-#              immutable-assets behavior skips already-published assets.
+#              npm resumes through the SAME scripts reusable-publish-npm-set.yml
+#              (#965) runs, under the same live preconditions; the GitHub
+#              Release resume goes through create-github-release.sh with
+#              IMMUTABLE_ASSETS so already-published assets are skipped.
 #   record   — always(): records the outcome on the release-failure issue the
 #              notifier (#964) opened, closing it on success.
 #
 # Consumers wrap this in a `workflow_dispatch` entry workflow (see
 # examples/release-recover.yml); the entry file is what npm trusted
 # publishing validates, so the consumer's trusted-publisher registration must
-# include it.
+# include it and `npm-entry-workflows` must name it.
 
 "on":
   workflow_call:
@@ -66,17 +74,22 @@ name: Reusable Release Recovery
         type: string
         default: ""
       npm-artifact-name:
-        description: Source-run artifact holding the npm packages directory
+        description: >-
+          Source-run artifact holding the staged npm package set (the
+          artifact publish-npm-set uploaded from its packages directory)
         required: false
         type: string
         default: ""
       npm-packages-dir:
-        description: Directory (inside the artifact) containing one subdirectory per package
+        description: >-
+          Directory INSIDE the artifact containing one subdirectory per
+          package. "." when the artifact was uploaded from the packages
+          directory itself (the examples/publish-npm-set.yml layout).
         required: false
         type: string
-        default: npm-dist
+        default: "."
       npm-order:
-        description: Package order for the npm resume (meta last)
+        description: Package order for the npm resume (meta last), as publish-npm-set takes it
         required: false
         type: string
         default: ""
@@ -86,15 +99,54 @@ name: Reusable Release Recovery
         type: string
         default: latest
       npm-checksums-file:
-        description: SHA256SUMS path (relative to the npm packages dir) for artifact verification
+        description: >-
+          SHA256SUMS manifest for the npm artifacts, relative to the npm
+          packages directory; entries inside it are relative to that
+          directory too
         required: false
         type: string
         default: SHA256SUMS
+      npm-files-to-verify:
+        description: >-
+          Additional artifact globs (relative to the packages directory) to
+          verify on top of every file npm would pack
+        required: false
+        type: string
+        default: "[]"
+      npm-entry-workflows:
+        description: >-
+          Allowlisted entry workflow path(s) for npm trusted publishing —
+          the consumer's recovery dispatch workflow (e.g.
+          .github/workflows/release-recover.yml). Required for a live npm
+          resume; the guard fails closed without it.
+        required: false
+        type: string
+        default: ""
+      npm-access:
+        description: >-
+          npm access level; must stay public (provenance and post-publish
+          verification need a public package)
+        required: false
+        type: string
+        default: public
+      npm-provenance:
+        description: Pass --provenance on the npm resume (also automatic under OIDC)
+        required: false
+        type: boolean
+        default: true
       release-artifact-name:
         description: Source-run artifact for the GitHub Release resume
         required: false
         type: string
         default: ""
+      release-checksums-file:
+        description: >-
+          SHA256SUMS manifest inside the release artifact (written by
+          reusable-build-python-dist.yml); used to verify the downloaded
+          assets and to compare them with any already-published asset
+        required: false
+        type: string
+        default: SHA256SUMS
       docker-image:
         description: Fully-qualified image reference for the Docker probe/promote
         required: false
@@ -126,12 +178,14 @@ name: Reusable Release Recovery
         type: string
         default: main
       signer-repo:
-        description: Repository the artifact attestations must come from
+        description: Repository the artifact attestations must come from (owner/repo)
         required: false
         type: string
         default: ""
       signer-workflow:
-        description: Workflow path the artifact attestations must come from
+        description: >-
+          Workflow the artifact attestations must come from: a path inside
+          signer-repo (e.g. .github/workflows/build.yml) or fully qualified
         required: false
         type: string
         default: ""
@@ -143,12 +197,14 @@ name: Reusable Release Recovery
         type: string
         default: release-publish
       runner-image:
-        description: Runner image for the resolve/record jobs
+        description: >-
+          GitHub-hosted runner image label for every job. Must stay
+          GitHub-hosted: the npm resume needs trusted publishing/provenance.
         required: false
         type: string
         default: ubuntu-24.04
       timeout-minutes:
-        description: Timeout for the resolve job
+        description: Timeout for the resolve job (the resume jobs keep their own caps)
         required: false
         type: number
         default: 15
@@ -157,10 +213,50 @@ name: Reusable Release Recovery
         required: false
         type: string
         default: audit
+      allowed-endpoints:
+        description: >-
+          Allowed endpoints when egress-policy is block (the probes reach
+          PyPI, npm, the registry, and the GitHub API; the npm resume also
+          needs Sigstore)
+        required: false
+        type: string
+        default: >
+          github.com:443
+          api.github.com:443
+          uploads.github.com:443
+          actions.githubusercontent.com:443
+          token.actions.githubusercontent.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          release-assets.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          *.blob.core.windows.net:443
+          pypi.org:443
+          registry.npmjs.org:443
+          fulcio.sigstore.dev:443
+          rekor.sigstore.dev:443
+          tuf-repo-cdn.sigstore.dev:443
+          oauth2.sigstore.dev:443
+          ghcr.io:443
+          pkg-containers.githubusercontent.com:443
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: replace
+      egress-preset:
+        description: Named allowlist when allowed-endpoints is empty and egress-policy is block
+        required: false
+        type: string
+        default: github-minimal
       tooling-ref:
         description: >-
           lgtm-ci ref for tooling checkout. Empty uses the calling workflow's
-          pinned SHA.
+          pinned SHA (github.workflow_sha — the default-branch code, never
+          the tag).
         required: false
         type: string
         default: ""
@@ -180,7 +276,6 @@ jobs:
       contents: read
       # Attestation verification API
       id-token: write
-      # Workflow dispatch probe/dispatch for Homebrew happens in its own job
     outputs:
       missing: ${{ steps.detect.outputs.missing }}
       missing-count: ${{ steps.detect.outputs.missing_count }}
@@ -191,6 +286,7 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -208,6 +304,9 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       # Gate 1: the tag must exist, not be a prerelease, and point at the
       # original run's commit (same commit = same version = the immutability
       # check the workflow can make).
@@ -227,31 +326,39 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ inputs.source-run-id }}
           NPM_ARTIFACT: ${{ inputs.npm-artifact-name }}
           RELEASE_ARTIFACT: ${{ inputs.release-artifact-name }}
-        run: |
-          mkdir -p recovery-artifacts
-          if [[ -n "$NPM_ARTIFACT" ]]; then
-            gh run download "${{ inputs.source-run-id }}" \
-              --repo "${GITHUB_REPOSITORY}" --name "$NPM_ARTIFACT" \
-              --dir recovery-artifacts/npm
-          fi
-          if [[ -n "$RELEASE_ARTIFACT" ]]; then
-            gh run download "${{ inputs.source-run-id }}" \
-              --repo "${GITHUB_REPOSITORY}" --name "$RELEASE_ARTIFACT" \
-              --dir recovery-artifacts/release
-          fi
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/download-artifacts.sh
       # Gate 2: downloaded artifacts must match their manifest and their
       # attestations before any resume step may use them.
-      - name: Verify recovery artifacts
+      - name: Verify the original npm artifacts
         if: inputs.npm-artifact-name != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-          ARTIFACTS_DIR: recovery-artifacts/npm
+          ARTIFACTS_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
           CHECKSUMS_FILE: ${{ inputs.npm-checksums-file }}
           SIGNER_REPO: ${{ inputs.signer-repo }}
           SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/verify-recovery-artifacts.sh
+      # Same gate for the release assets, plus equality with anything already
+      # published under the tag: a published asset whose digest differs from
+      # the attested artifact is tier three, refused before any resume write.
+      - name: Verify the original release artifacts against published assets
+        if: inputs.release-artifact-name != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ARTIFACTS_DIR: recovery-artifacts/release
+          CHECKSUMS_FILE: ${{ inputs.release-checksums-file }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          RELEASE_TAG: ${{ inputs.tag }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/recover/verify-recovery-artifacts.sh
       # Gate 3: probe every configured channel; emit the missing set.
@@ -277,10 +384,11 @@ jobs:
           echo "Dry run: detection only — nothing was resumed." >>"$GITHUB_STEP_SUMMARY"
           echo "::notice::Dry run complete; set dry-run: false (after reviewing the missing set) to resume."
 
-  # Resume npm through the SAME scripts the tag path uses (#965's
-  # publish-set.sh), from the verified original artifacts. A regular job
+  # Resume npm through the SAME scripts the tag path uses (#965's guard,
+  # verify-artifacts, publish-set and verify-published), from the verified
+  # original artifacts, under the same live preconditions. A regular job
   # (not a nested `uses:` call) because the recovery artifacts live on the
-  # SOURCE run; the script, not the wiring, is the shared surface that
+  # SOURCE run; the scripts, not the wiring, are the shared surface that
   # prevents drift.
   resume-npm:
     name: Resume npm channel
@@ -290,7 +398,7 @@ jobs:
       inputs.npm-artifact-name != '' &&
       inputs.npm-order != '' &&
       contains(fromJSON(needs.resolve.outputs.missing), 'npm')
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 20
     environment: npm # the caller's approval gate, same as the tag path
     permissions:
@@ -299,10 +407,12 @@ jobs:
       attestations: write
     steps:
       - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -321,32 +431,65 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: npm-publish
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Set up Node.js
+        # Node 24 ships npm >= 11.5.1 (OIDC trusted publishing); never
+        # self-upgrade npm in place.
         # yamllint disable-line rule:line-length
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: "24"
           registry-url: https://registry.npmjs.org
-      - name: Download and verify the original npm artifacts
+      # The recovery is always a live publish: the same guards the tag path
+      # applies fail closed here before anything is downloaded or packed.
+      - name: Assert entry workflow is allowlisted
+        shell: bash
+        env:
+          ALLOWED_ENTRY_WORKFLOWS: ${{ inputs.npm-entry-workflows }}
+          LIVE: "1"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/assert-entry-workflow.sh
+      - name: Assert live-publish preconditions
+        shell: bash
+        env:
+          LIVE: "1"
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CHECKSUMS_FILE: ${{ inputs.npm-checksums-file }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          ACCESS: ${{ inputs.npm-access }}
+          PROVENANCE: ${{ inputs.npm-provenance == true && '1' || '0' }}
+          POST_PUBLISH_VERIFY: "1"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/assert-live-publish-inputs.sh
+      - name: Download the original npm artifacts
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           SOURCE_RUN_ID: ${{ inputs.source-run-id }}
           NPM_ARTIFACT: ${{ inputs.npm-artifact-name }}
-          PACKAGES_DIR_IN_ARTIFACT: ${{ inputs.npm-packages-dir }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/download-artifacts.sh
+      # Contract step 1 of 3 (same script as the tag path): every file npm
+      # would pack must match the manifest and carry an attestation.
+      - name: Verify artifacts
+        shell: bash
+        env:
+          PACKAGES_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
+          ORDER: ${{ inputs.npm-order }}
           CHECKSUMS_FILE: ${{ inputs.npm-checksums-file }}
+          FILES: ${{ inputs.npm-files-to-verify }}
           SIGNER_REPO: ${{ inputs.signer-repo }}
           SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
-        run: |
-          mkdir -p recovery-artifacts
-          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "$NPM_ARTIFACT" --dir recovery-artifacts/npm
-          ARTIFACTS_DIR="recovery-artifacts/npm" \
-          CHECKSUMS_FILE="$CHECKSUMS_FILE" \
-          SIGNER_REPO="$SIGNER_REPO" SIGNER_WORKFLOW="$SIGNER_WORKFLOW" \
-            .lgtm-ci-tooling/scripts/ci/release/recover/verify-recovery-artifacts.sh
-      - name: Publish the missing packages (idempotent set publish)
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/verify-artifacts.sh
+      # Contract step 2 of 3: the ONLY step that writes to the registry.
+      # Already-published packages are skipped (status: skipped) and only the
+      # missing ones publish (status: published) — the idempotent set loop.
+      - name: Publish package set
         id: publish
         shell: bash
         env:
@@ -354,20 +497,23 @@ jobs:
           ORDER: ${{ inputs.npm-order }}
           DIST_TAG: ${{ inputs.npm-dist-tag }}
           LIVE: "1"
+          PROVENANCE: ${{ inputs.npm-provenance == true && '1' || '0' }}
+          ACCESS: ${{ inputs.npm-access }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/publish-set.sh
+      # Contract step 3 of 3: read-only registry verification, last.
       - name: Verify published packages
         shell: bash
         env:
           PACKAGES_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
           ORDER: ${{ inputs.npm-order }}
-          DIST_TAG: ${{ inputs.npm-dist-tag }}
+          DRY_RUN: "0"
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/verify-published.sh
 
   # Resume the GitHub Release through the SAME script the tag path uses;
-  # IMMUTABLE_ASSETS=true skips already-published assets, so only the missing
-  # ones upload.
+  # IMMUTABLE_ASSETS=true skips already-published assets with the same digest
+  # and fails on a different one, so only the missing assets upload.
   resume-github-release:
     name: Resume GitHub Release channel
     needs: [resolve]
@@ -375,16 +521,18 @@ jobs:
       !inputs.dry-run &&
       inputs.release-artifact-name != '' &&
       contains(fromJSON(needs.resolve.outputs.missing), 'github-release')
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 15
     permissions:
       contents: write
     steps:
       - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -394,21 +542,38 @@ jobs:
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-      - name: Download and verify the original release artifacts
+      - name: Resolve egress allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      - name: Download the original release artifacts
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           SOURCE_RUN_ID: ${{ inputs.source-run-id }}
           RELEASE_ARTIFACT: ${{ inputs.release-artifact-name }}
-        run: |
-          mkdir -p recovery-artifacts/release
-          gh run download "$SOURCE_RUN_ID" --repo "$GITHUB_REPOSITORY" \
-            --name "$RELEASE_ARTIFACT" --dir recovery-artifacts/release
-          find recovery-artifacts/release -type f | head -20
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/download-artifacts.sh
+      - name: Verify the original release artifacts against published assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ARTIFACTS_DIR: recovery-artifacts/release
+          CHECKSUMS_FILE: ${{ inputs.release-checksums-file }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/verify-recovery-artifacts.sh
       - name: Create the release and upload only missing assets
         shell: bash
         env:
@@ -433,11 +598,31 @@ jobs:
       !inputs.dry-run &&
       inputs.homebrew-dispatch-repo != '' &&
       contains(fromJSON(needs.resolve.outputs.missing), 'homebrew')
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 5
     permissions:
       contents: read
     steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
       - name: Re-dispatch the tap update workflow
         shell: bash
         env:
@@ -446,9 +631,8 @@ jobs:
           WORKFLOW: ${{ inputs.homebrew-dispatch-workflow }}
           REF: ${{ inputs.homebrew-dispatch-ref }}
           TAG: ${{ inputs.tag }}
-        run: |
-          gh workflow dispatch "$WORKFLOW" --repo "$REPO" --ref "$REF" -f tag="$TAG"
-          echo "Dispatched $WORKFLOW@$REF on $REPO for $TAG"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/redispatch-homebrew.sh
 
   # Always(): a failed recovery is exactly what the issue must show, and a
   # successful one closes it.
@@ -471,7 +655,8 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
-          egress-policy: audit
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -481,6 +666,7 @@ jobs:
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
           sparse-checkout: |
             .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
@@ -491,14 +677,10 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           TAG: ${{ inputs.tag }}
           WORKFLOW_KEY: ${{ inputs.recovery-issue-workflow-key }}
-          RECOVERY_SUMMARY: |-
-            | Channel resume | Result |
-            | --- | --- |
-            | npm | ${{ needs.resume-npm.result }} |
-            | GitHub Release | ${{ needs.resume-github-release.result }} |
-            | Homebrew dispatch | ${{ needs.resume-homebrew.result }} |
-
-            Missing set at detection: `${{ needs.resolve.outputs.missing }}`
-          RECOVERY_STATUS: ${{ (needs.resume-npm.result == 'skipped' || needs.resume-npm.result == 'success') && (needs.resume-github-release.result == 'skipped' || needs.resume-github-release.result == 'success') && (needs.resume-homebrew.result == 'skipped' || needs.resume-homebrew.result == 'success') && 'success' || 'failure' }}
+          NPM_RESULT: ${{ needs.resume-npm.result }}
+          RELEASE_RESULT: ${{ needs.resume-github-release.result }}
+          HOMEBREW_RESULT: ${{ needs.resume-homebrew.result }}
+          MISSING_SET: ${{ needs.resolve.outputs.missing }}
+          RESOLVE_RESULT: ${{ needs.resolve.result }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/recover/record-recovery.sh

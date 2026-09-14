@@ -1153,8 +1153,15 @@ stages are fixed:
    probes every configured channel (PyPI, npm, GitHub Release, Docker,
    Homebrew) and emits the missing set. `dry-run: true` (the default) stops
    here; nothing has been written.
+   The release artifacts are also compared with any asset already published
+   under the tag: a different digest is tier three, refused here.
 2. `resume-*` — one job per channel, gated on membership in the missing set.
-   npm resumes through #965's `publish-set.sh`; the GitHub Release through
+   npm resumes through the same scripts and guards as
+   `reusable-publish-npm-set.yml` (#965): the entry-workflow guard
+   (`npm-entry-workflows`, fail-closed), the live preconditions (hosted
+   runner, manifest, signer inputs, `npm-access: public`), `verify-artifacts`
+   over every file npm would pack, the idempotent `publish-set` loop, and
+   `verify-published`. The GitHub Release resumes through
    `create-github-release.sh` with `IMMUTABLE_ASSETS: true` (already-published
    assets are skipped, never overwritten); the Homebrew dispatch is re-sent
    only when the tap lacks the version. Complete channels are skipped, not
@@ -1162,6 +1169,12 @@ stages are fixed:
    missing state is tier three).
 3. `record` — `if: always()`: posts the outcome table to the release-failure
    issue the notifier (#964) opened, closing it when the recovery succeeded.
+
+The recovery runs the default-branch workflow code: the consumer dispatches
+its entry workflow from the default branch, and every tooling checkout in
+the reusable pins `github.workflow_sha` (or `tooling-ref`), never
+`inputs.tag`; the wiring test asserts it. All jobs run on `runner-image`
+(GitHub-hosted) under the runner contract.
 
 Release-artifact retention defaults to the 90-day recovery window
 (`reusable-build-python-dist.yml` `artifact-retention-days`,

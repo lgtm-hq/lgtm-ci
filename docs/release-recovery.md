@@ -47,9 +47,19 @@ Wrap `reusable-release-recover.yml` in a `workflow_dispatch` workflow (see
   the attested artifact — stop. That is tier three: cut a new patch version.
 - Otherwise re-run with `dry-run: false`. Only the missing channels run;
   complete channels are skipped, not re-run. npm and the GitHub Release
-  resume through the same scripts the tag path uses (`publish-set.sh`,
+  resume through the same scripts the tag path uses (the #965 guard and
+  `verify-artifacts` / `publish-set.sh` / `verify-published.sh` set, and
   `create-github-release.sh`), so the resume path cannot drift from the tag
-  path. The Homebrew dispatch is re-sent only when the tap lacks the version.
+  path. The npm resume is a live publish and applies the same fail-closed
+  preconditions as the tag path: `npm-entry-workflows` must name the
+  recovery entry workflow (registered as an npm trusted publisher),
+  `signer-repo`/`signer-workflow` and the manifest must be set, and
+  `npm-access` must be `public`. The Homebrew dispatch is re-sent only when
+  the tap lacks the version.
+- Dispatch the recovery from the **default branch**. It runs the
+  default-branch workflow code (the reusable pins `github.workflow_sha`,
+  never the tag), which is how a workflow fix merged after the release
+  applies to it.
 
 On completion the recovery run updates the release-failure issue the notifier
 (#964) opened with the outcome table, and closes it when the recovery

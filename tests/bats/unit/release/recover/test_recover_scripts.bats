@@ -9,6 +9,8 @@ RESOLVE="${PROJECT_ROOT}/scripts/ci/release/recover/resolve-tag.sh"
 DETECT="${PROJECT_ROOT}/scripts/ci/release/recover/detect-channels.sh"
 VERIFY="${PROJECT_ROOT}/scripts/ci/release/recover/verify-recovery-artifacts.sh"
 RECORD="${PROJECT_ROOT}/scripts/ci/release/recover/record-recovery.sh"
+DOWNLOAD="${PROJECT_ROOT}/scripts/ci/release/recover/download-artifacts.sh"
+REDISPATCH="${PROJECT_ROOT}/scripts/ci/release/recover/redispatch-homebrew.sh"
 
 setup() {
 	setup_temp_dir
@@ -168,11 +170,20 @@ detect_env() {
 # verify-recovery-artifacts.sh
 # =============================================================================
 
+# Same preference order as the scripts: GNU coreutils first, shasum fallback.
+sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | awk '{print $1}'
+	else
+		shasum -a 256 "$1" | awk '{print $1}'
+	fi
+}
+
 verify_env() {
 	export ARTIFACTS_DIR="${BATS_TEST_TMPDIR}/artifacts"
 	mkdir -p "$ARTIFACTS_DIR"
 	echo "artifact-bytes" >"$ARTIFACTS_DIR/tool-linux-x64"
-	h="$(shasum -a 256 "$ARTIFACTS_DIR/tool-linux-x64" | awk '{print $1}')"
+	h="$(sha256_of "$ARTIFACTS_DIR/tool-linux-x64")"
 	printf '%s  tool-linux-x64\n' "$h" >"$ARTIFACTS_DIR/SHA256SUMS"
 	export CHECKSUMS_FILE="SHA256SUMS"
 	export SIGNER_REPO=lgtm-hq/lgtm-ci
@@ -223,6 +234,53 @@ attest_mock() {
 	assert_failure
 	assert_output --partial "same version, different bytes"
 	assert_output --partial "tier three"
+}
+
+@test "verify-recovery-artifacts: reads published asset digests from the release when RELEASE_TAG is set" {
+	verify_env
+	export RELEASE_TAG=v1.2.3
+	# The published asset differs from the attested artifact: tier three.
+	mock_command_multi "gh" '
+		*attestation*verify*) exit 0;;
+		*release*view*) echo "{\"tool-linux-x64\":\"sha256:deadbeef\"}";;
+		*) exit 0;;
+	'
+	run bash "$VERIFY"
+	assert_failure
+	assert_output --partial "Published assets under v1.2.3: 1 with digests"
+	assert_output --partial "same version, different bytes"
+
+	# Same bytes already published: equality holds and verification passes.
+	local h
+	h="$(sha256_of "$ARTIFACTS_DIR/tool-linux-x64")"
+	mock_command_multi "gh" "
+		*attestation*verify*) exit 0;;
+		*release*view*) echo '{\"tool-linux-x64\":\"sha256:${h}\"}';;
+		*) exit 0;;
+	"
+	run bash "$VERIFY"
+	assert_success
+
+	# No release yet: nothing to compare, verification still passes.
+	mock_command_multi "gh" '
+		*attestation*verify*) exit 0;;
+		*release*view*) echo "release not found" >&2; exit 1;;
+		*) exit 0;;
+	'
+	run bash "$VERIFY"
+	assert_success
+	assert_output --partial "No published release under v1.2.3 yet"
+}
+
+@test "verify-recovery-artifacts: manifest lookup is an exact path match" {
+	verify_env
+	echo "plus-bytes" >"$ARTIFACTS_DIR/tool+x64"
+	printf '%s  tool+x64\n' "$(sha256_of "$ARTIFACTS_DIR/tool+x64")" >>"$ARTIFACTS_DIR/SHA256SUMS"
+	attest_mock 0
+
+	run bash "$VERIFY"
+	assert_success
+	assert_output --partial "Verifying tool+x64"
 }
 
 @test "verify-recovery-artifacts: missing manifest entry is a failure, not a crash" {
@@ -316,4 +374,153 @@ record_env() {
 	run bash "$RECORD"
 	assert_failure
 	assert_output --partial "RECOVERY_STATUS must be"
+}
+
+@test "record-recovery: derives the outcome from the per-job results" {
+	export TAG=v1.2.3
+	export WORKFLOW_KEY=release-publish
+	unset RECOVERY_STATUS RECOVERY_SUMMARY
+	export RESOLVE_RESULT=success
+	export NPM_RESULT=success
+	export RELEASE_RESULT=skipped
+	export HOMEBREW_RESULT=skipped
+	export MISSING_SET='["npm"]'
+	local body="${BATS_TEST_TMPDIR}/comment-body"
+	mock_command_multi "gh" "
+		*issue*list*) echo 77;;
+		*issue*comment*)
+			for a in \"\$@\"; do case \"\$a\" in /*) cp \"\$a\" '${body}';; esac; done
+			echo ok;;
+		*issue*close*) echo closed;;
+	"
+
+	run bash "$RECORD"
+	assert_success
+	assert_output --partial "Closed release-failure issue #77"
+	run cat "$body"
+	assert_output --partial "| npm | success |"
+	assert_output --partial "| GitHub Release | skipped |"
+	assert_output --partial 'Missing set at detection: `["npm"]`'
+
+	# A failed (or cancelled) resume, or a failed resolve, is a failed recovery.
+	export NPM_RESULT=failure
+	mock_command_multi "gh" '
+		*issue*list*) echo 77;;
+		*issue*comment*) echo ok;;
+		*issue*close*) echo "must not close" >&2; exit 99;;
+	'
+	run bash "$RECORD"
+	assert_success
+	refute_output --partial "Closed"
+
+	export NPM_RESULT=success
+	export RESOLVE_RESULT=failure
+	run bash "$RECORD"
+	assert_success
+	refute_output --partial "Closed"
+}
+
+# =============================================================================
+# download-artifacts.sh
+# =============================================================================
+
+@test "download-artifacts: passes bash syntax check" {
+	run bash -n "$DOWNLOAD"
+	assert_success
+}
+
+@test "download-artifacts: downloads each configured artifact into its own directory" {
+	export SOURCE_RUN_ID=12345
+	export NPM_ARTIFACT=npm-dist
+	export RELEASE_ARTIFACT=python-dist
+	export TARGET_DIR="${BATS_TEST_TMPDIR}/recovery-artifacts"
+	local calls="${BATS_TEST_TMPDIR}/gh-calls"
+	mock_command_multi "gh" "
+		*run*download*)
+			echo \"\$*\" >> '${calls}'
+			for a in \"\$@\"; do case \"\$a\" in ${BATS_TEST_TMPDIR}/*) mkdir -p \"\$a\"; echo x > \"\$a/file\";; esac; done
+			exit 0;;
+	"
+
+	run bash "$DOWNLOAD"
+	assert_success
+	assert_output --partial "Downloading artifact 'npm-dist' from run 12345"
+	assert_output --partial "Downloading artifact 'python-dist' from run 12345"
+	run grep -c "run download 12345 --repo lgtm-hq/lgtm-ci --name" "$calls"
+	assert_output 2
+	[[ -f "$TARGET_DIR/npm/file" && -f "$TARGET_DIR/release/file" ]]
+}
+
+@test "download-artifacts: an expired or missing artifact fails with tier-three guidance" {
+	export SOURCE_RUN_ID=12345
+	export NPM_ARTIFACT=npm-dist
+	export TARGET_DIR="${BATS_TEST_TMPDIR}/recovery-artifacts"
+	mock_command_multi "gh" '
+		*run*download*) echo "no artifact matches any of the names or patterns provided" >&2; exit 1;;
+	'
+
+	run bash "$DOWNLOAD"
+	assert_failure
+	assert_output --partial "could not download artifact 'npm-dist'"
+	assert_output --partial "90-day retention"
+	assert_output --partial "tier three"
+}
+
+@test "download-artifacts: an empty artifact is refused" {
+	export SOURCE_RUN_ID=12345
+	export RELEASE_ARTIFACT=python-dist
+	export TARGET_DIR="${BATS_TEST_TMPDIR}/recovery-artifacts"
+	mock_command_multi "gh" '
+		*run*download*) exit 0;;
+	'
+
+	run bash "$DOWNLOAD"
+	assert_failure
+	assert_output --partial "downloaded no files"
+}
+
+@test "download-artifacts: nothing configured is a no-op" {
+	export SOURCE_RUN_ID=12345
+	run bash "$DOWNLOAD"
+	assert_success
+	assert_output --partial "nothing to download"
+}
+
+# =============================================================================
+# redispatch-homebrew.sh
+# =============================================================================
+
+@test "redispatch-homebrew: passes bash syntax check" {
+	run bash -n "$REDISPATCH"
+	assert_success
+}
+
+@test "redispatch-homebrew: runs the tap workflow on the given ref with the tag input" {
+	export REPO=lgtm-hq/homebrew-tap
+	export WORKFLOW=dispatch-homebrew.yml
+	export REF=main
+	export TAG=v1.2.3
+	local calls="${BATS_TEST_TMPDIR}/gh-calls"
+	mock_command_multi "gh" "
+		*workflow*run*) echo \"\$*\" >> '${calls}'; exit 0;;
+	"
+
+	run bash "$REDISPATCH"
+	assert_success
+	assert_output --partial "Dispatched dispatch-homebrew.yml@main on lgtm-hq/homebrew-tap for v1.2.3"
+	run cat "$calls"
+	assert_output "workflow run dispatch-homebrew.yml --repo lgtm-hq/homebrew-tap --ref main -f tag=v1.2.3"
+}
+
+@test "redispatch-homebrew: a rejected dispatch fails the job" {
+	export REPO=lgtm-hq/homebrew-tap
+	export WORKFLOW=dispatch-homebrew.yml
+	export REF=main
+	export TAG=v1.2.3
+	mock_command_multi "gh" '
+		*workflow*run*) echo "HTTP 404" >&2; exit 1;;
+	'
+
+	run bash "$REDISPATCH"
+	assert_failure
 }

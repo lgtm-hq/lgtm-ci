@@ -172,7 +172,10 @@ fi
 
 missing_json="[]"
 if ((${#MISSING[@]} > 0)); then
-	missing_json="[$(IFS=,; echo "${MISSING[*]}")]"
+	missing_json="[$(
+		IFS=,
+		echo "${MISSING[*]}"
+	)]"
 fi
 if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
 	{

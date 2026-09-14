@@ -15,8 +15,14 @@
 # Environment:
 #   TAG               Recovered tag (required)
 #   WORKFLOW_KEY      Notifier workflow key the issue was filed under (required)
-#   RECOVERY_STATUS   success | failure (required)
-#   RECOVERY_SUMMARY  Markdown summary (the channel table + outcome) (required)
+#   Either the per-job results (the workflow passes these):
+#   RESOLVE_RESULT    needs.resolve.result
+#   NPM_RESULT, RELEASE_RESULT, HOMEBREW_RESULT
+#                     needs.resume-*.result (success|failure|cancelled|skipped)
+#   MISSING_SET       The detected missing set (JSON) for the table
+#   or an explicit outcome (takes precedence when set):
+#   RECOVERY_STATUS   success | failure
+#   RECOVERY_SUMMARY  Markdown summary (the channel table + outcome)
 #   GITHUB_REPOSITORY, GH_TOKEN, GITHUB_RUN_ID, GITHUB_SERVER_URL
 #   GH_CMD            gh binary override (default gh)
 
@@ -24,13 +30,42 @@ set -euo pipefail
 
 : "${TAG:?TAG is required}"
 : "${WORKFLOW_KEY:?WORKFLOW_KEY is required}"
-: "${RECOVERY_STATUS:?RECOVERY_STATUS (success|failure) is required}"
-: "${RECOVERY_SUMMARY:?RECOVERY_SUMMARY is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 GH="${GH_CMD:-gh}"
 
+# A resume job counts as fine when it ran and succeeded or was skipped
+# (channel already complete); anything else — failure, cancelled, or a
+# resolve stage that did not succeed — is a failed recovery.
+_job_ok() {
+	[[ "$1" == "success" || "$1" == "skipped" ]]
+}
+if [[ -z "${RECOVERY_STATUS:-}" ]]; then
+	: "${RESOLVE_RESULT:?RESOLVE_RESULT is required when RECOVERY_STATUS is not set}"
+	NPM_RESULT="${NPM_RESULT:-skipped}"
+	RELEASE_RESULT="${RELEASE_RESULT:-skipped}"
+	HOMEBREW_RESULT="${HOMEBREW_RESULT:-skipped}"
+	if [[ "$RESOLVE_RESULT" == "success" ]] && _job_ok "$NPM_RESULT" && _job_ok "$RELEASE_RESULT" && _job_ok "$HOMEBREW_RESULT"; then
+		RECOVERY_STATUS="success"
+	else
+		RECOVERY_STATUS="failure"
+	fi
+fi
+if [[ -z "${RECOVERY_SUMMARY:-}" ]]; then
+	RECOVERY_SUMMARY="| Channel resume | Result |
+| --- | --- |
+| resolve (tag, artifacts, detection) | ${RESOLVE_RESULT:-unknown} |
+| npm | ${NPM_RESULT:-skipped} |
+| GitHub Release | ${RELEASE_RESULT:-skipped} |
+| Homebrew dispatch | ${HOMEBREW_RESULT:-skipped} |
+
+Missing set at detection: \`${MISSING_SET:-[]}\`"
+fi
+
 [[ "$RECOVERY_STATUS" == "success" || "$RECOVERY_STATUS" == "failure" ]] ||
-	{ echo "ERROR: RECOVERY_STATUS must be 'success' or 'failure' (got '$RECOVERY_STATUS')" >&2; exit 1; }
+	{
+		echo "ERROR: RECOVERY_STATUS must be 'success' or 'failure' (got '$RECOVERY_STATUS')" >&2
+		exit 1
+	}
 
 title="fix(release): tag publish failed: ${TAG} (${WORKFLOW_KEY})"
 tracking_key="release-failure:${WORKFLOW_KEY}:${TAG}"

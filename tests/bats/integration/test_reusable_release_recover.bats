@@ -34,18 +34,97 @@ EXAMPLE="${PROJECT_ROOT}/examples/release-recover.yml"
 	assert_output 3
 }
 
-@test "reusable-release-recover: resumes through the same scripts as the tag path" {
-	# npm resumes through #965's publish-set.sh...
-	run grep -F "scripts/ci/actions/npm/publish-set.sh" "$WORKFLOW"
+# Print the lines of one job (from its key to the next job key).
+job_block() {
+	awk -v job="$1" '
+		$0 == "  " job ":" { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { exit }
+		in_job { print }
+	' "$WORKFLOW"
+}
+
+@test "reusable-release-recover: resumes through the same scripts and guards as the tag path" {
+	run job_block resume-npm
+	# #965's contract, in order: entry guard, live preconditions,
+	# verify-artifacts, publish-set (the only writer), verify-published.
+	assert_output --partial "scripts/ci/actions/npm/assert-entry-workflow.sh"
+	assert_output --partial "scripts/ci/actions/npm/assert-live-publish-inputs.sh"
+	assert_output --partial "scripts/ci/actions/npm/verify-artifacts.sh"
+	assert_output --partial "scripts/ci/actions/npm/publish-set.sh"
+	assert_output --partial "scripts/ci/actions/npm/verify-published.sh"
+	run awk '
+		/assert-entry-workflow.sh/ { guard = NR }
+		/assert-live-publish-inputs.sh/ { pre = NR }
+		/name: Download the original npm artifacts/ { download = NR }
+		/npm\/verify-artifacts.sh/ { verify = NR }
+		/npm\/publish-set.sh/ { publish = NR }
+		/npm\/verify-published.sh/ { post = NR }
+		END { exit !(guard && pre && download && verify && publish && post && guard < pre && pre < download && download < verify && verify < publish && publish < post) }
+	' "$WORKFLOW"
 	assert_success
-	run grep -F "scripts/ci/actions/npm/verify-published.sh" "$WORKFLOW"
-	assert_success
-	# ...and the GitHub Release through create-github-release.sh with
+	# The resume is always live and inherits the #965 inputs.
+	run job_block resume-npm
+	assert_line '          LIVE: "1"'
+	assert_line "          ALLOWED_ENTRY_WORKFLOWS: \${{ inputs.npm-entry-workflows }}"
+	assert_line "          ACCESS: \${{ inputs.npm-access }}"
+	assert_line "          RUNNER_ENVIRONMENT: \${{ runner.environment }}"
+	assert_line "          ORDER: \${{ inputs.npm-order }}"
+	assert_line "          FILES: \${{ inputs.npm-files-to-verify }}"
+	assert_line '          DRY_RUN: "0"'
+	refute_output --partial "DIST_TAG: \${{ inputs.npm-dist-tag }}
+          DRY_RUN"
+	# The GitHub Release resumes through create-github-release.sh with
 	# immutable assets so only missing assets upload.
-	run grep -F "scripts/ci/release/create-github-release.sh" "$WORKFLOW"
+	run job_block resume-github-release
+	assert_output --partial "scripts/ci/release/create-github-release.sh"
+	assert_line '          IMMUTABLE_ASSETS: "true"'
+	assert_output --partial "verify-recovery-artifacts.sh"
+	assert_line "          RELEASE_TAG: \${{ inputs.tag }}"
+}
+
+@test "reusable-release-recover: npm access defaults to public and the entry allowlist is an input" {
+	run awk '
+		$0 == "      npm-access:" { in_input = 1; next }
+		in_input && /^      [a-z-]+:$/ { exit }
+		in_input && /^        default:/ { sub(/^        default: */, ""); print; exit }
+	' "$WORKFLOW"
+	assert_output "public"
+	run grep -F "      npm-entry-workflows:" "$WORKFLOW"
 	assert_success
-	run grep -F 'IMMUTABLE_ASSETS: "true"' "$WORKFLOW"
+}
+
+@test "reusable-release-recover: runs the default-branch workflow code, never the tag" {
+	# Every checkout pins github.workflow_sha (the running workflow's SHA) or
+	# the explicit tooling-ref; nothing checks out inputs.tag.
+	run grep -c "ref: \${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}" "$WORKFLOW"
+	assert_output 5
+	run grep -cE "^\s+ref: " "$WORKFLOW"
+	assert_output 5
+	run grep -F "ref: \${{ inputs.tag }}" "$WORKFLOW"
+	assert_failure
+	run grep -F "inputs.tag }}" "$WORKFLOW"
 	assert_success
+	run grep -E "uses: .*@\\$\{\{ inputs\.tag" "$WORKFLOW"
+	assert_failure
+}
+
+@test "reusable-release-recover: every job is under the runner contract with harden first" {
+	# runs-on is the runner-image input on every job; no hardcoded label.
+	run grep -cE "^    runs-on: " "$WORKFLOW"
+	assert_output 5
+	run grep -c 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	assert_output 5
+	run grep -cE "^    timeout-minutes: " "$WORKFLOW"
+	assert_output 5
+	# The first step of every job is the harden-runner step.
+	run awk '
+		/^    steps:$/ { expect = 1; next }
+		expect && /^      - name: / { if ($0 != "      - name: Harden runner") bad++; expect = 0 }
+		END { exit bad > 0 }
+	' "$WORKFLOW"
+	assert_success
+	run grep -c "      - name: Harden runner" "$WORKFLOW"
+	assert_output 5
 }
 
 @test "reusable-release-recover: records the outcome on the release-failure issue" {
@@ -75,6 +154,14 @@ EXAMPLE="${PROJECT_ROOT}/examples/release-recover.yml"
 	run grep -F "default: true" "$EXAMPLE"
 	assert_success
 	run grep -F "source-run-sha" "$EXAMPLE"
+	assert_success
+	# The example names its own file as the npm entry workflow and grants the
+	# union of the reusable's per-job permissions.
+	run grep -F "npm-entry-workflows: .github/workflows/release-recover.yml" "$EXAMPLE"
+	assert_success
+	run grep -F "contents: write" "$EXAMPLE"
+	assert_success
+	run grep -F "attestations: write" "$EXAMPLE"
 	assert_success
 }
 

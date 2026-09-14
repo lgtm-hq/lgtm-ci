@@ -21,6 +21,7 @@ Sample caller layouts for lgtm-hq repositories. Copy and adapt into your
 | [publish-python-release.yml](publish-python-release.yml)                       | Publish to PyPI on tag (trusted publishing + attestation)                      |
 | [auto-rerun-on-infra-failure.yml](auto-rerun-on-infra-failure.yml)             | Re-run failed jobs up to `max-reruns` on a transient infra outage              |
 | [publish-npm-set.yml](publish-npm-set.yml)                                     | Ordered npm package-set release (trusted publishing, idempotent, verified)     |
+| [release-recover.yml](release-recover.yml)                                     | Resume a partially published release from the original attested artifacts      |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -51,4 +52,3 @@ If you invoke lgtm-ci composites directly from your own workflow (instead of a
 reusable), pin each action to a commit SHA and check out lgtm-ci tooling before
 `resolve-egress-allowlist` and `harden-runner`. See
 [.github/actions/README.md](../.github/actions/README.md#usage-example).
-- [publish-npm-set.yml](publish-npm-set.yml) — ordered npm package-set release (trusted publishing, idempotent re-runs, verified)

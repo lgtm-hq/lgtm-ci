@@ -21,10 +21,14 @@
 #   FILES            Optional JSON glob list to restrict verification;
 #                    default: every manifest entry must exist and verify
 #   SIGNER_REPO, SIGNER_WORKFLOW  attestation bindings (required)
-#   GH               gh binary override (default gh)
+#   GH_CMD           gh binary override (default gh)
 #   RELEASE_ASSET_DIGESTS  Optional JSON map {asset-name: "sha256:hex"} of
 #                    already-published GitHub Release assets to compare
 #                    against local files of the same name
+#   RELEASE_TAG      Optional: when set (and RELEASE_ASSET_DIGESTS is not),
+#                    the map is read from the published release under this
+#                    tag in GITHUB_REPOSITORY (`gh release view --json
+#                    assets`); no release yet means nothing to compare
 
 set -euo pipefail
 
@@ -34,13 +38,37 @@ set -euo pipefail
 : "${SIGNER_WORKFLOW:?SIGNER_WORKFLOW is required}"
 FILES="${FILES:-[]}"
 RELEASE_ASSET_DIGESTS="${RELEASE_ASSET_DIGESTS:-}"
+RELEASE_TAG="${RELEASE_TAG:-}"
 GH="${GH_CMD:-gh}"
 
-[[ -d "$ARTIFACTS_DIR" ]] || { echo "ERROR: ARTIFACTS_DIR '$ARTIFACTS_DIR' not found" >&2; exit 1; }
+# Published asset digests come from the release itself when a tag is given:
+# the equality check is what turns "already published, different bytes"
+# into a refusal before any resume write.
+if [[ -z "$RELEASE_ASSET_DIGESTS" && -n "$RELEASE_TAG" ]]; then
+	: "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required with RELEASE_TAG}"
+	if RELEASE_ASSET_DIGESTS="$("$GH" release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" --json assets \
+		--jq '[.assets[] | select(.digest != null) | {(.name): .digest}] | add // {}' 2>/dev/null)"; then
+		echo "Published assets under $RELEASE_TAG: $(printf '%s' "$RELEASE_ASSET_DIGESTS" | jq 'length') with digests"
+	else
+		echo "No published release under $RELEASE_TAG yet; nothing to compare against."
+		RELEASE_ASSET_DIGESTS=""
+	fi
+fi
+
+[[ -d "$ARTIFACTS_DIR" ]] || {
+	echo "ERROR: ARTIFACTS_DIR '$ARTIFACTS_DIR' not found" >&2
+	exit 1
+}
 manifest="$ARTIFACTS_DIR/$CHECKSUMS_FILE"
-[[ -f "$manifest" ]] || { echo "ERROR: checksums manifest '$manifest' not found" >&2; exit 1; }
+[[ -f "$manifest" ]] || {
+	echo "ERROR: checksums manifest '$manifest' not found" >&2
+	exit 1
+}
 printf '%s' "$FILES" | jq -e 'type == "array"' >/dev/null 2>&1 ||
-	{ echo "ERROR: FILES must be a JSON array" >&2; exit 1; }
+	{
+		echo "ERROR: FILES must be a JSON array" >&2
+		exit 1
+	}
 
 failures=0
 verify_file() {
@@ -53,9 +81,9 @@ verify_file() {
 		return 0
 	}
 	local expected
-	# `|| true`: a no-entry grep is the handled failure case; pipefail would
-	# otherwise kill the script before the error prints.
-	expected="$(grep -E "[[:space:]]${rel//./\\.}\$" "$manifest" | awk '{print $1}' | tail -1 || true)"
+	# Exact string match on the path (no regex): the hash is $1, the rest of
+	# the line is the path. Last entry wins on duplicates.
+	expected="$(awk -v p="$rel" '{ h = $1; $1 = ""; sub(/^[[:space:]]+/, ""); if ($0 == p) print h }' "$manifest" | tail -1)"
 	if [[ -z "$expected" ]]; then
 		echo "ERROR: no manifest entry for '$rel'" >&2
 		failures=$((failures + 1))

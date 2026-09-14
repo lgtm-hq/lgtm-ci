@@ -5,8 +5,11 @@
 #
 # Runbook: docs/release-recovery.md (which tier applies, how to find the
 # source run, what the dry run shows). Always run with dry-run: true first.
+# Dispatch it from the DEFAULT branch: the recovery runs the default-branch
+# workflow code (the reusable pins github.workflow_sha, never the tag), so
+# a fix merged on main applies to a release cut before it.
 # npm trusted publishing validates THIS workflow file: add it to your npm
-# trusted-publisher registration and keep the entry-workflows input in sync.
+# trusted-publisher registration and keep npm-entry-workflows in sync.
 ---
 name: Release Recovery
 
@@ -46,11 +49,15 @@ jobs:
   recover:
     name: Recover release
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-recover.yml@<sha> # vX.Y.Z
+    # Union of the reusable's per-job permissions: contents write for the
+    # GitHub Release resume, id-token + attestations for the npm resume,
+    # issues write for the outcome record.
     permissions:
       actions: read
-      contents: read
+      contents: write
       issues: write
       id-token: write
+      attestations: write
     with:
       tag: ${{ inputs.tag }}
       source-run-id: ${{ inputs.source-run-id }}
@@ -59,10 +66,17 @@ jobs:
       channels: ${{ inputs.channels }}
       pypi-package: <pypi-project>
       npm-package: "@scope/meta-package"
+      # The artifact publish-npm-set.yml uploaded from its packages dir, so
+      # the package subdirectories sit at the artifact root ("." below).
       npm-artifact-name: npm-dist
-      npm-packages-dir: npm-dist
+      npm-packages-dir: "."
       npm-order: '["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "meta"]'
+      npm-checksums-file: SHA256SUMS
+      # This file: the npm trusted publisher must be registered for it.
+      npm-entry-workflows: .github/workflows/release-recover.yml
+      npm-access: public
       release-artifact-name: python-dist
+      release-checksums-file: SHA256SUMS
       signer-repo: <owner>/<repo>
       signer-workflow: .github/workflows/publish-pypi-on-tag.yml
       recovery-issue-workflow-key: release-publish
