@@ -6,8 +6,10 @@
 # Runbook: docs/release-recovery.md (which tier applies, how to find the
 # source run, what the dry run shows). Always run with dry-run: true first.
 # Dispatch it from the DEFAULT branch: the recovery runs the default-branch
-# workflow code (the reusable pins github.workflow_sha, never the tag), so
-# a fix merged on main applies to a release cut before it.
+# workflow code (this file, plus lgtm-ci tooling pinned by tooling-ref to
+# the same <sha> as the uses: line; never the tag), so a fix merged on main
+# applies to a release cut before it. Release tags must be protected by a
+# ruleset (see docs/release-recovery.md, "Prerequisites").
 # npm trusted publishing validates THIS workflow file: add it to your npm
 # trusted-publisher registration and keep npm-entry-workflows in sync.
 ---
@@ -79,3 +81,7 @@ jobs:
       signer-workflow: .github/workflows/publish-pypi-on-tag.yml
       recovery-issue-workflow-key: release-publish
       tooling-ref: "<sha>"
+    # Only needed with homebrew-dispatch-repo: a token with actions: write on
+    # that repository (github.token cannot dispatch across repositories).
+    secrets:
+      homebrew-dispatch-token: ${{ secrets.HOMEBREW_DISPATCH_TOKEN }}

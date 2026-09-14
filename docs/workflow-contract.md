@@ -1180,9 +1180,14 @@ stages are fixed:
 
 The recovery runs the default-branch workflow code: the consumer dispatches
 its entry workflow from the default branch, and every tooling checkout in
-the reusable pins `github.workflow_sha` (or `tooling-ref`), never
-`inputs.tag`; the wiring test asserts it. All jobs run on `runner-image`
-(GitHub-hosted) under the runner contract.
+the reusable pins the required `tooling-ref` (the caller's `uses:` SHA),
+never `inputs.tag` and never `github.workflow_sha` (which names the caller's
+commit inside a called workflow); the wiring test asserts it. Release tags
+must be protected by a ruleset (runbook, "Prerequisites"). All jobs run on
+`runner-image` (GitHub-hosted) under the runner contract; in block mode
+`allowed-endpoints` must be complete on its own (harden-runner installs it
+at job start; there is no preset fallback). The cross-repository Homebrew
+re-dispatch uses the `homebrew-dispatch-token` secret.
 
 Release-artifact retention defaults to the 90-day recovery window
 (`reusable-build-python-dist.yml` `artifact-retention-days`,

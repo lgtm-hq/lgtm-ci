@@ -4,7 +4,9 @@
 #
 # A recovery run publishes against an ORIGINAL immutable tag and the ORIGINAL
 # attested artifacts. Before anything runs, this gate refuses:
-#   - prerelease tags (aN/bN/rcN): abandoned by policy — cut a new version;
+#   - prerelease tags, in PEP 440 (1.2.3a1, 1.2.3b1, 1.2.3rc1) and SemVer
+#     (1.2.3-rc.1, 1.2.3-beta.1, 1.2.3-alpha1) spellings: abandoned by
+#     policy — cut a new version;
 #   - a tag that does not exist;
 #   - a source run that is not THIS repository's publish workflow: the run id
 #     is caller-supplied, and artifacts from any other run of any workflow
@@ -43,7 +45,10 @@ fail() {
 # Prereleases are out of scope by policy: a partial prerelease is abandoned
 # and a new one is cut (the tag itself is the version; republishing the same
 # npm/PyPI version is impossible anyway).
-if [[ "$TAG" =~ [0-9]-(a|b|rc)[0-9]+$ ]]; then
+# PEP 440 attaches the marker directly (1.2.3rc1); SemVer separates it with
+# a hyphen and may dot the number (1.2.3-rc.1, 1.2.3-beta.1). Both spellings
+# and the spelled-out names are prereleases.
+if [[ "$TAG" =~ [0-9][-._]?(a|b|c|rc|alpha|beta|pre|preview|dev)[-._]?[0-9]*$ ]]; then
 	fail "refusing to recover prerelease tag '$TAG': prereleases are abandoned by policy — cut a new prerelease version instead"
 fi
 

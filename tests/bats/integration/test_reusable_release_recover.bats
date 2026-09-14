@@ -26,9 +26,15 @@ job_block() {
 	assert_output --partial "true"
 }
 
-@test "reusable-release-recover: requires tag, source run id, and the publish workflow path" {
+@test "reusable-release-recover: requires tag, source run id, the publish workflow path, and tooling-ref" {
 	run grep -cF "required: true" "$WORKFLOW"
-	assert_output 3
+	assert_output 4
+	run awk '
+		$0 == "      tooling-ref:" { in_input = 1; next }
+		in_input && /^      [a-z-]+:$/ { exit }
+		in_input && /^        required:/ { print $2; exit }
+	' "$WORKFLOW"
+	assert_output "true"
 	run grep -F "      source-workflow:" "$WORKFLOW"
 	assert_success
 	# The source run's identity is read from the API, never from an input.
@@ -112,10 +118,13 @@ job_block() {
 }
 
 @test "reusable-release-recover: runs the default-branch workflow code, never the tag" {
-	# Every checkout pins github.workflow_sha (the running workflow's SHA) or
-	# the explicit tooling-ref; nothing checks out inputs.tag.
-	run grep -c "ref: \${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}" "$WORKFLOW"
+	# Every checkout pins the required tooling-ref; nothing checks out
+	# inputs.tag, and github.workflow_sha (the caller's commit inside a
+	# called workflow) is never used as a ref.
+	run grep -c "ref: \${{ inputs.tooling-ref }}" "$WORKFLOW"
 	assert_output 5
+	run grep -F "github.workflow_sha }}" "$WORKFLOW"
+	assert_failure
 	run grep -cE "^\s+ref: " "$WORKFLOW"
 	assert_output 5
 	run grep -F "ref: \${{ inputs.tag }}" "$WORKFLOW"
@@ -137,7 +146,7 @@ job_block() {
 	# The first step of every job is the harden-runner step.
 	run awk '
 		/^    steps:$/ { expect = 1; next }
-		expect && /^      - name: / { if ($0 != "      - name: Harden runner") bad++; expect = 0 }
+		expect && /^      - / { if ($0 != "      - name: Harden runner") bad++; expect = 0 }
 		END { exit bad > 0 }
 	' "$WORKFLOW"
 	assert_success
@@ -183,6 +192,27 @@ job_block() {
 	assert_success
 	run grep -F "attestations: write" "$EXAMPLE"
 	assert_success
+	run grep -F "homebrew-dispatch-token: \${{ secrets.HOMEBREW_DISPATCH_TOKEN }}" "$EXAMPLE"
+	assert_success
+}
+
+@test "reusable-release-recover: the Homebrew re-dispatch uses the declared cross-repo secret" {
+	run grep -F "      homebrew-dispatch-token:" "$WORKFLOW"
+	assert_success
+	run job_block resume-homebrew
+	assert_line "          GH_TOKEN: \${{ secrets.homebrew-dispatch-token }}"
+	refute_output --partial "GH_TOKEN: \${{ github.token }}"
+}
+
+@test "reusable-release-recover: block-mode allowlists have no preset fallback" {
+	# harden-runner installs inputs.allowed-endpoints at job start; a preset
+	# resolved afterwards could never apply, so none is offered.
+	run grep -F "egress-preset" "$WORKFLOW"
+	assert_failure
+	run grep -F "allowed-endpoints-mode" "$WORKFLOW"
+	assert_failure
+	run grep -c "allowed-endpoints: \${{ inputs.allowed-endpoints }}" "$WORKFLOW"
+	assert_output 5
 }
 
 @test "release artifact retention defaults to the 90-day recovery window" {

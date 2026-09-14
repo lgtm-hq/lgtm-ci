@@ -9,10 +9,17 @@
 #   WORKFLOW  Workflow file name, e.g. dispatch-homebrew.yml (required)
 #   REF       Git ref to dispatch on (required)
 #   TAG       Release tag passed as the `tag` input (required)
+#   GH_TOKEN  Token with actions: write on REPO (the homebrew-dispatch-token
+#             secret); github.token cannot dispatch across repositories
+#             (required)
 #   GH_CMD    gh binary override (default gh)
 
 set -euo pipefail
 
+if [[ -z "${GH_TOKEN:-}" ]]; then
+	echo "ERROR: the Homebrew re-dispatch needs the homebrew-dispatch-token secret (a token with actions: write on the tap dispatch repository); github.token cannot dispatch workflows in another repository. Nothing was dispatched." >&2
+	exit 1
+fi
 : "${REPO:?REPO is required}"
 : "${WORKFLOW:?WORKFLOW is required}"
 : "${REF:?REF is required}"

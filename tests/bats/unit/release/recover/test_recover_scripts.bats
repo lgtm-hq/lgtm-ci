@@ -54,6 +54,27 @@ resolve_env() {
 	assert_output --partial "cut a new prerelease version"
 }
 
+@test "resolve-tag: refuses PEP 440 and SemVer prerelease spellings, accepts final versions" {
+	resolve_env
+	mock_command_multi "gh" '*) echo "must not be called" >&2; exit 99;;'
+	local tag
+	for tag in v1.2.3rc1 v1.2.3a1 v1.2.3b2 v1.2.3-rc.1 v1.2.3-beta.1 v1.2.3-alpha1 v1.2.3.dev4 v1.2.3-pre; do
+		export TAG="$tag"
+		run bash "$RESOLVE"
+		assert_failure
+		assert_output --partial "refusing to recover prerelease tag '${tag}'"
+	done
+	# Final versions reach the tag lookup (the mock then refuses, proving the
+	# gate let them through).
+	for tag in v1.2.3 v1.2.30 v10.0.0; do
+		export TAG="$tag"
+		run bash "$RESOLVE"
+		assert_failure
+		refute_output --partial "prerelease"
+		assert_output --partial "not found"
+	done
+}
+
 @test "resolve-tag: refuses a missing tag" {
 	resolve_env
 	export TAG=v9.9.9
@@ -379,6 +400,16 @@ attest_mock() {
 	run bash "$VERIFY"
 	assert_success
 	assert_output --partial "Recovery artifacts verified"
+}
+
+@test "verify-recovery-artifacts: fails when attestation verification fails" {
+	verify_env
+	attest_mock 1
+
+	run bash "$VERIFY"
+	assert_failure
+	assert_output --partial "attestation verification failed for 'tool-linux-x64'"
+	assert_output --partial "nothing was resumed"
 }
 
 @test "verify-recovery-artifacts: fails a swapped artifact before any resume" {
@@ -767,6 +798,20 @@ derived_env() {
 	assert_output --partial "Dispatched dispatch-homebrew.yml@main on lgtm-hq/homebrew-tap for v1.2.3"
 	run cat "$calls"
 	assert_output "workflow run dispatch-homebrew.yml --repo lgtm-hq/homebrew-tap --ref main -f tag=v1.2.3"
+}
+
+@test "redispatch-homebrew: refuses to run without the cross-repo token" {
+	export REPO=lgtm-hq/homebrew-tap
+	export WORKFLOW=dispatch-homebrew.yml
+	export REF=main
+	export TAG=v1.2.3
+	export GH_TOKEN=""
+	mock_command_multi "gh" '*) echo "must not be called" >&2; exit 99;;'
+
+	run bash "$REDISPATCH"
+	assert_failure
+	assert_output --partial "needs the homebrew-dispatch-token secret"
+	assert_output --partial "Nothing was dispatched"
 }
 
 @test "redispatch-homebrew: a rejected dispatch fails the job" {

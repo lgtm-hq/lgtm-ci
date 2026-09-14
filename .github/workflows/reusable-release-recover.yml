@@ -8,11 +8,13 @@ name: Reusable Release Recovery
 # publishes channels the detection stage proved missing.
 #
 # The recovery runs the DEFAULT-BRANCH workflow code, never the tagged
-# commit's: the consumer dispatches it from its default branch, and every
-# tooling checkout below pins `github.workflow_sha` (the SHA of the workflow
-# that is running) or the explicit `tooling-ref` — nothing here checks out
-# `inputs.tag`. That is what lets a workflow defect fixed on main repair a
-# release that was cut before the fix.
+# commit's: the consumer dispatches it from its default branch and pins the
+# lgtm-ci tooling with the required `tooling-ref` (the same SHA as its
+# `uses:` line) — nothing here checks out `inputs.tag`. That is what lets a
+# workflow defect fixed on main repair a release that was cut before the
+# fix. (github.workflow_sha is deliberately not used: inside a called
+# workflow it names the caller's commit, which lgtm-hq/lgtm-ci cannot
+# check out.)
 #
 # Stage layout (see docs/release-recovery.md for the runbook):
 #   resolve  — tag gate (prerelease refusal; the source run must be this
@@ -221,9 +223,11 @@ name: Reusable Release Recovery
         default: audit
       allowed-endpoints:
         description: >-
-          Allowed endpoints when egress-policy is block (the probes reach
-          PyPI, npm, the registry, and the GitHub API; the npm resume also
-          needs Sigstore)
+          Allowed endpoints when egress-policy is block. harden-runner
+          installs this list at job start, before any step runs, so it must
+          be complete on its own: there is no preset fallback. The default
+          covers the probes (PyPI, npm, GHCR, the GitHub API and artifact
+          service) and the npm resume (registry + Sigstore).
         required: false
         type: string
         default: >
@@ -246,26 +250,24 @@ name: Reusable Release Recovery
           oauth2.sigstore.dev:443
           ghcr.io:443
           pkg-containers.githubusercontent.com:443
-      allowed-endpoints-mode:
-        description: >-
-          replace: non-empty allowed-endpoints overrides egress-preset; append:
-          merges preset with allowed-endpoints (deduped, first-seen wins)
-        required: false
-        type: string
-        default: replace
-      egress-preset:
-        description: Named allowlist when allowed-endpoints is empty and egress-policy is block
-        required: false
-        type: string
-        default: github-minimal
       tooling-ref:
         description: >-
-          lgtm-ci ref for tooling checkout. Empty uses the calling workflow's
-          pinned SHA (github.workflow_sha — the default-branch code, never
-          the tag).
-        required: false
+          lgtm-ci commit SHA for the tooling checkout; pin it to the same SHA
+          as the `uses:` reference. Required: inside a called workflow
+          github.workflow_sha names the CALLER's workflow commit, which is
+          not a commit of lgtm-hq/lgtm-ci, so there is no safe fallback.
+          Never the release tag.
+        required: true
         type: string
-        default: ""
+
+    secrets:
+      homebrew-dispatch-token:
+        description: >-
+          Token with `actions: write` on homebrew-dispatch-repo (a GitHub App
+          token or fine-grained PAT) for the cross-repository Homebrew
+          re-dispatch; github.token cannot dispatch workflows in another
+          repository. Required when homebrew-dispatch-repo is set.
+        required: false
 
 permissions:
   contents: read
@@ -300,20 +302,13 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-      - name: Resolve egress allowlist
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       # Gate 1: the tag must exist and not be a prerelease; the source run
       # must be this repository's publish workflow and must have built the
       # tag's commit (same commit = same version = the immutability check
@@ -432,20 +427,13 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-      - name: Resolve egress allowlist
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: npm-publish
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Set up Node.js
         # Node 24 ships npm >= 11.5.1 (OIDC trusted publishing); never
         # self-upgrade npm in place.
@@ -552,20 +540,13 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-      - name: Resolve egress allowlist
-        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       - name: Download the original release artifacts
         shell: bash
         env:
@@ -629,7 +610,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
@@ -639,7 +620,8 @@ jobs:
       - name: Re-dispatch the tap update workflow
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          # Cross-repository dispatch needs a credential for the target repo.
+          GH_TOKEN: ${{ secrets.homebrew-dispatch-token }}
           REPO: ${{ inputs.homebrew-dispatch-repo }}
           WORKFLOW: ${{ inputs.homebrew-dispatch-workflow }}
           REF: ${{ inputs.homebrew-dispatch-ref }}
@@ -676,7 +658,7 @@ jobs:
         with:
           repository: lgtm-hq/lgtm-ci
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist

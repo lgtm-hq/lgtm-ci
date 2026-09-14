@@ -22,6 +22,23 @@ original tag and the original attested artifacts. Tiers come from the
 - **Prereleases are never recovered:** abandon the prerelease and cut a new
   one.
 
+## Prerequisites
+
+- **Release tags must be immutable by ruleset.** The resolve stage proves
+  only that the tag's commit equals the source run's commit; it cannot tell
+  that a tag was moved and then paired with a newer run of the publish
+  workflow built from the new commit. Enforce a repository ruleset that
+  forbids updating and deleting release tags (`v*`), as the
+  [release security policy](release-security-policy.md) requires for
+  same-bytes-same-version, before relying on recovery.
+- **Pin `tooling-ref`.** The reusable checks lgtm-ci tooling out at
+  `tooling-ref` (required; the same SHA as the `uses:` line). It never falls
+  back to `github.workflow_sha`, which inside a called workflow names the
+  caller's commit.
+- **Homebrew re-dispatch** needs the `homebrew-dispatch-token` secret (a
+  token with `actions: write` on the tap dispatch repository); the default
+  `github.token` cannot dispatch workflows in another repository.
+
 ## Finding the inputs
 
 ```bash
@@ -68,9 +85,9 @@ Wrap `reusable-release-recover.yml` in a `workflow_dispatch` workflow (see
   `npm-access` must be `public`. The Homebrew dispatch is re-sent only when
   the tap lacks the version.
 - Dispatch the recovery from the **default branch**. It runs the
-  default-branch workflow code (the reusable pins `github.workflow_sha`,
-  never the tag), which is how a workflow fix merged after the release
-  applies to it.
+  default-branch workflow code (your dispatch workflow, plus lgtm-ci tooling
+  at the pinned `tooling-ref`; never the tag), which is how a workflow fix
+  merged after the release applies to it.
 
 On completion the recovery run updates the release-failure issue the notifier
 (#964) opened with the outcome table, and closes it only when the run was
