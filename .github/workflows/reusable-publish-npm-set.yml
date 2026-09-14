@@ -1,0 +1,374 @@
+---
+name: Reusable npm Package-Set Publishing
+
+# Ordered, idempotent, provenance-aware publish of a SET of npm packages
+# (#965): platform packages first, meta package last, pre-publish artifact
+# verification, and post-publish registry verification. Ported from the
+# audited py-lintro publish loop (scripts/ci/npm/publish_packages.sh as
+# corrected by py-lintro#2637); #966's npm-channel resume calls this same
+# reusable so the resume path and the tag path cannot drift.
+#
+# Consumer contract (enforced by the step order below and asserted by the
+# bats wiring test):
+#   1. verify-artifacts (optional but required for releases per policy):
+#      sha256 + provenance attestation on the artifacts, BEFORE any npm pack.
+#   2. publish-set: the ONLY step that writes to the registry.
+#   3. verify-published: read-only registry verification, LAST.
+#
+# The entry-workflow guard matters because npm trusted publishing checks the
+# ENTRY workflow file of the run — the consumer's top-level workflow, not
+# this reusable — so calling this reusable keeps the consumer's registration
+# valid. Name the entry file via the `entry-workflows` input so the guard can
+# enforce it.
+#
+# A job that calls a reusable (`uses:`) cannot declare `environment`, and
+# this reusable's job declares none, so register the npm trusted publisher
+# WITHOUT an environment name. npm trusted publishing needs OIDC only — no
+# NODE_AUTH_TOKEN. Do not self-upgrade npm in-place (`npm install -g npm`
+# corrupts the toolcache and breaks --provenance).
+#
+# Live publishes fail closed before anything is downloaded or packed unless
+# entry-workflows, checksums-file, signer-repo and signer-workflow are set
+# and the runner is GitHub-hosted; dry-runs stay permissive.
+
+"on":
+  workflow_call:
+    inputs:
+      packages-dir:
+        description: >-
+          Directory containing one subdirectory per package. When
+          artifact-name is set, the artifact is downloaded into this
+          directory before verification.
+        required: true
+        type: string
+      order:
+        description: >-
+          Subdirectory names in publish order (JSON array or comma-separated),
+          meta package last
+        required: true
+        type: string
+      dist-tag:
+        description: npm dist-tag (latest, beta, next, backfill, …)
+        required: false
+        type: string
+        default: latest
+      dry-run:
+        description: >-
+          Pack only, do not publish; skips registry verification. Defaults to
+          true so a caller must opt in to writing to the registry; a live
+          publish additionally requires entry-workflows, checksums-file,
+          signer-repo and signer-workflow.
+        required: false
+        type: boolean
+        default: true
+      provenance:
+        description: Pass --provenance on publish (under OIDC it is also automatic)
+        required: false
+        type: boolean
+        default: true
+      access:
+        description: >-
+          npm access level. A live publish with any value other than public
+          is refused while provenance or post-publish-verify is on: npm
+          issues automatic provenance only for public packages from public
+          repositories, and post-publish verification reads the registry
+          unauthenticated.
+        required: false
+        type: string
+        default: public
+      max-attempts:
+        description: Bounded attempts per package on transient registry errors
+        required: false
+        type: number
+        default: 3
+      artifact-name:
+        description: >-
+          Workflow artifact (actions/upload-artifact) holding the staged
+          package set, downloaded into packages-dir before verification.
+          Jobs have isolated filesystems, so a caller that stages the
+          packages in another job must hand them over this way. Empty
+          expects packages-dir to already exist in the checkout.
+        required: false
+        type: string
+        default: ""
+      entry-workflows:
+        description: >-
+          Allowlisted consumer entry workflow path(s) for npm trusted
+          publishing, e.g. .github/workflows/publish-npm.yml. Required for a
+          live publish (the job fails before publishing when empty); a
+          dry-run only warns.
+        required: false
+        type: string
+        default: ""
+      checksums-file:
+        description: >-
+          SHA256SUMS manifest for pre-publish artifact verification. The
+          path is relative to the workspace (e.g. npm-dist/SHA256SUMS; a
+          packages-dir-relative path is accepted as a fallback); the entries
+          inside the manifest are relative to packages-dir. Requires
+          signer-repo and signer-workflow. Required for a live publish (the
+          job fails before publishing when empty); a dry-run may leave it
+          empty to skip verification.
+        required: false
+        type: string
+        default: ""
+      files-to-verify:
+        description: >-
+          JSON array of additional artifact globs (relative to packages-dir)
+          to verify against checksums-file, on top of every file npm would
+          pack (always verified). Empty array also verifies every file the
+          manifest lists.
+        required: false
+        type: string
+        default: "[]"
+      signer-repo:
+        description: >-
+          Repository the artifact attestations must come from (e.g.
+          owner/repo). Required for a live publish and whenever
+          checksums-file is set.
+        required: false
+        type: string
+        default: ""
+      signer-workflow:
+        description: >-
+          Workflow the artifact attestations must come from: a path inside
+          signer-repo (e.g. .github/workflows/build.yml, qualified with
+          signer-repo for gh) or a fully qualified
+          owner/repo/.github/workflows/build.yml. Required for a live
+          publish and whenever checksums-file is set.
+        required: false
+        type: string
+        default: ""
+      post-publish-verify:
+        description: Read-only registry verification after the publish
+        required: false
+        type: boolean
+        default: true
+      smoke-command:
+        description: Optional command run in a scratch install of the meta package
+        required: false
+        type: string
+        default: ""
+      node-version:
+        description: >-
+          Node version for publish. Trusted publishing needs npm >= 11.5.1;
+          Node 24 ships a compatible npm. Do not self-upgrade npm in-place.
+        required: false
+        type: string
+        default: "24"
+      tooling-ref:
+        description: >-
+          lgtm-ci ref for tooling checkout. Empty uses the calling workflow's
+          pinned SHA.
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: harden-runner egress policy (audit or block)
+        required: false
+        type: string
+        default: block
+      allowed-endpoints:
+        description: Allowed endpoints when egress-policy is block
+        required: false
+        type: string
+        default: >
+          github.com:443
+          api.github.com:443
+          actions.githubusercontent.com:443
+          token.actions.githubusercontent.com:443
+          codeload.github.com:443
+          objects.githubusercontent.com:443
+          raw.githubusercontent.com:443
+          pipelines.actions.githubusercontent.com:443
+          *.blob.core.windows.net:443
+          registry.npmjs.org:443
+          fulcio.sigstore.dev:443
+          rekor.sigstore.dev:443
+          tuf-repo-cdn.sigstore.dev:443
+          oauth2.sigstore.dev:443
+      allowed-endpoints-mode:
+        description: >-
+          replace: non-empty allowed-endpoints overrides egress-preset; append:
+          merges preset with allowed-endpoints (deduped, first-seen wins)
+        required: false
+        type: string
+        default: replace
+      egress-preset:
+        description: >-
+          Named allowlist when allowed-endpoints is empty and egress-policy is
+          block (npm-publish)
+        required: false
+        type: string
+        default: npm-publish
+      job-name:
+        description: GitHub check name for the publish job
+        required: false
+        type: string
+        default: Publish npm package set
+      runner-image:
+        description: >-
+          GitHub-hosted runner image label. Must stay GitHub-hosted: npm
+          trusted publishing and provenance are not available on self-hosted
+          runners, and a live publish refuses to run on one.
+        required: false
+        type: string
+        default: ubuntu-24.04
+      timeout-minutes:
+        description: Job timeout in minutes
+        required: false
+        type: number
+        default: 15
+
+    outputs:
+      published:
+        description: >-
+          JSON array of {name, version, status: published|skipped|dry-run,
+          integrity} per package (dry-run: the rehearsal packed the package
+          and wrote nothing)
+        value: ${{ jobs.publish.outputs.published }}
+      dist-tag-drift:
+        description: Whether any dist-tag could not be reconciled (OIDC write rejection)
+        value: ${{ jobs.publish.outputs.dist-tag-drift }}
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: ${{ inputs.job-name }}
+    # GitHub-hosted runner only: provenance attestation requires it.
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      # Read repository context (checkout of the consumer repo)
+      contents: read
+      # OIDC trusted publishing: npm registry exchanges this token
+      id-token: write
+      # Tarball provenance attestation upload
+      attestations: write
+
+    outputs:
+      published: ${{ steps.publish.outputs.published }}
+      dist-tag-drift: ${{ steps.publish.outputs.dist_tag_drift }}
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: lgtm-hq/lgtm-ci
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+            .github/actions/harden-runner
+            .github/actions/resolve-egress-allowlist
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref }}
+          egress-policy: ${{ inputs.egress-policy }}
+          egress-preset: ${{ inputs.egress-preset }}
+          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+          sparse-checkout-extra: |
+            .github/actions/
+            scripts/ci/
+      - name: Set up Node.js
+        # Node 24 ships npm >= 11.5.1 (required for OIDC trusted publishing).
+        # Do not run `npm install -g npm`: in-place self-upgrade corrupts the
+        # toolcache and breaks `npm publish --provenance` (missing sigstore).
+        # yamllint disable-line rule:line-length
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ inputs.node-version }}
+          registry-url: https://registry.npmjs.org
+      - name: Assert entry workflow is allowlisted
+        shell: bash
+        env:
+          ALLOWED_ENTRY_WORKFLOWS: ${{ inputs.entry-workflows }}
+          LIVE: ${{ inputs.dry-run == false && '1' || '0' }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/assert-entry-workflow.sh
+      # Live publishes fail closed here: hosted runner, checksums manifest and
+      # signer inputs are mandatory before anything is downloaded or packed.
+      - name: Assert live-publish preconditions
+        shell: bash
+        env:
+          LIVE: ${{ inputs.dry-run == false && '1' || '0' }}
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CHECKSUMS_FILE: ${{ inputs.checksums-file }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          ACCESS: ${{ inputs.access }}
+          PROVENANCE: ${{ inputs.provenance == true && '1' || '0' }}
+          POST_PUBLISH_VERIFY: ${{ inputs.post-publish-verify == true && '1' || '0' }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/assert-live-publish-inputs.sh
+      # Jobs have isolated filesystems: a package set staged by another job
+      # arrives as a workflow artifact and lands in packages-dir here.
+      - name: Download staged package set
+        if: inputs.artifact-name != ''
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-name }}
+          path: ${{ inputs.packages-dir }}
+      # Contract step 1 of 3: verify BEFORE anything is packed or written.
+      # Verifies every file npm would pack (npm pack --dry-run) plus
+      # files-to-verify; a packed file the manifest does not list fails.
+      - name: Verify artifacts
+        if: inputs.checksums-file != ''
+        shell: bash
+        env:
+          PACKAGES_DIR: ${{ inputs.packages-dir }}
+          ORDER: ${{ inputs.order }}
+          CHECKSUMS_FILE: ${{ inputs.checksums-file }}
+          FILES: ${{ inputs.files-to-verify }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/verify-artifacts.sh
+      # Contract step 2 of 3: the ONLY step that writes to the registry.
+      - name: Publish package set
+        id: publish
+        shell: bash
+        env:
+          PACKAGES_DIR: ${{ inputs.packages-dir }}
+          ORDER: ${{ inputs.order }}
+          DIST_TAG: ${{ inputs.dist-tag }}
+          LIVE: ${{ inputs.dry-run == false && '1' || '0' }}
+          PROVENANCE: ${{ inputs.provenance == true && '1' || '0' }}
+          ACCESS: ${{ inputs.access }}
+          MAX_ATTEMPTS: ${{ inputs.max-attempts }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/publish-set.sh
+      # Contract step 3 of 3: read-only verification, always last.
+      - name: Verify published packages
+        if: inputs.post-publish-verify
+        shell: bash
+        env:
+          PACKAGES_DIR: ${{ inputs.packages-dir }}
+          ORDER: ${{ inputs.order }}
+          DRY_RUN: ${{ inputs.dry-run == true && '1' || '0' }}
+          SMOKE: ${{ inputs.smoke-command }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/verify-published.sh

@@ -1,0 +1,114 @@
+# SPDX-License-Identifier: MIT
+# Canonical caller layout for an ordered npm package-set release using
+# lgtm-ci reusables (#965). Replace every <sha> with a full lgtm-ci commit
+# SHA (not a branch or tag) so builds stay reproducible. Copy into your
+# repository as .github/workflows/publish-npm-set.yml (or similar).
+#
+# npm trusted publishing validates THIS workflow file (the entry workflow),
+# so your npm trusted-publisher registration must name it — and the
+# `entry-workflows` input below must repeat that path so the pre-publish
+# guard can enforce the binding. A job that calls a reusable (`uses:`)
+# cannot declare `environment`, and the reusable's job declares none, so
+# register the trusted publisher WITHOUT an environment name. Trusted
+# publishing needs OIDC only; do not pass an npm token. See
+# docs/reusable-workflows.md and docs/workflow-contract.md.
+#
+# Prepare the packages directory before this workflow runs (build and stage
+# platform binaries, then one subdirectory per package with its
+# package.json): the reusable starts at "a directory of ready-to-pack
+# packages" and never builds binaries itself.
+---
+name: Publish - npm Package Set
+
+"on":
+  push:
+    tags:
+      - "*.*.*"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: publish-npm-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  npm-publish-set:
+    name: Stage npm package set
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+      - name: Stage packages from release assets
+        run: |
+          echo "Build/stage one subdirectory per package under ./npm-dist"
+          echo '(platform packages first in `order`, meta package last)'
+          echo "and the build's SHA256SUMS manifest at ./npm-dist/SHA256SUMS"
+      # Jobs have isolated filesystems: hand the staged set to the reusable as
+      # a workflow artifact (it downloads `artifact-name` into `packages-dir`).
+      - name: Upload staged package set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: npm-dist
+          path: npm-dist/
+          if-no-files-found: error
+          overwrite: true
+
+  # The publish job. It calls a reusable, so it cannot carry `environment:`
+  # (GitHub rejects the key on `uses:` jobs): the npm trusted publisher for
+  # this repository must be registered without an environment name.
+  npm-release:
+    name: Release npm package set
+    needs: [npm-publish-set]
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      packages-dir: npm-dist
+      artifact-name: npm-dist
+      # Platform packages first, meta package last: the meta package's
+      # optionalDependencies must exist on the registry first.
+      order: '["darwin-arm64", "darwin-x64", "linux-arm64", "linux-x64", "meta"]'
+      dist-tag: latest
+      dry-run: false
+      provenance: true
+      access: public
+      max-attempts: 3
+      # Live publishes require entry-workflows, checksums-file, signer-repo
+      # and signer-workflow; the job fails before publishing without them.
+      entry-workflows: .github/workflows/publish-npm-set.yml
+      # Workspace-relative path to the manifest that shipped inside the
+      # artifact; the entries inside it are relative to packages-dir.
+      checksums-file: npm-dist/SHA256SUMS
+      # Empty ("[]", the default) verifies every file the manifest lists.
+      files-to-verify: '["*/package.json", "*/bin/*"]'
+      signer-repo: <owner>/<repo>
+      signer-workflow: .github/workflows/build-binaries.yml
+      post-publish-verify: true
+      tooling-ref: "<sha>"
+
+  # Release-mode failure notifier (#964): files or updates ONE deduplicated
+  # issue per tag when a publish channel fails after automatic retries, and
+  # closes it when every channel succeeds.
+  release-failure-notifier:
+    name: Report release failure
+    needs: [npm-publish-set, npm-release]
+    if: always()
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-failure-notifier.yml@<sha> # vX.Y.Z
+    with:
+      workflow-key: publish-npm-set
+      tag: ${{ github.ref_name }}
+      channels: ${{ toJson(needs) }}
+      max-reruns: 3
+      tooling-ref: "<sha>"
+    permissions:
+      actions: read
+      contents: read
+      issues: write

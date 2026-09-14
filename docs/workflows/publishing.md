@@ -38,26 +38,44 @@ Cargo workspaces that bump `Cargo.toml` on `main` use
 preset) and uploads them to the release — see
 [deployment.md](deployment.md#rust-release-binaries).
 
-### reusable-publish-npm.yml
+### reusable-publish-npm-set.yml
 
-Publish Node.js packages to npm using **OIDC trusted publishing** (preferred)
-or an optional legacy `npm-token` / `NODE_AUTH_TOKEN`.
+Publish an ordered **set** of Node.js packages to npm using **OIDC trusted
+publishing** — platform packages first, meta package last, idempotent on
+re-runs, with pre-publish artifact verification and post-publish registry
+verification (#965). `reusable-publish-npm.yml` is a deprecated thin wrapper
+(a single package is a set of one) and the old `publish-npm` composite action
+is removed.
 
 ```yaml
 jobs:
   publish:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm.yml@main
+    needs: [stage] # uploads the npm-dist artifact (packages + SHA256SUMS)
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-npm-set.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
       id-token: write
       attestations: write
     with:
-      node-version: "24"
+      packages-dir: npm-dist
+      artifact-name: npm-dist # staged in another job: jobs do not share disks
+      order: '["darwin-arm64", "linux-x64", "meta"]' # meta last
       dist-tag: "latest"
-      provenance: true
-      access: "public"
       dry-run: false
+      entry-workflows: .github/workflows/publish-npm-set.yml
+      # Live publishes fail closed without entry-workflows, checksums-file,
+      # signer-repo and signer-workflow. The manifest path is workspace-
+      # relative; the entries inside it are relative to packages-dir.
+      checksums-file: npm-dist/SHA256SUMS
+      files-to-verify: "[]" # empty: every file the manifest lists
+      signer-repo: <owner>/<repo>
+      signer-workflow: .github/workflows/build-binaries.yml
+      tooling-ref: "<sha>"
 ```
+
+Pin `@<sha>` and `tooling-ref` to the same lgtm-ci release commit with a
+`# vX.Y.Z` comment (see [README.md](README.md)). Full caller layout:
+[examples/publish-npm-set.yml](../../examples/publish-npm-set.yml).
 
 #### Trusted publishing recipe
 

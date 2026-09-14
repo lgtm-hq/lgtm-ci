@@ -13,6 +13,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Deprecated
 
+- **npm**: `reusable-publish-npm.yml` is deprecated in favour of
+  `reusable-publish-npm-set.yml` and now forwards to it as a compatibility
+  shim: the legacy `published`, `version` and `package-name` outputs are
+  preserved, `tarball` is always empty, the set JSON is exposed as
+  `published-set`, and the `npm-token` secret is refused with an error
+  (trusted publishing only). Migration notes: the check name now defaults to
+  `Publish to npm (deprecated wrapper)` (pass `job-name: Publish to npm` to
+  keep a required status check), the publish job runs on `runner-image`
+  (default `ubuntu-24.04`) instead of `ubuntu-latest`, and a live publish
+  requires the forwarded `entry-workflows`, `checksums-file`, `signer-repo`
+  and `signer-workflow` inputs. Removal target: v0.72.0 (#965)
+
 ### Removed
 
 ### Fixed

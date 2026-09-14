@@ -57,7 +57,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | -------- | ------------ |
 | `reusable-build-python-dist.yml` | Build Python dist artifact |
 | `reusable-github-release.yml` | GitHub Release with artifact assets |
-| `reusable-publish-npm.yml` | npm publishing with provenance |
+| `reusable-publish-npm-set.yml` | ordered npm package set; idempotent; verified |
 | `reusable-publish-gem.yml` | RubyGems publishing (OIDC) |
 | `reusable-publish-rust-release.yml` | Rust cross-compile release binaries |
 | `reusable-release-version-pr.yml` | Release version PR with changelog |

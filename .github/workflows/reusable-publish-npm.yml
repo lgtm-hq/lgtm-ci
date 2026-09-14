@@ -1,14 +1,39 @@
 ---
-name: Reusable npm Publishing Workflow
+name: Reusable npm Publishing Workflow (deprecated)
 
-on:
+# DEPRECATED (#965): single-package publishing is the one-element case of a
+# package set. This wrapper forwards to reusable-publish-npm-set.yml (the
+# audited, idempotent, verified publish loop) using its single-directory
+# shape (order: "."). It will be removed in a future release — switch to
+# reusable-publish-npm-set.yml directly.
+#
+# The wrapper is a compatibility shim: the legacy output contract is kept
+# (`published` as 'true'/'false', `version`, `package-name`; `tarball` is
+# always empty because the set workflow packs in its own job) and the set
+# workflow's JSON is exposed as `published-set`. The `npm-token` secret is
+# refused with an error rather than silently ignored: publishing runs under
+# npm trusted publishing (OIDC) only, and a caller still relying on a token
+# has not migrated. Removal target: v0.72.0.
+#
+# Migration notes for callers of this wrapper:
+#   - The publish job runs on the set workflow's `runner-image` (default
+#     ubuntu-24.04, GitHub-hosted only) instead of ubuntu-latest; pass
+#     `runner-image` to pin another hosted label.
+#   - The GitHub check name defaults to "Publish to npm (deprecated wrapper)"
+#     instead of "Publish to npm"; callers with a required status check on
+#     the old name must pass `job-name: Publish to npm` until they migrate.
+#   - A live publish (dry-run: false) now fails closed unless
+#     `entry-workflows`, `checksums-file`, `signer-repo` and
+#     `signer-workflow` are set; they are forwarded verbatim to the set
+#     workflow. Dry-runs stay permissive.
+
+"on":
   workflow_call:
     inputs:
       node-version:
         description: >-
-          Node.js version for publish (default 24). Trusted publishing needs
-          npm ≥ 11.5.1; Node 24 ships a compatible npm. Do not self-upgrade
-          npm with `npm install -g npm`.
+          Node.js version for publish. Trusted publishing needs npm >= 11.5.1;
+          Node 24 ships a compatible npm. Do not self-upgrade npm in-place.
         required: false
         type: string
         default: "24"
@@ -35,10 +60,47 @@ on:
         type: boolean
         default: false
       working-directory:
-        description: "Working directory containing the package"
+        description: "Directory containing the package to publish"
         required: false
         type: string
         default: "."
+      entry-workflows:
+        description: >-
+          Allowlisted consumer entry workflow path(s) for npm trusted
+          publishing (forwarded to reusable-publish-npm-set.yml). Required
+          for a live publish.
+        required: false
+        type: string
+        default: ""
+      checksums-file:
+        description: >-
+          SHA256SUMS manifest for pre-publish artifact verification
+          (forwarded; required for a live publish)
+        required: false
+        type: string
+        default: ""
+      files-to-verify:
+        description: JSON array of artifact globs to verify (forwarded)
+        required: false
+        type: string
+        default: "[]"
+      signer-repo:
+        description: Repository the artifact attestations must come from (forwarded)
+        required: false
+        type: string
+        default: ""
+      signer-workflow:
+        description: Workflow path the artifact attestations must come from (forwarded)
+        required: false
+        type: string
+        default: ""
+      runner-image:
+        description: >-
+          GitHub-hosted runner image label for the publish job (forwarded;
+          default ubuntu-24.04)
+        required: false
+        type: string
+        default: ubuntu-24.04
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -73,12 +135,10 @@ on:
         required: false
         type: string
         default: "replace"
-
       egress-preset:
         description: >-
           Named allowlist when allowed-endpoints is empty and egress-policy is
-          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
-          rubygems, npm-publish, quality, sbom, scorecard)
+          block (npm-publish)
         required: false
         type: string
         default: "npm-publish"
@@ -86,8 +146,7 @@ on:
         description: "GitHub check name for the publish job"
         required: false
         type: string
-        default: "Publish to npm"
-
+        default: "Publish to npm (deprecated wrapper)"
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -97,98 +156,103 @@ on:
     secrets:
       npm-token:
         description: >-
-          Optional legacy npm token (NODE_AUTH_TOKEN). Omit for OIDC trusted
-          publishing (preferred).
+          Not supported: publishing runs under npm trusted publishing (OIDC)
+          only, and the wrapper fails with an error when this secret is
+          supplied so a token-based caller cannot silently lose auth.
         required: false
 
     outputs:
       published:
-        description: "Whether the package was published"
-        value: ${{ jobs.publish.outputs.published }}
+        description: >-
+          Whether the package was published ('true'/'false'); false for
+          dry-runs and for an already-published (skipped) version
+        value: >-
+          ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].status == 'published'
+              && 'true' || 'false' }}
       version:
         description: "Published package version"
-        value: ${{ jobs.publish.outputs.version }}
+        value: ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].version }}
       package-name:
         description: "Published package name"
-        value: ${{ jobs.publish.outputs.package-name }}
+        value: ${{ fromJSON(jobs.publish.outputs.published || '[]')[0].name }}
       tarball:
-        description: "Path to the built tarball"
-        value: ${{ jobs.publish.outputs.tarball }}
+        description: >-
+          Deprecated, always empty: the package-set workflow packs inside its
+          own job and does not export the tarball path.
+        # actionlint rejects a literal empty string here; the expression
+        # evaluates to the same empty output.
+        value: ${{ '' }}
+      published-set:
+        description: >-
+          The package-set JSON array ({name, version, status:
+          published|skipped|dry-run, integrity}, one entry) from
+          reusable-publish-npm-set.yml
+        value: ${{ jobs.publish.outputs.published }}
+      dist-tag-drift:
+        description: Whether the dist-tag could not be reconciled
+        value: ${{ jobs.publish.outputs.dist-tag-drift }}
+
+permissions:
+  contents: read
 
 jobs:
+  deprecation-notice:
+    name: Deprecation notice
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Warn about the deprecated reusable
+        shell: bash
+        env:
+          GITHUB_WORKFLOW_REF_VALUE: ${{ github.workflow_ref }}
+        run: |
+          echo "::warning::reusable-publish-npm.yml is deprecated and will be removed in v0.72.0 (#965)." \
+            "Switch to reusable-publish-npm-set.yml (a single package is a set of one; see docs/reusable-workflows.md)."
+          echo "Entry workflow: ${GITHUB_WORKFLOW_REF_VALUE:-unknown}"
+      # Fail before the publish job runs: a caller that still forwards a
+      # token has not migrated to trusted publishing, and ignoring the token
+      # would surface as an opaque auth failure inside the set workflow.
+      - name: Refuse the unsupported npm-token secret
+        shell: bash
+        env:
+          NPM_TOKEN_SUPPLIED: ${{ secrets.npm-token != '' }}
+        run: |
+          if [[ "$NPM_TOKEN_SUPPLIED" == "true" ]]; then
+            echo "::error::reusable-publish-npm.yml no longer accepts the npm-token secret:" \
+              "publishing runs under npm trusted publishing (OIDC) only. Remove the secret" \
+              "and configure a trusted publisher, or migrate to reusable-publish-npm-set.yml."
+            exit 1
+          fi
+
   publish:
     name: ${{ inputs.job-name }}
-    # CRITICAL: Must use GitHub-hosted runner for provenance attestation
-    runs-on: ubuntu-latest
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    needs: [deprecation-notice]
+    uses: ./.github/workflows/reusable-publish-npm-set.yml
     permissions:
       contents: read
       id-token: write
       attestations: write
-
-    outputs:
-      published: ${{ steps.npm.outputs.published || 'false' }}
-      version: ${{ steps.npm.outputs.version }}
-      package-name: ${{ steps.npm.outputs.package-name }}
-      tarball: ${{ steps.npm.outputs.tarball }}
-
-    steps:
-      - name: Harden runner
-        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
-        # Pinned to SHA for supply chain security
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: lgtm-hq/lgtm-ci
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-      - name: Checkout and harden
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-        with:
-          tooling-ref: ${{ inputs.tooling-ref }}
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-          sparse-checkout-extra: |
-            .github/actions/
-            scripts/ci/
-
-      - name: Set up Node.js
-        # Node 24 ships npm ≥ 11.5.1 (required for OIDC trusted publishing).
-        # Do not run `npm install -g npm`: in-place self-upgrade corrupts the
-        # toolcache and breaks `npm publish --provenance` (missing sigstore).
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-        with:
-          node-version: ${{ inputs.node-version }}
-          registry-url: https://registry.npmjs.org
-      - name: Publish to npm
-        id: npm
-        uses: ./.lgtm-ci-tooling/.github/actions/publish-npm
-        with:
-          dist-tag: ${{ inputs.dist-tag }}
-          provenance: ${{ inputs.provenance }}
-          access: ${{ inputs.access }}
-          dry-run: ${{ inputs.dry-run }}
-          working-directory: ${{ inputs.working-directory }}
-          npm-token: ${{ secrets.npm-token }}
-      - name: Attest build provenance
-        if: inputs.dry-run == false && inputs.provenance
-        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
-        with:
-          subject-path: >-
-            ${{ inputs.working-directory }}/${{ steps.npm.outputs.tarball }}
+    with:
+      packages-dir: ${{ inputs.working-directory }}
+      # Single-directory shape: the package IS the packages directory.
+      order: "."
+      dist-tag: ${{ inputs.dist-tag }}
+      dry-run: ${{ inputs.dry-run }}
+      provenance: ${{ inputs.provenance }}
+      access: ${{ inputs.access }}
+      node-version: ${{ inputs.node-version }}
+      entry-workflows: ${{ inputs.entry-workflows }}
+      checksums-file: ${{ inputs.checksums-file }}
+      files-to-verify: ${{ inputs.files-to-verify }}
+      signer-repo: ${{ inputs.signer-repo }}
+      signer-workflow: ${{ inputs.signer-workflow }}
+      runner-image: ${{ inputs.runner-image }}
+      tooling-ref: ${{ inputs.tooling-ref }}
+      egress-policy: ${{ inputs.egress-policy }}
+      allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
+      egress-preset: ${{ inputs.egress-preset }}
+      job-name: ${{ inputs.job-name }}
+      timeout-minutes: ${{ inputs.timeout-minutes }}
