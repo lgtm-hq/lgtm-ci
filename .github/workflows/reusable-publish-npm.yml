@@ -128,7 +128,9 @@ name: Reusable npm Publishing Workflow (deprecated)
         description: >-
           Deprecated, always empty: the package-set workflow packs inside its
           own job and does not export the tarball path.
-        value: ""
+        # actionlint rejects a literal empty string here; the expression
+        # evaluates to the same empty output.
+        value: ${{ '' }}
       published-set:
         description: >-
           The package-set JSON array ({name, version, status:

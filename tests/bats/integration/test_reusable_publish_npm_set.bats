@@ -134,7 +134,7 @@ wrapper_output_value() {
 	run wrapper_output_value package-name
 	assert_output "\${{ fromJSON(jobs.publish.outputs.published || '[]')[0].name }}"
 	run wrapper_output_value tarball
-	assert_output '""'
+	assert_output "\${{ '' }}"
 	run wrapper_output_value published-set
 	assert_output "\${{ jobs.publish.outputs.published }}"
 }
