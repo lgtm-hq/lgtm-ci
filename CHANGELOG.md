@@ -11,13 +11,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **release**: `reusable-release-recover.yml` (#966) requires `tooling-ref`
-  (no `github.workflow_sha` fallback: in a called workflow that SHA belongs
-  to the caller's repository), takes only a complete literal
-  `allowed-endpoints` for block-mode egress (no `egress-preset` /
-  `allowed-endpoints-mode` inputs), and needs the `homebrew-dispatch-token`
-  secret to re-send the Homebrew dispatch
-
 ### Deprecated
 
 ### Removed
@@ -25,6 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 ### Security
+
+## [0.73.0] - 2026-09-14
+
+### Added
+
+- **release**: reusable release recovery workflow and 90-day artifact retention (#984)
+  (cc3c57e)
+
+### Changed
+
+- **release**: `reusable-release-recover.yml` (#966) requires `tooling-ref`
+  (no `github.workflow_sha` fallback: in a called workflow that SHA belongs
+  to the caller's repository), takes only a complete literal
+  `allowed-endpoints` for block-mode egress (no `egress-preset` /
+  `allowed-endpoints-mode` inputs), and needs the `homebrew-dispatch-token`
+  secret to re-send the Homebrew dispatch
 
 ## [0.72.0] - 2026-09-14
 
@@ -2376,7 +2385,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.72.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.0...HEAD
+[0.73.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.72.0...v0.73.0
 [0.72.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.71.0...v0.72.0
 [0.71.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.1...v0.71.0
 [0.70.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.70.0...v0.70.1
