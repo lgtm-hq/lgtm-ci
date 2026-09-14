@@ -241,8 +241,10 @@ jobs:
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
-[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables and
-npm/gem publish workflows do not expose `runner-image`; see
+[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables,
+the deprecated `reusable-publish-npm.yml` wrapper, and the gem publish
+workflow do not expose `runner-image`; `reusable-publish-npm-set.yml` does
+(GitHub-hosted labels only, since provenance needs a hosted runner); see
 [workflow-contract.md](workflow-contract.md#runner-pinning).
 
 **Action-only reusables** (labeler, dependency review, semantic PR title,

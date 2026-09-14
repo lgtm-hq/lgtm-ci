@@ -137,7 +137,8 @@ jobs:
         env:
           GITHUB_WORKFLOW_REF_VALUE: ${{ github.workflow_ref }}
         run: |
-          echo "::warning::reusable-publish-npm.yml is deprecated and will be removed in a future release (#965). Switch to reusable-publish-npm-set.yml (a single package is a set of one; see docs/reusable-workflows.md)."
+          echo "::warning::reusable-publish-npm.yml is deprecated and will be removed in a future release (#965)." \
+            "Switch to reusable-publish-npm-set.yml (a single package is a set of one; see docs/reusable-workflows.md)."
           echo "Entry workflow: ${GITHUB_WORKFLOW_REF_VALUE:-unknown}"
 
   publish:

@@ -161,7 +161,6 @@ These reusables intentionally omit `runner-image`:
 | `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
 | `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
 | `reusable-publish-npm.yml`           | Deprecated wrapper → package-set reusable; OIDC only   |
-| `reusable-publish-npm-set.yml`       | Ordered npm package set; idempotent; pre/post verified |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->
