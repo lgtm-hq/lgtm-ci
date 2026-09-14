@@ -1105,7 +1105,7 @@ it. Do not self-upgrade npm in-place. Full example:
 [examples/publish-npm-set.yml](../examples/publish-npm-set.yml).
 
 The deprecated single-package wrapper `reusable-publish-npm.yml` forwards
-here with `order: "."` as a compatibility shim until its removal in v0.73.0:
+here with `order: "."` as a compatibility shim until its removal (not before 2026-10-15):
 the legacy `published` (`'true'`/`'false'`), `version` and `package-name`
 outputs are preserved, `tarball` is always empty (the set workflow packs in
 its own job), and the set JSON is exposed as `published-set`. The `npm-token`
