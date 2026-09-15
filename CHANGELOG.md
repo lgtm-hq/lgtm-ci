@@ -9,13 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **npm**: `reusable-publish-npm-set.yml` (and the deprecated wrapper) accept an
-  optional `environment` input that binds the publish job to a deployment
-  environment, so a `uses:` caller keeps its approval gate and an npm trusted
-  publisher registered with an environment name keeps matching; a dry-run
-  self-test lane (`npm-set-self-test.yml`) proves both shapes on every PR that
-  touches the reusable (#967)
-
 ### Changed
 
 ### Deprecated
@@ -24,12 +17,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+### Security
+
+## [0.74.0] - 2026-09-15
+
+### Added
+
+- **npm**: let callers bind the publish job to a deployment environment (#990) (cdc7c02)
+- **npm**: `reusable-publish-npm-set.yml` (and the deprecated wrapper) accept an
+  optional `environment` input that binds the publish job to a deployment
+  environment, so a `uses:` caller keeps its approval gate and an npm trusted
+  publisher registered with an environment name keeps matching; a dry-run
+  self-test lane (`npm-set-self-test.yml`) proves both shapes on every PR that
+  touches the reusable (#967)
+
+### Fixed
+
 - **npm**: `publish-set.sh` restores executable modes on `bin/*` files and
   package.json `bin` targets before `npm pack`; the workflow-artifact handoff
   lands every file as 0644, which shipped consumers' launchers and binaries
   non-executable (#967)
-
-### Security
 
 ## [0.73.2] - 2026-09-14
 
@@ -2415,7 +2422,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.0...HEAD
+[0.74.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.2...v0.74.0
 [0.73.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.1...v0.73.2
 [0.73.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.0...v0.73.1
 [0.73.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.72.0...v0.73.0
