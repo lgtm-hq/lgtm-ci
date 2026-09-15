@@ -440,3 +440,28 @@ teardown() {
 	assert_success
 	assert_output "clean"
 }
+
+@test "get_latest_reachable_tag: skips prerelease and checkpoint tags above the latest stable one" {
+	cd "$MOCK_GIT_REPO"
+	git tag v1.2.1
+	git tag v1.2.2a1
+	git tag v1.2.2rc1
+	git tag v1.2.2-rc.1
+	run bash -c 'source "$LIB_DIR/git.sh" && get_latest_reachable_tag "v*"'
+	assert_success
+	assert_output "v1.2.1"
+}
+
+@test "latest_stable_tag: returns the highest stable tag and honours the prefix" {
+	cd "$MOCK_GIT_REPO"
+	git tag v1.2.1
+	git tag v1.2.2a4
+	git tag v1
+	git tag release-1.2.5
+	run bash -c 'source "$LIB_DIR/git.sh" && latest_stable_tag'
+	assert_success
+	assert_output "v1.2.1"
+	run bash -c 'source "$LIB_DIR/git.sh" && latest_stable_tag HEAD release-'
+	assert_success
+	assert_output "release-1.2.5"
+}

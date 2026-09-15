@@ -115,3 +115,24 @@ run_calculate_version() {
 	assert_line --partial "bump-type=minor"
 	assert_line --partial "release-needed=true"
 }
+
+@test "calculate-version: skips a newer checkpoint prerelease tag and bumps from the stable one" {
+	# A checkpoint tag (v0.1.1a4) sorts above v0.1.0 in git's version sort; the
+	# next release must still be computed from the stable tag.
+	setup_mock_git_repo
+	(
+		cd "$MOCK_GIT_REPO"
+		git commit -q --allow-empty -m "feat: initial feature"
+		git tag "v0.1.0"
+		git commit -q --allow-empty -m "ci(release): checkpoint prerelease 0.1.1a4"
+		git tag "v0.1.1a4"
+		git tag "v0.1.1rc1"
+		git commit -q --allow-empty -m "fix: a bug"
+	)
+
+	run_calculate_version "minor"
+	assert_success
+	assert_line --partial "current-version=0.1.0"
+	assert_line --partial "next-version=0.1.1"
+	assert_line --partial "release-needed=true"
+}

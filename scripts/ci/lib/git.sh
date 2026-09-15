@@ -74,10 +74,29 @@ get_tags() {
 	git tag -l "$pattern" --sort=-v:refname 2>/dev/null
 }
 
-# Get the highest semver among tags reachable from HEAD matching a pattern
+# Get the highest STABLE semver among tags reachable from HEAD matching a
+# pattern. Prerelease and checkpoint tags (v1.2.3a1, v1.2.3rc1, v1.2.3-rc.1)
+# and floating tags (v1) are skipped: git's version sort ranks v1.2.3a1 above
+# v1.2.2, so without the end-anchored filter a checkpoint prerelease became
+# the "previous version" the release pipeline bumped from.
 get_latest_reachable_tag() {
 	local pattern="${1:-v*}"
-	git tag -l "$pattern" --sort=-v:refname --merged HEAD 2>/dev/null | head -1
+	git tag -l "$pattern" --sort=-v:refname --merged HEAD 2>/dev/null |
+		grep -E '[0-9]+\.[0-9]+\.[0-9]+$' |
+		head -1
+}
+
+# Get the highest stable semver tag reachable from a ref (default HEAD),
+# optionally requiring a tag prefix (default: optional "v"). Same filter as
+# get_latest_reachable_tag; this is the single lookup the release scripts use
+# to find the version they bump from and the range they summarize.
+# Usage: latest_stable_tag [merged-ref] [prefix]
+latest_stable_tag() {
+	local merged="${1:-HEAD}"
+	local prefix="${2-v?}"
+	git tag --merged "$merged" --sort=-v:refname 2>/dev/null |
+		grep -E "^${prefix}[0-9]+\.[0-9]+\.[0-9]+$" |
+		head -n1
 }
 
 # Check if a tag exists
@@ -92,4 +111,4 @@ tag_exists() {
 # =============================================================================
 export -f get_git_root get_current_branch get_commit_sha get_short_sha
 export -f is_git_repo is_git_clean get_git_remote_url
-export -f get_latest_tag get_tags get_latest_reachable_tag tag_exists
+export -f get_latest_tag get_tags get_latest_reachable_tag latest_stable_tag tag_exists
