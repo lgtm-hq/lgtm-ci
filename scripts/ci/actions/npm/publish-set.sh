@@ -155,9 +155,11 @@ _record_dist_tag_drift() {
 
 package_field() {
 	# $1 package dir, $2 field (name|version) — via package.json.
-	# path.resolve: a relative PACKAGES_DIR (the common caller shape, e.g.
-	# packages-dir: npm) would otherwise make require() look up a module name.
-	node -p "require(require('path').resolve('$1/package.json')).$2"
+	# The path travels as an argv entry, never interpolated into JS source
+	# (PACKAGES_DIR and the order entries are caller-provided strings), and
+	# path.resolve keeps a relative PACKAGES_DIR (packages-dir: npm) from
+	# being looked up as a module name. The field name is a fixed literal.
+	node -p "require(require('node:path').resolve(process.argv[1])).$2" "$1/package.json"
 }
 
 # Workflow artifacts drop file modes: actions/upload-artifact zips every file
@@ -185,7 +187,7 @@ restore_bin_modes() {
 			continue
 		fi
 		targets+=("$pkg_dir/$target")
-	done < <(node -p "const b = require(require('path').resolve('$pkg_dir/package.json')).bin; (typeof b === 'string' ? [b] : Object.values(b || {})).join('\\n')")
+	done < <(node -p 'const b = require(require("node:path").resolve(process.argv[1])).bin; (typeof b === "string" ? [b] : Object.values(b || {})).join("\n")' "$pkg_dir/package.json")
 	for target in "${targets[@]+"${targets[@]}"}"; do
 		[[ -f "$target" && ! -L "$target" && ! -x "$target" ]] || continue
 		real="$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"

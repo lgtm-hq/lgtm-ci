@@ -413,6 +413,25 @@ export -f not_published_reply
 	assert_output --partial "==> Publishing meta"
 }
 
+@test "publish-set: a quote-bearing package directory is a path, never JavaScript" {
+	# PACKAGES_DIR and the order entries are caller strings; they reach node
+	# as argv, so a name like it's-meta cannot break or extend the expression.
+	export ORDER='["it'"'"'s-meta"]'
+	mkdir -p "$PACKAGES_DIR/it's-meta"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":{"pkg":"cli.js"}}\n' >"$PACKAGES_DIR/it's-meta/package.json"
+	printf '#!/usr/bin/env node\n' >"$PACKAGES_DIR/it's-meta/cli.js"
+	chmod 0644 "$PACKAGES_DIR/it's-meta/cli.js"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ -x "$PACKAGES_DIR/it's-meta/cli.js" ]]
+	refute_output --partial "SyntaxError"
+	assert_output --partial "==> Publishing it's-meta"
+}
+
 @test "publish-set: leaves already-executable bin files alone" {
 	export ORDER='["platform-a"]'
 	mkdir -p "$PACKAGES_DIR/platform-a/bin"
