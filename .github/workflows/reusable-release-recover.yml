@@ -510,6 +510,7 @@ jobs:
           PACKAGES_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
           ORDER: ${{ inputs.npm-order }}
           DIST_TAG: ${{ inputs.npm-dist-tag }}
+          PROVENANCE: ${{ inputs.npm-provenance == true && '1' || '0' }}
           DRY_RUN: "0"
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/verify-published.sh

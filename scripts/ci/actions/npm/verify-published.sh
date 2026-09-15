@@ -10,8 +10,10 @@
 #   0.159.4, 0.160.2 and the 0.160.3rc1 checkpoint all did), so every package
 #   in ORDER is polled in the same loop with exponential backoff until each is
 #   - visible: `npm view <name>@<version>` resolves;
-#   - complete: `dist.attestations` and `dist.integrity` are present
-#     (provenance metadata propagates separately from the version);
+#   - complete: `dist.integrity` is present, and `dist.attestations` too when
+#     the publish ran with provenance (PROVENANCE=1; provenance metadata
+#     propagates separately from the version). Without provenance npm
+#     publishes no attestation, so none is expected;
 #   - tagged: `dist-tags.<DIST_TAG>` points at <version>, so consumers that
 #     resolve the tag get this publish and not the previous release.
 #   The log records when each package became visible and the total wait. The
@@ -19,7 +21,7 @@
 #   retry doubling up to DELAY seconds between later ones (defaults 30 polls,
 #   5 s doubling to a 30 s cap: about fifteen minutes worst case; the
 #   0.160.3rc1 checkpoint needed about eight minutes for full visibility).
-#   A package still missing, incomplete or mis-tagged after the budget is a
+#   A package still missing, incomplete or wrongly tagged after the budget is a
 #   failure; every package is reported before the script exits.
 # Phase 2, only after every package is visible:
 #   For the meta package (last in ORDER): `npm install <name>@<version>` from
@@ -39,6 +41,8 @@
 #   PACKAGES_DIR   Directory containing one subdirectory per package (required)
 #   ORDER          Same order input publish-set.sh took; meta package last (required)
 #   DIST_TAG       Dist-tag the publish used; must point at each version (default latest)
+#   PROVENANCE     1 when the publish carried --provenance, so dist.attestations
+#                  is required on the registry (default 1)
 #   DRY_RUN        1 when the publish was a dry-run (default 0)
 #   SMOKE          Optional command to run inside the scratch install
 #   ATTEMPTS       Propagation polls before giving up (default 30)
@@ -53,6 +57,7 @@ set -euo pipefail
 : "${ORDER:?ORDER is required}"
 PACKAGES_DIR="${PACKAGES_DIR%/}"
 DIST_TAG="${DIST_TAG-latest}"
+PROVENANCE="${PROVENANCE:-1}"
 DRY_RUN="${DRY_RUN:-0}"
 SMOKE="${SMOKE:-}"
 ATTEMPTS="${ATTEMPTS:-30}"
@@ -107,11 +112,13 @@ package_dir_for() {
 declare -a FAILURES=()
 
 # One registry probe. Prints a state word on stdout:
-#   ok        visible, attestation + integrity present, dist-tag points here
+#   ok        visible, integrity (+ attestation under PROVENANCE=1) present,
+#             dist-tag points here
 #   missing   the version does not resolve yet
-#   partial   visible but attestation/integrity not yet present
+#   partial   visible but integrity (or the required attestation) not yet present
 #   untagged  visible and complete but dist-tags.<DIST_TAG> is elsewhere
-# Args: $1 name, $2 version. Never fails: a probe error is "missing".
+# Args: $1 name, $2 version. Never fails: a version-read error is "missing"
+# and a dist-tags read error is "untagged" (both retry the same way).
 probe_package() {
 	local name="$1" version="$2"
 	local view tags actual
@@ -119,8 +126,13 @@ probe_package() {
 		echo missing
 		return 0
 	fi
-	if ! printf '%s' "$view" | jq -e '."dist.attestations"' >/dev/null 2>&1 ||
-		! printf '%s' "$view" | jq -e '."dist.integrity"' >/dev/null 2>&1; then
+	if ! printf '%s' "$view" | jq -e '."dist.integrity"' >/dev/null 2>&1; then
+		echo partial
+		return 0
+	fi
+	# npm attaches dist.attestations only to a --provenance publish; a caller
+	# that publishes without provenance must not wait for one that never comes.
+	if [[ "$PROVENANCE" == "1" ]] && ! printf '%s' "$view" | jq -e '."dist.attestations"' >/dev/null 2>&1; then
 		echo partial
 		return 0
 	fi
@@ -138,6 +150,13 @@ probe_package() {
 	fi
 	echo ok
 }
+
+# What "complete" means in the log lines, per the publish's provenance setting.
+if [[ "$PROVENANCE" == "1" ]]; then
+	METADATA_LABEL="provenance attestation, integrity"
+else
+	METADATA_LABEL="integrity (no provenance expected)"
+fi
 
 # Seconds since the script started, for the per-package timing lines.
 STARTED_AT="$(date +%s)"
@@ -173,14 +192,14 @@ wait_for_propagation() {
 			state="$(probe_package "$name" "$version")"
 			case "$state" in
 			ok)
-				echo "    $name@$version visible with provenance attestation, integrity and dist-tag '$DIST_TAG' after $(elapsed)s (poll $attempt)"
+				echo "    $name@$version visible with $METADATA_LABEL and dist-tag '$DIST_TAG' after $(elapsed)s (poll $attempt)"
 				;;
 			missing)
 				echo "    $name@$version not visible yet"
 				still+=("$line")
 				;;
 			partial)
-				echo "    $name@$version visible, but provenance attestation or integrity not yet present"
+				echo "    $name@$version visible, but $METADATA_LABEL not yet present"
 				still+=("$line")
 				;;
 			untagged)
@@ -210,8 +229,12 @@ wait_for_propagation() {
 		version="${line##* }"
 		case "${last_state[$line]}" in
 		partial)
-			echo "ERROR: $name@$version is on the registry without provenance attestation or integrity after $ATTEMPTS attempts ($(elapsed)s)" >&2
-			FAILURES+=("$name@$version missing dist.attestations/dist.integrity after $ATTEMPTS propagation attempts")
+			echo "ERROR: $name@$version is on the registry without $METADATA_LABEL after $ATTEMPTS attempts ($(elapsed)s)" >&2
+			if [[ "$PROVENANCE" == "1" ]]; then
+				FAILURES+=("$name@$version missing dist.attestations/dist.integrity after $ATTEMPTS propagation attempts")
+			else
+				FAILURES+=("$name@$version missing dist.integrity after $ATTEMPTS propagation attempts")
+			fi
 			;;
 		untagged)
 			echo "ERROR: dist-tag '$DIST_TAG' does not point at $name@$version after $ATTEMPTS attempts ($(elapsed)s)" >&2

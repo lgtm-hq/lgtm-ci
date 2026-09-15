@@ -1124,7 +1124,8 @@ order that callers must not reorder around (asserted by
    over the whole set on one shared clock: every package is polled together
    with exponential backoff (`propagation-attempts` × up to
    `propagation-delay` seconds, default 30 × 30 s, about fifteen minutes) until
-   it is visible, carries `dist.attestations` + `dist.integrity`, and
+   it is visible, carries `dist.integrity` (and `dist.attestations` when
+   `provenance` is on), and
    `dist-tags.<dist-tag>` points at the published version; the log records
    when each package appeared. Only then `npm audit signatures` on a scratch
    install of the meta package (its optional dependencies are the platform

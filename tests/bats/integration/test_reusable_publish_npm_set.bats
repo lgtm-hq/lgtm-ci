@@ -157,8 +157,10 @@ output_value() {
 	assert_line "          LIVE: \${{ inputs.dry-run == false && '1' || '0' }}"
 	run step_block "Verify published packages"
 	assert_line "          DRY_RUN: \${{ inputs.dry-run == true && '1' || '0' }}"
-	# The verifier waits for dist-tags.<dist-tag> to point at the publish.
+	# The verifier waits for dist-tags.<dist-tag> to point at the publish and
+	# expects dist.attestations only when the publish carried provenance.
 	assert_line "          DIST_TAG: \${{ inputs.dist-tag }}"
+	assert_line "          PROVENANCE: \${{ inputs.provenance == true && '1' || '0' }}"
 }
 
 @test "reusable-publish-npm-set: verify-published receives the propagation budget" {

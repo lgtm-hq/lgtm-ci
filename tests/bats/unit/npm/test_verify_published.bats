@@ -429,6 +429,63 @@ BODY
 	assert_output 0
 }
 
+@test "verify-published: provenance off does not wait for dist.attestations and still runs the audit and smoke" {
+	export ORDER='["meta"]'
+	export PROVENANCE=0
+	export SMOKE="echo smoke-ran"
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
+	*view*dist.attestations*) echo '{"dist.integrity":"sha512-abc"}';;
+	*view*dist-tags*) echo '{"latest":"1.2.3"}';;
+	*audit*signatures*) exit 0;;
+	*install*@lgtm-hq/pkg@1.2.3*) exit 0;;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "visible with integrity (no provenance expected) and dist-tag 'latest' after"
+	assert_output --partial "(poll 1)"
+	assert_output --partial "smoke-ran"
+	assert_output --partial "Post-publish verification passed"
+	run grep -c "audit signatures" "$CALLS"
+	assert_output 1
+	run grep -c "" "$SLEEPS"
+	assert_output 0
+}
+
+@test "verify-published: provenance on treats a missing dist.attestations as partial" {
+	export ORDER='["meta"]'
+	export PROVENANCE=1
+	export ATTEMPTS=2
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
+	*view*dist.attestations*) echo '{"dist.integrity":"sha512-abc"}';;
+	*view*dist-tags*) echo '{"latest":"1.2.3"}';;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "visible, but provenance attestation, integrity not yet present"
+	assert_output --partial "missing dist.attestations/dist.integrity after 2 propagation attempts"
+	run grep -c "install" "$CALLS"
+	assert_output 0
+}
+
+@test "verify-published: provenance off still requires dist.integrity" {
+	export ORDER='["meta"]'
+	export PROVENANCE=0
+	export ATTEMPTS=2
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
+	*view*dist.attestations*) echo '{}';;
+	*view*dist-tags*) echo '{"latest":"1.2.3"}';;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "missing dist.integrity after 2 propagation attempts"
+}
+
 @test "verify-published: rejects an empty DIST_TAG" {
 	export ORDER='["meta"]'
 	export DIST_TAG=""

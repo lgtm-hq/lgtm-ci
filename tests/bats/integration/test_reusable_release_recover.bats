@@ -110,6 +110,7 @@ step_block_in_job() {
 	# so the resume's verify step is wired with the tag like the tag path.
 	run step_block_in_job resume-npm "Verify published packages"
 	assert_line "          DIST_TAG: \${{ inputs.npm-dist-tag }}"
+	assert_line "          PROVENANCE: \${{ inputs.npm-provenance == true && '1' || '0' }}"
 	assert_line '          DRY_RUN: "0"'
 	# The GitHub Release resumes through create-github-release.sh with
 	# immutable assets so only missing assets upload.
