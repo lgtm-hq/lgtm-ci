@@ -155,7 +155,9 @@ _record_dist_tag_drift() {
 
 package_field() {
 	# $1 package dir, $2 field (name|version) — via package.json.
-	node -p "require('$1/package.json').$2"
+	# path.resolve: a relative PACKAGES_DIR (the common caller shape, e.g.
+	# packages-dir: npm) would otherwise make require() look up a module name.
+	node -p "require(require('path').resolve('$1/package.json')).$2"
 }
 
 # Workflow artifacts drop file modes: actions/upload-artifact zips every file
@@ -165,18 +167,32 @@ package_field() {
 # anything is packed. Idempotent, and it runs for dry-runs too so a
 # rehearsal packs the same modes a live publish would.
 restore_bin_modes() {
-	local pkg_dir="$1" target
+	local pkg_dir="$1" target pkg_root real
 	local -a targets=()
+	pkg_root="$(cd "$pkg_dir" && pwd -P)"
 	if [[ -d "$pkg_dir/bin" ]]; then
 		while IFS= read -r target; do
 			[[ -n "$target" ]] && targets+=("$target")
 		done < <(find "$pkg_dir/bin" -type f | sort)
 	fi
+	# package.json "bin" targets are untrusted paths: confine them to the
+	# package directory (no absolute paths, no traversal, no symlinks that
+	# escape) so a crafted manifest cannot chmod anything outside the package.
 	while IFS= read -r target; do
-		[[ -n "$target" ]] && targets+=("$pkg_dir/$target")
-	done < <(node -p "const b = require('$pkg_dir/package.json').bin; (typeof b === 'string' ? [b] : Object.values(b || {})).join('\\n')")
+		[[ -n "$target" ]] || continue
+		if [[ "$target" == /* || "$target" == ".." || "$target" == ../* || "$target" == */../* || "$target" == */.. ]]; then
+			echo "    ::warning::ignoring package.json bin target '$target' in ${pkg_dir#"$PACKAGES_DIR"/}: it points outside the package"
+			continue
+		fi
+		targets+=("$pkg_dir/$target")
+	done < <(node -p "const b = require(require('path').resolve('$pkg_dir/package.json')).bin; (typeof b === 'string' ? [b] : Object.values(b || {})).join('\\n')")
 	for target in "${targets[@]+"${targets[@]}"}"; do
-		[[ -f "$target" && ! -x "$target" ]] || continue
+		[[ -f "$target" && ! -L "$target" && ! -x "$target" ]] || continue
+		real="$(cd "$(dirname "$target")" && pwd -P)/$(basename "$target")"
+		if [[ "$real" != "$pkg_root/"* ]]; then
+			echo "    ::warning::ignoring bin target '${target#"$PACKAGES_DIR"/}': it resolves outside the package"
+			continue
+		fi
 		chmod +x "$target"
 		echo "    restored executable mode on ${target#"$PACKAGES_DIR"/}"
 	done

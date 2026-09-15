@@ -63,7 +63,9 @@ normalize_order() {
 }
 
 package_field() {
-	node -p "require('$1/package.json').$2"
+	# path.resolve: a relative PACKAGES_DIR (the common caller shape, e.g.
+	# packages-dir: npm) would otherwise make require() look up a module name.
+	node -p "require(require('path').resolve('$1/package.json')).$2"
 }
 
 package_dir_for() {

@@ -356,6 +356,63 @@ export -f not_published_reply
 	assert_success
 }
 
+@test "publish-set: restores the mode of a string-form package.json bin target" {
+	export ORDER='["meta"]'
+	mkdir -p "$PACKAGES_DIR/meta"
+	printf '#!/usr/bin/env node\n' >"$PACKAGES_DIR/meta/cli.js"
+	chmod 0644 "$PACKAGES_DIR/meta/cli.js"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":"cli.js"}\n' >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ -x "$PACKAGES_DIR/meta/cli.js" ]]
+	assert_output --partial "restored executable mode on meta/cli.js"
+}
+
+@test "publish-set: never chmods a package.json bin target outside the package" {
+	# A crafted manifest must not turn the mode repair into a write outside
+	# the package: absolute paths, traversal and escaping symlinks are ignored.
+	export ORDER='["meta"]'
+	mkdir -p "$PACKAGES_DIR/meta"
+	printf 'outside\n' >"$PACKAGES_DIR/outside.sh"
+	printf 'elsewhere\n' >"$BATS_TEST_TMPDIR/elsewhere.sh"
+	chmod 0644 "$PACKAGES_DIR/outside.sh" "$BATS_TEST_TMPDIR/elsewhere.sh"
+	ln -s "$BATS_TEST_TMPDIR/elsewhere.sh" "$PACKAGES_DIR/meta/link.js"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":{"a":"../outside.sh","b":"%s","c":"link.js"}}\n' \
+		"$BATS_TEST_TMPDIR/elsewhere.sh" >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ ! -x "$PACKAGES_DIR/outside.sh" ]]
+	[[ ! -x "$BATS_TEST_TMPDIR/elsewhere.sh" ]]
+	assert_output --partial "ignoring package.json bin target '../outside.sh'"
+	assert_output --partial "ignoring package.json bin target '$BATS_TEST_TMPDIR/elsewhere.sh'"
+	refute_output --partial "restored executable mode"
+}
+
+@test "publish-set: accepts a relative PACKAGES_DIR (the packages-dir: npm caller shape)" {
+	# require('npm/x/package.json') is a module lookup, not a path: the first
+	# self-test run of the reusable failed on exactly this (#967).
+	export ORDER='["meta"]'
+	mkdir -p "$PACKAGES_DIR/meta"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3"}\n' >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	cd "$(dirname "$PACKAGES_DIR")" || return 1
+	PACKAGES_DIR="$(basename "$PACKAGES_DIR")" run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "Cannot find module"
+	assert_output --partial "==> Publishing meta"
+}
+
 @test "publish-set: leaves already-executable bin files alone" {
 	export ORDER='["platform-a"]'
 	mkdir -p "$PACKAGES_DIR/platform-a/bin"
