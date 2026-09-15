@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.74.2] - 2026-09-15
+
+### Added
+
 - **rerun**: `reusable-auto-rerun-on-infra-failure.yml` gains `protected-workflows`
   (runs of listed workflow files or names are never re-run) and
   `protected-job-pattern` (default `publish|promote|release|upload`; one matching
@@ -19,10 +33,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   zero steps, since they leave no log to match; callers must grant
   `checks: read` (#967)
 
-### Changed
-
-### Deprecated
-
 ### Removed
 
 - **rerun**: `Error resolving allowed domain` is no longer a built-in infra
@@ -32,14 +42,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **npm**: wait for registry propagation before verifying published packages (#1002)
+  (07ec2c7)
+- **rerun**: never auto-rerun jobs with irreversible steps and stop treating egress
+  refusals as infra failures (#1003) (0659c9c)
 - **npm**: post-publish verification waits for registry propagation of the whole
   package set before the scratch install (`propagation-attempts` ×
   `propagation-delay`, default about fifteen minutes, dist-tag aware, per-package
   timing in the log) instead of five polls in thirteen seconds (#967)
 - **release**: look up failure-issue labels with `gh label list` (case-insensitive);
   `gh label view` does not exist, so every failure issue was filed unlabelled (#967)
-
-### Security
 
 ## [0.74.1] - 2026-09-15
 
@@ -2450,7 +2462,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.2...HEAD
+[0.74.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.1...v0.74.2
 [0.74.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.0...v0.74.1
 [0.74.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.2...v0.74.0
 [0.73.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.73.1...v0.73.2
