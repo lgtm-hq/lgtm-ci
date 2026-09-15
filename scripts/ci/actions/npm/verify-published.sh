@@ -156,7 +156,13 @@ wait_for_propagation() {
 		pending+=("$line")
 	done <<<"$specs"
 
-	local attempt delay="$DELAY_START" state name version
+	local attempt delay state name version
+	# The first wait honours the cap too: propagation-delay below the start
+	# value must not produce a longer first sleep than later ones.
+	delay="$DELAY_START"
+	if ((delay > DELAY)); then
+		delay="$DELAY"
+	fi
 	local -A last_state=()
 	for ((attempt = 1; attempt <= ATTEMPTS; attempt++)); do
 		local -a still=()

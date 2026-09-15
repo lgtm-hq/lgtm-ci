@@ -355,7 +355,7 @@ collect_existing_issue_label_args() {
 	local -a applied_names=()
 	IFS=',' read -ra labels <<<"$default_labels"
 	for label in "${labels[@]}"; do
-		label="$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+		label="$(printf '%s\n' "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 		if [[ -z "$label" ]]; then
 			continue
 		fi

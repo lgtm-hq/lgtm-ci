@@ -257,6 +257,22 @@ BODY
 	assert_output $'8\n16\n20\n20'
 }
 
+@test "verify-published: a cap below the start value bounds the first sleep too" {
+	export ORDER='["meta"]'
+	export ATTEMPTS=3
+	export DELAY_START=5
+	export DELAY=2
+	cat >"${BATS_TEST_TMPDIR}/mock_body" <<'BODY'
+	*view*) echo "npm error 404" >&2; exit 1;;
+BODY
+	make_npm_mock_from "${BATS_TEST_TMPDIR}/mock_body"
+
+	run bash "$SCRIPT"
+	assert_failure
+	run cat "$SLEEPS"
+	assert_output $'2\n2'
+}
+
 @test "verify-published: waits for the dist-tag to point at the published version" {
 	export ORDER='["meta"]'
 	export DIST_TAG=next
