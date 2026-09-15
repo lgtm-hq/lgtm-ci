@@ -1,0 +1,69 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: Self-test - npm package-set reusable
+
+# Dry-run contract check for reusable-publish-npm-set.yml on the PR that
+# changes it: two calls against the committed fixture package set, one with
+# the `environment` input omitted (the job must start with no environment,
+# an empty string being "no environment") and one bound to a throwaway
+# environment, so both shapes are proven by this repository's own CI
+# instead of by the first adopter's live publish (#967). Dry-runs never
+# touch the registry, no secrets are used, and the fixture launcher is
+# committed 0644 so restore_bin_modes() is exercised on the way to npm pack.
+
+'on':
+  pull_request:
+    paths:
+      - '.github/workflows/reusable-publish-npm-set.yml'
+      - '.github/workflows/reusable-publish-npm.yml'
+      - '.github/workflows/npm-set-self-test.yml'
+      - 'scripts/ci/actions/npm/**'
+      - 'tests/fixtures/npm-set/**'
+  merge_group:
+    types: [checks_requested]
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: npm-set-self-test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  without-environment:
+    name: Dry-run without environment
+    uses: ./.github/workflows/reusable-publish-npm-set.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      job-name: npm-set dry-run (no environment)
+      packages-dir: tests/fixtures/npm-set
+      order: '["self-test"]'
+      dry-run: true
+      provenance: false
+      post-publish-verify: true
+      tooling-ref: ${{ github.sha }}
+      egress-policy: block
+
+  with-environment:
+    name: Dry-run bound to an environment
+    uses: ./.github/workflows/reusable-publish-npm-set.yml
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    with:
+      job-name: npm-set dry-run (environment npm-set-self-test)
+      packages-dir: tests/fixtures/npm-set
+      order: '["self-test"]'
+      dry-run: true
+      provenance: false
+      post-publish-verify: true
+      # Throwaway environment; GitHub creates it on first reference with no
+      # protection rules, so the job runs unattended.
+      environment: npm-set-self-test
+      tooling-ref: ${{ github.sha }}
+      egress-policy: block

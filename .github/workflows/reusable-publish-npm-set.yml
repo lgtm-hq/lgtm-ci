@@ -21,11 +21,18 @@ name: Reusable npm Package-Set Publishing
 # valid. Name the entry file via the `entry-workflows` input so the guard can
 # enforce it.
 #
-# A job that calls a reusable (`uses:`) cannot declare `environment`, and
-# this reusable's job declares none, so register the npm trusted publisher
-# WITHOUT an environment name. npm trusted publishing needs OIDC only — no
-# NODE_AUTH_TOKEN. Do not self-upgrade npm in-place (`npm install -g npm`
-# corrupts the toolcache and breaks --provenance).
+# A job that calls a reusable (`uses:`) cannot declare `environment`, so the
+# `environment` input binds THIS job to the caller's deployment environment
+# (approval gate, and the environment claim npm's trusted publisher can be
+# registered against). Empty (the default) runs without an environment, in
+# which case the trusted publisher must be registered WITHOUT an environment
+# name. npm trusted publishing needs OIDC only — no NODE_AUTH_TOKEN. Do not
+# self-upgrade npm in-place (`npm install -g npm` corrupts the toolcache and
+# breaks --provenance).
+#
+# Workflow artifacts drop file modes (every file lands as 0644), so
+# publish-set.sh restores +x on bin/* and package.json "bin" targets before
+# npm pack records the modes into the tarball.
 #
 # Live publishes fail closed before anything is downloaded or packed unless
 # entry-workflows, checksums-file, signer-repo and signer-workflow are set
@@ -206,6 +213,15 @@ name: Reusable npm Package-Set Publishing
         required: false
         type: string
         default: Publish npm package set
+      environment:
+        description: >-
+          GitHub deployment environment to bind the publish job to (approval
+          gate; also the environment claim in the OIDC token, so an npm
+          trusted publisher registered with an environment name keeps
+          matching). Empty runs the job without an environment.
+        required: false
+        type: string
+        default: ""
       runner-image:
         description: >-
           GitHub-hosted runner image label. Must stay GitHub-hosted: npm
@@ -240,6 +256,10 @@ jobs:
     # GitHub-hosted runner only: provenance attestation requires it.
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    # An empty name is "no environment"; a `uses:` caller cannot set this
+    # key itself, so it is the only way to keep an approval gate on the
+    # publish job.
+    environment: ${{ inputs.environment }}
     permissions:
       # Read repository context (checkout of the consumer repo)
       contents: read

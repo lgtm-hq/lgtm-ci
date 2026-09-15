@@ -1084,6 +1084,7 @@ jobs:
       files-to-verify: '["*/package.json", "*/bin/*"]'
       signer-repo: <owner>/<repo>
       signer-workflow: .github/workflows/build-binaries.yml
+      environment: npm # optional: approval gate on the publish job
 ```
 
 npm trusted publishing validates the **entry** workflow file of the run —
@@ -1097,9 +1098,14 @@ runner is GitHub-hosted, and `access` is `public` while `provenance` or
 `post-publish-verify` is on (npm provenance and unauthenticated post-publish
 reads need a public package); dry-runs stay permissive. Dry-run packages are
 reported with `status: dry-run`, never `published`. A `uses:` job cannot
-declare `environment`, and the reusable's job declares none, so register
-the npm trusted publisher without an environment name. No npm token: OIDC
-only.
+declare `environment`, so pass the deployment environment through the
+`environment` input: the reusable's publish job is bound to it (approval
+gate, and the environment claim in the OIDC token, so a trusted publisher
+registered with that environment name keeps matching). Empty (the default)
+runs without an environment, in which case register the trusted publisher
+without an environment name. No npm token: OIDC only. Workflow artifacts
+drop file modes, so the publish step restores `+x` on `bin/*` and on
+package.json `bin` targets before `npm pack` records the modes.
 `setup-node` writes a placeholder `_authToken`; the publish script strips
 it. Do not self-upgrade npm in-place. Full example:
 [examples/publish-npm-set.yml](../examples/publish-npm-set.yml).

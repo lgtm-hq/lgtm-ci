@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **npm**: `reusable-publish-npm-set.yml` (and the deprecated wrapper) accept an
+  optional `environment` input that binds the publish job to a deployment
+  environment, so a `uses:` caller keeps its approval gate and an npm trusted
+  publisher registered with an environment name keeps matching; a dry-run
+  self-test lane (`npm-set-self-test.yml`) proves both shapes on every PR that
+  touches the reusable (#967)
+
 ### Changed
 
 ### Deprecated
@@ -16,6 +23,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+
+- **npm**: `publish-set.sh` restores executable modes on `bin/*` files and
+  package.json `bin` targets before `npm pack`; the workflow-artifact handoff
+  lands every file as 0644, which shipped consumers' launchers and binaries
+  non-executable (#967)
 
 ### Security
 

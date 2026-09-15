@@ -147,6 +147,13 @@ name: Reusable npm Publishing Workflow (deprecated)
         required: false
         type: string
         default: "Publish to npm (deprecated wrapper)"
+      environment:
+        description: >-
+          GitHub deployment environment for the publish job (forwarded;
+          empty runs without an environment)
+        required: false
+        type: string
+        default: ""
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -256,4 +263,5 @@ jobs:
       allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       egress-preset: ${{ inputs.egress-preset }}
       job-name: ${{ inputs.job-name }}
+      environment: ${{ inputs.environment }}
       timeout-minutes: ${{ inputs.timeout-minutes }}

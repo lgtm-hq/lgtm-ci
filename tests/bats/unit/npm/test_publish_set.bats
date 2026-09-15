@@ -323,3 +323,126 @@ export -f not_published_reply
 	run grep -F '"status":"skipped"' "$output_file"
 	assert_success
 }
+
+@test "publish-set: restores executable modes on bin/ files and package.json bin targets before packing" {
+	# Workflow artifacts land every file as 0644; npm pack would record that
+	# mode, so a consumer's launcher/binary must be repaired before publish.
+	export ORDER='["platform-a", "meta"]'
+	mkdir -p "$PACKAGES_DIR/platform-a/bin" "$PACKAGES_DIR/meta/cli"
+	printf 'binary\n' >"$PACKAGES_DIR/platform-a/bin/tool"
+	printf '#!/usr/bin/env node\n' >"$PACKAGES_DIR/meta/cli/launcher.js"
+	printf 'not a bin\n' >"$PACKAGES_DIR/meta/README.md"
+	chmod 0644 "$PACKAGES_DIR/platform-a/bin/tool" "$PACKAGES_DIR/meta/cli/launcher.js" "$PACKAGES_DIR/meta/README.md"
+	# The meta package declares its launcher outside bin/ via the "bin" map.
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":{"pkg":"cli/launcher.js"}}\n' >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ -x "$PACKAGES_DIR/platform-a/bin/tool" ]]
+	[[ -x "$PACKAGES_DIR/meta/cli/launcher.js" ]]
+	# Only bin files are touched; other package files keep their mode.
+	[[ ! -x "$PACKAGES_DIR/meta/README.md" ]]
+	assert_output --partial "restored executable mode on platform-a/bin/tool"
+	assert_output --partial "restored executable mode on meta/cli/launcher.js"
+	# The repair happens before the publish (pack) call of that package.
+	run awk '
+		/restored executable mode on platform-a\/bin\/tool/ { fix = NR }
+		/==> Publishing platform-a/ { pub = NR }
+		END { exit !(fix && pub && fix < pub) }
+	' <<<"$output"
+	assert_success
+}
+
+@test "publish-set: restores the mode of a string-form package.json bin target" {
+	export ORDER='["meta"]'
+	mkdir -p "$PACKAGES_DIR/meta"
+	printf '#!/usr/bin/env node\n' >"$PACKAGES_DIR/meta/cli.js"
+	chmod 0644 "$PACKAGES_DIR/meta/cli.js"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":"cli.js"}\n' >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ -x "$PACKAGES_DIR/meta/cli.js" ]]
+	assert_output --partial "restored executable mode on meta/cli.js"
+}
+
+@test "publish-set: never chmods a package.json bin target outside the package" {
+	# A crafted manifest must not turn the mode repair into a write outside
+	# the package: absolute paths, traversal and escaping symlinks are ignored.
+	export ORDER='["meta"]'
+	mkdir -p "$PACKAGES_DIR/meta"
+	printf 'outside\n' >"$PACKAGES_DIR/outside.sh"
+	printf 'elsewhere\n' >"$BATS_TEST_TMPDIR/elsewhere.sh"
+	chmod 0644 "$PACKAGES_DIR/outside.sh" "$BATS_TEST_TMPDIR/elsewhere.sh"
+	ln -s "$BATS_TEST_TMPDIR/elsewhere.sh" "$PACKAGES_DIR/meta/link.js"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":{"a":"../outside.sh","b":"%s","c":"link.js"}}\n' \
+		"$BATS_TEST_TMPDIR/elsewhere.sh" >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ ! -x "$PACKAGES_DIR/outside.sh" ]]
+	[[ ! -x "$BATS_TEST_TMPDIR/elsewhere.sh" ]]
+	assert_output --partial "ignoring package.json bin target '../outside.sh'"
+	assert_output --partial "ignoring package.json bin target '$BATS_TEST_TMPDIR/elsewhere.sh'"
+	refute_output --partial "restored executable mode"
+}
+
+@test "publish-set: accepts a relative PACKAGES_DIR (the packages-dir: npm caller shape)" {
+	# require('npm/x/package.json') is a module lookup, not a path: the first
+	# self-test run of the reusable failed on exactly this (#967).
+	export ORDER='["meta"]'
+	mkdir -p "$PACKAGES_DIR/meta"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3"}\n' >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	cd "$(dirname "$PACKAGES_DIR")" || return 1
+	PACKAGES_DIR="$(basename "$PACKAGES_DIR")" run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "Cannot find module"
+	assert_output --partial "==> Publishing meta"
+}
+
+@test "publish-set: a quote-bearing package directory is a path, never JavaScript" {
+	# PACKAGES_DIR and the order entries are caller strings; they reach node
+	# as argv, so a name like it's-meta cannot break or extend the expression.
+	export ORDER='["it'"'"'s-meta"]'
+	mkdir -p "$PACKAGES_DIR/it's-meta"
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":{"pkg":"cli.js"}}\n' >"$PACKAGES_DIR/it's-meta/package.json"
+	printf '#!/usr/bin/env node\n' >"$PACKAGES_DIR/it's-meta/cli.js"
+	chmod 0644 "$PACKAGES_DIR/it's-meta/cli.js"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ -x "$PACKAGES_DIR/it's-meta/cli.js" ]]
+	refute_output --partial "SyntaxError"
+	assert_output --partial "==> Publishing it's-meta"
+}
+
+@test "publish-set: leaves already-executable bin files alone" {
+	export ORDER='["platform-a"]'
+	mkdir -p "$PACKAGES_DIR/platform-a/bin"
+	printf 'binary\n' >"$PACKAGES_DIR/platform-a/bin/tool"
+	chmod 0755 "$PACKAGES_DIR/platform-a/bin/tool"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "restored executable mode"
+	[[ -x "$PACKAGES_DIR/platform-a/bin/tool" ]]
+}

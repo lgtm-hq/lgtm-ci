@@ -1,0 +1,16 @@
+{
+  "name": "@lgtm-hq/npm-set-self-test",
+  "version": "0.0.0",
+  "description": "Fixture package for the reusable-publish-npm-set dry-run self-test; never published.",
+  "license": "MIT",
+  "bin": {
+    "npm-set-self-test": "bin/self-test.js"
+  },
+  "files": [
+    "bin",
+    "index.js"
+  ],
+  "publishConfig": {
+    "access": "public"
+  }
+}

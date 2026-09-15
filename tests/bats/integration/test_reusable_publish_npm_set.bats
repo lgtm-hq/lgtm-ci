@@ -238,3 +238,92 @@ wrapper_output_value() {
 	assert_line "      signer-workflow: \${{ inputs.signer-workflow }}"
 	assert_line "      runner-image: \${{ inputs.runner-image }}"
 }
+
+# Print the `type:` value of one workflow_call input block.
+input_type() {
+	awk -v input="$1" '
+		$0 == "      " input ":" { in_input = 1; next }
+		in_input && /^      [a-z-]+:$/ { exit }
+		in_input && /^        type:/ { print $2; exit }
+	' "$WORKFLOW"
+}
+
+@test "reusable-publish-npm-set: exposes an optional environment input, empty by default" {
+	# A `uses:` caller cannot set `environment` on its own job, so the
+	# reusable must accept the name; empty means "no environment".
+	run input_required environment
+	assert_output "false"
+	run input_type environment
+	assert_output "string"
+	run input_default environment
+	assert_output '""'
+}
+
+@test "reusable-publish-npm-set: binds the publish job to the environment input" {
+	run awk '
+		$0 == "  publish:" { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { exit }
+		in_job && /^    environment:/ { print }
+	' "$WORKFLOW"
+	assert_output '    environment: ${{ inputs.environment }}'
+}
+
+@test "reusable-publish-npm: forwards the environment input to the set workflow" {
+	run awk -v input="environment" '
+		$0 == "      " input ":" { in_input = 1; next }
+		in_input && /^      [a-z-]+:$/ { exit }
+		in_input && /^        (required|type|default):/ { print }
+	' "$WRAPPER"
+	assert_line "        required: false"
+	assert_line "        type: string"
+	assert_line '        default: ""'
+	run awk '
+		/^  publish:$/ { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { in_job = 0; in_with = 0 }
+		in_job && /^    with:$/ { in_with = 1; next }
+		in_with && /^      [a-z-]+: / { print }
+	' "$WRAPPER"
+	assert_line "      environment: \${{ inputs.environment }}"
+}
+
+# The dry-run self-test lane proves both environment shapes in this
+# repository's own CI (npm-set-self-test.yml, #967).
+SELF_TEST="${PROJECT_ROOT}/.github/workflows/npm-set-self-test.yml"
+
+# Print the `with:` block of one job in the self-test workflow.
+self_test_with_block() {
+	awk -v job="$1" '
+		$0 == "  " job ":" { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { exit }
+		in_job && /^    with:$/ { in_with = 1; next }
+		in_job && in_with && /^    [a-z-]+:/ { in_with = 0 }
+		in_job && in_with { print }
+	' "$SELF_TEST"
+}
+
+@test "npm-set-self-test: dry-runs the reusable once without and once with an environment" {
+	run grep -c 'uses: ./.github/workflows/reusable-publish-npm-set.yml' "$SELF_TEST"
+	assert_output "2"
+
+	run self_test_with_block without-environment
+	assert_output --partial "dry-run: true"
+	refute_output --partial "environment:"
+
+	run self_test_with_block with-environment
+	assert_output --partial "dry-run: true"
+	assert_output --partial "environment: npm-set-self-test"
+}
+
+@test "npm-set-self-test: runs on the PR that changes the reusable or its scripts" {
+	run awk '/^  pull_request:/,/^  merge_group:/' "$SELF_TEST"
+	assert_output --partial "- '.github/workflows/reusable-publish-npm-set.yml'"
+	assert_output --partial "- 'scripts/ci/actions/npm/**'"
+	assert_output --partial "- 'tests/fixtures/npm-set/**'"
+}
+
+@test "npm-set-self-test: the fixture launcher is committed without the executable bit" {
+	run git -C "$PROJECT_ROOT" ls-files -s tests/fixtures/npm-set/self-test/bin/self-test.js
+	assert_output --partial "100644 "
+	run grep -c '"bin": {' "${PROJECT_ROOT}/tests/fixtures/npm-set/self-test/package.json"
+	assert_output "1"
+}
