@@ -407,7 +407,8 @@ jobs:
       inputs.npm-order != '' &&
       contains(fromJSON(needs.resolve.outputs.missing), 'npm')
     runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: 20
+    # Publish plus the post-publish propagation wait (up to fifteen minutes).
+    timeout-minutes: 35
     environment: npm # the caller's approval gate, same as the tag path
     permissions:
       contents: read
@@ -508,6 +509,7 @@ jobs:
         env:
           PACKAGES_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
           ORDER: ${{ inputs.npm-order }}
+          DIST_TAG: ${{ inputs.npm-dist-tag }}
           DRY_RUN: "0"
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/verify-published.sh
