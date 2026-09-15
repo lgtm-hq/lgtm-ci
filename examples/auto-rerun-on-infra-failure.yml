@@ -39,5 +39,11 @@ jobs:
       max-reruns: "3"
       # signatures: |
       #   Some extra transient failure signature
+      # Runs of workflows with irreversible steps are never re-run (#967);
+      # list every publish/promote workflow this consumer watches. Failed jobs
+      # named publish|promote|release|upload are protected by default
+      # (protected-job-pattern) even without this list.
+      # protected-workflows: |
+      #   publish-python-release.yml
       egress-policy: block
       egress-preset: github-minimal

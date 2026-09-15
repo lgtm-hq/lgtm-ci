@@ -9,11 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **rerun**: `reusable-auto-rerun-on-infra-failure.yml` gains `protected-workflows`
+  (runs of listed workflow files or names are never re-run) and
+  `protected-job-pattern` (default `publish|promote|release|upload`; one matching
+  failed job protects the whole run, since a `--failed` re-run cannot exclude
+  jobs), both checked before any log is read and failing closed (#967)
+- **rerun**: runner-acquisition failures ("The job repeatedly failed to be
+  acquired") are detected from the check-run annotations of failed jobs that ran
+  zero steps, since they leave no log to match (#967)
+
 ### Changed
 
 ### Deprecated
 
 ### Removed
+
+- **rerun**: `Error resolving allowed domain` is no longer a built-in infra
+  signature: under block-mode egress it is deterministic, and it re-ran a publish
+  run into the npm approval gate (#967). Egress refusals (`connection refused`,
+  `ECONNREFUSED`) are documented as never being signatures
 
 ### Fixed
 
