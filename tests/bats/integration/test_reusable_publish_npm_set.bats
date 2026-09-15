@@ -285,3 +285,45 @@ input_type() {
 	' "$WRAPPER"
 	assert_line "      environment: \${{ inputs.environment }}"
 }
+
+# The dry-run self-test lane proves both environment shapes in this
+# repository's own CI (npm-set-self-test.yml, #967).
+SELF_TEST="${PROJECT_ROOT}/.github/workflows/npm-set-self-test.yml"
+
+# Print the `with:` block of one job in the self-test workflow.
+self_test_with_block() {
+	awk -v job="$1" '
+		$0 == "  " job ":" { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { exit }
+		in_job && /^    with:$/ { in_with = 1; next }
+		in_job && in_with && /^    [a-z-]+:/ { in_with = 0 }
+		in_job && in_with { print }
+	' "$SELF_TEST"
+}
+
+@test "npm-set-self-test: dry-runs the reusable once without and once with an environment" {
+	run grep -c 'uses: ./.github/workflows/reusable-publish-npm-set.yml' "$SELF_TEST"
+	assert_output "2"
+
+	run self_test_with_block without-environment
+	assert_output --partial "dry-run: true"
+	refute_output --partial "environment:"
+
+	run self_test_with_block with-environment
+	assert_output --partial "dry-run: true"
+	assert_output --partial "environment: npm-set-self-test"
+}
+
+@test "npm-set-self-test: runs on the PR that changes the reusable or its scripts" {
+	run awk '/^  pull_request:/,/^  merge_group:/' "$SELF_TEST"
+	assert_output --partial "- '.github/workflows/reusable-publish-npm-set.yml'"
+	assert_output --partial "- 'scripts/ci/actions/npm/**'"
+	assert_output --partial "- 'tests/fixtures/npm-set/**'"
+}
+
+@test "npm-set-self-test: the fixture launcher is committed without the executable bit" {
+	run git -C "$PROJECT_ROOT" ls-files -s tests/fixtures/npm-set/self-test/bin/self-test.js
+	assert_output --partial "100644 "
+	run grep -c '"bin": {' "${PROJECT_ROOT}/tests/fixtures/npm-set/self-test/package.json"
+	assert_output "1"
+}

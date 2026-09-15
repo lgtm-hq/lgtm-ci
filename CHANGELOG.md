@@ -12,7 +12,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **npm**: `reusable-publish-npm-set.yml` (and the deprecated wrapper) accept an
   optional `environment` input that binds the publish job to a deployment
   environment, so a `uses:` caller keeps its approval gate and an npm trusted
-  publisher registered with an environment name keeps matching (#967)
+  publisher registered with an environment name keeps matching; a dry-run
+  self-test lane (`npm-set-self-test.yml`) proves both shapes on every PR that
+  touches the reusable (#967)
 
 ### Changed
 
