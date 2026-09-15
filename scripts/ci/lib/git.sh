@@ -81,8 +81,14 @@ get_tags() {
 # the "previous version" the release pipeline bumped from.
 get_latest_reachable_tag() {
 	local pattern="${1:-v*}"
+	# The glob's literal prefix (everything before the first wildcard) anchors
+	# the stable filter at both ends, so neither a stable-looking suffix
+	# (v1.2.3-rc.1.2.3) nor another prefix (foo-9.9.9 under "v*") passes.
+	local prefix="${pattern%%[*?[]*}"
+	local prefix_re
+	prefix_re="$(printf '%s' "$prefix" | sed -e 's/[][\\.^$*+?(){}|/]/\\&/g')"
 	git tag -l "$pattern" --sort=-v:refname --merged HEAD 2>/dev/null |
-		grep -E '[0-9]+\.[0-9]+\.[0-9]+$' |
+		grep -E "^${prefix_re}[0-9]+\.[0-9]+\.[0-9]+$" |
 		head -1
 }
 

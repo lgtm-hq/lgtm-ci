@@ -465,3 +465,28 @@ teardown() {
 	assert_success
 	assert_output "release-1.2.5"
 }
+
+@test "get_latest_reachable_tag: rejects stable-looking suffixes and other prefixes" {
+	cd "$MOCK_GIT_REPO"
+	git tag v1.2.1
+	git tag v1.2.3-rc.1.2.3
+	git tag foo-9.9.9
+	git tag v9.9.9.post1
+	run bash -c 'source "$LIB_DIR/git.sh" && get_latest_reachable_tag "v*"'
+	assert_success
+	assert_output "v1.2.1"
+	run bash -c 'source "$LIB_DIR/git.sh" && get_latest_reachable_tag "foo-*"'
+	assert_success
+	assert_output "foo-9.9.9"
+}
+
+@test "latest_stable_tag: rejects stable-looking suffixes, post and local versions" {
+	cd "$MOCK_GIT_REPO"
+	git tag v1.2.1
+	git tag v1.2.3-rc.1.2.3
+	git tag v1.2.3.post1
+	git tag v1.2.3+build.1.2.3
+	run bash -c 'source "$LIB_DIR/git.sh" && latest_stable_tag'
+	assert_success
+	assert_output "v1.2.1"
+}
