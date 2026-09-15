@@ -70,6 +70,10 @@ jobs:
       files-to-verify: "[]" # empty: every file the manifest lists
       signer-repo: <owner>/<repo>
       signer-workflow: .github/workflows/build-binaries.yml
+      # Optional: bind the publish job to a deployment environment (approval
+      # gate). A `uses:` job cannot carry `environment:` itself; empty runs
+      # without one.
+      environment: npm
       tooling-ref: "<sha>"
 ```
 
@@ -81,8 +85,10 @@ Pin `@<sha>` and `tooling-ref` to the same lgtm-ci release commit with a
 
 1. On [npmjs.com](https://www.npmjs.com/), add a trusted publisher for the
    package: GitHub org/user, repository, the **caller** workflow filename
-   (not `reusable-publish-npm.yml`), and allow the `npm publish` action
-   (required for publishers created after 2026-05-20).
+   (not `reusable-publish-npm.yml`), the environment name when the call
+   passes `environment` (leave it blank otherwise — the reusable's job
+   carries exactly the environment the input names), and allow the
+   `npm publish` action (required for publishers created after 2026-05-20).
 2. Grant `id-token: write` (and `attestations: write` when attesting the
    tarball). No long-lived npm token is required.
 3. Use **Node 24** (default). Trusted publishing needs npm ≥ 11.5.1; Node 24

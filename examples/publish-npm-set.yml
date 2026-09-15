@@ -8,8 +8,9 @@
 # so your npm trusted-publisher registration must name it — and the
 # `entry-workflows` input below must repeat that path so the pre-publish
 # guard can enforce the binding. A job that calls a reusable (`uses:`)
-# cannot declare `environment`, and the reusable's job declares none, so
-# register the trusted publisher WITHOUT an environment name. Trusted
+# cannot declare `environment`; pass the `environment` input instead and the
+# reusable's publish job is bound to it (register the trusted publisher with
+# that environment name, or without one when the input is empty). Trusted
 # publishing needs OIDC only; do not pass an npm token. See
 # docs/reusable-workflows.md and docs/workflow-contract.md.
 #
@@ -59,8 +60,8 @@ jobs:
           overwrite: true
 
   # The publish job. It calls a reusable, so it cannot carry `environment:`
-  # (GitHub rejects the key on `uses:` jobs): the npm trusted publisher for
-  # this repository must be registered without an environment name.
+  # (GitHub rejects the key on `uses:` jobs); the `environment` input below
+  # binds the reusable's job instead.
   npm-release:
     name: Release npm package set
     needs: [npm-publish-set]
@@ -91,6 +92,8 @@ jobs:
       signer-repo: <owner>/<repo>
       signer-workflow: .github/workflows/build-binaries.yml
       post-publish-verify: true
+      # Optional approval gate; the trusted publisher must then name it.
+      environment: npm
       tooling-ref: "<sha>"
 
   # Release-mode failure notifier (#964): files or updates ONE deduplicated

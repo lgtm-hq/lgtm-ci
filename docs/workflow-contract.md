@@ -1127,6 +1127,14 @@ order that callers must not reorder around (asserted by
    `post-publish-verify: false` (default `true`); not recommended for live
    releases.
 
+The publish job is bound to the optional `environment` input (string,
+default empty = no environment): a `uses:` caller cannot set the key on its
+own job, so this is where an approval gate and the OIDC environment claim
+live. `publish-set` restores `+x` on every regular file under each
+package's `bin/` and on every package.json `bin` target before `npm pack`:
+workflow artifacts (`artifact-name`) land every file as 0644, and npm records
+on-disk modes into the tarball.
+
 npm trusted publishing validates the entry workflow file, so consumers must
 pass their top-level publish workflow via `entry-workflows` (a live publish
 fails before publishing when it is empty; a dry-run only warns) and keep

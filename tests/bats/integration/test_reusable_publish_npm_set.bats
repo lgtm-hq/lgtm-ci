@@ -238,3 +238,50 @@ wrapper_output_value() {
 	assert_line "      signer-workflow: \${{ inputs.signer-workflow }}"
 	assert_line "      runner-image: \${{ inputs.runner-image }}"
 }
+
+# Print the `type:` value of one workflow_call input block.
+input_type() {
+	awk -v input="$1" '
+		$0 == "      " input ":" { in_input = 1; next }
+		in_input && /^      [a-z-]+:$/ { exit }
+		in_input && /^        type:/ { print $2; exit }
+	' "$WORKFLOW"
+}
+
+@test "reusable-publish-npm-set: exposes an optional environment input, empty by default" {
+	# A `uses:` caller cannot set `environment` on its own job, so the
+	# reusable must accept the name; empty means "no environment".
+	run input_required environment
+	assert_output "false"
+	run input_type environment
+	assert_output "string"
+	run input_default environment
+	assert_output '""'
+}
+
+@test "reusable-publish-npm-set: binds the publish job to the environment input" {
+	run awk '
+		$0 == "  publish:" { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { exit }
+		in_job && /^    environment:/ { print }
+	' "$WORKFLOW"
+	assert_output '    environment: ${{ inputs.environment }}'
+}
+
+@test "reusable-publish-npm: forwards the environment input to the set workflow" {
+	run awk -v input="environment" '
+		$0 == "      " input ":" { in_input = 1; next }
+		in_input && /^      [a-z-]+:$/ { exit }
+		in_input && /^        (required|type|default):/ { print }
+	' "$WRAPPER"
+	assert_line "        required: false"
+	assert_line "        type: string"
+	assert_line '        default: ""'
+	run awk '
+		/^  publish:$/ { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { in_job = 0; in_with = 0 }
+		in_job && /^    with:$/ { in_with = 1; next }
+		in_with && /^      [a-z-]+: / { print }
+	' "$WRAPPER"
+	assert_line "      environment: \${{ inputs.environment }}"
+}

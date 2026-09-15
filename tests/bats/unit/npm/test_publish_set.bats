@@ -323,3 +323,50 @@ export -f not_published_reply
 	run grep -F '"status":"skipped"' "$output_file"
 	assert_success
 }
+
+@test "publish-set: restores executable modes on bin/ files and package.json bin targets before packing" {
+	# Workflow artifacts land every file as 0644; npm pack would record that
+	# mode, so a consumer's launcher/binary must be repaired before publish.
+	export ORDER='["platform-a", "meta"]'
+	mkdir -p "$PACKAGES_DIR/platform-a/bin" "$PACKAGES_DIR/meta/cli"
+	printf 'binary\n' >"$PACKAGES_DIR/platform-a/bin/tool"
+	printf '#!/usr/bin/env node\n' >"$PACKAGES_DIR/meta/cli/launcher.js"
+	printf 'not a bin\n' >"$PACKAGES_DIR/meta/README.md"
+	chmod 0644 "$PACKAGES_DIR/platform-a/bin/tool" "$PACKAGES_DIR/meta/cli/launcher.js" "$PACKAGES_DIR/meta/README.md"
+	# The meta package declares its launcher outside bin/ via the "bin" map.
+	printf '{"name":"@lgtm-hq/pkg","version":"1.2.3","bin":{"pkg":"cli/launcher.js"}}\n' >"$PACKAGES_DIR/meta/package.json"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	[[ -x "$PACKAGES_DIR/platform-a/bin/tool" ]]
+	[[ -x "$PACKAGES_DIR/meta/cli/launcher.js" ]]
+	# Only bin files are touched; other package files keep their mode.
+	[[ ! -x "$PACKAGES_DIR/meta/README.md" ]]
+	assert_output --partial "restored executable mode on platform-a/bin/tool"
+	assert_output --partial "restored executable mode on meta/cli/launcher.js"
+	# The repair happens before the publish (pack) call of that package.
+	run awk '
+		/restored executable mode on platform-a\/bin\/tool/ { fix = NR }
+		/==> Publishing platform-a/ { pub = NR }
+		END { exit !(fix && pub && fix < pub) }
+	' <<<"$output"
+	assert_success
+}
+
+@test "publish-set: leaves already-executable bin files alone" {
+	export ORDER='["platform-a"]'
+	mkdir -p "$PACKAGES_DIR/platform-a/bin"
+	printf 'binary\n' >"$PACKAGES_DIR/platform-a/bin/tool"
+	chmod 0755 "$PACKAGES_DIR/platform-a/bin/tool"
+	make_npm_mock '
+			*publish*--dry-run*) echo "npm notice"; exit 0;;
+	'
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "restored executable mode"
+	[[ -x "$PACKAGES_DIR/platform-a/bin/tool" ]]
+}

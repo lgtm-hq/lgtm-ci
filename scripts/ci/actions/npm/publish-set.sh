@@ -158,6 +158,30 @@ package_field() {
 	node -p "require('$1/package.json').$2"
 }
 
+# Workflow artifacts drop file modes: actions/upload-artifact zips every file
+# as 0644, and `npm pack` records the on-disk mode into the tarball, so a
+# consumer's launcher or binary under bin/ (or any package.json "bin"
+# target) would install non-executable. Restore +x on those files before
+# anything is packed. Idempotent, and it runs for dry-runs too so a
+# rehearsal packs the same modes a live publish would.
+restore_bin_modes() {
+	local pkg_dir="$1" target
+	local -a targets=()
+	if [[ -d "$pkg_dir/bin" ]]; then
+		while IFS= read -r target; do
+			[[ -n "$target" ]] && targets+=("$target")
+		done < <(find "$pkg_dir/bin" -type f | sort)
+	fi
+	while IFS= read -r target; do
+		[[ -n "$target" ]] && targets+=("$pkg_dir/$target")
+	done < <(node -p "const b = require('$pkg_dir/package.json').bin; (typeof b === 'string' ? [b] : Object.values(b || {})).join('\\n')")
+	for target in "${targets[@]+"${targets[@]}"}"; do
+		[[ -f "$target" && ! -x "$target" ]] || continue
+		chmod +x "$target"
+		echo "    restored executable mode on ${target#"$PACKAGES_DIR"/}"
+	done
+}
+
 registry_integrity() {
 	# Post-publish registry read; empty (never a lie) when the lookup fails.
 	# Dry-runs never touch the registry, not even to read: a dry-run must not
@@ -388,6 +412,7 @@ while IFS= read -r pkg; do
 		echo "ERROR: $pkg_dir/package.json not found (check the order input)" >&2
 		exit 1
 	fi
+	restore_bin_modes "$pkg_dir"
 	# Idempotency: if this exact name@version is already on the registry
 	# (e.g. a rerun after a mid-loop failure published some packages), skip
 	# it. Without this a retry would fail on the already-published versions
