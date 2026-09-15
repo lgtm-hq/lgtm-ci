@@ -29,10 +29,10 @@ source "$LIB_DIR/release.sh"
 
 # Get from_ref if not specified
 if [[ -z "$FROM_REF" ]]; then
-	# Find latest semver tag reachable from HEAD, skipping floating tags (e.g., v0, v1)
-	FROM_REF=$(git tag --merged HEAD --sort=-v:refname |
-		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
-		head -n1) || true
+	# Latest STABLE semver tag reachable from HEAD: floating tags (v0, v1)
+	# and prerelease/checkpoint tags (v1.2.3a1, v1.2.3rc1) are skipped, so a
+	# checkpoint never becomes the version the next release bumps from.
+	FROM_REF=$(latest_stable_tag HEAD) || true
 	FROM_REF="${FROM_REF:-}"
 fi
 

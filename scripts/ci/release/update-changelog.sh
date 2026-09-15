@@ -25,6 +25,8 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 source "$LIB_DIR/log.sh"
 # shellcheck source=../lib/github.sh
 source "$LIB_DIR/github.sh"
+# shellcheck source=../lib/git.sh
+source "$LIB_DIR/git.sh"
 # shellcheck source=../lib/release/changelog_merge.sh
 source "$LIB_DIR/release/changelog_merge.sh"
 
@@ -77,9 +79,7 @@ TAG_BASE="HEAD"
 if git rev-parse --verify HEAD^ >/dev/null 2>&1; then
 	TAG_BASE="HEAD^"
 fi
-PREV_TAG=$(git tag --merged "$TAG_BASE" --sort=-v:refname |
-	grep -E "^${TAG_PREFIX}[0-9]+\.[0-9]+\.[0-9]+" |
-	head -n1) || true
+PREV_TAG=$(latest_stable_tag "$TAG_BASE" "$TAG_PREFIX") || true
 PREV_TAG="${PREV_TAG:-}"
 
 # Build the new comparison links

@@ -22,6 +22,11 @@ RELEASE_LIB_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)" || {
 	echo "release.sh: missing required module release/version.sh in $RELEASE_LIB_DIR" >&2
 	return 1
 }
+# shellcheck source=./git.sh
+source "$RELEASE_LIB_DIR/git.sh" || {
+	echo "release.sh: required module git.sh is missing" >&2
+	return 1
+}
 # shellcheck source=./release/version.sh
 source "$RELEASE_LIB_DIR/release/version.sh" || return 1
 
@@ -74,9 +79,7 @@ determine_next_version() {
 
 	# Get latest semver tag (skip floating tags like v0, v1)
 	local latest_tag
-	latest_tag=$(git tag --merged HEAD --sort=-v:refname |
-		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
-		head -n1) || true
+	latest_tag=$(latest_stable_tag HEAD) || true
 	latest_tag="${latest_tag:-}"
 
 	# Get current version
@@ -121,9 +124,7 @@ create_release() {
 
 	# Get latest semver tag for changelog (skip floating tags)
 	local latest_tag
-	latest_tag=$(git tag --merged HEAD --sort=-v:refname |
-		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
-		head -n1) || true
+	latest_tag=$(latest_stable_tag HEAD) || true
 	latest_tag="${latest_tag:-}"
 
 	# Generate changelog
@@ -150,9 +151,7 @@ should_release() {
 
 	if [[ -z "$from_ref" ]]; then
 		# Find latest semver tag (skip floating tags like v0, v1)
-		from_ref=$(git tag --merged HEAD --sort=-v:refname |
-			grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
-			head -n1) || true
+		from_ref=$(latest_stable_tag HEAD) || true
 		from_ref="${from_ref:-}"
 	fi
 
@@ -163,9 +162,7 @@ should_release() {
 # Usage: get_release_summary
 get_release_summary() {
 	local latest_tag
-	latest_tag=$(git tag --merged HEAD --sort=-v:refname |
-		grep -E '^v?[0-9]+\.[0-9]+\.[0-9]+' |
-		head -n1) || true
+	latest_tag=$(latest_stable_tag HEAD) || true
 	latest_tag="${latest_tag:-}"
 
 	echo "Latest tag: ${latest_tag:-none}"

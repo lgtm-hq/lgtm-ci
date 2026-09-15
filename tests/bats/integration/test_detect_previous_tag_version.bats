@@ -98,3 +98,17 @@ run_detect() {
 	assert_line --partial "version=1.2.1"
 	assert_line --partial "found=true"
 }
+
+@test "detect-previous-tag-version: skips a newer prerelease tag" {
+	setup_mock_git_repo
+	(
+		cd "$MOCK_GIT_REPO"
+		git tag "v1.2.3"
+		git commit -q --allow-empty -m "ci(release): checkpoint prerelease 1.2.4a2"
+		git tag "v1.2.4a2"
+	)
+	run_detect
+	assert_success
+	assert_output --partial "version=1.2.3"
+	assert_output --partial "found=true"
+}

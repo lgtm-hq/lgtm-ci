@@ -941,3 +941,23 @@ See [docs/example.md](docs/example.md).
 	"
 	assert_success
 }
+
+@test "update-changelog: compare link starts at the latest stable tag, not a newer prerelease" {
+	setup_changelog_repo
+	git tag "v1.0.0"
+	git commit -q --allow-empty -m "ci(release): checkpoint prerelease 1.0.1a1"
+	git tag "v1.0.1a1"
+	git commit -q --allow-empty -m "fix: a bug"
+	write_changelog '# Changelog
+
+## [Unreleased]
+
+[Unreleased]: https://github.com/test-org/test-repo/compare/v1.0.0...HEAD'
+
+	run_update_changelog "1.0.1" "### Fixed
+- a bug"
+	assert_success
+	run cat "${MOCK_GIT_REPO}/CHANGELOG.md"
+	assert_output --partial "compare/v1.0.0...v1.0.1"
+	refute_output --partial "v1.0.1a1"
+}

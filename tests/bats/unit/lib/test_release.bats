@@ -216,3 +216,14 @@ teardown() {
 	assert_success
 	assert_output "1"
 }
+
+@test "determine_next_version: ignores a newer prerelease tag and bumps the stable one" {
+	tag_mock_repo "v1.0.0"
+	add_commit "ci(release): checkpoint prerelease 1.0.1a1"
+	(cd "$MOCK_GIT_REPO" && git tag "v1.0.1a1")
+	add_commit "fix: fix bug"
+
+	run bash -c "cd \"$MOCK_GIT_REPO\" && source \"\$LIB_DIR/release.sh\" && determine_next_version"
+	assert_success
+	assert_output "1.0.1"
+}
