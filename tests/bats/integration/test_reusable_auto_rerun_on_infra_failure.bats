@@ -79,6 +79,12 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	assert_success
 }
 
+@test "auto-rerun: rerun job grants checks read for the acquisition annotations (#967)" {
+	run grep -cE "^      checks: read$" "$WORKFLOW"
+	assert_success
+	assert_output "1"
+}
+
 @test "auto-rerun: protects publish, promote, release and upload jobs by default (#967)" {
 	run awk '
 		/^      protected-job-pattern:/ { in_input = 1; next }

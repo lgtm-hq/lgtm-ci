@@ -25,6 +25,8 @@ jobs:
     uses: ./.github/workflows/reusable-auto-rerun-on-infra-failure.yml
     permissions:
       actions: write
+      # Check-run annotations, for the runner-acquisition signature (#967).
+      checks: read
       contents: read
     with:
       # run id/attempt are numbers in the event payload; format() passes them

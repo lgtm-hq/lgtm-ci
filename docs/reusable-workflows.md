@@ -859,7 +859,8 @@ steps instead (`ACQUISITION_MAX_JOBS` of them, default `10`, `0` disables) and
 treats `failed to be acquired`, `failed to acquire` and `was not acquired`
 as a transient signature. That check runs both when the failed-job log is
 empty and when it matched nothing: a matrix can lose one runner while another
-leg fails for real.
+leg fails for real. Reading annotations needs `checks: read`, which the
+reusable declares and every caller must grant alongside `actions: write`.
 
 #### Irreversible steps are never re-run (#967)
 
@@ -952,6 +953,7 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@<sha> # vX.Y.Z
     permissions:
       actions: write
+      checks: read # check-run annotations, for the runner-acquisition signature
       contents: read
     with:
       tooling-ref: "<sha>" # vX.Y.Z

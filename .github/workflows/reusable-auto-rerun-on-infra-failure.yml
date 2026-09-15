@@ -16,6 +16,7 @@ name: Reusable - Auto Re-run on Infra Failure
 #     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@<sha>
 #     permissions:
 #       actions: write
+#       checks: read
 #       contents: read
 #     with:
 #       run-id: ${{ github.event.workflow_run.id }}
@@ -151,6 +152,9 @@ jobs:
     permissions:
       # Re-run failed jobs and read failed-job logs
       actions: write
+      # Read the check-run annotations of failed jobs for the
+      # runner-acquisition signature (#967); the caller must grant it too
+      checks: read
       # Read repository context for the tooling checkout
       contents: read
 

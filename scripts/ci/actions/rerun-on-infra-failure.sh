@@ -796,6 +796,17 @@ check_protection() {
 			return 1
 		fi
 		classify_failed_jobs
+		# The run failed, so a listing with no failed job is a partial answer
+		# (an incomplete page, a workflow-level failure), not proof that nothing
+		# irreversible failed. Fail closed rather than read absence as consent.
+		if ((${#PROTECTED_JOBS[@]} == 0 && ${#UNPROTECTED_JOBS[@]} == 0)); then
+			log_warn "The failed-jobs listing of run ${RUN_ID} attempt ${RUN_ATTEMPT} is empty; protection cannot be verified, not re-running"
+			echo "::warning::The failed-jobs listing of run ${RUN_ID} came back empty; the protected-job check was inconclusive and the failed jobs were not re-run"
+			add_github_summary "## Auto re-run on infra failure"
+			add_github_summary ""
+			add_github_summary "Inconclusive: the failed-jobs listing of run ${RUN_ID} attempt ${RUN_ATTEMPT} came back empty although the run failed, so the protected-job check could not tell whether an irreversible job is among them. The failed jobs were **not** re-run — re-check the run manually."
+			return 1
+		fi
 		if ((${#PROTECTED_JOBS[@]} > 0)); then
 			names="$(join_names "${PROTECTED_JOBS[@]}")"
 			log_info "Run ${RUN_ID} has protected failed job(s) matching '${PROTECTED_JOB_PATTERN}': ${names}; not re-running"

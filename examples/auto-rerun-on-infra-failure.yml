@@ -26,6 +26,8 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
     permissions:
       actions: write
+      # Check-run annotations, for the runner-acquisition signature (#967).
+      checks: read
       contents: read
     with:
       tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30

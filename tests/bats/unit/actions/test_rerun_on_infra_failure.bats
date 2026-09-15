@@ -106,12 +106,12 @@ _init_probe_dir() {
 	: >"${PROBE_DIR}/joblog.default"
 	printf '0' >"${PROBE_DIR}/joblog.default.status"
 	: >"$API_CALLS"
-	# #967 protection fixtures: an unprotected workflow, no failed jobs and no
-	# annotations, so a test that says nothing about protection re-runs as it
-	# always did.
+	# #967 protection fixtures: an unprotected workflow, one eligible failed
+	# job that ran its steps, and no annotations, so a test that says nothing
+	# about protection re-runs as it always did.
 	printf 'ci.yml\tCI' >"${PROBE_DIR}/run.meta"
 	printf '0' >"${PROBE_DIR}/run.meta.status"
-	: >"${PROBE_DIR}/jobs.names"
+	printf '7\ttest\t3\n' >"${PROBE_DIR}/jobs.names"
 	printf '0' >"${PROBE_DIR}/jobs.names.status"
 	: >"${PROBE_DIR}/annotations.default"
 	printf '0' >"${PROBE_DIR}/annotations.default.status"
@@ -1115,6 +1115,7 @@ case "\$*" in
 		echo "\$*" >> '${FETCH_CALLS}'
 		echo "The runner has received a shutdown signal"
 		;;
+	api\ *jobs*) printf '7\ttest\t3\n' ;;
 	run\ rerun\ *) echo "\$*" >> '${RERUN_CALLS}' ;;
 esac
 EOF
@@ -1712,6 +1713,17 @@ EOF
 	assert_success
 	assert_output --partial "::warning::"
 	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: an empty failed-jobs listing on a failed run is inconclusive, not consent" {
+	_mock_gh "The runner has received a shutdown signal"
+	_failed_jobs 0
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::"
+	assert_output --partial "came back empty"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
 }
 
 @test "rerun-on-infra-failure: an invalid protected-job pattern fails with a clear error" {

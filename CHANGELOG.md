@@ -16,7 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   jobs), both checked before any log is read and failing closed (#967)
 - **rerun**: runner-acquisition failures ("The job repeatedly failed to be
   acquired") are detected from the check-run annotations of failed jobs that ran
-  zero steps, since they leave no log to match (#967)
+  zero steps, since they leave no log to match; callers must grant
+  `checks: read` (#967)
 
 ### Changed
 
