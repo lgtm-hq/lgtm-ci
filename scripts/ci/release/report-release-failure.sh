@@ -334,26 +334,44 @@ find_existing_issue() {
 	fi
 }
 
+# Resolve the configured issue labels against the repository's label list.
+# One listing (`gh label` has no `view` subcommand, so a per-label probe
+# never matched and every issue was filed unlabelled) and a case-insensitive
+# match, because GitHub label names are; the argument passed on is the
+# repository's own spelling. Labels the repository lacks are skipped with a
+# log line, never created.
 collect_existing_issue_label_args() {
 	local -n _label_args=$1
 	local default_labels="${FAILURE_ISSUE_LABELS:-bug,ci,release,automation,infrastructure}"
-	local label
+	local label existing wanted canonical applied
 	local repo="${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
 
 	_label_args=()
+	if ! existing="$(gh label list --repo "$repo" --json name --limit 500 --jq '.[].name' 2>/dev/null)"; then
+		log_info "Could not list issue labels for ${repo}; filing without labels"
+		return 0
+	fi
 	local -a labels
+	local -a applied_names=()
 	IFS=',' read -ra labels <<<"$default_labels"
 	for label in "${labels[@]}"; do
-		label="$(echo "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+		label="$(printf '%s\n' "$label" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
 		if [[ -z "$label" ]]; then
 			continue
 		fi
-		if gh label view "$label" --repo "$repo" >/dev/null 2>&1; then
-			_label_args+=(--label "$label")
+		wanted="$(printf '%s' "$label" | tr '[:upper:]' '[:lower:]')"
+		canonical="$(printf '%s\n' "$existing" | awk -v wanted="$wanted" 'tolower($0) == wanted { print; exit }')"
+		if [[ -n "$canonical" ]]; then
+			_label_args+=(--label "$canonical")
+			applied_names+=("$canonical")
 		else
 			log_info "Skipping missing issue label '$label'"
 		fi
 	done
+	if ((${#applied_names[@]} > 0)); then
+		applied="$(printf '%s, ' "${applied_names[@]}")"
+		log_info "Applying issue labels: ${applied%, }"
+	fi
 }
 
 comment_on_failure_issue() {

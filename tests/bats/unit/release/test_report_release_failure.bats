@@ -94,8 +94,8 @@ case "\$*" in
 	*issue*list*)
 		echo ""
 		;;
-	*label*view*)
-		exit 0
+	*label*list*)
+		printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n'
 		;;
 	*issue*create*)
 		echo "https://github.com/lgtm-hq/lgtm-ci/issues/42"
@@ -146,8 +146,8 @@ case "\$*" in
 	*issue*list*)
 		echo ""
 		;;
-	*label*view*)
-		exit 0
+	*label*list*)
+		printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n'
 		;;
 	*issue*create*)
 		while [[ \$# -gt 0 ]]; do
@@ -241,7 +241,7 @@ EOF
 
 	mock_command_multi "gh" '
 		*issue*list*) echo "";;
-		*label*view*) exit 0;;
+		*label*list*) printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n';;
 		*issue*create*) echo "https://github.com/lgtm-hq/lgtm-ci/issues/55";;
 		*run*view*) exit 0;;
 		*) exit 1;;
@@ -253,10 +253,9 @@ EOF
 }
 
 @test "report-release-failure: notify_failure skips missing labels" {
-	mock_command_multi "gh" '
+	mock_gh_journaled '
 		*issue*list*) echo "";;
-		*label*view*bug*) exit 0;;
-		*label*view*) exit 1;;
+		*label*list*) printf "bug\n";;
 		*issue*create*) echo "https://github.com/lgtm-hq/lgtm-ci/issues/88";;
 		*run*view*) exit 0;;
 		*) exit 1;;
@@ -264,8 +263,90 @@ EOF
 
 	run bash "$SCRIPT" notify_failure
 	assert_success
-	assert_output --partial "Skipping missing issue label"
+	assert_output --partial "Skipping missing issue label 'ci'"
+	assert_output --partial "Skipping missing issue label 'infrastructure'"
+	assert_output --partial "Applying issue labels: bug"
 	assert_output --partial "Created release failure issue: https://github.com/lgtm-hq/lgtm-ci/issues/88"
+	# Only the existing label reaches gh issue create, and the list is read once.
+	run grep -c -- "--label bug" "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_output 1
+	run grep -c -- "--label ci" "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_output 0
+	run grep -c "label list" "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_output 1
+}
+
+# gh mock that journals every call to mock_calls_gh; $1 is the case body.
+mock_gh_journaled() {
+	mkdir -p "${BATS_TEST_TMPDIR}/bin"
+	{
+		printf '#!/usr/bin/env bash
+'
+		printf 'echo "$@" >> %q
+' "${BATS_TEST_TMPDIR}/mock_calls_gh"
+		printf 'case "$*" in
+'
+		printf '%s
+' "$1"
+		printf 'esac
+'
+	} >"${BATS_TEST_TMPDIR}/bin/gh"
+	chmod +x "${BATS_TEST_TMPDIR}/bin/gh"
+	if [[ ":$PATH:" != *":${BATS_TEST_TMPDIR}/bin:"* ]]; then
+		export PATH="${BATS_TEST_TMPDIR}/bin:$PATH"
+	fi
+}
+
+@test "report-release-failure: notify_failure passes every existing label as --label" {
+	mock_gh_journaled '
+		*issue*list*) echo "";;
+		*label*list*) printf '"'"'bug\nci\nrelease\nautomation\ninfrastructure\n'"'"';;
+		*issue*create*) echo "https://github.com/lgtm-hq/lgtm-ci/issues/89";;
+		*run*view*) exit 0;;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Applying issue labels: bug, ci, release, automation, infrastructure"
+	refute_output --partial "Skipping missing issue label"
+	run grep -c -- "issue create.*--label bug --label ci --label release --label automation --label infrastructure" "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_output 1
+}
+
+@test "report-release-failure: notify_failure matches labels case-insensitively and uses the repository spelling" {
+	export FAILURE_ISSUE_LABELS="Bug, CI ,release"
+	mock_gh_journaled '
+		*issue*list*) echo "";;
+		*label*list*) printf '"'"'bug\nci\nRelease\n'"'"';;
+		*issue*create*) echo "https://github.com/lgtm-hq/lgtm-ci/issues/90";;
+		*run*view*) exit 0;;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Applying issue labels: bug, ci, Release"
+	refute_output --partial "Skipping missing issue label"
+	run grep -c -- "--label bug --label ci --label Release" "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_output 1
+}
+
+@test "report-release-failure: notify_failure files without labels when the label listing fails" {
+	mock_gh_journaled '
+		*issue*list*) echo "";;
+		*label*list*) exit 1;;
+		*issue*create*) echo "https://github.com/lgtm-hq/lgtm-ci/issues/91";;
+		*run*view*) exit 0;;
+		*) exit 1;;
+	'
+
+	run bash "$SCRIPT" notify_failure
+	assert_success
+	assert_output --partial "Could not list issue labels"
+	assert_output --partial "Created release failure issue: https://github.com/lgtm-hq/lgtm-ci/issues/91"
+	run grep -c -- "--label" "${BATS_TEST_TMPDIR}/mock_calls_gh"
+	assert_output 0
 }
 
 @test "report-release-failure: notify_failure falls back when title search fails" {
@@ -385,8 +466,8 @@ case "\$*" in
 	*issue*list*)
 		echo ""
 		;;
-	*label*view*)
-		exit 0
+	*label*list*)
+		printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n'
 		;;
 	*issue*create*)
 		echo "https://github.com/lgtm-hq/lgtm-ci/issues/43"
@@ -427,8 +508,8 @@ case "\$*" in
 	*issue*list*)
 		echo ""
 		;;
-	*label*view*)
-		exit 0
+	*label*list*)
+		printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n'
 		;;
 	*issue*create*)
 		while [[ \$# -gt 0 ]]; do
@@ -479,8 +560,8 @@ case "\$*" in
 	*issue*list*)
 		echo ""
 		;;
-	*label*view*)
-		exit 0
+	*label*list*)
+		printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n'
 		;;
 	*issue*create*)
 		while [[ \$# -gt 0 ]]; do
@@ -528,7 +609,7 @@ EOF
 	export GITHUB_REF_NAME=v1.2.3
 	mock_command_multi "gh" '
 		*issue*list*) echo "";;
-		*label*view*) exit 0;;
+		*label*list*) printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n';;
 		*issue*create*)
 			while [[ $# -gt 0 ]]; do
 				if [[ "$1" == "--body-file" && -n "${2:-}" ]]; then
@@ -841,7 +922,7 @@ EOF
 	export MAX_RERUNS=3
 	mock_command_multi "gh" '
 		*issue*list*) echo "";;
-		*label*view*) exit 0;;
+		*label*list*) printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n';;
 		*issue*create*)
 			while [[ $# -gt 0 ]]; do
 				if [[ "$1" == "--body-file" && -n "${2:-}" ]]; then
@@ -889,7 +970,7 @@ EOF
 	export GITHUB_REF_NAME=v1.2.3
 	mock_command_multi "gh" '
 		*issue*list*) echo "";;
-		*label*view*) exit 0;;
+		*label*list*) printf 'bug\\nci\\nrelease\\nautomation\\ninfrastructure\\n';;
 		*issue*create*)
 			while [[ $# -gt 0 ]]; do
 				if [[ "$1" == "--body-file" && -n "${2:-}" ]]; then

@@ -18,6 +18,17 @@ job_block() {
 }
 
 
+# Lines of one named step inside one job of the workflow.
+step_block_in_job() {
+	awk -v job="$1" -v step="$2" '
+		$0 == "  " job ":" { in_job = 1; next }
+		in_job && /^  [a-z-]+:$/ { exit }
+		in_job && $0 == "      - name: " step { in_step = 1; print; next }
+		in_step && /^      - name: / { in_step = 0 }
+		in_step { print }
+	' "$WORKFLOW"
+}
+
 @test "reusable-release-recover: dry-run defaults to true" {
 	run awk '
 		/^      dry-run:/ { in_input = 1; next }
@@ -95,8 +106,12 @@ job_block() {
 	assert_line "          ORDER: \${{ inputs.npm-order }}"
 	assert_line "          FILES: \${{ inputs.npm-files-to-verify }}"
 	assert_line '          DRY_RUN: "0"'
-	refute_output --partial "DIST_TAG: \${{ inputs.npm-dist-tag }}
-          DRY_RUN"
+	# The verifier waits for dist-tags.<npm-dist-tag> to point at the publish,
+	# so the resume's verify step is wired with the tag like the tag path.
+	run step_block_in_job resume-npm "Verify published packages"
+	assert_line "          DIST_TAG: \${{ inputs.npm-dist-tag }}"
+	assert_line "          PROVENANCE: \${{ inputs.npm-provenance == true && '1' || '0' }}"
+	assert_line '          DRY_RUN: "0"'
 	# The GitHub Release resumes through create-github-release.sh with
 	# immutable assets so only missing assets upload.
 	run job_block resume-github-release

@@ -32,6 +32,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **npm**: post-publish verification waits for registry propagation of the whole
+  package set before the scratch install (`propagation-attempts` ×
+  `propagation-delay`, default about fifteen minutes, dist-tag aware, per-package
+  timing in the log) instead of five polls in thirteen seconds (#967)
+- **release**: look up failure-issue labels with `gh label list` (case-insensitive);
+  `gh label view` does not exist, so every failure issue was filed unlabelled (#967)
+
 ### Security
 
 ## [0.74.1] - 2026-09-15

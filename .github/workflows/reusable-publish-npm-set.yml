@@ -151,6 +151,24 @@ name: Reusable npm Package-Set Publishing
         required: false
         type: boolean
         default: true
+      propagation-attempts:
+        description: >-
+          Registry propagation polls before post-publish verification gives
+          up. Every package in the set is polled together; a fresh publish
+          is routinely invisible for one to six minutes (platform packages
+          lag the meta package; the 0.160.3rc1 checkpoint took about eight
+          minutes). With propagation-delay 30 the default budget is about
+          fifteen minutes.
+        required: false
+        type: number
+        default: 30
+      propagation-delay:
+        description: >-
+          Cap in seconds between propagation polls; the wait starts at 5 s
+          and doubles up to this cap.
+        required: false
+        type: number
+        default: 30
       smoke-command:
         description: Optional command run in a scratch install of the meta package
         required: false
@@ -231,10 +249,12 @@ name: Reusable npm Package-Set Publishing
         type: string
         default: ubuntu-24.04
       timeout-minutes:
-        description: Job timeout in minutes
+        description: >-
+          Job timeout in minutes. Leave room for the propagation wait
+          (propagation-attempts x propagation-delay) on top of the publish.
         required: false
         type: number
-        default: 15
+        default: 30
 
     outputs:
       published:
@@ -388,7 +408,11 @@ jobs:
         env:
           PACKAGES_DIR: ${{ inputs.packages-dir }}
           ORDER: ${{ inputs.order }}
+          DIST_TAG: ${{ inputs.dist-tag }}
+          PROVENANCE: ${{ inputs.provenance == true && '1' || '0' }}
           DRY_RUN: ${{ inputs.dry-run == true && '1' || '0' }}
           SMOKE: ${{ inputs.smoke-command }}
+          ATTEMPTS: ${{ inputs.propagation-attempts }}
+          DELAY: ${{ inputs.propagation-delay }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/actions/npm/verify-published.sh

@@ -157,8 +157,23 @@ output_value() {
 	assert_line "          LIVE: \${{ inputs.dry-run == false && '1' || '0' }}"
 	run step_block "Verify published packages"
 	assert_line "          DRY_RUN: \${{ inputs.dry-run == true && '1' || '0' }}"
-	# verify-published.sh does not read the dist-tag; nothing unused is wired.
-	refute_output --partial "DIST_TAG"
+	# The verifier waits for dist-tags.<dist-tag> to point at the publish and
+	# expects dist.attestations only when the publish carried provenance.
+	assert_line "          DIST_TAG: \${{ inputs.dist-tag }}"
+	assert_line "          PROVENANCE: \${{ inputs.provenance == true && '1' || '0' }}"
+}
+
+@test "reusable-publish-npm-set: verify-published receives the propagation budget" {
+	run step_block "Verify published packages"
+	assert_line "          ATTEMPTS: \${{ inputs.propagation-attempts }}"
+	assert_line "          DELAY: \${{ inputs.propagation-delay }}"
+	run input_default propagation-attempts
+	assert_output "30"
+	run input_default propagation-delay
+	assert_output "30"
+	# The job timeout leaves room for the fifteen-minute wait on top of the publish.
+	run input_default timeout-minutes
+	assert_output "30"
 }
 
 @test "reusable-publish-npm-set: verify-artifacts receives the order so it can enumerate packed files" {

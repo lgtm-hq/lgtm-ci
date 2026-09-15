@@ -1100,11 +1100,16 @@ The step order is the contract, asserted by the wiring test:
 2. **Publish package set**: the only step that writes to the registry.
    Bounded exponential backoff on transient Sigstore/5xx/429 errors only;
    `EPUBLISHCONFLICT` is an idempotent success; auth failures never retry.
-3. **Verify published** (read-only, last): `npm view` per package requires
-   `dist.attestations` and `dist.integrity` (bounded propagation retry);
-   `npm audit signatures` in a scratch install of the meta package; optional
-   `smoke-command` in that install. `post-publish-verify: false` skips this
-   step; not recommended for live releases.
+3. **Verify published** (read-only, last): waits for the whole set to
+   propagate on one shared clock, polling every package with exponential
+   backoff (`propagation-attempts` × up to `propagation-delay` seconds,
+   default 30 × 30 s, about fifteen minutes; platform packages routinely lag by
+   one to six minutes) until each is visible, carries `dist.integrity` (and
+   `dist.attestations` when `provenance` is on), and `dist-tags.<dist-tag>`
+   points at the published version, logging when each appeared; only then
+   `npm audit signatures` in a scratch install of the meta package and the
+   optional `smoke-command` in that install. `post-publish-verify: false`
+   skips this step; not recommended for live releases.
 
 ```yaml
 jobs:

@@ -1120,12 +1120,18 @@ order that callers must not reorder around (asserted by
    `dist-tag-drift`; dist-tag drift (an
    OIDC-scoped token cannot write `npm dist-tag`, npm/cli#8547) is deferred:
    remaining packages publish first, then the job fails.
-3. `verify-published` — read-only and last: per-package
-   `dist.attestations` + `dist.integrity` required (bounded propagation
-   retry), `npm audit signatures` on a scratch install of the meta package,
-   optional `smoke-command`. Callers can opt out with
-   `post-publish-verify: false` (default `true`); not recommended for live
-   releases.
+3. `verify-published` — read-only and last. First a propagation wait
+   over the whole set on one shared clock: every package is polled together
+   with exponential backoff (`propagation-attempts` × up to
+   `propagation-delay` seconds, default 30 × 30 s, about fifteen minutes) until
+   it is visible, carries `dist.integrity` (and `dist.attestations` when
+   `provenance` is on), and
+   `dist-tags.<dist-tag>` points at the published version; the log records
+   when each package appeared. Only then `npm audit signatures` on a scratch
+   install of the meta package (its optional dependencies are the platform
+   packages, which lag the registry by minutes) and the optional
+   `smoke-command`. Callers can opt out with `post-publish-verify: false`
+   (default `true`); not recommended for live releases.
 
 The publish job is bound to the optional `environment` input (string,
 default empty = no environment): a `uses:` caller cannot set the key on its
