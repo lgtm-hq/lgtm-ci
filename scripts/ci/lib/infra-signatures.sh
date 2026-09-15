@@ -29,13 +29,32 @@ source "$LIB_DIR/cosign.sh"
 # and the publish fails outright. Without them a persistent OIDC flake burned
 # its retries and then matched nothing here, leaving a human to press re-run
 # (#719).
+#
+# Egress refusals are deliberately NOT signatures. Under harden-runner's block
+# policy a host missing from the allowlist fails the same way on every attempt
+# ("Error resolving allowed domain", "connection refused", ECONNREFUSED, …), so
+# re-running never helps and, on a publish workflow, re-runs jobs that already
+# published (#967: the v0.160.3rc1 publish run was re-run into the npm
+# approval gate on exactly that line). A caller that knows a refusal is
+# transient in its own environment can still add it through INFRA_SIGNATURES.
 infra_default_signatures() {
 	printf '%s\n' "Failed to resolve action download info"
 	printf '%s\n' "The runner has received a shutdown signal"
-	printf '%s\n' "Error resolving allowed domain"
 	printf '%s\n' "lost communication with the server"
 	printf '%s\n' "$COSIGN_OIDC_TRANSIENT_MARKERS"
 }
+
+# Runner-acquisition failures ("The job repeatedly failed to be acquired
+# (5 attempts)") never start the job, so they leave no step log for the
+# fixed-string matcher above to read; GitHub reports them as a check-run
+# annotation on the job instead. These markers are matched against those
+# annotation messages, case-insensitively because the wording is GitHub's UI
+# copy rather than a program's output.
+INFRA_RUNNER_ACQUISITION_MARKERS="failed to be acquired
+failed to acquire
+was not acquired"
+export INFRA_RUNNER_ACQUISITION_MARKERS
+readonly INFRA_RUNNER_ACQUISITION_MARKERS
 
 # Build the effective signature list: defaults plus optional INFRA_SIGNATURES
 # extensions (newline-separated fixed strings), blank lines dropped.
@@ -70,5 +89,19 @@ infra_match_signature() {
 			return 0
 		fi
 	done < <(infra_build_signatures)
+	return 1
+}
+
+# Print the first runner-acquisition marker present in the annotation text
+# given as $1; return 1 when none match.
+infra_match_acquisition_annotation() {
+	local text="$1" marker
+	while IFS= read -r marker; do
+		[[ -z "$marker" ]] && continue
+		if grep -qiF -- "$marker" <<<"$text"; then
+			printf '%s\n' "$marker"
+			return 0
+		fi
+	done <<<"$INFRA_RUNNER_ACQUISITION_MARKERS"
 	return 1
 }

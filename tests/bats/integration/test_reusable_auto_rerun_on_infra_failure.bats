@@ -73,6 +73,36 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	assert_success
 	run grep -F "SIGNATURES: \${{ inputs.signatures }}" "$WORKFLOW"
 	assert_success
+	run grep -F "PROTECTED_WORKFLOWS: \${{ inputs.protected-workflows }}" "$WORKFLOW"
+	assert_success
+	run grep -F "PROTECTED_JOB_PATTERN: \${{ inputs.protected-job-pattern }}" "$WORKFLOW"
+	assert_success
+}
+
+@test "auto-rerun: rerun job grants checks read for the acquisition annotations (#967)" {
+	run grep -cE "^      checks: read$" "$WORKFLOW"
+	assert_success
+	assert_output "1"
+}
+
+@test "auto-rerun: protects publish, promote, release and upload jobs by default (#967)" {
+	run awk '
+		/^      protected-job-pattern:/ { in_input = 1; next }
+		in_input && /default: "publish\|promote\|release\|upload"/ { found = 1; exit }
+		in_input && /^      [a-z-]+:/ { in_input = 0 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "auto-rerun: protected-workflows is opt-in and empty by default" {
+	run awk '
+		/^      protected-workflows:/ { in_input = 1; next }
+		in_input && /default: ""/ { found = 1; exit }
+		in_input && /^      [a-z-]+:/ { in_input = 0 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
 }
 
 @test "auto-rerun: tooling checkout includes the rerun script" {

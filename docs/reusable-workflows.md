@@ -833,7 +833,6 @@ known transient-infrastructure signature. Built-in signatures:
 
 - `Failed to resolve action download info`
 - `The runner has received a shutdown signal`
-- `Error resolving allowed domain`
 - `lost communication with the server`
 - `fetching ambient OIDC credentials`
 - `retrieving ID token`
@@ -843,6 +842,44 @@ The last three are cosign's transient ambient-OIDC markers, single-sourced from
 `scripts/ci/lib/cosign.sh` so the in-step signing retry and this after-the-fact
 safety net cannot drift apart. The in-step retry is the fast path; this matcher
 covers the case where that retry is exhausted and the publish fails outright.
+
+Egress refusals are deliberately not signatures: under harden-runner's block
+policy a host missing from the allowlist fails identically on every attempt
+(`Error resolving allowed domain`, `connect: connection refused`,
+`ECONNREFUSED`), so a re-run never helps and, on a publish workflow, repeats
+jobs that already published. `Error resolving allowed domain` was a built-in
+signature until 0.74.2 and re-ran a publish run into the npm approval gate
+(#967). A caller that knows a refusal is transient in its own environment can
+still add it through `signatures`.
+
+A job that GitHub could not place on a runner ("The job repeatedly failed to
+be acquired (5 attempts)") never starts, so it leaves no log for the matcher.
+The reusable reads the check-run annotations of failed jobs that ran zero
+steps instead (`ACQUISITION_MAX_JOBS` of them, default `10`, `0` disables) and
+treats `failed to be acquired`, `failed to acquire` and `was not acquired`
+as a transient signature. That check runs both when the failed-job log is
+empty and when it matched nothing: a matrix can lose one runner while another
+leg fails for real. Reading annotations needs `checks: read`, which the
+reusable declares and every caller must grant alongside `actions: write`.
+
+#### Irreversible steps are never re-run (#967)
+
+`gh run rerun --failed` re-runs every failed job of the run, and a job that
+published or promoted cannot be undone by a second attempt. Two guards run
+before any log is read:
+
+- `protected-workflows` (default empty): newline- or comma-separated workflow
+  files (basename or `.github/workflows/...` path) or display names. A run of a
+  listed workflow is never re-run, whatever its logs say.
+- `protected-job-pattern` (default `publish|promote|release|upload`):
+  case-insensitive extended regex over failed job names. One match protects the
+  whole run, because a `--failed` re-run cannot exclude jobs; the summary names
+  the eligible jobs left un-run. An empty pattern disables the guard.
+
+Both guards fail closed: when the run's workflow or its failed jobs cannot be
+read, the reusable reports *inconclusive* and re-runs nothing. Consumers that
+watch a publish workflow should list it in `protected-workflows`; the job
+pattern is the backstop for workflows that were not listed.
 
 Signatures are matched as fixed strings, case-sensitively: every default is
 stored in the exact case its source emits, so case-insensitive matching would
@@ -916,12 +953,15 @@ jobs:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@<sha> # vX.Y.Z
     permissions:
       actions: write
+      checks: read # check-run annotations, for the runner-acquisition signature
       contents: read
     with:
       tooling-ref: "<sha>" # vX.Y.Z
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}
       run-attempt: ${{ format('{0}', github.event.workflow_run.run_attempt) }}
       max-reruns: "3"
+      # Never re-run the publish pipeline: its jobs have irreversible steps.
+      protected-workflows: publish-python-release.yml
 ```
 
 Caveats: `workflow_run` triggers only execute from the workflow definition on

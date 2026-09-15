@@ -18,11 +18,13 @@ setup() {
 	export FETCH_CALLS="${BATS_TEST_TMPDIR}/fetch_calls"
 	export SLEEP_CALLS="${BATS_TEST_TMPDIR}/sleep_calls"
 	export API_CALLS="${BATS_TEST_TMPDIR}/api_calls"
+	export JOBS_CALLS="${BATS_TEST_TMPDIR}/jobs_calls"
 	export PROBE_DIR="${BATS_TEST_TMPDIR}/gh_probe"
 	unset MAX_RERUNS SIGNATURES LOG_FETCH_ATTEMPTS LOG_FETCH_DELAY
 	unset LOG_FETCH_DEADLINE GH_CMD_TIMEOUT TIMEOUT_BIN
 	unset LOG_PROBE_MAX_JOBS LOG_PROBE_MAX_CALLS LOG_PROBE_CMD_TIMEOUT
 	unset LOG_PROBE_TIME_BUDGET
+	unset PROTECTED_WORKFLOWS PROTECTED_JOB_PATTERN ACQUISITION_MAX_JOBS
 }
 
 teardown() {
@@ -104,6 +106,78 @@ _init_probe_dir() {
 	: >"${PROBE_DIR}/joblog.default"
 	printf '0' >"${PROBE_DIR}/joblog.default.status"
 	: >"$API_CALLS"
+	# #967 protection fixtures: an unprotected workflow, one eligible failed
+	# job that ran its steps, and no annotations, so a test that says nothing
+	# about protection re-runs as it always did.
+	printf 'ci.yml\tCI' >"${PROBE_DIR}/run.meta"
+	printf '0' >"${PROBE_DIR}/run.meta.status"
+	printf '7\ttest\t3\n' >"${PROBE_DIR}/jobs.names"
+	printf '0' >"${PROBE_DIR}/jobs.names.status"
+	: >"${PROBE_DIR}/annotations.default"
+	printf '0' >"${PROBE_DIR}/annotations.default.status"
+	: >"$JOBS_CALLS"
+}
+
+# Set the run metadata the stub serves for `gh api .../actions/runs/<id>`:
+# _run_meta <exit-code> <workflow path> <workflow name>.
+_run_meta() {
+	printf '%s' "$1" >"${PROBE_DIR}/run.meta.status"
+	printf '%s\t%s' "$2" "$3" >"${PROBE_DIR}/run.meta"
+}
+
+# Set the failed-jobs listing the #967 guards read: "<exit-code>" then zero or
+# more "<job-id>	<job name>	<steps that ran>" rows.
+_failed_jobs() {
+	local status="$1" row
+	shift
+	printf '%s' "$status" >"${PROBE_DIR}/jobs.names.status"
+	: >"${PROBE_DIR}/jobs.names"
+	for row in "$@"; do
+		printf '%s\n' "$row" >>"${PROBE_DIR}/jobs.names"
+	done
+}
+
+# Set the check-run annotation messages the stub serves for one job id (or
+# "default"): _job_annotations <job-id|default> <exit-code> <messages>.
+_job_annotations() {
+	printf '%s' "$3" >"${PROBE_DIR}/annotations.${1}"
+	printf '%s' "$2" >"${PROBE_DIR}/annotations.${1}.status"
+}
+
+# `gh api` branches for the #967 guards. Listed before the probe's cases: the
+# guard's job listing hits the same attempt-jobs endpoint and is told apart by
+# the `.name` in its jq filter, and the run-metadata pattern would otherwise
+# swallow every /actions/runs/ URL.
+_gh_guard_case() {
+	cat <<EOF
+	"api "*"/attempts/"*"/jobs"*".name"*)
+		echo "\$*" >> '${JOBS_CALLS}'
+		cat '${PROBE_DIR}/jobs.names'
+		exit "\$(cat '${PROBE_DIR}/jobs.names.status')"
+		;;
+	"api "*"/check-runs/"*"/annotations"*)
+		echo "\$*" >> '${JOBS_CALLS}'
+		api_args="\$*"
+		job_id="\${api_args##*/check-runs/}"
+		job_id="\${job_id%%/annotations*}"
+		ann_file='${PROBE_DIR}'"/annotations.\${job_id}"
+		if [[ ! -f "\$ann_file" ]]; then
+			ann_file='${PROBE_DIR}/annotations.default'
+		fi
+		cat "\$ann_file"
+		exit "\$(cat "\${ann_file}.status")"
+		;;
+EOF
+}
+
+_gh_run_meta_case() {
+	cat <<EOF
+	"api "*"/actions/runs/"*".path"*)
+		echo "\$*" >> '${JOBS_CALLS}'
+		cat '${PROBE_DIR}/run.meta'
+		exit "\$(cat '${PROBE_DIR}/run.meta.status')"
+		;;
+EOF
 }
 
 # Set the attempt-jobs listing the stub returns: "<exit-code>" then zero or more
@@ -179,7 +253,9 @@ case "\$*" in
 		echo "\$*" >> '${FETCH_CALLS}'
 		cat '${logs_file}'
 		;;
+$(_gh_guard_case)
 $(_gh_api_case)
+$(_gh_run_meta_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
 		hang_for='${rerun_hang}'
@@ -239,7 +315,9 @@ $(_gh_hang_snippet)
 		cat "\${spec_dir}/\${attempt}.log"
 		exit "\$status"
 		;;
+$(_gh_guard_case)
 $(_gh_api_case)
+$(_gh_run_meta_case)
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
 		;;
@@ -377,12 +455,20 @@ _call_count() {
 	assert_output "1"
 }
 
-@test "rerun-on-infra-failure: 'Error resolving allowed domain' triggers rerun" {
-	_mock_gh "Error resolving allowed domain github.com"
-	run bash "$SCRIPT"
-	assert_success
-	run grep -c -- "--failed" "$RERUN_CALLS"
-	assert_output "1"
+@test "rerun-on-infra-failure: an egress refusal is not an infra signature (#967)" {
+	# Under harden-runner's block policy a missing allowlist entry fails the
+	# same way every time; re-running it re-ran a publish run into the npm gate.
+	local line
+	for line in \
+		"Error resolving allowed domain github.com" \
+		"dial tcp 20.60.1.1:443: connect: connection refused" \
+		"Error: connect ECONNREFUSED 127.0.0.1:443"; do
+		_mock_gh "$line"
+		run bash "$SCRIPT"
+		assert_success
+		assert_output --partial "No infra signature matched"
+		[ ! -s "$RERUN_CALLS" ]
+	done
 }
 
 @test "rerun-on-infra-failure: 'lost communication with the server' triggers rerun" {
@@ -576,7 +662,7 @@ _call_count() {
 }
 
 @test "rerun-on-infra-failure: whitespace-only logs are treated as unavailable and refetched" {
-	_mock_gh_attempts "0:$(printf '\n\n   \n')" "0:Error resolving allowed domain github.com"
+	_mock_gh_attempts "0:$(printf '\n\n   \n')" "0:lost communication with the server"
 	_mock_sleep
 	run bash "$SCRIPT"
 	assert_success
@@ -812,7 +898,8 @@ _minimal_path_dir() {
 	export PATH
 	run env -u BASH_ENV bash "$SCRIPT"
 	assert_success
-	assert_equal "2" "$(_call_count "$TIMEOUT_CALLS")"
+	# Log fetch, #967 failed-jobs listing, rerun.
+	assert_equal "3" "$(_call_count "$TIMEOUT_CALLS")"
 	run grep -c -- "--failed" "$RERUN_CALLS"
 	assert_output "1"
 }
@@ -837,7 +924,10 @@ _minimal_path_dir() {
 	_mock_gh "Failed to resolve action download info"
 	run bash "$SCRIPT"
 	assert_success
-	assert_equal "2" "$(_call_count "$TIMEOUT_CALLS")"
+	# Log fetch, #967 failed-jobs listing, rerun: every gh call is bounded.
+	assert_equal "3" "$(_call_count "$TIMEOUT_CALLS")"
+	run grep -c -- "42 gh api" "$TIMEOUT_CALLS"
+	assert_output "1"
 	run grep -c -- "42 gh run view" "$TIMEOUT_CALLS"
 	assert_output "1"
 	run grep -c -- "42 gh run rerun" "$TIMEOUT_CALLS"
@@ -954,6 +1044,7 @@ case "\$*" in
 	run\ rerun\ *)
 		echo "\$*" >> '${RERUN_CALLS}'
 		;;
+$(_gh_guard_case)
 	*)
 		echo "unexpected gh call: \$*" >&2
 		exit 1
@@ -1024,6 +1115,7 @@ case "\$*" in
 		echo "\$*" >> '${FETCH_CALLS}'
 		echo "The runner has received a shutdown signal"
 		;;
+	api\ *jobs*) printf '7\ttest\t3\n' ;;
 	run\ rerun\ *) echo "\$*" >> '${RERUN_CALLS}' ;;
 esac
 EOF
@@ -1037,8 +1129,9 @@ EOF
 	# block rather than see EOF — exactly the shape of the hang being excluded.
 	run bash -c 'exec 9<>"$1"; bash "$2" <&9' _ "$fifo" "$SCRIPT"
 	assert_success
+	# Log fetch, #967 failed-jobs listing, rerun.
 	run grep -c "^eof=1$" "$probe"
-	assert_output "2"
+	assert_output "3"
 }
 
 @test "rerun-on-infra-failure: the watchdog turns a hang into a diagnostic and exits 0" {
@@ -1508,3 +1601,225 @@ EOF
 	run grep -cF "Log-ingestion probe evidence" "$GITHUB_STEP_SUMMARY"
 	assert_failure
 }
+
+# =============================================================================
+# Irreversible-step protection (#967)
+# =============================================================================
+
+@test "rerun-on-infra-failure: a protected workflow is never re-run even on a matching signature" {
+	export PROTECTED_WORKFLOWS="publish-pypi-on-tag.yml"
+	_mock_gh "The runner has received a shutdown signal"
+	_run_meta 0 ".github/workflows/publish-pypi-on-tag.yml" "Publish - PyPI Production"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "protected workflow"
+	[ ! -s "$RERUN_CALLS" ]
+	# Decided before any log download.
+	[ ! -s "$FETCH_CALLS" ]
+	run grep -c "Protected workflow" "$GITHUB_STEP_SUMMARY"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: protected-workflows matches by path, basename or display name and tolerates commas" {
+	local entry
+	for entry in ".github/workflows/publish-pypi-on-tag.yml" "publish-pypi-on-tag.yml" "Publish - PyPI Production" "ci.yml, publish-pypi-on-tag.yml"; do
+		export PROTECTED_WORKFLOWS="$entry"
+		_mock_gh "The runner has received a shutdown signal"
+		_run_meta 0 ".github/workflows/publish-pypi-on-tag.yml" "Publish - PyPI Production"
+		run bash "$SCRIPT"
+		assert_success
+		[ ! -s "$RERUN_CALLS" ]
+	done
+}
+
+@test "rerun-on-infra-failure: an unprotected workflow still re-runs with protected-workflows set" {
+	export PROTECTED_WORKFLOWS=$'publish-pypi-on-tag.yml\npublish-npm.yml'
+	_mock_gh "The runner has received a shutdown signal"
+	_run_meta 0 ".github/workflows/ci.yml" "CI"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+}
+
+@test "rerun-on-infra-failure: an unreadable run fails the protection check closed" {
+	export PROTECTED_WORKFLOWS="publish-pypi-on-tag.yml"
+	_mock_gh "The runner has received a shutdown signal"
+	_run_meta 1 "" ""
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::"
+	assert_output --partial "inconclusive"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: a failed job matching the default protected-job pattern blocks the rerun" {
+	_mock_gh "The runner has received a shutdown signal"
+	_failed_jobs 0 $'104386448873\tPublish to npm / Publish npm package set\t7'
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "irreversible steps"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+	run grep -c "Protected job(s): Publish to npm / Publish npm package set" "$GITHUB_STEP_SUMMARY"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: the default protected-job pattern covers publish, promote, release and upload, case-insensitively" {
+	local name
+	for name in "Promote Docker images to release tags" "UPLOAD to PyPI" "Create GitHub Release" "publish-set"; do
+		_mock_gh "The runner has received a shutdown signal"
+		_failed_jobs 0 "1	${name}	3"
+		run bash "$SCRIPT"
+		assert_success
+		[ ! -s "$RERUN_CALLS" ]
+	done
+}
+
+@test "rerun-on-infra-failure: a mix of protected and eligible failed jobs re-runs nothing and says why" {
+	_mock_gh "The runner has received a shutdown signal"
+	_failed_jobs 0 $'1\tPromote Docker images to release tags\t4' $'2\tBuild binaries\t2'
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	run grep -c "cannot exclude jobs" "$GITHUB_STEP_SUMMARY"
+	assert_output "1"
+	run grep -c "Build binaries" "$GITHUB_STEP_SUMMARY"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: eligible failed jobs only still re-run on a signature" {
+	_mock_gh "The runner has received a shutdown signal"
+	_failed_jobs 0 $'1\tBuild binaries\t2' $'2\tTest (3.12)\t5'
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+}
+
+@test "rerun-on-infra-failure: an empty protected-job pattern disables the job guard" {
+	export PROTECTED_JOB_PATTERN=""
+	_mock_gh "The runner has received a shutdown signal"
+	_failed_jobs 0 $'1\tPublish to npm\t7'
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+	# The guard was off, so the listing was never fetched.
+	[ ! -s "$JOBS_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: an unlistable job set fails the job guard closed" {
+	_mock_gh "The runner has received a shutdown signal"
+	_failed_jobs 1
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: an empty failed-jobs listing on a failed run is inconclusive, not consent" {
+	_mock_gh "The runner has received a shutdown signal"
+	_failed_jobs 0
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning::"
+	assert_output --partial "came back empty"
+	[ ! -s "$RERUN_CALLS" ]
+	[ ! -s "$FETCH_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: an invalid protected-job pattern fails with a clear error" {
+	export PROTECTED_JOB_PATTERN="publish|("
+	_mock_gh "The runner has received a shutdown signal"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "PROTECTED_JOB_PATTERN"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+# =============================================================================
+# Runner-acquisition failures (#967)
+# =============================================================================
+
+@test "rerun-on-infra-failure: a job that repeatedly failed to be acquired re-runs from its annotation" {
+	_mock_sleep
+	# The job never started, so the failed-job log is empty on every attempt.
+	_mock_gh_attempts "0:"
+	_failed_jobs 0 $'104349007496\ttest-compat / Python Compatibility (3.14)\t0'
+	_job_annotations 104349007496 0 "The job repeatedly failed to be acquired (5 attempts)"
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "runner acquisition failure"
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+	run grep -c "runner acquisition failure on job 104349007496" "$GITHUB_STEP_SUMMARY"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: an acquisition failure next to a real failure is still re-run" {
+	# One matrix leg lost its runner while another failed for real: the log
+	# belongs to the real failure and matches nothing, the annotation does.
+	_mock_gh "assertion failed: expected 200 got 500"
+	_failed_jobs 0 $'1\ttest (3.12)\t9' $'2\ttest (3.14)\t0'
+	_job_annotations 2 0 "The job repeatedly failed to be acquired (5 attempts)"
+	run bash "$SCRIPT"
+	assert_success
+	assert_equal "1" "$(_call_count "$RERUN_CALLS")"
+}
+
+@test "rerun-on-infra-failure: only zero-step failed jobs are checked for acquisition failures" {
+	_mock_sleep
+	_mock_gh_attempts "0:"
+	_failed_jobs 0 $'1\ttest (3.12)\t9'
+	_job_annotations 1 0 "The job repeatedly failed to be acquired (5 attempts)"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	run grep -c "check-runs/1/annotations" "$JOBS_CALLS"
+	assert_output "0"
+}
+
+@test "rerun-on-infra-failure: an annotation without the acquisition wording stays inconclusive" {
+	_mock_sleep
+	_mock_gh_attempts "0:"
+	_failed_jobs 0 $'1\ttest (3.14)\t0'
+	_job_annotations 1 0 "Process completed with exit code 1."
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Inconclusive"
+	[ ! -s "$RERUN_CALLS" ]
+}
+
+@test "rerun-on-infra-failure: ACQUISITION_MAX_JOBS=0 disables the annotation check" {
+	export ACQUISITION_MAX_JOBS=0
+	_mock_sleep
+	_mock_gh_attempts "0:"
+	_failed_jobs 0 $'1\ttest (3.14)\t0'
+	_job_annotations 1 0 "The job repeatedly failed to be acquired (5 attempts)"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	run grep -c "annotations" "$JOBS_CALLS"
+	assert_output "0"
+}
+
+@test "rerun-on-infra-failure: the acquisition check is capped by ACQUISITION_MAX_JOBS" {
+	export ACQUISITION_MAX_JOBS=1
+	_mock_sleep
+	_mock_gh_attempts "0:"
+	_failed_jobs 0 $'1\ttest (3.12)\t0' $'2\ttest (3.14)\t0'
+	_job_annotations 2 0 "The job repeatedly failed to be acquired (5 attempts)"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+	run grep -c "annotations" "$JOBS_CALLS"
+	assert_output "1"
+}
+
+@test "rerun-on-infra-failure: a protected job is never re-run on an acquisition failure either" {
+	_mock_sleep
+	_mock_gh_attempts "0:"
+	_failed_jobs 0 $'1\tPublish to npm\t0'
+	_job_annotations 1 0 "The job repeatedly failed to be acquired (5 attempts)"
+	run bash "$SCRIPT"
+	assert_success
+	[ ! -s "$RERUN_CALLS" ]
+}
+

@@ -5,18 +5,23 @@ name: Reusable - Auto Re-run on Infra Failure
 # the failed-job logs match a known transient-infrastructure signature
 # (GitHub-side outages such as "Failed to resolve action download info").
 # RUN_ATTEMPT gating caps automation at max-reruns re-run(s) per run so a
-# persistent outage can never loop. Call from a workflow_run consumer gated
-# on a failed conclusion (see examples/auto-rerun-on-infra-failure.yml):
+# persistent outage can never loop. Runs of protected workflows and runs with
+# a failed publish/promote/release/upload job are never re-run (#967): a
+# `--failed` re-run repeats irreversible steps. Call from a workflow_run
+# consumer gated on a failed conclusion (see
+# examples/auto-rerun-on-infra-failure.yml):
 #
 #   rerun:
 #     if: github.event.workflow_run.conclusion == 'failure'
 #     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-auto-rerun-on-infra-failure.yml@<sha>
 #     permissions:
 #       actions: write
+#       checks: read
 #       contents: read
 #     with:
 #       run-id: ${{ github.event.workflow_run.id }}
 #       run-attempt: ${{ github.event.workflow_run.run_attempt }}
+#       protected-workflows: publish-pypi-on-tag.yml
 #       tooling-ref: <sha>
 
 "on":
@@ -42,6 +47,23 @@ name: Reusable - Auto Re-run on Infra Failure
         required: false
         type: string
         default: ""
+      protected-workflows:
+        description: >-
+          Newline- or comma-separated workflow files (basename or
+          .github/workflows path) or workflow names whose runs are never
+          re-run automatically because their jobs have irreversible steps
+          (publish, promote). Checked before any log is read (#967)
+        required: false
+        type: string
+        default: ""
+      protected-job-pattern:
+        description: >-
+          Case-insensitive extended regex; a failed job whose name matches is
+          never re-run automatically, and since `gh run rerun --failed` cannot
+          exclude jobs the whole run is left alone. Empty disables the guard
+        required: false
+        type: string
+        default: "publish|promote|release|upload"
       tooling-ref:
         description: "Git ref to use when checking out lgtm-ci tooling scripts"
         required: false
@@ -130,6 +152,9 @@ jobs:
     permissions:
       # Re-run failed jobs and read failed-job logs
       actions: write
+      # Read the check-run annotations of failed jobs for the
+      # runner-acquisition signature (#967); the caller must grant it too
+      checks: read
       # Read repository context for the tooling checkout
       contents: read
 
@@ -186,4 +211,6 @@ jobs:
           RUN_ATTEMPT: ${{ inputs.run-attempt }}
           MAX_RERUNS: ${{ inputs.max-reruns }}
           SIGNATURES: ${{ inputs.signatures }}
+          PROTECTED_WORKFLOWS: ${{ inputs.protected-workflows }}
+          PROTECTED_JOB_PATTERN: ${{ inputs.protected-job-pattern }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/rerun-on-infra-failure.sh
