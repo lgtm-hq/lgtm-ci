@@ -6,7 +6,7 @@
 #   None (uses git history)
 #
 # Optional environment variables:
-#   FROM_REF - Reference to start from (default: latest tag)
+#   FROM_REF - Reference to start from (default: latest stable tag reachable from HEAD)
 #   TO_REF - Reference to end at (default: HEAD)
 #   VERSION - Version for changelog header
 #   FORMAT - Output format: full, simple, with-type (default: full)
@@ -33,7 +33,14 @@ source "$LIB_DIR/release.sh"
 
 # Get from_ref if not specified
 if [[ -z "$FROM_REF" ]]; then
-	FROM_REF=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+	# Latest STABLE semver tag reachable from HEAD, the same lookup
+	# calculate-version.sh bumps from (#1000). A bare `git describe` picks the
+	# nearest tag, which on a main that carries checkpoint prereleases
+	# (v1.2.3a1, v1.2.3rc1) is the checkpoint, and the version PR's changelog
+	# then covers only the commits since it and silently drops the rest
+	# (#1012).
+	FROM_REF=$(latest_stable_tag HEAD) || true
+	FROM_REF="${FROM_REF:-}"
 fi
 
 log_info "Generating changelog from '${FROM_REF:-beginning}' to '$TO_REF'"
