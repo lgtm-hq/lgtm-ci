@@ -46,6 +46,11 @@ on:
         required: false
         type: boolean
         default: false
+      tag-prefix:
+        description: "Prefix of the version tags the generated notes range from"
+        required: false
+        type: string
+        default: "v"
       checksums:
         description: >-
           Attach a SHA256SUMS manifest of the release assets. A manifest
@@ -196,6 +201,7 @@ jobs:
             ${{ inputs.release-name != '' && inputs.release-name ||
             (inputs.tag-name != '' && inputs.tag-name || github.ref_name) }}
           GENERATE_NOTES: ${{ inputs.generate-release-notes }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
           DRAFT: ${{ inputs.draft }}
           PRERELEASE: ${{ inputs.prerelease }}
           FILE_PATTERNS: >-
