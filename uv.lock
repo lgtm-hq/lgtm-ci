@@ -255,7 +255,7 @@ dev = [
 requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.9.4" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
-    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.162.0" },
+    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.163.0" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -381,7 +381,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.162.0"
+version = "0.163.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -397,9 +397,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "watchdog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/f0/23/f73f828b9c175e5a9d3cbab3dea4e8e57bcc5a170249293a02b4624912de/lintro-0.162.0.tar.gz", hash = "sha256:beea600dd3e3a46e5facf67d943a7f6eb3c4fd62c7bafcb9cce6ba3ecae59fc8", size = 2867064, upload-time = "2026-09-16T11:41:29.294Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/72/d6/4249ec917ed98e3d1cb1d8c38c2ac4b71996afb24ff216dfcedf5aa59393/lintro-0.163.0.tar.gz", hash = "sha256:3b6fbfd6a0deb22fa8496604db7e517829f89223426aa2947fae4000a57c5ef7", size = 2880372, upload-time = "2026-09-16T20:29:34.092Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/56/ef/30597a9fa7ac6c9f6c0463ae1fdb695ec675cf037a8b137e523da7a46fa4/lintro-0.162.0-py3-none-any.whl", hash = "sha256:30d089311ed6836343addbcbb8716745efc858728c01828ab795dfc119a44b7f", size = 1888148, upload-time = "2026-09-16T11:41:27.608Z" },
+    { url = "https://files.pythonhosted.org/packages/b8/da/8c45cca8a562670370fecf442ea46d6f5b8041a5fcf3270006b39d81955b/lintro-0.163.0-py3-none-any.whl", hash = "sha256:978032bbdce79256f5f9495b7a7470a10e70abfe61f39819fc47868af8418f72", size = 1902086, upload-time = "2026-09-16T20:29:32.048Z" },
 ]
 
 [[package]]
