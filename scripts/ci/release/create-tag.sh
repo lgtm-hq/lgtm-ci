@@ -9,7 +9,7 @@
 #   TAG_PREFIX - Prefix for tag (default: v)
 #   MESSAGE - Tag message (default: auto-generated from changelog)
 #   PUSH - Whether to push the tag (default: false)
-#   FROM_REF - Reference for changelog generation (default: latest tag)
+#   FROM_REF - Reference for changelog generation (default: latest stable TAG_PREFIX tag)
 
 set -euo pipefail
 
@@ -52,9 +52,13 @@ if git rev-parse --verify --quiet "refs/tags/$TAG_NAME" >/dev/null 2>&1; then
 fi
 
 if [[ "$TAG_EXISTS" != "true" ]]; then
-	# Get from_ref if not specified
+	# Get from_ref if not specified: the latest STABLE tag, not the nearest.
+	# This runs on the version-PR merge commit before the tag exists, so a
+	# bare `git describe` resolves to any checkpoint prerelease on main and
+	# the annotated tag message would carry only the commits since it (#1012).
 	if [[ -z "$FROM_REF" ]]; then
-		FROM_REF=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+		FROM_REF=$(latest_stable_tag HEAD "$TAG_PREFIX") || true
+		FROM_REF="${FROM_REF:-}"
 	fi
 
 	# Generate message if not provided

@@ -7,9 +7,13 @@ author: "lgtm-hq"
 
 inputs:
   from-ref:
-    description: "Git reference to start from (default: latest tag)"
+    description: "Git reference to start from (default: latest stable tag with tag-prefix)"
     required: false
     default: ""
+  tag-prefix:
+    description: "Prefix of the version tags the default from-ref is chosen from"
+    required: false
+    default: "v"
   to-ref:
     description: "Git reference to end at"
     required: false
@@ -46,6 +50,7 @@ runs:
       shell: bash
       env:
         FROM_REF: ${{ inputs.from-ref }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
         TO_REF: ${{ inputs.to-ref }}
         VERSION: ${{ inputs.version }}
         FORMAT: ${{ inputs.format }}

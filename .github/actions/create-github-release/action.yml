@@ -29,6 +29,10 @@ inputs:
     description: "Use GitHub's auto-generated release notes"
     required: false
     default: "false"
+  tag-prefix:
+    description: "Prefix of the version tags the generated notes range from"
+    required: false
+    default: "v"
   files:
     description: "Space-separated list of files to attach"
     required: false
@@ -70,6 +74,7 @@ runs:
         DRAFT: ${{ inputs.draft }}
         PRERELEASE: ${{ inputs.prerelease }}
         GENERATE_NOTES: ${{ inputs['generate-notes'] }}
+        TAG_PREFIX: ${{ inputs.tag-prefix }}
         FILES: ${{ inputs.files }}
         REPO: ${{ inputs.repo }}
         GH_TOKEN: ${{ inputs.token }}

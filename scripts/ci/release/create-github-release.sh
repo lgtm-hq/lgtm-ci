@@ -11,6 +11,7 @@
 #   DRAFT - Create as draft (default: false)
 #   PRERELEASE - Mark as prerelease (default: false)
 #   GENERATE_NOTES - Use GitHub's auto-generated notes (default: false)
+#   TAG_PREFIX - Prefix of the version tags the generated notes range from (default: v)
 #   FILES - Space-separated list of files to attach
 #   FILE_PATTERNS - Newline-separated glob patterns (used by reusable workflows)
 #   REPO - Repository in owner/repo format (default: GITHUB_REPOSITORY or git remote)
@@ -42,6 +43,7 @@ source "$LIB_DIR/release/assets.sh"
 : "${TAG:?TAG is required}"
 : "${TITLE:=$TAG}"
 : "${BODY:=}"
+: "${TAG_PREFIX:=v}"
 : "${DRAFT:=false}"
 : "${PRERELEASE:=false}"
 : "${GENERATE_NOTES:=false}"
@@ -166,8 +168,11 @@ if [[ "$RELEASE_EXISTS" != "true" ]]; then
 	elif [[ -n "$BODY" ]]; then
 		GH_ARGS+=("--notes" "$BODY")
 	else
-		# Generate body from changelog
-		FROM_REF=$(git describe --tags --abbrev=0 "${TAG}^" 2>/dev/null || echo "")
+		# Generate body from changelog, ranging from the latest STABLE tag
+		# below this one; a checkpoint prerelease between them is skipped
+		# (#1012).
+		FROM_REF=$(latest_stable_tag "${TAG}^" "$TAG_PREFIX") || true
+		FROM_REF="${FROM_REF:-}"
 		CHANGELOG=$(generate_release_notes "$FROM_REF" "$TAG" "${TAG#v}")
 		GH_ARGS+=("--notes" "$CHANGELOG")
 	fi
