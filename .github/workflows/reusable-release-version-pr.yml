@@ -269,6 +269,7 @@ jobs:
         shell: bash
         env:
           FORMAT: full
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
       - name: Update CHANGELOG.md

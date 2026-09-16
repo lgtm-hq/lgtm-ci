@@ -6,7 +6,8 @@
 #   None (uses git history)
 #
 # Optional environment variables:
-#   FROM_REF - Reference to start from (default: latest stable tag reachable from HEAD)
+#   FROM_REF - Reference to start from (default: latest stable TAG_PREFIX tag reachable from HEAD)
+#   TAG_PREFIX - Prefix of the version tags the default FROM_REF is chosen from (default: v)
 #   TO_REF - Reference to end at (default: HEAD)
 #   VERSION - Version for changelog header
 #   FORMAT - Output format: full, simple, with-type (default: full)
@@ -26,6 +27,7 @@ source "$LIB_DIR/github.sh"
 source "$LIB_DIR/release.sh"
 
 : "${FROM_REF:=}"
+: "${TAG_PREFIX:=v}"
 : "${TO_REF:=HEAD}"
 : "${VERSION:=}"
 : "${FORMAT:=full}"
@@ -39,7 +41,7 @@ if [[ -z "$FROM_REF" ]]; then
 	# (v1.2.3a1, v1.2.3rc1) is the checkpoint, and the version PR's changelog
 	# then covers only the commits since it and silently drops the rest
 	# (#1012).
-	FROM_REF=$(latest_stable_tag HEAD) || true
+	FROM_REF=$(latest_stable_tag HEAD "$TAG_PREFIX") || true
 	FROM_REF="${FROM_REF:-}"
 fi
 
