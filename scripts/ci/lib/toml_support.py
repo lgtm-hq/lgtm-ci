@@ -23,12 +23,17 @@ from typing import Any, cast
 # it from a same-name registry package elsewhere in the lockfile.
 LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path", "workspace")
 
-try:
-    import tomlkit as _tomlkit
-except ImportError:  # optional runtime dependency; require_tomlkit() reports it
-    _tomlkit = None
 
-tomlkit: ModuleType | None = _tomlkit
+def _import_tomlkit() -> ModuleType | None:
+    """Return the ``tomlkit`` module, or ``None`` when it is not installed."""
+    try:
+        import tomlkit
+    except ImportError:  # optional runtime dependency; require_tomlkit() reports it
+        return None
+    return cast(ModuleType, tomlkit)
+
+
+tomlkit: ModuleType | None = _import_tomlkit()
 
 
 def require_tomlkit() -> ModuleType:
