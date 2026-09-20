@@ -13,6 +13,8 @@ ambient installation of the module.
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -26,11 +28,9 @@ LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path", "workspace")
 
 def _import_tomlkit() -> ModuleType | None:
     """Return the ``tomlkit`` module, or ``None`` when it is not installed."""
-    try:
-        import tomlkit
-    except ImportError:  # optional runtime dependency; require_tomlkit() reports it
+    if importlib.util.find_spec("tomlkit") is None:
         return None
-    return cast(ModuleType, tomlkit)
+    return importlib.import_module("tomlkit")
 
 
 tomlkit: ModuleType | None = _import_tomlkit()
