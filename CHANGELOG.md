@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.74.6] - 2026-09-20
+
+### Changed
+
+- **deps**: update dtolnay/rust-toolchain digest to 02cb101 (#1030) (be9ccbb)
+- **deps**: update dependency anchore/grype to 0.119.0 (minor) (#1025) (7b10366)
+- **deps**: update dependency anchore/syft to v1.52.0 (minor) (#1026) (194346d)
+- **deps**: update github-actions (#1027) (3d1e478)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.74.5 (patch) (#1023) (fd4d6d1)
+- **deps**: lock file maintenance (#1029) (d7111d2)
+
+### Fixed
+
+- **release**: avoid authenticated preflight fetch in Python dist reusable workflow
+  (#1031) (babbaa3)
+- **deps**: update lintro (#1022) (be21075)
+
 ## [0.74.5] - 2026-09-17
 
 ### Changed
@@ -2486,7 +2503,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.5...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.6...HEAD
+[0.74.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.5...v0.74.6
 [0.74.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.4...v0.74.5
 [0.74.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.3...v0.74.4
 [0.74.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.2...v0.74.3
