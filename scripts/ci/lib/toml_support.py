@@ -13,6 +13,8 @@ ambient installation of the module.
 
 from __future__ import annotations
 
+import importlib
+import importlib.util
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -23,10 +25,15 @@ from typing import Any, cast
 # it from a same-name registry package elsewhere in the lockfile.
 LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path", "workspace")
 
-try:
-    import tomlkit
-except ImportError:  # optional runtime dependency; require_tomlkit() reports it
-    tomlkit = None  # type: ignore[assignment]
+
+def _import_tomlkit() -> ModuleType | None:
+    """Return the ``tomlkit`` module, or ``None`` when it is not installed."""
+    if importlib.util.find_spec("tomlkit") is None:
+        return None
+    return importlib.import_module("tomlkit")
+
+
+tomlkit: ModuleType | None = _import_tomlkit()
 
 
 def require_tomlkit() -> ModuleType:
