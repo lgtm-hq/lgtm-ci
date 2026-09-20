@@ -1305,7 +1305,7 @@ Canonical examples:
 
 ```yaml
 uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
-tooling-ref: "d32388495d571a0ee13383bacc732765bf4e9e7d" # v0.74.6
+tooling-ref: "d32388495d571a0ee13383bacc732765bf4e9e7d"  # v0.74.6
 ```
 
 Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.
