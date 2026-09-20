@@ -86,11 +86,14 @@ preflight)
 	fi
 
 	if [[ "$ENSURE_TAG_ON_DEFAULT_BRANCH" == "true" ]]; then
-		git fetch --no-tags origin "${DEFAULT_BRANCH}:refs/remotes/origin/${DEFAULT_BRANCH}"
+		default_ref="refs/remotes/origin/${DEFAULT_BRANCH}"
+		if ! git show-ref --verify --quiet "$default_ref"; then
+			die "Default branch ref ${default_ref} is unavailable; check out full history before running tag preflight"
+		fi
 		ref="${GITHUB_REF:-refs/tags/${tag}}"
 		tag_commit=$(git rev-parse "${ref}^{}")
 		log_info "Tag ${tag} -> ${tag_commit}"
-		if git merge-base --is-ancestor "$tag_commit" "origin/${DEFAULT_BRANCH}"; then
+		if git merge-base --is-ancestor "$tag_commit" "$default_ref"; then
 			log_success "Tag commit is on ${DEFAULT_BRANCH}"
 		else
 			die "Tag commit is not on ${DEFAULT_BRANCH}; aborting publish"

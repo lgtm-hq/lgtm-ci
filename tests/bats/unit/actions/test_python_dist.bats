@@ -68,12 +68,26 @@ _run_build() {
 	_init_repo_on_main "1.2.3"
 	export GITHUB_REF_NAME="v1.2.3"
 	export GITHUB_REF="refs/tags/v1.2.3"
+	git remote set-url origin "https://github.invalid/private/repository.git"
 
 	_run_preflight true true
 
 	assert_success
 	assert_output --partial "Tag version matches pyproject.toml"
 	assert_output --partial "Tag commit is on main"
+}
+
+@test "python-dist preflight: fails clearly when the default branch ref is unavailable" {
+	_init_repo_on_main "1.2.3"
+	export GITHUB_REF_NAME="v1.2.3"
+	export GITHUB_REF="refs/tags/v1.2.3"
+	git update-ref -d refs/remotes/origin/main
+
+	_run_preflight true true
+
+	assert_failure
+	assert_output --partial "Default branch ref refs/remotes/origin/main is unavailable"
+	assert_output --partial "check out full history"
 }
 
 @test "python-dist preflight: fails when tag version mismatches pyproject" {
