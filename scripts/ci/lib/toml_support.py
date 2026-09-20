@@ -24,9 +24,11 @@ from typing import Any, cast
 LOCAL_SOURCE_KEYS = ("editable", "virtual", "directory", "path", "workspace")
 
 try:
-    import tomlkit
+    import tomlkit as _tomlkit
 except ImportError:  # optional runtime dependency; require_tomlkit() reports it
-    tomlkit = None  # type: ignore[assignment]
+    _tomlkit = None
+
+tomlkit: ModuleType | None = _tomlkit
 
 
 def require_tomlkit() -> ModuleType:
