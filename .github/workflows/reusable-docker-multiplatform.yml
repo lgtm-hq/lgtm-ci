@@ -668,7 +668,7 @@ jobs:
        needs.verify-per-platform.result == 'skipped') &&
       (needs.health-check-per-platform.result == 'success' ||
        needs.health-check-per-platform.result == 'skipped')
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -840,7 +840,7 @@ jobs:
       always() &&
       inputs.validate-on-pr &&
       inputs.push == false
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -904,7 +904,7 @@ jobs:
       inputs.scan &&
       inputs.push &&
       needs.merge.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # packages: read — pull the merged image by digest for Trivy.
     permissions:
