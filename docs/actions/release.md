@@ -76,7 +76,9 @@ Create a GitHub-signed commit from working-tree files through the GraphQL
 `createCommitOnBranch` mutation, so bot commits made with a GitHub App token
 satisfy `required_signatures`. `mode: append` adds one commit on top of an
 existing branch and fails cleanly if its head moved past `expected-head`.
-`mode: reset` creates the branch at `base`, or force-resets it there, first.
+`mode: reset` makes the branch exactly `base` plus this commit: the commit is
+made on a temporary branch and the target is moved to it in one step. The
+default branch is never reset.
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@main

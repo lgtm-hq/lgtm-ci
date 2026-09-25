@@ -310,7 +310,9 @@ cleanup_on_exit() {
 	if [[ -n "${CLEANUP_TEMP_BRANCH:-}" ]]; then
 		delete_temp_branch "$CLEANUP_REPO" "$CLEANUP_TEMP_BRANCH" || true
 	fi
-	[[ -n "${WORK_DIR:-}" ]] && rm -rf "$WORK_DIR"
+	if [[ -n "${WORK_DIR:-}" ]]; then
+		rm -rf "$WORK_DIR"
+	fi
 }
 
 main() {

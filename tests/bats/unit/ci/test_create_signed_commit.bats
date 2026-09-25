@@ -289,6 +289,8 @@ _input() {
 	assert_failure
 	assert_output --partial "could not be moved to it"
 	refute_output --partial "commit-sha="
+	run grep -qE "api -X DELETE repos/lgtm-hq/example/git/refs/heads/signed-commit-tmp/" "$MOCK_GH_LOG"
+	assert_success
 }
 
 @test "create-signed-commit: reset aborts before creating any ref when the branch lookup errors" {
