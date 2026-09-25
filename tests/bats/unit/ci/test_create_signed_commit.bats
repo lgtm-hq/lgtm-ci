@@ -8,6 +8,8 @@ load "../../../helpers/github_env"
 SCRIPT="${PROJECT_ROOT}/scripts/ci/git/create-signed-commit.sh"
 BASE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 HEAD_SHA="c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff"
+# oid returned by the mock createCommitOnBranch response
+NEW_OID="abc123abc123abc123abc123abc123abc123abc1"
 
 # Recording gh mock:
 #   - logs every invocation (one line of args) to MOCK_GH_LOG
@@ -17,7 +19,9 @@ HEAD_SHA="c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff"
 #     MOCK_BRANCH_EXISTS=false
 #   - git/refs create: fails when MOCK_REF_EXISTS=true
 #   - branches lookup: HTTP 500 when MOCK_BRANCH_LOOKUP_FAIL=true
-#   - -X DELETE: succeeds (reset rollback of a created branch)
+#   - -X DELETE: succeeds (reset cleanup of the temporary branch)
+#   - repo lookup (--jq .default_branch): prints MOCK_DEFAULT_BRANCH (main),
+#     or HTTP 500 when MOCK_DEFAULT_BRANCH_FAIL=true
 _mock_gh() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
@@ -29,6 +33,14 @@ if [[ "$args" == *" graphql "* ]]; then
 	cat >"$MOCK_GH_GRAPHQL_PAYLOAD"
 	printf '%s\n' "${MOCK_GRAPHQL_RESPONSE:-{\"data\":{\"createCommitOnBranch\":{\"commit\":{\"oid\":\"abc123abc123abc123abc123abc123abc123abc1\",\"url\":\"https://github.com/o/r/commit/abc123\"}}}}}"
 	exit "${MOCK_GRAPHQL_EXIT:-0}"
+fi
+if [[ "$args" == *"--jq .default_branch"* ]]; then
+	if [[ "${MOCK_DEFAULT_BRANCH_FAIL:-false}" == "true" ]]; then
+		echo "gh: Server Error (HTTP 500)" >&2
+		exit 1
+	fi
+	echo "${MOCK_DEFAULT_BRANCH:-main}"
+	exit 0
 fi
 if [[ "$args" == *"/branches/"* ]]; then
 	if [[ "${MOCK_BRANCH_LOOKUP_FAIL:-false}" == "true" ]]; then
@@ -177,7 +189,7 @@ _input() {
 # reset mode
 # =============================================================================
 
-@test "create-signed-commit: reset creates branch ref at base" {
+@test "create-signed-commit: reset commits on a temporary branch, then creates the target at the commit" {
 	export MOCK_BRANCH_EXISTS="false"
 
 	run bash "$SCRIPT" \
@@ -188,19 +200,23 @@ _input() {
 		--file "Formula/lintro.rb"
 
 	assert_success
-	assert_output --partial "Created branch homebrew/lintro-1.2.3 at ${BASE_SHA}"
-	run grep -qF \
-		"api repos/lgtm-hq/example/git/refs -f ref=refs/heads/homebrew/lintro-1.2.3 -f sha=${BASE_SHA}" \
-		"$MOCK_GH_LOG"
+	assert_output --partial "Created branch homebrew/lintro-1.2.3 at ${NEW_OID}"
+	# temporary branch created at base, and the commit targets it
+	run grep -qE "api repos/lgtm-hq/example/git/refs -f ref=refs/heads/signed-commit-tmp/[^ ]+ -f sha=${BASE_SHA}" "$MOCK_GH_LOG"
 	assert_success
-	run grep -F -- "-X PATCH" "$MOCK_GH_LOG"
-	assert_failure
+	[[ "$(_input | jq -r '.branch.branchName')" == signed-commit-tmp/* ]]
 	[ "$(_input | jq -r '.expectedHeadOid')" = "$BASE_SHA" ]
+	# target created directly at the new commit, never at base
+	run grep -qF "api repos/lgtm-hq/example/git/refs -f ref=refs/heads/homebrew/lintro-1.2.3 -f sha=${NEW_OID}" "$MOCK_GH_LOG"
+	assert_success
+	run grep -F "refs/heads/homebrew/lintro-1.2.3 -f sha=${BASE_SHA}" "$MOCK_GH_LOG"
+	assert_failure
+	# temporary branch cleaned up
+	run grep -qE "api -X DELETE repos/lgtm-hq/example/git/refs/heads/signed-commit-tmp/" "$MOCK_GH_LOG"
+	assert_success
 }
 
-@test "create-signed-commit: reset force-patches when ref already exists" {
-	export MOCK_REF_EXISTS="true"
-
+@test "create-signed-commit: reset moves an existing branch straight to the new commit" {
 	run bash "$SCRIPT" \
 		--mode reset \
 		--branch "homebrew/lintro-1.2.3" \
@@ -209,15 +225,16 @@ _input() {
 		--file "Formula/lintro.rb"
 
 	assert_success
-	assert_output --partial "Reset existing branch homebrew/lintro-1.2.3 from ${HEAD_SHA} to ${BASE_SHA}"
+	assert_output --partial "Moved branch homebrew/lintro-1.2.3 from ${HEAD_SHA} to ${NEW_OID}"
 	run grep -qF \
-		"api -X PATCH repos/lgtm-hq/example/git/refs/heads/homebrew/lintro-1.2.3 -f sha=${BASE_SHA} -F force=true" \
+		"api -X PATCH repos/lgtm-hq/example/git/refs/heads/homebrew/lintro-1.2.3 -f sha=${NEW_OID} -F force=true" \
 		"$MOCK_GH_LOG"
 	assert_success
-	[ "$(_input | jq -r '.expectedHeadOid')" = "$BASE_SHA" ]
+	run grep -F "refs/heads/homebrew/lintro-1.2.3 -f sha=${BASE_SHA}" "$MOCK_GH_LOG"
+	assert_failure
 }
 
-@test "create-signed-commit: reset restores the previous head when the commit fails" {
+@test "create-signed-commit: reset leaves the target untouched when the commit fails" {
 	export MOCK_GRAPHQL_RESPONSE='{"errors":[{"message":"boom"}]}'
 
 	run bash "$SCRIPT" \
@@ -229,31 +246,14 @@ _input() {
 
 	assert_failure
 	assert_output --partial "boom"
-	assert_output --partial "Restored homebrew/lintro-1.2.3 to its previous head ${HEAD_SHA}"
-	run grep -qF \
-		"api -X PATCH repos/lgtm-hq/example/git/refs/heads/homebrew/lintro-1.2.3 -f sha=${HEAD_SHA} -F force=true" \
-		"$MOCK_GH_LOG"
-	assert_success
-}
-
-@test "create-signed-commit: reset deletes a branch it created when the commit fails" {
-	export MOCK_BRANCH_EXISTS="false"
-	export MOCK_GRAPHQL_RESPONSE='{"errors":[{"message":"boom"}]}'
-
-	run bash "$SCRIPT" \
-		--mode reset \
-		--branch "homebrew/lintro-1.2.3" \
-		--base "$BASE_SHA" \
-		--message "msg" \
-		--file "Formula/lintro.rb"
-
+	assert_output --partial "homebrew/lintro-1.2.3 was not changed"
+	run grep -F "refs/heads/homebrew/lintro-1.2.3" "$MOCK_GH_LOG"
 	assert_failure
-	assert_output --partial "Deleted homebrew/lintro-1.2.3, which this run created"
-	run grep -qF "api -X DELETE repos/lgtm-hq/example/git/refs/heads/homebrew/lintro-1.2.3" "$MOCK_GH_LOG"
+	run grep -qE "api -X DELETE repos/lgtm-hq/example/git/refs/heads/signed-commit-tmp/" "$MOCK_GH_LOG"
 	assert_success
 }
 
-@test "create-signed-commit: reset aborts before moving the ref when the branch lookup errors" {
+@test "create-signed-commit: reset aborts before creating any ref when the branch lookup errors" {
 	export MOCK_BRANCH_LOOKUP_FAIL="true"
 
 	run bash "$SCRIPT" \
@@ -268,6 +268,28 @@ _input() {
 	run grep -F "git/refs" "$MOCK_GH_LOG"
 	assert_failure
 	run grep -F "graphql" "$MOCK_GH_LOG"
+	assert_failure
+}
+
+@test "create-signed-commit: reset refuses the default branch" {
+	export MOCK_DEFAULT_BRANCH="main"
+
+	run bash "$SCRIPT" --mode reset --branch "main" --base "$BASE_SHA" --message "msg" --file "Formula/lintro.rb"
+
+	assert_failure
+	assert_output --partial "Refusing to reset main: it is the default branch of lgtm-hq/example"
+	run grep -F "git/refs" "$MOCK_GH_LOG"
+	assert_failure
+}
+
+@test "create-signed-commit: reset aborts when the default branch cannot be read" {
+	export MOCK_DEFAULT_BRANCH_FAIL="true"
+
+	run bash "$SCRIPT" --mode reset --branch "homebrew/lintro-1.2.3" --base "$BASE_SHA" --message "msg" --file "Formula/lintro.rb"
+
+	assert_failure
+	assert_output --partial "Failed to read the default branch of lgtm-hq/example"
+	run grep -F "git/refs" "$MOCK_GH_LOG"
 	assert_failure
 }
 
@@ -424,6 +446,24 @@ _input() {
 		--delete "../outside.txt"
 	assert_failure
 	assert_output --partial "must not contain '..'"
+}
+
+@test "create-signed-commit: rejects '.' and empty path components" {
+	for bad in "./Formula/lintro.rb" "Formula//lintro.rb" "Formula/./lintro.rb" "Formula/"; do
+		run bash "$SCRIPT" --branch "b" --expected-head "$HEAD_SHA" --message "msg" --file "$bad"
+		assert_failure
+		assert_output --partial "must not contain '.' or empty components"
+	done
+}
+
+@test "create-signed-commit: accepts a path starting with a dash" {
+	mkdir -p "$WORK/-dir"
+	printf 'x\n' >"$WORK/-dir/file.txt"
+
+	run bash "$SCRIPT" --branch "b" --expected-head "$HEAD_SHA" --message "msg" --file "-dir/file.txt"
+
+	assert_success
+	[ "$(_input | jq -r '.fileChanges.additions[0].path')" = "-dir/file.txt" ]
 }
 
 @test "create-signed-commit: rejects unknown argument" {

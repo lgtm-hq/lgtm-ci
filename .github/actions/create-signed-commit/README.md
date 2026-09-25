@@ -73,13 +73,19 @@ their work.
 ### `reset`: own the branch
 
 Use this when the bot owns the branch, as with a release or update PR. The
-action creates `refs/heads/<branch>` at `base`, or force-resets it to `base` if
-it already exists, then commits on top with `expectedHeadOid = base`. Any
-earlier commits on the branch are discarded.
+branch ends up as exactly `base` plus this one commit, and is created if it
+does not exist. Any earlier commits on it are discarded.
 
-The full payload is built before the ref moves. If the commit then fails, the
-action restores the branch to its previous head, or deletes it if this run
-created it, so a failed run never leaves the branch parked at `base`.
+The commit is made on a temporary branch (`signed-commit-tmp/<run>-<random>`)
+created at `base`, with `expectedHeadOid = base`. Only after the commit exists
+is the target branch moved to it, in a single step, and the temporary branch
+deleted. The target is never parked at `base`, so an open pull request on it
+never sees an empty diff, which GitHub would close. If the commit fails, the
+target branch is left exactly as it was. The repository's default branch is
+never reset.
+
+Creating the temporary branch fires events for it, so workflows with broad
+branch triggers may start a short-lived run on that branch.
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@<sha> # vX.Y.Z

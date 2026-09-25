@@ -19,11 +19,14 @@
 #                      never created or moved; expectedHeadOid is set to
 #                      --expected-head, so the mutation fails if the branch
 #                      head moved in the meantime.
-#   reset            - Create refs/heads/<branch> at --base, or force-reset it
-#                      to --base when it already exists, then commit on top.
-#                      expectedHeadOid is set to --base. The payload is built
-#                      before the ref moves, and a failed commit restores the
-#                      previous head (or deletes a branch this run created).
+#   reset            - Make <branch> exactly <base> plus this commit, creating
+#                      it if needed. The commit is made on a temporary branch
+#                      created at --base (expectedHeadOid = --base); only then
+#                      is <branch> moved, in one step, to the new commit, and
+#                      the temporary branch is deleted. <branch> is never
+#                      parked at --base, and a failed commit leaves it
+#                      untouched. The repository's default branch is never
+#                      reset.
 #
 # Environment variables:
 #   GH_TOKEN             - Token with contents:write (a GitHub App token for
@@ -95,6 +98,10 @@ validate_repo_path() {
 		log_error "Path must not contain '..' components: $path"
 		return 1
 	fi
+	if [[ "/${path}/" == */./* || "$path" == *//* || "$path" == */ ]]; then
+		log_error "Path must not contain '.' or empty components: $path"
+		return 1
+	fi
 }
 
 # createCommitOnBranch can only write regular file contents.
@@ -121,7 +128,7 @@ validate_addition() {
 	# the parent physically and require it to stay under the working directory.
 	local root parent
 	root="$(pwd -P)"
-	if ! parent="$(cd "$(dirname "$path")" && pwd -P)"; then
+	if ! parent="$(cd -- "$(dirname -- "$path")" && pwd -P)"; then
 		log_error "Cannot resolve parent directory of: $path"
 		return 1
 	fi
@@ -184,8 +191,45 @@ current_branch_head() {
 	return 1
 }
 
-# reset mode: create refs/heads/<branch> at base, or force-reset it.
-move_branch_to() {
+# reset mode: refuse to force-reset the repository's default branch.
+refuse_default_branch() {
+	local repo="$1"
+	local branch="$2"
+	local default_branch
+	if ! default_branch="$(gh api "repos/${repo}" --jq '.default_branch')"; then
+		log_error "Failed to read the default branch of ${repo}; refusing to reset ${branch}"
+		return 1
+	fi
+	if [[ "$branch" == "$default_branch" ]]; then
+		log_error "Refusing to reset ${branch}: it is the default branch of ${repo}"
+		return 1
+	fi
+}
+
+# reset mode: create a temporary branch at base to commit on.
+create_temp_branch() {
+	local repo="$1"
+	local temp="$2"
+	local oid="$3"
+	gh api "repos/${repo}/git/refs" \
+		-f ref="refs/heads/${temp}" -f sha="$oid" >/dev/null
+	log_info "Created temporary branch ${temp} at ${oid}"
+}
+
+delete_temp_branch() {
+	local repo="$1"
+	local temp="$2"
+	if gh api -X DELETE "repos/${repo}/git/refs/heads/${temp}" >/dev/null; then
+		log_info "Deleted temporary branch ${temp}"
+	else
+		log_warn "Could not delete temporary branch ${temp}; delete it manually"
+	fi
+}
+
+# reset mode: point the target branch at the new commit in one move, creating
+# it if it does not exist yet. The branch is never parked at base, so an open
+# pull request on it never sees an empty diff.
+point_branch_at() {
 	local repo="$1"
 	local branch="$2"
 	local oid="$3"
@@ -198,28 +242,7 @@ move_branch_to() {
 	fi
 	gh api -X PATCH "repos/${repo}/git/refs/heads/${branch}" \
 		-f sha="$oid" -F force=true >/dev/null
-	log_info "Reset existing branch ${branch} from ${previous} to ${oid}"
-}
-
-# reset mode: undo move_branch_to after a failed commit.
-restore_branch() {
-	local repo="$1"
-	local branch="$2"
-	local previous="$3"
-	if [[ -n "$previous" ]]; then
-		if gh api -X PATCH "repos/${repo}/git/refs/heads/${branch}" \
-			-f sha="$previous" -F force=true >/dev/null; then
-			log_warn "Restored ${branch} to its previous head ${previous}"
-		else
-			log_error "Could not restore ${branch} to ${previous}; it is left at the reset base"
-		fi
-		return 0
-	fi
-	if gh api -X DELETE "repos/${repo}/git/refs/heads/${branch}" >/dev/null; then
-		log_warn "Deleted ${branch}, which this run created"
-	else
-		log_error "Could not delete ${branch}, which this run created"
-	fi
+	log_info "Moved branch ${branch} from ${previous} to ${oid}"
 }
 
 # Write one JSON object per line ({path, contents}, base64 contents).
@@ -393,27 +416,30 @@ main() {
 	WORK_DIR="$(mktemp -d)"
 	trap 'rm -rf "$WORK_DIR"' EXIT
 
-	local expected_head_oid
+	local expected_head_oid commit_branch temp_branch=""
 	if [[ "$mode" == "append" ]]; then
 		expected_head_oid="$expected_head"
+		commit_branch="$branch"
 	else
 		expected_head_oid="$base"
+		temp_branch="signed-commit-tmp/${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-${RANDOM}${RANDOM}"
+		commit_branch="$temp_branch"
 	fi
 
-	# Build the whole payload before touching any ref, so a file or payload
-	# error can never leave a reset branch moved without its commit.
+	# Build the whole payload before touching any ref.
 	local payload_file="$WORK_DIR/payload.json"
 	write_additions "$WORK_DIR/additions.jsonl" "$WORK_DIR/contents.b64" "${files[@]+"${files[@]}"}"
 	write_deletions "$WORK_DIR/deletions.jsonl" "${deletes[@]+"${deletes[@]}"}"
-	build_commit_payload "$repo" "$branch" "$expected_head_oid" "$message" "$body" \
+	build_commit_payload "$repo" "$commit_branch" "$expected_head_oid" "$message" "$body" \
 		"$WORK_DIR/additions.jsonl" "$WORK_DIR/deletions.jsonl" >"$payload_file"
 
 	local previous_head=""
 	if [[ "$mode" == "append" ]]; then
 		require_branch_head "$repo" "$branch" "$expected_head" "$WORK_DIR/branch.err" || return 1
 	else
+		refuse_default_branch "$repo" "$branch" || return 1
 		previous_head="$(current_branch_head "$repo" "$branch" "$WORK_DIR/branch.err")" || return 1
-		move_branch_to "$repo" "$branch" "$base" "$previous_head"
+		create_temp_branch "$repo" "$temp_branch" "$base"
 	fi
 
 	local response_file="$WORK_DIR/response.json"
@@ -433,9 +459,19 @@ main() {
 		if [[ "$mode" == "append" ]]; then
 			log_error "If the error mentions expectedHeadOid, ${branch} moved after ${expected_head_oid} was captured"
 		else
-			restore_branch "$repo" "$branch" "$previous_head"
+			delete_temp_branch "$repo" "$temp_branch"
+			log_error "${branch} was not changed"
 		fi
 		return 1
+	fi
+
+	if [[ "$mode" == "reset" ]]; then
+		if ! point_branch_at "$repo" "$branch" "$commit_oid" "$previous_head"; then
+			log_error "Commit ${commit_oid} was created but ${branch} could not be moved to it"
+			delete_temp_branch "$repo" "$temp_branch"
+			return 1
+		fi
+		delete_temp_branch "$repo" "$temp_branch"
 	fi
 
 	log_success "Created signed commit ${commit_oid} on ${branch}"

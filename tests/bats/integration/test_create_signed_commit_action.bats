@@ -29,7 +29,7 @@ _step_env() {
 
 @test "create-signed-commit action: runs the committed, executable script" {
 	[ -x "${PROJECT_ROOT}/${SCRIPT_REL}" ]
-	run grep -F 'run: $SCRIPTS_DIR/ci/git/create-signed-commit.sh' "$ACTION"
+	run grep -F 'run: "$SCRIPTS_DIR/ci/git/create-signed-commit.sh"' "$ACTION"
 	assert_success
 	run grep -F 'GITHUB_ACTION_PATH}/../../../scripts' "$ACTION"
 	assert_success
