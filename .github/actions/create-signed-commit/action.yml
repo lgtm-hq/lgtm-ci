@@ -1,0 +1,92 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+---
+name: "Create Signed Commit"
+description:
+  "Create a GitHub-signed commit from working-tree files via the GraphQL
+  createCommitOnBranch mutation"
+author: "lgtm-hq"
+
+inputs:
+  token:
+    description:
+      "Token with contents: write on the target repository (a GitHub App token, so
+      the commit triggers push and pull_request workflows)"
+    required: true
+  repository:
+    description: "Target repository in owner/repo format"
+    required: false
+    default: ${{ github.repository }}
+  branch:
+    description: "Branch to commit on"
+    required: true
+  mode:
+    description: >-
+      append (default): add one commit on top of an existing branch whose head must
+      equal expected-head. reset: make the branch exactly base plus this commit,
+      creating it if needed; the commit is made on a temporary branch and the target
+      is moved to it in one step. The default branch is never reset.
+    required: false
+    default: "append"
+  expected-head:
+    description: "append mode: full SHA the branch head must equal"
+    required: false
+    default: ""
+  base:
+    description: "reset mode: full SHA the branch is rebuilt on"
+    required: false
+    default: ""
+  message:
+    description: "Commit message headline (single line)"
+    required: true
+  body:
+    description: "Optional commit message body"
+    required: false
+    default: ""
+  files:
+    description: >-
+      Newline-separated repo-relative paths to add or update; contents are read from
+      the working tree. Each path must be a regular file.
+    required: false
+    default: ""
+  delete:
+    description: "Newline-separated repo-relative paths to delete"
+    required: false
+    default: ""
+
+outputs:
+  commit-sha:
+    description: "OID of the created commit"
+    value: ${{ steps.commit.outputs.commit-sha }}
+  commit-url:
+    description: "URL of the created commit"
+    value: ${{ steps.commit.outputs.commit-url }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Resolve scripts directory
+      shell: bash
+      run: |
+        SCRIPTS_DIR="$(cd "${GITHUB_ACTION_PATH}/../../../scripts" && pwd)"
+        echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
+
+    - name: Create signed commit
+      id: commit
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        COMMIT_REPOSITORY: ${{ inputs.repository }}
+        COMMIT_BRANCH: ${{ inputs.branch }}
+        COMMIT_MODE: ${{ inputs.mode }}
+        COMMIT_EXPECTED_HEAD: ${{ inputs.expected-head }}
+        COMMIT_BASE: ${{ inputs.base }}
+        COMMIT_MESSAGE: ${{ inputs.message }}
+        COMMIT_BODY: ${{ inputs.body }}
+        COMMIT_FILES: ${{ inputs.files }}
+        COMMIT_DELETE: ${{ inputs.delete }}
+      run: "$SCRIPTS_DIR/ci/git/create-signed-commit.sh"
+
+branding:
+  icon: "git-commit"
+  color: "blue"

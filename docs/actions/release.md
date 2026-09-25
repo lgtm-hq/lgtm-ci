@@ -1,7 +1,7 @@
 # Release actions
 
-Semantic version calculation, changelog generation, and tag/release
-creation. See
+Semantic version calculation, changelog generation, tag/release
+creation, and signed bot commits. See
 [release-changelog.md](../release-changelog.md) for the Keep a Changelog
 migration and [reusable-workflows.md](../reusable-workflows.md#release) for
 the two-stage release model these actions back.
@@ -69,3 +69,29 @@ Create a GitHub release with changelog and optional assets.
 > token or PAT instead.
 
 **Outputs:** `release-url`, `release-id`.
+
+## create-signed-commit
+
+Create a GitHub-signed commit from working-tree files through the GraphQL
+`createCommitOnBranch` mutation, so bot commits made with a GitHub App token
+satisfy `required_signatures`. `mode: append` adds one commit on top of an
+existing branch and fails cleanly if its head moved past `expected-head`.
+`mode: reset` makes the branch exactly `base` plus this commit: the commit is
+made on a temporary branch and the target is moved to it in one step. The
+default branch is never reset.
+
+```yaml
+- uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@main
+  with:
+    token: ${{ steps.app-token.outputs.token }}
+    branch: renovate/foo
+    mode: append # append or reset
+    expected-head: ${{ github.event.pull_request.head.sha }} # append only
+    message: "chore(deps): pin tools candidate digest"
+    files: |
+      Dockerfile
+```
+
+**Outputs:** `commit-sha`, `commit-url`. See the
+[action README](../../.github/actions/create-signed-commit/README.md) for both
+modes, the bot author email form, and `createCommitOnBranch` limits.

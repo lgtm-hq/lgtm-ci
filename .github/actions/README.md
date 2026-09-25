@@ -31,7 +31,8 @@ Full documentation lives in [docs/actions/](../../docs/actions/README.md):
 - [Notifications](../../docs/actions/notifications.md) — `notify-slack`,
   `notify-discord`
 - [Release](../../docs/actions/release.md) — `calculate-version`,
-  `generate-changelog`, `create-release-tag`, `create-github-release`
+  `generate-changelog`, `create-release-tag`, `create-github-release`,
+  `create-signed-commit`
 
 Prefer [reusable workflows](../../docs/workflows/README.md) when you want
 drop-in jobs without copying `.github/actions/harden-runner` or
