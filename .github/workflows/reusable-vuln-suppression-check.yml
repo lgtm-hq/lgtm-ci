@@ -42,7 +42,9 @@ on:
         default: ""
       cleanup-pr-labels:
         description: >-
-          Comma-separated labels for auto-created cleanup PRs
+          Comma-separated labels for auto-created cleanup PRs. Added after the
+          PR is created; a label missing in the repository only warns. Empty
+          disables labelling.
         required: false
         type: string
         default: "security,dependencies,automation"
@@ -100,7 +102,10 @@ on:
 
     secrets:
       GH_TOKEN:
-        description: "GitHub token for PR creation (typically secrets.GITHUB_TOKEN)"
+        description: >-
+          GitHub token with contents:write and pull-requests:write (typically
+          secrets.GITHUB_TOKEN). Used for the API-created, GitHub-signed cleanup
+          commit, the cleanup branch, and the cleanup PR.
         required: true
 
 jobs:
@@ -111,6 +116,14 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    # One cleanup run per repository at a time: the next run then sees the
+    # previous run's open cleanup PR instead of racing it into a duplicate.
+    # A running cleanup is never cancelled. GitHub keeps only the newest
+    # pending run per group, so an older queued run can be superseded; that
+    # is harmless because the newer run scans the latest suppressions.
+    concurrency:
+      group: vuln-suppression-cleanup-${{ github.repository }}
+      cancel-in-progress: false
 
     steps:
       - name: Harden runner
@@ -125,6 +138,8 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           token: ${{ secrets.GH_TOKEN }}
+          # The cleanup commit goes through the GitHub API; git never pushes.
+          persist-credentials: false
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

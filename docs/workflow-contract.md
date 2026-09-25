@@ -1505,6 +1505,19 @@ non-zero exit.
 
 <!-- markdownlint-enable MD013 MD060 -->
 
+The cleanup commit is created through the GitHub API
+(`scripts/ci/git/create-signed-commit.sh`, reset mode on the default branch
+head), so GitHub signs it and the PR can merge where `required_signatures` is
+enforced; nothing is committed or pushed with the git CLI. The run stops before
+any write if the suppression file on the default branch differs from the
+checked-out copy. The PR is opened without labels and `cleanup-pr-labels` are
+added afterwards one at a time; a label missing in the repository only logs a
+warning. An empty `cleanup-pr-labels` opts out of labelling. If the PR cannot
+be created, the new
+`chore/remove-stale-vulns-<timestamp>-<run_id>-<attempt>-<random>` branch is deleted
+(or, when deletion fails or it cannot be verified that no PR exists, left in
+place with its compare URL in the job summary) and the job fails.
+
 Caller `on:` triggers are consumer-owned (`schedule`, `workflow_dispatch`).
 Grant `contents: write` and `pull-requests: write` on the caller job. Forward
 `secrets.GH_TOKEN` (typically `secrets.GITHUB_TOKEN`). Use a Linux

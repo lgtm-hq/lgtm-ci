@@ -2033,11 +2033,31 @@ the job so a human re-evaluates each one.
 | `osv-version`            | `2.3.5`                 | osv-scanner release version                |
 | `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
 | `check-script`           | tooling default         | Repo-local override supported              |
-| `cleanup-pr-labels`      | see below | Labels on cleanup PR |
+| `cleanup-pr-labels`      | security labels (below) | Added after PR creation; empty opts out    |
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
 | `runner-image`           | `ubuntu-24.04`          | Linux runners only (install script)        |
+
+The cleanup commit is created through the GitHub API
+(`scripts/ci/git/create-signed-commit.sh`, reset mode on the default branch
+head), so GitHub signs it and the PR can merge where `required_signatures` is
+enforced; nothing is committed or pushed with the git CLI. The run stops before
+any write if the suppression file on the default branch differs from the
+checked-out copy. The PR is opened without labels and `cleanup-pr-labels`
+(default `security,dependencies,automation`) are added afterwards one at a
+time; a label missing in the repository only logs a warning. An empty
+`cleanup-pr-labels` opts out of labelling. If the PR cannot be created, the new
+`chore/remove-stale-vulns-<timestamp>-<run_id>-<attempt>-<random>` branch is
+deleted (or, when deletion fails or it cannot be verified that no PR exists,
+left in place with its compare URL in the job summary) and the job fails.
+Cleanup runs are serialized per repository by a job-level `concurrency` group,
+so a later run sees an earlier run's open cleanup PR instead of opening a
+duplicate. This group never cancels a running cleanup (a caller's own
+`cancel-in-progress: true` group still can); if several runs queue, GitHub
+keeps only the newest pending one, which scans the latest suppressions. A PR
+opened with `GITHUB_TOKEN` starts no workflows, so repositories that require
+status checks on the cleanup PR should pass a GitHub App token instead.
 
 Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.
