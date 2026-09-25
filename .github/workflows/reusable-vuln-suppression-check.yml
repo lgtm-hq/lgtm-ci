@@ -118,6 +118,9 @@ jobs:
       pull-requests: write
     # One cleanup run per repository at a time: the next run then sees the
     # previous run's open cleanup PR instead of racing it into a duplicate.
+    # A running cleanup is never cancelled. GitHub keeps only the newest
+    # pending run per group, so an older queued run can be superseded; that
+    # is harmless because the newer run scans the latest suppressions.
     concurrency:
       group: vuln-suppression-cleanup-${{ github.repository }}
       cancel-in-progress: false
