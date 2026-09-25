@@ -65,9 +65,10 @@ Usage: create-signed-commit.sh --branch <name> --message <headline>
 
   --branch         Branch to commit on
   --mode           append (default): commit on top of an existing branch
-                   reset: create or force-reset the branch to --base first
+                   reset: make the branch exactly --base plus this commit
+                   (committed on a temporary branch, then moved in one step)
   --expected-head  append: SHA the branch head must equal
-  --base           reset: SHA to create or force-reset the branch at
+  --base           reset: SHA the branch is rebuilt on
   --message        Commit message headline (single line)
   --body           Optional commit message body
   --repository     Target repository (default: $GITHUB_REPOSITORY)
@@ -212,7 +213,7 @@ create_temp_branch() {
 	local temp="$2"
 	local oid="$3"
 	gh api "repos/${repo}/git/refs" \
-		-f ref="refs/heads/${temp}" -f sha="$oid" >/dev/null
+		-f ref="refs/heads/${temp}" -f sha="$oid" >/dev/null || return 1
 	log_info "Created temporary branch ${temp} at ${oid}"
 }
 
@@ -236,12 +237,12 @@ point_branch_at() {
 	local previous="$4"
 	if [[ -z "$previous" ]]; then
 		gh api "repos/${repo}/git/refs" \
-			-f ref="refs/heads/${branch}" -f sha="$oid" >/dev/null
+			-f ref="refs/heads/${branch}" -f sha="$oid" >/dev/null || return 1
 		log_info "Created branch ${branch} at ${oid}"
 		return 0
 	fi
 	gh api -X PATCH "repos/${repo}/git/refs/heads/${branch}" \
-		-f sha="$oid" -F force=true >/dev/null
+		-f sha="$oid" -F force=true >/dev/null || return 1
 	log_info "Moved branch ${branch} from ${previous} to ${oid}"
 }
 
@@ -301,6 +302,15 @@ build_commit_payload() {
 				)
 			}}
 		}'
+}
+
+# Remove the work dir and, if still set, a temporary branch this run created
+# (for example when the job is cancelled between creating and deleting it).
+cleanup_on_exit() {
+	if [[ -n "${CLEANUP_TEMP_BRANCH:-}" ]]; then
+		delete_temp_branch "$CLEANUP_REPO" "$CLEANUP_TEMP_BRANCH" || true
+	fi
+	[[ -n "${WORK_DIR:-}" ]] && rm -rf "$WORK_DIR"
 }
 
 main() {
@@ -414,7 +424,9 @@ main() {
 	done
 
 	WORK_DIR="$(mktemp -d)"
-	trap 'rm -rf "$WORK_DIR"' EXIT
+	CLEANUP_REPO=""
+	CLEANUP_TEMP_BRANCH=""
+	trap 'cleanup_on_exit' EXIT
 
 	local expected_head_oid commit_branch temp_branch=""
 	if [[ "$mode" == "append" ]]; then
@@ -439,7 +451,12 @@ main() {
 	else
 		refuse_default_branch "$repo" "$branch" || return 1
 		previous_head="$(current_branch_head "$repo" "$branch" "$WORK_DIR/branch.err")" || return 1
-		create_temp_branch "$repo" "$temp_branch" "$base"
+		create_temp_branch "$repo" "$temp_branch" "$base" || {
+			log_error "Could not create temporary branch ${temp_branch}; ${branch} was not changed"
+			return 1
+		}
+		CLEANUP_REPO="$repo"
+		CLEANUP_TEMP_BRANCH="$temp_branch"
 	fi
 
 	local response_file="$WORK_DIR/response.json"
@@ -460,6 +477,7 @@ main() {
 			log_error "If the error mentions expectedHeadOid, ${branch} moved after ${expected_head_oid} was captured"
 		else
 			delete_temp_branch "$repo" "$temp_branch"
+			CLEANUP_TEMP_BRANCH=""
 			log_error "${branch} was not changed"
 		fi
 		return 1
@@ -467,11 +485,13 @@ main() {
 
 	if [[ "$mode" == "reset" ]]; then
 		if ! point_branch_at "$repo" "$branch" "$commit_oid" "$previous_head"; then
-			log_error "Commit ${commit_oid} was created but ${branch} could not be moved to it"
+			log_error "Commit ${commit_oid} was created but ${branch} could not be moved to it; ${branch} was not changed"
 			delete_temp_branch "$repo" "$temp_branch"
+			CLEANUP_TEMP_BRANCH=""
 			return 1
 		fi
 		delete_temp_branch "$repo" "$temp_branch"
+		CLEANUP_TEMP_BRANCH=""
 	fi
 
 	log_success "Created signed commit ${commit_oid} on ${branch}"

@@ -23,8 +23,9 @@ inputs:
   mode:
     description: >-
       append (default): add one commit on top of an existing branch whose head must
-      equal expected-head. reset: create the branch at base, or force-reset it to
-      base when it exists, then commit.
+      equal expected-head. reset: make the branch exactly base plus this commit,
+      creating it if needed; the commit is made on a temporary branch and the target
+      is moved to it in one step. The default branch is never reset.
     required: false
     default: "append"
   expected-head:
@@ -32,7 +33,7 @@ inputs:
     required: false
     default: ""
   base:
-    description: "reset mode: full SHA to create or force-reset the branch at"
+    description: "reset mode: full SHA the branch is rebuilt on"
     required: false
     default: ""
   message:

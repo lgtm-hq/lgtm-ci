@@ -17,7 +17,8 @@ NEW_OID="abc123abc123abc123abc123abc123abc123abc1"
 #     MOCK_GRAPHQL_RESPONSE (default: a successful commit)
 #   - branches/<name>: prints MOCK_BRANCH_SHA, or 404s when
 #     MOCK_BRANCH_EXISTS=false
-#   - git/refs create: fails when MOCK_REF_EXISTS=true
+#   - target ref move (PATCH, or create of a non-temp ref): fails when
+#     MOCK_MOVE_FAIL=true
 #   - branches lookup: HTTP 500 when MOCK_BRANCH_LOOKUP_FAIL=true
 #   - -X DELETE: succeeds (reset cleanup of the temporary branch)
 #   - repo lookup (--jq .default_branch): prints MOCK_DEFAULT_BRANCH (main),
@@ -59,11 +60,15 @@ if [[ "$args" == *" -X DELETE "* ]]; then
 	exit 0
 fi
 if [[ "$args" == *" -X PATCH "* ]]; then
+	if [[ "${MOCK_MOVE_FAIL:-false}" == "true" ]]; then
+		echo "gh: Reference update failed (HTTP 422)" >&2
+		exit 1
+	fi
 	echo '{}'
 	exit 0
 fi
 if [[ "$args" == *"/git/refs "* ]]; then
-	if [[ "${MOCK_REF_EXISTS:-false}" == "true" ]]; then
+	if [[ "${MOCK_MOVE_FAIL:-false}" == "true" && "$args" != *"refs/heads/signed-commit-tmp/"* ]]; then
 		echo "gh: Reference already exists (HTTP 422)" >&2
 		exit 1
 	fi
@@ -251,6 +256,39 @@ _input() {
 	assert_failure
 	run grep -qE "api -X DELETE repos/lgtm-hq/example/git/refs/heads/signed-commit-tmp/" "$MOCK_GH_LOG"
 	assert_success
+}
+
+@test "create-signed-commit: reset fails and reports when the target move fails" {
+	export MOCK_MOVE_FAIL="true"
+
+	run bash "$SCRIPT" \
+		--mode reset \
+		--branch "homebrew/lintro-1.2.3" \
+		--base "$BASE_SHA" \
+		--message "msg" \
+		--file "Formula/lintro.rb"
+
+	assert_failure
+	assert_output --partial "could not be moved to it; homebrew/lintro-1.2.3 was not changed"
+	refute_output --partial "commit-sha="
+	run grep -qE "api -X DELETE repos/lgtm-hq/example/git/refs/heads/signed-commit-tmp/" "$MOCK_GH_LOG"
+	assert_success
+}
+
+@test "create-signed-commit: reset fails and reports when a new target cannot be created" {
+	export MOCK_BRANCH_EXISTS="false"
+	export MOCK_MOVE_FAIL="true"
+
+	run bash "$SCRIPT" \
+		--mode reset \
+		--branch "homebrew/lintro-1.2.3" \
+		--base "$BASE_SHA" \
+		--message "msg" \
+		--file "Formula/lintro.rb"
+
+	assert_failure
+	assert_output --partial "could not be moved to it"
+	refute_output --partial "commit-sha="
 }
 
 @test "create-signed-commit: reset aborts before creating any ref when the branch lookup errors" {
@@ -530,11 +568,11 @@ _input() {
 
 	assert_success
 	[ "$(_input | jq -r '.branch.repositoryNameWithOwner')" = "other-org/other-repo" ]
-	[ "$(_input | jq -r '.branch.branchName')" = "bot/branch" ]
+	[[ "$(_input | jq -r '.branch.branchName')" == signed-commit-tmp/* ]]
 	[ "$(_input | jq -r '.expectedHeadOid')" = "$BASE_SHA" ]
 	[ "$(_input | jq -r '.message.body')" = "env body" ]
 	[ "$(_input | jq -c '[.fileChanges.additions[].path]')" = '["Formula/lintro.rb","second.txt"]' ]
 	[ "$(_input | jq -c '.fileChanges.deletions')" = '[{"path":"gone.txt"}]' ]
-	run grep -qF "repos/other-org/other-repo/git/refs" "$MOCK_GH_LOG"
+	run grep -qF "api -X PATCH repos/other-org/other-repo/git/refs/heads/bot/branch -f sha=${NEW_OID} -F force=true" "$MOCK_GH_LOG"
 	assert_success
 }

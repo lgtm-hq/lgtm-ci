@@ -22,7 +22,7 @@ which you can also run directly (`--help` lists its flags).
 | `branch` | yes | | Branch to commit on |
 | `mode` | no | `append` | `append` or `reset` (see below) |
 | `expected-head` | append | | Full SHA the branch head must equal |
-| `base` | reset | | Full SHA to create or force-reset the branch at |
+| `base` | reset | | Full SHA the branch is rebuilt on |
 | `message` | yes | | Commit headline (single line) |
 | `body` | no | | Commit message body |
 | `files` | no | | Newline-separated repo-relative paths to add or update |
@@ -85,7 +85,10 @@ target branch is left exactly as it was. The repository's default branch is
 never reset.
 
 Creating the temporary branch fires events for it, so workflows with broad
-branch triggers may start a short-lived run on that branch.
+branch triggers may start a short-lived run on that branch, and a ruleset that
+restricts branch creation for the token will make reset mode fail cleanly. The
+final move is forced: anything pushed to the target between the head lookup and
+the move is discarded, which is the point of reset on a bot-owned branch.
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@<sha> # vX.Y.Z
