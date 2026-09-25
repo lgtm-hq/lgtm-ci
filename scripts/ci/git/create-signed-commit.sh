@@ -21,7 +21,9 @@
 #                      head moved in the meantime.
 #   reset            - Create refs/heads/<branch> at --base, or force-reset it
 #                      to --base when it already exists, then commit on top.
-#                      expectedHeadOid is set to --base.
+#                      expectedHeadOid is set to --base. The payload is built
+#                      before the ref moves, and a failed commit restores the
+#                      previous head (or deletes a branch this run created).
 #
 # Environment variables:
 #   GH_TOKEN             - Token with contents:write (a GitHub App token for
@@ -115,6 +117,21 @@ validate_addition() {
 		log_error "Refusing non-regular file: $path"
 		return 1
 	fi
+	# A symlinked parent directory could point outside the checkout; resolve
+	# the parent physically and require it to stay under the working directory.
+	local root parent
+	root="$(pwd -P)"
+	if ! parent="$(cd "$(dirname "$path")" && pwd -P)"; then
+		log_error "Cannot resolve parent directory of: $path"
+		return 1
+	fi
+	case "${parent}/" in
+	"${root}"/*) ;;
+	*)
+		log_error "Refusing path that resolves outside the working directory: $path"
+		return 1
+		;;
+	esac
 }
 
 validate_oid() {
@@ -148,19 +165,61 @@ require_branch_head() {
 	log_info "Branch ${branch} is at expected head ${expected}"
 }
 
+# reset mode: print the branch's current head, or nothing if it does not exist.
+# Any lookup failure other than "not found" is fatal, so a restore can never
+# delete a branch that already existed.
+current_branch_head() {
+	local repo="$1"
+	local branch="$2"
+	local err_file="$3"
+	local head
+	if head="$(gh api "repos/${repo}/branches/${branch}" --jq '.commit.sha' 2>"$err_file")"; then
+		printf '%s\n' "$head"
+		return 0
+	fi
+	if grep -qiE 'not found|HTTP 404' "$err_file"; then
+		return 0
+	fi
+	log_error "Failed to look up branch ${branch} in ${repo}: $(cat "$err_file")"
+	return 1
+}
+
 # reset mode: create refs/heads/<branch> at base, or force-reset it.
-ensure_branch_at() {
+move_branch_to() {
 	local repo="$1"
 	local branch="$2"
 	local oid="$3"
-	if gh api "repos/${repo}/git/refs" \
-		-f ref="refs/heads/${branch}" -f sha="$oid" >/dev/null 2>&1; then
+	local previous="$4"
+	if [[ -z "$previous" ]]; then
+		gh api "repos/${repo}/git/refs" \
+			-f ref="refs/heads/${branch}" -f sha="$oid" >/dev/null
 		log_info "Created branch ${branch} at ${oid}"
 		return 0
 	fi
 	gh api -X PATCH "repos/${repo}/git/refs/heads/${branch}" \
 		-f sha="$oid" -F force=true >/dev/null
-	log_info "Reset existing branch ${branch} to ${oid}"
+	log_info "Reset existing branch ${branch} from ${previous} to ${oid}"
+}
+
+# reset mode: undo move_branch_to after a failed commit.
+restore_branch() {
+	local repo="$1"
+	local branch="$2"
+	local previous="$3"
+	if [[ -n "$previous" ]]; then
+		if gh api -X PATCH "repos/${repo}/git/refs/heads/${branch}" \
+			-f sha="$previous" -F force=true >/dev/null; then
+			log_warn "Restored ${branch} to its previous head ${previous}"
+		else
+			log_error "Could not restore ${branch} to ${previous}; it is left at the reset base"
+		fi
+		return 0
+	fi
+	if gh api -X DELETE "repos/${repo}/git/refs/heads/${branch}" >/dev/null; then
+		log_warn "Deleted ${branch}, which this run created"
+	else
+		log_error "Could not delete ${branch}, which this run created"
+	fi
 }
 
 # Write one JSON object per line ({path, contents}, base64 contents).
@@ -336,21 +395,30 @@ main() {
 
 	local expected_head_oid
 	if [[ "$mode" == "append" ]]; then
-		require_branch_head "$repo" "$branch" "$expected_head" "$WORK_DIR/branch.err" || return 1
 		expected_head_oid="$expected_head"
 	else
-		ensure_branch_at "$repo" "$branch" "$base"
 		expected_head_oid="$base"
 	fi
 
+	# Build the whole payload before touching any ref, so a file or payload
+	# error can never leave a reset branch moved without its commit.
+	local payload_file="$WORK_DIR/payload.json"
 	write_additions "$WORK_DIR/additions.jsonl" "$WORK_DIR/contents.b64" "${files[@]+"${files[@]}"}"
 	write_deletions "$WORK_DIR/deletions.jsonl" "${deletes[@]+"${deletes[@]}"}"
+	build_commit_payload "$repo" "$branch" "$expected_head_oid" "$message" "$body" \
+		"$WORK_DIR/additions.jsonl" "$WORK_DIR/deletions.jsonl" >"$payload_file"
+
+	local previous_head=""
+	if [[ "$mode" == "append" ]]; then
+		require_branch_head "$repo" "$branch" "$expected_head" "$WORK_DIR/branch.err" || return 1
+	else
+		previous_head="$(current_branch_head "$repo" "$branch" "$WORK_DIR/branch.err")" || return 1
+		move_branch_to "$repo" "$branch" "$base" "$previous_head"
+	fi
 
 	local response_file="$WORK_DIR/response.json"
 	local error_file="$WORK_DIR/response.err"
-	build_commit_payload "$repo" "$branch" "$expected_head_oid" "$message" "$body" \
-		"$WORK_DIR/additions.jsonl" "$WORK_DIR/deletions.jsonl" |
-		gh api graphql --input - >"$response_file" 2>"$error_file" || true
+	gh api graphql --input - <"$payload_file" >"$response_file" 2>"$error_file" || true
 
 	local commit_oid commit_url
 	commit_oid="$(jq -r '.data.createCommitOnBranch.commit.oid // empty' "$response_file" 2>/dev/null || true)"
@@ -364,6 +432,8 @@ main() {
 		log_error "createCommitOnBranch returned no commit: ${details:-empty response}"
 		if [[ "$mode" == "append" ]]; then
 			log_error "If the error mentions expectedHeadOid, ${branch} moved after ${expected_head_oid} was captured"
+		else
+			restore_branch "$repo" "$branch" "$previous_head"
 		fi
 		return 1
 	fi

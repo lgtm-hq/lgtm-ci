@@ -77,6 +77,10 @@ action creates `refs/heads/<branch>` at `base`, or force-resets it to `base` if
 it already exists, then commits on top with `expectedHeadOid = base`. Any
 earlier commits on the branch are discarded.
 
+The full payload is built before the ref moves. If the commit then fails, the
+action restores the branch to its previous head, or deletes it if this run
+created it, so a failed run never leaves the branch parked at `base`.
+
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@<sha> # vX.Y.Z
   id: commit

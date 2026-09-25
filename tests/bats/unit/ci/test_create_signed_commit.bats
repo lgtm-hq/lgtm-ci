@@ -16,6 +16,8 @@ HEAD_SHA="c0ffeec0ffeec0ffeec0ffeec0ffeec0ffeec0ff"
 #   - branches/<name>: prints MOCK_BRANCH_SHA, or 404s when
 #     MOCK_BRANCH_EXISTS=false
 #   - git/refs create: fails when MOCK_REF_EXISTS=true
+#   - branches lookup: HTTP 500 when MOCK_BRANCH_LOOKUP_FAIL=true
+#   - -X DELETE: succeeds (reset rollback of a created branch)
 _mock_gh() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
@@ -29,11 +31,19 @@ if [[ "$args" == *" graphql "* ]]; then
 	exit "${MOCK_GRAPHQL_EXIT:-0}"
 fi
 if [[ "$args" == *"/branches/"* ]]; then
+	if [[ "${MOCK_BRANCH_LOOKUP_FAIL:-false}" == "true" ]]; then
+		echo "gh: Server Error (HTTP 500)" >&2
+		exit 1
+	fi
 	if [[ "${MOCK_BRANCH_EXISTS:-true}" != "true" ]]; then
 		echo "gh: Branch not found (HTTP 404)" >&2
 		exit 1
 	fi
 	echo "${MOCK_BRANCH_SHA}"
+	exit 0
+fi
+if [[ "$args" == *" -X DELETE "* ]]; then
+	echo '{}'
 	exit 0
 fi
 if [[ "$args" == *" -X PATCH "* ]]; then
@@ -168,6 +178,8 @@ _input() {
 # =============================================================================
 
 @test "create-signed-commit: reset creates branch ref at base" {
+	export MOCK_BRANCH_EXISTS="false"
+
 	run bash "$SCRIPT" \
 		--mode reset \
 		--branch "homebrew/lintro-1.2.3" \
@@ -197,12 +209,66 @@ _input() {
 		--file "Formula/lintro.rb"
 
 	assert_success
-	assert_output --partial "Reset existing branch homebrew/lintro-1.2.3 to ${BASE_SHA}"
+	assert_output --partial "Reset existing branch homebrew/lintro-1.2.3 from ${HEAD_SHA} to ${BASE_SHA}"
 	run grep -qF \
 		"api -X PATCH repos/lgtm-hq/example/git/refs/heads/homebrew/lintro-1.2.3 -f sha=${BASE_SHA} -F force=true" \
 		"$MOCK_GH_LOG"
 	assert_success
 	[ "$(_input | jq -r '.expectedHeadOid')" = "$BASE_SHA" ]
+}
+
+@test "create-signed-commit: reset restores the previous head when the commit fails" {
+	export MOCK_GRAPHQL_RESPONSE='{"errors":[{"message":"boom"}]}'
+
+	run bash "$SCRIPT" \
+		--mode reset \
+		--branch "homebrew/lintro-1.2.3" \
+		--base "$BASE_SHA" \
+		--message "msg" \
+		--file "Formula/lintro.rb"
+
+	assert_failure
+	assert_output --partial "boom"
+	assert_output --partial "Restored homebrew/lintro-1.2.3 to its previous head ${HEAD_SHA}"
+	run grep -qF \
+		"api -X PATCH repos/lgtm-hq/example/git/refs/heads/homebrew/lintro-1.2.3 -f sha=${HEAD_SHA} -F force=true" \
+		"$MOCK_GH_LOG"
+	assert_success
+}
+
+@test "create-signed-commit: reset deletes a branch it created when the commit fails" {
+	export MOCK_BRANCH_EXISTS="false"
+	export MOCK_GRAPHQL_RESPONSE='{"errors":[{"message":"boom"}]}'
+
+	run bash "$SCRIPT" \
+		--mode reset \
+		--branch "homebrew/lintro-1.2.3" \
+		--base "$BASE_SHA" \
+		--message "msg" \
+		--file "Formula/lintro.rb"
+
+	assert_failure
+	assert_output --partial "Deleted homebrew/lintro-1.2.3, which this run created"
+	run grep -qF "api -X DELETE repos/lgtm-hq/example/git/refs/heads/homebrew/lintro-1.2.3" "$MOCK_GH_LOG"
+	assert_success
+}
+
+@test "create-signed-commit: reset aborts before moving the ref when the branch lookup errors" {
+	export MOCK_BRANCH_LOOKUP_FAIL="true"
+
+	run bash "$SCRIPT" \
+		--mode reset \
+		--branch "homebrew/lintro-1.2.3" \
+		--base "$BASE_SHA" \
+		--message "msg" \
+		--file "Formula/lintro.rb"
+
+	assert_failure
+	assert_output --partial "Failed to look up branch homebrew/lintro-1.2.3"
+	run grep -F "git/refs" "$MOCK_GH_LOG"
+	assert_failure
+	run grep -F "graphql" "$MOCK_GH_LOG"
+	assert_failure
 }
 
 @test "create-signed-commit: reset requires --base" {
@@ -333,6 +399,19 @@ _input() {
 	assert_failure
 	assert_output --partial "Refusing symlink"
 	[ ! -s "$MOCK_GH_LOG" ]
+}
+
+@test "create-signed-commit: rejects a file under a parent symlink that leaves the checkout" {
+	mkdir -p "${BATS_TEST_TMPDIR}/outside"
+	printf 'secret\n' >"${BATS_TEST_TMPDIR}/outside/file.txt"
+	ln -s "${BATS_TEST_TMPDIR}/outside" "$WORK/assets"
+
+	run bash "$SCRIPT" --branch "b" --expected-head "$HEAD_SHA" --message "msg" --file "assets/file.txt"
+
+	assert_failure
+	assert_output --partial "resolves outside the working directory: assets/file.txt"
+	run grep -F "graphql" "$MOCK_GH_LOG"
+	assert_failure
 }
 
 @test "create-signed-commit: rejects absolute and parent paths" {
