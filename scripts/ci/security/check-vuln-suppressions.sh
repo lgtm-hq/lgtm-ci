@@ -6,11 +6,19 @@
 # are auto-removed via a cleanup PR; expired entries (past ignoreUntil) are
 # left untouched and flagged for manual review with a non-zero exit.
 #
+# The cleanup commit is created through the GitHub API
+# (scripts/ci/git/create-signed-commit.sh, reset mode on the default branch
+# head), so GitHub signs it and it merges where required_signatures is
+# enforced. Nothing is committed or pushed with the git CLI. Labels are added
+# after the PR exists and failures only warn; if the PR cannot be created the
+# new branch is deleted and the script exits non-zero.
+#
 # Usage:
 #   check-vuln-suppressions.sh
 #
 # Environment:
-#   GH_TOKEN           - GitHub token for PR creation (required)
+#   GH_TOKEN           - GitHub token with contents:write and pull-requests:write (required)
+#   GITHUB_REPOSITORY  - Target repository (owner/repo); required to open a cleanup PR
 #   CONFIG_PATH        - Suppression TOML path (default: .osv-scanner.toml)
 #   WORKFLOW_FILE      - Caller workflow filename for PR footer link (optional)
 #   CLEANUP_PR_LABELS  - Comma-separated PR labels (default when unset: security,dependencies,automation; empty opts out)
@@ -25,11 +33,14 @@ Detect stale or expired vulnerability suppressions in .osv-scanner.toml.
 
 Runs osv-scanner recursively without suppressions to scan all
 supported lockfiles and see which suppressed vulnerabilities are still
-present. Opens a PR removing entries that are stale (vuln resolved).
+present. Opens a PR removing entries that are stale (vuln resolved),
+committed through the GitHub API so the commit is signed by GitHub.
+Labels are added best-effort after the PR is created.
 Expired entries (past ignoreUntil) are left untouched and flagged for
 manual review, causing a non-zero exit.
 
-Requires GH_TOKEN for PR management.
+Requires GH_TOKEN (contents:write, pull-requests:write) and
+GITHUB_REPOSITORY for the cleanup commit and PR.
 EOF
 	exit 0
 fi
@@ -40,8 +51,6 @@ LIB_DIR="$SCRIPTS_DIR/../lib"
 
 # shellcheck source=../lib/log.sh
 source "$LIB_DIR/log.sh"
-# shellcheck source=../lib/github/output.sh
-source "$LIB_DIR/github/output.sh"
 
 cd "$REPO_ROOT"
 
@@ -186,7 +195,32 @@ if [[ -f "$OSV_TOML" ]]; then
 	fi
 fi
 
+# Record the branch name and, while the branch still exists, a compare URL in
+# the job summary so a failed cleanup never leaves an untracked branch behind.
+write_cleanup_failure_summary() {
+	local reason="$1"
+	local branch_state="$2"
+	[[ -n "${GITHUB_STEP_SUMMARY:-}" ]] || return 0
+	{
+		printf '## Stale vulnerability suppression cleanup failed\n\n'
+		printf '%s\n\n' "$reason"
+		printf -- "- Branch: \`%s\` (%s)\n" "$BRANCH" "$branch_state"
+		if [[ "$branch_state" != "deleted" ]]; then
+			printf -- '- Open the PR manually or delete the branch: %s\n' "$COMPARE_URL"
+		fi
+	} >>"$GITHUB_STEP_SUMMARY"
+}
+
 if ! git diff --quiet; then
+	REPO="${GITHUB_REPOSITORY:-}"
+	if [[ -z "$REPO" ]]; then
+		log_error "GITHUB_REPOSITORY is required to create the cleanup commit"
+		exit 1
+	fi
+	SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}"
+	# createCommitOnBranch takes plain repo-relative paths.
+	COMMIT_PATH="${OSV_TOML#./}"
+
 	STALE_LIST=""
 	for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
 		STALE_LIST="${STALE_LIST}- \`${id}\` (stale — vulnerability resolved)
@@ -194,23 +228,58 @@ if ! git diff --quiet; then
 	done
 	REMOVED_LIST="${STALE_LIST}"
 
+	# Base the commit on the default branch head as GitHub sees it, not on the
+	# local checkout: a workflow_dispatch run may be checked out on another ref.
+	DEFAULT_BRANCH=$(gh api "repos/${REPO}" --jq '.default_branch' || true)
+	BASE_SHA=""
+	if [[ -n "$DEFAULT_BRANCH" ]]; then
+		BASE_SHA=$(gh api "repos/${REPO}/branches/${DEFAULT_BRANCH}" --jq '.commit.sha' || true)
+	fi
+	if [[ -z "$DEFAULT_BRANCH" || -z "$BASE_SHA" ]]; then
+		log_error "Could not resolve the default branch head of ${REPO}"
+		exit 1
+	fi
+
+	# The commit uploads the whole edited file, so the edit must start from the
+	# version the base holds. If the default branch changed the file since
+	# checkout (or the run is on another ref), stop instead of clobbering it.
+	LOCAL_BLOB=$(git rev-parse "HEAD:${COMMIT_PATH}" 2>/dev/null || true)
+	BASE_BLOB=$(gh api "repos/${REPO}/contents/${COMMIT_PATH}?ref=${BASE_SHA}" --jq '.sha' 2>/dev/null || true)
+	if [[ -z "$LOCAL_BLOB" || "$LOCAL_BLOB" != "$BASE_BLOB" ]]; then
+		log_error "${COMMIT_PATH} on ${DEFAULT_BRANCH} (${BASE_SHA}) differs from the checked-out version; rerun on the current ${DEFAULT_BRANCH}"
+		exit 1
+	fi
+
 	BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
-	configure_git_ci_user
-	git checkout -b "$BRANCH"
-	git add -A -- "$OSV_TOML"
-	git commit -m "$(
-		cat <<EOF
-chore(security): remove stale vulnerability suppressions
-
-The following suppressions are no longer needed:
+	COMPARE_URL="${SERVER_URL}/${REPO}/compare/${DEFAULT_BRANCH}...${BRANCH}?expand=1"
+	COMMIT_HEADLINE="chore(security): remove stale vulnerability suppressions"
+	COMMIT_BODY="The following suppressions are no longer needed:
 ${REMOVED_LIST}
-Detected by the weekly vuln-suppression-check workflow.
-EOF
-	)"
+Detected by the weekly vuln-suppression-check workflow."
 
-	git push -u origin "$BRANCH"
+	commit_args=(
+		--repository "$REPO"
+		--branch "$BRANCH"
+		--mode reset
+		--base "$BASE_SHA"
+		--message "$COMMIT_HEADLINE"
+		--body "$COMMIT_BODY"
+	)
+	if [[ -f "$OSV_TOML" ]]; then
+		commit_args+=(--file "$COMMIT_PATH")
+	else
+		commit_args+=(--delete "$COMMIT_PATH")
+	fi
 
-	WF_URL="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY:-}/actions"
+	# GitHub creates and signs the commit (createCommitOnBranch), so it merges
+	# where required_signatures is enforced. Reset mode creates the branch only
+	# once the commit exists, so a failed commit never leaves a branch behind.
+	if ! bash "$SCRIPTS_DIR/../git/create-signed-commit.sh" "${commit_args[@]}"; then
+		log_error "Failed to create the signed cleanup commit; no branch was created"
+		exit 1
+	fi
+
+	WF_URL="${SERVER_URL}/${REPO}/actions"
 	if [[ -n "${WORKFLOW_FILE:-}" ]]; then
 		WF_URL="${WF_URL}/workflows/${WORKFLOW_FILE}"
 	fi
@@ -231,28 +300,45 @@ ${STALE_LIST}"
 ---
 *Auto-created by [vuln-suppression-check](${WF_URL}).*"
 
-	gh_pr_label_args=()
+	# Labels are applied after creation so a missing label can never block the
+	# PR (creating a PR with an unknown label rejects the whole command).
+	PR_URL=""
+	if ! PR_URL=$(gh pr create \
+		--repo "$REPO" \
+		--head "$BRANCH" \
+		--base "$DEFAULT_BRANCH" \
+		--title "$COMMIT_HEADLINE" \
+		--body "$PR_BODY"); then
+		# The PR may exist even though gh reported an error; never delete its branch.
+		PR_URL=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+			--json url --jq '.[0].url // empty' 2>/dev/null || true)
+		if [[ -z "$PR_URL" ]]; then
+			log_error "Failed to create the cleanup PR for branch $BRANCH"
+			if gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null; then
+				log_info "Deleted branch $BRANCH"
+				write_cleanup_failure_summary "Creating the cleanup PR failed; the branch was deleted. Rerun the workflow." "deleted"
+			else
+				log_error "Could not delete branch $BRANCH; open the PR or delete it manually: $COMPARE_URL"
+				write_cleanup_failure_summary "Creating the cleanup PR failed and the branch could not be deleted." "left in place"
+			fi
+			exit 1
+		fi
+		log_warning "PR creation reported an error, but $PR_URL exists for $BRANCH"
+	fi
+
 	if [[ -n "${CLEANUP_PR_LABELS}" ]]; then
 		IFS=',' read -ra _cleanup_labels <<<"${CLEANUP_PR_LABELS}"
 		for label in "${_cleanup_labels[@]}"; do
 			label="${label#"${label%%[![:space:]]*}"}"
 			label="${label%"${label##*[![:space:]]}"}"
-			[[ -n "$label" ]] && gh_pr_label_args+=(--label "$label")
+			[[ -n "$label" ]] || continue
+			if ! gh pr edit "$PR_URL" --repo "$REPO" --add-label "$label" >/dev/null; then
+				log_warning "Could not add label '$label' to $PR_URL (missing in ${REPO}?); continuing"
+			fi
 		done
 	fi
 
-	if ((${#gh_pr_label_args[@]} > 0)); then
-		gh pr create \
-			--title "chore(security): remove stale vulnerability suppressions" \
-			"${gh_pr_label_args[@]}" \
-			--body "$PR_BODY"
-	else
-		gh pr create \
-			--title "chore(security): remove stale vulnerability suppressions" \
-			--body "$PR_BODY"
-	fi
-
-	log_success "Cleanup PR created on branch $BRANCH"
+	log_success "Cleanup PR created on branch $BRANCH: $PR_URL"
 else
 	log_info "No file changes needed."
 fi

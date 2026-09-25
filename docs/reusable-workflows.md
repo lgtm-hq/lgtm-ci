@@ -2033,11 +2033,23 @@ the job so a human re-evaluates each one.
 | `osv-version`            | `2.3.5`                 | osv-scanner release version                |
 | `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
 | `check-script`           | tooling default         | Repo-local override supported              |
-| `cleanup-pr-labels`      | see below | Labels on cleanup PR |
+| `cleanup-pr-labels`      | security labels (below) | Added after PR creation; empty opts out    |
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
 | `runner-image`           | `ubuntu-24.04`          | Linux runners only (install script)        |
+
+The cleanup commit is created through the GitHub API
+(`scripts/ci/git/create-signed-commit.sh`, reset mode on the default branch
+head), so GitHub signs it and the PR can merge where `required_signatures` is
+enforced; nothing is committed or pushed with the git CLI. The run stops before
+any write if the suppression file on the default branch differs from the
+checked-out copy. The PR is opened without labels and `cleanup-pr-labels`
+(default `security,dependencies,automation`) are added afterwards one at a
+time; a label missing in the repository only logs a warning. An empty
+`cleanup-pr-labels` opts out of labelling. If the PR cannot be created, the new
+`chore/remove-stale-vulns-<timestamp>` branch is deleted (or, when deletion
+fails, its compare URL is written to the job summary) and the job fails.
 
 Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.

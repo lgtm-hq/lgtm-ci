@@ -44,7 +44,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 	assert_success
 }
 
-@test "reusable-vuln-suppression-check: checkout uses caller GH_TOKEN for git push" {
+@test "reusable-vuln-suppression-check: checkout uses caller GH_TOKEN" {
 	run awk '
 		/^  vuln-suppression-check:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  vuln-suppression-check:/ { in_job = 0 }
@@ -99,4 +99,23 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
+}
+
+@test "reusable-vuln-suppression-check: repository checkout does not persist credentials" {
+	run awk '
+		/^  vuln-suppression-check:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  vuln-suppression-check:/ { in_job = 0 }
+		in_job && /- name: Checkout repository/ { checkout = 1; next }
+		checkout && /- name:/ { exit }
+		checkout && /persist-credentials: false/ { found = 1; exit }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-vuln-suppression-check: allowed-endpoints default includes api.github.com" {
+	run awk '/^      allowed-endpoints:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'api.github.com:443'
 }
