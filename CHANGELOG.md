@@ -19,6 +19,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.75.0] - 2026-09-25
+
+### Added
+
+- **actions**: add create-signed-commit composite action for GitHub-signed bot commits
+  (#1044) (739b776)
+
+### Changed
+
+- **deps**: update renovatebot/github-action action to v46.3.2 (patch) (#1036) (ed8f95a)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.74.6 (patch) (#1033) (bd2752a)
+
+### Fixed
+
+- **deps**: update lintro (#1045) (d3b2025)
+- **deps**: update lintro (#1041) (503a9dd)
+- **deps**: update lintro (#1037) (6ca9618)
+- **deps**: update lintro (#1035) (928e49a)
+- **deps**: update lintro (#1032) (c21aabf)
+
 ## [0.74.6] - 2026-09-20
 
 ### Changed
@@ -2503,7 +2523,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.6...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.0...HEAD
+[0.75.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.6...v0.75.0
 [0.74.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.5...v0.74.6
 [0.74.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.4...v0.74.5
 [0.74.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.3...v0.74.4
