@@ -460,7 +460,7 @@ _commit_input() {
 
 	run_check_script
 	assert_failure
-	assert_output --partial "must be a repo-relative path"
+	assert_output --partial "must be a plain repo-relative path"
 
 	run grep -E "graphql|git/refs|pr create" "$MOCK_GH_LOG"
 	assert_failure

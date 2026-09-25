@@ -1515,8 +1515,8 @@ added afterwards one at a time; a label missing in the repository only logs a
 warning. An empty `cleanup-pr-labels` opts out of labelling. If the PR cannot
 be created, the new
 `chore/remove-stale-vulns-<timestamp>-<run_id>-<attempt>-<random>` branch is deleted
-(or, when deletion fails, its compare URL is written to the job summary) and
-the job fails.
+(or, when deletion fails or it cannot be verified that no PR exists, left in
+place with its compare URL in the job summary) and the job fails.
 
 Caller `on:` triggers are consumer-owned (`schedule`, `workflow_dispatch`).
 Grant `contents: write` and `pull-requests: write` on the caller job. Forward

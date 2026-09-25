@@ -220,8 +220,10 @@ if ! git diff --quiet; then
 	SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}"
 	# createCommitOnBranch takes plain repo-relative paths.
 	COMMIT_PATH="${OSV_TOML#./}"
-	if [[ "$COMMIT_PATH" == /* || "/${COMMIT_PATH}/" == */../* ]]; then
-		log_error "The suppression file must be a repo-relative path without '..' to be cleaned up automatically: $OSV_TOML"
+	# Same rules as create-signed-commit.sh's validate_repo_path.
+	if [[ "$COMMIT_PATH" == /* || "/${COMMIT_PATH}/" == */../* ||
+		"/${COMMIT_PATH}/" == */./* || "$COMMIT_PATH" == *//* || "$COMMIT_PATH" == */ ]]; then
+		log_error "The suppression file must be a plain repo-relative path (no absolute path, '..', '.' or empty components) to be cleaned up automatically: $OSV_TOML"
 		exit 1
 	fi
 
