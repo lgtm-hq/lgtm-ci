@@ -274,9 +274,9 @@ _commit_input() {
 	run bash -c "jq -r '.variables.input.fileChanges.additions[0].contents' '$MOCK_GH_GRAPHQL_PAYLOAD' | base64 -d | grep -q 'GHSA-stale-2222'"
 	assert_failure
 
-	run grep -E "git/refs -f ref=refs/heads/chore/remove-stale-vulns-[0-9]{14} -f sha=abc123abc123abc123abc123abc123abc123abc1" "$MOCK_GH_LOG"
+	run grep -E "git/refs -f ref=refs/heads/chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+ -f sha=abc123abc123abc123abc123abc123abc123abc1" "$MOCK_GH_LOG"
 	assert_success
-	run grep -E "pr create --repo test-org/test-repo --head chore/remove-stale-vulns-[0-9]{14} --base main" "$MOCK_GH_LOG"
+	run grep -E "pr create --repo test-org/test-repo --head chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+ --base main" "$MOCK_GH_LOG"
 	assert_success
 
 	# Nothing is committed or pushed with the git CLI.
@@ -401,13 +401,13 @@ _commit_input() {
 	assert_output --partial "Failed to create the cleanup PR"
 	refute_output --partial "Cleanup PR created"
 
-	run grep -E -- "-X DELETE repos/test-org/test-repo/git/refs/heads/chore/remove-stale-vulns-[0-9]{14}$" "$MOCK_GH_LOG"
+	run grep -E -- "-X DELETE repos/test-org/test-repo/git/refs/heads/chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+$" "$MOCK_GH_LOG"
 	assert_success
 	run grep -F "pr edit" "$MOCK_GH_LOG"
 	assert_failure
 
 	grep -qF "Stale vulnerability suppression cleanup failed" "$GITHUB_STEP_SUMMARY"
-	grep -qE 'chore/remove-stale-vulns-[0-9]{14}` \(deleted\)' "$GITHUB_STEP_SUMMARY"
+	grep -qE 'chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+` \(deleted\)' "$GITHUB_STEP_SUMMARY"
 }
 
 @test "vuln-suppressions: PR creation failure surfaces a compare URL when the branch cannot be deleted" {
@@ -423,8 +423,8 @@ _commit_input() {
 	assert_failure
 	assert_output --partial "Could not delete branch"
 
-	grep -qE 'chore/remove-stale-vulns-[0-9]{14}` \(left in place\)' "$GITHUB_STEP_SUMMARY"
-	grep -qE 'https://github.com/test-org/test-repo/compare/main\.\.\.chore/remove-stale-vulns-[0-9]{14}\?expand=1' "$GITHUB_STEP_SUMMARY"
+	grep -qE 'chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+` \(left in place\)' "$GITHUB_STEP_SUMMARY"
+	grep -qE 'https://github.com/test-org/test-repo/compare/main\.\.\.chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+\?expand=1' "$GITHUB_STEP_SUMMARY"
 }
 
 @test "vuln-suppressions: keeps the branch when the PR exists despite a create error" {

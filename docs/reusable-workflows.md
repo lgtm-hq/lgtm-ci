@@ -2048,7 +2048,7 @@ checked-out copy. The PR is opened without labels and `cleanup-pr-labels`
 (default `security,dependencies,automation`) are added afterwards one at a
 time; a label missing in the repository only logs a warning. An empty
 `cleanup-pr-labels` opts out of labelling. If the PR cannot be created, the new
-`chore/remove-stale-vulns-<timestamp>` branch is deleted (or, when deletion
+`chore/remove-stale-vulns-<timestamp>-<run>-<random>` branch is deleted (or, when deletion
 fails, its compare URL is written to the job summary) and the job fails.
 
 Use a Linux `runner-image`; the install script downloads `linux_*` release

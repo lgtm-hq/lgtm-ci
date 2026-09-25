@@ -250,7 +250,9 @@ if ! git diff --quiet; then
 		exit 1
 	fi
 
-	BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)"
+	# Unique per run: two runs in the same second must never share a branch,
+	# or reset mode would move one run's open PR onto the other's commit.
+	BRANCH="chore/remove-stale-vulns-$(date +%Y%m%d%H%M%S)-${GITHUB_RUN_ID:-local}-${GITHUB_RUN_ATTEMPT:-0}-${RANDOM}"
 	COMPARE_URL="${SERVER_URL}/${REPO}/compare/${DEFAULT_BRANCH}...${BRANCH}?expand=1"
 	COMMIT_HEADLINE="chore(security): remove stale vulnerability suppressions"
 	COMMIT_BODY="The following suppressions are no longer needed:

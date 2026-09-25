@@ -1513,7 +1513,7 @@ any write if the suppression file on the default branch differs from the
 checked-out copy. The PR is opened without labels and `cleanup-pr-labels` are
 added afterwards one at a time; a label missing in the repository only logs a
 warning. An empty `cleanup-pr-labels` opts out of labelling. If the PR cannot
-be created, the new `chore/remove-stale-vulns-<timestamp>` branch is deleted
+be created, the new `chore/remove-stale-vulns-<timestamp>-<run>-<random>` branch is deleted
 (or, when deletion fails, its compare URL is written to the job summary) and
 the job fails.
 
