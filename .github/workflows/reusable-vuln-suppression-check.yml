@@ -116,6 +116,11 @@ jobs:
     permissions:
       contents: write
       pull-requests: write
+    # One cleanup run per repository at a time: the next run then sees the
+    # previous run's open cleanup PR instead of racing it into a duplicate.
+    concurrency:
+      group: vuln-suppression-cleanup-${{ github.repository }}
+      cancel-in-progress: false
 
     steps:
       - name: Harden runner

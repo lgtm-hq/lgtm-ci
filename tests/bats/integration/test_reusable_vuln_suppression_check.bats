@@ -119,3 +119,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 	assert_success
 	assert_output --partial 'api.github.com:443'
 }
+
+@test "reusable-vuln-suppression-check: serializes cleanup runs per repository" {
+	run grep -A2 '^    concurrency:$' "$WORKFLOW"
+	assert_success
+	assert_output --partial 'group: vuln-suppression-cleanup-${{ github.repository }}'
+	assert_output --partial 'cancel-in-progress: false'
+}
