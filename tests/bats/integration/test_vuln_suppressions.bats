@@ -99,7 +99,8 @@ BASE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 # Recording gh mock covering the cleanup flow, including the gh api calls made
 # by the real scripts/ci/git/create-signed-commit.sh (reset mode):
 #   - pr list --search: no open cleanup PR
-#   - pr list --head: MOCK_PR_AFTER_FAIL (a PR that exists despite an error)
+#   - pr list --head: MOCK_PR_AFTER_FAIL (a PR that exists despite an error);
+#     exits 1 when MOCK_PR_LIST_HEAD_FAIL=true
 #   - pr create: prints the PR URL, or fails when MOCK_PR_CREATE_FAIL=true
 #   - pr edit --add-label: fails for labels listed in MOCK_MISSING_LABELS
 #   - api repos/<repo> --jq .default_branch: main
@@ -125,6 +126,10 @@ args=" $* "
 case "$args" in
 *" pr list "*"--search"*) exit 0 ;;
 *" pr list "*"--head"*)
+	if [[ "${MOCK_PR_LIST_HEAD_FAIL:-false}" == "true" ]]; then
+		echo "gh: Server Error (HTTP 502)" >&2
+		exit 1
+	fi
 	[[ -n "${MOCK_PR_AFTER_FAIL:-}" ]] && echo "$MOCK_PR_AFTER_FAIL"
 	exit 0
 	;;
@@ -425,6 +430,40 @@ _commit_input() {
 
 	grep -qE 'chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+` \(left in place\)' "$GITHUB_STEP_SUMMARY"
 	grep -qE 'https://github.com/test-org/test-repo/compare/main\.\.\.chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+\?expand=1' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "vuln-suppressions: keeps the branch when the create error cannot be checked" {
+	setup_suppression_repo
+	write_stale_only_toml
+
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_gh_for_cleanup_pr
+	export MOCK_PR_CREATE_FAIL=true
+	export MOCK_PR_LIST_HEAD_FAIL=true
+
+	run_check_script
+	assert_failure
+	assert_output --partial "also failed; leaving the branch in place"
+
+	run grep -F -- "-X DELETE repos/test-org/test-repo/git/refs/heads/chore/" "$MOCK_GH_LOG"
+	assert_failure
+	grep -qE 'chore/remove-stale-vulns-[0-9]{14}-[A-Za-z0-9]+-[0-9]+-[0-9]+` \(left in place\)' "$GITHUB_STEP_SUMMARY"
+}
+
+@test "vuln-suppressions: refuses an absolute suppression path before any write" {
+	setup_suppression_repo
+	write_stale_only_toml
+
+	mock_osv_probe '{"results":[{"packages":[{"vulnerabilities":[]}]}]}'
+	mock_gh_for_cleanup_pr
+	export CONFIG_PATH="$MOCK_GIT_REPO/.osv-scanner.toml"
+
+	run_check_script
+	assert_failure
+	assert_output --partial "must be a repo-relative path"
+
+	run grep -E "graphql|git/refs|pr create" "$MOCK_GH_LOG"
+	assert_failure
 }
 
 @test "vuln-suppressions: keeps the branch when the PR exists despite a create error" {

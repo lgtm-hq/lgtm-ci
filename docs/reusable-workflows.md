@@ -2048,12 +2048,16 @@ checked-out copy. The PR is opened without labels and `cleanup-pr-labels`
 (default `security,dependencies,automation`) are added afterwards one at a
 time; a label missing in the repository only logs a warning. An empty
 `cleanup-pr-labels` opts out of labelling. If the PR cannot be created, the new
-`chore/remove-stale-vulns-<timestamp>-<run>-<random>` branch is deleted (or, when deletion
-fails, its compare URL is written to the job summary) and the job fails.
+`chore/remove-stale-vulns-<timestamp>-<run_id>-<attempt>-<random>` branch is
+deleted (or, when deletion fails or it cannot be verified that no PR exists,
+left in place with its compare URL in the job summary) and the job fails.
 Cleanup runs are serialized per repository by a job-level `concurrency` group,
 so a later run sees an earlier run's open cleanup PR instead of opening a
-duplicate. A running cleanup is never cancelled; if several runs queue, GitHub
-keeps only the newest pending one, which scans the latest suppressions.
+duplicate. This group never cancels a running cleanup (a caller's own
+`cancel-in-progress: true` group still can); if several runs queue, GitHub
+keeps only the newest pending one, which scans the latest suppressions. A PR
+opened with `GITHUB_TOKEN` starts no workflows, so repositories that require
+status checks on the cleanup PR should pass a GitHub App token instead.
 
 Use a Linux `runner-image`; the install script downloads `linux_*` release
 binaries only.

@@ -220,6 +220,10 @@ if ! git diff --quiet; then
 	SERVER_URL="${GITHUB_SERVER_URL:-https://github.com}"
 	# createCommitOnBranch takes plain repo-relative paths.
 	COMMIT_PATH="${OSV_TOML#./}"
+	if [[ "$COMMIT_PATH" == /* || "/${COMMIT_PATH}/" == */../* ]]; then
+		log_error "The suppression file must be a repo-relative path without '..' to be cleaned up automatically: $OSV_TOML"
+		exit 1
+	fi
 
 	STALE_LIST=""
 	for id in "${STALE_IDS[@]+"${STALE_IDS[@]}"}"; do
@@ -311,9 +315,14 @@ ${STALE_LIST}"
 		--base "$DEFAULT_BRANCH" \
 		--title "$COMMIT_HEADLINE" \
 		--body "$PR_BODY"); then
-		# The PR may exist even though gh reported an error; never delete its branch.
-		PR_URL=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-			--json url --jq '.[0].url // empty' 2>/dev/null || true)
+		# The PR may exist even though gh reported an error; never delete its
+		# branch. If the lookup itself fails we cannot tell, so leave the branch.
+		if ! PR_URL=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+			--json url --jq '.[0].url // empty'); then
+			log_error "Creating the cleanup PR failed and checking for an existing PR on $BRANCH also failed; leaving the branch in place: $COMPARE_URL"
+			write_cleanup_failure_summary "Creating the cleanup PR failed and it could not be verified whether a PR exists; the branch was left in place." "left in place"
+			exit 1
+		fi
 		if [[ -z "$PR_URL" ]]; then
 			log_error "Failed to create the cleanup PR for branch $BRANCH"
 			if gh api -X DELETE "repos/${REPO}/git/refs/heads/${BRANCH}" >/dev/null; then
