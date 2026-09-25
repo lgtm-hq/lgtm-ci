@@ -63,6 +63,7 @@ want a drop-in job without wiring these composites by hand.
 | `generate-changelog` | [release](release.md#generate-changelog) | Changelog generation |
 | `create-release-tag` | [release](release.md#create-release-tag) | Release tag creation |
 | `create-github-release` | [release](release.md#create-github-release) | GitHub release creation |
+| `create-signed-commit` | [release](release.md#create-signed-commit) | GitHub-signed bot commits via GraphQL `createCommitOnBranch` |
 
 <!-- markdownlint-enable MD013 -->
 
