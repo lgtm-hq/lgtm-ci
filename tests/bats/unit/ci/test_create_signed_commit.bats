@@ -19,7 +19,8 @@ NEW_OID="abc123abc123abc123abc123abc123abc123abc1"
 #     MOCK_BRANCH_EXISTS=false
 #   - target ref move (PATCH, or create of a non-temp ref): fails when
 #     MOCK_MOVE_FAIL=true
-#   - branches lookup: HTTP 500 when MOCK_BRANCH_LOOKUP_FAIL=true
+#   - branches lookup: HTTP 500 when MOCK_BRANCH_LOOKUP_FAIL=true; after a
+#     PATCH it prints MOCK_BRANCH_SHA_AFTER_MOVE when that is set
 #   - -X DELETE: succeeds (reset cleanup of the temporary branch)
 #   - repo lookup (--jq .default_branch): prints MOCK_DEFAULT_BRANCH (main),
 #     or HTTP 500 when MOCK_DEFAULT_BRANCH_FAIL=true
@@ -52,7 +53,11 @@ if [[ "$args" == *"/branches/"* ]]; then
 		echo "gh: Branch not found (HTTP 404)" >&2
 		exit 1
 	fi
-	echo "${MOCK_BRANCH_SHA}"
+	if [[ -n "${MOCK_BRANCH_SHA_AFTER_MOVE:-}" && -f "${MOCK_GH_LOG}.moved" ]]; then
+		echo "${MOCK_BRANCH_SHA_AFTER_MOVE}"
+	else
+		echo "${MOCK_BRANCH_SHA}"
+	fi
 	exit 0
 fi
 if [[ "$args" == *" -X DELETE "* ]]; then
@@ -60,6 +65,7 @@ if [[ "$args" == *" -X DELETE "* ]]; then
 	exit 0
 fi
 if [[ "$args" == *" -X PATCH "* ]]; then
+	touch "${MOCK_GH_LOG}.moved"
 	if [[ "${MOCK_MOVE_FAIL:-false}" == "true" ]]; then
 		echo "gh: Reference update failed (HTTP 422)" >&2
 		exit 1
@@ -269,8 +275,26 @@ _input() {
 		--file "Formula/lintro.rb"
 
 	assert_failure
-	assert_output --partial "could not be moved to it; homebrew/lintro-1.2.3 was not changed"
+	assert_output --partial "could not be moved to it; homebrew/lintro-1.2.3 is at ${HEAD_SHA}"
 	refute_output --partial "commit-sha="
+	run grep -qE "api -X DELETE repos/lgtm-hq/example/git/refs/heads/signed-commit-tmp/" "$MOCK_GH_LOG"
+	assert_success
+}
+
+@test "create-signed-commit: reset treats a failed move as success when the branch is already at the commit" {
+	export MOCK_MOVE_FAIL="true"
+	export MOCK_BRANCH_SHA_AFTER_MOVE="$NEW_OID"
+
+	run bash "$SCRIPT" \
+		--mode reset \
+		--branch "homebrew/lintro-1.2.3" \
+		--base "$BASE_SHA" \
+		--message "msg" \
+		--file "Formula/lintro.rb"
+
+	assert_success
+	assert_output --partial "treating it as moved"
+	assert_output --partial "commit-sha=${NEW_OID}"
 	run grep -qE "api -X DELETE repos/lgtm-hq/example/git/refs/heads/signed-commit-tmp/" "$MOCK_GH_LOG"
 	assert_success
 }

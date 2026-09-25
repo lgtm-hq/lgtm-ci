@@ -487,10 +487,18 @@ main() {
 
 	if [[ "$mode" == "reset" ]]; then
 		if ! point_branch_at "$repo" "$branch" "$commit_oid" "$previous_head"; then
-			log_error "Commit ${commit_oid} was created but ${branch} could not be moved to it; ${branch} was not changed"
-			delete_temp_branch "$repo" "$temp_branch"
-			CLEANUP_TEMP_BRANCH=""
-			return 1
+			# The move may have landed even though the call failed (for example a
+			# lost response). Re-read the branch before deciding.
+			local after_head=""
+			after_head="$(current_branch_head "$repo" "$branch" "$WORK_DIR/after.err")" || after_head="unknown"
+			if [[ "$after_head" == "$commit_oid" ]]; then
+				log_warn "The move of ${branch} reported an error, but ${branch} is at ${commit_oid}; treating it as moved"
+			else
+				log_error "Commit ${commit_oid} was created but ${branch} could not be moved to it; ${branch} is at ${after_head:-nothing (branch missing)}"
+				delete_temp_branch "$repo" "$temp_branch"
+				CLEANUP_TEMP_BRANCH=""
+				return 1
+			fi
 		fi
 		delete_temp_branch "$repo" "$temp_branch"
 		CLEANUP_TEMP_BRANCH=""
