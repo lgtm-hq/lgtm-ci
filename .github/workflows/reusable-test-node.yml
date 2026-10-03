@@ -686,7 +686,6 @@ jobs:
       - test-vitest
     if: >-
       always()
-      && needs.prepare.result == 'success'
       && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
@@ -713,6 +712,16 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Fail if matrix preparation did not succeed
+        # A failed or cancelled prepare skips the matrix; failing here keeps
+        # the required check from reporting a skip, which rulesets treat as a pass.
+        if: needs.prepare.result != 'success'
+        shell: bash
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+        run: |
+          echo "::error::Matrix preparation concluded '${PREPARE_RESULT}'; failing the check."
+          exit 1
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -753,6 +762,16 @@ jobs:
           RESULTS_DIR: node-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
+      - name: Fail if any matrix leg failed
+        # Fail closed (#1058): rulesets require this context directly, so a
+        # failing matrix leg must fail the job, not just set `passed=false`.
+        if: >-
+          always()
+          && (needs.test-vitest.result != 'success' || steps.aggregate.outputs.passed != 'true')
+        shell: bash
+        run: |
+          echo "::error::A matrix test leg failed or its results could not be aggregated; failing the check."
+          exit 1
   publish-test-summary:
     needs: aggregate-tests
     if: >-
