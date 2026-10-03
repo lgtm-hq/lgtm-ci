@@ -9,6 +9,8 @@ Usage:
     python3 scripts/ci/maintenance/match-renovate-pins.py [PATH ...]
 """
 
+# pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
+
 from __future__ import annotations
 
 import argparse
