@@ -761,7 +761,7 @@ jobs:
           && (needs.test-vitest.result != 'success' || steps.aggregate.outputs.passed != 'true')
         shell: bash
         run: |
-          echo "::error::One or more matrix test legs failed; the required check fails instead of passing."
+          echo "::error::A matrix test leg failed or its results could not be aggregated; failing the check."
           exit 1
   publish-test-summary:
     needs: aggregate-tests

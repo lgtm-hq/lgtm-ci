@@ -94,7 +94,7 @@ _dependents_of() {
 #   $1 workflow file, $2 aggregate job id, $3 upstream matrix job id
 _assert_fail_closed() {
 	local workflow="$1" agg="$2" upstream="$3"
-	local block step names last
+	local block step names last expected_if
 
 	block="$(_job_block "$workflow" "$agg")"
 	[[ -n "$block" ]] || { fail "${workflow}: missing ${agg} job"; return 1; }
@@ -102,12 +102,15 @@ _assert_fail_closed() {
 	step="$(_step_block "$workflow" "$agg" "$FAIL_STEP_NAME")"
 	[[ -n "$step" ]] || { fail "${workflow}: ${agg} lacks '${FAIL_STEP_NAME}' step"; return 1; }
 
-	grep -qF 'always()' <<<"$step" ||
-		{ fail "${workflow}: fail step must run under always()"; return 1; }
 	grep -qF "needs.${upstream}.result != 'success'" <<<"$step" ||
 		{ fail "${workflow}: fail step must check needs.${upstream}.result"; return 1; }
 	grep -qF "steps.aggregate.outputs.passed != 'true'" <<<"$step" ||
 		{ fail "${workflow}: fail step must check steps.aggregate.outputs.passed"; return 1; }
+	# Pin the whole condition so the operator (`||`) and `always()` cannot drift:
+	# with `&&`, a failed leg plus a passing summary would let the check pass.
+	expected_if="always() && (needs.${upstream}.result != 'success' || steps.aggregate.outputs.passed != 'true')"
+	grep -qxF "        if: ${expected_if}" <<<"$step" ||
+		{ fail "${workflow}: fail step condition must be exactly: ${expected_if}"; return 1; }
 	grep -qE '^[[:space:]]+exit 1$' <<<"$step" ||
 		{ fail "${workflow}: fail step must exit 1"; return 1; }
 
@@ -140,6 +143,10 @@ _assert_dependents_run_on_failure() {
 		elif grep -qF "needs.${agg}.result" <<<"$cond"; then
 			grep -qF "needs.${agg}.result != 'skipped'" <<<"$cond" ||
 				{ fail "${workflow}: ${dep} gates on ${agg} in a way that may skip on failure"; return 1; }
+			if grep -qF "needs.${agg}.result != 'failure'" <<<"$cond"; then
+				fail "${workflow}: ${dep} excludes ${agg} failure from its gate"
+				return 1
+			fi
 		fi
 	done <<<"$dependents"
 }
@@ -261,4 +268,26 @@ _assert_draft_skip_preserved() {
 	rm -rf "$WORKFLOWS_DIR"
 	assert_failure
 	assert_output --partial "must check needs.test-vitest.result"
+}
+
+@test "aggregate fail-closed: contract rejects a fail step joined with && instead of ||" {
+	WORKFLOWS_DIR="$(mktemp -d)"
+	sed "s/!= 'success' || steps\.aggregate/!= 'success' \&\& steps.aggregate/" \
+		"${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml" \
+		>"${WORKFLOWS_DIR}/reusable-rust-test.yml"
+	run _assert_fail_closed reusable-rust-test.yml aggregate test
+	rm -rf "$WORKFLOWS_DIR"
+	assert_failure
+	assert_output --partial "fail step condition must be exactly"
+}
+
+@test "aggregate fail-closed: contract rejects a dependent that excludes aggregate failure" {
+	WORKFLOWS_DIR="$(mktemp -d)"
+	sed "s/&& needs\.aggregate-tests\.result != 'skipped'/& \&\& needs.aggregate-tests.result != 'failure'/" \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml" \
+		>"${WORKFLOWS_DIR}/reusable-test-node.yml"
+	run _assert_dependents_run_on_failure reusable-test-node.yml aggregate-tests
+	rm -rf "$WORKFLOWS_DIR"
+	assert_failure
+	assert_output --partial "excludes aggregate-tests failure from its gate"
 }
