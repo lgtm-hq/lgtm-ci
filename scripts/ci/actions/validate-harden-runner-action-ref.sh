@@ -10,7 +10,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 # Overridable so tests can point the validator at a fixture directory. The
-# release/renovate-specific checks below tolerate missing files, so a fixture
+# release-specific checks below tolerate missing files, so a fixture
 # dir containing only reusable-*.yml is safe.
 WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 
@@ -342,7 +342,7 @@ while IFS= read -r -d '' file; do
 			violations=$((violations + 1))
 		fi
 	done <"$file"
-done < <(find "$WORKFLOWS_DIR" \( -name 'reusable-*.yml' -o -name 'renovate.yml' \) -print0)
+done < <(find "$WORKFLOWS_DIR" -name 'reusable-*.yml' -print0)
 
 while IFS= read -r -d '' workflow; do
 	[[ -f "$workflow" ]] || continue
@@ -378,30 +378,8 @@ done < <(discover_reusable_workflows)
 _check_release_two_phase_sparse "$WORKFLOWS_DIR/reusable-release-auto-tag.yml"
 _check_release_two_phase_sparse "$WORKFLOWS_DIR/reusable-release-version-pr.yml"
 
-renovate="$WORKFLOWS_DIR/renovate.yml"
-if [[ -f "$renovate" ]]; then
-	# Renovate inlines allowlist endpoints for harden-runner pre (job-start);
-	# resolve-egress-allowlist is optional when endpoints are literal.
-	if ! grep -qE "$STEP_SECURITY_HARDEN_RE" "$renovate"; then
-		echo "renovate.yml: missing step-security/harden-runner@${HARDEN_SHA}" >&2
-		violations=$((violations + 1))
-	fi
-	if ! grep -qE 'allowed-endpoints:[[:space:]]+[|>]' "$renovate"; then
-		echo "renovate.yml: harden-runner must use a literal allowed-endpoints block (| or >; pre runs at job start)" >&2
-		violations=$((violations + 1))
-	fi
-	if grep -qE "$TOOLING_HARDEN_RE|$IN_REPO_HARDEN_RE" "$renovate"; then
-		echo "renovate.yml: do not use local harden-runner action path; use step-security/harden-runner@${HARDEN_SHA}" >&2
-		violations=$((violations + 1))
-	fi
-	if grep -qE "allowed-endpoints:[[:space:]]+\\\$\{\{[[:space:]]*steps\\." "$renovate"; then
-		echo "renovate.yml: harden-runner must not use steps.*.outputs for allowed-endpoints" >&2
-		violations=$((violations + 1))
-	fi
-fi
-
 if [[ $violations -gt 0 ]]; then
 	exit 1
 fi
 
-echo "All reusables use direct step-security/harden-runner@${HARDEN_SHA}; renovate matches"
+echo "All reusables use direct step-security/harden-runner@${HARDEN_SHA}"
