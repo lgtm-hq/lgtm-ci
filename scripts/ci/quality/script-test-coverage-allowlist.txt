@@ -22,4 +22,3 @@ actions/setup-python.sh
 actions/setup-ruby.sh
 quality/lint-check.sh
 testing/rust/build-workspace.sh
-testing/rust/setup-rust-nextest.sh
