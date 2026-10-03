@@ -98,11 +98,19 @@ RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
 	assert_output --partial "1.4.2"
 }
 
-@test "tool pins: workflow bun copies are pinned, not latest" {
-	run python3 "$MATCHER" ".github/workflows/reusable-test-node.yml"
-	assert_success
-	assert_output --partial "bun"
-	assert_output --partial "1.4.2"
+@test "tool pins: every workflow bun copy matches the grouped pin" {
+	local wf
+	for wf in \
+		.github/workflows/reusable-test-node.yml \
+		.github/workflows/reusable-test-node-custom.yml \
+		.github/workflows/reusable-test-e2e-playwright.yml \
+		.github/workflows/reusable-deploy-site-with-reports.yml \
+		.github/workflows/reusable-site-quality.yml; do
+		run python3 "$MATCHER" "$wf"
+		assert_success
+		assert_output --partial "bun"
+		assert_output --partial "1.4.2"
+	done
 	run grep -R -n "bun-version: latest" "${PROJECT_ROOT}/.github"
 	assert_failure
 }

@@ -29,10 +29,11 @@ Setup Python with [uv](https://github.com/astral-sh/uv).
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
   with:
     python-version: "3.12" # optional, default: 3.12
-    uv-version: "0.12.22" # optional, Renovate-managed default
     cache: "true" # optional, default: true
     install-dependencies: "true" # optional, default: true
 ```
+
+Omit `uv-version` to use the Renovate-managed action default.
 
 **Outputs:** `python-version`, `uv-version`, `cache-hit`.
 
@@ -48,11 +49,12 @@ Setup Node.js with [bun](https://bun.sh).
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@main
   with:
     node-version: "22" # optional, default: 22
-    bun-version: "1.4.2" # optional, Renovate-managed default
     cache: "true" # optional, default: true
     install-dependencies: "true" # optional, default: true
     frozen-lockfile: "true" # optional, default: true
 ```
+
+Omit `bun-version` to use the Renovate-managed action default.
 
 **Outputs:** `node-version`, `bun-version`, `cache-hit`.
 
