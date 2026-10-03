@@ -9,13 +9,19 @@ workflows here use: literals, dotted context paths, `!`, `&&`, `||`,
 comparisons, parentheses, and the status functions.
 
 Usage:
-    gha_expr.py EXPRESSION [KEY=STRING | KEY:=JSON]...
+    gha_expr.py [--value] EXPRESSION [KEY=STRING | KEY:=JSON]...
 
 `KEY=STRING` binds a string (step and job outputs are always strings);
 `KEY:=JSON` binds a typed value (`true`, `false`, `null`, numbers) for
 boolean inputs and event fields. Unbound paths evaluate to null. `job.status`
 (default `success`) drives the status functions; an expression without one is
-wrapped in an implicit `success() && (...)`, as the runner does.
+wrapped in an implicit `success() && (...)`, as the runner does for `if:`.
+Pass `--value` to evaluate a plain value expression (for example a job
+output) without that wrapper.
+
+Both operands of `&&` / `||` are evaluated eagerly. Evaluation has no side
+effects, so the result matches the runner's short-circuit evaluation; the only
+difference is that a parse error on either side is always reported.
 
 Prints `true` or `false` for the expression's truthiness; exits 2 on a parse
 error.
@@ -42,7 +48,7 @@ _TOKEN = re.compile(
 )
 _STATUS_FUNCTIONS = ("always", "success", "failure", "cancelled")
 _LITERALS: dict[str, Value] = {"true": True, "false": False, "null": None}
-_USAGE = "usage: gha_expr.py EXPRESSION [KEY=VALUE | KEY:=JSON]..."
+_USAGE = "usage: gha_expr.py [--value] EXPRESSION [KEY=VALUE | KEY:=JSON]..."
 
 
 class ExpressionError(ValueError):
@@ -303,12 +309,19 @@ class Parser:
         return token is not None and token.kind == "op" and token.text == text
 
 
-def evaluate(expression: str, context: dict[str, Value]) -> bool:
-    """Evaluate an `if:` expression the way the runner does.
+def evaluate(
+    expression: str,
+    context: dict[str, Value],
+    *,
+    is_condition: bool = True,
+) -> bool:
+    """Evaluate an expression the way the runner does.
 
     Args:
-        expression: Condition, with or without the `${{ }}` wrapper.
+        expression: Expression, with or without the `${{ }}` wrapper.
         context: Flat mapping of dotted paths to values.
+        is_condition: Whether this is an `if:` condition, which gets the
+            implicit `success() &&` when it calls no status function.
 
     Returns:
         Whether the condition is truthy.
@@ -319,7 +332,7 @@ def evaluate(expression: str, context: dict[str, Value]) -> bool:
     tokens = tokenize(source)
     idents = {token.text for token in tokens if token.kind == "ident"}
     has_status = not idents.isdisjoint(_STATUS_FUNCTIONS)
-    if not has_status:
+    if is_condition and not has_status:
         tokens = [
             Token("ident", "success"),
             Token("op", "("),
@@ -368,11 +381,18 @@ def main(argv: list[str]) -> int:
     Returns:
         Process exit code.
     """
+    is_condition = not (argv and argv[0] == "--value")
+    if not is_condition:
+        argv = argv[1:]
     if not argv:
         print(_USAGE, file=sys.stderr)
         return 2
     try:
-        result = evaluate(argv[0], parse_bindings(argv[1:]))
+        result = evaluate(
+            argv[0],
+            parse_bindings(argv[1:]),
+            is_condition=is_condition,
+        )
     except (ExpressionError, json.JSONDecodeError) as error:
         print(f"gha_expr: {error}", file=sys.stderr)
         return 2

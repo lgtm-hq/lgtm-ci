@@ -185,7 +185,8 @@ _simulate() {
 		ctx+=("job.status=failure" "steps.aggregate.outputs.passed=")
 	fi
 	fail="$(_eval "$(_step_if "$workflow" "$agg" "$FAIL_STEP_NAME")" "${ctx[@]}")"
-	passed="$(_eval "$(_job_output "$workflow" "$agg" passed)" "${ctx[@]}")"
+	# Job outputs are value expressions: no implicit success() wrapper.
+	passed="$(_eval --value "$(_job_output "$workflow" "$agg" passed)" "${ctx[@]}")"
 	echo "run=${runs} prep=${prep} fail=${fail} passed=${passed}"
 }
 
