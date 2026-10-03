@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.11"
 resolution-markers = [
     "python_full_version >= '3.15'",
@@ -255,7 +255,7 @@ dev = [
 requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.9.4" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
-    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.171.1" },
+    { name = "lintro", marker = "extra == 'dev'", specifier = "==0.171.2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
@@ -381,7 +381,7 @@ wheels = [
 
 [[package]]
 name = "lintro"
-version = "0.171.1"
+version = "0.171.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "click" },
@@ -397,9 +397,9 @@ dependencies = [
     { name = "tabulate" },
     { name = "watchdog" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/4d/ff/061e6a53e846800aa9c543ed1bc2d5feb940e5353385f91f5b5f232ac9ad/lintro-0.171.1.tar.gz", hash = "sha256:887bcacea9d064412a19a2a8592936d85a9c816fbe383c8eb606b1f14db63a18", size = 2968023, upload-time = "2026-09-25T14:16:28.499Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/db/7e/865f83cf57da4be044ac3959323931194a4f34ca5d68b9a136e7233394e3/lintro-0.171.2.tar.gz", hash = "sha256:145fc16634e66d01c6d14d3b152af353d110fbe6141ab48c8811528acd3e54e4", size = 2967901, upload-time = "2026-10-03T20:45:36.436Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/5a/b4/441f3961fa8a7952a2791aa447dcb5f137d7120be30929317de6abc3675b/lintro-0.171.1-py3-none-any.whl", hash = "sha256:00fce7468f05b128796e712beafd87fecd6f3f36295af3203597e6863a509e23", size = 1998129, upload-time = "2026-09-25T14:16:26.193Z" },
+    { url = "https://files.pythonhosted.org/packages/11/bc/d43c55522eea110f1db494ee945fed4cbd387a1f19eb6334bdc442d357af/lintro-0.171.2-py3-none-any.whl", hash = "sha256:fefeca5e464e16b8585deeab1bf7d84e43f0385257fd51b469cc4296232c34c4", size = 1998130, upload-time = "2026-10-03T20:45:33.616Z" },
 ]
 
 [[package]]
