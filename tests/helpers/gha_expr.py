@@ -41,6 +41,7 @@ _TOKEN = re.compile(
     r")",
 )
 _STATUS_FUNCTIONS = ("always", "success", "failure", "cancelled")
+_LITERALS: dict[str, Value] = {"true": True, "false": False, "null": None}
 _USAGE = "usage: gha_expr.py EXPRESSION [KEY=VALUE | KEY:=JSON]..."
 
 
@@ -275,34 +276,27 @@ class Parser:
         if token.text == "(":
             value = self.parse_or()
             self.take(")")
-            return value
-        if token.kind == "str":
-            return token.text[1:-1].replace("''", "'")
-        if token.kind == "num":
-            return float(token.text)
-        if token.kind != "ident":
+        elif token.kind == "str":
+            value = token.text[1:-1].replace("''", "'")
+        elif token.kind == "num":
+            value = float(token.text)
+        elif token.kind != "ident":
             raise ExpressionError(f"unexpected token {token}")
-        if token.text in ("true", "false"):
-            return token.text == "true"
-        if token.text == "null":
-            return None
-        if self._at_op("("):
+        elif token.text in _LITERALS:
+            value = _LITERALS[token.text]
+        elif self._at_op("("):
             self.take("(")
             self.take(")")
-            return self._status(token.text)
-        return self.context.get(token.text)
+            value = self._status(token.text)
+        else:
+            value = self.context.get(token.text)
+        return value
 
     def _status(self, name: str) -> bool:
+        if name not in _STATUS_FUNCTIONS:
+            raise ExpressionError(f"unsupported function {name}()")
         status = str(self.context.get("job.status") or "success")
-        if name == "always":
-            return True
-        if name == "success":
-            return status == "success"
-        if name == "failure":
-            return status == "failure"
-        if name == "cancelled":
-            return status == "cancelled"
-        raise ExpressionError(f"unsupported function {name}()")
+        return name == "always" or name == status
 
     def _at_op(self, text: str) -> bool:
         token = self.peek()
