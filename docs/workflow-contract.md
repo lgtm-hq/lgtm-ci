@@ -617,9 +617,7 @@ bootstrap/fallback flow in `reusable-validate-lintro-version`.
 
 Pin the reusable workflow `uses:` line to a commit SHA in production and pass the
 same ref as `tooling-ref` when testing branches. When `tooling-ref` is empty,
-reusables fall back to `github.workflow_sha`. First-party `renovate.yml` resolves
-allowlists via in-repo `./.github/actions/resolve-egress-allowlist` and hardens
-with the same pinned `step-security/harden-runner` SHA.
+reusables fall back to `github.workflow_sha`.
 
 Callers may still pin **other** lgtm-ci composites with
 `lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;
