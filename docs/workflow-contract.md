@@ -1511,7 +1511,7 @@ non-zero exit.
 
 | Input                    | Default                                              | Notes                                           |
 | ------------------------ | ---------------------------------------------------- | ----------------------------------------------- |
-| `osv-version`            | `2.3.5`                                              | osv-scanner release to install                  |
+| `osv-version`            | empty                                                | Empty uses install-osv-scanner.sh pin           |
 | `config-path`            | `.osv-scanner.toml`                                  | Suppression TOML relative to repo root          |
 | `check-script`           | `.lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh` | Repo-local override supported |
 | `cleanup-pr-labels`      | `security,dependencies,automation`                   | Labels on auto-created cleanup PR               |

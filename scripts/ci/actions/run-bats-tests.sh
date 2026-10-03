@@ -77,12 +77,20 @@ filter_kcov_console() {
 # Step: install-bats - Install BATS core and helper libraries
 # =============================================================================
 if [[ "$STEP" == "install-bats" ]]; then
-	: "${BATS_VERSION:=1.10.0}"
+	# renovate: datasource=github-releases depName=bats-core/bats-core
+	DEFAULT_BATS_VERSION="1.10.0"
+	BATS_VERSION="${BATS_VERSION:-$DEFAULT_BATS_VERSION}"
 	# Normalize BATS_VERSION to avoid double "v" (strip leading "v" if present)
 	BATS_VERSION="${BATS_VERSION#v}"
-	: "${BATS_SUPPORT_VERSION:=v0.3.0}"
-	: "${BATS_ASSERT_VERSION:=v2.2.4}"
-	: "${BATS_FILE_VERSION:=v0.4.0}"
+	# renovate: datasource=github-releases depName=bats-core/bats-support versioning=loose
+	DEFAULT_BATS_SUPPORT_VERSION="v0.3.0"
+	BATS_SUPPORT_VERSION="${BATS_SUPPORT_VERSION:-$DEFAULT_BATS_SUPPORT_VERSION}"
+	# renovate: datasource=github-releases depName=bats-core/bats-assert versioning=loose
+	DEFAULT_BATS_ASSERT_VERSION="v2.2.4"
+	BATS_ASSERT_VERSION="${BATS_ASSERT_VERSION:-$DEFAULT_BATS_ASSERT_VERSION}"
+	# renovate: datasource=github-releases depName=bats-core/bats-file versioning=loose
+	DEFAULT_BATS_FILE_VERSION="v0.4.0"
+	BATS_FILE_VERSION="${BATS_FILE_VERSION:-$DEFAULT_BATS_FILE_VERSION}"
 
 	# Install BATS core from source at specified version
 	git clone --depth 1 --branch "v${BATS_VERSION}" \
@@ -144,7 +152,9 @@ if [[ "$STEP" == "install-kcov" ]]; then
 
 	# Install kcov from source with integrity verification
 	# KCOV_VERSION can be overridden via environment variable
-	: "${KCOV_VERSION:=v43}"
+	# renovate: datasource=github-releases depName=SimonKagstrom/kcov versioning=loose
+	DEFAULT_KCOV_VERSION="v43"
+	KCOV_VERSION="${KCOV_VERSION:-$DEFAULT_KCOV_VERSION}"
 
 	# Clone repo (need full history for tag verification)
 	git clone --branch "$KCOV_VERSION" \

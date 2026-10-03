@@ -6,6 +6,13 @@ load "../../helpers/common"
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 
+@test "reusable-vuln-suppression-check: osv-version defaults to empty" {
+	run awk '/^      osv-version:$/{show=1;next} show&&/^      [a-z]/{exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: ""'
+}
+
 @test "reusable-vuln-suppression-check: egress-policy defaults to block" {
 	run awk '/^      egress-policy:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
 		"$WORKFLOW"

@@ -5,10 +5,12 @@ on:
   workflow_call:
     inputs:
       bats-version:
-        description: "BATS version to use"
+        description: >-
+          BATS version to use. Empty uses the annotated default in
+          scripts/ci/actions/run-bats-tests.sh.
         required: false
         type: string
-        default: "1.10.0"
+        default: ""
       test-path:
         description: "Path to test files or directory"
         required: false

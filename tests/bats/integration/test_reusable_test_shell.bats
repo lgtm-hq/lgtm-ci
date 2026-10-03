@@ -6,6 +6,13 @@ load "../../helpers/common"
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 
+@test "reusable-test-shell: bats-version defaults to empty" {
+	run awk '/^      bats-version:$/{show=1;next} show&&/^      [a-z]/{exit} show{print}' \
+		"$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: ""'
+}
+
 @test "reusable-test-shell: coverage-run step has timeout-minutes below job default" {
 	run awk '
 		/^      - name: Run BATS tests with coverage/ { in_step = 1 }

@@ -169,6 +169,38 @@ EOF
 	refute_output --partial "--pinnedpubkey"
 }
 
+@test "install-osv-scanner: empty version uses annotated default in the download URL" {
+	if ! bash4_available; then
+		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
+	fi
+	_setup_osv_mocks
+	run bash -c "
+		unset OSV_VERSION
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export INSTALL_DIR='${INSTALL_DIR}'
+		bash '$SCRIPT' 2>&1
+	"
+	assert_success
+	run cat "$CALLS_FILE"
+	assert_output --partial "/download/v2.3.5/"
+}
+
+@test "install-osv-scanner: explicit version overrides the annotated default" {
+	if ! bash4_available; then
+		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
+	fi
+	_setup_osv_mocks
+	run bash -c "
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export INSTALL_DIR='${INSTALL_DIR}'
+		bash '$SCRIPT' 9.9.9 2>&1
+	"
+	assert_success
+	run cat "$CALLS_FILE"
+	assert_output --partial "/download/v9.9.9/"
+	refute_output --partial "/download/v2.3.5/"
+}
+
 @test "install-osv-scanner: fails closed on unreadable CA bundle" {
 	if ! bash4_available; then
 		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"

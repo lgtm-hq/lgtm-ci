@@ -11,9 +11,10 @@ inputs:
     required: false
     default: "22"
   bun-version:
-    description: 'Bun version to install (e.g., "1.1.0", "latest")'
+    description: 'Bun version to install (e.g., "1.4.2")'
     required: false
-    default: "latest"
+    # renovate: datasource=npm depName=bun
+    default: "1.4.2"
   cache:
     description: "Enable bun cache"
     required: false
