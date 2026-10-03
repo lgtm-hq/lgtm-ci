@@ -483,10 +483,21 @@ same change.
 **Aggregate gate:** The matrix test reusables (`reusable-test-python.yml`,
 `reusable-rust-test.yml`, `reusable-test-node.yml`,
 `reusable-test-node-custom.yml`) fail their `Aggregate … Results` job whenever
-any matrix leg fails, so that context (for example
+the tests did not pass, so that context (for example
 `test / Aggregate Python Results`) is a valid required check on its own (#1058).
-The job still exposes the `passed` output for callers that combine it with
-other jobs.
+It fails closed rather than skipping, because a ruleset treats a skipped
+required check as passing:
+
+- a failed or cancelled matrix leg, or missing / empty matrix summaries;
+- a failed or cancelled `prepare` job (the matrix never ran);
+- single-version calls (`python-version` / `rust-toolchain` with an empty
+  `python-versions` / `rust-toolchains`) are gated too, on the test job result
+  alone. The summary download is matrix-only, because a second call in the
+  same run can upload summaries under the same artifact names.
+
+The job is skipped only on the explicit skip paths: a draft PR with
+`draft-pr-skip`, and `pipeline-skip` (Python). The job still exposes the
+`passed` output for callers that combine it with other jobs.
 
 When a single ruleset context should summarize **multiple** work jobs, add a
 thin caller job that calls `reusable-required-check.yml` instead of

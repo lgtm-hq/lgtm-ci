@@ -8,13 +8,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml"
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/actions/validate-test-compat-coverage-contract.sh"
 
 # =============================================================================
-# Aggregate job reachability (#756)
+# Aggregate job reachability (#756, #1058)
 #
-# The `aggregate` job only runs with a non-empty `python-versions` and a
-# successful `prepare`, and `prepare` runs the compat/coverage contract
-# validator, which rejects `coverage: true` alongside a non-empty
-# `python-versions` (#345). So no step in `aggregate` can be gated on
-# `inputs.coverage` — such a step is unreachable by construction. That is what
+# The `aggregate` job runs for every non-skipped call so its required check
+# fails closed (#1058), but its summary steps (download + aggregate) run only
+# with a non-empty `python-versions`. `prepare` runs the compat/coverage
+# contract validator, which rejects `coverage: true` alongside a non-empty
+# `python-versions` (#345), so the matrix summary path never sees coverage.
+# The single-version path gates on the test job result alone; coverage is
+# verdicted inside the test job. So no step in `aggregate` is gated on
+# `inputs.coverage`, and the job touches no coverage artifacts. That is what
 # orphaned the old `Merge per-version coverage artifacts` step, which is why
 # these assertions exist rather than a bare "the step is gone" check.
 # =============================================================================
@@ -72,12 +75,21 @@ _job_run_commands() {
 	_job_block "$1" | grep -E "^[[:space:]]*(run:|bash )"
 }
 
-@test "reusable-test-python: aggregate job runs only for a non-empty python-versions" {
-	# Read off the job-level `if:` itself, not any line that happens to mention
-	# the input, so the gate cannot be weakened while the test keeps passing.
+@test "reusable-test-python: aggregate summary steps run only for a non-empty python-versions" {
+	# Read off the `if:` expressions themselves, not any line that happens to
+	# mention the input. The job-level gate must not require the input (#1058:
+	# single-version calls still get a failing check); the download and
+	# aggregate steps must, so the matrix-only path stays matrix-only.
 	run _job_if_expressions aggregate
 	assert_success
-	assert_line --partial "inputs.python-versions != ''"
+	[[ "${lines[0]}" == *"always()"* ]] || fail "aggregate job if must start with always()"
+	[[ "${lines[0]}" != *"inputs.python-versions"* ]] ||
+		fail "aggregate job must run for single-version calls too"
+	local gated
+	gated="$(_job_block aggregate |
+		grep -A2 -E "name: (Download|Aggregate) matrix test summaries$" |
+		grep -cF "if: inputs.python-versions != ''")"
+	[[ "$gated" == "2" ]] || fail "expected both summary steps gated on python-versions, got ${gated}"
 }
 
 @test "reusable-test-python: prepare runs the compat/coverage contract validator" {

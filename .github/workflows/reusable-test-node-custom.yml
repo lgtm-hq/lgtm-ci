@@ -471,7 +471,6 @@ jobs:
       - test
     if: >-
       always()
-      && needs.prepare.result == 'success'
       && (
         !inputs.draft-pr-skip ||
         github.event_name != 'pull_request' ||
@@ -494,6 +493,16 @@ jobs:
         with:
           egress-policy: ${{ inputs.egress-policy }}
           allowed-endpoints: ${{ inputs.allowed-endpoints }}
+      - name: Fail if matrix preparation did not succeed
+        # A failed or cancelled prepare skips the matrix; failing here keeps
+        # the required check from reporting a skip, which rulesets treat as a pass.
+        if: needs.prepare.result != 'success'
+        shell: bash
+        env:
+          PREPARE_RESULT: ${{ needs.prepare.result }}
+        run: |
+          echo "::error::Matrix preparation concluded '${PREPARE_RESULT}'; failing the check."
+          exit 1
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
