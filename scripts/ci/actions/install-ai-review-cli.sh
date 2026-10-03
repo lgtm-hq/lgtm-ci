@@ -27,7 +27,7 @@ source "${SCRIPT_DIR}/../lib/github/output.sh"
 source "${SCRIPT_DIR}/../lib/network/download.sh"
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-DEFAULT_CLAUDE_CODE_VERSION="2.1.232"
+DEFAULT_CLAUDE_CODE_VERSION="2.1.286"
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-$DEFAULT_CLAUDE_CODE_VERSION}"
 # renovate: datasource=npm depName=@openai/codex
 DEFAULT_CODEX_VERSION="0.147.0"
