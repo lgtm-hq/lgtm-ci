@@ -29,7 +29,7 @@ Setup Python with [uv](https://github.com/astral-sh/uv).
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
   with:
     python-version: "3.12" # optional, default: 3.12
-    uv-version: "latest" # optional
+    uv-version: "0.12.22" # optional, Renovate-managed default
     cache: "true" # optional, default: true
     install-dependencies: "true" # optional, default: true
 ```
@@ -48,7 +48,7 @@ Setup Node.js with [bun](https://bun.sh).
 - uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@main
   with:
     node-version: "22" # optional, default: 22
-    bun-version: "latest" # optional
+    bun-version: "1.4.2" # optional, Renovate-managed default
     cache: "true" # optional, default: true
     install-dependencies: "true" # optional, default: true
     frozen-lockfile: "true" # optional, default: true

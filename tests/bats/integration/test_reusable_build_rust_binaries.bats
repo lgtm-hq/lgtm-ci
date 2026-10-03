@@ -62,7 +62,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
 	refute_output --partial 'SHA256SUMS'
 }
 
-@test "reusable-build-rust-binaries: pins cross install version" {
-	run grep -F 'cargo install cross --locked --version 0.2.5' "$WORKFLOW"
+@test "reusable-build-rust-binaries: installs cross via the annotated script" {
+	run grep -F "scripts/ci/release/install-cross.sh" "$WORKFLOW"
 	assert_success
+	run grep -F "cargo install cross --locked --version 0.2.5" "$WORKFLOW"
+	assert_failure
 }

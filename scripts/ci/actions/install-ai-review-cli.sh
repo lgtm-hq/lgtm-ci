@@ -27,9 +27,11 @@ source "${SCRIPT_DIR}/../lib/github/output.sh"
 source "${SCRIPT_DIR}/../lib/network/download.sh"
 
 # renovate: datasource=npm depName=@anthropic-ai/claude-code
-CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-2.1.232}"
+DEFAULT_CLAUDE_CODE_VERSION="2.1.232"
+CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-$DEFAULT_CLAUDE_CODE_VERSION}"
 # renovate: datasource=npm depName=@openai/codex
-CODEX_VERSION="${CODEX_VERSION:-0.147.0}"
+DEFAULT_CODEX_VERSION="0.147.0"
+CODEX_VERSION="${CODEX_VERSION:-$DEFAULT_CODEX_VERSION}"
 # Cursor publishes no registry feed; bump by hand with both checksums.
 # 2026.08.11 fixes wedged uploads silently stalling long headless sessions.
 CURSOR_AGENT_VERSION="${CURSOR_AGENT_VERSION:-2026.08.11-e8db854}"

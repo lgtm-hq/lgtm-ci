@@ -10,10 +10,12 @@ on:
         type: string
         default: "Check Vulnerability Suppressions"
       osv-version:
-        description: "osv-scanner release version to install"
+        description: >-
+          osv-scanner release version to install. Empty uses the annotated
+          default in scripts/ci/security/install-osv-scanner.sh.
         required: false
         type: string
-        default: "2.3.5"
+        default: ""
       config-path:
         description: "Path to suppression TOML relative to repository root"
         required: false

@@ -202,7 +202,7 @@ jobs:
       - name: Install cross
         if: matrix.cross
         shell: bash
-        run: cargo install cross --locked --version 0.2.5
+        run: bash .lgtm-ci-tooling/scripts/ci/release/install-cross.sh
       - name: Build release binaries
         shell: bash
         env:

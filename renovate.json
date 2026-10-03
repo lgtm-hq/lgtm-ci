@@ -25,16 +25,29 @@
       "description": "Track pinned tool versions in shell scripts via renovate comments",
       "managerFilePatterns": ["/^scripts/.*\\.sh$/"],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\n\\s*[A-Za-z_]+=\"?v?(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\"?"
-      ]
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?:\\s+extractVersion=(?<extractVersion>\\S+))?(?:\\s+versioning=(?<versioning>\\S+))?\\s*\\n\\s*[A-Za-z_]+=\"?(?<currentValue>v?[0-9]+(?:\\.[0-9]+){0,2})\"?"
+      ],
+      "extractVersionTemplate": "{{#if extractVersion}}{{{extractVersion}}}{{/if}}",
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{/if}}"
     },
     {
       "customType": "regex",
-      "description": "Track pinned lintro PyPI version in reusable-ai-review.yml",
-      "managerFilePatterns": ["/^\\.github/workflows/reusable-ai-review\\.yml$/"],
+      "description": "Track annotated YAML version pins (workflow/action defaults and with: values)",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/reusable-ai-review\\.yml$/",
+        "/^\\.github/actions/setup-python/action\\.yml$/",
+        "/^\\.github/actions/setup-node/action\\.yml$/",
+        "/^\\.github/workflows/reusable-test-node\\.yml$/",
+        "/^\\.github/workflows/reusable-test-node-custom\\.yml$/",
+        "/^\\.github/workflows/reusable-test-e2e-playwright\\.yml$/",
+        "/^\\.github/workflows/reusable-deploy-site-with-reports\\.yml$/",
+        "/^\\.github/workflows/reusable-site-quality\\.yml$/"
+      ],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)\\s*\\n\\s*default: \"(?<currentValue>[0-9]+\\.[0-9]+\\.[0-9]+)\""
-      ]
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?:\\s+extractVersion=(?<extractVersion>\\S+))?(?:\\s+versioning=(?<versioning>\\S+))?\\s*\\n\\s*[A-Za-z0-9_-]+:\\s*\"(?<currentValue>v?[0-9]+(?:\\.[0-9]+){0,2})\""
+      ],
+      "extractVersionTemplate": "{{#if extractVersion}}{{{extractVersion}}}{{/if}}",
+      "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{/if}}"
     },
     {
       "customType": "regex",
@@ -94,6 +107,12 @@
       "description": "Group lgtm-ci self-reference pins in examples/docs so every uses: and tooling-ref bump together (#765)",
       "groupName": "lgtm-ci example and docs pins",
       "matchPackageNames": ["lgtm-hq/lgtm-ci"],
+      "automerge": false
+    },
+    {
+      "description": "Group bun pins so the setup-node default and workflow setup-bun copies bump together",
+      "groupName": "bun",
+      "matchPackageNames": ["bun"],
       "automerge": false
     }
   ]

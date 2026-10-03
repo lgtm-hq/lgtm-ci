@@ -6,7 +6,7 @@
 # Usage:
 #   install-osv-scanner.sh [version]
 #
-# Resolves version as: $1 > $OSV_VERSION env var > 2.3.5 (hardcoded default).
+# Resolves version as: $1 > $OSV_VERSION env var > DEFAULT_OSV_VERSION.
 # Resolves install dir as: $INSTALL_DIR env var > /usr/local/bin > ~/.local/bin.
 
 set -euo pipefail
@@ -17,7 +17,7 @@ Usage: install-osv-scanner.sh [version]
 
 Download and verify the osv-scanner release binary.
 
-Version: $1 > $OSV_VERSION > 2.3.5
+Version: $1 > $OSV_VERSION > annotated DEFAULT_OSV_VERSION
 Install dir: $INSTALL_DIR > /usr/local/bin > ~/.local/bin
 EOF
 	exit 0
@@ -31,7 +31,9 @@ source "$LIB_DIR/fs.sh"
 # shellcheck source=../lib/network/download.sh
 source "$LIB_DIR/network/download.sh"
 
-OSV_VERSION="${1:-${OSV_VERSION:-2.3.5}}"
+# renovate: datasource=github-releases depName=google/osv-scanner
+DEFAULT_OSV_VERSION="2.3.5"
+OSV_VERSION="${1:-${OSV_VERSION:-$DEFAULT_OSV_VERSION}}"
 
 OS=$(uname -s)
 if [[ "$OS" != "Linux" ]]; then

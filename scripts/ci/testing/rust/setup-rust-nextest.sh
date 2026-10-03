@@ -5,8 +5,12 @@
 set -euo pipefail
 
 : "${INSTALL_COVERAGE_TOOLS:=false}"
-: "${CARGO_NEXTEST_VERSION:=0.9.92}"
-: "${CARGO_LLVM_COV_VERSION:=0.8.6}"
+# renovate: datasource=github-releases depName=nextest-rs/nextest extractVersion=^cargo-nextest-(?<version>.+)$
+DEFAULT_CARGO_NEXTEST_VERSION="0.9.92"
+CARGO_NEXTEST_VERSION="${CARGO_NEXTEST_VERSION:-$DEFAULT_CARGO_NEXTEST_VERSION}"
+# renovate: datasource=github-releases depName=taiki-e/cargo-llvm-cov
+DEFAULT_CARGO_LLVM_COV_VERSION="0.8.6"
+CARGO_LLVM_COV_VERSION="${CARGO_LLVM_COV_VERSION:-$DEFAULT_CARGO_LLVM_COV_VERSION}"
 
 _install_cargo_crate() {
 	local crate="$1"

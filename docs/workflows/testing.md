@@ -104,7 +104,8 @@ jobs:
       upload-coverage: true
 ```
 
-**Inputs:** `bats-version` (default `1.10.0`), `test-path` (default
+**Inputs:** `bats-version` (default empty; script pin in
+`run-bats-tests.sh`), `test-path` (default
 `tests/bats`), `coverage` (default false), `coverage-threshold` (default
 0), `coverage-shards` (default 1), `upload-coverage` (default false),
 `parallel` (default 1; ignored under kcov), `comment-marker` (default

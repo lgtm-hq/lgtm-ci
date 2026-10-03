@@ -2030,7 +2030,7 @@ the job so a human re-evaluates each one.
 
 | Input                    | Default                 | Notes                                      |
 | ------------------------ | ----------------------- | ------------------------------------------ |
-| `osv-version`            | `2.3.5`                 | osv-scanner release version                |
+| `osv-version`            | empty                   | Empty uses install-osv-scanner.sh pin      |
 | `config-path`            | `.osv-scanner.toml`     | Suppression TOML path                      |
 | `check-script`           | tooling default         | Repo-local override supported              |
 | `cleanup-pr-labels`      | security labels (below) | Added after PR creation; empty opts out    |
