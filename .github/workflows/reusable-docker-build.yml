@@ -239,7 +239,7 @@ jobs:
   # Single-platform builds, or multi-platform when push is disabled (QEMU fallback)
   build:
     name: Build and Push
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -523,7 +523,7 @@ jobs:
       inputs.scan &&
       inputs.push &&
       needs.build.result == 'success'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # packages: read — pull the pushed image by digest for Trivy.
     permissions:
