@@ -19,9 +19,10 @@ wrapped in an implicit `success() && (...)`, as the runner does for `if:`.
 Pass `--value` to evaluate a plain value expression (for example a job
 output) without that wrapper.
 
-Both operands of `&&` / `||` are evaluated eagerly. Evaluation has no side
-effects, so the result matches the runner's short-circuit evaluation; the only
-difference is that a parse error on either side is always reported.
+`&&` and `||` short-circuit like the runner: once the left operand decides
+the result, the right operand is still parsed (so syntax errors and unknown
+functions are always reported) but its context paths and status functions are
+not evaluated.
 
 Prints `true` or `false` for the expression's truthiness; exits 2 on a parse
 error.
@@ -48,7 +49,7 @@ _TOKEN = re.compile(
 )
 _STATUS_FUNCTIONS = ("always", "success", "failure", "cancelled")
 _LITERALS: dict[str, Value] = {"true": True, "false": False, "null": None}
-_USAGE = "usage: gha_expr.py [--value] EXPRESSION [KEY=VALUE | KEY:=JSON]..."
+_USAGE = "usage: gha_expr.py [--value] EXPRESSION [KEY=STRING | KEY:=JSON]..."
 
 
 class ExpressionError(ValueError):
@@ -168,6 +169,7 @@ class Parser:
         self.tokens = tokens
         self.pos = 0
         self.context = context
+        self.evaluating = True
 
     def peek(self) -> Token | None:
         """Return the next token without consuming it.
@@ -218,8 +220,10 @@ class Parser:
         value = self.parse_and()
         while self._at_op("||"):
             self.take()
-            right = self.parse_and()
-            value = value if truthy(value) else right
+            if truthy(value):
+                self._skip(self.parse_and)
+            else:
+                value = self.parse_and()
         return value
 
     def parse_and(self) -> Value:
@@ -231,8 +235,10 @@ class Parser:
         value = self.parse_comparison()
         while self._at_op("&&"):
             self.take()
-            right = self.parse_comparison()
-            value = right if truthy(value) else value
+            if truthy(value):
+                value = self.parse_comparison()
+            else:
+                self._skip(self.parse_comparison)
         return value
 
     def parse_comparison(self) -> Value:
@@ -295,14 +301,29 @@ class Parser:
             self.take(")")
             value = self._status(token.text)
         else:
-            value = self.context.get(token.text)
+            value = self.context.get(token.text) if self.evaluating else None
         return value
 
     def _status(self, name: str) -> bool:
         if name not in _STATUS_FUNCTIONS:
             raise ExpressionError(f"unsupported function {name}()")
+        if not self.evaluating:
+            return False
         status = str(self.context.get("job.status") or "success")
         return name in ("always", status)
+
+    def _skip(self, parse: Callable[[], Value]) -> None:
+        """Parse an operand without evaluating it (short-circuit).
+
+        Args:
+            parse: Parse method for the operand.
+        """
+        outer = self.evaluating
+        self.evaluating = False
+        try:
+            parse()
+        finally:
+            self.evaluating = outer
 
     def _at_op(self, text: str) -> bool:
         token = self.peek()

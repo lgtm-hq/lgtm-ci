@@ -488,3 +488,33 @@ _with_mutated() {
 	assert_failure
 	assert_output --partial "must also run when aggregate-tests fails"
 }
+
+# =============================================================================
+# Evaluator semantics (tests/helpers/gha_expr.py)
+# =============================================================================
+
+@test "gha_expr: && and || return operand values and short-circuit" {
+	run _eval --value "inputs.a || 'fallback'" "inputs.a="
+	assert_output "true"
+	run _eval "false && always()"
+	assert_output "false"
+	run _eval "true || failure()" "job.status=success"
+	assert_output "true"
+	run _eval "!inputs.skip && needs.x.result == 'success'" "inputs.skip:=false" "needs.x.result=SUCCESS"
+	assert_output "true"
+}
+
+@test "gha_expr: skipped operands are still parsed" {
+	run _eval "always() || bogus()"
+	assert_failure 2
+	assert_output --partial "unsupported function bogus()"
+	run _eval "false && ("
+	assert_failure 2
+}
+
+@test "gha_expr: implicit success() applies to conditions, not --value" {
+	run _eval "needs.x.result == 'success'" "needs.x.result=success" "job.status=failure"
+	assert_output "false"
+	run _eval --value "needs.x.result == 'success'" "needs.x.result=success" "job.status=failure"
+	assert_output "true"
+}

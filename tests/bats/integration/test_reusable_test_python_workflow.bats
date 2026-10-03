@@ -85,11 +85,18 @@ _job_run_commands() {
 	[[ "${lines[0]}" == *"always()"* ]] || fail "aggregate job if must start with always()"
 	[[ "${lines[0]}" != *"inputs.python-versions"* ]] ||
 		fail "aggregate job must run for single-version calls too"
-	local gated
-	gated="$(_job_block aggregate |
-		grep -A2 -E "name: (Download|Aggregate) matrix test summaries$" |
-		grep -cF "if: inputs.python-versions != ''")"
-	[[ "$gated" == "2" ]] || fail "expected both summary steps gated on python-versions, got ${gated}"
+	# Structural: read each step's own step-level `if:` (any position within
+	# the step, not a fixed line window after its name).
+	local step cond
+	for step in "Download matrix test summaries" "Aggregate matrix test summaries"; do
+		cond="$(_job_block aggregate | awk -v name="$step" '
+			$0 == "      - name: " name { in_step = 1; next }
+			in_step && (/^      - / || /^    [a-zA-Z0-9_-]+:/) { exit }
+			in_step && /^        if: / { sub(/^        if: /, ""); print; exit }
+		')"
+		[[ "$cond" == "inputs.python-versions != ''" ]] ||
+			fail "step '${step}' must be gated on inputs.python-versions != '' (got: '${cond}')"
+	done
 }
 
 @test "reusable-test-python: prepare runs the compat/coverage contract validator" {
