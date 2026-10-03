@@ -6,7 +6,7 @@ set -euo pipefail
 
 : "${INSTALL_COVERAGE_TOOLS:=false}"
 # renovate: datasource=github-releases depName=nextest-rs/nextest extractVersion=^cargo-nextest-(?<version>.+)$
-DEFAULT_CARGO_NEXTEST_VERSION="0.9.92"
+DEFAULT_CARGO_NEXTEST_VERSION="0.9.146"
 CARGO_NEXTEST_VERSION="${CARGO_NEXTEST_VERSION:-$DEFAULT_CARGO_NEXTEST_VERSION}"
 # renovate: datasource=github-releases depName=taiki-e/cargo-llvm-cov
 DEFAULT_CARGO_LLVM_COV_VERSION="0.8.6"
