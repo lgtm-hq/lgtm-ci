@@ -296,7 +296,7 @@ class Parser:
         if name not in _STATUS_FUNCTIONS:
             raise ExpressionError(f"unsupported function {name}()")
         status = str(self.context.get("job.status") or "success")
-        return name == "always" or name == status
+        return name in ("always", status)
 
     def _at_op(self, text: str) -> bool:
         token = self.peek()
