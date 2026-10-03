@@ -480,9 +480,17 @@ export/sync tooling under `scripts/ci/org/`. When a check name must change,
 update the org ruleset to the new `{caller_job_id} / {job-name}` path in the
 same change.
 
-**Aggregate gate:** When a single ruleset context should summarize one or more
-work jobs, add a thin caller job that calls `reusable-required-check.yml`
-instead of hand-rolled `runs-on` shims. The gate itself is a `uses:` job, so
+**Aggregate gate:** The matrix test reusables (`reusable-test-python.yml`,
+`reusable-rust-test.yml`, `reusable-test-node.yml`,
+`reusable-test-node-custom.yml`) fail their `Aggregate … Results` job whenever
+any matrix leg fails, so that context (for example
+`test / Aggregate Python Results`) is a valid required check on its own (#1058).
+The job still exposes the `passed` output for callers that combine it with
+other jobs.
+
+When a single ruleset context should summarize **multiple** work jobs, add a
+thin caller job that calls `reusable-required-check.yml` instead of
+hand-rolled `runs-on` shims. The gate itself is a `uses:` job, so
 the ruleset must require its prefixed path too (below:
 `test-suite-coverage / 🧪 Test Suite & Coverage`). Pass `upstream-result` and
 optional `passed-output` / `status-output` from the work job. Use `always()`

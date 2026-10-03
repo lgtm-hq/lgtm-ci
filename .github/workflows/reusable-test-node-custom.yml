@@ -484,7 +484,7 @@ jobs:
     permissions:
       contents: read
     outputs:
-      passed: ${{ steps.aggregate.outputs.passed }}
+      passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
 
     steps:
       - name: Harden runner
@@ -528,6 +528,16 @@ jobs:
           OUTPUT_NAME: passed
           CONDITION_VALUE: ${{ needs.test.result }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/set-conditional-output.sh
+      - name: Fail if any matrix leg failed
+        # Fail closed (#1058): rulesets require this context directly, so a
+        # failing matrix leg must fail the job, not just set `passed=false`.
+        if: >-
+          always()
+          && (needs.test.result != 'success' || steps.aggregate.outputs.passed != 'true')
+        shell: bash
+        run: |
+          echo "::error::One or more matrix test legs failed; the required check fails instead of passing."
+          exit 1
   pages-coverage-status:
     name: Pages coverage upload status
     needs:

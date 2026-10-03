@@ -600,6 +600,16 @@ jobs:
           RESULTS_DIR: rust-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
+      - name: Fail if any matrix leg failed
+        # Fail closed (#1058): rulesets require this context directly, so a
+        # failing matrix leg must fail the job, not just set `passed=false`.
+        if: >-
+          always()
+          && (needs.test.result != 'success' || steps.aggregate.outputs.passed != 'true')
+        shell: bash
+        run: |
+          echo "::error::One or more matrix test legs failed; the required check fails instead of passing."
+          exit 1
   publish-test-summary:
     needs:
       - test
@@ -608,6 +618,7 @@ jobs:
       always()
       && (
         needs.aggregate.result == 'success'
+        || needs.aggregate.result == 'failure'
         || needs.aggregate.result == 'skipped'
       )
       && (
