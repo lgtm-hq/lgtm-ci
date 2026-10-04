@@ -213,7 +213,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
@@ -252,7 +252,7 @@ jobs:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           # yamllint disable-line rule:line-length
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
             scripts/ci/
             .github/actions/harden-runner
@@ -478,7 +478,7 @@ jobs:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           # yamllint disable-line rule:line-length
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
             scripts/ci/
             .github/actions/harden-runner
@@ -582,7 +582,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist

@@ -95,7 +95,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
             scripts/ci/
           sparse-checkout-cone-mode: true

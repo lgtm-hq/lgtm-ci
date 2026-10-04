@@ -564,9 +564,12 @@ check out tooling and resolve the allowlist, then call step-security directly:
   with:
     # job.workflow_* identify the repository and commit of the workflow file
     # that defines this job — the reusable itself, not the caller (#995).
+    # The final 'tooling-ref-required' fallback makes checkout fail loudly on
+    # GHES (no job context) when the caller omits tooling-ref, instead of
+    # fetching the tooling default branch.
     repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     path: .lgtm-ci-tooling
-    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
     sparse-checkout: |
       .github/actions/checkout-and-harden
     sparse-checkout-cone-mode: true

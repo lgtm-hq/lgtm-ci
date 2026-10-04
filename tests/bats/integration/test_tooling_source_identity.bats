@@ -128,6 +128,15 @@ _is_explicit_pin_only() {
 	assert_failure
 }
 
+@test "tooling identity: every job.workflow_sha ref fallback ends in the loud sentinel" {
+	# GHES has no job context; without the sentinel an empty ref makes
+	# actions/checkout fetch the tooling default branch (unpinned tooling).
+	run grep -rlE "^[[:space:]]+ref: \\$\\{\\{ inputs\\.tooling-ref != '' && inputs\\.tooling-ref \\|\\| job\\.workflow_sha \\}\\}" "$WORKFLOWS"
+	assert_failure
+	run grep -rlF "|| job.workflow_sha || 'tooling-ref-required' }}" "$WORKFLOWS"
+	assert_success
+}
+
 @test "tooling identity: inline warn steps are guarded for tooling-refs that predate the script" {
 	local failures=0 f
 	for f in "$WORKFLOWS"/reusable-*.yml "$ACTIONS"/*/action.yml; do

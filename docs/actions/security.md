@@ -12,13 +12,15 @@ Shared reusable-workflow preamble (#379): checks out lgtm-ci tooling into
 bootstrap sparse checkout of `.github/actions/checkout-and-harden` (the
 composite lives in lgtm-ci).
 
+<!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
+
 ```yaml
 - name: Checkout lgtm-ci tooling
   uses: actions/checkout@<pin>
   with:
     repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     path: .lgtm-ci-tooling
-    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
     sparse-checkout: |
       .github/actions/checkout-and-harden
     sparse-checkout-cone-mode: true
@@ -37,6 +39,8 @@ composite lives in lgtm-ci).
     sparse-checkout-extra: |
       scripts/ci/
 ```
+
+<!-- markdownlint-enable MD013 -->
 
 **Inputs:** `tooling-ref`, `egress-policy` (default `block`), `egress-preset`,
 `allowed-endpoints`, `allowed-endpoints-mode` (default `replace`),
