@@ -261,8 +261,8 @@ unreleased matrix-generator changes. See
 
 Consumers do **not** need to vendor `.github/actions/harden-runner` or
 `resolve-egress-allowlist` — reusables sparse-checkout lgtm-ci into
-`.lgtm-ci-tooling/` and invoke `./.lgtm-ci-tooling/.github/actions/...` (same
-`tooling-ref` / `github.workflow_sha` as other tooling steps).
+`.lgtm-ci-tooling/` and invoke `./.lgtm-ci-tooling/.github/actions/...` (resolved
+from `job.workflow_sha`, or the `tooling-ref` override, like every tooling step).
 
 See [workflow-contract.md](workflow-contract.md) for the standard input contract,
 permissions by mode, egress allowlists, and Rust examples.

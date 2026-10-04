@@ -29,7 +29,6 @@ jobs:
       contents: read
       packages: read
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "🛠️ Lintro Code Quality"
       egress-policy: block
       # GHCR image pulls resolve layers via pkg-containers.githubusercontent.com;
@@ -60,7 +59,6 @@ jobs:
       pull-requests: write
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
 
   rust-build:
     # Build-only check, separate from tests (contract:
@@ -70,7 +68,6 @@ jobs:
     permissions:
       contents: read
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "Build Check"
       egress-policy: block
       # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
@@ -98,7 +95,6 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "Rust Coverage"
       rust-toolchain: stable
       coverage: true

@@ -1,7 +1,8 @@
 # SPDX-License-Identifier: MIT
 # Canonical caller layout for Python tag releases using lgtm-ci reusables.
 # Replace every <sha> with a full lgtm-ci commit SHA (not a branch or tag) for
-# reusable workflow refs and tooling-ref so builds stay reproducible.
+# reusable workflow refs so builds stay reproducible; reusables resolve
+# their own tooling from that pin (job.workflow_sha).
 # Copy into your repository as .github/workflows/publish-pypi-on-tag.yml (or similar).
 # PyPI trusted publishing must reference THIS workflow filename and the upload job.
 # Do not vendor .github/actions/harden-runner or resolve-egress-allowlist — reusables
@@ -33,7 +34,6 @@ jobs:
     with:
       python-version: "3.12"
       artifact-name: python-dist
-      tooling-ref: "<sha>"
       egress-policy: block
       allowed-endpoints: >
         github.com:443
@@ -108,7 +108,6 @@ jobs:
     with:
       artifact-name: python-dist
       generate-release-notes: true
-      tooling-ref: "<sha>"
       egress-policy: block
       allowed-endpoints: >
         github.com:443
@@ -134,7 +133,6 @@ jobs:
       tag: ${{ github.ref_name }}
       channels: ${{ toJson(needs) }}
       max-reruns: 3
-      tooling-ref: "<sha>"
     permissions:
       actions: read
       contents: read

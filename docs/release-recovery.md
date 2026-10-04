@@ -32,9 +32,9 @@ original tag and the original attested artifacts. Tiers come from the
   [release security policy](release-security-policy.md) requires for
   same-bytes-same-version, before relying on recovery.
 - **Pin `tooling-ref`.** The reusable checks lgtm-ci tooling out at
-  `tooling-ref` (required; the same SHA as the `uses:` line). It never falls
-  back to `github.workflow_sha`, which inside a called workflow names the
-  caller's commit.
+  `tooling-ref` (required; the same SHA as the `uses:` line). Unlike the other
+  reusables it does not default to `job.workflow_sha`, so the tooling an
+  operator runs against an older release is always an explicit choice.
 - **Homebrew re-dispatch** needs the `homebrew-dispatch-token` secret (a
   token with `actions: write` on the tap dispatch repository); the default
   `github.token` cannot dispatch workflows in another repository.

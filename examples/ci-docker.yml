@@ -31,7 +31,6 @@ jobs:
       attestations: write
       security-events: write
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       file: Dockerfile
       push: ${{ github.event_name == 'push' }}
       # Split per-platform validation on PRs without QEMU overhead

@@ -25,16 +25,19 @@ Sample caller layouts for lgtm-hq repositories. Copy and adapt into your
 
 <!-- markdownlint-enable MD013 -->
 
-All starters pin reusable workflow `uses:` refs and `tooling-ref` to the same
-lgtm-ci release commit SHA with a `# vX.Y.Z` comment (see
+All starters pin reusable workflow `uses:` refs to an lgtm-ci release commit
+SHA with a `# vX.Y.Z` comment (see
 [docs/workflow-contract.md](../docs/workflow-contract.md), "Action pinning
-policy"). Update both together when bumping releases.
+policy"). Reusables resolve their own tooling from that pin
+(`job.workflow_sha`), so no separate `tooling-ref` is needed; the one exception
+is `release-recover.yml`, where the explicit pin is deliberate.
 
 ## Reusable workflows (recommended)
 
 Examples such as `publish-python-release.yml` and
 `release-version-pr-changelog-only.yml` call `lgtm-hq/lgtm-ci` **reusable
-workflows** at a pinned commit SHA and pass `tooling-ref` with the same SHA.
+workflows** at a pinned commit SHA; the reusable locates its own tooling from
+that pin.
 
 You do **not** need to vendor copies of:
 
