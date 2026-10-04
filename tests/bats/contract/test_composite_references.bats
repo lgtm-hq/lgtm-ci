@@ -81,7 +81,21 @@ _tooling_checkout_line() {
 	local file="$1"
 	awk '
 		/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/ {
-			in_checkout = ($0 ~ /uses:[[:space:]]*["'"'"']?actions\/checkout@/)
+			value = $0
+			sub(/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/, "", value)
+			in_checkout = (value ~ /^["'"'"']?actions\/checkout@/)
+			# A block scalar (`>-`, `|`) carries the ref on the next line.
+			folded = (value ~ /^[>|][+-]?[[:space:]]*(#.*)?$/)
+			next
+		}
+		folded {
+			if ($0 ~ /^[[:space:]]*$/) {
+				next
+			}
+			value = $0
+			sub(/^[[:space:]]+/, "", value)
+			in_checkout = (value ~ /^["'"'"']?actions\/checkout@/)
+			folded = 0
 			next
 		}
 		in_checkout && /^[[:space:]]*path:[[:space:]]*["'"'"']?\.lgtm-ci-tooling["'"'"']?[[:space:]]*(#.*)?$/ {
@@ -258,6 +272,29 @@ YAML
 	assert_failure
 	assert_output --partial "no-checkout/action.yml:6: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
 	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
+}
+
+@test "composite actions: guard recognises a folded actions/checkout as the tooling checkout" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/folded-checkout"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Folded checkout
+runs:
+  using: composite
+  steps:
+    - name: Checkout lgtm-ci tooling
+      uses: >-
+        actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+      with:
+        repository: lgtm-hq/lgtm-ci
+        path: .lgtm-ci-tooling
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+YAML
+
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_success
+	refute_output
 }
 
 @test "composite actions: guard ignores a path: .lgtm-ci-tooling that is not under actions/checkout" {
