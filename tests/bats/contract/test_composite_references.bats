@@ -74,14 +74,23 @@ _composite_uses_refs() {
 	done < <(find "$scan_path" -path "*/action.yml" -type f -print0 | sort -z)
 }
 
-# Line number of the first `path: .lgtm-ci-tooling` (an actions/checkout
-# `with:` entry) in a file, or 0 when there is none.
+# Line number of the first `path: .lgtm-ci-tooling` that belongs to an
+# `actions/checkout@...` step's `with:` block, or 0 when there is none. A
+# `path:` under any other step (cache, upload, ...) does not count.
 _tooling_checkout_line() {
 	local file="$1"
-	local line
-	line="$(grep -n -E '^[[:space:]]*path:[[:space:]]*["'"'"']?\.lgtm-ci-tooling["'"'"']?[[:space:]]*(#.*)?$' "$file" |
-		head -1 | cut -d: -f1)"
-	echo "${line:-0}"
+	awk '
+		/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/ {
+			in_checkout = ($0 ~ /uses:[[:space:]]*["'"'"']?actions\/checkout@/)
+			next
+		}
+		in_checkout && /^[[:space:]]*path:[[:space:]]*["'"'"']?\.lgtm-ci-tooling["'"'"']?[[:space:]]*(#.*)?$/ {
+			print NR
+			found = 1
+			exit
+		}
+		END { if (!found) print 0 }
+	' "$file"
 }
 
 # Classify one ref; echo nothing when allowed, else a reason.
@@ -248,5 +257,27 @@ YAML
 	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_failure
 	assert_output --partial "no-checkout/action.yml:6: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
+	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
+}
+
+@test "composite actions: guard ignores a path: .lgtm-ci-tooling that is not under actions/checkout" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/cache-path"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Tooling path on a non-checkout step
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+      with:
+        path: .lgtm-ci-tooling
+        key: tooling
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+YAML
+
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_failure
+	assert_output --partial "cache-path/action.yml:10: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
 	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
 }
