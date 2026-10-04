@@ -74,7 +74,9 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 }
 
 @test "checkout-and-harden: warns when the caller still passes tooling-ref" {
-	run grep -F "if: inputs.tooling-ref-override != ''" "$ACTION"
+	run grep -F "inputs.tooling-ref-override != ''" "$ACTION"
+	assert_success
+	run grep -F "hashFiles('.lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh') != ''" "$ACTION"
 	assert_success
 	run grep -F "scripts/ci/actions/warn-tooling-ref-override.sh" "$ACTION"
 	assert_success

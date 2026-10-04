@@ -130,7 +130,7 @@ _is_explicit_pin_only() {
 
 @test "tooling identity: inline warn steps are guarded for tooling-refs that predate the script" {
 	local failures=0 f
-	for f in "$WORKFLOWS"/reusable-*.yml; do
+	for f in "$WORKFLOWS"/reusable-*.yml "$ACTIONS"/*/action.yml; do
 		grep -q 'warn-tooling-ref-override.sh' "$f" || continue
 		if ! grep -qF "hashFiles('.lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh') != ''" "$f"; then
 			echo "${f##*/}: warn step not guarded with hashFiles" >&2
