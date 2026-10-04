@@ -372,7 +372,9 @@ audit_nested_uses_line() {
 	action_ref="$(echo "$nested_line" | sed -E 's/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*//' | sed 's/#.*//' | sed 's/[[:space:]]*$//')"
 	action_ref="$(echo "$action_ref" | sed -E "s/^['\"]//;s/['\"]$//")"
 
-	if [[ -z "$action_ref" || "$action_ref" == ./* || "$action_ref" == docker://* ]]; then
+	# `$/` self-repository refs are pinned by construction: GitHub resolves them
+	# to the repository and SHA of the file that contains them (#1075).
+	if [[ -z "$action_ref" || "$action_ref" == ./* || "$action_ref" == '$/'* || "$action_ref" == docker://* ]]; then
 		return 0
 	fi
 
@@ -469,7 +471,9 @@ scan_uses_line() {
 	action_ref="$(echo "$line" | sed -E 's/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*//' | sed 's/#.*//' | sed 's/[[:space:]]*$//')"
 	action_ref="$(echo "$action_ref" | sed -E "s/^['\"]//;s/['\"]$//")"
 
-	if [[ -z "$action_ref" || "$action_ref" == ./* || "$action_ref" == docker://* ]]; then
+	# `$/` self-repository refs are pinned by construction: GitHub resolves them
+	# to the repository and SHA of the file that contains them (#1075).
+	if [[ -z "$action_ref" || "$action_ref" == ./* || "$action_ref" == '$/'* || "$action_ref" == docker://* ]]; then
 		return 0
 	fi
 

@@ -366,3 +366,41 @@ runs:
 	assert_output --partial "verification warning"
 	assert_output --partial "aquasecurity/setup-trivy@v0.2.2"
 }
+
+@test "validate-action-pinning: audit-transitive accepts nested self-repository \$/ refs (#1075)" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: example/composite-action@aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa # v1.0.0
+'
+
+	local encoded
+	encoded="$(printf '%s' '---
+runs:
+  using: composite
+  steps:
+    - uses: $/.github/actions/setup-thing
+' | base64 | tr -d '\n')"
+
+	mock_command_multi "gh" "
+		*repos/example/composite-action/contents/action.yml?ref=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa*) echo '${encoded}';;
+		*) exit 1;;
+	"
+
+	run bash -c '
+		export PATH="'"$PATH"'"
+		export INPUT_ENFORCE=true
+		export INPUT_AUDIT_TRANSITIVE=true
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
+	refute_output --partial "no version specified"
+	assert_github_output "offenders" "0"
+	assert_github_output "warnings" "0"
+}
