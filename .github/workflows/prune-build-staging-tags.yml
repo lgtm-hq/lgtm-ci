@@ -33,7 +33,6 @@ jobs:
       package-name: ${{ inputs.package-name || 'py-lintro' }}
       # Scheduled runs never delete; deletion requires an explicit dispatch.
       dry-run: ${{ github.event_name != 'workflow_dispatch' || inputs.dry-run }}
-      tooling-ref: ${{ github.sha }}
     permissions:
       # Read repository and lgtm-ci tooling for the pruner scripts
       contents: read

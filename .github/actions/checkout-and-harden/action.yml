@@ -15,8 +15,21 @@ author: "lgtm-hq"
 inputs:
   tooling-ref:
     description: >-
-      Git ref for the lgtm-ci tooling checkout. Empty falls back to
-      github.workflow_sha so the tooling matches the reusable workflow ref.
+      Git ref (commit SHA) for the lgtm-ci tooling checkout. The calling
+      reusable workflow resolves it as
+      `inputs.tooling-ref || job.workflow_sha`; this composite never infers
+      it from caller-owned context (#995).
+    required: true
+  tooling-repository:
+    description: >-
+      owner/repo of the lgtm-ci tooling source. The calling reusable
+      workflow passes `job.workflow_repository`.
+    required: false
+    default: "lgtm-hq/lgtm-ci"
+  tooling-ref-override:
+    description: >-
+      The caller's raw `inputs.tooling-ref`. Non-empty emits a deprecation
+      warning; the value itself is already folded into `tooling-ref`.
     required: false
     default: ""
   egress-policy:
@@ -71,16 +84,24 @@ runs:
       # Pinned to SHA for supply chain security
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
-        repository: lgtm-hq/lgtm-ci
+        repository: ${{ inputs.tooling-repository }}
         path: .lgtm-ci-tooling
-        ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+        ref: ${{ inputs.tooling-ref }}
         sparse-checkout: |
           .github/actions/checkout-and-harden
           .github/actions/harden-runner
           .github/actions/resolve-egress-allowlist
+          scripts/ci/actions
           ${{ inputs.sparse-checkout-extra }}
         sparse-checkout-cone-mode: true
         persist-credentials: ${{ inputs.persist-credentials }}
+
+    - name: Warn on explicit tooling-ref override
+      if: inputs.tooling-ref-override != ''
+      shell: bash
+      env:
+        TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref-override }}
+      run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
 
     - name: Resolve egress allowlist
       id: egress

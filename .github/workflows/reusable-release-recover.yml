@@ -14,7 +14,9 @@ name: Reusable Release Recovery
 # workflow defect fixed on main repair a release that was cut before the
 # fix. (github.workflow_sha is deliberately not used: inside a called
 # workflow it names the caller's commit, which lgtm-hq/lgtm-ci cannot
-# check out.)
+# check out. Other reusables now fall back to job.workflow_sha (#995);
+# recovery keeps the explicit pin so an operator can run newer tooling
+# against an older release deliberately.)
 #
 # Stage layout (see docs/release-recovery.md for the runbook):
 #   resolve  — tag gate (prerelease refusal; the source run must be this
@@ -253,10 +255,10 @@ name: Reusable Release Recovery
       tooling-ref:
         description: >-
           lgtm-ci commit SHA for the tooling checkout; pin it to the same SHA
-          as the `uses:` reference. Required: inside a called workflow
-          github.workflow_sha names the CALLER's workflow commit, which is
-          not a commit of lgtm-hq/lgtm-ci, so there is no safe fallback.
-          Never the release tag.
+          as the `uses:` reference. Kept required here so the tooling an
+          operator runs against an older release is an explicit choice
+          (other reusables default to job.workflow_sha, #995). Never the
+          release tag.
         required: true
         type: string
 
@@ -300,7 +302,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
@@ -426,7 +428,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
@@ -541,7 +543,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
@@ -611,7 +613,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |
@@ -659,7 +661,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref }}
           sparse-checkout: |

@@ -4,12 +4,13 @@
 #
 # Prefer an explicit TOOLING_REF override; when running inside lgtm-ci itself
 # use GH_SHA so the tooling matches the triggering commit; otherwise fall back
-# to WORKFLOW_SHA (the reusable workflow ref consumers are pinned to).
+# to WORKFLOW_SHA, the called workflow's own commit (job.workflow_sha; never
+# github.workflow_sha, which names the caller's commit — #995).
 #
 # Required environment variables:
 #   GH_REPO       - github.repository
 #   GH_SHA        - github.sha
-#   WORKFLOW_SHA  - github.workflow_sha
+#   WORKFLOW_SHA  - job.workflow_sha (the called workflow's own commit)
 # Optional:
 #   TOOLING_REF   - Explicit caller override (inputs.tooling-ref)
 

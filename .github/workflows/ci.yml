@@ -17,7 +17,6 @@ jobs:
     uses: ./.github/workflows/reusable-quality-lint.yml
     with:
       job-name: "🛠️ Lintro Code Quality"
-      tooling-ref: ${{ github.sha }}
     permissions:
       contents: read
       packages: read
@@ -31,7 +30,6 @@ jobs:
     uses: ./.github/workflows/reusable-publish-quality-summary.yml
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
-      tooling-ref: ${{ github.sha }}
     permissions:
       contents: read
       pull-requests: write
@@ -48,15 +46,12 @@ jobs:
       coverage-threshold: 84
       coverage-shards: 4
       upload-coverage: true
-      tooling-ref: ${{ github.sha }}
 
   file-breakdown:
     if: >-
       github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
     uses: ./.github/workflows/reusable-publish-file-breakdown.yml
-    with:
-      tooling-ref: ${{ github.sha }}
     permissions:
       contents: read
       pull-requests: write
@@ -67,7 +62,6 @@ jobs:
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:
       workflow-key: ci
-      tooling-ref: ${{ github.sha }}
     permissions:
       actions: read
       contents: read

@@ -18,7 +18,6 @@ jobs:
     uses: ./.github/workflows/reusable-semantic-pr-title.yml
     with:
       job-name: "📝 Validate PR Title"
-      tooling-ref: ${{ github.sha }}
       egress-preset: github-minimal
     permissions:
       contents: read

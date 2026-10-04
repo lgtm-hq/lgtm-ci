@@ -18,7 +18,6 @@ jobs:
   registry-health:
     uses: ./.github/workflows/reusable-registry-health-check.yml
     with:
-      tooling-ref: ${{ github.sha }}
       open-issue-on-failure: true
     permissions:
       # Read repository and lgtm-ci tooling for health checks

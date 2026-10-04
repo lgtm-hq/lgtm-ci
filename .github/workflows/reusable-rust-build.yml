@@ -16,7 +16,9 @@ on:
         type: string
         default: ""
       tooling-ref:
-        description: "Git ref for lgtm-ci tooling and composite actions"
+        description: >-
+          Optional lgtm-ci tooling override; unset tracks the workflow pin
+          (job.workflow_sha), set emits a deprecation warning (#995).
         required: false
         type: string
         default: ""

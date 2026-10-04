@@ -6,8 +6,11 @@ on:
   workflow_call:
     inputs:
       tooling-ref:
-        description: "Git ref for lgtm-ci tooling and composite actions (SHA pin)"
-        required: true
+        description: >-
+          Optional lgtm-ci tooling override; unset tracks the workflow pin
+          (job.workflow_sha), set emits a deprecation warning (#995).
+        required: false
+        default: ""
         type: string
       packages:
         description: "Comma-separated Cargo package names to build"
@@ -131,14 +134,21 @@ jobs:
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
             .github/actions/
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
+      - name: Warn on explicit tooling-ref override
+        if: inputs.tooling-ref != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
       - name: Validate runner policy
         id: policy
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
@@ -180,6 +190,8 @@ jobs:
       attestations: write
     uses: ./.github/workflows/reusable-build-rust-binaries.yml
     with:
+      # The nested reusable resolves its own job.workflow_sha; `job` is not
+      # available at jobs.<id>.with, so only the override is passed through.
       tooling-ref: ${{ inputs.tooling-ref }}
       packages: ${{ inputs.packages }}
       binary-names: ${{ inputs.binary-names }}
@@ -227,9 +239,9 @@ jobs:
       - name: Checkout lgtm-ci tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
             .github/actions/harden-runner
             .github/actions/resolve-egress-allowlist
