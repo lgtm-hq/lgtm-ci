@@ -15,7 +15,8 @@
 #   - the self-repository form `$/<path>` (resolves to lgtm-ci at the SHA the
 #     composite was fetched from), or
 #   - a `./.lgtm-ci-tooling/...` path, which is valid only after the composite
-#     has itself checked lgtm-ci out there (prepare-pypi-upload pattern).
+#     has itself checked lgtm-ci out there (prepare-pypi-upload pattern); the
+#     guard requires a `path: .lgtm-ci-tooling` checkout earlier in the file.
 
 load "../../helpers/common"
 
@@ -73,14 +74,35 @@ _composite_uses_refs() {
 	done < <(find "$scan_path" -path "*/action.yml" -type f -print0 | sort -z)
 }
 
+# Line number of the first `path: .lgtm-ci-tooling` (an actions/checkout
+# `with:` entry) in a file, or 0 when there is none.
+_tooling_checkout_line() {
+	local file="$1"
+	local line
+	line="$(grep -n -E '^[[:space:]]*path:[[:space:]]*["'"'"']?\.lgtm-ci-tooling["'"'"']?[[:space:]]*(#.*)?$' "$file" |
+		head -1 | cut -d: -f1)"
+	echo "${line:-0}"
+}
+
 # Classify one ref; echo nothing when allowed, else a reason.
 _composite_ref_violation() {
 	local ref="$1"
+	local file="$2"
+	local line="$3"
+	local checkout_line
 
 	case "$ref" in
 	'$/'*) return 0 ;;
 	docker://*) return 0 ;;
-	./.lgtm-ci-tooling/*) return 0 ;;
+	./.lgtm-ci-tooling/*)
+		# Only valid once this composite has itself checked lgtm-ci out
+		# there; otherwise it resolves against the caller just like `./`.
+		checkout_line="$(_tooling_checkout_line "$file")"
+		if [[ "$checkout_line" -eq 0 || "$checkout_line" -gt "$line" ]]; then
+			echo "no preceding checkout with path: .lgtm-ci-tooling in this action"
+		fi
+		return 0
+		;;
 	./*)
 		echo "workspace-relative ref resolves against the caller, not lgtm-ci"
 		return 0
@@ -103,7 +125,7 @@ _composite_reference_violations() {
 		entry="${entry#*:}"
 		line="${entry%%:*}"
 		ref="${entry#*:}"
-		reason="$(_composite_ref_violation "$ref")"
+		reason="$(_composite_ref_violation "$ref" "$file" "$line")"
 		if [[ -n "$reason" ]]; then
 			echo "${file}:${line}: uses: ${ref} (${reason})"
 			rc=1
@@ -191,8 +213,11 @@ runs:
   steps:
     - uses: $/.github/actions/setup-node
     - uses: docker://alpine:3.20
-    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
     - uses: "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd" # v6.0.2
+      with:
+        repository: lgtm-hq/lgtm-ci
+        path: .lgtm-ci-tooling
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
     - uses: >-
         actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
@@ -202,4 +227,26 @@ YAML
 	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_success
 	refute_output
+}
+
+@test "composite actions: guard flags a .lgtm-ci-tooling ref without a preceding tooling checkout" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/no-checkout"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Tooling ref without checkout
+runs:
+  using: composite
+  steps:
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        repository: lgtm-hq/lgtm-ci
+        path: .lgtm-ci-tooling
+YAML
+
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_failure
+	assert_output --partial "no-checkout/action.yml:6: uses: ./.lgtm-ci-tooling/.github/actions/setup-python"
+	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
 }
