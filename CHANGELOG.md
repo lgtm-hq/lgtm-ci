@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.75.2] - 2026-10-03
+
+### Changed
+
+- **deps**: update dependency anchore/grype to 0.120.0 (minor) (#1057) (6bc1299)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.25.1 (minor) (#1050)
+  (436e8f6)
+- **deps**: update dependency anchore/syft to v1.54.0 (minor) (#1056) (3a4c6bc)
+
+### Fixed
+
+- **ci**: put supplier tool pins under Renovate and fix AI-CLI annotations (#1066)
+  (e1f4fbf)
+- **deps**: update lintro (#1064) (5402047)
+
 ## [0.75.1] - 2026-10-03
 
 ### Changed
@@ -2538,7 +2553,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.2...HEAD
+[0.75.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.1...v0.75.2
 [0.75.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.0...v0.75.1
 [0.75.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.6...v0.75.0
 [0.74.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.74.5...v0.74.6
