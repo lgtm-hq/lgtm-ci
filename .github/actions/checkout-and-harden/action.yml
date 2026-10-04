@@ -4,12 +4,14 @@
 name: "Checkout and harden"
 description: >-
   Shared reusable-workflow preamble: sparse-checkout lgtm-ci tooling into
-  .lgtm-ci-tooling and resolve the egress allowlist. Callers must invoke
-  step-security/harden-runner@<pinned SHA> as the next workflow step so the
-  action's pre hook installs the egress agent (#412/#420). The repository
-  checkout stays a separate workflow step before this action; a bootstrap
-  sparse checkout of .github/actions/checkout-and-harden must precede it
-  because the composite lives in lgtm-ci.
+  .lgtm-ci-tooling. This composite plays no part in egress enforcement: the
+  direct step-security/harden-runner@<pinned SHA> step runs FIRST in the job
+  and composes its allowlist from inputs and the workflow's literal preset
+  map (#412/#420/#913); nothing a composite step produces can reach the
+  action's pre hook. The repository checkout stays a separate workflow step
+  before this action; a bootstrap sparse checkout of
+  .github/actions/checkout-and-harden must precede it because the composite
+  lives in lgtm-ci.
 author: "lgtm-hq"
 
 inputs:
@@ -32,27 +34,6 @@ inputs:
       warning; the value itself is already folded into `tooling-ref`.
     required: false
     default: ""
-  egress-policy:
-    description: "Egress policy: audit (log) or block (enforce allowlist)"
-    required: false
-    default: "block"
-  egress-preset:
-    description: >-
-      Named baseline allowlist for block policy (github-minimal, github-pages,
-      github-tooling, docker, playwright, pypi, rubygems, npm-publish, quality,
-      osv-scanner, rust-release, sbom, scorecard)
-    required: false
-    default: ""
-  allowed-endpoints:
-    description: >-
-      Host:port list (multiline). replace mode: overrides preset when
-      non-empty; append mode: merged with preset (deduped)
-    required: false
-    default: ""
-  allowed-endpoints-mode:
-    description: "replace (override preset) or append (merge with preset, deduped)"
-    required: false
-    default: "replace"
   sparse-checkout-extra:
     description: >-
       Additional sparse-checkout paths (multiline) appended to the base egress
@@ -65,9 +46,6 @@ inputs:
     default: "false"
 
 outputs:
-  allowed-endpoints:
-    description: "Resolved allowlist for the following step-security/harden-runner step"
-    value: ${{ steps.egress.outputs['allowed-endpoints'] }}
   scripts-dir:
     description: "Absolute path to the checked-out lgtm-ci scripts directory"
     value: ${{ steps.paths.outputs['scripts-dir'] }}
@@ -84,10 +62,8 @@ runs:
       run: bash "${GITHUB_ACTION_PATH}/require-tooling-ref.sh"
 
     # Re-checkout tooling with the full sparse set. The bootstrap workflow
-    # checkout only materialises this action's directory; this step adds the
-    # egress composites (and any sparse-checkout-extra paths) at the same ref.
-    # harden-runner/ remains in the sparse set because resolve-egress-allowlist
-    # loads resolve-egress-endpoints.sh from that sibling directory.
+    # checkout only materialises this action's directory; this step adds
+    # scripts/ci/actions (and any sparse-checkout-extra paths) at the same ref.
     - name: Checkout lgtm-ci tooling
       # Pinned to SHA for supply chain security
       uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -97,8 +73,6 @@ runs:
         ref: ${{ inputs.tooling-ref }}
         sparse-checkout: |
           .github/actions/checkout-and-harden
-          .github/actions/harden-runner
-          .github/actions/resolve-egress-allowlist
           scripts/ci/actions
           ${{ inputs.sparse-checkout-extra }}
         sparse-checkout-cone-mode: true
@@ -115,15 +89,6 @@ runs:
       env:
         TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref-override }}
       run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
-
-    - name: Resolve egress allowlist
-      id: egress
-      uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-      with:
-        egress-policy: ${{ inputs.egress-policy }}
-        egress-preset: ${{ inputs.egress-preset }}
-        allowed-endpoints: ${{ inputs.allowed-endpoints }}
-        allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
 
     - name: Resolve scripts directory
       id: paths

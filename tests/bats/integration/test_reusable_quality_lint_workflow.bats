@@ -40,9 +40,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
 @test "reusable-quality-lint: hardens via checkout-and-harden composite" {
 	run grep -E '^\s*uses:\s*\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden\s*$' "$WORKFLOW"
 	assert_success
-	run grep -F 'egress-preset: ${{ inputs.egress-preset }}' "$WORKFLOW"
-	assert_success
-	run grep -F 'allowed-endpoints: ${{ inputs.allowed-endpoints }}' "$WORKFLOW"
+	run grep -F "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality']" "$WORKFLOW"
 	assert_success
 	run awk '
 		/- name: Checkout repository/ { checkout = 1 }

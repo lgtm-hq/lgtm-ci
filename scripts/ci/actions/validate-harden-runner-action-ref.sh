@@ -23,6 +23,8 @@ if [[ -z "$HARDEN_TAG" ]]; then
 	exit 1
 fi
 STEP_SECURITY_HARDEN_RE="^[[:space:]]+uses:[[:space:]]+step-security/harden-runner@${HARDEN_SHA}([[:space:]]+#.*)?[[:space:]]*$"
+# resolve-egress-allowlist and the bundled harden-runner composite were
+# removed in #913; any reference is a stale pattern that cannot enforce.
 TOOLING_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/resolve-egress-allowlist[[:space:]]*$'
 TOOLING_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/harden-runner[[:space:]]*$'
 IN_REPO_RESOLVE_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/resolve-egress-allowlist[[:space:]]*$'
@@ -84,7 +86,7 @@ _check_job_egress_order() {
 					}
 				}
 			}
-			$0 ~ /^[[:space:]]+- name: Checkout lgtm-ci egress tooling/ {
+			$0 ~ /^[[:space:]]+- name: Checkout lgtm-ci bootstrap tooling/ {
 				tooling_line = NR
 				next
 			}
@@ -99,13 +101,6 @@ _check_job_egress_order() {
 					report("Checkout lgtm-ci tooling must precede checkout-and-harden (checkout-and-harden at line " NR ")")
 				}
 				cah_line = NR
-				next
-			}
-			$0 ~ /^[[:space:]]+uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/resolve-egress-allowlist/ {
-				if (tooling_line == 0 || tooling_line >= NR) {
-					report("Checkout lgtm-ci tooling must precede resolve-egress-allowlist (resolve at line " NR ")")
-				}
-				resolve_line = NR
 				next
 			}
 			$0 ~ /^[[:space:]]+uses:[[:space:]]+step-security\/harden-runner@/ {
@@ -139,18 +134,28 @@ _check_harden_with_blocks() {
 				}
 			' "$workflow"
 		)"
-		if grep -qE 'egress-preset:' <<<"$block"; then
-			echo "${wf_name}:${line_num}: pass egress-preset to resolve-egress-allowlist / checkout-and-harden, not step-security/harden-runner" >&2
+		# harden-runner's pre hook runs at job start, before any step exists.
+		# #913 contract: allowed-endpoints is an expression that selects a
+		# preset from the workflow's literal env map (optionally combined with
+		# inputs.*); never a hand-maintained host list, never step outputs.
+		local ae_block
+		ae_block="$(awk '/^[[:space:]]+allowed-endpoints:/ { on = 1 } on' <<<"$block")"
+		if [[ -z "$ae_block" ]]; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner must set allowed-endpoints" >&2
+			violations=$((violations + 1))
+			continue
+		fi
+		if ! grep -qF 'fromJSON(env.LGTM_CI_EGRESS_PRESETS)' <<<"$ae_block"; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner allowed-endpoints must select a preset via fromJSON(env.LGTM_CI_EGRESS_PRESETS) (#913); hand-maintained host lists drift" >&2
 			violations=$((violations + 1))
 		fi
-		# harden-runner's pre hook runs at job start, before any step outputs
-		# exist. Allowlists must come from workflow inputs or a literal block.
-		if ! grep -qE "allowed-endpoints:[[:space:]]+(\\\$\{\{[[:space:]]*inputs\.|\||>)" <<<"$block"; then
-			echo "${wf_name}:${line_num}: step-security/harden-runner must use inputs.* or a literal allowed-endpoints (| or >) (not step outputs; pre runs at job start)" >&2
+		if grep -qE '(steps|needs|job|vars|matrix|strategy|runner)\.' <<<"$ae_block"; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner allowed-endpoints may reference only inputs.* and env.* (pre hook sees nothing computed in a step)" >&2
 			violations=$((violations + 1))
 		fi
-		if grep -qE "allowed-endpoints:[[:space:]]+\\\$\{\{[[:space:]]*steps\." <<<"$block"; then
-			echo "${wf_name}:${line_num}: step-security/harden-runner must not use steps.*.outputs for allowed-endpoints (empty at pre/job-start)" >&2
+		# A bare host:port token outside an expression is a literal list.
+		if grep -vE '\$\{\{|\}\}|^[[:space:]]*#' <<<"$ae_block" | grep -qE '^[[:space:]]*[A-Za-z0-9*][A-Za-z0-9.*-]*:[0-9]+[[:space:]]*$'; then
+			echo "${wf_name}:${line_num}: step-security/harden-runner allowed-endpoints contains a literal host:port; add it to a preset in scripts/ci/lib/egress/presets.sh instead" >&2
 			violations=$((violations + 1))
 		fi
 	done < <(grep -nE "$ANY_STEP_SECURITY_HARDEN_RE" "$workflow" | cut -d: -f1)
@@ -161,7 +166,7 @@ _check_release_two_phase_sparse() {
 	local wf_name="${workflow##*/}"
 
 	[[ -f "$workflow" ]] || return 0
-	grep -q 'Checkout lgtm-ci egress tooling' "$workflow" || return 0
+	grep -q 'Checkout lgtm-ci bootstrap tooling' "$workflow" || return 0
 
 	while IFS= read -r msg; do
 		[[ -z "$msg" ]] && continue
@@ -169,26 +174,23 @@ _check_release_two_phase_sparse() {
 		violations=$((violations + 1))
 	done < <(
 		awk -v wf="$wf_name" '
-			/Checkout lgtm-ci egress tooling/ { saw_egress = 1 }
+			/Checkout lgtm-ci bootstrap tooling/ { saw_egress = 1 }
 			saw_egress && /- name: Checkout lgtm-ci tooling/ { block = 1 }
 			saw_egress && /- name: Restore tooling for post-PR steps/ { block = 1 }
-			block && /^[[:space:]]+sparse-checkout: scripts\/ci\/$/ {
-				print wf ": sparse-checkout after egress tooling must include egress composites (not scripts/ci/ only)"
-				block = 0
-			}
 			block && /^[[:space:]]+sparse-checkout: \|/ {
 				in_sparse = 1
 				has_scripts = 0
-				has_harden = 0
-				has_resolve = 0
+				has_stale = 0
 				next
 			}
 			in_sparse && /scripts\/ci\// { has_scripts = 1 }
-			in_sparse && /\.github\/actions\/harden-runner/ { has_harden = 1 }
-			in_sparse && /\.github\/actions\/resolve-egress-allowlist/ { has_resolve = 1 }
+			in_sparse && /\.github\/actions\/(harden-runner|resolve-egress-allowlist)/ { has_stale = 1 }
 			in_sparse && /^[[:space:]]+[a-zA-Z]/ && !/^[[:space:]]+\./ && !/^[[:space:]]+scripts/ {
-				if (!has_scripts || !has_harden || !has_resolve) {
-					print wf ": multiline sparse-checkout after egress tooling must include scripts/ci/, harden-runner, and resolve-egress-allowlist"
+				if (!has_scripts) {
+					print wf ": multiline sparse-checkout after bootstrap tooling must include scripts/ci/"
+				}
+				if (has_stale) {
+					print wf ": sparse-checkout lists a removed egress composite (harden-runner / resolve-egress-allowlist, #913)"
 				}
 				in_sparse = 0
 				block = 0
@@ -202,7 +204,7 @@ _check_checkout_and_harden() {
 	local wf_name="${workflow##*/}"
 
 	grep -qE "$TOOLING_CAH_RE" "$workflow" || return 0
-	if ! grep -qE 'Checkout lgtm-ci (egress )?tooling' "$workflow"; then
+	if ! grep -qE 'Checkout lgtm-ci (bootstrap )?tooling' "$workflow"; then
 		echo "${wf_name}: missing bootstrap Checkout lgtm-ci tooling step before checkout-and-harden" >&2
 		violations=$((violations + 1))
 	fi
@@ -350,11 +352,15 @@ while IFS= read -r -d '' workflow; do
 	_check_checkout_and_harden "$workflow"
 	_check_harden_is_first_step "$workflow"
 
+	if grep -qE "$TOOLING_RESOLVE_RE" "$workflow" || grep -qE '\.github/actions/(harden-runner|resolve-egress-allowlist)[[:space:]]*$' "$workflow"; then
+		echo "${wf_name}: references the removed resolve-egress-allowlist / bundled harden-runner composite (#913)" >&2
+		violations=$((violations + 1))
+	fi
 	if ! grep -qE "$ANY_STEP_SECURITY_HARDEN_RE" "$workflow"; then
-		# Some reusables may not harden (none today); skip only if they also
-		# lack checkout-and-harden / resolve-egress.
-		if grep -qE "$TOOLING_CAH_RE|$TOOLING_RESOLVE_RE" "$workflow"; then
-			echo "${wf_name}: resolves egress but missing step-security/harden-runner@${HARDEN_SHA}" >&2
+		# Some reusables may not harden (nested-only callers); skip only if
+		# they also lack checkout-and-harden.
+		if grep -qE "$TOOLING_CAH_RE" "$workflow"; then
+			echo "${wf_name}: uses checkout-and-harden but missing step-security/harden-runner@${HARDEN_SHA}" >&2
 			violations=$((violations + 1))
 		fi
 		continue
@@ -363,13 +369,6 @@ while IFS= read -r -d '' workflow; do
 	if grep -qE "$IN_REPO_RESOLVE_RE" "$workflow" || grep -qE "$IN_REPO_HARDEN_RE" "$workflow"; then
 		echo "${wf_name}: caller-local ./.github/actions egress paths are forbidden in reusables" >&2
 		violations=$((violations + 1))
-	fi
-	if ! grep -qE 'Checkout lgtm-ci (egress )?tooling' "$workflow" && ! grep -qE "$TOOLING_CAH_RE" "$workflow"; then
-		# Direct resolve pattern still needs tooling checkout.
-		if grep -qE "$TOOLING_RESOLVE_RE" "$workflow"; then
-			echo "${wf_name}: missing Checkout lgtm-ci tooling step before egress resolve" >&2
-			violations=$((violations + 1))
-		fi
 	fi
 	_check_job_egress_order "$workflow"
 	_check_harden_with_blocks "$workflow"

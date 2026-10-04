@@ -7,9 +7,10 @@ the full egress preset table and permission requirements.
 ## checkout-and-harden
 
 Shared reusable-workflow preamble (#379): checks out lgtm-ci tooling into
-`.lgtm-ci-tooling/` and resolves the egress allowlist (callers invoke
-`step-security/harden-runner` as the first workflow step). Requires a prior
-bootstrap sparse checkout of `.github/actions/checkout-and-harden` (the
+`.lgtm-ci-tooling/`. It takes no part in egress enforcement — callers invoke
+`step-security/harden-runner` as the first workflow step with an allowlist
+composed from inputs and the workflow's literal preset map (#913). Requires a
+prior bootstrap sparse checkout of `.github/actions/checkout-and-harden` (the
 composite lives in lgtm-ci).
 
 <!-- markdownlint-disable MD013 -- expression lines exceed the limit -->
@@ -35,42 +36,21 @@ composite lives in lgtm-ci).
     tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
     tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     tooling-ref-override: ${{ inputs.tooling-ref }}
-    egress-preset: quality
     sparse-checkout-extra: |
       scripts/ci/
 ```
 
 <!-- markdownlint-enable MD013 -->
 
-**Inputs:** `tooling-ref`, `egress-policy` (default `block`), `egress-preset`,
-`allowed-endpoints`, `allowed-endpoints-mode` (default `replace`),
+**Inputs:** `tooling-ref`, `tooling-repository`, `tooling-ref-override`,
 `sparse-checkout-extra`, `persist-credentials` (default `false`).
 
-**Outputs:** `allowed-endpoints` (resolved allowlist), `scripts-dir` (absolute
-path to `.lgtm-ci-tooling/scripts`).
+**Outputs:** `scripts-dir` (absolute path to `.lgtm-ci-tooling/scripts`).
 
-## resolve-egress-allowlist
-
-Resolves `allowed-endpoints` from explicit lists or `egress-preset` names.
-Useful for validating/merging lists; **do not** feed its step output into
-`step-security/harden-runner` (the action `pre` hook runs at job start and
-cannot see step outputs — use workflow inputs or literals instead).
-
-```yaml
-- name: Resolve egress allowlist
-  id: egress
-  uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-  with:
-    egress-policy: block
-    egress-preset: quality
-    allowed-endpoints: |
-      private.registry.example:443
-    allowed-endpoints-mode: append # default: replace
-```
-
-`replace` drops the preset when `allowed-endpoints` is non-empty; `append`
-merges preset + extras with deduplication. Presets are defined in
-`scripts/ci/lib/egress/presets.sh`.
+The former `resolve-egress-allowlist` composite and the bundled
+`.github/actions/harden-runner/` resolver were removed in #913: their output
+was consumed by nothing, because the harden-runner `pre` hook cannot see step
+outputs.
 
 ## harden-runner
 
@@ -78,13 +58,15 @@ Security hardening using [StepSecurity](https://stepsecurity.io). Invoke
 `step-security/harden-runner` as a **direct** workflow step (pinned SHA) so its
 `pre` hook installs the egress agent.
 
-The `pre` hook runs at **job start**, before any step outputs exist. Pass
-allowlists from **workflow inputs** (reusables bake the default preset into
-`allowed-endpoints`) or a **literal** `host:port` block — never from
-`steps.*.outputs` (those are empty at `pre` time and block all egress).
+The `pre` hook runs at **job start**, before any step exists. Reusable
+workflows compose the allowlist from **workflow inputs** and a **literal
+preset map** carried in the workflow's `env` (rendered from
+`scripts/ci/lib/egress/presets.sh`, see
+[workflow-contract.md](../workflow-contract.md#egress-allowlists)) — never
+from `steps.*.outputs` (those are empty at `pre` time and block all egress).
 
-Use YAML `>` (folded) for literal lists so endpoints are space-separated;
-harden-runner does not apply newline-separated `|` lists.
+harden-runner splits `allowed-endpoints` on whitespace; a folded scalar (`>-`)
+with one `host:port` per token is the idiomatic form.
 
 Make this the **first step** in the job so the action `main` step applies the
 allowlist before checkout or other network I/O. `pre` alone is not enough.
@@ -93,17 +75,18 @@ allowlist before checkout or other network I/O. `pre` alone is not enough.
 - name: Harden runner
   uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
   with:
-    egress-policy: block # default; use audit to log only
-    allowed-endpoints: ${{ inputs.allowed-endpoints }}
-    disable-sudo: "false" # optional
+    egress-policy: ${{ inputs.egress-policy }} # block (default) or audit
+    allowed-endpoints: >-
+      ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+      && inputs.allowed-endpoints
+      || format('{0} {1}',
+      fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'],
+      inputs.allowed-endpoints) }}
 ```
 
-Reusable workflows check out lgtm-ci into `.lgtm-ci-tooling` for allowlist
-resolution — consumers do not copy `resolve-egress-allowlist` into their repo.
 Do not nest step-security inside a local composite (GitHub skips nested
 `pre`/`post`). Do not use `${{ }}` in remote action `@ref` segments inside
-`uses:`. Support scripts for allowlist resolution live under
-`.github/actions/harden-runner/` (`lib/`, `resolve-egress-endpoints.sh`).
+`uses:`.
 
 ## secure-checkout
 

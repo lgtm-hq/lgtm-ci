@@ -44,28 +44,27 @@ on:
         type: string
         default: "block"
       allowed-endpoints:
-        description: "Allowed endpoints when egress-policy is block"
+        description: >-
+          Extra or replacement host:port list (whitespace-separated) for
+          harden-runner. replace mode: a non-empty list is used alone;
+          append mode: merged with egress-preset. Composed at job start, so
+          it is enforced (#913).
         required: false
         type: string
-        default: >
-          github.com:443
-          api.github.com:443
-          codeload.github.com:443
-          objects.githubusercontent.com:443
-          pipelines.actions.githubusercontent.com:443
+        default: ""
       allowed-endpoints-mode:
         description: >-
-          replace: non-empty allowed-endpoints overrides egress-preset; append:
-          merges preset with allowed-endpoints (deduped, first-seen wins)
+          replace (default): non-empty allowed-endpoints is used instead of
+          egress-preset; append: egress-preset plus allowed-endpoints
         required: false
         type: string
         default: "replace"
 
       egress-preset:
         description: >-
-          Named allowlist when allowed-endpoints is empty and egress-policy is
-          block (github-minimal, github-pages, github-tooling, docker, playwright, pypi,
-          rubygems, npm-publish, quality, sbom, scorecard)
+          Named baseline allowlist from scripts/ci/lib/egress/presets.sh
+          (default github-minimal). Selected at job start inside every harden-runner
+          step, so it is enforced (#913).
         required: false
         type: string
         default: "github-minimal"
@@ -79,6 +78,110 @@ on:
         required: false
         type: number
         default: 10
+
+env:
+  # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
+  # scripts/ci/egress/sync-workflow-presets.sh — do not edit by hand. Every
+  # harden-runner step below indexes this map by expression: the
+  # step-security pre hook installs the agent before any step runs, so the
+  # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-presets:begin
+  LGTM_CI_EGRESS_PRESETS: >-
+    {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443",
+    "github-results":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443",
+    "github-tooling":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "github-pages":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "docker":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443",
+    "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
+    playwright.azureedge.net:443 playwright-akamai.azureedge.net:443 archive.ubuntu.com:80
+    security.ubuntu.com:80",
+    "pypi":"github.com:443 api.github.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 test.pypi.org:443 upload.pypi.org:443 upload.test.pypi.org:443",
+    "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    test.pypi.org:443 upload.pypi.org:443 upload.test.pypi.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
+    sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    rubygems.org:443 api.rubygems.org:443 index.rubygems.org:443",
+    "npm-publish":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    token.actions.githubusercontent.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 registry.npmjs.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443",
+    "quality":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 bun.sh:443 astral.sh:443 releases.astral.sh:443 sh.rustup.rs:443
+    deb.debian.org:80 registry.npmjs.org:443 crates.io:443 static.crates.io:443 index.crates.io:443
+    semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443 api.deps.dev:443",
+    "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 bun.sh:443 nodejs.org:443 registry.npmjs.org:443
+    pypi.org:443 files.pythonhosted.org:443 astral.sh:443 releases.astral.sh:443
+    static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 security.ubuntu.com:443",
+    "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
+    toolbox-data.anchore.io:443 grype.anchore.io:443 pipelines.actions.githubusercontent.com:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "scorecard":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 gcr.io:443 api.osv.dev:443 api.scorecard.dev:443
+    api.securityscorecards.dev:443",
+    "osv-scanner":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 api.osv.dev:443 api.deps.dev:443",
+    "ai-review":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443 astral.sh:443
+    releases.astral.sh:443",
+    "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    raw.githubusercontent.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
+    actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443"}
+  # lgtm-ci-egress-presets:end
 
 jobs:
   publish-artifact-report:
@@ -96,7 +199,14 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-minimal'],
+            inputs.allowed-endpoints) }}
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -120,10 +230,6 @@ jobs:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
-          egress-policy: ${{ inputs.egress-policy }}
-          egress-preset: ${{ inputs.egress-preset }}
-          allowed-endpoints: ${{ inputs.allowed-endpoints }}
-          allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
           sparse-checkout-extra: |
             .github/actions/
             scripts/ci/

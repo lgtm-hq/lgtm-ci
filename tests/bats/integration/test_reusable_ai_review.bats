@@ -114,7 +114,14 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 }
 
 @test "reusable-ai-review: default allowlist has no provider inference hosts" {
-	run awk '/^      allowed-endpoints:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
+	# The baseline is the ai-review preset selected from the embedded map;
+	# provider hosts are appended only by the gated expressions.
+	run awk '/^      egress-preset:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: "ai-review"'
+	run grep -F "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'ai-review']" "$WORKFLOW"
+	assert_success
+	run bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh' && egress_preset_endpoints ai-review"
 	assert_success
 	refute_output --partial "api.anthropic.com"
 	refute_output --partial "api.openai.com"
@@ -265,7 +272,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	# anthropic/openai-conditioned env var — never in an unconditional list.
 	run bash -c "grep -F 'downloads.cursor.com:443' '$WORKFLOW' | grep -vc AI_REVIEW_CURSOR_EGRESS"
 	assert_output "0"
-	run bash -c "grep -F 'registry.npmjs.org:443' '$WORKFLOW' | grep -vc AI_REVIEW_NPM_EGRESS"
+	# The embedded preset map (quality, npm-publish, …) legitimately lists the
+	# npm registry; only lines outside the generated block count here.
+	run bash -c "awk '/lgtm-ci-egress-presets:begin/ { skip = 1 } /lgtm-ci-egress-presets:end/ { skip = 0; next } !skip' '$WORKFLOW' | grep -F 'registry.npmjs.org:443' | grep -vc AI_REVIEW_NPM_EGRESS"
 	assert_output "0"
 	# And the npm env var's own definition must carry the anthropic/openai
 	# gate — an unconditional definition would grant npm egress to cursor.

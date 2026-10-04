@@ -51,7 +51,7 @@ load "../../helpers/common"
 		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /report-release-failure:/ {
 			in_job = 0
 		}
-		in_job && /egress-preset: github-minimal/ { found = 1; exit }
+		in_job && /fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[.github-minimal.\]/ { found = 1; exit }
 		END { exit !found }
 	' "$workflow"
 	assert_success
@@ -74,7 +74,7 @@ load "../../helpers/common"
 		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ && $0 !~ /report-release-failure:/ {
 			in_job = 0
 		}
-		in_job && /egress-preset: github-minimal/ { found = 1; exit }
+		in_job && /fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[.github-minimal.\]/ { found = 1; exit }
 		END { exit !found }
 	' "$workflow"
 	assert_success

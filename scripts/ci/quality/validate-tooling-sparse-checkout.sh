@@ -37,7 +37,7 @@ for action_yml in actions_dir.glob("*/action.yml"):
     text = action_yml.read_text()
     if re.search(r"scripts/ci|SCRIPTS_DIR/ci/|GITHUB_ACTION_PATH.*scripts", text):
         script_composites.add(action_yml.parent.name)
-script_composites -= {"checkout-and-harden", "harden-runner", "resolve-egress-allowlist"}
+script_composites -= {"checkout-and-harden"}
 
 
 def parse_sparse(block: str) -> list[str]:

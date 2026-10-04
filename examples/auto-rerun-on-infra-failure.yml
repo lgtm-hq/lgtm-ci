@@ -48,4 +48,7 @@ jobs:
       # protected-workflows: |
       #   publish-python-release.yml
       egress-policy: block
-      egress-preset: github-minimal
+      # github-results = github-minimal + GitHub's results blob storage, which
+      # the job-log probe is redirected to. Presets are enforced (#913), so a
+      # narrower preset here would make every probe read "unavailable".
+      egress-preset: github-results

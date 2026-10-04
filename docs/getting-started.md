@@ -51,8 +51,8 @@ jobs:
 Reusable workflows share a standard contract (`tooling-ref`,
 `egress-policy`, `job-name`, permissions by mode) — see
 [workflow-contract.md](workflow-contract.md). You do **not** need to copy
-`.github/actions/harden-runner` or `resolve-egress-allowlist` into your
-repository; reusables fetch them from lgtm-ci internally. See the
+anything into your repository for egress hardening; reusables carry their
+allowlist presets and invoke `step-security/harden-runner` directly. See the
 [workflows index](workflows/README.md) for the full catalog.
 
 ## Using shell libraries

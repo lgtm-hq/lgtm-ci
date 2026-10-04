@@ -77,17 +77,16 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-scorecards.yml"
 	assert_success
 }
 
-@test "reusable-scorecards: drops deprecated no-op tooling/egress inputs" {
+@test "reusable-scorecards: no tooling-ref, but enforced egress inputs via the embedded preset map" {
+	# The scorecard publish allowlist forbids lgtm-ci composites (#540), so
+	# there is no tooling checkout to pin. The egress inputs are back since
+	# #913: the preset map is a workflow literal, not a composite.
 	run grep -qE '^      tooling-ref:' "$WORKFLOW"
-	assert_failure
-	run grep -qE '^      allowed-endpoints-mode:' "$WORKFLOW"
-	assert_failure
-	run grep -qE '^      egress-preset:' "$WORKFLOW"
 	assert_failure
 	run grep -qF 'inputs.tooling-ref' "$WORKFLOW"
 	assert_failure
-	run grep -qF 'inputs.allowed-endpoints-mode' "$WORKFLOW"
+	run grep -qF '.lgtm-ci-tooling' "$WORKFLOW"
 	assert_failure
-	run grep -qF 'inputs.egress-preset' "$WORKFLOW"
-	assert_failure
+	run grep -F "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'scorecard']" "$WORKFLOW"
+	assert_success
 }

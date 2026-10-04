@@ -1,19 +1,15 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Contract tests for harden-runner support files used by resolve-egress-allowlist
+# Purpose: No lgtm-ci composite may stand in for step-security/harden-runner (#412/#420/#913)
 
 load "../../../helpers/common"
 
-ACTION="${PROJECT_ROOT}/.github/actions/harden-runner/action.yml"
-
-@test "harden-runner: no local composite action.yml (invoke step-security directly)" {
-	[[ ! -f "$ACTION" ]]
+@test "harden-runner: no local composite action (invoke step-security directly)" {
+	[[ ! -e "${PROJECT_ROOT}/.github/actions/harden-runner" ]]
 }
 
-@test "harden-runner: still ships resolve-egress-endpoints.sh for sibling resolve" {
-	[ -x "${PROJECT_ROOT}/.github/actions/harden-runner/resolve-egress-endpoints.sh" ]
-	run grep -F \
-		'../harden-runner/resolve-egress-endpoints.sh' \
-		"${PROJECT_ROOT}/.github/actions/resolve-egress-allowlist/action.yml"
-	assert_success
+@test "harden-runner: the resolve composite is gone (its output could never reach the pre hook)" {
+	[[ ! -e "${PROJECT_ROOT}/.github/actions/resolve-egress-allowlist" ]]
+	[[ ! -e "${PROJECT_ROOT}/scripts/ci/actions/resolve-egress-endpoints.sh" ]]
+	[[ ! -e "${PROJECT_ROOT}/scripts/ci/actions/sync-harden-runner-bundle.sh" ]]
 }

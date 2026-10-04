@@ -112,10 +112,10 @@ composites for them. See
 [reusable-workflows.md](../reusable-workflows.md#runner-pinning) and
 [workflow-contract.md](../workflow-contract.md#runner-pinning).
 
-Consumers do **not** need to vendor `.github/actions/harden-runner` or
-`resolve-egress-allowlist` — reusables sparse-checkout lgtm-ci into
-`.lgtm-ci-tooling/` for allowlist resolution and invoke
-`step-security/harden-runner` directly.
+Consumers do **not** need to vendor anything for egress — reusables carry
+their allowlist presets as a workflow literal and invoke
+`step-security/harden-runner` directly (#913); `.lgtm-ci-tooling/` is a
+sparse checkout for scripts only.
 
 Caller examples live under [examples/](../../examples/) (see
 [examples/README.md](../../examples/README.md)); the task-ordered setup

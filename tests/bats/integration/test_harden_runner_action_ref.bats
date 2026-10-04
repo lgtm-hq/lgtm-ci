@@ -65,14 +65,109 @@ jobs:
         uses: ${HARDEN_PIN}
         with:
           egress-policy: block
-          allowed-endpoints: \${{ inputs.allowed-endpoints }}
+          allowed-endpoints: \${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
 ${bootstrap:+$bootstrap
 }      - name: Checkout and harden
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
-          egress-policy: block
+          tooling-ref: abc
 EOF
+}
+
+# Write a one-job fixture whose harden-runner allowed-endpoints is $2 (raw
+# YAML value, may span lines when it starts with a block indicator).
+_write_allowlist_fixture() {
+	local dir="$1" allowlist="$2"
+	cat >"$dir/reusable-fixture.yml" <<EOF
+name: Fixture
+on:
+  workflow_call:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden runner
+        uses: ${HARDEN_PIN}
+        with:
+          egress-policy: block
+          allowed-endpoints: ${allowlist}
+      - name: Checkout repository
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+EOF
+}
+
+@test "validate-harden-runner-action-ref: accepts the caller-selectable preset composition" {
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	_write_allowlist_fixture "$dir" ">-
+            \${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'],
+            inputs.allowed-endpoints) }}"
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_success
+}
+
+@test "validate-harden-runner-action-ref: flags a raw inputs.allowed-endpoints pass-through" {
+	# Pre-#913 shape: enforces the caller list but ignores egress-preset.
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	_write_allowlist_fixture "$dir" '\${{ inputs.allowed-endpoints }}'
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_failure
+	assert_output --partial "must select a preset via fromJSON(env.LGTM_CI_EGRESS_PRESETS)"
+}
+
+@test "validate-harden-runner-action-ref: flags a hand-maintained literal host list" {
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	_write_allowlist_fixture "$dir" ">
+            github.com:443
+            api.github.com:443"
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_failure
+	assert_output --partial "contains a literal host:port"
+}
+
+@test "validate-harden-runner-action-ref: flags step outputs in allowed-endpoints" {
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	_write_allowlist_fixture "$dir" ">-
+            \${{ format('{0} {1}', fromJSON(env.LGTM_CI_EGRESS_PRESETS)['quality'], steps.egress.outputs.allowed-endpoints) }}"
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_failure
+	assert_output --partial "may reference only inputs.* and env.*"
+}
+
+@test "validate-harden-runner-action-ref: flags a reference to the removed resolve composite" {
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	cat >"$dir/reusable-fixture.yml" <<EOF
+name: Fixture
+on:
+  workflow_call:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden runner
+        uses: ${HARDEN_PIN}
+        with:
+          egress-policy: block
+          allowed-endpoints: \${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
+      - name: Checkout lgtm-ci tooling
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github/actions/resolve-egress-allowlist
+      - name: Resolve egress allowlist
+        uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
+EOF
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_failure
+	assert_output --partial "removed resolve-egress-allowlist"
 }
 
 @test "validate-harden-runner-action-ref: flags a quoted job that skips its bootstrap checkout" {
@@ -132,12 +227,12 @@ jobs:
               uses: ${HARDEN_PIN}
               with:
                   egress-policy: block
-                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
+                  allowed-endpoints: \${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
             - name: Checkout and harden
               id: egress
               uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
               with:
-                  egress-policy: block
+                  tooling-ref: abc
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_failure
@@ -173,7 +268,7 @@ jobs:
               uses: ${HARDEN_PIN}
               with:
                   egress-policy: block
-                  allowed-endpoints: \${{ inputs.allowed-endpoints }}
+                  allowed-endpoints: \${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
             - name: Checkout lgtm-ci tooling
               uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
               with:
@@ -185,7 +280,7 @@ jobs:
               id: egress
               uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
               with:
-                  egress-policy: block
+                  tooling-ref: abc
 EOF
 	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
 	assert_success

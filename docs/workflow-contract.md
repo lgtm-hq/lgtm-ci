@@ -12,9 +12,9 @@ Where applicable, workflows accept:
 | ---------------------------------- | ---------------------------------------------------------------------- |
 | `tooling-ref`                      | Optional tooling override (default: the called workflow's commit)      |
 | `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner            |
-| `egress-preset`                    | Named baseline allowlist under block                                   |
-| `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)              |
-| `allowed-endpoints-mode`           | `replace` (default) or `append` (merge with preset, deduped)           |
+| `egress-preset`                    | Named baseline allowlist (see [Egress allowlists](#egress-allowlists)) |
+| `allowed-endpoints`                | `host:port` list, default empty (see `allowed-endpoints-mode`)         |
+| `allowed-endpoints-mode`           | `replace` (default): non-empty list replaces the preset; `append`      |
 | `job-name`                         | Check name on always-run jobs; test summary suite title                |
 | `runner-image`                     | GitHub-hosted runner OS label (default `ubuntu-24.04`)                 |
 | `runner-map`                       | JSON platform→runner map for multi-arch Docker (default `{}`)          |
@@ -28,14 +28,84 @@ Where applicable, workflows accept:
 
 `tooling-ref` is listed above for workflows that accept it. See
 [Action-only reusables](#action-only-reusables) for workflows where the input
-pins egress composites only (not `scripts/ci/`).
+pins the `checkout-and-harden` composite only (not `scripts/ci/`).
+
+## Egress allowlists
+
+Every reusable job starts with a direct, SHA-pinned
+`step-security/harden-runner` step. That action installs its egress agent in
+its **pre hook**, before any step runs, so the allowlist it enforces must be
+fully known at job start: nothing a later step computes — including anything a
+composite action resolves — can reach it (#412/#420/#913).
+
+The three egress inputs are therefore composed **inside** the harden-runner
+step from job-start values only:
+
+<!-- markdownlint-disable MD013 -->
+
+| Inputs                                                         | Enforced allowlist                              |
+| -------------------------------------------------------------- | ----------------------------------------------- |
+| defaults                                                       | the workflow's default `egress-preset`          |
+| `egress-preset: <name>`                                        | that preset                                     |
+| `allowed-endpoints: <list>` (mode `replace`, the default)      | that list **alone** — the preset is not applied |
+| `allowed-endpoints: <list>` + `allowed-endpoints-mode: append` | the preset **plus** the list                    |
+| `egress-policy: audit`                                         | nothing is blocked; the same list is logged     |
+
+<!-- markdownlint-enable MD013 -->
+
+Presets are defined once in `scripts/ci/lib/egress/presets.sh`
+(`egress_preset_names` lists them). Because the workflow cannot read that file
+at run time, `scripts/ci/egress/render-presets.sh` renders every preset into a
+JSON map and `scripts/ci/egress/sync-workflow-presets.sh` writes it into each
+reusable as the workflow-level literal `env.LGTM_CI_EGRESS_PRESETS` (between
+`# lgtm-ci-egress-presets:begin/end` markers). Each harden-runner step then
+selects by expression:
+
+```yaml
+- name: Harden runner
+  uses: step-security/harden-runner@<pinned SHA>
+  with:
+    egress-policy: ${{ inputs.egress-policy }}
+    allowed-endpoints: >-
+      ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+      && inputs.allowed-endpoints
+      || format('{0} {1}',
+      fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || '<workflow default>'],
+      inputs.allowed-endpoints) }}
+```
+
+Consequences of the contract:
+
+- **Add hosts to a preset, not to a workflow.** Edit `presets.sh`, run
+  `bash scripts/ci/egress/sync-workflow-presets.sh`, commit both. The BATS
+  contract test (`tests/bats/integration/test_egress_presets_rendered.bats`)
+  and `scripts/ci/actions/validate-harden-runner-action-ref.sh` fail on any
+  embedded copy that differs from the render, on any harden-runner block that
+  carries a literal host list, and on any block that reads `steps.*`,
+  `needs.*` or other non-job-start context.
+- Every harden-runner block in a workflow honours the same caller inputs,
+  coordinator jobs (`prepare`, `aggregate`, …) included. A few jobs that
+  must never be widened by a caller (failure reporters, the Rust release tag
+  verification / GitHub release jobs) select a fixed preset:
+  `fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal']`.
+- `allowed-endpoints` defaults to `""` everywhere. A caller who passes a list
+  without `allowed-endpoints-mode: append` opts out of the preset entirely,
+  so the list must include the GitHub hosts the job needs (see the
+  `github-minimal` preset for the floor).
+- An unknown `egress-preset` name selects nothing: under `block` the job's
+  checkout fails immediately. Preset names are validated at test time, not at
+  run time.
+- `checkout-and-harden` is a tooling checkout only. It takes no egress inputs
+  and produces no allowlist; the former `resolve-egress-allowlist` composite
+  and the bundled `.github/actions/harden-runner/` resolver were removed
+  because nothing they produced could reach the pre hook.
 
 ## Action-only reusables
 
 Some reusables wrap a third-party GitHub Action for a single check. They do
-**not** run the full lgtm-ci script suite — only optional egress hardening
-composites from a sparse lgtm-ci checkout (`harden-runner`,
-`resolve-egress-allowlist`).
+**not** run the full lgtm-ci script suite — only the `checkout-and-harden`
+tooling checkout from a sparse lgtm-ci checkout, where they need
+`scripts/ci/actions`.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -54,15 +124,16 @@ For these workflows:
 - Pin the reusable `uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-*.yml@<sha>`
   ref in production.
 - `tooling-ref` is **optional** on the action-only wrappers that still expose it
-  (labeler, dependency-review, semantic-pr-title, codeql) and pins egress
-  composites only — not CI scripts. When omitted, those reusables resolve
-  their own source through `job.workflow_sha` (the called workflow's commit).
-  Setting it emits a deprecation warning; use it only when testing unreleased
-  egress composite changes on a branch.
-- `reusable-scorecards.yml` does **not** accept `tooling-ref` (or
-  `egress-preset` / `allowed-endpoints-mode`): the scorecard publish allowlist
-  forbids lgtm-ci composites, so egress uses a static `allowed-endpoints`
-  default (#540).
+  (labeler, dependency-review, semantic-pr-title, codeql) and pins the
+  tooling composite only — not CI scripts. When omitted, those reusables
+  resolve their own source through `job.workflow_sha` (the called workflow's
+  commit). Setting it emits a deprecation warning; use it only when testing
+  unreleased composite changes on a branch.
+- `reusable-scorecards.yml` does **not** accept `tooling-ref`: the scorecard
+  publish allowlist forbids lgtm-ci composites (#540). Its egress inputs
+  (`egress-preset` default `scorecard`, `allowed-endpoints`,
+  `allowed-endpoints-mode`) still work because the preset map is a workflow
+  literal, not a composite.
 - Do **not** assume `tooling-ref` pins the third-party action inside the
   reusable; those actions are pinned by SHA inside the workflow YAML.
 
@@ -394,12 +465,12 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 caller repository checkout must initialize `.git` before tooling is added:
 
 1. Harden runner (`uses: step-security/harden-runner@<pinned SHA>` — first step;
-   allowlist from inputs/literals)
+   allowlist composed from inputs and the workflow's preset map, see
+   [Egress allowlists](#egress-allowlists))
 2. Checkout repository (caller repo at workspace root)
-3. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` — sparse-checkout must include egress
-   composites and any scripts/actions the job needs)
-4. Resolve egress allowlist / checkout-and-harden (scripts-dir; do not feed outputs
-   into harden-runner)
+3. Checkout lgtm-ci tooling (`.lgtm-ci-tooling/` — sparse-checkout must include
+   `checkout-and-harden` and any scripts/actions the job needs)
+4. checkout-and-harden (scripts-dir only; it plays no part in egress)
 5. Download artifacts, badge generation, GitHub Pages publish (local tooling actions)
 
 Deploy uses official `actions/deploy-pages` (not gh-pages branch push). See
@@ -456,8 +527,6 @@ cannot mix load-bearing fan-in inputs.
 When a reusable workflow job invokes a script-backed composite from
 `.lgtm-ci-tooling/.github/actions/`, the job's `Checkout lgtm-ci tooling` step
 must sparse-checkout `scripts/ci/` alongside `.github/actions/` (cone mode).
-Egress-only jobs that load only `harden-runner` and `resolve-egress-allowlist`
-are exempt.
 
 Contract enforcement: `scripts/ci/quality/validate-tooling-sparse-checkout.sh`
 (covered by BATS).
@@ -538,20 +607,18 @@ Egress **enforcement** requires a **direct** remote
 hooks for workspace-local actions and for actions nested inside composites, and
 step-security installs its monitoring agent only in `pre` (v2.20.0).
 
-`allowed-endpoints` must come from workflow **inputs** or literals available at
-job start — not `steps.*.outputs` (empty when `pre` runs).
-
-Allowlist **resolution** helpers (`resolve-egress-allowlist`, plus support files
-under `.github/actions/harden-runner/`) still ship via sparse checkout into
-`.lgtm-ci-tooling/` when needed; cross-repo callers must not vendor those
-composites. Hardening itself is always the remote step-security action.
+`allowed-endpoints` is composed from workflow **inputs** and the workflow's
+literal preset map (`env.LGTM_CI_EGRESS_PRESETS`) — never `steps.*.outputs`,
+which are empty when `pre` runs. See [Egress allowlists](#egress-allowlists)
+for the expression and the generator. No lgtm-ci composite takes part in
+enforcement; hardening is always the remote step-security action.
 
 Do **not** use `lgtm-hq/lgtm-ci/.github/actions/...@\${{ }}` in `steps[*].uses` —
 GitHub does not allow expressions in action `@ref` segments
 ([runner#895](https://github.com/actions/runner/issues/895)).
 
-Most reusable workflows use the shared `checkout-and-harden` composite (#379) to
-check out tooling and resolve the allowlist, then call step-security directly:
+Most reusable workflows call step-security directly as the first step, then use
+the shared `checkout-and-harden` composite (#379) to check out tooling:
 
 ```yaml
 - name: Checkout repository
@@ -579,8 +646,14 @@ check out tooling and resolve the allowlist, then call step-security directly:
   uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
   with:
     egress-policy: ${{ inputs.egress-policy }}
-    # inputs.allowed-endpoints (not step outputs): harden-runner pre runs at job start
-    allowed-endpoints: ${{ inputs.allowed-endpoints }}
+    # Composed from inputs and the literal map in env only: harden-runner's
+    # pre hook runs before any step, so nothing computed later can reach it.
+    allowed-endpoints: >-
+      ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+      && inputs.allowed-endpoints
+      || format('{0} {1}',
+      fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'],
+      inputs.allowed-endpoints) }}
 
 - name: Checkout and harden
   id: egress
@@ -591,40 +664,16 @@ check out tooling and resolve the allowlist, then call step-security directly:
     tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
     tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     tooling-ref-override: ${{ inputs.tooling-ref }}
-    egress-policy: ${{ inputs.egress-policy }}
-    egress-preset: ${{ inputs.egress-preset }}
-    allowed-endpoints: ${{ inputs.allowed-endpoints }}
-    allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
     sparse-checkout-extra: |
       scripts/ci/
 ```
 
-Workflows that cannot use the composite keep the explicit tooling checkout →
-`resolve-egress-allowlist` → `step-security/harden-runner` sequence for tooling
-layout, but still pass allowlists via **inputs or literals** (the action `pre`
-hook cannot see step outputs): the release workflows' two-phase checkouts
-(`reusable-release-auto-tag`, `reusable-release-version-pr`,
-`reusable-release-multi-ecosystem`), the tiered Rust
-workflows where `validate-runner-policy` must run between checkout and resolve
-(`reusable-build-rust-binaries`, `reusable-publish-rust-release`), and the
-bootstrap/fallback flow in `reusable-validate-lintro-version`.
-
-```yaml
-- name: Harden runner
-  uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-  with:
-    egress-policy: ${{ inputs.egress-policy }}
-    allowed-endpoints: ${{ inputs.allowed-endpoints }}
-
-- name: Resolve egress allowlist
-  id: egress
-  uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist
-  with:
-    egress-policy: ${{ inputs.egress-policy }}
-    egress-preset: ${{ inputs.egress-preset }}
-    allowed-endpoints: ${{ inputs.allowed-endpoints }}
-    allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-```
+Workflows that cannot use the composite (the release workflows' two-phase
+checkouts in `reusable-release-auto-tag`, `reusable-release-version-pr`,
+`reusable-release-multi-ecosystem`; the tiered Rust workflows
+`reusable-build-rust-binaries`, `reusable-publish-rust-release`; the
+bootstrap/fallback flow in `reusable-validate-lintro-version`) use the same
+harden-runner block — the allowlist never depends on the tooling checkout.
 
 Pin the reusable workflow `uses:` line to a commit SHA in production. Reusables
 locate their own tooling through `job.workflow_repository` / `job.workflow_sha`,
@@ -643,30 +692,28 @@ that pattern does not apply inside reusable workflow steps that need dynamic ref
 
 These jobs use **two** lgtm-ci checkouts:
 
-1. **Egress tooling** (before the GitHub App token) — sparse-checkout
-   `harden-runner` (resolve script bundle) and `resolve-egress-allowlist`, then
-   resolve → direct `step-security/harden-runner`.
+1. **Bootstrap tooling** (before the GitHub App token) — sparse-checkout
+   `scripts/ci/` for the tooling-ref resolution and deprecation-warning
+   scripts.
 2. **Scripts tooling** (after `create-github-app-token` and the full repository
-   checkout) — sparse-checkout `scripts/ci/` with the app installation token.
+   checkout) — sparse-checkout `scripts/ci/` again with the app installation
+   token.
 
 Keep `Create GitHub App installation token` before any step that uses
 `steps.app-token.outputs` (actionlint enforces step order).
 
 <!-- markdownlint-enable MD013 -->
 
-The resolve script bundle under `.github/actions/harden-runner/` is
-**self-contained** (`lib/egress/`). Canonical preset definitions live in
-`scripts/ci/lib/egress/presets.sh`; release maintainers run
-`scripts/ci/actions/sync-harden-runner-bundle.sh` before tagging.
-Reusable workflows bake the default preset into the `allowed-endpoints` input
-so harden-runner `pre` receives a non-empty allowlist at job start.
+Canonical preset definitions live in `scripts/ci/lib/egress/presets.sh`;
+after editing them run `bash scripts/ci/egress/sync-workflow-presets.sh` so
+every reusable's embedded map matches (the BATS contract test fails otherwise).
 
 Do **not** use `.lgtm-ci-egress` sparse checkouts for the composite.
 
 ### Runner policy tiers {#runner-policy-tiers}
 
 Reusable workflows that support multi-platform or release builds declare a **tier**
-via `validate-runner-policy` before `resolve-egress-allowlist` and `harden-runner`.
+via `validate-runner-policy` after the job-start `harden-runner` step.
 Consumers cannot override the tier — it is baked into the reusable contract.
 
 <!-- markdownlint-disable MD013 MD060 -->
@@ -687,9 +734,9 @@ Consumers cannot override the tier — it is baked into the reusable contract.
 
 <!-- markdownlint-enable MD013 MD060 -->
 
-New reusables call `validate-runner-policy` first, then conditionally run
-`resolve-egress-allowlist` and a direct `step-security/harden-runner@<pinned SHA>`
-step when `enforce-egress` is `true`.
+New reusables start with the direct `step-security/harden-runner@<pinned SHA>`
+step (its `if:` gates the platforms the tier supports), then call
+`validate-runner-policy` to hard-fail or warn per the table above.
 
 **Usage guidance:**
 
@@ -881,76 +928,74 @@ plain-text `VERSION`; `gemspec` → literal `.version = "..."` in a `.gemspec`
 (constant-backed gemspecs need `version-update-script` / `version.rb`);
 `pep621` → `[project].version` only (no `__init__.py` / `uv.lock`).
 When `pep621` needs to install `tomlkit` under `egress-policy: block`, callers
-must allow `pypi.org:443` and `files.pythonhosted.org:443` in
-`allowed-endpoints` (or use `egress-preset: pypi` with
-`allowed-endpoints-mode: append` and include those hosts in
-`allowed-endpoints` — the initial harden-runner step uses the input list
-directly, matching `reusable-release-version-pr`).
+must allow `pypi.org:443` and `files.pythonhosted.org:443`: either
+`egress-preset: pypi` with `allowed-endpoints-mode: append`, or list them in
+`allowed-endpoints` together with the GitHub hosts the job needs.
 
 ## Egress presets
 
 Reusable workflows default to `egress-policy: block` and
-`allowed-endpoints-mode: replace`. `resolve-egress-allowlist` expands presets via
-bundled `lib/egress/presets.sh` (synced from `scripts/ci/lib/egress/presets.sh`).
+`allowed-endpoints-mode: replace`. Presets are defined in
+`scripts/ci/lib/egress/presets.sh` and reach harden-runner's pre hook as the
+literal map described in [Egress allowlists](#egress-allowlists); since #913
+`egress-preset` and `allowed-endpoints-mode` are **enforced**, not advisory.
 
-### Pre-enforcement allowlist (harden-runner, since v0.50.0)
+### Pre-enforcement history (v0.50.0 → #913)
 
-Since [#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) (v0.50.0), reusables feed
-the caller's `allowed-endpoints` **verbatim** to the job-start
-`step-security/harden-runner` step, before `resolve-egress-allowlist` runs. That
-pre-enforcement value **replaces** the reusable's default GitHub/Ubuntu baseline
-whenever it is non-empty — even when `allowed-endpoints-mode: append` (append only
-affects the later, non-enforcing resolution step for tooling/checkout helpers).
-
-`step-security/harden-runner` splits `allowed-endpoints` on **spaces**. A
-newline-separated `|` literal block (the common multiline YAML style) is treated as
-a single unrecognised host:port token (the whole multiline string), which blocks
-**all** egress — including `github.com:443` checkout. Prefer a folded scalar (`>-`)
-with space-separated `host:port` tokens, or use `egress-preset` /
-`allowed-endpoints-mode: append` with empty caller endpoints so the baked-in preset
-reaches pre-enforcement.
-
-Upgrade incidents during org-wide v0.52.3 adoption
-([#510](https://github.com/lgtm-hq/lgtm-ci/issues/510)):
+From [#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) (v0.50.0) until
+issue #913, reusables fed the caller's `allowed-endpoints` **verbatim** to the
+job-start `step-security/harden-runner` step and resolved presets in a later,
+non-enforcing step. A non-empty caller list therefore replaced the baseline
+even under `append`, and `egress-preset` changed nothing (upgrade incidents
+during org-wide v0.52.3 adoption,
+[#510](https://github.com/lgtm-hq/lgtm-ci/issues/510):
 [homebrew-tap#126](https://github.com/lgtm-hq/homebrew-tap/pull/126),
 [podex#152](https://github.com/lgtm-hq/podex/pull/152),
 [Rustume#385](https://github.com/lgtm-hq/Rustume/pull/385),
 [turbo-themes#526](https://github.com/lgtm-hq/turbo-themes/pull/526),
-[py-lintro#1281](https://github.com/lgtm-hq/py-lintro/pull/1281).
+[py-lintro#1281](https://github.com/lgtm-hq/py-lintro/pull/1281)). The
+composition now happens inside the harden-runner step, so the table below is
+what the agent enforces.
 
-A future release may restore pre-enforcement normalization (tracked in the same
-[#467](https://github.com/lgtm-hq/lgtm-ci/issues/467) thread) so presets merge again
-before the harden-runner `pre` hook runs; until then, treat non-empty
-`allowed-endpoints` as the complete enforced allowlist.
+`step-security/harden-runner` splits `allowed-endpoints` on whitespace. Prefer a
+folded scalar (`>-`) with space-separated `host:port` tokens; a `|` literal
+block also works since newlines count as whitespace, but keep one host per
+token.
 
-The table below describes `resolve-egress-allowlist` / `allowed-endpoints-mode` only
-(not the pre-enforcement harden-runner step):
-
-| Mode      | Behavior                                                                        |
-| --------- | ------------------------------------------------------------------------------- |
-| `replace` | Non-empty `allowed-endpoints` overrides `egress-preset`; empty uses preset only |
-| `append`  | Merges preset + `allowed-endpoints` (deduped, first-seen wins)                  |
+| Mode      | Enforced allowlist                                                                 |
+| --------- | ---------------------------------------------------------------------------------- |
+| `replace` | Non-empty `allowed-endpoints` is used alone; empty `allowed-endpoints` uses preset |
+| `append`  | Preset + `allowed-endpoints`                                                       |
 
 Use `append` to keep lgtm-ci defaults and add project-specific hosts. Empty
-`allowed-endpoints` under `append` still means preset-only (same as omitting extras)
-and is the safe way to inherit the reusable preset at pre-enforcement.
-`audit` mode is unchanged (no enforced allowlist).
+`allowed-endpoints` under either mode means preset-only. `audit` mode logs the
+same list without blocking.
 
-| Preset           | Use case                                                             |
-| ---------------- | -------------------------------------------------------------------- |
-| `github-minimal` | PR summaries and reports (API, tooling checkout, workflow artifacts) |
-| `github-pages`   | GitHub Pages deploy/publish (OIDC)                                   |
-| `github-tooling` | Validate action pinning + GitHub raw/codeload                        |
-| `docker`         | Docker build/pull/push (`reusable-docker.yml`)                       |
-| `playwright`     | Playwright E2E + browser CDN downloads (`reusable-test-e2e*.yml`)    |
-| `pypi`           | PyPI/TestPyPI publish and availability checks                        |
-| `rubygems`       | RubyGems publish                                                     |
-| `npm-publish`    | npm OIDC trusted publish + Sigstore (`oauth2.sigstore.dev`)          |
-| `quality`        | Docker `lintro chk` (default on quality lint)                        |
-| `rust-release`   | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)     |
-| `sbom`           | SBOM, Grype scan, Sigstore attestation/cosign, release upload        |
-| `scorecard`      | OpenSSF Scorecard (`reusable-scorecards.yml`)                        |
-| `osv-scanner`    | GitHub tooling + release assets + OSV APIs                           |
+<!-- markdownlint-disable MD013 -->
+
+| Preset            | Use case                                                                         |
+| ----------------- | -------------------------------------------------------------------------------- |
+| `github-minimal`  | PR summaries and reports (API, tooling checkout, workflow artifacts)             |
+| `github-results`  | `github-minimal` + results blob storage (`reusable-auto-rerun-on-infra-failure`) |
+| `github-tooling`  | Validate action pinning + GitHub raw/codeload/release-assets                     |
+| `github-pages`    | GitHub Pages deploy/publish (OIDC)                                               |
+| `docker`          | Docker build/pull/push (`reusable-docker.yml`)                                   |
+| `playwright`      | Playwright E2E + browser CDN downloads (`reusable-test-e2e*.yml`)                |
+| `pypi`            | PyPI/TestPyPI publish and availability checks                                    |
+| `python-dist`     | `pypi` + Sigstore attestation (`reusable-build-python-dist.yml`)                 |
+| `rubygems`        | RubyGems publish                                                                 |
+| `npm-publish`     | npm OIDC trusted publish + Sigstore + artifact download                          |
+| `quality`         | Docker `lintro chk` (default on quality lint, Node/Rust tests)                   |
+| `build-artifact`  | Every vetted toolchain's registry (`reusable-build-artifact.yml`)                |
+| `shell-test`      | `github-tooling` + Ubuntu apt mirrors (`reusable-test-shell.yml`)                |
+| `sbom`            | SBOM, Grype scan, Sigstore attestation/cosign, release upload                    |
+| `scorecard`       | OpenSSF Scorecard (`reusable-scorecards.yml`)                                    |
+| `osv-scanner`     | GitHub tooling + release assets + OSV APIs                                       |
+| `ai-review`       | GitHub tooling + PyPI/uv (`reusable-ai-review.yml`; provider hosts appended)     |
+| `rust-release`    | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)                 |
+| `release-recover` | Registry probes + npm resume (`reusable-release-recover.yml`)                    |
+
+<!-- markdownlint-enable MD013 -->
 
 ```yaml
 egress-policy: block
@@ -964,15 +1009,8 @@ egress-preset: quality
 
 ### Allowlist formatting
 
-**Wrong** — `|` block becomes one token; harden-runner blocks all egress:
-
-```yaml
-allowed-endpoints: |
-  github.com:443
-  api.github.com:443
-```
-
-**Right** — folded scalar (`>-`) yields space-separated hosts:
+harden-runner splits the list on whitespace, so a folded scalar (`>-`) with
+one `host:port` per token is the idiomatic form:
 
 ```yaml
 allowed-endpoints: >-
@@ -980,12 +1018,24 @@ allowed-endpoints: >-
   api.github.com:443
 ```
 
-**Right** — rely on preset (recommended when the reusable ships one):
+**Right** — rely on the preset (recommended; every reusable ships a default):
 
 ```yaml
 egress-preset: quality
-allowed-endpoints-mode: append
-allowed-endpoints: ''
+```
+
+**Careful** — a non-empty list in the default `replace` mode is the *whole*
+allowlist; the preset is not applied, so the list must carry the GitHub hosts
+the job needs (`github-minimal` is the floor):
+
+```yaml
+allowed-endpoints: >-
+  github.com:443
+  api.github.com:443
+  codeload.github.com:443
+  objects.githubusercontent.com:443
+  pipelines.actions.githubusercontent.com:443
+  ghcr.io:443
 ```
 
 Or add project-specific hosts without replacing the preset baseline:

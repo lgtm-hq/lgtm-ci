@@ -114,7 +114,7 @@ input_required_value() {
 	run awk '
 		/^  notify:/ { in_job = 1; next }
 		in_job && /^  [A-Za-z_][A-Za-z0-9_-]*:/ { in_job = 0 }
-		in_job && /egress-preset: github-minimal/ { found = 1; exit }
+		in_job && /fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[.github-minimal.\]/ { found = 1; exit }
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success

@@ -13,7 +13,7 @@ import sys
 REPO_ROOT = pathlib.Path(__file__).resolve().parents[3]
 WORKFLOWS = REPO_ROOT / ".github/workflows"
 SCRIPTS_LINE = "            scripts/ci/\n"
-EGRESS_STEP = re.compile(r"^\s+- name: Checkout lgtm-ci egress tooling\s*$")
+BOOTSTRAP_STEP = re.compile(r"^\s+- name: Checkout lgtm-ci bootstrap tooling\s*$")
 
 
 def job_needs_scripts(job_body: str) -> bool:
@@ -40,12 +40,6 @@ def fix_sparse_block(block: str) -> str:
     """
     if "scripts/ci/" in block or "scripts/ci/actions/" in block:
         return block
-    if "resolve-egress-allowlist" in block:
-        return block.replace(
-            "            .github/actions/resolve-egress-allowlist\n",
-            "            .github/actions/resolve-egress-allowlist\n" + SCRIPTS_LINE,
-            1,
-        )
     if ".github/actions/" in block:
         return block.replace(
             "            .github/actions/\n",
@@ -58,8 +52,8 @@ def fix_sparse_block(block: str) -> str:
 def fix_job(job_body: str) -> str:
     """Ensure sparse-checkout includes ``scripts/ci/`` for tooling jobs.
 
-    Skips egress tooling checkout steps, which use a separate sparse
-    checkout that must not be modified.
+    Skips the release workflows' bootstrap tooling checkout steps, which
+    use a separate sparse checkout that must not be modified.
 
     Args:
         job_body: YAML text for a single workflow job.
@@ -74,17 +68,17 @@ def fix_job(job_body: str) -> str:
     lines = job_body.splitlines(keepends=True)
     out: list[str] = []
     i = 0
-    egress_sparse = False
+    bootstrap_sparse = False
     while i < len(lines):
         line = lines[i]
-        if EGRESS_STEP.match(line.rstrip("\n")):
-            egress_sparse = True
+        if BOOTSTRAP_STEP.match(line.rstrip("\n")):
+            bootstrap_sparse = True
             out.append(line)
             i += 1
             continue
         if line.strip().startswith("- name:") and "Checkout lgtm-ci" in line:
-            egress_sparse = False
-        if line.strip() == "sparse-checkout: |" and not egress_sparse:
+            bootstrap_sparse = False
+        if line.strip() == "sparse-checkout: |" and not bootstrap_sparse:
             out.append(line)
             i += 1
             block_lines: list[str] = []
