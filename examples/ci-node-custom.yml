@@ -28,6 +28,7 @@ jobs:
       contents: read
       packages: read
     with:
+      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "🛠️ Lintro Code Quality"
       egress-policy: block
       egress-preset: quality
@@ -46,6 +47,7 @@ jobs:
       pull-requests: write
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
+      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
 
   web-coverage:
     # Custom command runs in working-directory after dependency install
@@ -56,6 +58,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "Web Coverage"
       working-directory: apps/web
       package-manager: bun

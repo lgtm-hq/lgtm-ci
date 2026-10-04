@@ -31,6 +31,7 @@ jobs:
       actions: read
       issues: write
     with:
+      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       # Ecosystems whose version files get bumped: node, rust, python,
       # ruby, swift, dart, kotlin (comma-separated). Empty = CHANGELOG only.
       ecosystems: python

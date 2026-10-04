@@ -563,7 +563,7 @@ check out tooling and resolve the allowlist, then call step-security directly:
   with:
     # job.workflow_* identify the repository and commit of the workflow file
     # that defines this job — the reusable itself, not the caller (#995).
-    repository: ${{ job.workflow_repository }}
+    repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     path: .lgtm-ci-tooling
     ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
     sparse-checkout: |
@@ -623,8 +623,9 @@ locate their own tooling through `job.workflow_repository` / `job.workflow_sha`,
 so `tooling-ref` is no longer needed; passing it emits a deprecation warning and
 is reserved for testing unreleased tooling on a branch. Never derive the tooling
 ref from the `github` context: inside a called workflow it belongs to the caller
-(#995). The `job.workflow_*` properties are GitHub.com only; GHES callers must
-pass `tooling-ref` explicitly.
+(#995). The `job.workflow_*` properties are GitHub.com only; on GHES the
+repository falls back to `lgtm-hq/lgtm-ci` and callers must pass `tooling-ref`
+explicitly.
 
 Callers may still pin **other** lgtm-ci composites with
 `lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;

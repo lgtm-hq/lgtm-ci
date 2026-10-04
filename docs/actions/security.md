@@ -16,7 +16,7 @@ composite lives in lgtm-ci).
 - name: Checkout lgtm-ci tooling
   uses: actions/checkout@<pin>
   with:
-    repository: ${{ job.workflow_repository }}
+    repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     path: .lgtm-ci-tooling
     ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
     sparse-checkout: |

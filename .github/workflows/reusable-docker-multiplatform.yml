@@ -299,7 +299,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository }}
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
@@ -311,7 +311,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
-          tooling-repository: ${{ job.workflow_repository }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -527,7 +527,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository }}
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
@@ -539,7 +539,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
-          tooling-repository: ${{ job.workflow_repository }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -613,7 +613,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository }}
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
@@ -625,7 +625,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
-          tooling-repository: ${{ job.workflow_repository }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -707,7 +707,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository }}
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
@@ -719,7 +719,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
-          tooling-repository: ${{ job.workflow_repository }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -874,7 +874,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository }}
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
@@ -886,7 +886,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
-          tooling-repository: ${{ job.workflow_repository }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}
@@ -936,7 +936,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: ${{ job.workflow_repository }}
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
           ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           sparse-checkout: |
@@ -948,7 +948,7 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
           tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
-          tooling-repository: ${{ job.workflow_repository }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           egress-policy: ${{ inputs.egress-policy }}
           egress-preset: ${{ inputs.egress-preset }}

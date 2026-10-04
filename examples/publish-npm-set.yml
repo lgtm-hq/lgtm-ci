@@ -94,6 +94,7 @@ jobs:
       post-publish-verify: true
       # Optional approval gate; the trusted publisher must then name it.
       environment: npm
+      tooling-ref: "<sha>"
 
   # Release-mode failure notifier (#964): files or updates ONE deduplicated
   # issue per tag when a publish channel fails after automatic retries, and
@@ -109,6 +110,7 @@ jobs:
       tag: ${{ github.ref_name }}
       channels: ${{ toJson(needs) }}
       max-reruns: 3
+      tooling-ref: "<sha>"
     permissions:
       actions: read
       contents: read

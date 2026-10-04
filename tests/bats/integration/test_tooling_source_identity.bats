@@ -52,7 +52,7 @@ _is_explicit_pin_only() {
 			local start=$((line_no - 6)) end=$((line_no + 6))
 			((start < 1)) && start=1
 			if ! sed -n "${start},${end}p" "$f" |
-				grep -qF 'repository: ${{ job.workflow_repository }}'; then
+				grep -qF "repository: \${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}"; then
 				echo "${f##*/}:${line_no}: tooling checkout without job.workflow_repository" >&2
 				failures=$((failures + 1))
 			fi
@@ -110,11 +110,30 @@ _is_explicit_pin_only() {
 			/uses: \.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden$/ { in_call = 1; ref = repo = ovr = 0; next }
 			in_call && /^      - / { if (!(ref && repo && ovr)) bad = 1; in_call = 0 }
 			in_call && /tooling-ref: \$\{\{ inputs\.tooling-ref != .. && inputs\.tooling-ref \|\| job\.workflow_sha \}\}/ { ref = 1 }
-			in_call && /tooling-repository: \$\{\{ job\.workflow_repository \}\}/ { repo = 1 }
+			in_call && /tooling-repository: \$\{\{ job\.workflow_repository \|\| .lgtm-hq\/lgtm-ci. \}\}/ { repo = 1 }
 			in_call && /tooling-ref-override: \$\{\{ inputs\.tooling-ref \}\}/ { ovr = 1 }
 			END { if (in_call && !(ref && repo && ovr)) bad = 1; exit !bad }
 		' "$f"; then
 			echo "${f##*/}: checkout-and-harden call missing resolved tooling inputs" >&2
+			failures=$((failures + 1))
+		fi
+	done
+	[ "$failures" -eq 0 ]
+}
+
+@test "tooling identity: every job.workflow_repository use falls back to lgtm-hq/lgtm-ci for GHES" {
+	# job.workflow_* is GitHub.com only; on GHES the property is empty and an
+	# empty repository input would make checkout default to the caller's repo.
+	run grep -rlF 'job.workflow_repository }}' "$WORKFLOWS" "$ACTIONS"
+	assert_failure
+}
+
+@test "tooling identity: inline warn steps are guarded for tooling-refs that predate the script" {
+	local failures=0 f
+	for f in "$WORKFLOWS"/reusable-*.yml; do
+		grep -q 'warn-tooling-ref-override.sh' "$f" || continue
+		if ! grep -qF "hashFiles('.lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh') != ''" "$f"; then
+			echo "${f##*/}: warn step not guarded with hashFiles" >&2
 			failures=$((failures + 1))
 		fi
 	done
