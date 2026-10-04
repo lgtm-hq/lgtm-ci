@@ -92,9 +92,15 @@ Consequences of the contract:
   without `allowed-endpoints-mode: append` opts out of the preset entirely,
   so the list must include the GitHub hosts the job needs (see the
   `github-minimal` preset for the floor).
-- An unknown `egress-preset` name selects nothing: under `block` the job's
-  checkout fails immediately. Preset names are validated at test time, not at
-  run time.
+- An unknown `egress-preset` name selects nothing from the map (the pre hook
+  cannot refuse it), so the step right after harden-runner — `Fail on unknown
+  egress-preset` — fails the job by name under `block`, before any checkout or
+  install can die with an opaque network error. Under `audit` the guard is
+  skipped.
+- Coordinator jobs (`prepare`, `aggregate`, `setup`, `merge`) honour the same
+  inputs as the work job. On `main` some of them carried a literal that also
+  listed `uploads.github.com:443`; they now select the workflow's preset, which
+  omits it — none of those jobs uploads release assets.
 - `checkout-and-harden` is a tooling checkout only. It takes no egress inputs
   and produces no allowlist; the former `resolve-egress-allowlist` composite
   and the bundled `.github/actions/harden-runner/` resolver were removed

@@ -339,6 +339,17 @@ jobs:
             || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'],
             inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -421,6 +432,17 @@ jobs:
             || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'],
             inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -732,6 +754,17 @@ jobs:
             || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'],
             inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -814,6 +847,17 @@ jobs:
             || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'],
             inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'quality'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
       - name: Fail if matrix preparation did not succeed
         # A failed or cancelled prepare skips the matrix; failing here keeps
         # the required check from reporting a skip, which rulesets treat as a pass.

@@ -223,7 +223,10 @@ step_block_in_job() {
 @test "reusable-release-recover: every job composes its allowlist from the release-recover preset" {
 	# harden-runner installs the allowlist at job start, so every job selects
 	# the release-recover preset from the embedded map by expression (#913).
+	# Five harden-runner selectors plus their five unknown-preset guards.
 	run grep -c "fromJSON(env.LGTM_CI_EGRESS_PRESETS)\[inputs.egress-preset || 'release-recover'\]" "$WORKFLOW"
+	assert_output 10
+	run grep -c "^      - name: Fail on unknown egress-preset" "$WORKFLOW"
 	assert_output 5
 	run awk '/^      egress-preset:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
 	assert_output --partial 'default: "release-recover"'

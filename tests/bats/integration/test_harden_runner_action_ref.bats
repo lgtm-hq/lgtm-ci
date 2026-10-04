@@ -141,6 +141,62 @@ EOF
 	assert_output --partial "may reference only inputs.* and env.*"
 }
 
+@test "validate-harden-runner-action-ref: flags a literal host after an expression on the same line" {
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	_write_allowlist_fixture "$dir" "\\\${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }} evil.example:443"
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_failure
+	assert_output --partial "contains a literal host:port (evil.example:443)"
+}
+
+@test "validate-harden-runner-action-ref: flags several hosts on one continuation line" {
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	_write_allowlist_fixture "$dir" ">
+            \\\${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
+            evil.example:443 evil2.example:443"
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_failure
+	assert_output --partial "evil.example:443, evil2.example:443"
+}
+
+@test "validate-harden-runner-action-ref: flags github context in allowed-endpoints" {
+	# github.event.* is attacker-controlled; it must never widen egress.
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	_write_allowlist_fixture "$dir" ">-
+            \\\${{ format('{0} {1}', fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'], github.head_ref) }}"
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_failure
+	assert_output --partial "may reference only inputs.* and env.*"
+	assert_output --partial "found: github"
+}
+
+@test "validate-harden-runner-action-ref: ignores comments and quoted hosts inside expressions" {
+	local dir="$BATS_TEST_TMPDIR/wf"
+	mkdir -p "$dir"
+	cat >"$dir/reusable-fixture.yml" <<EOF
+name: Fixture
+on:
+  workflow_call:
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Harden runner
+        uses: ${HARDEN_PIN}
+        with:
+          egress-policy: block
+          # harden-runner.md explains why the runner.os gate matters here
+          allowed-endpoints: >
+            \\\${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'ai-review'] }}
+            \\\${{ env.AI_REVIEW_PROVIDER == 'anthropic' && 'api.anthropic.com:443' || '' }}
+EOF
+	WORKFLOWS_DIR="$dir" run bash "$VALIDATE"
+	assert_success
+}
+
 @test "validate-harden-runner-action-ref: flags a reference to the removed resolve composite" {
 	local dir="$BATS_TEST_TMPDIR/wf"
 	mkdir -p "$dir"

@@ -62,17 +62,23 @@ print(len(m))
 }
 
 @test "render-presets: every rendered value equals egress_preset_endpoints" {
-	run bash -c "
-		set -euo pipefail
-		source '$PRESETS'
-		json=\"\$(bash '$RENDER' --json)\"
-		while IFS= read -r name; do
-			expected=\"\$(egress_preset_endpoints \"\$name\" | tr '\n' ' ' | sed 's/ \$//')\"
-			actual=\"\$(printf '%s' \"\$json\" | python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' \"\$name\")\"
-			[[ \"\$expected\" == \"\$actual\" ]] || { echo \"mismatch for \$name\"; exit 1; }
-		done < <(egress_preset_names)
-	"
+	# Runs from a script file (not bash -c) so BASH_SOURCE is bound under
+	# kcov's DEBUG trap; paths arrive via exported variables.
+	local check="$BATS_TEST_TMPDIR/compare.sh"
+	cat >"$check" <<'SH'
+set -euo pipefail
+source "$PRESETS"
+json="$(bash "$RENDER" --json)"
+while IFS= read -r name; do
+	expected="$(egress_preset_endpoints "$name" | tr '\n' ' ' | sed 's/ $//')"
+	actual="$(printf '%s' "$json" | python3 -c 'import json,sys; print(json.load(sys.stdin)[sys.argv[1]])' "$name")"
+	[[ "$expected" == "$actual" ]] || { echo "mismatch for $name"; exit 1; }
+done < <(egress_preset_names)
+echo compared
+SH
+	PRESETS="$PRESETS" RENDER="$RENDER" run bash "$check"
 	assert_success
+	assert_output "compared"
 }
 
 @test "render-presets: lines stay under yamllint's limit once indented" {
@@ -90,6 +96,32 @@ print(len(m))
 	assert_output --partial '*.blob.core.windows.net:443'
 	refute_output --partial 'x.blob.core.windows.net:443'
 	rm -rf "$tmp"
+}
+
+@test "render-presets: wildcard hosts survive an inherited nullglob" {
+	run bash -O nullglob -c "cd / && bash '$RENDER' | tr '\n' ' '"
+	assert_success
+	assert_output --partial '*.blob.core.windows.net:443'
+}
+
+@test "render-presets: a preset that fails to resolve aborts instead of rendering empty" {
+	# egress_preset_names lists a name egress_preset_endpoints does not know.
+	local fake="$BATS_TEST_TMPDIR/presets.sh"
+	cat >"$fake" <<'SH'
+egress_preset_names() { printf '%s\n' github-minimal typo; }
+egress_preset_endpoints() {
+	case "$1" in
+	github-minimal) printf '%s\n' github.com:443 api.github.com:443 ;;
+	*) echo "unknown egress preset: $1" >&2; return 1 ;;
+	esac
+}
+SH
+	run env EGRESS_PRESETS_FILE="$fake" bash "$RENDER"
+	assert_failure
+	refute_output --partial '"typo":""'
+	run env EGRESS_PRESETS_FILE="$fake" bash "$RENDER" --json
+	assert_failure
+	refute_output --partial '"typo":""'
 }
 
 @test "render-presets: rejects unknown flags" {
@@ -186,25 +218,29 @@ print(len(m))
 	done
 }
 
-@test "no harden-runner allowed-endpoints reads step, job or needs context" {
-	local workflow blocks
+# The validator's expression analyser (expressions may reference only inputs
+# and env; nothing outside an expression may be a host:port). Sourced from the
+# script so the BATS contract and the CI validator can never disagree.
+# shellcheck disable=SC1090
+source <(sed -n '/^_allowed_endpoints_violations()/,/^}/p' "${PROJECT_ROOT}/scripts/ci/actions/validate-harden-runner-action-ref.sh")
+
+@test "no harden-runner allowed-endpoints reads any context other than inputs and env" {
+	local workflow block
 	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
-		blocks="$(harden_allowed_endpoints_blocks "$workflow")"
-		[[ -n "$blocks" ]] || continue
-		run grep -E '(steps|needs|job|github|vars|secrets|matrix|strategy|runner)\.' <<<"$blocks"
-		assert_failure
+		while IFS= read -r -d $'\x1e' block; do
+			[[ -n "${block//[[:space:]]/}" ]] || continue
+			run _allowed_endpoints_violations <<<"$block"
+			assert_output ""
+		done < <(harden_allowed_endpoints_blocks "$workflow" | awk 'BEGIN { RS = ""; ORS = "\x1e" } { print }')
 	done
 }
 
-@test "no harden-runner allowed-endpoints carries a literal host list" {
-	local workflow blocks
-	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
-		blocks="$(harden_allowed_endpoints_blocks "$workflow")"
-		[[ -n "$blocks" ]] || continue
-		# A line that is just host:port is a hand-maintained allowlist.
-		run grep -E '^[[:space:]]*[A-Za-z0-9*][A-Za-z0-9.*-]*:[0-9]+[[:space:]]*$' <<<"$blocks"
-		assert_failure
-	done
+@test "the expression analyser rejects a literal host next to an expression" {
+	run _allowed_endpoints_violations <<<"          allowed-endpoints: \${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['a'] }} evil.example:443"
+	assert_output --partial "literal host:port (evil.example:443)"
+	run _allowed_endpoints_violations <<<"          allowed-endpoints: >
+            \${{ format('{0} {1}', fromJSON(env.LGTM_CI_EGRESS_PRESETS)['a'], github.head_ref) }}"
+	assert_output --partial "found: github"
 }
 
 @test "every preset name selected by expression exists in presets.sh" {
@@ -294,12 +330,45 @@ print(len(m))
 		assert_success
 	done
 	# deploy-site: build and deploy jobs select their own preset inputs.
+	# Two harden-runner selectors plus their two unknown-preset guards.
 	run grep -oE "\[inputs\.egress-(build|deploy)-preset \|\| '(playwright|github-pages)'\]" "$WORKFLOWS_DIR/reusable-deploy-site-with-reports.yml"
 	assert_success
-	[[ "$(wc -l <<<"$output" | tr -d ' ')" -eq 2 ]]
+	[[ "$(wc -l <<<"$output" | tr -d ' ')" -eq 4 ]]
 	# site-quality test job: test-egress-preset falls back to egress-preset.
 	run grep -F "[inputs.test-egress-preset || inputs.egress-preset || 'github-tooling']" "$WORKFLOWS_DIR/reusable-site-quality.yml"
 	assert_success
+}
+
+@test "every caller-selectable harden-runner step is followed by an unknown-preset guard with the same selector" {
+	# The pre hook cannot refuse an unknown name (it just gets an empty
+	# baseline), so the very next step must fail by name instead of letting
+	# the job die later with an opaque network error.
+	local workflow bad
+	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
+		bad="$(awk '
+			/uses: step-security\/harden-runner@/ { in_harden = 1; selector = ""; next }
+			in_harden && match($0, /fromJSON\(env\.LGTM_CI_EGRESS_PRESETS\)\[inputs\.[^]]+\]/) {
+				selector = substr($0, RSTART, RLENGTH)
+			}
+			in_harden && /^      - / {
+				in_harden = 0
+				if (selector != "") {
+					if ($0 !~ /- name: Fail on unknown egress-preset/) { print "missing guard after " selector; next }
+					want = selector " == null"
+					expect = 1
+					next
+				}
+			}
+			# The guard if: may wrap across lines; compare the joined text.
+			expect && !/^      - / { joined = joined " " $0; gsub(/[[:space:]]+/, " ", joined) }
+			expect && index(joined, want) { expect = 0; want = ""; joined = "" }
+			expect && /^      - / { print "guard selector differs from harden selector: " want; expect = 0; joined = "" }
+		' "$workflow")"
+		[[ -z "$bad" ]] || {
+			echo "$workflow: $bad"
+			return 1
+		}
+	done
 }
 
 @test "allowed-endpoints inputs default to empty so the preset is the baseline" {

@@ -26,8 +26,10 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 
+# EGRESS_PRESETS_FILE is a test seam only; production renders the canonical file.
+PRESETS_FILE="${EGRESS_PRESETS_FILE:-$REPO_ROOT/scripts/ci/lib/egress/presets.sh}"
 # shellcheck source=../lib/egress/presets.sh
-source "$REPO_ROOT/scripts/ci/lib/egress/presets.sh"
+source "$PRESETS_FILE"
 
 # Wrap width for the folded form. Entries are indented four spaces inside the
 # workflow `env:` block, so 100 keeps every line under yamllint's 120 limit.
@@ -64,7 +66,9 @@ if [[ "$mode" == "json" ]]; then
 	out="{"
 	sep=""
 	for name in "${names[@]}"; do
-		out+="${sep}\"${name}\":\"$(preset_value "$name")\""
+		# Resolve first so a failed preset aborts instead of rendering "".
+		value="$(preset_value "$name")" || exit 1
+		out+="${sep}\"${name}\":\"${value}\""
 		sep=","
 	done
 	printf '%s}\n' "$out"
@@ -100,5 +104,7 @@ for i in "${!names[@]}"; do
 	[[ $i -eq 0 ]] && prefix="{${prefix}"
 	suffix='",'
 	[[ $i -eq $last ]] && suffix='"}'
-	emit_entry "$prefix" "$(preset_value "$name")" "$suffix"
+	# Resolve first so a failed preset aborts instead of rendering "".
+	value="$(preset_value "$name")" || exit 1
+	emit_entry "$prefix" "$value" "$suffix"
 done

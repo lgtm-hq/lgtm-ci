@@ -145,20 +145,52 @@ _check_harden_with_blocks() {
 			violations=$((violations + 1))
 			continue
 		fi
-		if ! grep -qF 'fromJSON(env.LGTM_CI_EGRESS_PRESETS)' <<<"$ae_block"; then
-			echo "${wf_name}:${line_num}: step-security/harden-runner allowed-endpoints must select a preset via fromJSON(env.LGTM_CI_EGRESS_PRESETS) (#913); hand-maintained host lists drift" >&2
+		while IFS= read -r msg; do
+			[[ -z "$msg" ]] && continue
+			echo "${wf_name}:${line_num}: ${msg}" >&2
 			violations=$((violations + 1))
-		fi
-		if grep -qE '(steps|needs|job|vars|matrix|strategy|runner)\.' <<<"$ae_block"; then
-			echo "${wf_name}:${line_num}: step-security/harden-runner allowed-endpoints may reference only inputs.* and env.* (pre hook sees nothing computed in a step)" >&2
-			violations=$((violations + 1))
-		fi
-		# A bare host:port token outside an expression is a literal list.
-		if grep -vE '\$\{\{|\}\}|^[[:space:]]*#' <<<"$ae_block" | grep -qE '^[[:space:]]*[A-Za-z0-9*][A-Za-z0-9.*-]*:[0-9]+[[:space:]]*$'; then
-			echo "${wf_name}:${line_num}: step-security/harden-runner allowed-endpoints contains a literal host:port; add it to a preset in scripts/ci/lib/egress/presets.sh instead" >&2
-			violations=$((violations + 1))
-		fi
+		done < <(_allowed_endpoints_violations <<<"$ae_block")
 	done < <(grep -nE "$ANY_STEP_SECURITY_HARDEN_RE" "$workflow" | cut -d: -f1)
+}
+
+# Analyse one harden-runner allowed-endpoints value (stdin: the key line and
+# its continuation lines). Prints one violation per line, nothing when clean.
+# Comments are dropped; `${{ ... }}` spans are analysed as expressions (only the
+# inputs and env contexts may appear, and one span must select from the preset
+# map); everything outside the spans must contain no host:port token.
+_allowed_endpoints_violations() {
+	local block
+	block="$(cat)"
+	AE_BLOCK="$block" python3 - <<'PY'
+import os
+import re
+
+text = os.environ["AE_BLOCK"]
+text = "\n".join(l for l in text.splitlines() if not l.lstrip().startswith("#"))
+spans = re.findall(r"\$\{\{(.*?)\}\}", text, flags=re.S)
+if not any("fromJSON(env.LGTM_CI_EGRESS_PRESETS)" in span for span in spans):
+    print(
+        "step-security/harden-runner allowed-endpoints must select a preset via "
+        "fromJSON(env.LGTM_CI_EGRESS_PRESETS) (#913); hand-maintained host lists drift"
+    )
+for span in spans:
+    unquoted = re.sub(r"'[^']*'", "''", span)
+    bad = sorted({ctx for ctx in re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\.", unquoted) if ctx not in {"inputs", "env"}})
+    if bad:
+        print(
+            "step-security/harden-runner allowed-endpoints may reference only inputs.* and env.* "
+            f"(pre hook sees nothing computed in a step); found: {', '.join(bad)}"
+        )
+outside = re.sub(r"\$\{\{.*?\}\}", " ", text, flags=re.S)
+outside = re.sub(r"^\s*allowed-endpoints:\s*[>|][-+]?\s*$", "", outside, flags=re.M)
+outside = re.sub(r"^\s*allowed-endpoints:", "", outside, flags=re.M)
+hosts = re.findall(r"(?<![\w.*-])[A-Za-z0-9*][A-Za-z0-9.*-]*:[0-9]+(?![\w.*-])", outside)
+if hosts:
+    print(
+        "step-security/harden-runner allowed-endpoints contains a literal host:port "
+        f"({', '.join(hosts)}); add it to a preset in scripts/ci/lib/egress/presets.sh instead"
+    )
+PY
 }
 
 _check_release_two_phase_sparse() {
@@ -225,7 +257,7 @@ _check_checkout_and_harden() {
 				if (length(lead) == job_indent) { tooling = 0; next }
 			}
 		}
-		/- name: Checkout lgtm-ci tooling/ { tooling = NR }
+		/- name: Checkout lgtm-ci (bootstrap )?tooling/ { tooling = NR }
 		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/checkout-and-harden/ {
 			if (tooling == 0 || tooling >= NR) {
 				bad = 1
@@ -352,7 +384,7 @@ while IFS= read -r -d '' workflow; do
 	_check_checkout_and_harden "$workflow"
 	_check_harden_is_first_step "$workflow"
 
-	if grep -qE "$TOOLING_RESOLVE_RE" "$workflow" || grep -qE '\.github/actions/(harden-runner|resolve-egress-allowlist)[[:space:]]*$' "$workflow"; then
+	if grep -qE "$TOOLING_RESOLVE_RE" "$workflow" || grep -qE '\.github/actions/(harden-runner|resolve-egress-allowlist)[[:space:]]*(#.*)?$' "$workflow"; then
 		echo "${wf_name}: references the removed resolve-egress-allowlist / bundled harden-runner composite (#913)" >&2
 		violations=$((violations + 1))
 	fi

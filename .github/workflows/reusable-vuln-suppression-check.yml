@@ -73,8 +73,8 @@ on:
         default: ""
       allowed-endpoints-mode:
         description: >-
-          replace (default): non-empty allowed-endpoints is used instead of
-          egress-preset; append: egress-preset plus allowed-endpoints
+          append (default): egress-preset plus allowed-endpoints; replace:
+          non-empty allowed-endpoints is used instead of egress-preset
         required: false
         type: string
         default: "append"
@@ -242,6 +242,17 @@ jobs:
             || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'osv-scanner'],
             inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'osv-scanner'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
       - name: Checkout repository
         # Pinned to SHA for supply chain security
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -256,15 +256,9 @@ jobs:
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: ${{ inputs.egress-policy }}
-          # Literal GitHub bootstrap allowlist (same pattern as the main
-          # failure notifier): the tooling checkout and preset resolution run
-          # after this step, so an empty caller allowed-endpoints must not
-          # leave block-policy egress with an empty allowlist.
-          # Carries the same results-storage wildcard as the input default:
-          # this bootstrap allowlist is what governs the rerun step when a
-          # caller passes its own (empty) allowed-endpoints, and a #794 probe
-          # blocked at the network layer produces evidence that reads like an
-          # empty endpoint.
+          # github-results carries the results-storage wildcard the #794 probe
+          # needs; a probe blocked at the network layer produces evidence that
+          # reads like an empty endpoint.
           # Composed from inputs and the literal map in env only: harden-runner's
           # pre hook runs before any step, so nothing computed later can reach it.
           allowed-endpoints: >-
@@ -273,6 +267,17 @@ jobs:
             || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-results'],
             inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-results'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
