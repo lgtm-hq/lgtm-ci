@@ -80,6 +80,18 @@ print(len(m))
 	assert_success
 }
 
+@test "render-presets: wildcard hosts survive a matching filename in the working directory" {
+	# `*.blob.core.windows.net:443` must not undergo pathname expansion.
+	local tmp
+	tmp="$(mktemp -d)"
+	touch "$tmp/x.blob.core.windows.net:443"
+	run bash -c "cd '$tmp' && bash '$RENDER' --json"
+	assert_success
+	assert_output --partial '*.blob.core.windows.net:443'
+	refute_output --partial 'x.blob.core.windows.net:443'
+	rm -rf "$tmp"
+}
+
 @test "render-presets: rejects unknown flags" {
 	run bash "$RENDER" --bogus
 	assert_failure
@@ -240,6 +252,54 @@ print(len(m))
 			}
 		done < <(grep -oE "\[inputs\.egress-preset \|\| '[a-z-]+'\]" "$workflow" | grep -oE "'[a-z-]+'" | tr -d "'")
 	done
+}
+
+@test "caller-selectable blocks use the canonical replace/append expression verbatim" {
+	# The replace/append semantics live in one expression repeated across the
+	# reusables (proven live by the consumer fixture, #913). Pin its exact
+	# shape, whitespace-normalised, so a drifting copy cannot quietly drop the
+	# caller list or the preset:
+	#   replace + non-empty list -> the list alone
+	#   otherwise               -> preset (+ list in append mode)
+	local workflow default blocks expected n_blocks n_match
+	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
+		default="$(awk '
+			/^      egress-preset:$/ { on = 1; next }
+			on && /^        default:/ { gsub(/"/, "", $2); print $2; exit }
+			on && /^      [a-z-]+:$/ { on = 0 }
+		' "$workflow")"
+		[[ -n "$default" ]] || continue
+		blocks="$(harden_allowed_endpoints_blocks "$workflow" | tr -s ' \n' ' ')"
+		n_blocks="$(grep -o "\[inputs.egress-preset || '$default'\]" <<<"$blocks" | wc -l | tr -d ' ')"
+		[[ "$n_blocks" -gt 0 ]] || continue
+		expected="\${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '') && inputs.allowed-endpoints || format('{0} {1}', fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || '$default'], inputs.allowed-endpoints) }}"
+		n_match="$(grep -oF "$expected" <<<"$blocks" | wc -l | tr -d ' ')"
+		# (site-quality's test job selects via `inputs.test-egress-preset ||
+		# inputs.egress-preset || ...` and is covered by the per-job test below.)
+		[[ "$n_match" -eq "$n_blocks" ]] || {
+			echo "$workflow: $n_blocks blocks select '$default' but only $n_match use the canonical expression"
+			echo "$blocks"
+			return 1
+		}
+	done
+}
+
+@test "per-job variants (deploy-site, site-quality test job) keep the same replace/append gate" {
+	local workflow blocks
+	for workflow in reusable-deploy-site-with-reports reusable-site-quality; do
+		blocks="$(harden_allowed_endpoints_blocks "$WORKFLOWS_DIR/$workflow.yml" | tr -s ' \n' ' ')"
+		run grep -oF "(inputs.allowed-endpoints-mode != 'append' && (inputs." <<<"$blocks"
+		assert_success
+		run grep -oF "|| format('{0} {1}', fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs." <<<"$blocks"
+		assert_success
+	done
+	# deploy-site: build and deploy jobs select their own preset inputs.
+	run grep -oE "\[inputs\.egress-(build|deploy)-preset \|\| '(playwright|github-pages)'\]" "$WORKFLOWS_DIR/reusable-deploy-site-with-reports.yml"
+	assert_success
+	[[ "$(wc -l <<<"$output" | tr -d ' ')" -eq 2 ]]
+	# site-quality test job: test-egress-preset falls back to egress-preset.
+	run grep -F "[inputs.test-egress-preset || inputs.egress-preset || 'github-tooling']" "$WORKFLOWS_DIR/reusable-site-quality.yml"
+	assert_success
 }
 
 @test "allowed-endpoints inputs default to empty so the preset is the baseline" {

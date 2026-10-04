@@ -76,7 +76,11 @@ fi
 emit_entry() {
 	local prefix="$1" value="$2" suffix="$3"
 	local line="${prefix}" host
-	for host in $value; do
+	local -a hosts=()
+	# Split on spaces only: wildcard hosts such as *.blob.core.windows.net:443
+	# must never undergo pathname expansion.
+	IFS=' ' read -r -a hosts <<<"$value"
+	for host in "${hosts[@]}"; do
 		if [[ "$line" != "$prefix" && $((${#line} + 1 + ${#host})) -gt "$WRAP_WIDTH" ]]; then
 			printf '%s\n' "$line"
 			line="$host"

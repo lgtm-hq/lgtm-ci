@@ -65,8 +65,9 @@ preset map** carried in the workflow's `env` (rendered from
 [workflow-contract.md](../workflow-contract.md#egress-allowlists)) — never
 from `steps.*.outputs` (those are empty at `pre` time and block all egress).
 
-harden-runner splits `allowed-endpoints` on whitespace; a folded scalar (`>-`)
-with one `host:port` per token is the idiomatic form.
+Use a folded scalar (`>-`) so hosts are space-separated; a newline-separated
+`|` block was observed to be treated as one token and block all egress (see
+workflow-contract.md, "Egress presets").
 
 Make this the **first step** in the job so the action `main` step applies the
 allowlist before checkout or other network I/O. `pre` alone is not enough.

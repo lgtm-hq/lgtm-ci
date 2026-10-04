@@ -668,8 +668,8 @@ the shared `checkout-and-harden` composite (#379) to check out tooling:
       scripts/ci/
 ```
 
-Workflows that cannot use the composite (the release workflows' two-phase
-checkouts in `reusable-release-auto-tag`, `reusable-release-version-pr`,
+Workflows that cannot use the composite (the release workflows
+`reusable-release-auto-tag`, `reusable-release-version-pr`,
 `reusable-release-multi-ecosystem`; the tiered Rust workflows
 `reusable-build-rust-binaries`, `reusable-publish-rust-release`; the
 bootstrap/fallback flow in `reusable-validate-lintro-version`) use the same
@@ -690,7 +690,7 @@ that pattern does not apply inside reusable workflow steps that need dynamic ref
 
 ### Release workflows (`reusable-release-auto-tag`, `reusable-release-version-pr`, `reusable-release-multi-ecosystem`)
 
-These jobs use **two** lgtm-ci checkouts:
+`reusable-release-auto-tag` uses **two** lgtm-ci checkouts:
 
 1. **Bootstrap tooling** (before the GitHub App token) — sparse-checkout
    `scripts/ci/` for the tooling-ref resolution and deprecation-warning
@@ -698,6 +698,10 @@ These jobs use **two** lgtm-ci checkouts:
 2. **Scripts tooling** (after `create-github-app-token` and the full repository
    checkout) — sparse-checkout `scripts/ci/` again with the app installation
    token.
+
+`reusable-release-version-pr` and `reusable-release-multi-ecosystem` need no
+tooling before the App token and check out `scripts/ci/` once, after it. (Their
+former pre-token checkout only fed the removed egress resolver.)
 
 Keep `Create GitHub App installation token` before any step that uses
 `steps.app-token.outputs` (actionlint enforces step order).
@@ -957,10 +961,12 @@ during org-wide v0.52.3 adoption,
 composition now happens inside the harden-runner step, so the table below is
 what the agent enforces.
 
-`step-security/harden-runner` splits `allowed-endpoints` on whitespace. Prefer a
-folded scalar (`>-`) with space-separated `host:port` tokens; a `|` literal
-block also works since newlines count as whitespace, but keep one host per
-token.
+`step-security/harden-runner` splits `allowed-endpoints` on **spaces**. A
+newline-separated `|` literal block (the common multiline YAML style) was
+observed to be treated as one unrecognised token, blocking **all** egress
+including the checkout (#510 incidents above). Use a folded scalar (`>-`) with
+space-separated `host:port` tokens. The generated preset map is space-separated
+for the same reason.
 
 | Mode      | Enforced allowlist                                                                 |
 | --------- | ---------------------------------------------------------------------------------- |
@@ -1009,8 +1015,15 @@ egress-preset: quality
 
 ### Allowlist formatting
 
-harden-runner splits the list on whitespace, so a folded scalar (`>-`) with
-one `host:port` per token is the idiomatic form:
+**Wrong** — `|` block becomes one token; harden-runner blocks all egress:
+
+```yaml
+allowed-endpoints: |
+  github.com:443
+  api.github.com:443
+```
+
+**Right** — folded scalar (`>-`) yields space-separated hosts:
 
 ```yaml
 allowed-endpoints: >-
