@@ -30,7 +30,7 @@ source "${SCRIPT_DIR}/../lib/network/download.sh"
 DEFAULT_CLAUDE_CODE_VERSION="2.1.232"
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-$DEFAULT_CLAUDE_CODE_VERSION}"
 # renovate: datasource=npm depName=@openai/codex
-DEFAULT_CODEX_VERSION="0.147.0"
+DEFAULT_CODEX_VERSION="0.160.0"
 CODEX_VERSION="${CODEX_VERSION:-$DEFAULT_CODEX_VERSION}"
 # Cursor publishes no registry feed; bump by hand with both checksums.
 # 2026.08.11 fixes wedged uploads silently stalling long headless sessions.
