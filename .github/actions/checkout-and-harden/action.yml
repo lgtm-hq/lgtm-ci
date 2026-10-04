@@ -75,6 +75,14 @@ outputs:
 runs:
   using: "composite"
   steps:
+    # Required inputs still accept an empty string; an empty ref would make
+    # actions/checkout take the tooling default branch (unpinned tooling, the
+    # GHES-without-override case). Fail before any checkout instead.
+    - name: Require a resolved tooling ref
+      if: inputs.tooling-ref == ''
+      shell: bash
+      run: bash "${GITHUB_ACTION_PATH}/require-tooling-ref.sh"
+
     # Re-checkout tooling with the full sparse set. The bootstrap workflow
     # checkout only materialises this action's directory; this step adds the
     # egress composites (and any sparse-checkout-extra paths) at the same ref.

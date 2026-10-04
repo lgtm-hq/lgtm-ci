@@ -10,7 +10,7 @@ Where applicable, workflows accept:
 
 | Input                              | Purpose                                                                |
 | ---------------------------------- | ---------------------------------------------------------------------- |
-| `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA)          |
+| `tooling-ref`                      | Optional tooling override (default: the called workflow's commit)      |
 | `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner            |
 | `egress-preset`                    | Named baseline allowlist under block                                   |
 | `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)              |
@@ -70,10 +70,11 @@ For these workflows:
 helper scripts (`prepare-semantic-pr-lists.sh`, `validate-pr-title-length.sh`).
 Pass `tooling-ref` when testing unreleased fixes to those helpers.
 
-Contrast with **script-backed reusables** (quality, test-*, validate-*,
-pr-auto-assign, release-*, publish-*, etc.) where callers **should** pass
-`tooling-ref` matching the workflow pin so `scripts/ci/` and composites stay
-aligned.
+Script-backed reusables (quality, test-*, validate-*, pr-auto-assign,
+release-*, publish-*, etc.) resolve `scripts/ci/` and composites from their own
+commit (`job.workflow_sha`), so `tooling-ref` is only needed on GHES or when
+testing unreleased tooling from a branch; passing it otherwise emits a
+deprecation warning.
 
 ### Runner pinning
 
@@ -582,7 +583,11 @@ check out tooling and resolve the allowlist, then call step-security directly:
   id: egress
   uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
   with:
-    tooling-ref: ${{ inputs.tooling-ref }}
+    # The composite never infers its source; pass the resolved ref, the
+    # repository (with the GHES fallback) and the raw override for the warning.
+    tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+    tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+    tooling-ref-override: ${{ inputs.tooling-ref }}
     egress-policy: ${{ inputs.egress-policy }}
     egress-preset: ${{ inputs.egress-preset }}
     allowed-endpoints: ${{ inputs.allowed-endpoints }}

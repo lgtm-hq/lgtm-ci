@@ -28,7 +28,11 @@ composite lives in lgtm-ci).
   id: egress
   uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
   with:
-    tooling-ref: ${{ inputs.tooling-ref }}
+    # The composite never infers its source; pass the resolved ref, the
+    # repository (with the GHES fallback) and the raw override for the warning.
+    tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+    tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+    tooling-ref-override: ${{ inputs.tooling-ref }}
     egress-preset: quality
     sparse-checkout-extra: |
       scripts/ci/

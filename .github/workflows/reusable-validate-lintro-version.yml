@@ -21,7 +21,7 @@ on:
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
-          (job.workflow_sha), set emits a deprecation warning (#995).
+          (job.workflow_sha). Pairs with tooling-ref-fallback for bootstrap.
         required: false
         type: string
         default: ""

@@ -135,3 +135,13 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	run grep -F "$pin" "$ACTION"
 	assert_success
 }
+
+@test "checkout-and-harden: fails before any checkout when the resolved tooling-ref is empty" {
+	run grep -F "if: inputs.tooling-ref == ''" "$ACTION"
+	assert_success
+	run awk '/Require a resolved tooling ref/ { seen_guard = NR } /Checkout lgtm-ci tooling/ { if (seen_guard && NR > seen_guard) ok = 1 } END { exit !ok }' "$ACTION"
+	assert_success
+	run bash "${PROJECT_ROOT}/.github/actions/checkout-and-harden/require-tooling-ref.sh"
+	assert_failure
+	assert_output --partial "::error title=tooling-ref required::"
+}

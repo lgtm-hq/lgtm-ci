@@ -18,12 +18,16 @@ set -euo pipefail
 
 : "${GH_REPO:?GH_REPO is required}"
 : "${GH_SHA:?GH_SHA is required}"
-: "${WORKFLOW_SHA:?WORKFLOW_SHA is required}"
 : "${GITHUB_OUTPUT:?GITHUB_OUTPUT is required}"
 
+# An explicit override wins and needs no workflow identity (GHES has none).
 if [[ -n "${TOOLING_REF:-}" ]]; then
 	echo "ref=${TOOLING_REF}" >>"${GITHUB_OUTPUT}"
-elif [[ "${GH_REPO}" == "lgtm-hq/lgtm-ci" ]]; then
+	exit 0
+fi
+: "${WORKFLOW_SHA:?WORKFLOW_SHA is required when TOOLING_REF is empty}"
+
+if [[ "${GH_REPO}" == "lgtm-hq/lgtm-ci" ]]; then
 	echo "ref=${GH_SHA}" >>"${GITHUB_OUTPUT}"
 else
 	echo "ref=${WORKFLOW_SHA}" >>"${GITHUB_OUTPUT}"

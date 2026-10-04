@@ -171,7 +171,9 @@ jobs:
         shell: bash
         env:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          # On GHES job.workflow_sha is empty; the explicit override must
+          # still satisfy older resolver scripts that require WORKFLOW_SHA.
+          WORKFLOW_SHA: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
       - name: Resolve egress allowlist
         id: egress
@@ -188,7 +190,9 @@ jobs:
           TOOLING_REF: ${{ inputs.tooling-ref }}
           GH_REPO: ${{ github.repository }}
           GH_SHA: ${{ github.sha }}
-          WORKFLOW_SHA: ${{ job.workflow_sha }}
+          # On GHES job.workflow_sha is empty; the explicit override must
+          # still satisfy older resolver scripts that require WORKFLOW_SHA.
+          WORKFLOW_SHA: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/release/resolve-tooling-ref.sh
       - name: Create GitHub App installation token
         id: app-token

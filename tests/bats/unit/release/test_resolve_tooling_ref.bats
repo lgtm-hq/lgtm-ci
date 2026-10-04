@@ -27,6 +27,18 @@ teardown() {
 	assert_success
 }
 
+@test "resolve-tooling-ref.sh: explicit TOOLING_REF needs no WORKFLOW_SHA (GHES)" {
+	run env \
+		TOOLING_REF="abc123" \
+		GH_REPO="someone/else" \
+		GH_SHA="deadbeef" \
+		WORKFLOW_SHA="" \
+		bash "$SCRIPT"
+	assert_success
+	run grep -q '^ref=abc123$' "$GITHUB_OUTPUT"
+	assert_success
+}
+
 @test "resolve-tooling-ref.sh: uses GH_SHA inside lgtm-ci" {
 	run env \
 		TOOLING_REF="" \
