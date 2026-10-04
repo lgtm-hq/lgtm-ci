@@ -28,7 +28,10 @@ Sample caller layouts for lgtm-hq repositories. Copy and adapt into your
 All starters pin reusable workflow `uses:` refs and `tooling-ref` to the same
 lgtm-ci release commit SHA with a `# vX.Y.Z` comment (see
 [docs/workflow-contract.md](../docs/workflow-contract.md), "Action pinning
-policy"). Update both together when bumping releases.
+policy"). Update both together when bumping releases. Releases that include
+issue #995 resolve their own tooling from the `uses:` pin, so `tooling-ref`
+can be dropped once a starter is bumped to one of them; it stays while the pin
+is older.
 
 ## Reusable workflows (recommended)
 

@@ -102,7 +102,9 @@ name: Reusable npm Publishing Workflow (deprecated)
         type: string
         default: ubuntu-24.04
       tooling-ref:
-        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        description: >-
+          Optional lgtm-ci tooling override; unset tracks the workflow pin
+          (job.workflow_sha), set emits a deprecation warning (#995).
         required: false
         type: string
         default: ""

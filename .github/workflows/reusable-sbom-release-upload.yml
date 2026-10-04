@@ -31,7 +31,9 @@ on:
         default: ""
 
       tooling-ref:
-        description: "Git ref to use when checking out lgtm-ci tooling scripts"
+        description: >-
+          Optional lgtm-ci tooling override; unset tracks the workflow pin
+          (job.workflow_sha), set emits a deprecation warning (#995).
         required: false
         type: string
         default: ""
@@ -91,13 +93,23 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          repository: lgtm-hq/lgtm-ci
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
+      - name: Warn on explicit tooling-ref override
+        # hashFiles guards callers that pin a tooling-ref predating the script.
+        if: >-
+          inputs.tooling-ref != ''
+          && hashFiles('.lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh') != ''
+        shell: bash
+        env:
+          TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
+          WORKFLOW_SHA: ${{ job.workflow_sha }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
       - name: Download SBOM artifact
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1

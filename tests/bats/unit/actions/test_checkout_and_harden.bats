@@ -11,8 +11,9 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 }
 
 @test "checkout-and-harden: declares the contract inputs" {
-	for input in tooling-ref egress-policy egress-preset allowed-endpoints \
-		allowed-endpoints-mode sparse-checkout-extra persist-credentials; do
+	for input in tooling-ref tooling-repository tooling-ref-override egress-policy \
+		egress-preset allowed-endpoints allowed-endpoints-mode sparse-checkout-extra \
+		persist-credentials; do
 		run grep -E "^  ${input}:" "$ACTION"
 		assert_success
 	done
@@ -45,10 +46,43 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	assert_success
 }
 
-@test "checkout-and-harden: tooling checkout falls back to github.workflow_sha" {
-	run grep -F \
-		"ref: \${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}" \
-		"$ACTION"
+@test "checkout-and-harden: tooling checkout uses the resolved inputs, never caller context (#995)" {
+	run grep -F 'repository: ${{ inputs.tooling-repository }}' "$ACTION"
+	assert_success
+	run grep -F 'ref: ${{ inputs.tooling-ref }}' "$ACTION"
+	assert_success
+	run grep -E 'github\.workflow_sha|job\.workflow_sha' "$ACTION"
+	# Only the input description may mention job.workflow_sha; no expression does.
+	refute_output --partial '${{'
+}
+
+@test "checkout-and-harden: tooling-ref is required and tooling-repository defaults to lgtm-ci" {
+	run awk '
+		/^  tooling-ref:/ { found = 1 }
+		found && /^    required: true/ { ok = 1; exit }
+		found && /^  [a-z]/ && !/^  tooling-ref:/ { exit }
+		END { exit !ok }
+	' "$ACTION"
+	assert_success
+	run awk '
+		/^  tooling-repository:/ { found = 1 }
+		found && /^    default: "lgtm-hq\/lgtm-ci"/ { ok = 1; exit }
+		found && /^  [a-z]/ && !/^  tooling-repository:/ { exit }
+		END { exit !ok }
+	' "$ACTION"
+	assert_success
+}
+
+@test "checkout-and-harden: warns when the caller still passes tooling-ref" {
+	run grep -F "inputs.tooling-ref-override != ''" "$ACTION"
+	assert_success
+	run grep -F "hashFiles('.lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh') != ''" "$ACTION"
+	assert_success
+	run grep -F "scripts/ci/actions/warn-tooling-ref-override.sh" "$ACTION"
+	assert_success
+	# The warning script lives under scripts/ci/actions, so that path must be
+	# in the composite's own sparse set (callers may not add it).
+	run grep -F "          scripts/ci/actions" "$ACTION"
 	assert_success
 }
 
@@ -100,4 +134,14 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 		"${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml" | head -1)
 	run grep -F "$pin" "$ACTION"
 	assert_success
+}
+
+@test "checkout-and-harden: fails before any checkout when the resolved tooling-ref is empty" {
+	run grep -F "if: inputs.tooling-ref == ''" "$ACTION"
+	assert_success
+	run awk '/Require a resolved tooling ref/ { seen_guard = NR } /Checkout lgtm-ci tooling/ { if (seen_guard && NR > seen_guard) ok = 1 } END { exit !ok }' "$ACTION"
+	assert_success
+	run bash "${PROJECT_ROOT}/.github/actions/checkout-and-harden/require-tooling-ref.sh"
+	assert_failure
+	assert_output --partial "::error title=tooling-ref required::"
 }

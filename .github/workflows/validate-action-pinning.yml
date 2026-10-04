@@ -30,7 +30,6 @@ jobs:
       fail-on-error: true
       verify-tags: true
       audit-transitive: true
-      tooling-ref: ${{ github.sha }}
       egress-policy: block
       egress-preset: github-tooling
     permissions:

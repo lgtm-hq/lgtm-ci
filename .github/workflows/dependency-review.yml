@@ -19,7 +19,6 @@ jobs:
     uses: ./.github/workflows/reusable-dependency-review.yml
     with:
       fail-on-severity: high
-      tooling-ref: ${{ github.sha }}
       egress-policy: block
       egress-preset: scorecard
       allowed-endpoints-mode: replace

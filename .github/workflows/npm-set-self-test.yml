@@ -45,7 +45,6 @@ jobs:
       dry-run: true
       provenance: false
       post-publish-verify: true
-      tooling-ref: ${{ github.sha }}
       egress-policy: block
 
   with-environment:
@@ -65,5 +64,4 @@ jobs:
       # Throwaway environment; GitHub creates it on first reference with no
       # protection rules, so the job runs unattended.
       environment: npm-set-self-test
-      tooling-ref: ${{ github.sha }}
       egress-policy: block

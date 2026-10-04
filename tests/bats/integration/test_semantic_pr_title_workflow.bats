@@ -16,7 +16,9 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/semantic-pr-title.yml"
 	assert_success
 }
 
-@test "semantic-pr-title: pins tooling to current commit" {
-	run grep -F 'tooling-ref: ${{ github.sha }}' "$WORKFLOW"
-	assert_success
+@test "semantic-pr-title: lets the reusable resolve its own tooling (#995)" {
+	# A local reusable call resolves job.workflow_sha to this commit; passing
+	# tooling-ref would only trigger the deprecation warning.
+	run grep -F 'tooling-ref:' "$WORKFLOW"
+	assert_failure
 }

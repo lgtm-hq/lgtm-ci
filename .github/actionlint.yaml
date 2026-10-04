@@ -1,0 +1,14 @@
+# SPDX-License-Identifier: MIT
+# actionlint configuration (auto-discovered; also honoured through lintro).
+#
+# `job.workflow_sha` and `job.workflow_repository` are documented GitHub.com
+# context properties that identify the repository and commit of the workflow
+# file defining the current job. Reusable workflows use them to check out
+# their own tooling (#995). actionlint <= 1.7.12 does not yet know them
+# (rhysd/actionlint#705, fix in rhysd/actionlint#707). Remove this ignore
+# once the pinned actionlint release includes that fix.
+---
+paths:
+  .github/workflows/**/*.{yml,yaml}:
+    ignore:
+      - 'property "workflow_(sha|repository)" is not defined in object type \{check_run_id: number;.+'

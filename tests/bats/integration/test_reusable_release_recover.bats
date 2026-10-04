@@ -134,11 +134,12 @@ step_block_in_job() {
 
 @test "reusable-release-recover: runs the default-branch workflow code, never the tag" {
 	# Every checkout pins the required tooling-ref; nothing checks out
-	# inputs.tag, and github.workflow_sha (the caller's commit inside a
-	# called workflow) is never used as a ref.
+	# inputs.tag, and neither github.workflow_sha (the caller's commit inside
+	# a called workflow) nor the job.workflow_sha default used elsewhere is a
+	# ref here: recovery tooling is always an explicit operator choice.
 	run grep -c "ref: \${{ inputs.tooling-ref }}" "$WORKFLOW"
 	assert_output 5
-	run grep -F "github.workflow_sha }}" "$WORKFLOW"
+	run grep -E "(github|job)\.workflow_sha \}\}" "$WORKFLOW"
 	assert_failure
 	run grep -cE "^\s+ref: " "$WORKFLOW"
 	assert_output 5

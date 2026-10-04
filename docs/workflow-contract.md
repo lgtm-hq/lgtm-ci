@@ -10,7 +10,7 @@ Where applicable, workflows accept:
 
 | Input                              | Purpose                                                                |
 | ---------------------------------- | ---------------------------------------------------------------------- |
-| `tooling-ref`                      | Pin lgtm-ci scripts/actions (defaults to caller workflow SHA)          |
+| `tooling-ref`                      | Optional tooling override (default: the called workflow's commit)      |
 | `egress-policy`                    | `block` (default) or `audit` for StepSecurity harden-runner            |
 | `egress-preset`                    | Named baseline allowlist under block                                   |
 | `allowed-endpoints`                | Multiline `host:port` list (see `allowed-endpoints-mode`)              |
@@ -55,9 +55,10 @@ For these workflows:
   ref in production.
 - `tooling-ref` is **optional** on the action-only wrappers that still expose it
   (labeler, dependency-review, semantic-pr-title, codeql) and pins egress
-  composites only — not CI scripts. When omitted, those reusables default to
-  `github.workflow_sha` (the pinned workflow SHA). Pass a matching `tooling-ref`
-  only when testing unreleased egress composite changes on a branch.
+  composites only — not CI scripts. When omitted, those reusables resolve
+  their own source through `job.workflow_sha` (the called workflow's commit).
+  Setting it emits a deprecation warning; use it only when testing unreleased
+  egress composite changes on a branch.
 - `reusable-scorecards.yml` does **not** accept `tooling-ref` (or
   `egress-preset` / `allowed-endpoints-mode`): the scorecard publish allowlist
   forbids lgtm-ci composites, so egress uses a static `allowed-endpoints`
@@ -69,10 +70,11 @@ For these workflows:
 helper scripts (`prepare-semantic-pr-lists.sh`, `validate-pr-title-length.sh`).
 Pass `tooling-ref` when testing unreleased fixes to those helpers.
 
-Contrast with **script-backed reusables** (quality, test-*, validate-*,
-pr-auto-assign, release-*, publish-*, etc.) where callers **should** pass
-`tooling-ref` matching the workflow pin so `scripts/ci/` and composites stay
-aligned.
+Script-backed reusables (quality, test-*, validate-*, pr-auto-assign,
+release-*, publish-*, etc.) resolve `scripts/ci/` and composites from their own
+commit (`job.workflow_sha`), so `tooling-ref` is only needed on GHES or when
+testing unreleased tooling from a branch; passing it otherwise emits a
+deprecation warning.
 
 ### Runner pinning
 
@@ -560,9 +562,14 @@ check out tooling and resolve the allowlist, then call step-security directly:
 - name: Checkout lgtm-ci tooling
   uses: actions/checkout@<pin> # v7.0.0
   with:
-    repository: lgtm-hq/lgtm-ci
+    # job.workflow_* identify the repository and commit of the workflow file
+    # that defines this job — the reusable itself, not the caller (#995).
+    # The final 'tooling-ref-required' fallback makes checkout fail loudly on
+    # GHES (no job context) when the caller omits tooling-ref, instead of
+    # fetching the tooling default branch.
+    repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
     path: .lgtm-ci-tooling
-    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || github.workflow_sha }}
+    ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
     sparse-checkout: |
       .github/actions/checkout-and-harden
     sparse-checkout-cone-mode: true
@@ -579,7 +586,11 @@ check out tooling and resolve the allowlist, then call step-security directly:
   id: egress
   uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
   with:
-    tooling-ref: ${{ inputs.tooling-ref }}
+    # The composite never infers its source; pass the resolved ref, the
+    # repository (with the GHES fallback) and the raw override for the warning.
+    tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+    tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+    tooling-ref-override: ${{ inputs.tooling-ref }}
     egress-policy: ${{ inputs.egress-policy }}
     egress-preset: ${{ inputs.egress-preset }}
     allowed-endpoints: ${{ inputs.allowed-endpoints }}
@@ -615,9 +626,14 @@ bootstrap/fallback flow in `reusable-validate-lintro-version`.
     allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
 ```
 
-Pin the reusable workflow `uses:` line to a commit SHA in production and pass the
-same ref as `tooling-ref` when testing branches. When `tooling-ref` is empty,
-reusables fall back to `github.workflow_sha`.
+Pin the reusable workflow `uses:` line to a commit SHA in production. Reusables
+locate their own tooling through `job.workflow_repository` / `job.workflow_sha`,
+so `tooling-ref` is no longer needed; passing it emits a deprecation warning and
+is reserved for testing unreleased tooling on a branch. Never derive the tooling
+ref from the `github` context: inside a called workflow it belongs to the caller
+(#995). The `job.workflow_*` properties are GitHub.com only; on GHES the
+repository falls back to `lgtm-hq/lgtm-ci` and callers must pass `tooling-ref`
+explicitly.
 
 Callers may still pin **other** lgtm-ci composites with
 `lgtm-hq/lgtm-ci/.github/actions/foo@<static-sha>` from their own workflow files;
