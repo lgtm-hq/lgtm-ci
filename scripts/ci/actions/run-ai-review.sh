@@ -53,7 +53,7 @@
 #   LINTRO_REVIEW_STATE_DIR  Coverage artifact directory (default:
 #                            ai-review-state).
 #   JOB_TIMEOUT_MINUTES      Job cap. The review is bounded to what remains
-#                            of it from JOB_STARTED_AT minus a 180s margin,
+#                            of it from JOB_STARTED_AT minus a 240s margin,
 #                            so the job — not the runner — owns the outcome.
 #   JOB_STARTED_AT           Epoch from preflight's started-at output.
 #   REVIEW_TIMEOUT_SECONDS   Test hook: explicit bound, skips the derivation.
@@ -82,10 +82,17 @@ readonly REVIEW_STATUS_ERROR=2
 # GNU timeout: 124 after SIGTERM, 137 after --kill-after escalated to KILL.
 readonly REVIEW_STATUS_TIMED_OUT=124
 readonly REVIEW_STATUS_KILLED=137
-# Seconds reserved out of the job cap for the steps before preflight, the
-# kill-after grace, the notices below, artifact upload, and post hooks.
-readonly REVIEW_CAP_MARGIN_SECONDS=180
+# Seconds reserved out of the job cap. The anchor is preflight, which runs
+# after harden-runner and the checkouts (~15s on the evidence run, #1097),
+# so the margin must absorb those plus everything after the bound fires:
+# kill-after grace (30s), up to three 20s gh calls, artifact upload, and
+# post hooks (~100s worst case). 240s leaves ~2 minutes for slow checkouts.
+readonly REVIEW_CAP_MARGIN_SECONDS=240
 readonly REVIEW_NOTICE_MARKER="<!-- lintro-ai-review-incomplete -->"
+# GNU timeout -v writes this to stderr when its deadline fires — the only
+# evidence that distinguishes the wrapper's 124/137 from lintro's own.
+readonly REVIEW_TIMEOUT_EVIDENCE='^timeout: sending signal '
+readonly REVIEW_DEFAULT_HINT="Split the PR, or re-run once it is smaller, to get a full review."
 
 emit_output() {
 	set_github_output "$1" "$2"
@@ -115,49 +122,56 @@ pr_diff_lines() {
 
 # Warn, add a step-summary line, and post (or update in place) a best-effort
 # PR comment as the bot (App token) so the author sees why no review landed.
-# Never fails. $3 is "true" when the job is about to fail (blocking).
+# Never fails. $3 is "true" when the job is about to fail (blocking); $4
+# replaces the default "split the PR" hint when size is not the cause.
 notice_review_not_completed() {
-	local reason="$1" diff_lines="${2:-}" failing="${3:-false}"
+	local reason="$1" diff_lines="${2:-}" failing="${3:-false}" hint="${4:-$REVIEW_DEFAULT_HINT}"
 	local size="${diff_lines:+ (diff: ${diff_lines} lines)}"
 	local effect="This check is neutral; required checks still gate the merge."
 	if [[ "$failing" == "true" ]]; then
 		effect="This check fails because the workflow runs with blocking: true."
 	fi
-	local body="AI review did not complete: ${reason}${size}. ${effect} Split the PR, or re-run once it is smaller, to get a full review."
+	local body="AI review did not complete: ${reason}${size}. ${effect} ${hint}"
 	echo "::warning::${body}"
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		echo "> :warning: ${body}" >>"$GITHUB_STEP_SUMMARY"
 	fi
 	[[ -n "${GITHUB_TOKEN:-}" ]] || return 0
 	local comments="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+	local comment_body="${REVIEW_NOTICE_MARKER}
+:warning: ${body}"
+	# Update in place only a comment the bot itself wrote: anyone can post
+	# the marker, and a PATCH on their comment would 403. Newest-first single
+	# page: the notice is recent by construction, and --paginate could not
+	# finish inside the 20s bound on a long thread.
 	local existing
 	existing="$(
 		GH_TOKEN="$GITHUB_TOKEN" MARKER="$REVIEW_NOTICE_MARKER" \
-			bounded_gh api --paginate "${comments}?per_page=100" \
-			--jq 'map(select(.body | startswith(env.MARKER))) | .[0].id // empty' 2>/dev/null |
-			head -n1 || true
+			bounded_gh api "${comments}?per_page=100&direction=desc" \
+			--jq 'map(select(.user.type == "Bot" and (.body | startswith(env.MARKER)))) | .[0].id // empty' 2>/dev/null ||
+			true
 	)"
-	local method="POST" target="$comments"
 	if [[ "$existing" =~ ^[0-9]+$ ]]; then
-		method="PATCH"
-		target="repos/${GITHUB_REPOSITORY}/issues/comments/${existing}"
+		GH_TOKEN="$GITHUB_TOKEN" bounded_gh api --method PATCH \
+			"repos/${GITHUB_REPOSITORY}/issues/comments/${existing}" \
+			-f body="$comment_body" >/dev/null 2>&1 && return 0
 	fi
-	GH_TOKEN="$GITHUB_TOKEN" bounded_gh api --method "$method" "$target" \
-		-f body="${REVIEW_NOTICE_MARKER}
-:warning: ${body}" >/dev/null 2>&1 ||
+	GH_TOKEN="$GITHUB_TOKEN" bounded_gh api --method POST "$comments" \
+		-f body="$comment_body" >/dev/null 2>&1 ||
 		echo "::warning::could not post the not-completed comment on PR #${PR_NUMBER}"
 }
 
-# Record a not-completed outcome, notify, and exit per the blocking rule.
-# Shared by the size gate, the no-budget path, and a timed-out review.
+# Record a not-completed outcome (lintro did not run, so exit-code is 0),
+# notify, and exit per the blocking rule. Shared by the size gate and the
+# no-budget path; a review that ran and timed out reports its real code.
 conclude_not_completed() {
-	local outcome="$1" reason="$2" diff_lines="${3:-}" blocking="${4:-false}" code="${5:-0}"
+	local outcome="$1" reason="$2" diff_lines="${3:-}" blocking="${4:-false}" hint="${5:-}"
 	emit_output "outcome" "$outcome"
-	emit_output "exit-code" "$code"
+	emit_output "exit-code" "0"
 	emit_output "verdict" ""
 	emit_output "error-kind" ""
 	echo "ai-review: outcome=${outcome} ${reason} blocking=${blocking}"
-	notice_review_not_completed "$reason" "$diff_lines" "$blocking"
+	notice_review_not_completed "$reason" "$diff_lines" "$blocking" "${hint:-$REVIEW_DEFAULT_HINT}"
 	if [[ "$blocking" == "true" ]]; then
 		exit 1
 	fi
@@ -313,7 +327,9 @@ if [[ "$STEP" == "run" ]]; then
 	# (the install above already spent some of it), minus a fixed margin.
 	# REVIEW_TIMEOUT_SECONDS is a test hook that bypasses the derivation.
 	review_timeout="${REVIEW_TIMEOUT_SECONDS:-}"
+	bound_source="test hook"
 	if [[ ! "$review_timeout" =~ ^[1-9][0-9]*$ ]]; then
+		bound_source="job cap ${JOB_TIMEOUT_MINUTES:-30}m"
 		job_minutes="${JOB_TIMEOUT_MINUTES:-30}"
 		[[ "$job_minutes" =~ ^[0-9]+$ ]] || job_minutes=30
 		now="$(date +%s)"
@@ -325,31 +341,29 @@ if [[ "$STEP" == "run" ]]; then
 			# as a review that ran and timed out, without burning spend.
 			conclude_not_completed "timed-out" \
 				"only ${review_timeout}s of the ${job_minutes}-minute job cap remained before the review could start" \
-				"$(pr_diff_lines)" "$blocking"
+				"$(pr_diff_lines)" "$blocking" \
+				"Re-run the job, or raise timeout-minutes if setup is routinely this slow."
 		fi
 	fi
 	kill_after="${REVIEW_KILL_AFTER_SECONDS:-30}"
 	[[ "$kill_after" =~ ^[0-9]+$ ]] || kill_after=30
 	runner=()
 	if command -v timeout >/dev/null 2>&1; then
-		runner=(timeout --kill-after="$kill_after" "$review_timeout")
-		echo "ai-review: review-timeout=${review_timeout}s (job cap ${JOB_TIMEOUT_MINUTES:-30}m)"
+		# -v: the "sending signal" diagnostic is the evidence the deadline
+		# fired (lintro's own 124/137 would otherwise look identical).
+		runner=(timeout -v --kill-after="$kill_after" "$review_timeout")
+		echo "ai-review: review-timeout=${review_timeout}s (${bound_source})"
 	else
 		echo "::warning::GNU timeout not found; the review is bounded only by the job cap"
 	fi
 
 	set +e
-	review_started="$SECONDS"
 	# ${arr[@]+...}: an empty array is unbound under set -u on bash < 4.4.
 	${runner[@]+"${runner[@]}"} "$lintro_bin" "${args[@]}" >"$out_file" 2>"$err_file"
 	exit_code=$?
 	set -e
-	review_elapsed=$((SECONDS - review_started))
-	# Evidence that the wrapper's deadline fired, not that lintro itself
-	# happened to exit 124/137: the wrapper was on, and the call ran at
-	# least as long as the bound.
 	bound_fired=false
-	if [[ ${#runner[@]} -gt 0 && "$review_elapsed" -ge "$review_timeout" ]]; then
+	if [[ ${#runner[@]} -gt 0 ]] && grep -q "$REVIEW_TIMEOUT_EVIDENCE" "$err_file"; then
 		bound_fired=true
 	fi
 

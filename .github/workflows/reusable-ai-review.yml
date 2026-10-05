@@ -151,7 +151,7 @@ on:
       timeout-minutes:
         description: >-
           Job timeout in minutes. The review call itself is bounded to what
-          remains of this cap (measured from preflight) minus a 3-minute
+          remains of this cap (measured from preflight) minus a 4-minute
           margin, so a slow review ends as a neutral `timed-out` outcome
           instead of a cancelled (failed) job (#1098).
         required: false

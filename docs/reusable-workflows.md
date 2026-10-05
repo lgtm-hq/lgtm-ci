@@ -2053,10 +2053,10 @@ the raw values and cannot fold case.
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`). |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → `vars.LINTRO_AI_MAX_COST_USD`). |
-| `blocking`        | `false` | When true, exit 2 (no review), a timed-out review, or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
+| `blocking`        | `false` | When true, exit 2 (no review), a timed-out review, a size-skipped review (see `max-diff-lines`), or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
 | `max-diff-lines`  | `0`     | Skip the review (PR comment; neutral unless `blocking`) when additions+deletions exceed this; `0` disables. `2000` is a sensible start: ~1,900-line diffs did not finish in 30 min on `anthropic`/`cli` (#1097). |
 | `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair. |
-| `timeout-minutes` | `30`    | Job cap; the review call is bounded to what remains of it (from preflight) minus 3 min. Raise for long CLI reviews. |
+| `timeout-minutes` | `30`    | Job cap; the review call is bounded to what remains of it (from preflight) minus 4 min. Raise for long CLI reviews. |
 | `job-name`        | `AI Review` | Check name. |
 
 <!-- markdownlint-enable MD013 -->
@@ -2074,12 +2074,17 @@ the raw values and cannot fold case.
   non-blocking. **INCOMPLETE** coverage-at-HEAD always reddens the check.
 - **Timed-out is neutral.** The review call runs under GNU `timeout` with
   a budget of whatever remains of `timeout-minutes` — measured from the
-  preflight step, so setup and the lintro install are already counted —
-  minus a 3-minute margin for kill escalation, the notices, and the
-  artifact upload. When the bound ends the review (exit 124, or 137 after
-  `--kill-after`) the step logs a `::warning`, adds a step-summary line,
-  posts or updates one "did not complete" PR comment as the bot, and exits
-  `0` (`outcome=timed-out`; fails only with `blocking: true`). If under 60 s
+  preflight step, so the CLI and lintro installs are already counted —
+  minus a 4-minute margin. The margin absorbs the harden-runner and
+  checkout steps that run before preflight (~15 s on the evidence run)
+  plus everything after the bound fires: kill escalation, the notices,
+  and the artifact upload (~100 s worst case). When the bound ends the
+  review (GNU `timeout -v`'s "sending signal" diagnostic is the evidence;
+  a 124/137 that lintro produced on its own stays `broken`) the step logs
+  a `::warning`, adds a step-summary line, posts or updates one "did not
+  complete" PR comment as the bot (only its own comment is updated; the
+  comment stays once a later round completes), and exits `0`
+  (`outcome=timed-out`; fails only with `blocking: true`). If under 60 s
   remain the same outcome is recorded without running the model. The job
   cap is never what ends the review — a job cancelled at its cap records a
   failed check and flips the PR to `UNSTABLE`, which blocks

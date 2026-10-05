@@ -236,22 +236,33 @@ write_hanging_lintro() {
 }
 
 # Mock gh: records every call with its GH_TOKEN; answers the pulls/N size
-# lookup with $1 and the comment-list lookup with $2 (existing comment id
-# or empty).
+# lookup with $1; the comment-list lookup applies the real --jq filter to
+# the JSON array in $2 (default: no comments). $3 = "patch-fails" makes
+# PATCH exit 1 (403 shape). Writes exit 0.
 _mock_gh_comment() {
-	local diff_lines="$1" existing_id="${2:-}"
+	local diff_lines="$1" comments_json="${2:-[]}" patch_mode="${3:-}"
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
+	printf '%s' "$comments_json" >"${BATS_TEST_TMPDIR}/comments.json"
 	cat >"${mock_bin}/gh" <<EOF
 #!/usr/bin/env bash
 printf '%s\n' "\$@" >>"${BATS_TEST_TMPDIR}/gh-calls"
 echo "token=\${GH_TOKEN:-}" >>"${BATS_TEST_TMPDIR}/gh-calls"
 echo "--" >>"${BATS_TEST_TMPDIR}/gh-calls"
+if [[ " \$* " == *" --method PATCH "* ]]; then
+	[[ "${patch_mode}" == "patch-fails" ]] && exit 1
+	exit 0
+fi
 if [[ " \$* " == *" --method "* ]]; then
 	exit 0
 fi
 if [[ " \$* " == *"/issues/"*"/comments?per_page="* ]]; then
-	echo "${existing_id}"
+	jq_filter=""
+	while [[ \$# -gt 0 ]]; do
+		if [[ "\$1" == "--jq" ]]; then jq_filter="\$2"; fi
+		shift
+	done
+	jq -r "\$jq_filter" "${BATS_TEST_TMPDIR}/comments.json"
 	exit 0
 fi
 echo "${diff_lines}"
@@ -260,6 +271,9 @@ EOF
 	save_path
 	export PATH="${mock_bin}:$PATH"
 }
+
+BOT_MARKER_COMMENT='[{"id":4242,"user":{"type":"Bot","login":"lintro-review[bot]"},"body":"<!-- lintro-ai-review-incomplete -->\n:warning: old"}]'
+USER_MARKER_COMMENT='[{"id":7,"user":{"type":"User","login":"someone"},"body":"<!-- lintro-ai-review-incomplete -->\nspoof"}]'
 
 @test "run: timed-out review is neutral (exit 0) when non-blocking" {
 	command -v timeout >/dev/null || skip "GNU timeout not installed"
@@ -295,13 +309,39 @@ EOF
 	command -v timeout >/dev/null || skip "GNU timeout not installed"
 	local bin
 	bin="$(write_hanging_lintro)"
-	_mock_gh_comment 1900 4242
+	_mock_gh_comment 1900 "$BOT_MARKER_COMMENT"
 	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=1 GITHUB_TOKEN=app-token
 	assert_success
 	run awk -v RS='--\n' '/--method/' "${BATS_TEST_TMPDIR}/gh-calls"
 	assert_output --partial "PATCH"
 	assert_output --partial "repos/x/y/issues/comments/4242"
 	refute_output --partial "POST"
+}
+
+@test "run: a marker comment from a non-bot user is ignored and a fresh one is posted" {
+	command -v timeout >/dev/null || skip "GNU timeout not installed"
+	local bin
+	bin="$(write_hanging_lintro)"
+	_mock_gh_comment 1900 "$USER_MARKER_COMMENT"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=1 GITHUB_TOKEN=app-token
+	assert_success
+	run awk -v RS='--\n' '/--method/' "${BATS_TEST_TMPDIR}/gh-calls"
+	assert_output --partial "POST"
+	refute_output --partial "PATCH"
+	refute_output --partial "issues/comments/7"
+}
+
+@test "run: a failed PATCH falls back to posting a new comment" {
+	command -v timeout >/dev/null || skip "GNU timeout not installed"
+	local bin
+	bin="$(write_hanging_lintro)"
+	_mock_gh_comment 1900 "$BOT_MARKER_COMMENT" patch-fails
+	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=1 GITHUB_TOKEN=app-token
+	assert_success
+	refute_output --partial "could not post"
+	run awk -v RS='--\n' '/--method/' "${BATS_TEST_TMPDIR}/gh-calls"
+	assert_output --partial "PATCH"
+	assert_output --partial "POST"
 }
 
 @test "run: a review that ignores SIGTERM is killed and still timed-out, not broken" {
@@ -341,6 +381,17 @@ EOF
 		run cat "$GITHUB_OUTPUT"
 		assert_output --partial "outcome=broken"
 	done
+	# Near-deadline: lintro exits 124 on its own just before the bound. An
+	# elapsed-seconds heuristic would misread this; the wrapper's own
+	# "sending signal" diagnostic is the only evidence that counts.
+	: >"$GITHUB_OUTPUT"
+	bin="${BATS_TEST_TMPDIR}/lintro"
+	printf '#!/usr/bin/env bash\nsleep 0.8\nexit 124\n' >"$bin"
+	chmod +x "$bin"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=1
+	assert_failure
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=broken"
 }
 
 @test "run: review bound is the cap remainder from preflight minus the margin" {
@@ -348,14 +399,14 @@ EOF
 	local bin now
 	bin="$(write_fake_lintro "$(success_json)" "" 0)"
 	now="$(date +%s)"
-	# 30-minute cap, preflight anchored 600s ago → 1800-600-180 = 1020s.
+	# 30-minute cap, preflight anchored 600s ago → 1800-600-240 = 960s.
 	run run_review LINTRO_BIN="$bin" JOB_TIMEOUT_MINUTES=30 JOB_STARTED_AT=$((now - 600)) BLOCKING=false
 	assert_success
-	assert_output --regexp "review-timeout=10(19|20)s"
+	assert_output --regexp "review-timeout=9(59|60)s"
 	# No anchor: measured from now.
 	run run_review LINTRO_BIN="$bin" JOB_TIMEOUT_MINUTES=30 BLOCKING=false
 	assert_success
-	assert_output --regexp "review-timeout=16(19|20)s"
+	assert_output --regexp "review-timeout=15(59|60)s"
 	# Test hook wins over the derivation.
 	run run_review LINTRO_BIN="$bin" JOB_TIMEOUT_MINUTES=30 REVIEW_TIMEOUT_SECONDS=42 BLOCKING=false
 	assert_success
@@ -372,13 +423,17 @@ EOF
 	chmod +x "$bin"
 	_mock_gh_comment 1900
 	now="$(date +%s)"
-	# 30-minute cap with 28 minutes already gone: 120-180 < 60.
+	# 30-minute cap with 28 minutes already gone: 120-240 < 60.
 	run run_review LINTRO_BIN="$bin" JOB_TIMEOUT_MINUTES=30 JOB_STARTED_AT=$((now - 1680)) BLOCKING=false
 	assert_success
 	assert_output --partial "job cap remained before the review could start"
+	assert_output --partial "Re-run the job"
+	refute_output --partial "Split the PR"
 	[[ ! -e "${BATS_TEST_TMPDIR}/lintro-ran" ]]
 	run cat "$GITHUB_OUTPUT"
 	assert_output --partial "outcome=timed-out"
+	# lintro did not run, so there is no lintro exit code to report.
+	assert_output --partial "exit-code=0"
 }
 
 @test "run: without GNU timeout a 124 is broken, not timed-out" {
