@@ -259,10 +259,12 @@ legs. Each leg still uses `github/codeql-action/*` with the resolved
 unreleased matrix-generator changes. See
 [workflow-contract.md](workflow-contract.md#action-only-reusables).
 
-Consumers do **not** need to vendor `.github/actions/harden-runner` or
-`resolve-egress-allowlist` — reusables sparse-checkout lgtm-ci into
-`.lgtm-ci-tooling/` and invoke `./.lgtm-ci-tooling/.github/actions/...` (resolved
-from `job.workflow_sha`, or the `tooling-ref` override, like every tooling step).
+Consumers do **not** need to vendor anything for egress — reusables carry
+their allowlist presets as a workflow literal and invoke
+`step-security/harden-runner` directly (#913). Tooling composites are
+sparse-checked-out into `.lgtm-ci-tooling/` and invoked as
+`./.lgtm-ci-tooling/.github/actions/...` (resolved from `job.workflow_sha`, or
+the `tooling-ref` override, like every tooling step).
 
 See [workflow-contract.md](workflow-contract.md) for the standard input contract,
 permissions by mode, egress allowlists, and Rust examples.

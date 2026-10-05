@@ -250,27 +250,101 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_failure
 }
 
-@test "egress preset: every canonical name returns endpoints" {
+@test "egress preset: every name from egress_preset_names returns endpoints" {
 	local preset
-	local presets=(
-		github-minimal
-		github-pages
-		github-tooling
-		docker
-		playwright
-		pypi
-		rubygems
-		npm-publish
-		quality
-		osv-scanner
-		rust-release
-		sbom
-		scorecard
-		ai-review
-	)
-	for preset in "${presets[@]}"; do
+	while IFS= read -r preset; do
 		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | grep -c ."
 		assert_success
 		[[ "$output" -gt 0 ]]
-	done
+	done < <(bash -c "source '$PRESETS' && egress_preset_names")
+}
+
+@test "egress_preset_names: lists every case arm exactly once" {
+	# Every `name)` arm in egress_preset_endpoints must be enumerated (the
+	# renderer only emits listed names) and no name may repeat.
+	local arms names
+	arms="$(awk '
+		/^egress_preset_endpoints\(\)/ { on = 1; next }
+		on && /^}/ { exit }
+		on && /^\t[a-z][a-z-]*\)$/ { sub(/^\t/, ""); sub(/\)$/, ""); print }
+	' "$PRESETS" | sort)"
+	names="$(bash -c "source '$PRESETS' && egress_preset_names" | sort)"
+	[[ -n "$arms" ]]
+	[[ "$arms" == "$names" ]] || {
+		echo "case arms:"
+		echo "$arms"
+		echo "egress_preset_names:"
+		echo "$names"
+		return 1
+	}
+	run bash -c "source '$PRESETS' && egress_preset_names | sort | uniq -d"
+	assert_output ""
+}
+
+@test "egress preset github-results is github-minimal plus results blob storage" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints github-results"
+	assert_success
+	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
+	assert_output --partial '*.blob.core.windows.net:443'
+	run bash -c "source '$PRESETS' && egress_preset_endpoints github-minimal | grep -c blob"
+	assert_output "0"
+}
+
+@test "egress preset python-dist is pypi plus Sigstore attestation hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints python-dist"
+	assert_success
+	assert_output --partial 'files.pythonhosted.org:443'
+	assert_output --partial 'upload.pypi.org:443'
+	assert_output --partial 'fulcio.sigstore.dev:443'
+	assert_output --partial 'oauth2.sigstore.dev:443'
+	assert_output --partial 'sigstore-tuf-root.storage.googleapis.com:443'
+}
+
+@test "egress preset npm-publish includes the artifact service for the built tarball" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints npm-publish"
+	assert_success
+	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
+	assert_output --partial '*.blob.core.windows.net:443'
+}
+
+@test "egress preset build-artifact covers every vetted toolchain registry" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints build-artifact"
+	assert_success
+	assert_output --partial 'bun.sh:443'
+	assert_output --partial 'nodejs.org:443'
+	assert_output --partial 'registry.npmjs.org:443'
+	assert_output --partial 'files.pythonhosted.org:443'
+	assert_output --partial 'releases.astral.sh:443'
+	assert_output --partial 'sh.rustup.rs:443'
+	assert_output --partial 'index.crates.io:443'
+}
+
+@test "egress preset shell-test is github-tooling plus Ubuntu apt mirrors" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints shell-test"
+	assert_success
+	assert_output --partial 'uploads.github.com:443'
+	assert_output --partial 'archive.ubuntu.com:80'
+	assert_output --partial 'azure.archive.ubuntu.com:80'
+	assert_output --partial 'security.ubuntu.com:80'
+	assert_output --partial 'security.ubuntu.com:443'
+}
+
+@test "egress preset release-recover covers registry probes and the npm resume" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints release-recover"
+	assert_success
+	assert_output --partial 'pypi.org:443'
+	assert_output --partial 'registry.npmjs.org:443'
+	assert_output --partial 'ghcr.io:443'
+	assert_output --partial 'pkg-containers.githubusercontent.com:443'
+	assert_output --partial 'uploads.github.com:443'
+	assert_output --partial '*.blob.core.windows.net:443'
+	assert_output --partial 'oauth2.sigstore.dev:443'
+}
+
+@test "egress presets never emit duplicate hosts" {
+	local preset
+	while IFS= read -r preset; do
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset' | sort | uniq -d"
+		assert_output ""
+	done < <(bash -c "source '$PRESETS' && egress_preset_names")
 }

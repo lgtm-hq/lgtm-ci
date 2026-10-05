@@ -142,7 +142,7 @@ _source_tmp_lib() {
 	local smoke="$BATS_TEST_TMPDIR/aggregator_smoke.sh"
 	cat >"$smoke" <<'SMOKE'
 set -euo pipefail
-for lib in actions testing release docker publish network egress notify; do
+for lib in actions testing release docker publish network notify; do
 	source "$TMP_LIB_DIR/$lib.sh"
 done
 echo loaded

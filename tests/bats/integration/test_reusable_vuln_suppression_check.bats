@@ -120,9 +120,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 	assert_success
 }
 
-@test "reusable-vuln-suppression-check: allowed-endpoints default includes api.github.com" {
-	run awk '/^      allowed-endpoints:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
-		"$WORKFLOW"
+@test "reusable-vuln-suppression-check: default osv-scanner preset includes api.github.com" {
+	run grep -F "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'osv-scanner']" "$WORKFLOW"
+	assert_success
+	run bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh' && egress_preset_endpoints osv-scanner"
 	assert_success
 	assert_output --partial 'api.github.com:443'
 }

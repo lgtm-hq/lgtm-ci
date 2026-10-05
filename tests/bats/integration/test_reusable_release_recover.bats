@@ -220,15 +220,16 @@ step_block_in_job() {
 	refute_output --partial "GH_TOKEN: \${{ github.token }}"
 }
 
-@test "reusable-release-recover: block-mode allowlists have no preset fallback" {
-	# harden-runner installs inputs.allowed-endpoints at job start; a preset
-	# resolved afterwards could never apply, so none is offered.
-	run grep -F "egress-preset" "$WORKFLOW"
-	assert_failure
-	run grep -F "allowed-endpoints-mode" "$WORKFLOW"
-	assert_failure
-	run grep -c "allowed-endpoints: \${{ inputs.allowed-endpoints }}" "$WORKFLOW"
+@test "reusable-release-recover: every job composes its allowlist from the release-recover preset" {
+	# harden-runner installs the allowlist at job start, so every job selects
+	# the release-recover preset from the embedded map by expression (#913).
+	# Five harden-runner selectors plus their five unknown-preset guards.
+	run grep -c "fromJSON(env.LGTM_CI_EGRESS_PRESETS)\[inputs.egress-preset || 'release-recover'\]" "$WORKFLOW"
+	assert_output 10
+	run grep -c "^      - name: Fail on unknown egress-preset" "$WORKFLOW"
 	assert_output 5
+	run awk '/^      egress-preset:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
+	assert_output --partial 'default: "release-recover"'
 }
 
 @test "release artifact retention defaults to the 90-day recovery window" {

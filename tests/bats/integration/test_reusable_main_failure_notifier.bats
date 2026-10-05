@@ -26,7 +26,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-main-failure-notifier.yml"
 @test "main-failure-notifier: hardens egress before reporting" {
 	run grep -F "harden-runner" "$WORKFLOW"
 	assert_success
-	run grep -F "resolve-egress-allowlist" "$WORKFLOW"
+	run grep -F "fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal']" "$WORKFLOW"
 	assert_success
 }
 

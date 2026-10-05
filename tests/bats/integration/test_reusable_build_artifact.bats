@@ -184,12 +184,16 @@ _input_default() {
 @test "reusable-build-artifact: default egress allowlist covers every toolchain" {
 	# Each vetted toolchain must build with no egress configuration at all, so
 	# the default allowlist carries its setup host and ecosystem registry.
+	# The list lives in the build-artifact preset, which the workflow selects
+	# by default (#913).
+	run grep -F "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'build-artifact']" "$WORKFLOW"
+	assert_success
 	local endpoint
 	for endpoint in \
 		nodejs.org:443 registry.npmjs.org:443 \
 		pypi.org:443 files.pythonhosted.org:443 astral.sh:443 \
 		static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443; do
-		run grep -F "          ${endpoint}" "$WORKFLOW"
+		run bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh' && egress_preset_endpoints build-artifact | grep -Fx '${endpoint}'"
 		assert_success
 	done
 }

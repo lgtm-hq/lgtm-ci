@@ -114,10 +114,13 @@ scripts for standalone sourcing — the canonical versions are in `fs.sh` and
 
 ## Egress allowlist
 
-- `egress_normalize_endpoint_lines` (egress.sh) - Normalize a multiline host:port list
-- `egress_dedupe_endpoint_lines` (egress.sh) - Deduplicate host:port lines, preserving first-seen order
-- `egress_merge_endpoint_lines` (egress.sh) - Merge multiple multiline endpoint lists, then dedupe
+- `egress_preset_names` (egress/presets.sh) - List every preset name, in render order
 - `egress_preset_endpoints` (egress/presets.sh) - Resolve a named egress preset to its endpoint list
+- `egress_ai_review_provider_endpoints` (egress/presets.sh) - Canonical provider/transport host matrix for `reusable-ai-review.yml`
+
+Presets reach the reusable workflows as a generated literal map
+(`scripts/ci/egress/render-presets.sh`, `scripts/ci/egress/sync-workflow-presets.sh`);
+see [workflow-contract.md](../workflow-contract.md#egress-allowlists).
 
 ## SBOM format & severity
 

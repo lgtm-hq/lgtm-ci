@@ -33,17 +33,14 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	assert_success
 }
 
-@test "auto-rerun: bootstrap harden step pins literal github hosts" {
-	# The first harden-runner step must not depend on caller input: an empty
-	# allowed-endpoints would otherwise block the tooling checkout that
-	# resolves the egress preset.
-	run awk '
-		/step-security\/harden-runner@/ { in_harden = 1 }
-		in_harden && /allowed-endpoints: \$\{\{/ { bad = 1; exit }
-		in_harden && /api\.github\.com:443/ { found = 1; exit }
-		END { exit !(found && !bad) }
-	' "$WORKFLOW"
+@test "auto-rerun: harden step selects the github-results preset by default" {
+	# The first harden-runner step composes its allowlist from inputs and the
+	# embedded preset map at job start (#913); an empty caller allowed-endpoints
+	# falls back to the github-results preset rather than blocking checkout.
+	run grep -F "fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-results']" "$WORKFLOW"
 	assert_success
+	run awk '/^      egress-preset:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
+	assert_output --partial 'default: "github-results"'
 }
 
 @test "auto-rerun: allows the results storage the #794 probe needs" {
@@ -55,11 +52,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-auto-rerun-on-infra-failure
 	#
 	# Wildcarded because the redirect target is sharded (productionresultssa4
 	# and productionresultssa11 observed live); the unsharded host is never the
-	# target.
-	run grep -cF "*.blob.core.windows.net:443" "$WORKFLOW"
+	# target. The host lives in the github-results preset, not in a literal.
+	run bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh' && egress_preset_endpoints github-results"
 	assert_success
-	# Both the bootstrap allowlist and the allowed-endpoints input default.
-	assert_output "2"
+	assert_output --partial "*.blob.core.windows.net:443"
+	assert_output --partial "api.github.com:443"
 }
 
 @test "auto-rerun: delegates to the rerun script with no inline shell" {

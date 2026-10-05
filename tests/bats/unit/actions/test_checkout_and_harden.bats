@@ -11,39 +11,29 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 }
 
 @test "checkout-and-harden: declares the contract inputs" {
-	for input in tooling-ref tooling-repository tooling-ref-override egress-policy \
-		egress-preset allowed-endpoints allowed-endpoints-mode sparse-checkout-extra \
-		persist-credentials; do
+	for input in tooling-ref tooling-repository tooling-ref-override \
+		sparse-checkout-extra persist-credentials; do
 		run grep -E "^  ${input}:" "$ACTION"
 		assert_success
 	done
 }
 
-@test "checkout-and-harden: declares allowed-endpoints and scripts-dir outputs" {
-	run grep -E "^  allowed-endpoints:" "$ACTION"
-	assert_success
+@test "checkout-and-harden: takes no egress inputs and emits no allowlist (#913)" {
+	# harden-runner's pre hook cannot see anything this composite produces,
+	# so offering egress inputs here would be decorative.
+	for key in egress-policy egress-preset allowed-endpoints allowed-endpoints-mode; do
+		run grep -E "^  ${key}:" "$ACTION"
+		assert_failure
+	done
+	run grep -F "resolve-egress-allowlist" "$ACTION"
+	assert_failure
+}
+
+@test "checkout-and-harden: declares the scripts-dir output only" {
 	run grep -E "^  scripts-dir:" "$ACTION"
 	assert_success
-}
-
-@test "checkout-and-harden: egress-policy defaults to block" {
-	run awk '
-		/^  egress-policy:/ { found = 1 }
-		found && /^    default: "block"/ { ok = 1; exit }
-		found && /^  [a-z]/ && !/^  egress-policy:/ { exit }
-		END { exit !ok }
-	' "$ACTION"
-	assert_success
-}
-
-@test "checkout-and-harden: allowed-endpoints-mode defaults to replace" {
-	run awk '
-		/^  allowed-endpoints-mode:/ { found = 1 }
-		found && /^    default: "replace"/ { ok = 1; exit }
-		found && /^  [a-z]/ && !/^  allowed-endpoints-mode:/ { exit }
-		END { exit !ok }
-	' "$ACTION"
-	assert_success
+	run grep -E "^  allowed-endpoints:" "$ACTION"
+	assert_failure
 }
 
 @test "checkout-and-harden: tooling checkout uses the resolved inputs, never caller context (#995)" {
@@ -86,13 +76,13 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	assert_success
 }
 
-@test "checkout-and-harden: base sparse checkout covers egress composites and itself" {
-	for path in ".github/actions/checkout-and-harden" \
-		".github/actions/harden-runner" \
-		".github/actions/resolve-egress-allowlist"; do
+@test "checkout-and-harden: base sparse checkout covers itself and scripts/ci/actions" {
+	for path in ".github/actions/checkout-and-harden" "scripts/ci/actions"; do
 		run grep -F "          ${path}" "$ACTION"
 		assert_success
 	done
+	run grep -E '\.github/actions/(harden-runner|resolve-egress-allowlist)' "$ACTION"
+	assert_failure
 }
 
 @test "checkout-and-harden: appends sparse-checkout-extra to the sparse set" {
@@ -101,9 +91,8 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 }
 
 @test "checkout-and-harden: does not nest step-security/harden-runner " {
-	run grep -E 'step-security/harden-runner|/\.github/actions/harden-runner' "$ACTION"
-	# Sparse path mention of harden-runner directory is required for resolve sibling;
-	# the composite must not *invoke* the local harden-runner action or step-security.
+	# The composite must not *invoke* step-security (nested pre/post hooks are
+	# skipped) nor any local harden-runner action.
 	run awk '
 		/uses:[[:space:]]+step-security\/harden-runner/ { bad = 1 }
 		/uses:[[:space:]]+\.\/\.lgtm-ci-tooling\/\.github\/actions\/harden-runner/ { bad = 1 }
@@ -112,19 +101,10 @@ ACTION="${PROJECT_ROOT}/.github/actions/checkout-and-harden/action.yml"
 	assert_success
 }
 
-@test "checkout-and-harden: resolve step runs and exposes allowed-endpoints" {
-	run grep -F \
-		"uses: ./.lgtm-ci-tooling/.github/actions/resolve-egress-allowlist" \
-		"$ACTION"
-	assert_success
-	run grep -F \
-		"value: \${{ steps.egress.outputs['allowed-endpoints'] }}" \
-		"$ACTION"
-	assert_success
-}
-
-@test "checkout-and-harden: documents direct step-security follow-up " {
+@test "checkout-and-harden: documents that the direct step-security step runs first" {
 	run grep -F 'step-security/harden-runner@' "$ACTION"
+	assert_success
+	run grep -F 'FIRST' "$ACTION"
 	assert_success
 }
 

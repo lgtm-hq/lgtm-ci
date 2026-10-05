@@ -9,7 +9,7 @@ Full documentation lives in [docs/actions/](../../docs/actions/README.md):
 - [Setup](../../docs/actions/setup.md) — `setup-env`, `setup-python`,
   `setup-node`, `setup-rust`, `setup-ruby`
 - [Security](../../docs/actions/security.md) — `checkout-and-harden`,
-  `resolve-egress-allowlist`, `harden-runner`, `secure-checkout`,
+  `secure-checkout`,
   `egress-audit`, `validate-runner-policy`, `validate-action-pinning`,
   `generate-sbom`, `scan-vulnerabilities`, `attest-build`,
   `verify-attestation`, `sign-artifact`, `verify-signature`
@@ -35,8 +35,8 @@ Full documentation lives in [docs/actions/](../../docs/actions/README.md):
   `create-signed-commit`
 
 Prefer [reusable workflows](../../docs/workflows/README.md) when you want
-drop-in jobs without copying `.github/actions/harden-runner` or
-`resolve-egress-allowlist` into your repo.
+drop-in jobs; they harden egress with a direct `step-security/harden-runner`
+step and need nothing copied into your repo.
 
 For production workflows, pin actions to a commit SHA (or a release tag)
 — see [docs/getting-started.md](../../docs/getting-started.md#pinning).

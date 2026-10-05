@@ -16,9 +16,7 @@ want a drop-in job without wiring these composites by hand.
 | `setup-node` | [setup](setup.md#setup-node) | Node.js + Bun setup with caching |
 | `setup-rust` | [setup](setup.md#setup-rust) | Rust toolchain setup with cargo caching |
 | `setup-ruby` | [setup](setup.md#setup-ruby) | Ruby + Bundler setup with gem caching |
-| `checkout-and-harden` | [security](security.md#checkout-and-harden) | Tooling checkout + egress allowlist resolve |
-| `resolve-egress-allowlist` | [security](security.md#resolve-egress-allowlist) | Resolve egress presets/endpoints before hardening |
-| `harden-runner/` | [security](security.md#harden-runner) | Support files for allowlist resolve (`lib/`, `resolve-egress-endpoints.sh`); invoke `step-security/harden-runner` directly |
+| `checkout-and-harden` | [security](security.md#checkout-and-harden) | Tooling checkout for reusable workflows (no egress role) |
 | `secure-checkout` | [security](security.md#secure-checkout) | Hardened git checkout |
 | `egress-audit` | [security](security.md#egress-audit) | Network egress monitoring and reporting |
 | `validate-runner-policy` | [security](security.md#validate-runner-policy) | Tiered egress policy enforcement |

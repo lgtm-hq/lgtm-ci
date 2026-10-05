@@ -26,7 +26,7 @@ Full function-level reference: [reference.md](reference.md).
 ## Layout
 
 Single-file libraries at the top of `scripts/ci/lib/` are either standalone
-(`log.sh`, `fs.sh`, `platform.sh`, `git.sh`, `egress.sh`, `cosign.sh`,
+(`log.sh`, `fs.sh`, `platform.sh`, `git.sh`, `cosign.sh`,
 `pages_coverage.sh`) or thin **aggregators** that source every module in a
 same-named subdirectory, so callers can pick one file for a whole domain:
 
