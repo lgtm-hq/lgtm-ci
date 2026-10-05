@@ -150,9 +150,10 @@ on:
         default: "ubuntu-24.04"
       timeout-minutes:
         description: >-
-          Job timeout in minutes. The review call itself is bounded 5
-          minutes below this so a slow review ends as a neutral `timed-out`
-          outcome instead of a cancelled (failed) job (#1098).
+          Job timeout in minutes. The review call itself is bounded to what
+          remains of this cap (measured from preflight) minus a 3-minute
+          margin, so a slow review ends as a neutral `timed-out` outcome
+          instead of a cancelled (failed) job (#1098).
         required: false
         type: number
         default: 30
@@ -508,6 +509,7 @@ jobs:
           PYTHON_VERSION: ${{ inputs.python-version }}
           BLOCKING: ${{ inputs.blocking }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}
           MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
           LINTRO_AI_ENABLED: "1"

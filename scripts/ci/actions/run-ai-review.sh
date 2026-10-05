@@ -16,10 +16,11 @@
 #                2  no review produced (provider/lintro failure)
 #              Coverage-at-HEAD below 100% is INCOMPLETE and always
 #              reddens the check (lintro exit codes stay 0/1/2).
-#              The call is bounded by GNU timeout below the job cap; a
-#              timed-out review is `timed-out` and neutral unless BLOCKING
-#              (#1098). A diff above MAX_DIFF_LINES is `skipped-size` and
-#              never runs the model. Both warn and post a PR comment.
+#              The call is bounded by GNU timeout to the cap's remainder; a
+#              review the bound ended (124, or 137 after --kill-after) is
+#              `timed-out` and neutral unless BLOCKING (#1098). A diff above
+#              MAX_DIFF_LINES is `skipped-size` and never runs the model.
+#              Both warn and post (update in place) a PR comment.
 #
 # Trusted-install invariant: this script only installs a *pinned lintro from
 # PyPI* and runs `lintro review`, which reads the PR diff via the GitHub API
@@ -51,9 +52,12 @@
 #   LINTRO_AI_*        Pass-through overlays (set by the workflow).
 #   LINTRO_REVIEW_STATE_DIR  Coverage artifact directory (default:
 #                            ai-review-state).
-#   JOB_TIMEOUT_MINUTES      Job cap; the review is bounded 5 minutes below
-#                            it (floor 60s) so the job owns the conclusion.
-#   REVIEW_TIMEOUT_SECONDS   Explicit bound; overrides the derived value.
+#   JOB_TIMEOUT_MINUTES      Job cap. The review is bounded to what remains
+#                            of it from JOB_STARTED_AT minus a 180s margin,
+#                            so the job — not the runner — owns the outcome.
+#   JOB_STARTED_AT           Epoch from preflight's started-at output.
+#   REVIEW_TIMEOUT_SECONDS   Test hook: explicit bound, skips the derivation.
+#   REVIEW_KILL_AFTER_SECONDS  Test hook: timeout --kill-after (default 30).
 #   MAX_DIFF_LINES           Skip the review when additions+deletions exceed
 #                            this. 0 (default) disables the gate.
 #
@@ -75,37 +79,89 @@ source "${SCRIPT_DIR}/../lib/github/output.sh"
 readonly REVIEW_STATUS_CLEAN=0
 readonly REVIEW_STATUS_FINDINGS=1
 readonly REVIEW_STATUS_ERROR=2
-# GNU timeout's own exit status when it had to signal the command.
+# GNU timeout: 124 after SIGTERM, 137 after --kill-after escalated to KILL.
 readonly REVIEW_STATUS_TIMED_OUT=124
+readonly REVIEW_STATUS_KILLED=137
+# Seconds reserved out of the job cap for the steps before preflight, the
+# kill-after grace, the notices below, artifact upload, and post hooks.
+readonly REVIEW_CAP_MARGIN_SECONDS=180
+readonly REVIEW_NOTICE_MARKER="<!-- lintro-ai-review-incomplete -->"
 
 emit_output() {
 	set_github_output "$1" "$2"
 }
 
-# additions+deletions for the PR via the workflow token; empty on failure.
-pr_diff_lines() {
-	command -v gh >/dev/null 2>&1 || return 0
-	gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
-		--jq '.additions + .deletions' 2>/dev/null || true
+# gh with a short bound so a stuck API call cannot eat the cap margin.
+bounded_gh() {
+	command -v gh >/dev/null 2>&1 || return 1
+	if command -v timeout >/dev/null 2>&1; then
+		timeout 20 gh "$@"
+	else
+		gh "$@"
+	fi
 }
 
-# Warn, add a step-summary line, and post a best-effort PR comment as the
-# bot (App token) so the author sees why no review landed. Never fails.
+# additions+deletions for the PR via the workflow token; empty on failure
+# (gh prints an error envelope on stdout for 404s, so validate the shape).
+pr_diff_lines() {
+	local lines
+	lines="$(
+		bounded_gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}" \
+			--jq '.additions + .deletions' 2>/dev/null || true
+	)"
+	[[ "$lines" =~ ^[0-9]+$ ]] && printf '%s\n' "$lines"
+	return 0
+}
+
+# Warn, add a step-summary line, and post (or update in place) a best-effort
+# PR comment as the bot (App token) so the author sees why no review landed.
+# Never fails. $3 is "true" when the job is about to fail (blocking).
 notice_review_not_completed() {
-	local reason="$1" diff_lines="${2:-}"
+	local reason="$1" diff_lines="${2:-}" failing="${3:-false}"
 	local size="${diff_lines:+ (diff: ${diff_lines} lines)}"
-	local body="AI review did not complete: ${reason}${size}. This check is neutral; required checks still gate the merge. Split the PR or re-run to get a full review."
+	local effect="This check is neutral; required checks still gate the merge."
+	if [[ "$failing" == "true" ]]; then
+		effect="This check fails because the workflow runs with blocking: true."
+	fi
+	local body="AI review did not complete: ${reason}${size}. ${effect} Split the PR, or re-run once it is smaller, to get a full review."
 	echo "::warning::${body}"
 	if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 		echo "> :warning: ${body}" >>"$GITHUB_STEP_SUMMARY"
 	fi
-	if [[ -n "${GITHUB_TOKEN:-}" ]] && command -v gh >/dev/null 2>&1; then
-		GH_TOKEN="$GITHUB_TOKEN" gh api --method POST \
-			"repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-			-f body="<!-- lintro-ai-review-incomplete -->
-:warning: ${body}" >/dev/null 2>&1 ||
-			echo "::warning::could not post the not-completed comment on PR #${PR_NUMBER}"
+	[[ -n "${GITHUB_TOKEN:-}" ]] || return 0
+	local comments="repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments"
+	local existing
+	existing="$(
+		GH_TOKEN="$GITHUB_TOKEN" MARKER="$REVIEW_NOTICE_MARKER" \
+			bounded_gh api --paginate "${comments}?per_page=100" \
+			--jq 'map(select(.body | startswith(env.MARKER))) | .[0].id // empty' 2>/dev/null |
+			head -n1 || true
+	)"
+	local method="POST" target="$comments"
+	if [[ "$existing" =~ ^[0-9]+$ ]]; then
+		method="PATCH"
+		target="repos/${GITHUB_REPOSITORY}/issues/comments/${existing}"
 	fi
+	GH_TOKEN="$GITHUB_TOKEN" bounded_gh api --method "$method" "$target" \
+		-f body="${REVIEW_NOTICE_MARKER}
+:warning: ${body}" >/dev/null 2>&1 ||
+		echo "::warning::could not post the not-completed comment on PR #${PR_NUMBER}"
+}
+
+# Record a not-completed outcome, notify, and exit per the blocking rule.
+# Shared by the size gate, the no-budget path, and a timed-out review.
+conclude_not_completed() {
+	local outcome="$1" reason="$2" diff_lines="${3:-}" blocking="${4:-false}" code="${5:-0}"
+	emit_output "outcome" "$outcome"
+	emit_output "exit-code" "$code"
+	emit_output "verdict" ""
+	emit_output "error-kind" ""
+	echo "ai-review: outcome=${outcome} ${reason} blocking=${blocking}"
+	notice_review_not_completed "$reason" "$diff_lines" "$blocking"
+	if [[ "$blocking" == "true" ]]; then
+		exit 1
+	fi
+	exit 0
 }
 
 # -----------------------------------------------------------------------------
@@ -138,6 +194,10 @@ if [[ "$STEP" == "preflight" ]]; then
 
 	emit_output "should-run" "$should_run"
 	emit_output "skip-reason" "$skip_reason"
+	# Epoch anchor for the run step's review budget (#1098): the job cap
+	# counts from job start, and the steps between here and the review
+	# (CLI install, artifact download, lintro install) eat into it.
+	emit_output "started-at" "$(date +%s)"
 	echo "preflight: should-run=${should_run} skip-reason=${skip_reason:-<none>}"
 	exit 0
 fi
@@ -210,18 +270,17 @@ if [[ "$STEP" == "run" ]]; then
 	blocking="${BLOCKING:-false}"
 
 	# Size gate before any install or spend: the model will not finish a
-	# diff this large inside the bound anyway (#1098). Opt-in via input.
+	# diff this large inside the bound anyway (#1098). Opt-in via input;
+	# the blocking rule applies as for any other no-review outcome, so the
+	# author cannot dodge a blocking review by inflating the diff.
 	max_diff_lines="${MAX_DIFF_LINES:-0}"
 	if [[ "$max_diff_lines" =~ ^[0-9]+$ && "$max_diff_lines" -gt 0 ]]; then
 		diff_lines="$(pr_diff_lines)"
-		if [[ "$diff_lines" =~ ^[0-9]+$ && "$diff_lines" -gt "$max_diff_lines" ]]; then
-			emit_output "outcome" "skipped-size"
-			emit_output "exit-code" "0"
-			emit_output "verdict" ""
-			emit_output "error-kind" ""
-			echo "ai-review: outcome=skipped-size diff-lines=${diff_lines} max-diff-lines=${max_diff_lines}"
-			notice_review_not_completed "the diff exceeds max-diff-lines=${max_diff_lines}" "$diff_lines"
-			exit 0
+		if [[ ! "$diff_lines" =~ ^[0-9]+$ ]]; then
+			echo "::notice::size gate: could not read the PR diff size; reviewing anyway"
+		elif [[ "$diff_lines" -gt "$max_diff_lines" ]]; then
+			conclude_not_completed "skipped-size" \
+				"the diff exceeds max-diff-lines=${max_diff_lines}" "$diff_lines" "$blocking"
 		fi
 	fi
 
@@ -249,27 +308,50 @@ if [[ "$STEP" == "run" ]]; then
 
 	# Bounded below the job cap so the step — not the runner — ends a review
 	# that will not finish, and this script maps the result (#1098). A job-
-	# cap cancel records a failed check and flips the PR to UNSTABLE.
+	# cap cancel records a failed check and flips the PR to UNSTABLE. The
+	# budget is what remains of the cap measured from preflight's anchor
+	# (the install above already spent some of it), minus a fixed margin.
+	# REVIEW_TIMEOUT_SECONDS is a test hook that bypasses the derivation.
 	review_timeout="${REVIEW_TIMEOUT_SECONDS:-}"
-	if [[ -z "$review_timeout" ]]; then
+	if [[ ! "$review_timeout" =~ ^[1-9][0-9]*$ ]]; then
 		job_minutes="${JOB_TIMEOUT_MINUTES:-30}"
 		[[ "$job_minutes" =~ ^[0-9]+$ ]] || job_minutes=30
-		review_timeout=$((job_minutes * 60 - 300))
-		[[ "$review_timeout" -lt 60 ]] && review_timeout=60
+		now="$(date +%s)"
+		started_at="${JOB_STARTED_AT:-}"
+		[[ "$started_at" =~ ^[0-9]+$ ]] || started_at="$now"
+		review_timeout=$((started_at + job_minutes * 60 - now - REVIEW_CAP_MARGIN_SECONDS))
+		if [[ "$review_timeout" -lt 60 ]]; then
+			# Not enough cap left to get anything useful: same neutral shape
+			# as a review that ran and timed out, without burning spend.
+			conclude_not_completed "timed-out" \
+				"only ${review_timeout}s of the ${job_minutes}-minute job cap remained before the review could start" \
+				"$(pr_diff_lines)" "$blocking"
+		fi
 	fi
+	kill_after="${REVIEW_KILL_AFTER_SECONDS:-30}"
+	[[ "$kill_after" =~ ^[0-9]+$ ]] || kill_after=30
 	runner=()
 	if command -v timeout >/dev/null 2>&1; then
-		runner=(timeout --kill-after=30 "$review_timeout")
+		runner=(timeout --kill-after="$kill_after" "$review_timeout")
 		echo "ai-review: review-timeout=${review_timeout}s (job cap ${JOB_TIMEOUT_MINUTES:-30}m)"
 	else
 		echo "::warning::GNU timeout not found; the review is bounded only by the job cap"
 	fi
 
 	set +e
+	review_started="$SECONDS"
 	# ${arr[@]+...}: an empty array is unbound under set -u on bash < 4.4.
 	${runner[@]+"${runner[@]}"} "$lintro_bin" "${args[@]}" >"$out_file" 2>"$err_file"
 	exit_code=$?
 	set -e
+	review_elapsed=$((SECONDS - review_started))
+	# Evidence that the wrapper's deadline fired, not that lintro itself
+	# happened to exit 124/137: the wrapper was on, and the call ran at
+	# least as long as the bound.
+	bound_fired=false
+	if [[ ${#runner[@]} -gt 0 && "$review_elapsed" -ge "$review_timeout" ]]; then
+		bound_fired=true
+	fi
 
 	# Combined log so the classifier and humans see the same stream.
 	cat "$out_file"
@@ -287,7 +369,7 @@ if [[ "$STEP" == "run" ]]; then
 	elif [[ "$exit_code" -eq "$REVIEW_STATUS_CLEAN" ]]; then
 		outcome="reviewed"
 		verdict="$(jq -r '.verdict // .metadata.verdict // empty' "$out_file" 2>/dev/null || true)"
-	elif [[ "$exit_code" -eq "$REVIEW_STATUS_TIMED_OUT" && ${#runner[@]} -gt 0 ]]; then
+	elif [[ "$bound_fired" == "true" && ("$exit_code" -eq "$REVIEW_STATUS_TIMED_OUT" || "$exit_code" -eq "$REVIEW_STATUS_KILLED") ]]; then
 		outcome="timed-out"
 	else
 		outcome="broken"
@@ -323,7 +405,8 @@ if [[ "$STEP" == "run" ]]; then
 	elif [[ "$outcome" == "timed-out" ]]; then
 		# Neutral by default: a review that ran out of time is a no-review,
 		# not a defect, and must not gate the merge (#1098).
-		notice_review_not_completed "the review step hit its ${review_timeout}s bound" "$(pr_diff_lines)"
+		notice_review_not_completed "the review step hit its ${review_timeout}s bound" \
+			"$(pr_diff_lines)" "$blocking"
 		if [[ "$blocking" == "true" ]]; then
 			fail_job=true
 		fi

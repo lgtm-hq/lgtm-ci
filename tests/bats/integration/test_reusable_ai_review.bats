@@ -114,6 +114,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	run awk '/- name: Run AI review/{f=1} f&&/- name: Upload review-state/{exit} f{print}' "$WORKFLOW"
 	assert_success
 	assert_output --partial 'JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}'
+	assert_output --partial 'JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}'
 	assert_output --partial 'MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}'
 	# No continue-on-error on the review step: the script exits 0 on a
 	# timed-out / size-skipped review itself, and continue-on-error would
