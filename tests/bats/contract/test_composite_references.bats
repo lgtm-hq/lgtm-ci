@@ -138,7 +138,7 @@ _composite_steps() {
 				}
 				if (state == "key" && c == "}") {
 					depth--
-					if (depth == 1) state = "key"
+					if (depth < 2) with_mode = 0
 					continue
 				}
 				if (state == "key" && c == "{") {
@@ -648,11 +648,42 @@ YAML
 }
 
 @test "composite actions: extractor covers every uses: step in the real tree" {
-	local extracted grepped
+	# Reference count built independently of the step walker: block-style
+	# steps whose own key level has a `uses` key (indentation only, no flow
+	# parsing), plus flow-style step items. The real tree has no flow steps
+	# today; the self-tests above cover that form.
+	_reference_uses_count() {
+		local file total=0 n
+		while IFS= read -r -d '' file; do
+			n="$(awk '
+				function ind(l, p) { p = l; sub(/[^ \t].*$/, "", p); return length(p) }
+				/^[[:space:]]*steps:[[:space:]]*$/ { in_steps = 1; sc = ind($0); next }
+				!in_steps { next }
+				/^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+				ind($0) <= sc { in_steps = 0; next }
+				/^[[:space:]]*-([[:space:]]|$)/ {
+					if ($0 ~ /^[[:space:]]*-[[:space:]]*[{]/) { flow++; next }
+					kl = ind($0) + 2
+					line = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", line)
+					if (line ~ /^["'"'"']?uses["'"'"']?:/) count++
+					next
+				}
+				ind($0) == kl && /^[[:space:]]*["'"'"']?uses["'"'"']?:/ { count++ }
+				END { printf("%d %d", count, flow) }
+			' "$file")"
+			total=$((total + ${n% *}))
+			if [[ "${n#* }" != "0" ]]; then
+				echo "flow-style step in $file; extend the reference count" >&2
+				return 1
+			fi
+		done < <(find "$1" -path "*/action.yml" -type f -print0)
+		echo "$total"
+	}
+	local extracted reference
 	extracted="$(_composite_uses_refs "${PROJECT_ROOT}/.github/actions" | wc -l | tr -d ' ')"
-	grepped="$(grep -rhE '(^[[:space:]]*-?[[:space:]]*|[{,][[:space:]]*)["'"'"']?uses["'"'"']?:' --include=action.yml "${PROJECT_ROOT}/.github/actions" | wc -l | tr -d ' ')"
+	reference="$(_reference_uses_count "${PROJECT_ROOT}/.github/actions")"
 	[[ "$extracted" -ge 1 ]]
-	[[ "$extracted" -eq "$grepped" ]]
+	[[ "$extracted" -eq "$reference" ]]
 }
 
 @test "composite actions: flow-mapping checkout with quoted keys and apostrophes still counts as the tooling checkout" {
@@ -673,6 +704,26 @@ YAML
 	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_success
 	refute_output
+}
+
+@test "composite actions: an empty with: {} on a flow checkout does not let env.path qualify" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/empty-with"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Empty with then env path
+runs:
+  using: composite
+  steps:
+    - {uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd, with: {}, env: {path: .lgtm-ci-tooling}}
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+YAML
+
+	run _tooling_checkout_line "${fixture_dir}/action.yml"
+	assert_output "0"
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_failure
+	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
 }
 
 @test "composite actions: guard flags a .lgtm-ci-tooling ref without a preceding tooling checkout" {
