@@ -265,6 +265,9 @@ _composite_steps() {
 			end_step()
 			in_step = 1
 			step_col = indent_of($0)
+			# The step'"'"'s key column is learned from its first key, which may
+			# be on this line (`- key:`) or the next (bare `-`).
+			key_level_set = 0
 			if ($0 ~ /^[[:space:]]*-[[:space:]]*[{]/) {
 				# Flow mapping on one line: the step'"'"'s own keys come from the
 				# top level and `path` only from its `with: {...}` group.
@@ -287,12 +290,12 @@ _composite_steps() {
 			col = key_col($0)
 			k = key_of($0)
 			if (k == "") { next }
-			# Back at the step'"'"'s own key level ends any `with:` block.
-			if (col <= key_level) { in_with = 0 }
-			if (!key_level_set || col < key_level) {
+			if (!key_level_set) {
 				key_level = col
 				key_level_set = 1
 			}
+			# Back at the step'"'"'s own key level ends any `with:` block.
+			if (col <= key_level) { in_with = 0 }
 			v = value_of($0)
 			if (col == key_level) {
 				if (k == "uses") {
@@ -662,13 +665,15 @@ _reference_uses_count() {
 			ind($0) <= sc { in_steps = 0; next }
 			/^[[:space:]]*-([[:space:]]|$)/ {
 				if ($0 ~ /^[[:space:]]*-[[:space:]]*[{]/) { flow++; next }
-				# Key column is wherever the first key starts after `-`.
+				# Key column is wherever the first key starts after `-`; for a
+				# bare `-` it is the column of the next key line.
 				pre = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", pre)
+				if (pre == "") { kl = -1; next }
 				kl = length($0) - length(pre)
-				line = pre
-				if (line ~ /^["'"'"']?uses["'"'"']?:/) count++
+				if (pre ~ /^["'"'"']?uses["'"'"']?:/) count++
 				next
 			}
+			kl == -1 { kl = ind($0) }
 			ind($0) == kl && /^[[:space:]]*["'"'"']?uses["'"'"']?:/ { count++ }
 			END { printf("%d %d", count, flow) }
 		' "$file")"
@@ -729,7 +734,7 @@ YAML
 	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
 }
 
-@test "composite actions: extractor and reference count handle wide dash indentation" {
+@test "composite actions: extractor and reference count handle wide and bare dash indentation" {
 	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/wide"
 	mkdir -p "$fixture_dir"
 	cat >"${fixture_dir}/action.yml" <<'YAML'
@@ -743,15 +748,24 @@ runs:
         with:
             uses: not-a-step
     -   uses: $/.github/actions/setup-node
+    -
+      name: Bare dash
+      uses: ./.github/actions/bare-dash
+      with:
+        uses: not-a-step
+    -
+          uses: ./.github/actions/bare-dash-wide
 YAML
 
 	run _composite_uses_refs "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_success
 	assert_line --index 0 "${fixture_dir}/action.yml:7:./.github/actions/setup-python"
 	assert_line --index 1 "${fixture_dir}/action.yml:10:\$/.github/actions/setup-node"
+	assert_line --index 2 "${fixture_dir}/action.yml:13:./.github/actions/bare-dash"
+	assert_line --index 3 "${fixture_dir}/action.yml:17:./.github/actions/bare-dash-wide"
 	refute_output --partial "not-a-step"
 	run _reference_uses_count "${BATS_TEST_TMPDIR}/.github/actions"
-	assert_output "2"
+	assert_output "4"
 }
 
 @test "composite actions: guard flags a .lgtm-ci-tooling ref without a preceding tooling checkout" {
