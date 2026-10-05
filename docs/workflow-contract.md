@@ -1403,9 +1403,14 @@ consumer workflow that checks out only its own source. `$/` is generally
 available on GitHub.com and ghe.com since 2026-07-30 (see the
 [self-repository references announcement](https://github.com/orgs/community/discussions/26245));
 self-hosted runners need `>= 2.336.0`. GitHub Enterprise Server is **not**
-covered by that announcement: GHES consumers of these four actions must either
-check lgtm-ci out at the workspace root or use the `.lgtm-ci-tooling` pattern
-below until their GHES release ships `$/`. Since it is pinned by construction,
+covered by that announcement. On a GHES release without `$/`, these four
+actions are **unavailable**: the nested `$/` ref lives inside the action
+itself, so no caller-side checkout (workspace root or `.lgtm-ci-tooling`)
+can make it resolve. GHES consumers should call the per-language reusable
+workflows instead (`reusable-test-python`, `reusable-test-node`,
+`reusable-test-e2e-playwright`, `reusable-site-quality`), which run the same
+`scripts/ci/actions/run-*.sh` directly and never load these composites.
+Since `$/` is pinned by construction,
 `validate-action-pinning` exempts `$/` refs the same way it exempts `./` and
 `docker://` — but only the plain `$/<path>` form; a value carrying `@ref` or a
 `..` segment is checked like any other ref.

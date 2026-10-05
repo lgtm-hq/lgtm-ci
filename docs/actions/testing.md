@@ -8,8 +8,10 @@ The runner actions `run-pytest`, `run-vitest`, `run-playwright`, and
 self-repository references, so they work from a plain
 `uses: lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>` with only your own
 repository checked out — no lgtm-ci checkout or `tooling-ref` is needed
-(#1075; GitHub.com and ghe.com only, see
-[the workflow contract](../workflow-contract.md#composite-actions-calling-sibling-lgtm-ci-actions)).
+(#1075). `$/` is GitHub.com and ghe.com only; on a GHES release without it
+these four actions are unavailable and the per-language reusable workflows
+are the alternative — see
+[the workflow contract](../workflow-contract.md#composite-actions-calling-sibling-lgtm-ci-actions).
 
 ## detect-changes
 

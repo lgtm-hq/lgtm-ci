@@ -101,6 +101,38 @@ _composite_steps() {
 			sub(/[,}].*$/, "", v)
 			return clean(v)
 		}
+		# The top level of a one-line flow mapping: the outer `{ ... }` with
+		# every nested `{...}` group blanked, so a `uses` or `path` inside
+		# `with: {...}` cannot be mistaken for the step'"'"'s own key.
+		function flow_top(line, v, depth, i, c, out) {
+			v = line
+			sub(/^[[:space:]]*-[[:space:]]*/, "", v)
+			out = ""
+			depth = 0
+			for (i = 1; i <= length(v); i++) {
+				c = substr(v, i, 1)
+				if (c == "{") {
+					depth++
+					if (depth <= 1) out = out c
+				} else if (c == "}") {
+					depth--
+					if (depth <= 0) out = out c
+				} else if (depth <= 1) {
+					out = out c
+				}
+			}
+			return out
+		}
+		# The `with: {...}` group of a one-line flow mapping, or "".
+		function flow_with(line, v) {
+			v = line
+			if (!match(v, /[{,][[:space:]]*["'"'"']?with["'"'"']?:[[:space:]]*[{]/)) {
+				return ""
+			}
+			v = substr(v, RSTART + RLENGTH - 1)
+			sub(/[}].*$/, "}", v)
+			return v
+		}
 
 		# ---- block scalar of some other key: data, not structure ----
 		in_block {
@@ -143,14 +175,17 @@ _composite_steps() {
 			in_step = 1
 			step_col = indent_of($0)
 			if ($0 ~ /^[[:space:]]*-[[:space:]]*[{]/) {
-				# Flow mapping on one line.
-				v = flow_field($0, "uses")
-				if (v != "" || $0 ~ /[{,][[:space:]]*["'"'"']?uses["'"'"']?:/) {
+				# Flow mapping on one line: read the step'"'"'s own keys from the
+				# top level and `path` only from its `with: {...}` group.
+				top = flow_top($0)
+				v = flow_field(top, "uses")
+				if (v != "" || top ~ /[{,][[:space:]]*["'"'"']?uses["'"'"']?:/) {
 					uses_line = NR
 					uses_val = v
 				}
-				if ($0 ~ /checkout@/) {
-					path_val = flow_field($0, "path")
+				w = flow_with($0)
+				if (w != "") {
+					path_val = flow_field(w, "path")
 				}
 				end_step()
 				next
@@ -421,12 +456,20 @@ runs:
     - {name: Setup, uses: ./.github/actions/setup-python, with: {python-version: "3.12"}}
     - uses: >- # pinned
         actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+    - {with: {uses: "value", path: .lgtm-ci-tooling}, uses: ./.github/actions/with-first}
+    - {uses: ./.github/actions/nested-uses, with: {uses: "value"}}
 YAML
 
 	run _composite_uses_refs "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_success
 	assert_line --index 0 "${fixture_dir}/action.yml:6:./.github/actions/setup-python"
 	assert_line --index 1 "${fixture_dir}/action.yml:7:actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+	assert_line --index 2 "${fixture_dir}/action.yml:9:./.github/actions/with-first"
+	assert_line --index 3 "${fixture_dir}/action.yml:10:./.github/actions/nested-uses"
+	refute_output --partial ":value"
+	# A tooling path inside a non-checkout flow step's with: does not count.
+	run _tooling_checkout_line "${fixture_dir}/action.yml"
+	assert_output "0"
 
 	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_failure
