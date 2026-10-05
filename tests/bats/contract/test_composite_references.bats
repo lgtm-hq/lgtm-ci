@@ -104,14 +104,23 @@ _composite_steps() {
 		# The top level of a one-line flow mapping: the outer `{ ... }` with
 		# every nested `{...}` group blanked, so a `uses` or `path` inside
 		# `with: {...}` cannot be mistaken for the step'"'"'s own key.
-		function flow_top(line, v, depth, i, c, out) {
+		# Braces inside a quoted scalar (`name: "Setup {node"`) are text, not
+		# delimiters; quoted content is kept but never changes the depth.
+		function flow_top(line, v, depth, i, c, out, q) {
 			v = line
 			sub(/^[[:space:]]*-[[:space:]]*/, "", v)
 			out = ""
 			depth = 0
+			q = ""
 			for (i = 1; i <= length(v); i++) {
 				c = substr(v, i, 1)
-				if (c == "{") {
+				if (q != "") {
+					if (c == q) q = ""
+					if (depth <= 1) out = out c
+				} else if (c == "\"" || c == "'"'"'") {
+					q = c
+					if (depth <= 1) out = out c
+				} else if (c == "{") {
 					depth++
 					if (depth <= 1) out = out c
 				} else if (c == "}") {
@@ -124,14 +133,37 @@ _composite_steps() {
 			return out
 		}
 		# The `with: {...}` group of a one-line flow mapping, or "".
-		function flow_with(line, v) {
+		function flow_with(line, v, depth, i, c, out, q, started) {
+			# Find `with: {` outside quotes, then copy its balanced group.
 			v = line
-			if (!match(v, /[{,][[:space:]]*["'"'"']?with["'"'"']?:[[:space:]]*[{]/)) {
-				return ""
+			sub(/^[[:space:]]*-[[:space:]]*/, "", v)
+			q = ""
+			depth = 0
+			for (i = 1; i <= length(v); i++) {
+				c = substr(v, i, 1)
+				if (q != "") {
+					if (c == q) q = ""
+					if (started) out = out c
+					continue
+				}
+				if (c == "\"" || c == "'"'"'") {
+					q = c
+					if (started) out = out c
+					continue
+				}
+				if (!started && depth == 1 && substr(v, i) ~ /^[[:space:]]*["'"'"']?with["'"'"']?:[[:space:]]*[{]/ && (i == 2 || substr(v, i - 1, 1) ~ /[{,[:space:]]/)) {
+					started = 1
+					while (substr(v, i, 1) != "{") i++
+					c = "{"
+				}
+				if (c == "{") depth++
+				if (started) out = out c
+				if (c == "}") {
+					depth--
+					if (started && depth <= 1) return out
+				}
 			}
-			v = substr(v, RSTART + RLENGTH - 1)
-			sub(/[}].*$/, "}", v)
-			return v
+			return ""
 		}
 
 		# ---- block scalar of some other key: data, not structure ----
@@ -458,6 +490,7 @@ runs:
         actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
     - {with: {uses: "value", path: .lgtm-ci-tooling}, uses: ./.github/actions/with-first}
     - {uses: ./.github/actions/nested-uses, with: {uses: "value"}}
+    - {name: "Setup {node", uses: ./.github/actions/quoted-brace, with: {x: "y}"}}
 YAML
 
 	run _composite_uses_refs "${BATS_TEST_TMPDIR}/.github/actions"
@@ -466,6 +499,7 @@ YAML
 	assert_line --index 1 "${fixture_dir}/action.yml:7:actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
 	assert_line --index 2 "${fixture_dir}/action.yml:9:./.github/actions/with-first"
 	assert_line --index 3 "${fixture_dir}/action.yml:10:./.github/actions/nested-uses"
+	assert_line --index 4 "${fixture_dir}/action.yml:11:./.github/actions/quoted-brace"
 	refute_output --partial ":value"
 	# A tooling path inside a non-checkout flow step's with: does not count.
 	run _tooling_checkout_line "${fixture_dir}/action.yml"
