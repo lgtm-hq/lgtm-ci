@@ -371,6 +371,23 @@ source <(sed -n '/^_allowed_endpoints_violations()/,/^}/p' "${PROJECT_ROOT}/scri
 	done
 }
 
+@test "the unknown-preset guard is skipped when replace mode uses the caller list alone" {
+	# In replace mode with a non-empty allowed-endpoints the preset is not
+	# consulted, so a stale preset name must not fail the job (Greptile P1).
+	local workflow n_guards n_gated
+	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
+		n_guards="$(grep -c '^      - name: Fail on unknown egress-preset' "$workflow" || true)"
+		[[ "$n_guards" -gt 0 ]] || continue
+		n_gated="$(grep -c "&& (inputs.allowed-endpoints-mode == 'append'" "$workflow" || true)"
+		[[ "$n_gated" -eq "$n_guards" ]] || {
+			echo "$workflow: $n_guards guards but $n_gated carry the replace-mode gate"
+			return 1
+		}
+		run grep -c "inputs.egress-policy != 'audit'" "$workflow"
+		assert_output "$n_guards"
+	done
+}
+
 @test "allowed-endpoints inputs default to empty so the preset is the baseline" {
 	# A non-empty default would silently replace the preset in replace mode
 	# and re-create the hand-maintained host lists this contract removes.

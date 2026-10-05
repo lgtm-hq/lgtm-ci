@@ -308,6 +308,7 @@ jobs:
         # surface later as an opaque network error. Fail here by name (#913).
         if: >-
           inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
           && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'shell-test'] == null
         shell: bash
         env:
@@ -482,6 +483,7 @@ jobs:
         # surface later as an opaque network error. Fail here by name (#913).
         if: >-
           inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
           && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'shell-test'] == null
         shell: bash
         env:
@@ -558,6 +560,7 @@ jobs:
         # surface later as an opaque network error. Fail here by name (#913).
         if: >-
           inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
           && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'shell-test'] == null
         shell: bash
         env:
@@ -711,6 +714,7 @@ jobs:
         # surface later as an opaque network error. Fail here by name (#913).
         if: >-
           inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
           && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'shell-test'] == null
         shell: bash
         env:

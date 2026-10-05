@@ -95,8 +95,9 @@ Consequences of the contract:
 - An unknown `egress-preset` name selects nothing from the map (the pre hook
   cannot refuse it), so the step right after harden-runner — `Fail on unknown
   egress-preset` — fails the job by name under `block`, before any checkout or
-  install can die with an opaque network error. Under `audit` the guard is
-  skipped.
+  install can die with an opaque network error. The guard is skipped under
+  `audit` and in `replace` mode with a non-empty `allowed-endpoints` (the
+  preset is not consulted then).
 - Coordinator jobs (`prepare`, `aggregate`, `setup`, `merge`) honour the same
   inputs as the work job. On `main` some of them carried a literal that also
   listed `uploads.github.com:443`; they now select the workflow's preset, which
