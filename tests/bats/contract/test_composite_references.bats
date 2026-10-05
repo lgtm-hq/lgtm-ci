@@ -647,38 +647,41 @@ YAML
 	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
 }
 
+# Reference count built independently of the step walker: block-style steps
+# whose own key level has a `uses` key (indentation only, no flow parsing).
+# Fails if a flow-style step item is present; the real tree has none today and
+# the walker self-tests cover that form.
+_reference_uses_count() {
+	local file total=0 n
+	while IFS= read -r -d '' file; do
+		n="$(awk '
+			function ind(l, p) { p = l; sub(/[^ \t].*$/, "", p); return length(p) }
+			/^[[:space:]]*steps:[[:space:]]*$/ { in_steps = 1; sc = ind($0); next }
+			!in_steps { next }
+			/^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
+			ind($0) <= sc { in_steps = 0; next }
+			/^[[:space:]]*-([[:space:]]|$)/ {
+				if ($0 ~ /^[[:space:]]*-[[:space:]]*[{]/) { flow++; next }
+				# Key column is wherever the first key starts after `-`.
+				pre = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", pre)
+				kl = length($0) - length(pre)
+				line = pre
+				if (line ~ /^["'"'"']?uses["'"'"']?:/) count++
+				next
+			}
+			ind($0) == kl && /^[[:space:]]*["'"'"']?uses["'"'"']?:/ { count++ }
+			END { printf("%d %d", count, flow) }
+		' "$file")"
+		total=$((total + ${n% *}))
+		if [[ "${n#* }" != "0" ]]; then
+			echo "flow-style step in $file; extend the reference count" >&2
+			return 1
+		fi
+	done < <(find "$1" -path "*/action.yml" -type f -print0)
+	echo "$total"
+}
+
 @test "composite actions: extractor covers every uses: step in the real tree" {
-	# Reference count built independently of the step walker: block-style
-	# steps whose own key level has a `uses` key (indentation only, no flow
-	# parsing), plus flow-style step items. The real tree has no flow steps
-	# today; the self-tests above cover that form.
-	_reference_uses_count() {
-		local file total=0 n
-		while IFS= read -r -d '' file; do
-			n="$(awk '
-				function ind(l, p) { p = l; sub(/[^ \t].*$/, "", p); return length(p) }
-				/^[[:space:]]*steps:[[:space:]]*$/ { in_steps = 1; sc = ind($0); next }
-				!in_steps { next }
-				/^[[:space:]]*$/ || /^[[:space:]]*#/ { next }
-				ind($0) <= sc { in_steps = 0; next }
-				/^[[:space:]]*-([[:space:]]|$)/ {
-					if ($0 ~ /^[[:space:]]*-[[:space:]]*[{]/) { flow++; next }
-					kl = ind($0) + 2
-					line = $0; sub(/^[[:space:]]*-[[:space:]]*/, "", line)
-					if (line ~ /^["'"'"']?uses["'"'"']?:/) count++
-					next
-				}
-				ind($0) == kl && /^[[:space:]]*["'"'"']?uses["'"'"']?:/ { count++ }
-				END { printf("%d %d", count, flow) }
-			' "$file")"
-			total=$((total + ${n% *}))
-			if [[ "${n#* }" != "0" ]]; then
-				echo "flow-style step in $file; extend the reference count" >&2
-				return 1
-			fi
-		done < <(find "$1" -path "*/action.yml" -type f -print0)
-		echo "$total"
-	}
 	local extracted reference
 	extracted="$(_composite_uses_refs "${PROJECT_ROOT}/.github/actions" | wc -l | tr -d ' ')"
 	reference="$(_reference_uses_count "${PROJECT_ROOT}/.github/actions")"
@@ -724,6 +727,31 @@ YAML
 	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_failure
 	assert_output --partial "no preceding checkout with path: .lgtm-ci-tooling"
+}
+
+@test "composite actions: extractor and reference count handle wide dash indentation" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/wide"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Wide dash indentation
+runs:
+  using: composite
+  steps:
+    -   name: Setup
+        uses: ./.github/actions/setup-python
+        with:
+            uses: not-a-step
+    -   uses: $/.github/actions/setup-node
+YAML
+
+	run _composite_uses_refs "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_success
+	assert_line --index 0 "${fixture_dir}/action.yml:7:./.github/actions/setup-python"
+	assert_line --index 1 "${fixture_dir}/action.yml:10:\$/.github/actions/setup-node"
+	refute_output --partial "not-a-step"
+	run _reference_uses_count "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_output "2"
 }
 
 @test "composite actions: guard flags a .lgtm-ci-tooling ref without a preceding tooling checkout" {
