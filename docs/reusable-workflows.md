@@ -740,6 +740,63 @@ trigger context to the job step summary, then creates or updates a deduplicated
 GitHub issue with failed step details. Set `report-failures: false` to disable
 both actions. See [workflow-contract.md](workflow-contract.md) for inputs.
 
+### Version update hook (`version-update-script`)
+
+`reusable-release-version-pr.yml` and `reusable-release-multi-ecosystem.yml`
+run the caller's `version-update-script` in its own job,
+`version-update-hook`, with `permissions: contents: read`, no secrets and no
+token of any kind (#849). The jobs that mint the App installation token
+(`prepare`, `version-pr`) execute lgtm-ci code only; a hook can never edit
+tooling that later runs with the token. Callers without a hook skip both
+extra jobs.
+
+The hook receives:
+
+- `NEXT_VERSION` — the version being prepared.
+- `RELEASE_METADATA_PATH` — a read-only JSON file written by lgtm-ci code in
+  the `prepare` job, so a hook needing API data does not need a token:
+
+```json
+{
+  "schema": 1,
+  "repository": "owner/name",
+  "next_version": "1.3.0",
+  "tag_prefix": "v",
+  "latest_release": {
+    "tag": "v1.2.2",
+    "version": "1.2.2",
+    "published_at": "...",
+    "url": "..."
+  },
+  "container": {
+    "package": "name",
+    "version": "1.2.2",
+    "digest": "sha256:..."
+  }
+}
+```
+
+`latest_release` is `null` when the repository has no release. `container`
+is the newest release-tagged (`major.minor.patch`) version of the GitHub
+Packages container named by `release-metadata-container-package`; it is
+`null` when that input is empty or the App lacks `Packages: read`. A hook
+that re-pins a published image reads this instead of calling the API.
+
+The hook sees the prepared workspace (changelog and ecosystem/manifest
+updates already applied) and its own edits — tracked changes and new files —
+travel to the privileged job as a `git diff` artifact. That job rejects the
+diff if it touches `.github/workflows/**`, the tooling checkout, or any path
+outside the repository, then `git apply --check`s and applies it before PR
+creation. A hook that writes into `.lgtm-ci-tooling/` or exits non-zero
+fails the run before any branch, commit or PR exists.
+
+**App token scope.** Every `create-github-app-token` step in the release
+reusables passes `repositories: ${{ github.event.repository.name }}`, so an
+App installed org-wide still yields a token for the calling repository only.
+No lgtm-ci reusable writes to a second repository; a future one that must
+(for example a Homebrew tap dispatch) takes that repository as an explicit
+input rather than widening this default.
+
 ### Main failure notifier
 
 `reusable-main-failure-notifier.yml` generalizes the same dedup'd-issue

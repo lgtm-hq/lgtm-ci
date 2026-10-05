@@ -74,7 +74,9 @@ load "../../helpers/common"
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-release-version-pr.yml"
 
 	run awk '
-		/- name: Create GitHub App installation token/ { token_line = NR; after_token = 1 }
+		# First mint and first authenticated checkout; prepare and version-pr
+		# each mint their own token (#849).
+		/- name: Create GitHub App installation token/ && !token_line { token_line = NR; after_token = 1 }
 		after_token && !checkout_line && /^      - name: Checkout repository/ {
 			in_auth_checkout = 1
 		}

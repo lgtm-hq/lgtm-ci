@@ -44,7 +44,12 @@ fi
 #
 # Uses always() — never actually skips; conditional-success gate:
 #   reusable-required-check.yml:gate
-STATIC_JOB_NAME_EXCEPTIONS="${STATIC_JOB_NAME_EXCEPTIONS-reusable-dependency-review.yml:dependency-review reusable-required-check.yml:gate reusable-test-e2e.yml:test reusable-test-e2e-playwright.yml:test reusable-test-rust-build.yml:build reusable-test-node.yml:test-vitest reusable-site-quality.yml:site-build-link reusable-site-quality.yml:site-test reusable-test-python.yml:test reusable-test-node-custom.yml:test reusable-test-shell.yml:test reusable-test-shell.yml:test-sharded reusable-test-shell.yml:aggregate reusable-rust-test.yml:test reusable-sbom.yml:sbom reusable-sbom.yml:release-assets}"
+#
+# Dependency-failure gate only (#849): `!cancelled() && needs.*.result !=
+# 'failure'` reproduces plain needs: semantics while letting skipped
+# upstream jobs through; the job never skips on its own inputs.
+#   reusable-release-multi-ecosystem.yml:version-pr
+STATIC_JOB_NAME_EXCEPTIONS="${STATIC_JOB_NAME_EXCEPTIONS-reusable-dependency-review.yml:dependency-review reusable-required-check.yml:gate reusable-test-e2e.yml:test reusable-test-e2e-playwright.yml:test reusable-test-rust-build.yml:build reusable-test-node.yml:test-vitest reusable-site-quality.yml:site-build-link reusable-site-quality.yml:site-test reusable-test-python.yml:test reusable-test-node-custom.yml:test reusable-test-shell.yml:test reusable-test-shell.yml:test-sharded reusable-test-shell.yml:aggregate reusable-rust-test.yml:test reusable-sbom.yml:sbom reusable-sbom.yml:release-assets reusable-release-multi-ecosystem.yml:version-pr}"
 
 violations=0
 

@@ -60,8 +60,22 @@ name: "Reusable: Release Version PR"
         # yamllint disable-line rule:line-length
         description: >-
           Path to a repo-specific script for additional version file updates
-          beyond ecosystem defaults. Receives NEXT_VERSION env var. Runs after
-          ecosystem updaters, before PR creation.
+          beyond ecosystem defaults. Runs in its own job with no token or
+          secrets (#849), after ecosystem updaters, before PR creation.
+          Receives NEXT_VERSION and RELEASE_METADATA_PATH (read-only JSON:
+          latest release, container digest). Only changes to this
+          repository's files outside .github/workflows/ are carried into
+          the version PR.
+        required: false
+        type: string
+        default: ""
+      release-metadata-container-package:
+        # yamllint disable-line rule:line-length
+        description: >-
+          GitHub Packages container (same owner) whose newest release-tagged
+          digest is recorded in release-metadata.json for the
+          version-update-script. Needs Packages: read on the release App.
+          Empty skips the lookup.
         required: false
         type: string
         default: ""
@@ -255,8 +269,266 @@ env:
   # lgtm-ci-egress-presets:end
 
 jobs:
+  # Trust split (#849): caller code (version-update-script) runs only in
+  # version-update-hook, a job with no secrets and no token. The jobs that
+  # mint the App installation token (prepare, version-pr) run lgtm-ci code
+  # only. prepare computes the version and fetches, with the token, the
+  # release metadata the hook may read; the hook's edits travel to version-pr
+  # as a diff artifact that is scope-checked and `git apply`'d there. Callers
+  # without a hook skip both extra jobs.
+  prepare:
+    name: Prepare version update hook
+    if: inputs.version-update-script != ''
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      # Single gate for the hook job: mirrors the step conditions version-pr
+      # evaluates again for itself.
+      # yamllint disable-line rule:line-length
+      hook-needed: ${{ steps.guard.outputs.is-release-commit == 'false' && steps.check-pr.outputs.pr-exists == 'false' && steps.version.outputs.release-needed == 'true' }}
+      next-version: ${{ steps.version.outputs.next-version }}
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Create GitHub App installation token
+        id: app-token
+        # yamllint disable-line rule:line-length
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          # Scoped to the calling repository; an installation covering the
+          # whole org must not be reachable from a release job (#849).
+          repositories: ${{ github.event.repository.name }}
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+          token: ${{ steps.app-token.outputs.token }}
+      - name: Guard release commit
+        id: guard
+        shell: bash
+        env:
+          SKIP_PATTERNS: ${{ inputs.skip-patterns }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/guard-release-commit.sh
+      - name: Check existing version PR
+        if: steps.guard.outputs.is-release-commit == 'false'
+        id: check-pr
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/check-existing-version-pr.sh
+      - name: Calculate next version
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+        id: version
+        shell: bash
+        env:
+          MAX_BUMP: ${{ inputs.max-bump }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/calculate-version.sh
+      - name: Write release metadata
+        # Fixed lgtm-ci code fetches what the hook may need; the hook itself
+        # never holds a token.
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          OWNER: ${{ github.repository_owner }}
+          OWNER_TYPE: ${{ github.event.repository.owner.type }}
+          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          CONTAINER_PACKAGE: ${{ inputs.release-metadata-container-package }}
+          OUTPUT_PATH: ${{ runner.temp }}/release-metadata/release-metadata.json
+        run: .lgtm-ci-tooling/scripts/ci/release/write-release-metadata.sh
+      - name: Upload release metadata
+        if: >-
+          steps.guard.outputs.is-release-commit == 'false'
+          && steps.check-pr.outputs.pr-exists == 'false'
+          && steps.version.outputs.release-needed == 'true'
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-version-pr-metadata
+          path: ${{ runner.temp }}/release-metadata/release-metadata.json
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
+  version-update-hook:
+    name: Run version update hook
+    needs: [prepare]
+    if: needs.prepare.outputs.hook-needed == 'true'
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    # The only job that executes caller code. No secrets are referenced, no
+    # App token is minted, and no step exports the workflow token.
+    permissions:
+      contents: read
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout repository
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          # yamllint disable-line rule:line-length
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Download release metadata
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-version-pr-metadata
+          path: ${{ runner.temp }}/release-metadata
+      # Reproduce the prepared workspace the hook has always seen (changelog
+      # and ecosystem updates) with trusted code, before the hook runs.
+      - name: Generate changelog
+        id: changelog
+        shell: bash
+        env:
+          FORMAT: full
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
+      - name: Update CHANGELOG.md
+        shell: bash
+        env:
+          VERSION: ${{ needs.prepare.outputs.next-version }}
+          CHANGELOG_BODY: ${{ steps.changelog.outputs.changelog }}
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+          PUSH: "false"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh
+      - name: Setup Rust toolchain
+        if: contains(format(',{0},', inputs.ecosystems), ',rust,')
+        # yamllint disable-line rule:line-length
+        uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
+        with:
+          toolchain: stable
+      - name: Run ecosystem version updaters
+        if: inputs.ecosystems != ''
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}
+          ECOSYSTEMS: ${{ inputs.ecosystems }}
+          ECOSYSTEM_CONFIG: ${{ inputs.ecosystem-config }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
+      - name: Validate version update script
+        id: validate-script
+        shell: bash
+        env:
+          RAW_SCRIPT_PATH: ${{ inputs.version-update-script }}
+        run: .lgtm-ci-tooling/scripts/ci/release/validate-version-update-script.sh
+      - name: Run repo-specific version update script
+        shell: bash
+        env:
+          NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}
+          SCRIPT_PATH: ${{ steps.validate-script.outputs.resolved }}
+          RELEASE_METADATA_PATH: ${{ runner.temp }}/release-metadata/release-metadata.json
+          OUTPUT_DIR: ${{ runner.temp }}/version-update-changes
+        run: .lgtm-ci-tooling/scripts/ci/release/run-version-update-hook.sh
+      - name: Upload version update changes
+        # yamllint disable-line rule:line-length
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: release-version-pr-hook-changes
+          path: ${{ runner.temp }}/version-update-changes/version-update.diff
+          if-no-files-found: error
+          retention-days: 1
+          overwrite: true
+
   version-pr:
     name: Create Version PR
+    needs: [prepare, version-update-hook]
+    # Runs when the hook path is not configured (both skipped) or ran clean;
+    # a failed or cancelled hook must not reach the token-holding job.
+    if: >-
+      !cancelled()
+      && needs.prepare.result != 'failure'
+      && needs.version-update-hook.result != 'failure'
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
@@ -309,6 +581,10 @@ jobs:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          # Scoped to the calling repository (#849). No lgtm-ci reusable
+          # writes to a second repository; one that does must take it as an
+          # explicit input rather than widen this default.
+          repositories: ${{ github.event.repository.name }}
       - name: Checkout repository
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -420,19 +696,24 @@ jobs:
           ECOSYSTEM_CONFIG: ${{ inputs.ecosystem-config }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/ecosystems/_runner.sh
-      - name: Validate version update script
+      # The caller's version-update-script ran in the version-update-hook job
+      # (no token); only its diff enters this job. The download fails loudly
+      # if that job did not run for a release this job still deems needed.
+      - name: Download version update changes
         # yamllint disable-line rule:line-length
         if: >-
           steps.guard.outputs.is-release-commit == 'false'
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
           && inputs.version-update-script != ''
-        id: validate-script
-        shell: bash
-        env:
-          RAW_SCRIPT_PATH: ${{ inputs.version-update-script }}
-        run: .lgtm-ci-tooling/scripts/ci/release/validate-version-update-script.sh
-      - name: Run repo-specific version update script
+        # yamllint disable-line rule:line-length
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: release-version-pr-hook-changes
+          path: ${{ runner.temp }}/version-update-changes
+      - name: Apply version update changes
+        # Scope check (no .github/workflows/**, no repository escape), then
+        # `git apply --check`, then `git apply`. Nothing from the artifact runs.
         # yamllint disable-line rule:line-length
         if: >-
           steps.guard.outputs.is-release-commit == 'false'
@@ -441,9 +722,8 @@ jobs:
           && inputs.version-update-script != ''
         shell: bash
         env:
-          NEXT_VERSION: ${{ steps.version.outputs.next-version }}
-          SCRIPT_PATH: ${{ steps.validate-script.outputs.resolved }}
-        run: .lgtm-ci-tooling/scripts/ci/release/run-version-update-script.sh
+          DIFF_PATH: ${{ runner.temp }}/version-update-changes/version-update.diff
+        run: .lgtm-ci-tooling/scripts/ci/release/apply-version-update-changes.sh
       - name: Check for version file changes
         # yamllint disable-line rule:line-length
         if: >-
@@ -623,11 +903,13 @@ jobs:
           .lgtm-ci-tooling/scripts/ci/release/write-version-pr-summary.sh
   report-release-failure:
     name: Report release automation failure
-    needs: [version-pr]
+    needs: [prepare, version-update-hook, version-pr]
     if: >-
       always() &&
       inputs.report-failures &&
-      needs.version-pr.result == 'failure'
+      (needs.prepare.result == 'failure'
+      || needs.version-update-hook.result == 'failure'
+      || needs.version-pr.result == 'failure')
     runs-on: ${{ inputs.runner-image }}
     # Keep an independent short cap: the caller's timeout-minutes bounds the
     # main version-pr job, and lowering it must not cancel failure reporting.
