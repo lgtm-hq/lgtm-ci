@@ -2053,9 +2053,10 @@ the raw values and cannot fold case.
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`). |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → `vars.LINTRO_AI_MAX_COST_USD`). |
-| `blocking`        | `false` | When true, exit 2 (no review) or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
+| `blocking`        | `false` | When true, exit 2 (no review), a timed-out review, or a changes-requested verdict fails the job. INCOMPLETE coverage-at-HEAD always reddens. |
+| `max-diff-lines`  | `0`     | Skip the review (neutral + PR comment) when additions+deletions exceed this; `0` disables. `2000` is a sensible start: ~1,900-line diffs did not finish in 30 min on `anthropic`/`cli` (#1097). |
 | `egress-preset`   | `ai-review` | GitHub + PyPI/uv only. Provider hosts are appended from the visible pair. |
-| `timeout-minutes` | `30`    | Raise for long CLI reviews. |
+| `timeout-minutes` | `30`    | Job cap; the review call is bounded 5 min below it (floor 60 s). Raise for long CLI reviews. |
 | `job-name`        | `AI Review` | Check name. |
 
 <!-- markdownlint-enable MD013 -->
@@ -2071,6 +2072,16 @@ the raw values and cannot fold case.
   envelope on stdout), not a crash. Exit `1` is a produced review with P1 /
   changes-requested. Default `blocking: false` keeps those outcomes
   non-blocking. **INCOMPLETE** coverage-at-HEAD always reddens the check.
+- **Timed-out is neutral.** The review call runs under GNU `timeout` five
+  minutes below `timeout-minutes`. When it fires the step logs a
+  `::warning`, adds a step-summary line, posts a "did not complete" PR
+  comment as the bot, and exits `0` (`outcome=timed-out`; fails only with
+  `blocking: true`). The job cap is never what ends the review — a job
+  cancelled at its cap records a failed check and flips the PR to
+  `UNSTABLE`, which blocks `lgtm-ai gh pr merge` (#1098). Real errors
+  (missing App secrets, resolve failures, unexpected exit codes,
+  INCOMPLETE) still fail. A review killed by the bound may not persist
+  resume state for the next round.
 - **Per-PR concurrency.** The reusable cancels in-progress runs for the same
   consuming-repo PR so overlapping pushes do not race on state artifacts.
 - **Review resume.** `actions: read` on the caller job lets the reusable

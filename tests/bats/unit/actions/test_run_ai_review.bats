@@ -216,6 +216,159 @@ run_review() {
 	assert_output --partial "outcome=reviewed"
 }
 
+# --- run: timeout + size gate conclusion matrix (#1098) ----------------------
+
+# Fake lintro that never finishes. REVIEW_TIMEOUT_SECONDS=1 makes GNU
+# timeout signal it, which is exactly the job-cap shape on #1094/#1097.
+write_hanging_lintro() {
+	local bin="${BATS_TEST_TMPDIR}/lintro"
+	{
+		echo '#!/usr/bin/env bash'
+		echo 'sleep 30'
+		echo 'exit 0'
+	} >"$bin"
+	chmod +x "$bin"
+	echo "$bin"
+}
+
+# Mock gh: records POSTed comments; answers the pulls/N size lookup.
+_mock_gh_comment() {
+	local diff_lines="$1"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/gh" <<EOF
+#!/usr/bin/env bash
+if [[ " \$* " == *" --method POST "* ]]; then
+	printf '%s\n' "\$@" >>"${BATS_TEST_TMPDIR}/comments"
+	echo "token=\${GH_TOKEN:-}" >>"${BATS_TEST_TMPDIR}/comments"
+	exit 0
+fi
+echo "${diff_lines}"
+EOF
+	chmod +x "${mock_bin}/gh"
+	save_path
+	export PATH="${mock_bin}:$PATH"
+}
+
+@test "run: timed-out review is neutral (exit 0) when non-blocking" {
+	command -v timeout >/dev/null || skip "GNU timeout not installed"
+	local bin
+	bin="$(write_hanging_lintro)"
+	_mock_gh_comment 1900
+	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=1 GITHUB_TOKEN=app-token
+	assert_success
+	assert_output --partial "::warning::AI review did not complete"
+	assert_output --partial "(diff: 1900 lines)"
+	refute_output --partial "::error::"
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=timed-out"
+	assert_output --partial "exit-code=124"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "did not complete"
+	# The PR comment goes out as the bot (App token), not the workflow token.
+	run cat "${BATS_TEST_TMPDIR}/comments"
+	assert_output --partial "repos/x/y/issues/1/comments"
+	assert_output --partial "lintro-ai-review-incomplete"
+	assert_output --partial "token=app-token"
+}
+
+@test "run: timed-out review fails when blocking" {
+	command -v timeout >/dev/null || skip "GNU timeout not installed"
+	local bin
+	bin="$(write_hanging_lintro)"
+	_mock_gh_comment 1900
+	run run_review LINTRO_BIN="$bin" BLOCKING=true REVIEW_TIMEOUT_SECONDS=1
+	assert_failure
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=timed-out"
+}
+
+@test "run: review bound derives from the job cap minus five minutes (floor 60s)" {
+	command -v timeout >/dev/null || skip "GNU timeout not installed"
+	local bin
+	bin="$(write_fake_lintro "$(success_json)" "" 0)"
+	run run_review LINTRO_BIN="$bin" JOB_TIMEOUT_MINUTES=30 BLOCKING=false
+	assert_success
+	assert_output --partial "review-timeout=1500s"
+	run run_review LINTRO_BIN="$bin" JOB_TIMEOUT_MINUTES=3 BLOCKING=false
+	assert_success
+	assert_output --partial "review-timeout=60s"
+	run run_review LINTRO_BIN="$bin" JOB_TIMEOUT_MINUTES=30 REVIEW_TIMEOUT_SECONDS=42 BLOCKING=false
+	assert_success
+	assert_output --partial "review-timeout=42s"
+}
+
+@test "run: without GNU timeout a 124 is broken, not timed-out" {
+	# Only the wrapper's 124 means timed-out. With no `timeout` on PATH the
+	# code is lintro's own and stays in the unexpected-exit branch.
+	local bin
+	bin="$(write_fake_lintro "" "boom" 124)"
+	local empty_bin="${BATS_TEST_TMPDIR}/nopath"
+	mkdir -p "$empty_bin"
+	for tool in bash jq cat mktemp rm mkdir env dirname tr; do
+		ln -s "$(command -v "$tool")" "${empty_bin}/${tool}"
+	done
+	PATH="$empty_bin" run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_failure
+	assert_output --partial "GNU timeout not found"
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=broken"
+}
+
+@test "run: diff above max-diff-lines is skipped-size, neutral, and never runs lintro" {
+	local bin="${BATS_TEST_TMPDIR}/lintro"
+	{
+		echo '#!/usr/bin/env bash'
+		echo "touch '${BATS_TEST_TMPDIR}/lintro-ran'"
+		echo 'exit 0'
+	} >"$bin"
+	chmod +x "$bin"
+	_mock_gh_comment 2500
+	run run_review LINTRO_BIN="$bin" BLOCKING=true MAX_DIFF_LINES=2000 GITHUB_TOKEN=app-token
+	assert_success
+	assert_output --partial "::warning::AI review did not complete: the diff exceeds max-diff-lines=2000 (diff: 2500 lines)"
+	[[ ! -e "${BATS_TEST_TMPDIR}/lintro-ran" ]]
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=skipped-size"
+	run cat "${BATS_TEST_TMPDIR}/comments"
+	assert_output --partial "repos/x/y/issues/1/comments"
+}
+
+@test "run: diff at or below max-diff-lines runs the review" {
+	local bin
+	bin="$(write_fake_lintro "$(success_json)" "" 0)"
+	_mock_gh_comment 2000
+	run run_review LINTRO_BIN="$bin" BLOCKING=false MAX_DIFF_LINES=2000
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=reviewed"
+}
+
+@test "run: max-diff-lines=0 disables the size gate" {
+	local bin
+	bin="$(write_fake_lintro "$(success_json)" "" 0)"
+	_mock_gh_comment 999999
+	run run_review LINTRO_BIN="$bin" BLOCKING=false MAX_DIFF_LINES=0
+	assert_success
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=reviewed"
+}
+
+@test "run: real errors still fail alongside the neutral timeout path" {
+	# Conclusion matrix guard: timeout is the only non-contract code that
+	# maps to exit 0; INCOMPLETE and unexpected codes keep reddening.
+	local bin
+	bin="$(write_fake_lintro '{"coverage":{"complete":false,"covered_at_head":1,"eligible":4}}' "" 0)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_failure
+	bin="$(write_fake_lintro "" "boom" 7)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_failure
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=broken"
+}
+
 @test "locate: writes empty run-id when gh is unavailable or lists nothing" {
 	PATH="/usr/bin:/bin" STEP=locate GITHUB_REPOSITORY="x/y" PR_NUMBER=1 \
 		GITHUB_RUN_ID=9 run bash "$SCRIPT"
