@@ -66,18 +66,56 @@ while IFS= read -r -d '' field; do
 	[[ -n "$field" ]] && paths+=("$field")
 done <"$numstat"
 
+# Decode one of git's C-quoted path names: `\"...\"` with `\\`, `\"`, the
+# C escapes a b f n r t v, and `\ooo` octal bytes (core.quotePath).
+decode_c_quoted() {
+	local quoted="$1" out="" i ch next
+	quoted="${quoted#\"}"
+	quoted="${quoted%\"}"
+	for ((i = 0; i < ${#quoted}; i++)); do
+		ch="${quoted:i:1}"
+		if [[ "$ch" != "\\" ]]; then
+			out+="$ch"
+			continue
+		fi
+		next="${quoted:i+1:1}"
+		case "$next" in
+		[0-7])
+			# Three octal digits, one raw byte (UTF-8 sequences arrive as
+			# consecutive escapes and reassemble byte by byte).
+			# shellcheck disable=SC2059 # the escape is the format on purpose
+			out+="$(printf "\\${quoted:i+1:3}")"
+			i=$((i + 3))
+			;;
+		a | b | f | n | r | t | v)
+			# shellcheck disable=SC2059
+			out+="$(printf "\\${next}")"
+			i=$((i + 1))
+			;;
+		"\\" | '"')
+			out+="$next"
+			i=$((i + 1))
+			;;
+		*)
+			log_error "unknown escape \\${next} in quoted path ${1}"
+			return 1
+			;;
+		esac
+	done
+	printf '%s' "$out"
+}
+
 # `--numstat` prints only the destination of a rename/copy, so the source
 # is read from the headers: it is a touched path too (moving a workflow
 # file out of .github/workflows/ deletes it there). git C-quotes names with
-# unusual bytes; those are not decoded here, so a quoted source is rejected
-# rather than compared half-decoded.
+# unusual bytes; decode them so the comparison sees the real path.
 while IFS= read -r source; do
 	source="${source#rename from }"
 	source="${source#copy from }"
 	if [[ "$source" == \"* ]]; then
-		printf '::error title=version-update-script out of scope::%s - %s\n' \
-			"$source" "rename/copy source with escaped characters is not supported" >&2
-		exit 1
+		if ! source="$(decode_c_quoted "$source")"; then
+			exit 1
+		fi
 	fi
 	[[ -n "$source" ]] && paths+=("$source")
 done < <(grep -E '^(rename|copy) from ' "$DIFF_PATH" || true)

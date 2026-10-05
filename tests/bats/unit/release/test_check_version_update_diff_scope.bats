@@ -91,18 +91,40 @@ diff_of() {
 	assert_output --partial ".github/workflows/ci.yml"
 }
 
-@test "check-version-update-diff-scope: rejects a C-quoted rename source instead of half-decoding it" {
+@test "check-version-update-diff-scope: decodes a C-quoted rename source before checking it" {
 	local diff
 	diff="$(diff_of 'git mv .github/workflows/ci.yml src/ci.yml')"
-	# A workflow name with a non-ASCII byte is C-quoted by git; a naive quote
-	# strip would compare the escaped form and could miss the prefix.
+	# A workflow name with a non-ASCII byte is C-quoted by git; the decoded
+	# path still starts with .github/ and must be rejected.
 	sed 's#^rename from .github/workflows/ci.yml$#rename from ".github/workflows/ci\\303\\251.yml"#' "$diff" \
 		>"${BATS_TEST_TMPDIR}/quoted.diff"
 	run grep -c '^rename from "' "${BATS_TEST_TMPDIR}/quoted.diff"
 	assert_output "1"
 	run env DIFF_PATH="${BATS_TEST_TMPDIR}/quoted.diff" bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "escaped characters is not supported"
+	assert_output --partial ".github/workflows/cié.yml"
+}
+
+@test "check-version-update-diff-scope: a C-quoted in-scope rename source is accepted" {
+	local diff
+	diff="$(diff_of 'git mv README.md docs.md')"
+	# Tab, quote, backslash and octal escapes all decode to ordinary bytes.
+	sed 's#^rename from README.md$#rename from "src/re\\tad\\"me\\\\\\303\\251.md"#' "$diff" \
+		>"${BATS_TEST_TMPDIR}/quoted-ok.diff"
+	run grep -c '^rename from "' "${BATS_TEST_TMPDIR}/quoted-ok.diff"
+	assert_output "1"
+	run env DIFF_PATH="${BATS_TEST_TMPDIR}/quoted-ok.diff" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "in scope (2 path(s))"
+}
+
+@test "check-version-update-diff-scope: an unknown escape in a quoted source is rejected" {
+	local diff
+	diff="$(diff_of 'git mv README.md docs.md')"
+	sed 's#^rename from README.md$#rename from "src/bad\\qname.md"#' "$diff" >"${BATS_TEST_TMPDIR}/quoted-bad.diff"
+	run env DIFF_PATH="${BATS_TEST_TMPDIR}/quoted-bad.diff" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "unknown escape"
 }
 
 @test "check-version-update-diff-scope: rejects case variants of protected paths" {
