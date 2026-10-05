@@ -92,78 +92,137 @@ _composite_steps() {
 			sub(/^[[:space:]]*-?[[:space:]]*["'"'"']?[A-Za-z0-9_-]+["'"'"']?:[[:space:]]*/, "", v)
 			return v
 		}
-		function flow_field(line, key, v) {
-			v = line
-			if (!match(v, "(^|[{,][[:space:]]*)[\"'"'"']?" key "[\"'"'"']?:[[:space:]]*")) {
-				return ""
-			}
-			v = substr(v, RSTART + RLENGTH)
-			sub(/[,}].*$/, "", v)
-			return clean(v)
-		}
-		# The top level of a one-line flow mapping: the outer `{ ... }` with
-		# every nested `{...}` group blanked, so a `uses` or `path` inside
-		# `with: {...}` cannot be mistaken for the step'"'"'s own key.
-		# Braces inside a quoted scalar (`name: "Setup {node"`) are text, not
-		# delimiters; quoted content is kept but never changes the depth.
-		function flow_top(line, v, depth, i, c, out, q) {
+		# ---- one-line flow mapping `- {k: v, with: {k: v}, ...}` ----
+		# A small tokenizer with YAML quoting rules: a quote opens a scalar
+		# only at the start of a key or value; a backslash escapes inside
+		# double quotes and a doubled quote escapes inside single quotes; an
+		# apostrophe inside a plain scalar is text; braces inside quotes are
+		# text. Fills
+		# FT[key] with the step'"'"'s own fields and FW[key] with the fields of
+		# `with: {...}`. Deeper nesting is skipped. Keys are unquoted; values
+		# are passed through clean().
+		function flow_parse(line, v, n, i, c, depth, state, key, val, q, k) {
+			delete FT
+			delete FW
 			v = line
 			sub(/^[[:space:]]*-[[:space:]]*/, "", v)
-			out = ""
+			n = length(v)
 			depth = 0
+			state = "key"
+			key = ""
+			val = ""
 			q = ""
-			for (i = 1; i <= length(v); i++) {
+			for (i = 1; i <= n; i++) {
 				c = substr(v, i, 1)
 				if (q != "") {
-					if (c == q) q = ""
-					if (depth <= 1) out = out c
-				} else if (c == "\"" || c == "'"'"'") {
-					q = c
-					if (depth <= 1) out = out c
-				} else if (c == "{") {
+					# Inside a quoted scalar.
+					if (q == "\"" && c == "\\" && i < n) {
+						val = val substr(v, i + 1, 1)
+						i++
+						continue
+					}
+					if (c == q) {
+						if (q == "'"'"'" && substr(v, i + 1, 1) == "'"'"'") {
+							val = val c
+							i++
+							continue
+						}
+						q = ""
+						continue
+					}
+					val = val c
+					continue
+				}
+				if (state == "key" && c ~ /[[:space:],]/) {
+					continue
+				}
+				if (state == "key" && c == "}") {
+					depth--
+					if (depth == 1) state = "key"
+					continue
+				}
+				if (state == "key" && c == "{") {
 					depth++
-					if (depth <= 1) out = out c
-				} else if (c == "}") {
-					depth--
-					if (depth <= 0) out = out c
-				} else if (depth <= 1) {
-					out = out c
+					continue
+				}
+				if (state == "key") {
+					# Read a key up to ':'.
+					key = ""
+					if (c == "\"" || c == "'"'"'") {
+						q = c
+						state = "qkey"
+						val = ""
+						continue
+					}
+					while (i <= n && substr(v, i, 1) != ":") {
+						key = key substr(v, i, 1)
+						i++
+					}
+					gsub(/^[[:space:]]+|[[:space:]]+$/, "", key)
+					state = "value"
+					val = ""
+					continue
+				}
+				if (state == "qkey") {
+					# Closed quote reached: `val` holds the key; expect ':'.
+					key = val
+					val = ""
+					while (i <= n && substr(v, i, 1) != ":") i++
+					state = "value"
+					continue
+				}
+				if (state == "value") {
+					if (c == " " && val == "") continue
+					if (val == "" && (c == "\"" || c == "'"'"'")) {
+						q = c
+						state = "qvalue"
+						continue
+					}
+					if (val == "" && c == "{") {
+						# Nested mapping: only `with` is read.
+						depth++
+						if (depth == 2 && key == "with") {
+							with_mode = 1
+						}
+						state = "key"
+						continue
+					}
+					if (c == "," || c == "}") {
+						gsub(/[[:space:]]+$/, "", val)
+						store(depth, key, clean(val))
+						state = "key"
+						if (c == "}") {
+							depth--
+							if (depth < 2) with_mode = 0
+						}
+						continue
+					}
+					val = val c
+					continue
+				}
+				if (state == "qvalue") {
+					# Quote closed; `val` is the full scalar.
+					store(depth, key, val)
+					state = "key"
+					if (c == "}") {
+						depth--
+						if (depth < 2) with_mode = 0
+					}
+					continue
 				}
 			}
-			return out
+			if (state == "value" && key != "") {
+				gsub(/[[:space:]]+$/, "", val)
+				store(depth, key, clean(val))
+			}
 		}
-		# The `with: {...}` group of a one-line flow mapping, or "".
-		function flow_with(line, v, depth, i, c, out, q, started) {
-			# Find `with: {` outside quotes, then copy its balanced group.
-			v = line
-			sub(/^[[:space:]]*-[[:space:]]*/, "", v)
-			q = ""
-			depth = 0
-			for (i = 1; i <= length(v); i++) {
-				c = substr(v, i, 1)
-				if (q != "") {
-					if (c == q) q = ""
-					if (started) out = out c
-					continue
-				}
-				if (c == "\"" || c == "'"'"'") {
-					q = c
-					if (started) out = out c
-					continue
-				}
-				if (!started && depth == 1 && substr(v, i) ~ /^[[:space:]]*["'"'"']?with["'"'"']?:[[:space:]]*[{]/ && (i == 2 || substr(v, i - 1, 1) ~ /[{,[:space:]]/)) {
-					started = 1
-					while (substr(v, i, 1) != "{") i++
-					c = "{"
-				}
-				if (c == "{") depth++
-				if (started) out = out c
-				if (c == "}") {
-					depth--
-					if (started && depth <= 1) return out
-				}
+		function store(depth, key, val) {
+			if (depth == 1) {
+				FT[key] = val
+				FT_HAS[key] = 1
+			} else if (depth == 2 && with_mode) {
+				FW[key] = val
 			}
-			return ""
 		}
 
 		# ---- block scalar of some other key: data, not structure ----
@@ -207,18 +266,17 @@ _composite_steps() {
 			in_step = 1
 			step_col = indent_of($0)
 			if ($0 ~ /^[[:space:]]*-[[:space:]]*[{]/) {
-				# Flow mapping on one line: read the step'"'"'s own keys from the
+				# Flow mapping on one line: the step'"'"'s own keys come from the
 				# top level and `path` only from its `with: {...}` group.
-				top = flow_top($0)
-				v = flow_field(top, "uses")
-				if (v != "" || top ~ /[{,][[:space:]]*["'"'"']?uses["'"'"']?:/) {
+				flow_parse($0)
+				if ("uses" in FT_HAS) {
 					uses_line = NR
-					uses_val = v
+					uses_val = FT["uses"]
 				}
-				w = flow_with($0)
-				if (w != "") {
-					path_val = flow_field(w, "path")
+				if ("path" in FW) {
+					path_val = FW["path"]
 				}
+				delete FT_HAS
 				end_step()
 				next
 			}
@@ -248,8 +306,10 @@ _composite_steps() {
 				}
 				if (k == "with") {
 					if (v ~ /^[{]/) {
-						# Flow `with: {path: x}`.
-						path_val = flow_field(v, "path")
+						# Flow `with: {path: x}` under a block-style step.
+						flow_parse("{with: " v "}")
+						if ("path" in FW) path_val = FW["path"]
+						delete FT_HAS
 					} else {
 						in_with = 1
 					}
@@ -491,6 +551,8 @@ runs:
     - {with: {uses: "value", path: .lgtm-ci-tooling}, uses: ./.github/actions/with-first}
     - {uses: ./.github/actions/nested-uses, with: {uses: "value"}}
     - {name: "Setup {node", uses: ./.github/actions/quoted-brace, with: {x: "y}"}}
+    - {name: "Setup \"{node", uses: ./.github/actions/escaped-quote}
+    - {name: It's setup, uses: ./.github/actions/apostrophe, with: {k: 'it''s'}}
 YAML
 
 	run _composite_uses_refs "${BATS_TEST_TMPDIR}/.github/actions"
@@ -500,6 +562,8 @@ YAML
 	assert_line --index 2 "${fixture_dir}/action.yml:9:./.github/actions/with-first"
 	assert_line --index 3 "${fixture_dir}/action.yml:10:./.github/actions/nested-uses"
 	assert_line --index 4 "${fixture_dir}/action.yml:11:./.github/actions/quoted-brace"
+	assert_line --index 5 "${fixture_dir}/action.yml:12:./.github/actions/escaped-quote"
+	assert_line --index 6 "${fixture_dir}/action.yml:13:./.github/actions/apostrophe"
 	refute_output --partial ":value"
 	# A tooling path inside a non-checkout flow step's with: does not count.
 	run _tooling_checkout_line "${fixture_dir}/action.yml"
@@ -586,9 +650,29 @@ YAML
 @test "composite actions: extractor covers every uses: step in the real tree" {
 	local extracted grepped
 	extracted="$(_composite_uses_refs "${PROJECT_ROOT}/.github/actions" | wc -l | tr -d ' ')"
-	grepped="$(grep -rhE '^[[:space:]]*-?[[:space:]]*"?uses"?:' --include=action.yml "${PROJECT_ROOT}/.github/actions" | wc -l | tr -d ' ')"
+	grepped="$(grep -rhE '(^[[:space:]]*-?[[:space:]]*|[{,][[:space:]]*)["'"'"']?uses["'"'"']?:' --include=action.yml "${PROJECT_ROOT}/.github/actions" | wc -l | tr -d ' ')"
 	[[ "$extracted" -ge 1 ]]
 	[[ "$extracted" -eq "$grepped" ]]
+}
+
+@test "composite actions: flow-mapping checkout with quoted keys and apostrophes still counts as the tooling checkout" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/flow-checkout"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Flow checkout
+runs:
+  using: composite
+  steps:
+    - {name: It's the tooling, "uses": "actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd", "with": {repository: lgtm-hq/lgtm-ci, 'path': ".lgtm-ci-tooling"}}
+    - uses: ./.lgtm-ci-tooling/.github/actions/setup-python
+YAML
+
+	run _tooling_checkout_line "${fixture_dir}/action.yml"
+	assert_output "6"
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_success
+	refute_output
 }
 
 @test "composite actions: guard flags a .lgtm-ci-tooling ref without a preceding tooling checkout" {
