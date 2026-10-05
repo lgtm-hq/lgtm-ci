@@ -85,18 +85,21 @@ container_json() {
 	*) scope="users/${OWNER}" ;;
 	esac
 
-	versions='[]'
+	# Pages go to files: a page of 100 versions with many tags can exceed the
+	# single-argument limit, so nothing is passed through --argjson.
+	local pages
+	pages="$(mktemp -d)"
 	for ((page = 1; page <= MAX_PAGES; page++)); do
-		if ! records="$(gh api -X GET \
+		if ! gh api -X GET \
 			"${scope}/packages/container/${CONTAINER_PACKAGE}/versions?per_page=${PER_PAGE}&page=${page}" \
-			2>/dev/null)"; then
+			>"${pages}/$(printf '%03d' "$page").json" 2>/dev/null; then
 			log_warn "packages API refused ${CONTAINER_PACKAGE} (needs Packages: read on the App); container=null"
+			rm -rf "$pages"
 			printf 'null'
 			return 0
 		fi
-		versions="$(jq -c --argjson new "$records" '. + $new' <<<"$versions")"
 		# A short page is the last one.
-		if [[ "$(jq 'length' <<<"$records")" -lt "$PER_PAGE" ]]; then
+		if [[ "$(jq 'length' "${pages}/$(printf '%03d' "$page").json" 2>/dev/null || echo 0)" -lt "$PER_PAGE" ]]; then
 			break
 		fi
 		if [[ "$page" -eq "$MAX_PAGES" ]]; then
@@ -104,8 +107,10 @@ container_json() {
 		fi
 	done
 
-	jq -c --arg package "$CONTAINER_PACKAGE" '
-		[ .[]
+	# Best-effort: an unparseable payload yields null, never a failed release.
+	local result
+	if ! result="$(jq -s -c --arg package "$CONTAINER_PACKAGE" '
+		[ add[]?
 		  | select(.name | startswith("sha256:"))
 		  | {digest: .name, tag: .metadata.container.tags[]?}
 		  | select(.tag | test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))
@@ -115,7 +120,12 @@ container_json() {
 		| last
 		| if . == null then null
 		  else {package: $package, version: .version, digest: .digest} end
-	' <<<"$versions"
+	' "${pages}"/*.json 2>/dev/null)"; then
+		log_warn "could not parse ${CONTAINER_PACKAGE} package versions; container=null"
+		result='null'
+	fi
+	rm -rf "$pages"
+	printf '%s' "$result"
 }
 
 latest_release="$(latest_release_json)"

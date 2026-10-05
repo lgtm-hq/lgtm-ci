@@ -105,6 +105,38 @@ diff_of() {
 	assert_output --partial "escaped characters is not supported"
 }
 
+@test "check-version-update-diff-scope: rejects case variants of protected paths" {
+	local diff
+	diff="$(diff_of 'echo 2.0.0 >src/version.txt')"
+	sed 's#src/version.txt#.GitHub/Workflows/evil.yml#g' "$diff" >"${BATS_TEST_TMPDIR}/case1.diff"
+	run env DIFF_PATH="${BATS_TEST_TMPDIR}/case1.diff" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial ".GitHub/Workflows/evil.yml"
+	sed 's#src/version.txt#.LGTM-CI-TOOLING/scripts/ci/release/x.sh#g' "$diff" >"${BATS_TEST_TMPDIR}/case2.diff"
+	run env DIFF_PATH="${BATS_TEST_TMPDIR}/case2.diff" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "tooling checkout"
+}
+
+@test "check-version-update-diff-scope: rejects composite actions and CODEOWNERS under .github" {
+	local diff
+	diff="$(diff_of 'mkdir -p .github/actions/a; echo x >.github/actions/a/action.yml; echo "* @me" >.github/CODEOWNERS')"
+	run env DIFF_PATH="$diff" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial ".github/actions/a/action.yml"
+	assert_output --partial ".github/CODEOWNERS"
+}
+
+@test "check-version-update-diff-scope: rejects symlinks" {
+	local diff
+	diff="$(diff_of 'ln -s /etc/passwd src/link')"
+	run grep -c "120000" "$diff"
+	assert_output "1"
+	run env DIFF_PATH="$diff" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "symlinks and gitlinks are not allowed"
+}
+
 @test "check-version-update-diff-scope: rejects the tooling checkout" {
 	local diff
 	diff="$(diff_of 'echo 2.0.0 >src/version.txt')"

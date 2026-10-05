@@ -73,6 +73,27 @@ run_apply() {
 	run cat "$MOCK_GIT_REPO/src/version.txt"
 	assert_output "2.0.0"
 	assert_file_exists "$MOCK_GIT_REPO/src/extra.txt"
+	# New files are registered (intent-to-add), not left untracked, so the
+	# version-file change gate counts them.
+	run git -C "$MOCK_GIT_REPO" status --porcelain -- src/extra.txt
+	assert_output " A src/extra.txt"
+}
+
+@test "apply-version-update-changes: refuses a diff built for another version" {
+	local diff
+	diff="$(diff_of 'echo 2.0.0 >src/version.txt')"
+	run bash -c "cd '$MOCK_GIT_REPO' && DIFF_PATH='$diff' NEXT_VERSION=2.1.0 EXPECTED_NEXT_VERSION=2.0.0 bash '$SCRIPT' 2>&1"
+	assert_failure
+	assert_output --partial "version drift"
+	run cat "$MOCK_GIT_REPO/src/version.txt"
+	assert_output "1.0.0"
+}
+
+@test "apply-version-update-changes: applies when the versions agree" {
+	local diff
+	diff="$(diff_of 'echo 2.0.0 >src/version.txt')"
+	run bash -c "cd '$MOCK_GIT_REPO' && DIFF_PATH='$diff' NEXT_VERSION=2.0.0 EXPECTED_NEXT_VERSION=2.0.0 bash '$SCRIPT' 2>&1"
+	assert_success
 }
 
 @test "apply-version-update-changes: refuses a diff touching .github/workflows before applying" {

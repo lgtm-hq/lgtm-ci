@@ -9,11 +9,16 @@
 # privileged job as the enforcement point (the hook job can rewrite anything
 # in its own runner, including this script).
 #
-# Rejected paths:
+# Rejected paths (matched case-insensitively: macOS runners have
+# case-insensitive filesystems, so `.GitHub/` lands in `.github/`):
 #   - absolute paths and any `..` component (repository escape)
-#   - .github/workflows/**  (a version PR must never carry workflow edits)
+#   - .github/**            (workflows, composite actions, CODEOWNERS: a
+#                            version PR never needs them and the App token
+#                            may auto-merge the PR)
 #   - .lgtm-ci-tooling/**   (the tooling checkout is not caller content)
 #   - .git/**
+# Rejected entries: symlinks (mode 120000) and gitlinks (160000), which
+# would let the PR point at content outside the diff.
 #
 # Environment variables:
 #   DIFF_PATH - Path to the unified diff (may be empty)
@@ -83,13 +88,14 @@ if [[ "${#paths[@]}" -eq 0 ]]; then
 fi
 
 violations=0
+shopt -s nocasematch
 for path in "${paths[@]}"; do
 	reason=""
 	case "$path" in
 	/*) reason="absolute path" ;;
 	.. | ../* | */.. | */../*) reason="escapes the repository" ;;
-	.github/workflows/*) reason="workflow files are out of scope for a version-update hook" ;;
-	.lgtm-ci-tooling/*) reason="lgtm-ci tooling checkout is not caller content" ;;
+	.github | .github/*) reason=".github/ is out of scope for a version-update hook" ;;
+	.lgtm-ci-tooling | .lgtm-ci-tooling/*) reason="lgtm-ci tooling checkout is not caller content" ;;
 	.git | .git/*) reason="git metadata" ;;
 	esac
 	if [[ -n "$reason" ]]; then
@@ -97,6 +103,14 @@ for path in "${paths[@]}"; do
 		violations=$((violations + 1))
 	fi
 done
+shopt -u nocasematch
+
+# Symlinks and submodule pointers are entries, not content; refuse them.
+while IFS= read -r mode_line; do
+	printf '::error title=version-update-script out of scope::%s - %s\n' \
+		"$mode_line" "symlinks and gitlinks are not allowed in a version-update diff" >&2
+	violations=$((violations + 1))
+done < <(grep -E '^(new file mode|new mode|old mode|index [0-9a-f.]+ ) ?(120000|160000)$' "$DIFF_PATH" || true)
 
 if [[ "$violations" -gt 0 ]]; then
 	log_error "version-update-script diff touches ${violations} out-of-scope path(s); refusing to apply"

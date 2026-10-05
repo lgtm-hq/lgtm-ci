@@ -10,7 +10,12 @@
 # from the artifact is executed.
 #
 # Environment variables:
-#   DIFF_PATH - Path to version-update.diff from the version-update-changes artifact
+#   DIFF_PATH             - Path to version-update.diff from the hook-changes artifact
+#   NEXT_VERSION          - Optional; version this job computed
+#   EXPECTED_NEXT_VERSION - Optional; version the prepare job handed the hook.
+#                           When both are set and differ (a tag landed between
+#                           the jobs), the diff was built for another release
+#                           and is refused.
 
 set -euo pipefail
 
@@ -29,6 +34,11 @@ fi
 
 git rev-parse --is-inside-work-tree >/dev/null
 
+if [[ -n "${NEXT_VERSION:-}" && -n "${EXPECTED_NEXT_VERSION:-}" && "$NEXT_VERSION" != "$EXPECTED_NEXT_VERSION" ]]; then
+	log_error "version drift: the hook ran for ${EXPECTED_NEXT_VERSION} but this job resolved ${NEXT_VERSION}; refusing to apply"
+	exit 1
+fi
+
 if [[ ! -s "$DIFF_PATH" ]]; then
 	log_info "version-update-script made no changes; nothing to apply"
 	exit 0
@@ -41,6 +51,9 @@ if ! git apply --check --binary -- "$DIFF_PATH"; then
 	exit 1
 fi
 
-git apply --binary -- "$DIFF_PATH"
+# --intent-to-add registers files the hook created so change detection and
+# the PR commit see them; without it they stay untracked (`??`) and are
+# ignored by check-version-files-changed.sh.
+git apply --binary --intent-to-add -- "$DIFF_PATH"
 log_info "Applied version-update-script changes:"
 git apply --stat -- "$DIFF_PATH" | tail -20 >&2

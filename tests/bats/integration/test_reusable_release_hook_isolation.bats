@@ -57,7 +57,7 @@ _assert_hook_job_isolated() {
 	# Runs the hook through the sandboxing script and ships the diff.
 	printf '%s\n' "$block" | grep -Fq 'run-version-update-hook.sh' || return 1
 	printf '%s\n' "$block" | grep -Fq 'RELEASE_METADATA_PATH:' || return 1
-	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-hook-changes' || return 1
+	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-hook-changes-\$\{\{ inputs\.tag-prefix \}\}' || return 1
 	printf '%s\n' "$block" | grep -Fq 'if-no-files-found: error' || return 1
 }
 
@@ -86,15 +86,17 @@ _assert_privileged_job_runs_no_caller_code() {
 	# The hook's output enters only as a downloaded diff that is applied by
 	# fixed code, after the download.
 	printf '%s\n' "$block" | awk '
-		/name: release-[a-z-]+-hook-changes/ { saw_download = 1 }
+		/name: release-[a-z-]+-hook-changes-/ { saw_download = 1 }
 		saw_download && /apply-version-update-changes.sh/ { saw_apply = 1; exit }
 		END { exit !(saw_download && saw_apply) }
 	' || return 1
 
 	# Depends on the hook job and refuses to run after a hook failure.
 	printf '%s\n' "$block" | grep -Fq 'needs: [prepare, version-update-hook]' || return 1
-	printf '%s\n' "$block" | grep -Fq "needs.version-update-hook.result != 'failure'" || return 1
-	printf '%s\n' "$block" | grep -Fq "needs.prepare.result != 'failure'" || return 1
+	printf '%s\n' "$block" | grep -Fq "needs.version-update-hook.result == 'success' || needs.version-update-hook.result == 'skipped'" || return 1
+	printf '%s\n' "$block" | grep -Fq "needs.prepare.result == 'success' || needs.prepare.result == 'skipped'" || return 1
+	# The diff is refused when prepare and version-pr resolved different versions.
+	printf '%s\n' "$block" | grep -Fq 'EXPECTED_NEXT_VERSION: ${{ needs.prepare.outputs.next-version }}' || return 1
 }
 
 _assert_prepare_job_shape() {
@@ -110,7 +112,7 @@ _assert_prepare_job_shape() {
 	fi
 	# Metadata is fetched by fixed code with the token and shipped read-only.
 	printf '%s\n' "$block" | grep -Fq 'write-release-metadata.sh' || return 1
-	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-metadata' || return 1
+	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-metadata-\$\{\{ inputs\.tag-prefix \}\}' || return 1
 	# The hook job is gated on prepare's verdict, never on caller input alone.
 	_job_block "$workflow" "version-update-hook" |
 		grep -Fq "if: needs.prepare.outputs.hook-needed == 'true'" || return 1

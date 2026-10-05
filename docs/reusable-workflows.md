@@ -777,20 +777,34 @@ The hook receives:
 ```
 
 `latest_release` is `null` when the repository has no release. `container`
-is the newest release-tagged (`major.minor.patch`) version of the GitHub
-Packages container named by `release-metadata-container-package`; it is
-`null` when that input is empty. Setting the input makes the `prepare` job
-request `Packages: read` on its token, so the App must hold that
-permission or the token step fails. A hook that re-pins a published image
+is the highest bare `major.minor.patch`-tagged version (no `v` prefix;
+`sha-*`, `latest` and the like are ignored) of the GitHub Packages container
+named by `release-metadata-container-package`; it is `null` when that input
+is empty, the package is unreadable, or no release tag exists. Setting the
+input makes the `prepare` job request `Packages: read` on its token, so the
+App must hold that permission or the token step fails. A hook that re-pins a
+published image
 reads this instead of calling the API.
 
 The hook sees the prepared workspace (changelog and ecosystem/manifest
 updates already applied) and its own edits — tracked changes and new files —
 travel to the privileged job as a `git diff` artifact. That job rejects the
-diff if it touches `.github/workflows/**`, the tooling checkout, or any path
-outside the repository, then `git apply --check`s and applies it before PR
-creation. A hook that writes into `.lgtm-ci-tooling/` or exits non-zero
-fails the run before any branch, commit or PR exists.
+diff if it touches `.github/**` (workflows, composite actions, CODEOWNERS),
+the tooling checkout, `.git/`, any path outside the repository (matched
+case-insensitively), or adds a symlink or submodule pointer; it also refuses
+a diff built for a different version than it resolved itself. It then `git
+apply --check`s and applies the diff before PR creation. A hook that writes
+into `.lgtm-ci-tooling/` or exits non-zero fails the run before any branch,
+commit or PR exists.
+
+The isolation assumes ephemeral runners (GitHub-hosted, or self-hosted with
+a fresh machine per job): the hook job and the privileged job share nothing
+but the artifact. On a persistent self-hosted runner, state the hook leaves
+in `$HOME`, the tool cache or a lingering process would carry over, and the
+guarantee does not hold. Artifacts are named per `tag-prefix`
+(`release-version-pr-hook-changes-<prefix>`), so two calls of one reusable
+in a single run must use distinct prefixes, as the version PR title and
+concurrency group already require.
 
 **App token scope.** Every `create-github-app-token` step in the release
 reusables passes `repositories: ${{ github.event.repository.name }}`, so an
