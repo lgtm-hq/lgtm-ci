@@ -1373,8 +1373,51 @@ and reusable workflows may still pass `${{ inputs.tooling-ref }}` to checkout
 `ref:` values or reusable workflow inputs; this restriction is only for
 composite action `uses:` fields.
 
-Composite actions that need sibling lgtm-ci actions should checkout lgtm-ci
-tooling into `.lgtm-ci-tooling` and call those actions by local path:
+A workspace-relative path is equally wrong:
+
+```yaml
+uses: ./.github/actions/setup-python
+```
+
+GitHub resolves `./` against `github.workspace`, which is the **caller's**
+checkout. The reference only works when the caller happens to have lgtm-ci
+checked out at the workspace root (lgtm-ci's own CI); from any other
+repository it fails with `Can't find 'action.yml' … under
+<workspace>/.github/actions/setup-python` (#1075).
+
+Composite actions reach sibling lgtm-ci actions with the GitHub.com
+**self-repository reference** `$/<path>`, which resolves to the repository and
+SHA of the file that contains it — the SHA the consumer pinned the composite
+to — with no checkout at all:
+
+```yaml
+- name: Setup Python
+  uses: $/.github/actions/setup-python
+  with:
+    python-version: ${{ inputs.python-version }}
+```
+
+`run-pytest`, `run-vitest`, `run-playwright`, and `run-lighthouse` use this
+form, so `uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@<sha>` works from a
+consumer workflow that checks out only its own source. `$/` is generally
+available on GitHub.com and ghe.com since 2026-07-30 (see the
+[self-repository references announcement](https://github.com/orgs/community/discussions/26245));
+self-hosted runners need `>= 2.336.0`. GitHub Enterprise Server is **not**
+covered by that announcement. On a GHES release without `$/`, these four
+actions are **unavailable**: the nested `$/` ref lives inside the action
+itself, so no caller-side checkout (workspace root or `.lgtm-ci-tooling`)
+can make it resolve. GHES consumers should call the per-language reusable
+workflows instead (`reusable-test-python`, `reusable-test-node`,
+`reusable-test-e2e-playwright`, `reusable-site-quality`), which run the same
+`scripts/ci/actions/run-*.sh` directly and never load these composites.
+Since `$/` is pinned by construction,
+`validate-action-pinning` exempts `$/` refs the same way it exempts `./` and
+`docker://` — but only the plain `$/<path>` form; a value carrying `@ref` or a
+`..` segment is checked like any other ref.
+
+Composite actions that need the lgtm-ci *scripts* tree alongside the caller's
+source (for example `prepare-pypi-upload`) may still check lgtm-ci tooling out
+into `.lgtm-ci-tooling` and call sibling actions by that local path:
 
 ```yaml
 - name: Checkout lgtm-ci tooling
@@ -1399,7 +1442,13 @@ tooling into `.lgtm-ci-tooling` and call those actions by local path:
 
 `tests/bats/integration/test_composite_action_refs.bats` guards this contract
 and fails if any `.github/actions/**/action.yml` uses
-`lgtm-hq/lgtm-ci/...@${{ ... }}`. Hardened caller jobs that run composites with
+`lgtm-hq/lgtm-ci/...@${{ ... }}`;
+`tests/bats/contract/test_composite_references.bats` additionally forbids
+`uses: ./.github/actions/...` and requires every nested `uses:` in a composite
+to be a SHA-pinned remote, `docker://`, `$/`, or `./.lgtm-ci-tooling/` ref.
+The external fixture `TurboCoder13/lgtm-ci-consumer-fixture`
+(`actions-direct.yml`) exercises the direct path at a pinned lgtm-ci SHA with
+no lgtm-ci checkout. Hardened caller jobs that run composites with
 tooling checkout need egress for `codeload.github.com`, `astral.sh`, and
 `releases.astral.sh`; see the PyPI egress examples above.
 

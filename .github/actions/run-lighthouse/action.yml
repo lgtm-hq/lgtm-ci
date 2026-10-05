@@ -78,7 +78,10 @@ runs:
         echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
     - name: Setup Node.js
-      uses: ./.github/actions/setup-node
+      # Self-repository ref: resolves to lgtm-ci at the SHA this action was
+      # fetched from, with no caller checkout (#1075). A `./` ref would resolve
+      # against the consumer's workspace instead.
+      uses: $/.github/actions/setup-node
       with:
         node-version: ${{ inputs.node-version }}
 

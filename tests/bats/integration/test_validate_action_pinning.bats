@@ -168,6 +168,65 @@ jobs:
 	assert_github_output "offenders" "0"
 }
 
+@test "validate-action-pinning: self-repository \$/ refs are ignored (#1075)" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/dot-github/workflows"
+	local actions_dir="${BATS_TEST_TMPDIR}/dot-github/actions/run-thing"
+
+	create_workflow "$workflows_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/run-thing
+'
+
+	create_workflow "$actions_dir" "action.yml" '
+name: Run thing
+runs:
+  using: composite
+  steps:
+    - uses: $/.github/actions/setup-thing
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$workflows_dir"' '"$actions_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_success
+	assert_output --partial "All action references follow SHA pinning with Renovate version comments"
+	refute_output --partial "no version specified"
+	assert_github_output "offenders" "0"
+}
+
+@test "validate-action-pinning: malformed \$/ refs with @ref or .. are not exempt (#1075)" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/run-thing@v1
+      - uses: $/../other/.github/actions/run-thing
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial '$/.github/actions/run-thing@v1'
+	assert_output --partial '$/../other/.github/actions/run-thing (no version specified)'
+	assert_github_output "offenders" "2"
+}
+
 # =============================================================================
 # Docker references are ignored
 # =============================================================================

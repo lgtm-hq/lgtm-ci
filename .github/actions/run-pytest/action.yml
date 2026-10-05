@@ -62,7 +62,10 @@ runs:
   using: "composite"
   steps:
     - name: Setup Python
-      uses: ./.github/actions/setup-python
+      # Self-repository ref: resolves to lgtm-ci at the SHA this action was
+      # fetched from, with no caller checkout (#1075). A `./` ref would resolve
+      # against the consumer's workspace instead.
+      uses: $/.github/actions/setup-python
       with:
         python-version: ${{ inputs.python-version }}
         working-directory: ${{ inputs.working-directory }}
