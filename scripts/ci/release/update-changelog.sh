@@ -14,6 +14,9 @@
 #   TAG_PREFIX - Prefix for version tags (default: v)
 #   REPO_URL - Repository URL (default: auto-detected)
 #   PUSH - Whether to commit and push the update (default: false)
+#   RELEASE_DATE - YYYY-MM-DD for the new section (default: today). The
+#     version-PR reusables pin it across jobs so the hook job and the
+#     privileged job render the same heading (#849).
 
 set -euo pipefail
 
@@ -49,7 +52,7 @@ if [[ -z "$REPO_URL" ]]; then
 	log_error "REPO_URL could not be detected and was not provided (needed for ${TAG_NAME} comparison links)"
 	exit 1
 fi
-RELEASE_DATE=$(date +%Y-%m-%d)
+RELEASE_DATE="${RELEASE_DATE:-$(date +%Y-%m-%d)}"
 
 if [[ ! -f "$CHANGELOG_FILE" ]]; then
 	log_error "CHANGELOG.md not found at: $CHANGELOG_FILE"

@@ -309,6 +309,11 @@ jobs:
           app-id: ${{ secrets.RELEASE_APP_ID }}
           private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
           owner: ${{ github.repository_owner }}
+          # Scoped to the calling repository (#849): tags, releases and the
+          # floating tag are all written here. A cross-repository write
+          # (e.g. a Homebrew tap dispatch) belongs to an explicit input, not
+          # to a wider default.
+          repositories: ${{ github.event.repository.name }}
           # Scopes are declared explicitly so the token's reach is visible
           # here rather than silently tracking the App's configuration.
           # `workflows` is required by "Update floating tag": moving `v0`

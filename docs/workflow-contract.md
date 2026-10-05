@@ -710,8 +710,20 @@ that pattern does not apply inside reusable workflow steps that need dynamic ref
 tooling before the App token and check out `scripts/ci/` once, after it. (Their
 former pre-token checkout only fed the removed egress resolver.)
 
+Both version-PR reusables split on privilege (#849): `prepare` and
+`version-pr` mint the App token and run lgtm-ci code only; the caller's
+`version-update-script` runs in `version-update-hook` (`contents: read`, no
+secrets, no token) and its edits reach `version-pr` as a scope-checked diff
+artifact. `version-pr` carries `needs: [prepare, version-update-hook]` with
+an `if:` that only propagates dependency failure, which is why
+`reusable-release-multi-ecosystem.yml:version-pr` (dynamic `job-name`) is an
+exception in `validate-static-job-names.sh`. Contract:
+`tests/bats/integration/test_reusable_release_hook_isolation.bats`. See
+[reusable-workflows.md](reusable-workflows.md#version-update-hook-version-update-script).
+
 Keep `Create GitHub App installation token` before any step that uses
-`steps.app-token.outputs` (actionlint enforces step order).
+`steps.app-token.outputs` (actionlint enforces step order). Every mint passes
+`repositories: ${{ github.event.repository.name }}`.
 
 <!-- markdownlint-enable MD013 -->
 
