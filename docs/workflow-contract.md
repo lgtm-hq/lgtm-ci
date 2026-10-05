@@ -1399,10 +1399,16 @@ to — with no checkout at all:
 
 `run-pytest`, `run-vitest`, `run-playwright`, and `run-lighthouse` use this
 form, so `uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@<sha>` works from a
-consumer workflow that checks out only its own source. `$/` is GA on
-GitHub.com and ghe.com; self-hosted runners need `>= 2.336.0`. Since it is
-pinned by construction, `validate-action-pinning` exempts `$/` refs the same
-way it exempts `./` and `docker://`.
+consumer workflow that checks out only its own source. `$/` is generally
+available on GitHub.com and ghe.com since 2026-07-30 (see the
+[self-repository references announcement](https://github.com/orgs/community/discussions/26245));
+self-hosted runners need `>= 2.336.0`. GitHub Enterprise Server is **not**
+covered by that announcement: GHES consumers of these four actions must either
+check lgtm-ci out at the workspace root or use the `.lgtm-ci-tooling` pattern
+below until their GHES release ships `$/`. Since it is pinned by construction,
+`validate-action-pinning` exempts `$/` refs the same way it exempts `./` and
+`docker://` — but only the plain `$/<path>` form; a value carrying `@ref` or a
+`..` segment is checked like any other ref.
 
 Composite actions that need the lgtm-ci *scripts* tree alongside the caller's
 source (for example `prepare-pypi-upload`) may still check lgtm-ci tooling out

@@ -23,7 +23,10 @@ load "../../helpers/common"
 # Print every `uses:` value under .github/actions/**/action.yml as
 # `<file>:<line>:<ref>`, with the trailing version comment and surrounding
 # quotes stripped. Folded/multi-line values are joined onto one line so a
-# `>-` ref cannot hide from the checks below.
+# `>-` ref cannot hide from the checks below. Flow-mapping steps
+# (`- {uses: ..., with: ...}`) are read too. Lines inside another key's block
+# scalar (`run: |`, `description: >`) are skipped so a `uses:` mentioned in a
+# script or prose is not mistaken for a step.
 _composite_uses_refs() {
 	local scan_path="$1"
 
@@ -44,6 +47,27 @@ _composite_uses_refs() {
 				printf("%s:%d:%s\n", file, uses_line, value)
 				in_uses = 0
 			}
+			# Inside another key'"'"'s block scalar: skip until the indent returns
+			# to (or above) that key'"'"'s column.
+			in_block {
+				if ($0 ~ /^[[:space:]]*$/ || indent_of($0) > block_indent) {
+					next
+				}
+				in_block = 0
+			}
+			# Flow-mapping step: `- {uses: ref, with: {...}}` on one line. The
+			# `{` is a bracket expression and no character class follows `.*`
+			# because BSD awk mis-parses both forms.
+			/^[[:space:]]*-[[:space:]]*[{].*uses:[[:space:]]*/ {
+				flush()
+				value = $0
+				sub(/^.*uses:[[:space:]]*/, "", value)
+				sub(/[,}].*$/, "", value)
+				in_uses = 1
+				uses_line = NR
+				flush()
+				next
+			}
 			/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/ {
 				flush()
 				in_uses = 1
@@ -55,6 +79,9 @@ _composite_uses_refs() {
 				uses_indent = length(prefix)
 				value = $0
 				sub(/^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*/, "", value)
+				# Drop a comment on the indicator line (`uses: >- # pinned`) so
+				# it does not swallow the folded ref that follows.
+				sub(/[[:space:]]+#.*$/, "", value)
 				next
 			}
 			in_uses {
@@ -63,11 +90,20 @@ _composite_uses_refs() {
 				}
 				if (indent_of($0) <= uses_indent) {
 					flush()
+				} else {
+					line = $0
+					sub(/^[[:space:]]+/, "", line)
+					value = value " " line
 					next
 				}
-				line = $0
-				sub(/^[[:space:]]+/, "", line)
-				value = value " " line
+			}
+			# Any other key opening a block scalar (`run: |`, `description: >-`)
+			# starts a region whose lines are data, not steps.
+			/^[[:space:]]*-?[[:space:]]*[A-Za-z0-9_-]+:[[:space:]]*[>|][+-]?[0-9]?[[:space:]]*(#.*)?$/ {
+				prefix = $0
+				sub(/[A-Za-z0-9_-]+:.*$/, "", prefix)
+				block_indent = length(prefix)
+				in_block = 1
 			}
 			END { flush() }
 		' "$action"
@@ -159,9 +195,10 @@ _composite_reference_violations() {
 }
 
 @test "composite actions: no nested uses: ./.github/actions/ references" {
-	run grep -rn --include=action.yml -E \
-		'^[[:space:]]*-?[[:space:]]*uses:[[:space:]]*["'"'"']?\./\.github/actions/' \
-		"${PROJECT_ROOT}/.github/actions"
+	_workspace_relative_refs() {
+		_composite_uses_refs "$1" | grep -E ':\./\.github/actions/'
+	}
+	run _workspace_relative_refs "${PROJECT_ROOT}/.github/actions"
 	assert_failure
 	refute_output
 }
@@ -250,6 +287,53 @@ YAML
 	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
 	assert_success
 	refute_output
+}
+
+@test "composite actions: extractor ignores uses: inside run: and description: block scalars" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/prose"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Prose mentions
+description: >
+  Example: uses: ./.github/actions/in-description
+runs:
+  using: composite
+  steps:
+    - run: |
+        echo "uses: ./.github/actions/in-run"
+      shell: bash
+    - uses: $/.github/actions/setup-node
+YAML
+
+	run _composite_uses_refs "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_success
+	assert_output "${fixture_dir}/action.yml:11:\$/.github/actions/setup-node"
+}
+
+@test "composite actions: extractor reads flow-mapping steps and commented fold indicators" {
+	local fixture_dir="${BATS_TEST_TMPDIR}/.github/actions/flow"
+	mkdir -p "$fixture_dir"
+	cat >"${fixture_dir}/action.yml" <<'YAML'
+---
+name: Flow and folded
+runs:
+  using: composite
+  steps:
+    - {name: Setup, uses: ./.github/actions/setup-python, with: {python-version: "3.12"}}
+    - uses: >- # pinned
+        actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd
+YAML
+
+	run _composite_uses_refs "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_success
+	assert_line --index 0 "${fixture_dir}/action.yml:6:./.github/actions/setup-python"
+	assert_line --index 1 "${fixture_dir}/action.yml:7:actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd"
+
+	run _composite_reference_violations "${BATS_TEST_TMPDIR}/.github/actions"
+	assert_failure
+	assert_output --partial "flow/action.yml:6: uses: ./.github/actions/setup-python"
+	refute_output --partial "actions/checkout@"
 }
 
 @test "composite actions: guard flags a .lgtm-ci-tooling ref without a preceding tooling checkout" {

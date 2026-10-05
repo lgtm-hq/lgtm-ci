@@ -202,6 +202,31 @@ runs:
 	assert_github_output "offenders" "0"
 }
 
+@test "validate-action-pinning: malformed \$/ refs with @ref or .. are not exempt (#1075)" {
+	local scan_dir="${BATS_TEST_TMPDIR}/workflows"
+	create_workflow "$scan_dir" "ci.yml" '
+name: CI
+on: push
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: $/.github/actions/run-thing@v1
+      - uses: $/../other/.github/actions/run-thing
+'
+
+	run bash -c '
+		export INPUT_ENFORCE=true
+		export INPUT_ALLOW_TAG_EXCEPTIONS=""
+		export INPUT_SCAN_PATHS="'"$scan_dir"'"
+		bash "$SCRIPT" 2>&1
+	'
+	assert_failure
+	assert_output --partial '$/.github/actions/run-thing@v1'
+	assert_output --partial '$/../other/.github/actions/run-thing (no version specified)'
+	assert_github_output "offenders" "2"
+}
+
 # =============================================================================
 # Docker references are ignored
 # =============================================================================

@@ -3,6 +3,14 @@
 Test runners, quality checks, and change detection. For reusable
 per-language test workflows, see [workflows/testing.md](../workflows/testing.md).
 
+The runner actions `run-pytest`, `run-vitest`, `run-playwright`, and
+`run-lighthouse` call their `setup-python` / `setup-node` siblings through `$/`
+self-repository references, so they work from a plain
+`uses: lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>` with only your own
+repository checked out — no lgtm-ci checkout or `tooling-ref` is needed
+(#1075; GitHub.com and ghe.com only, see
+[the workflow contract](../workflow-contract.md#composite-actions-calling-sibling-lgtm-ci-actions)).
+
 ## detect-changes
 
 Maps changed paths to named filters so conditional jobs **always run and
@@ -95,13 +103,6 @@ runners.
 ## run-pytest
 
 Run Python tests with pytest and optional coverage.
-
-`run-pytest`, `run-vitest`, `run-playwright`, and `run-lighthouse` call their
-`setup-python` / `setup-node` siblings through `$/` self-repository references,
-so they work from a plain `uses: lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>`
-with only your own repository checked out — no lgtm-ci checkout or
-`tooling-ref` is needed (#1075; see
-[the workflow contract](../workflow-contract.md#composite-actions-calling-sibling-lgtm-ci-actions)).
 
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@main
