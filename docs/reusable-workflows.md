@@ -779,8 +779,10 @@ The hook receives:
 `latest_release` is `null` when the repository has no release. `container`
 is the newest release-tagged (`major.minor.patch`) version of the GitHub
 Packages container named by `release-metadata-container-package`; it is
-`null` when that input is empty or the App lacks `Packages: read`. A hook
-that re-pins a published image reads this instead of calling the API.
+`null` when that input is empty. Setting the input makes the `prepare` job
+request `Packages: read` on its token, so the App must hold that
+permission or the token step fails. A hook that re-pins a published image
+reads this instead of calling the API.
 
 The hook sees the prepared workspace (changelog and ecosystem/manifest
 updates already applied) and its own edits — tracked changes and new files —

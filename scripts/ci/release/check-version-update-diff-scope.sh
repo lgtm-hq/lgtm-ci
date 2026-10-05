@@ -61,15 +61,18 @@ while IFS= read -r -d '' field; do
 	[[ -n "$field" ]] && paths+=("$field")
 done <"$numstat"
 
-# numstat lists only the destination of a rename/copy; the source is a
-# touched path too (moving a workflow file out of .github/workflows/ deletes
-# it there). Headers quote unusual names in C style; strip the quotes.
+# `--numstat` prints only the destination of a rename/copy, so the source
+# is read from the headers: it is a touched path too (moving a workflow
+# file out of .github/workflows/ deletes it there). git C-quotes names with
+# unusual bytes; those are not decoded here, so a quoted source is rejected
+# rather than compared half-decoded.
 while IFS= read -r source; do
 	source="${source#rename from }"
 	source="${source#copy from }"
-	if [[ "$source" == \"*\" ]]; then
-		source="${source#\"}"
-		source="${source%\"}"
+	if [[ "$source" == \"* ]]; then
+		printf '::error title=version-update-script out of scope::%s - %s\n' \
+			"$source" "rename/copy source with escaped characters is not supported" >&2
+		exit 1
 	fi
 	[[ -n "$source" ]] && paths+=("$source")
 done < <(grep -E '^(rename|copy) from ' "$DIFF_PATH" || true)

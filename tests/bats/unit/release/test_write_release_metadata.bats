@@ -35,12 +35,14 @@ mock_gh() {
 	mkdir -p "$mock_bin"
 	printf '%s\n' "$release" >"${mock_bin}/.release"
 	printf '%s\n' "$package" >"${mock_bin}/.package"
+	printf '%s\n' "${3:-[]}" >"${mock_bin}/.package2"
 	cat >"${mock_bin}/gh" <<EOF
 #!/usr/bin/env bash
 echo "\$*" >>'${BATS_TEST_TMPDIR}/gh_calls'
 case "\$*" in
 *releases/latest*) body='${mock_bin}/.release' ;;
-*packages/container/*) body='${mock_bin}/.package' ;;
+*packages/container/*\&page=1) body='${mock_bin}/.package' ;;
+*packages/container/*) body='${mock_bin}/.package2' ;;
 *) echo "unexpected: \$*" >&2; exit 1 ;;
 esac
 content="\$(cat "\$body")"
@@ -123,4 +125,20 @@ sha256:dddd"
 	assert_success
 	run jq -c '.container' "$OUT"
 	assert_output "null"
+}
+
+@test "write-release-metadata: walks every page so a newer release behind a recent backport is found" {
+	# Page 1 is full (100 records, newest first) and carries only a backport;
+	# the higher release sits on page 2.
+	local page1 page2
+	page1="$(jq -c -n '[range(100) | {name: ("sha256:" + (. | tostring)), metadata: {container: {tags: [(if . == 0 then "1.2.4" else ("sha-" + (. | tostring)) end)]}}}]')"
+	page2='[{"name":"sha256:newer","metadata":{"container":{"tags":["1.10.0"]}}}]'
+	mock_gh "$RELEASE_JSON" "$page1" "$page2"
+	run_writer CONTAINER_PACKAGE=widget
+	assert_success
+	run jq -r '.container.version, .container.digest' "$OUT"
+	assert_output "1.10.0
+sha256:newer"
+	run grep -c "packages/container/widget/versions" "${BATS_TEST_TMPDIR}/gh_calls"
+	assert_output "2"
 }

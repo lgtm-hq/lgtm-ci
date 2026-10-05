@@ -91,6 +91,20 @@ diff_of() {
 	assert_output --partial ".github/workflows/ci.yml"
 }
 
+@test "check-version-update-diff-scope: rejects a C-quoted rename source instead of half-decoding it" {
+	local diff
+	diff="$(diff_of 'git mv .github/workflows/ci.yml src/ci.yml')"
+	# A workflow name with a non-ASCII byte is C-quoted by git; a naive quote
+	# strip would compare the escaped form and could miss the prefix.
+	sed 's#^rename from .github/workflows/ci.yml$#rename from ".github/workflows/ci\\303\\251.yml"#' "$diff" \
+		>"${BATS_TEST_TMPDIR}/quoted.diff"
+	run grep -c '^rename from "' "${BATS_TEST_TMPDIR}/quoted.diff"
+	assert_output "1"
+	run env DIFF_PATH="${BATS_TEST_TMPDIR}/quoted.diff" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "escaped characters is not supported"
+}
+
 @test "check-version-update-diff-scope: rejects the tooling checkout" {
 	local diff
 	diff="$(diff_of 'echo 2.0.0 >src/version.txt')"

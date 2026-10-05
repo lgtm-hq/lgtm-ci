@@ -315,6 +315,9 @@ jobs:
       # yamllint disable-line rule:line-length
       hook-needed: ${{ steps.guard.outputs.is-release-commit == 'false' && steps.check-pr.outputs.pr-exists == 'false' && steps.version.outputs.release-needed == 'true' }}
       next-version: ${{ steps.version.outputs.next-version }}
+      # Pinned once so the hook job and version-pr render the same
+      # CHANGELOG heading even across midnight.
+      release-date: ${{ steps.release-date.outputs.date }}
 
     steps:
       - name: Harden runner
@@ -351,6 +354,14 @@ jobs:
           # Scoped to the calling repository; an installation covering the
           # whole org must not be reachable from a release job (#849).
           repositories: ${{ github.event.repository.name }}
+          # This job only reads. Packages is requested only when the caller
+          # asks for the container digest: create-github-app-token errors
+          # when asked for a permission the installation lacks, and it
+          # ignores an empty value.
+          permission-contents: read
+          permission-pull-requests: read
+          # yamllint disable-line rule:line-length
+          permission-packages: ${{ inputs.release-metadata-container-package != '' && 'read' || '' }}
       - name: Checkout repository
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -400,6 +411,10 @@ jobs:
           MAX_BUMP: ${{ inputs.max-bump }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/resolve-multi-ecosystem-version.sh
+      - name: Pin release date
+        id: release-date
+        shell: bash
+        run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
       - name: Write release metadata
         # Fixed lgtm-ci code fetches what the hook may need; the hook itself
         # never holds a token.
@@ -508,6 +523,7 @@ jobs:
           VERSION: ${{ needs.prepare.outputs.next-version }}
           CHANGELOG_BODY: ${{ steps.changelog.outputs.changelog }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
+          RELEASE_DATE: ${{ needs.prepare.outputs.release-date }}
           PUSH: "false"
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh
@@ -697,6 +713,8 @@ jobs:
           VERSION: ${{ steps.version.outputs.next-version }}
           CHANGELOG_BODY: ${{ steps.changelog.outputs.changelog }}
           TAG_PREFIX: ${{ inputs.tag-prefix }}
+          # Empty (today) unless the hook path ran prepare.
+          RELEASE_DATE: ${{ needs.prepare.outputs.release-date }}
           PUSH: "false"
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/update-changelog.sh

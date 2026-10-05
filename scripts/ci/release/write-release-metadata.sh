@@ -52,8 +52,10 @@ OWNER_TYPE="${OWNER_TYPE:-Organization}"
 TAG_PREFIX="${TAG_PREFIX:-v}"
 CONTAINER_PACKAGE="${CONTAINER_PACKAGE:-}"
 
-# Bounded like the consumer that motivated this: the package may carry
-# thousands of sha-/ci- tags, so walk pages until a release tag appears.
+# The package may carry thousands of sha-/ci- tags. Pages are ordered by
+# creation, not by version, so a backport pushed after a newer release would
+# hide the newer one on a later page: walk every page up to the cap and pick
+# the highest release tag among them.
 PER_PAGE=100
 MAX_PAGES=20
 
@@ -93,12 +95,12 @@ container_json() {
 			return 0
 		fi
 		versions="$(jq -c --argjson new "$records" '. + $new' <<<"$versions")"
-		# Stop on a short page or once a release tag is in hand (newest first).
+		# A short page is the last one.
 		if [[ "$(jq 'length' <<<"$records")" -lt "$PER_PAGE" ]]; then
 			break
 		fi
-		if [[ "$(jq -c '[.[] | .metadata.container.tags[]? | select(test("^[0-9]+\\.[0-9]+\\.[0-9]+$"))] | length' <<<"$versions")" -gt 0 ]]; then
-			break
+		if [[ "$page" -eq "$MAX_PAGES" ]]; then
+			log_warn "stopped after ${MAX_PAGES} pages of ${CONTAINER_PACKAGE} versions; container may be based on an incomplete list"
 		fi
 	done
 
