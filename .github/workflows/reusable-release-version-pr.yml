@@ -293,6 +293,9 @@ jobs:
       # Pinned once so the hook job and version-pr render the same
       # CHANGELOG heading even across midnight.
       release-date: ${{ steps.release-date.outputs.date }}
+      # Per-invocation artifact key derived from tag-prefix (which may hold
+      # characters artifact names reject, e.g. cli/v).
+      artifact-key: ${{ steps.artifact-key.outputs.key }}
 
     steps:
       - name: Harden runner
@@ -387,6 +390,12 @@ jobs:
         id: release-date
         shell: bash
         run: echo "date=$(date +%Y-%m-%d)" >> "$GITHUB_OUTPUT"
+      - name: Derive artifact key
+        id: artifact-key
+        shell: bash
+        env:
+          TAG_PREFIX: ${{ inputs.tag-prefix }}
+        run: .lgtm-ci-tooling/scripts/ci/release/derive-artifact-key.sh
       - name: Write release metadata
         # Fixed lgtm-ci code fetches what the hook may need; the hook itself
         # never holds a token.
@@ -413,7 +422,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-version-pr-metadata-${{ inputs.tag-prefix }}
+          name: release-version-pr-metadata-${{ steps.artifact-key.outputs.key }}
           path: ${{ runner.temp }}/release-metadata/release-metadata.json
           if-no-files-found: error
           retention-days: 1
@@ -475,7 +484,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-version-pr-metadata-${{ inputs.tag-prefix }}
+          name: release-version-pr-metadata-${{ needs.prepare.outputs.artifact-key }}
           path: ${{ runner.temp }}/release-metadata
       # Reproduce the prepared workspace the hook has always seen (changelog
       # and ecosystem updates) with trusted code, before the hook runs.
@@ -530,7 +539,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: release-version-pr-hook-changes-${{ inputs.tag-prefix }}
+          name: release-version-pr-hook-changes-${{ needs.prepare.outputs.artifact-key }}
           path: ${{ runner.temp }}/version-update-changes/version-update.diff
           if-no-files-found: error
           retention-days: 1
@@ -727,7 +736,7 @@ jobs:
         # yamllint disable-line rule:line-length
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: release-version-pr-hook-changes-${{ inputs.tag-prefix }}
+          name: release-version-pr-hook-changes-${{ needs.prepare.outputs.artifact-key }}
           path: ${{ runner.temp }}/version-update-changes
       - name: Apply version update changes
         # Scope check (no .github/workflows/**, no repository escape), then

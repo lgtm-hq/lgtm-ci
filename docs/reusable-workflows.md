@@ -801,10 +801,11 @@ The isolation assumes ephemeral runners (GitHub-hosted, or self-hosted with
 a fresh machine per job): the hook job and the privileged job share nothing
 but the artifact. On a persistent self-hosted runner, state the hook leaves
 in `$HOME`, the tool cache or a lingering process would carry over, and the
-guarantee does not hold. Artifacts are named per `tag-prefix`
-(`release-version-pr-hook-changes-<prefix>`), so two calls of one reusable
-in a single run must use distinct prefixes, as the version PR title and
-concurrency group already require.
+guarantee does not hold. Artifacts are named per `tag-prefix` through a
+filesystem-safe key (`release-version-pr-hook-changes-<key>`, where
+`cli/v` becomes `cli_v-<digest>`), so two calls of one reusable in a single
+run must use distinct prefixes, as the version PR title and concurrency
+group already require.
 
 **App token scope.** Every `create-github-app-token` step in the release
 reusables passes `repositories: ${{ github.event.repository.name }}`, so an

@@ -57,7 +57,7 @@ _assert_hook_job_isolated() {
 	# Runs the hook through the sandboxing script and ships the diff.
 	printf '%s\n' "$block" | grep -Fq 'run-version-update-hook.sh' || return 1
 	printf '%s\n' "$block" | grep -Fq 'RELEASE_METADATA_PATH:' || return 1
-	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-hook-changes-\$\{\{ inputs\.tag-prefix \}\}' || return 1
+	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-hook-changes-\$\{\{ needs\.prepare\.outputs\.artifact-key \}\}' || return 1
 	printf '%s\n' "$block" | grep -Fq 'if-no-files-found: error' || return 1
 }
 
@@ -112,7 +112,7 @@ _assert_prepare_job_shape() {
 	fi
 	# Metadata is fetched by fixed code with the token and shipped read-only.
 	printf '%s\n' "$block" | grep -Fq 'write-release-metadata.sh' || return 1
-	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-metadata-\$\{\{ inputs\.tag-prefix \}\}' || return 1
+	printf '%s\n' "$block" | grep -Eq 'name: release-[a-z-]+-metadata-\$\{\{ steps\.artifact-key\.outputs\.key \}\}' || return 1
 	# The hook job is gated on prepare's verdict, never on caller input alone.
 	_job_block "$workflow" "version-update-hook" |
 		grep -Fq "if: needs.prepare.outputs.hook-needed == 'true'" || return 1
