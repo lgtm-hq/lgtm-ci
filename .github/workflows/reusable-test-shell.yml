@@ -683,6 +683,12 @@ jobs:
         github.event.pull_request.draft == false
       )
     permissions:
+      # `actions: read`: the pre-aggregation availability wait (#803) polls
+      # `GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts` with
+      # GITHUB_TOKEN so a shard whose upload succeeded but is not yet listed
+      # does not make the TAP aggregate under-count. Validated statically, so
+      # every caller must grant it on this call (docs/reusable-workflows.md).
+      actions: read
       contents: read
     outputs:
       tests-passed: ${{ steps.results.outputs.tests-passed }}
@@ -745,6 +751,22 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             scripts/ci/
+      # Bounded availability wait (#803): the listing is eventually consistent,
+      # so a one-shot download can miss a shard whose upload already
+      # succeeded. Listing only — the downloads below stay the fetch path.
+      # Best effort like them: the strict TAP count in run-bats-tests.sh is
+      # still the verdict, so a permanent under-count fails there by shard.
+      - name: Wait for shard TAP artifacts
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COUNT: ${{ inputs.coverage-shards }}
+          COMMENT_MARKER: ${{ inputs.comment-marker }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
+          "$EXPECTED_COUNT" "shell-test-results-${COMMENT_MARKER}-shard-*"
       - name: Download shard TAP artifacts
         if: always()
         continue-on-error: true

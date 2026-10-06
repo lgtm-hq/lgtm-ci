@@ -330,6 +330,7 @@ jobs:
       contents: read
     outputs:
       matrix: ${{ steps.matrix.outputs.matrix }}
+      matrix-count: ${{ steps.matrix.outputs.matrix-count }}
       pages-coverage-node-version: ${{ steps.matrix.outputs.pages-coverage-node-version }}
 
     steps:
@@ -854,6 +855,15 @@ jobs:
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
     permissions:
+      # `actions: read` is the one scope the REST artifact listing accepts
+      # from GITHUB_TOKEN. The pre-aggregation availability wait (#803) polls
+      # `GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts` so a leg
+      # whose upload succeeded but is not yet listed does not fail the
+      # aggregate. A reusable workflow's request is validated statically, so
+      # every caller must grant `actions: read` on this call (documented in
+      # docs/reusable-workflows.md); it was deliberately absent before #803
+      # (#730), when the job only used the runtime-token download action.
+      actions: read
       contents: read
     outputs:
       tests-passed: ${{ steps.aggregate.outputs.tests-passed }}
@@ -924,12 +934,21 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             scripts/ci/
-      - name: Download matrix test summaries
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          pattern: node-results-*
-          path: node-results
-          merge-multiple: false
+      # Bounded availability wait, then download (#803): the artifact listing
+      # is eventually consistent, so a one-shot download can miss a leg whose
+      # upload already succeeded. Only under-counts and 404s on a listed id are
+      # retried; an over-count fails at once as sibling contamination (#752).
+      - name: Wait for and download matrix test summaries
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DOWNLOAD_DIR: node-results
+          MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+          MATRIX_KEY: node-version
+          EXPECTED_COUNT: ${{ needs.prepare.outputs.matrix-count }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
+          "$EXPECTED_COUNT" 'node-results-*'
       - name: Aggregate matrix test summaries
         id: aggregate
         shell: bash

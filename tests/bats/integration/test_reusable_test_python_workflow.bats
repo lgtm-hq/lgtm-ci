@@ -88,7 +88,7 @@ _job_run_commands() {
 	# Structural: read each step's own step-level `if:` (any position within
 	# the step, not a fixed line window after its name).
 	local step cond
-	for step in "Download matrix test summaries" "Aggregate matrix test summaries"; do
+	for step in "Wait for and download matrix test summaries" "Aggregate matrix test summaries"; do
 		cond="$(_job_block aggregate | awk -v name="$step" '
 			$0 == "      - name: " name { in_step = 1; next }
 			in_step && (/^      - / || /^    [a-zA-Z0-9_-]+:/) { exit }
@@ -153,18 +153,37 @@ _job_run_commands() {
 	assert_failure
 }
 
-# A reusable workflow's permission request is validated statically, so
-# requesting an unused `actions` scope here would force every consumer to grant
-# it or die at startup_failure (#730). The `aggregate` job only downloads
-# same-run artifacts, which @actions/artifact serves from its *Internal paths
-# on the runtime token — no `findBy`, no GITHUB_TOKEN, no scope needed.
-@test "reusable-test-python: aggregate job requests no actions scope" {
+# The aggregate job polls the REST artifact listing before aggregating (#803),
+# and GITHUB_TOKEN only reaches `GET /actions/runs/{id}/artifacts` with
+# `actions: read`. A reusable workflow's permission request is validated
+# statically, so this is a documented caller requirement; it must stay at
+# `read` — `write` was the over-grant #730 removed, and nothing here mutates.
+@test "reusable-test-python: aggregate job requests exactly actions: read" {
 	run awk '
 		/^  aggregate:/ { in_aggregate = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate:/ { in_aggregate = 0 }
-		in_aggregate && /^ *actions: / { found = 1; exit }
-		END { exit found }
+		in_aggregate && /^ *actions: read$/ { found = 1 }
+		in_aggregate && /^ *actions: write$/ { write = 1 }
+		END { exit !(found && !write) }
 	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-python: aggregate waits for the matrix artifact count before aggregating" {
+	# The wait step must precede aggregation, carry the token, and take its
+	# expected count from the prepare job rather than a literal.
+	run awk '
+		/^  aggregate:/ { in_aggregate = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate:/ { in_aggregate = 0 }
+		in_aggregate && /wait-for-artifacts\.sh/ { wait = NR }
+		in_aggregate && /aggregate-results\.sh/ { agg = NR }
+		in_aggregate && /GH_TOKEN: \$\{\{ github\.token \}\}/ { token = 1 }
+		in_aggregate && /EXPECTED_COUNT: \$\{\{ needs\.prepare\.outputs\.matrix-count \}\}/ { count = 1 }
+		in_aggregate && /actions\/download-artifact@/ { dl = 1 }
+		END { exit !(wait && agg && wait < agg && token && count && !dl) }
+	' "$WORKFLOW"
+	assert_success
+	run grep -F "matrix-count: \${{ steps.matrix.outputs.matrix-count }}" "$WORKFLOW"
 	assert_success
 }
 
