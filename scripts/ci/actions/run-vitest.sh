@@ -4,6 +4,8 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, run, parse, summary
+#   PACKAGE_MANAGER - bun, npm, or pnpm (setup and run steps; never inferred
+#                     from lockfiles, see lib/node/pm.sh)
 #
 # Optional environment variables:
 #   TEST_PATH - Path to test files (default: .)
@@ -11,6 +13,10 @@
 #   COVERAGE_FORMAT - Coverage output format: json, lcov, html (default: json)
 #   EXTRA_ARGS - Additional arguments to pass to vitest
 #   WORKING_DIRECTORY - Directory to run tests in
+#
+# Test tooling is a consumer prerequisite: vitest (and a coverage provider
+# when COVERAGE=true) must already be in the installed tree. The setup step
+# fails with an actionable message instead of installing anything (#1077).
 
 set -euo pipefail
 
@@ -22,32 +28,27 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/testing.sh
 source "$SCRIPT_DIR/../lib/testing.sh"
+# shellcheck source=../lib/node/pm.sh
+source "$SCRIPT_DIR/../lib/node/pm.sh"
 
 case "$STEP" in
 setup)
 	: "${WORKING_DIRECTORY:=.}"
+	: "${COVERAGE:=false}"
 
 	cd "$WORKING_DIRECTORY"
 
-	log_info "Checking vitest installation..."
+	pm_require >/dev/null || exit $?
 
-	# Check if vitest is available
-	if ! bun pm ls 2>/dev/null | grep -q vitest; then
-		if [[ -f "package.json" ]]; then
-			log_info "Installing dependencies..."
-			bun install
-		else
-			log_info "Installing vitest..."
-			bun add -d vitest
-		fi
+	log_info "Checking vitest installation (${PACKAGE_MANAGER})..."
+
+	if ! pm_has vitest; then
+		die "vitest is not installed in $(pwd): install vitest as a devDependency and commit the ${PACKAGE_MANAGER} lockfile"
 	fi
 
-	# Install coverage provider if needed
-	: "${COVERAGE:=false}"
 	if [[ "$COVERAGE" == "true" ]]; then
-		if ! bun pm ls 2>/dev/null | grep -q "@vitest/coverage-v8"; then
-			log_info "Installing @vitest/coverage-v8..."
-			bun add -d @vitest/coverage-v8
+		if ! pm_has @vitest/coverage-v8 && ! pm_has @vitest/coverage-istanbul; then
+			die "coverage=true needs a vitest coverage provider: install @vitest/coverage-v8 (or @vitest/coverage-istanbul) as a devDependency and commit the ${PACKAGE_MANAGER} lockfile"
 		fi
 	fi
 
@@ -62,6 +63,8 @@ run)
 	: "${WORKING_DIRECTORY:=.}"
 
 	cd "$WORKING_DIRECTORY"
+
+	pm_require >/dev/null || exit $?
 
 	# Build vitest command
 	VITEST_ARGS=()
@@ -106,7 +109,7 @@ run)
 	log_info "Running vitest with args: ${VITEST_ARGS[*]}"
 
 	exit_code=0
-	bun run vitest "${VITEST_ARGS[@]}" || exit_code=$?
+	pm_exec vitest "${VITEST_ARGS[@]}" || exit_code=$?
 
 	# Set outputs
 	set_github_output "exit-code" "$exit_code"

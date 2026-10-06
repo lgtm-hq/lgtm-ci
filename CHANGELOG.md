@@ -11,6 +11,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Node runners (`run-vitest`, `run-playwright`, `run-lighthouse`) dispatch on
+  `package-manager` (bun/npm/pnpm) and never install test tooling into the
+  consumer project; the direct composites require `package-manager`, and
+  `reusable-test-e2e.yml` / `reusable-test-e2e-matrix.yml` now honour it
+  (default `npm`) instead of always running Bun — Bun projects must set
+  `package-manager: bun`. Node default is 22. See the Node package-manager
+  contract in `docs/workflow-contract.md` for the migration note (#1077).
+
 ### Deprecated
 
 ### Removed

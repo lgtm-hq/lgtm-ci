@@ -4,16 +4,24 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, run, parse, summary
+#   PACKAGE_MANAGER - bun, npm, or pnpm (setup and run steps; never inferred
+#                     from lockfiles, see lib/node/pm.sh)
 #
 # Optional environment variables:
 #   URL - URL to audit (required for run step)
 #   CONFIG_PATH - Path to lighthouserc.json
 #   OUTPUT_DIR - Directory for results (default: lighthouse-reports)
+#   RUN_MARKER - Marker file from the run step; parse only accepts reports
+#                newer than it (default: unset, any report in OUTPUT_DIR)
 #   THRESHOLD_PERFORMANCE - Minimum performance score (default: 80)
 #   THRESHOLD_ACCESSIBILITY - Minimum accessibility score (default: 90)
 #   THRESHOLD_BEST_PRACTICES - Minimum best practices score (default: 80)
 #   THRESHOLD_SEO - Minimum SEO score (default: 80)
 #   EXTRA_ARGS - Additional arguments to pass to LHCI
+#
+# @lhci/cli is a consumer prerequisite: either already on PATH, or installed
+# in the project tree (resolved from the current directory) by the selected
+# package manager. Nothing is installed here (#1077).
 
 set -euo pipefail
 
@@ -25,28 +33,50 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/testing.sh
 source "$SCRIPT_DIR/../lib/testing.sh"
+# shellcheck source=../lib/node/pm.sh
+source "$SCRIPT_DIR/../lib/node/pm.sh"
+
+# Run lhci from PATH when present, otherwise from the project tree via the
+# selected package manager. Shared by the setup and run steps.
+run_lhci() {
+	if command -v lhci &>/dev/null; then
+		lhci "$@"
+	else
+		pm_exec lhci "$@"
+	fi
+}
+
+# Newest Lighthouse report (LHR JSON) under a filesystem-upload directory.
+# `lhci autorun --upload.target=filesystem` writes `<slug>.report.json` next to
+# a manifest.json; older layouts used `lhr-*.json`. Both are accepted. With a
+# marker file as the second argument only reports written after it count, so
+# a report left over from an earlier audit in the same directory is never
+# mistaken for this run's result.
+find_lighthouse_report() {
+	local dir="$1" marker="${2:-}" newest="" f
+	local -a find_args=("$dir" -type f \( -name "*.report.json" -o -name "lhr-*.json" \))
+	if [[ -n "$marker" ]]; then
+		find_args+=(-newer "$marker")
+	fi
+	while IFS= read -r f; do
+		if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
+			newest="$f"
+		fi
+	done < <(find "${find_args[@]}" 2>/dev/null | sort)
+	printf '%s\n' "$newest"
+}
 
 case "$STEP" in
 setup)
-	log_info "Setting up Lighthouse CI..."
+	pm_require >/dev/null || exit $?
 
-	# Check if @lhci/cli is available
-	if ! command -v lhci &>/dev/null; then
-		log_info "Installing @lhci/cli..."
-		bun add -g @lhci/cli
+	log_info "Checking Lighthouse CI installation (${PACKAGE_MANAGER})..."
+
+	if ! command -v lhci &>/dev/null && ! pm_has @lhci/cli; then
+		die "@lhci/cli is not installed in $(pwd): install @lhci/cli as a devDependency and commit the ${PACKAGE_MANAGER} lockfile"
 	fi
 
-	# Verify installation
-	if command -v lhci &>/dev/null; then
-		log_success "Lighthouse CI installed: $(lhci --version)"
-	else
-		# Try with bunx as fallback
-		if bunx @lhci/cli --version &>/dev/null; then
-			log_success "Lighthouse CI available via bunx"
-		else
-			die "Failed to install Lighthouse CI"
-		fi
-	fi
+	log_success "Lighthouse CI available: $(run_lhci --version)"
 	;;
 
 run)
@@ -55,7 +85,12 @@ run)
 	: "${OUTPUT_DIR:=lighthouse-reports}"
 	: "${EXTRA_ARGS:=}"
 
+	pm_require >/dev/null || exit $?
+
 	mkdir -p "$OUTPUT_DIR"
+
+	# Anything in OUTPUT_DIR older than this marker predates the audit.
+	run_marker=$(mktemp "${TMPDIR:-/tmp}/lhci-run-marker.XXXXXX")
 
 	# Build LHCI command
 	LHCI_ARGS=()
@@ -86,20 +121,18 @@ run)
 	log_info "Running Lighthouse CI..."
 
 	exit_code=0
-	if command -v lhci &>/dev/null; then
-		lhci "${LHCI_ARGS[@]}" || exit_code=$?
-	else
-		bunx @lhci/cli "${LHCI_ARGS[@]}" || exit_code=$?
-	fi
+	run_lhci "${LHCI_ARGS[@]}" || exit_code=$?
 
 	# Set outputs
 	set_github_output "exit-code" "$exit_code"
 	set_github_output "output-dir" "$OUTPUT_DIR"
+	# The parse step reuses the marker so its fallback search cannot pick a
+	# report that predates this audit either.
+	set_github_output "run-marker" "$run_marker"
 
 	# Find the results file
 	if [[ -d "$OUTPUT_DIR" ]]; then
-		# LHCI creates files like lhr-*.json
-		results_file=$(find "$OUTPUT_DIR" -name "lhr-*.json" -type f 2>/dev/null | sort | head -1 || true)
+		results_file=$(find_lighthouse_report "$OUTPUT_DIR" "$run_marker")
 		if [[ -n "$results_file" ]]; then
 			set_github_output "results-path" "$results_file"
 		fi
@@ -111,15 +144,21 @@ run)
 parse)
 	: "${RESULTS_PATH:=}"
 	: "${OUTPUT_DIR:=lighthouse-reports}"
+	: "${RUN_MARKER:=}"
 	: "${THRESHOLD_PERFORMANCE:=80}"
 	: "${THRESHOLD_ACCESSIBILITY:=90}"
 	: "${THRESHOLD_BEST_PRACTICES:=80}"
 	: "${THRESHOLD_SEO:=80}"
 
-	# Find results file if not specified
+	# Find results file if not specified. With RUN_MARKER (set by the run
+	# step) only a report written by that audit qualifies; a marker that no
+	# longer exists means nothing can qualify.
 	if [[ -z "$RESULTS_PATH" ]] || [[ ! -f "$RESULTS_PATH" ]]; then
-		if [[ -d "$OUTPUT_DIR" ]]; then
-			RESULTS_PATH=$(find "$OUTPUT_DIR" -name "lhr-*.json" -type f 2>/dev/null | sort | head -1 || true)
+		if [[ -n "$RUN_MARKER" && ! -f "$RUN_MARKER" ]]; then
+			log_warn "Run marker not found: $RUN_MARKER"
+			RESULTS_PATH=""
+		elif [[ -d "$OUTPUT_DIR" ]]; then
+			RESULTS_PATH=$(find_lighthouse_report "$OUTPUT_DIR" "$RUN_MARKER")
 		fi
 	fi
 

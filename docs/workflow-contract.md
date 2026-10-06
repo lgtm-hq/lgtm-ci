@@ -505,6 +505,85 @@ Use separate caller jobs (different `name:` and/or `job-name`) when rulesets
 require distinct required checks; the reusable never runs nextest and llvm-cov in
 one job.
 
+## Node package-manager contract (#1077)
+
+The Node family (`reusable-test-node`, `reusable-test-node-custom`,
+`reusable-test-e2e`, `reusable-test-e2e-matrix`, `reusable-test-e2e-playwright`)
+takes one `package-manager` input: `npm` (default), `bun`, or `pnpm`. The
+value is **never inferred from lockfiles** (#181) and Yarn is not in the
+contract. It drives three things in one job:
+
+1. **Toolchain setup** — `actions/setup-node` always; `oven-sh/setup-bun` only
+   for `bun`; `pnpm/action-setup` only for `pnpm` (reads the pnpm version from
+   the project's `package.json` `packageManager` field). An npm consumer never
+   gets Bun on the runner.
+2. **Install** — `scripts/ci/actions/setup-package-manager.sh` with
+   `FROZEN_LOCKFILE=true`: `bun install --frozen-lockfile`, `npm ci`, or
+   `pnpm install --frozen-lockfile`, failing when the matching lockfile is
+   absent. No manager touches another manager's lockfile.
+3. **Execution** — the runner scripts `run-vitest.sh`, `run-playwright.sh`,
+   and `run-lighthouse.sh` dispatch through `scripts/ci/lib/node/pm.sh`
+   (`pm_run`, `pm_exec`, `pm_add_dev`, `pm_has`). `pm_exec` only runs
+   binaries already in the project tree (`bun x --no-install <bin>`,
+   `npx --no-install <bin>`, `pnpm exec <bin>`) and never installs a missing
+   one (npx may still query the registry to resolve the name before it
+   refuses, so under an egress block a missing binary can surface as a
+   network error); an empty `PACKAGE_MANAGER` fails with
+   `package-manager is required for execution actions`.
+
+**Test tooling is a consumer prerequisite.** The runners never install into
+the project: `vitest` (plus `@vitest/coverage-v8` or
+`@vitest/coverage-istanbul` when `coverage: true`), `@playwright/test`, and
+`@lhci/cli` (unless `lhci` is already on `PATH`) must be devDependencies in
+the committed lockfile, or the setup step fails naming the package to add.
+
+The same inputs exist on the direct composites `run-vitest`, `run-playwright`,
+and `run-lighthouse`, where `package-manager` is **required** and
+`install-dependencies` (default `true`) runs the frozen install before the
+tests. The generic `run-tests` composite forwards an optional
+`package-manager` to its Vitest/Playwright branches.
+
+The direct composites do **not** cache dependencies: the Bun/`node_modules`
+cache that the former `setup-node` nesting restored is gone, deliberately —
+one composite cannot key a cache correctly for three managers, and npm/pnpm
+never had one there. Callers that want install caching should either call
+`reusable-test-node.yml` / `reusable-test-node-custom.yml` (which keep their
+Bun cache; the e2e reusables go through `run-playwright` and only cache
+Playwright browsers) or add their own `actions/cache` step in front and pass
+`install-dependencies: "false"`.
+
+### Migration (#1077)
+
+- `reusable-test-e2e.yml` and `reusable-test-e2e-matrix.yml` now honour
+  `package-manager` (default `npm`). Before #1077 the e2e path always ran
+  Bun regardless of the input, so a Bun project that never set it must now
+  pass `package-manager: bun` or the frozen `npm ci` fails for want of a
+  `package-lock.json`.
+- The direct `run-vitest`, `run-playwright`, `run-lighthouse` composites
+  require `package-manager`; `run-tests` needs it whenever the vitest or
+  playwright runner is selected.
+- Test tooling (`vitest`, a coverage provider, `@playwright/test`,
+  `@lhci/cli`) must be a committed devDependency; nothing is installed.
+
+### Tested runtime matrix
+
+<!-- markdownlint-disable MD013 -- matrix table -->
+
+| Runtime | Default                                                        | Tested                                         | Source of truth                                                                          |
+| ------- | -------------------------------------------------------------- | ---------------------------------------------- | ---------------------------------------------------------------------------------------- |
+| Node    | `node-version: "22"` (active LTS)                              | 22, 24                                         | `actions/setup-node`; override per call or via `node-versions` for a compat matrix       |
+| Bun     | exact pin (`# renovate: datasource=npm depName=bun`), no `latest` | the pinned release                             | `bun-version` default in the e2e reusables and the three composites; grouped by Renovate |
+| npm     | bundled with the Node release                                  | npm 10 (Node 22), npm 11 (Node 24)             | `actions/setup-node`                                                                     |
+| pnpm    | `packageManager` field in the consumer's `package.json`        | pnpm 9 and 10 (via `pnpm/action-setup`/Corepack) | `pnpm/action-setup`                                                                      |
+
+<!-- markdownlint-enable MD013 -->
+
+The external fixture `TurboCoder13/lgtm-ci-consumer-fixture` runs
+`node-npm.yml`, `node-bun.yml`, and `node-pnpm.yml` against one project that
+carries all three lockfiles, and each ends with
+`test -z "$(git status --porcelain)"` so a runner that writes another
+manager's lockfile fails the fixture.
+
 ## Job display names
 
 GitHub can render unevaluated `job.name` expressions in the checks UI when a job
@@ -1486,17 +1565,21 @@ to — with no checkout at all:
     python-version: ${{ inputs.python-version }}
 ```
 
-`run-pytest`, `run-vitest`, `run-playwright`, and `run-lighthouse` use this
-form, so `uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@<sha>` works from a
-consumer workflow that checks out only its own source. `$/` is generally
+`run-pytest` uses this form, so
+`uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@<sha>` works from a consumer
+workflow that checks out only its own source. The Node runners `run-vitest`,
+`run-playwright`, and `run-lighthouse` no longer nest the Bun-only
+`setup-node` sibling: they pin `actions/setup-node`, `oven-sh/setup-bun`, and
+`pnpm/action-setup` directly and gate the last two on `package-manager`
+(#1077), so they carry no `$/` ref at all. `$/` is generally
 available on GitHub.com and ghe.com since 2026-07-30 (see the
 [self-repository references announcement](https://github.com/orgs/community/discussions/26245));
 self-hosted runners need `>= 2.336.0`. GitHub Enterprise Server is **not**
-covered by that announcement. On a GHES release without `$/`, these four
-actions are **unavailable**: the nested `$/` ref lives inside the action
-itself, so no caller-side checkout (workspace root or `.lgtm-ci-tooling`)
-can make it resolve. GHES consumers should call the per-language reusable
-workflows instead (`reusable-test-python`, `reusable-test-node`,
+covered by that announcement. On a GHES release without `$/`, `run-pytest` is
+**unavailable**: the nested `$/` ref lives inside the action itself, so no
+caller-side checkout (workspace root or `.lgtm-ci-tooling`) can make it
+resolve. GHES consumers should call the per-language reusable workflows
+instead (`reusable-test-python`, `reusable-test-node`,
 `reusable-test-e2e-playwright`, `reusable-site-quality`), which run the same
 `scripts/ci/actions/run-*.sh` directly and never load these composites.
 Since `$/` is pinned by construction,
@@ -1788,7 +1871,7 @@ Default `egress-preset: playwright` (CDN + apt mirrors); the workflow default
 | `test-command`   | `npx playwright test`  | Base CLI; `project` / `grep` append                |
 | `project`        | empty                  | `--project=` filter                                |
 | `grep`           | empty                  | `--grep=` filter (e.g. `@smoke`)                   |
-| `node-version`   | `20`                   | setup-node                                         |
+| `node-version`   | `22`                   | setup-node                                         |
 | `browsers`       | `chromium`             | install `--with-deps` list or `all`                |
 | `upload-report`  | `true`                 | HTML/blob artifact **on failure only**             |
 | `base-url`       | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                 |

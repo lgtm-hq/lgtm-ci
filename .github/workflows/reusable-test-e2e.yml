@@ -8,7 +8,7 @@ on:
         description: "Node.js version to use"
         required: false
         type: string
-        default: "20"
+        default: "22"
       project:
         description: "Playwright project to run"
         required: false
@@ -58,6 +58,14 @@ on:
         required: false
         type: string
         default: "npm"
+      bun-version:
+        description: >-
+          Bun version installed when package-manager is bun. Exact pin,
+          Renovate-managed; never a floating tag (#1077).
+        required: false
+        type: string
+        # renovate: datasource=npm depName=bun
+        default: "1.4.2"
 
       tooling-ref:
         description: >-
@@ -306,7 +314,9 @@ jobs:
         id: test
         uses: ./.lgtm-ci-tooling/.github/actions/run-playwright
         with:
+          package-manager: ${{ inputs.package-manager }}
           node-version: ${{ inputs.node-version }}
+          bun-version: ${{ inputs.bun-version }}
           project: ${{ inputs.project }}
           browser: ${{ inputs.browsers }}
           reporter: ${{ inputs.reporter }}

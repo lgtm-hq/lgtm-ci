@@ -37,8 +37,13 @@
         "/^\\.github/workflows/reusable-ai-review\\.yml$/",
         "/^\\.github/actions/setup-python/action\\.yml$/",
         "/^\\.github/actions/setup-node/action\\.yml$/",
+        "/^\\.github/actions/run-vitest/action\\.yml$/",
+        "/^\\.github/actions/run-playwright/action\\.yml$/",
+        "/^\\.github/actions/run-lighthouse/action\\.yml$/",
         "/^\\.github/workflows/reusable-test-node\\.yml$/",
         "/^\\.github/workflows/reusable-test-node-custom\\.yml$/",
+        "/^\\.github/workflows/reusable-test-e2e\\.yml$/",
+        "/^\\.github/workflows/reusable-test-e2e-matrix\\.yml$/",
         "/^\\.github/workflows/reusable-test-e2e-playwright\\.yml$/",
         "/^\\.github/workflows/reusable-deploy-site-with-reports\\.yml$/",
         "/^\\.github/workflows/reusable-site-quality\\.yml$/"

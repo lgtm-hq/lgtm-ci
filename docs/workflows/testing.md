@@ -50,11 +50,19 @@ scripts (for example `bun run test:coverage`) use
 `reusable-test-node-custom.yml` instead.
 
 **Inputs:** `job-name` (check name, default `Node.js Tests`),
-`node-version` (default '20'), `test-path` (default '.'), `coverage`
-(default false), `coverage-format` (json/lcov/html, default 'json'),
-`coverage-threshold` (default 0), `upload-coverage` (default false), plus
-the Pages coverage HTML inputs (see
+`node-version` (default '22'), `package-manager` (npm/bun/pnpm, default
+'npm'; drives setup, the frozen-lockfile install, and how `vitest` is
+executed — never inferred from lockfiles, see the
+[Node package-manager contract](../workflow-contract.md#node-package-manager-contract-1077)),
+`test-path` (default '.'), `coverage` (default false; needs
+`@vitest/coverage-v8` or `-istanbul` as a devDependency), `coverage-format`
+(json/lcov/html, default 'json'), `coverage-threshold` (default 0),
+`upload-coverage` (default false), `pre-test-command` (after install, before
+tests), `post-test-command` (right after vitest, before parsing; non-zero
+fails the job — the fixture uses it for a clean-tree assertion), plus the
+Pages coverage HTML inputs (see
 [reusable-workflows.md](../reusable-workflows.md#pages-coverage-html-inputs-reusable-test-node)).
+`vitest` itself must be a devDependency; the workflow never installs it.
 
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.
@@ -129,10 +137,12 @@ jobs:
       upload-report: true
 ```
 
-**Inputs:** `node-version` (default '20'), `project` (Playwright project),
-`browsers` (chromium/firefox/webkit/all, default 'chromium'), `shard` (for
-example "1/3"), `reporter` (json/html/junit, default 'html'),
-`upload-report` (default true).
+**Inputs:** `node-version` (default '22'), `package-manager` (npm/bun/pnpm,
+default 'npm'), `bun-version` (exact Renovate-managed pin, used only with
+`bun`), `project` (Playwright project), `browsers`
+(chromium/firefox/webkit/all, default 'chromium'), `shard` (for example
+"1/3"), `reporter` (json/html/junit, default 'html'), `upload-report`
+(default true). `@playwright/test` must be a devDependency.
 
 **Outputs:** `tests-passed`, `tests-failed`, `passed`.
 
@@ -165,8 +175,10 @@ Matrix E2E with parallel legs per suite/browser/shard, tag-based filtering
 (`@smoke`, `@visual`, `@a11y`), browser caching, and automatic report
 merging.
 
-**Inputs:** `node-version` (default '20'), `test-suites` (comma-separated,
-default 'smoke'), `browsers` (comma-separated, default 'chromium'),
+**Inputs:** `node-version` (default '22'), `package-manager` (npm/bun/pnpm,
+default 'npm'), `bun-version` (exact Renovate-managed pin, used only with
+`bun`), `test-suites` (comma-separated, default 'smoke'), `browsers`
+(comma-separated, default 'chromium'),
 `tag-prefix` (default '@'), `shards` (per suite, default 1), `reporter`
 (json/html/blob, default 'html'), `upload-report` (default true),
 `timeout-minutes` (default 30), `artifact-prefix` (default 'playwright').

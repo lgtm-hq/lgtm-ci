@@ -3,15 +3,18 @@
 Test runners, quality checks, and change detection. For reusable
 per-language test workflows, see [workflows/testing.md](../workflows/testing.md).
 
-The runner actions `run-pytest`, `run-vitest`, `run-playwright`, and
-`run-lighthouse` call their `setup-python` / `setup-node` siblings through `$/`
-self-repository references, so they work from a plain
+The runner action `run-pytest` calls its `setup-python` sibling through a `$/`
+self-repository reference, so it works from a plain
 `uses: lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>` with only your own
 repository checked out — no lgtm-ci checkout or `tooling-ref` is needed
 (#1075). `$/` is GitHub.com and ghe.com only; on a GHES release without it
-these four actions are unavailable and the per-language reusable workflows
-are the alternative — see
+`run-pytest` is unavailable and the per-language reusable workflows are the
+alternative — see
 [the workflow contract](../workflow-contract.md#composite-actions-calling-sibling-lgtm-ci-actions).
+The Node runners `run-vitest`, `run-playwright`, and `run-lighthouse` pin
+their toolchain actions directly and take a required `package-manager`
+(`bun` / `npm` / `pnpm`) that is never inferred from lockfiles — see
+[the Node package-manager contract](../workflow-contract.md#node-package-manager-contract-1077).
 
 ## detect-changes
 
@@ -95,12 +98,17 @@ runners.
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-tests@main
   with:
     runner: "auto" # 'pytest', 'vitest', 'playwright', or 'auto'
+    package-manager: npm # 'bun', 'npm', 'pnpm'; required when vitest/playwright run
     coverage: "true" # optional
     coverage-format: "json" # 'xml', 'json', 'lcov'
 ```
 
 **Outputs:** `exit-code`, `runner`, `tests-passed`, `tests-failed`,
-`tests-skipped`, `coverage-file`.
+`tests-skipped`, `coverage-file`. Node callers must set `package-manager`
+whenever the vitest or playwright runner is selected (or auto-detected) — the
+runner fails with `package-manager is required for execution actions`
+otherwise; pytest ignores it. This action installs no toolchain or
+dependencies itself.
 
 ## run-pytest
 
@@ -126,14 +134,19 @@ Run JavaScript/TypeScript tests with vitest and optional coverage.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-vitest@main
   with:
-    node-version: "20" # optional
+    package-manager: npm # required: 'bun', 'npm', 'pnpm'
+    node-version: "22" # optional
     coverage: "true" # optional
     coverage-format: "json" # 'json', 'lcov', 'html'
 ```
 
 **Outputs:** `exit-code`, `tests-passed`, `tests-failed`, `tests-skipped`,
-`tests-total`, `coverage-file`, `coverage-percent`. Uses bun for package
-management; Istanbul-compatible coverage output.
+`tests-total`, `coverage-file`, `coverage-percent`. Runs a frozen-lockfile
+install with the selected manager (`install-dependencies: "false"` to skip)
+and executes `vitest` through it; `vitest` and, with coverage,
+`@vitest/coverage-v8` (or `-istanbul`) must already be devDependencies —
+nothing is installed into the project (#1077). `bun-version` is an exact,
+Renovate-managed pin used only when `package-manager: bun`.
 
 ## run-playwright
 
@@ -142,14 +155,17 @@ Run E2E tests using Playwright with browser automation.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-playwright@main
   with:
-    node-version: "20" # optional
+    package-manager: pnpm # required: 'bun', 'npm', 'pnpm'
+    node-version: "22" # optional
     browser: "chromium" # 'chromium', 'firefox', 'webkit', 'all'
     reporter: "html" # 'json', 'html', 'junit'
     shard: "1/3" # optional, for parallel execution
 ```
 
 **Outputs:** `exit-code`, `tests-passed`, `tests-failed`, `tests-skipped`,
-`tests-total`, `report-path`.
+`tests-total`, `report-path`. `@playwright/test` must be a devDependency;
+browsers are installed with `playwright install --with-deps` through the
+selected manager, the package never is (#1077).
 
 ## merge-playwright-reports
 

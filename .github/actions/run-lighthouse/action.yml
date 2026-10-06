@@ -9,10 +9,27 @@ inputs:
   url:
     description: "URL to audit"
     required: true
+  package-manager:
+    description: >-
+      Package manager that owns the project: bun, npm, or pnpm. Required and
+      never inferred from lockfiles (#181); it selects the toolchain setup,
+      the frozen-lockfile install, and how @lhci/cli is executed (#1077).
+    required: true
   node-version:
     description: "Node.js version to use"
     required: false
-    default: "20"
+    default: "22"
+  bun-version:
+    description: "Bun version to install when package-manager is bun"
+    required: false
+    # renovate: datasource=npm depName=bun
+    default: "1.4.2"
+  install-dependencies:
+    description: >-
+      Run a frozen-lockfile install with the selected package manager before
+      the audit (true/false). Set false when the caller already installed.
+    required: false
+    default: "true"
   config-path:
     description: "Path to lighthouserc.json config file"
     required: false
@@ -41,6 +58,12 @@ inputs:
     description: "Additional arguments to pass to LHCI"
     required: false
     default: ""
+  working-directory:
+    description: >-
+      Project directory that holds @lhci/cli in its installed tree; output-dir
+      and config-path are relative to it.
+    required: false
+    default: "."
 
 outputs:
   performance:
@@ -61,12 +84,23 @@ outputs:
   failed-categories:
     description: "Comma-separated list of failed categories"
     value: ${{ steps.parse.outputs.failed-categories }}
+  # The run step writes both paths relative to working-directory, so a
+  # relative value is re-based here for callers that resolve it from the
+  # workspace root; an absolute output-dir passes through untouched.
   results-path:
-    description: "Path to results JSON file"
-    value: ${{ steps.run.outputs.results-path }}
+    description: "Path to results JSON file (workspace-relative, or absolute as given)"
+    value: >-
+      ${{ inputs.working-directory != '.' && steps.run.outputs.results-path != ''
+      && !startsWith(steps.run.outputs.results-path, '/')
+      && format('{0}/{1}', inputs.working-directory, steps.run.outputs.results-path)
+      || steps.run.outputs.results-path }}
   output-dir:
-    description: "Directory containing all results"
-    value: ${{ steps.run.outputs.output-dir }}
+    description: "Directory containing all results (workspace-relative, or absolute as given)"
+    value: >-
+      ${{ inputs.working-directory != '.' && steps.run.outputs.output-dir != ''
+      && !startsWith(steps.run.outputs.output-dir, '/')
+      && format('{0}/{1}', inputs.working-directory, steps.run.outputs.output-dir)
+      || steps.run.outputs.output-dir }}
 
 runs:
   using: "composite"
@@ -78,24 +112,50 @@ runs:
         echo "SCRIPTS_DIR=${SCRIPTS_DIR}" >> "$GITHUB_ENV"
 
     - name: Setup Node.js
-      # Self-repository ref: resolves to lgtm-ci at the SHA this action was
-      # fetched from, with no caller checkout (#1075). A `./` ref would resolve
-      # against the consumer's workspace instead.
-      uses: $/.github/actions/setup-node
+      # Pinned to SHA for supply chain security
+      uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
       with:
         node-version: ${{ inputs.node-version }}
 
-    - name: Setup Lighthouse CI
+    - name: Setup Bun
+      if: inputs.package-manager == 'bun'
+      # Pinned to SHA for supply chain security
+      uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+      with:
+        bun-version: ${{ inputs.bun-version }}
+
+    - name: Setup pnpm
+      if: inputs.package-manager == 'pnpm'
+      # Pinned to SHA for supply chain security. Reads the pnpm version from
+      # the project's package.json `packageManager` field.
+      uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+      with:
+        package_json_file: ${{ inputs.working-directory }}/package.json
+
+    - name: Install dependencies
+      if: inputs.install-dependencies == 'true'
       shell: bash
       env:
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
+        WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        FROZEN_LOCKFILE: "true"
+      run: $SCRIPTS_DIR/ci/actions/setup-package-manager.sh
+
+    - name: Setup Lighthouse CI
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      env:
         STEP: setup
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
       run: $SCRIPTS_DIR/ci/actions/run-lighthouse.sh
 
     - name: Run Lighthouse
       id: run
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         STEP: run
+        PACKAGE_MANAGER: ${{ inputs.package-manager }}
         URL: ${{ inputs.url }}
         CONFIG_PATH: ${{ inputs.config-path }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
@@ -106,9 +166,11 @@ runs:
     - name: Parse results
       id: parse
       shell: bash
+      working-directory: ${{ inputs.working-directory }}
       env:
         STEP: parse
         RESULTS_PATH: ${{ steps.run.outputs.results-path }}
+        RUN_MARKER: ${{ steps.run.outputs.run-marker }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         THRESHOLD_PERFORMANCE: ${{ inputs.threshold-performance }}
         THRESHOLD_ACCESSIBILITY: ${{ inputs.threshold-accessibility }}
@@ -137,17 +199,30 @@ runs:
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: lighthouse-reports
-        path: ${{ inputs.output-dir }}
+        path: >-
+          ${{ startsWith(inputs.output-dir, '/') && inputs.output-dir
+          || format('{0}/{1}', inputs.working-directory, inputs.output-dir) }}
         retention-days: 30
         if-no-files-found: ignore
 
     - name: Check result
-      if: steps.parse.outputs.passed == 'false'
+      # Thresholds below target, no fresh report, or a non-zero lhci exit
+      # (e.g. a failed assertion in the consumer's lighthouserc) all fail.
+      if: >-
+        steps.parse.outputs.passed == 'false'
+        || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0')
       shell: bash
       env:
         FAILED_CATS: ${{ steps.parse.outputs.failed-categories }}
+        LHCI_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        PASSED: ${{ steps.parse.outputs.passed }}
       run: |
-        echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
+        if [[ "$PASSED" == "false" ]]; then
+          echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
+        fi
+        if [[ -n "$LHCI_EXIT_CODE" && "$LHCI_EXIT_CODE" != "0" ]]; then
+          echo "::error::Lighthouse CI exited with code $LHCI_EXIT_CODE"
+        fi
         exit 1
 
 branding:

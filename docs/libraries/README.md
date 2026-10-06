@@ -46,8 +46,9 @@ same-named subdirectory, so callers can pick one file for a whole domain:
 <!-- markdownlint-enable MD013 -->
 
 `ghcr/registry.sh` and `ghcr/tags.sh` (GHCR digest/tag helpers for cleanup
-and multi-arch index safety) and `bundle/workflow_artifacts.sh` (Model B
-manifest bundling) and `cargo/version.sh` (Cargo.toml version parsing) are
+and multi-arch index safety), `bundle/workflow_artifacts.sh` (Model B
+manifest bundling), `cargo/version.sh` (Cargo.toml version parsing), and
+`node/pm.sh` (bun/npm/pnpm dispatch for the Node runner scripts, #1077) are
 sourced directly by their consuming scripts rather than through a top-level
 aggregator.
 
