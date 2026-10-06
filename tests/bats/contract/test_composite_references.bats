@@ -440,15 +440,32 @@ _composite_reference_violations() {
 @test "composite actions: runner actions reach their setup siblings via \$/ self-repository refs" {
 	local -A expected=(
 		[run-pytest]='$/.github/actions/setup-python'
-		[run-vitest]='$/.github/actions/setup-node'
-		[run-playwright]='$/.github/actions/setup-node'
-		[run-lighthouse]='$/.github/actions/setup-node'
 	)
 	local name
 	for name in "${!expected[@]}"; do
 		run _composite_uses_refs "${PROJECT_ROOT}/.github/actions/${name}"
 		assert_success
 		assert_output --partial ":${expected[$name]}"
+	done
+}
+
+@test "composite actions: Node runners pin their toolchain actions directly and gate Bun/pnpm on package-manager" {
+	# The Bun-only setup-node sibling is gone from the Node runners (#1077):
+	# each pins actions/setup-node, oven-sh/setup-bun and pnpm/action-setup
+	# itself, so npm consumers never get Bun on the runner.
+	local name
+	for name in run-vitest run-playwright run-lighthouse; do
+		run _composite_uses_refs "${PROJECT_ROOT}/.github/actions/${name}"
+		assert_success
+		refute_output --partial "setup-node'"
+		refute_output --partial ':$/.github/actions/setup-node'
+		assert_output --regexp ':actions/setup-node@[0-9a-f]{40}'
+		assert_output --regexp ':oven-sh/setup-bun@[0-9a-f]{40}'
+		assert_output --regexp ':pnpm/action-setup@[0-9a-f]{40}'
+		run grep -c "if: inputs.package-manager == 'bun'" "${PROJECT_ROOT}/.github/actions/${name}/action.yml"
+		assert_output "1"
+		run grep -c "if: inputs.package-manager == 'pnpm'" "${PROJECT_ROOT}/.github/actions/${name}/action.yml"
+		assert_output "1"
 	done
 }
 

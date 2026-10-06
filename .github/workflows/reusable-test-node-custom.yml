@@ -8,7 +8,7 @@ on:
         description: "Node.js version to use"
         required: false
         type: string
-        default: "20"
+        default: "22"
       node-versions:
         description: "Comma-separated Node.js versions for a test matrix"
         required: false
@@ -351,7 +351,7 @@ jobs:
         env:
           MATRIX_KEY: node-version
           MATRIX_LABEL: Node.js
-          DEFAULT_VERSION: ${{ inputs.node-version || '20' }}
+          DEFAULT_VERSION: ${{ inputs.node-version || '22' }}
           VERSIONS_INPUT: ${{ inputs.node-versions }}
           FIRST_VERSION_OUTPUT: pages-coverage-node-version
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh

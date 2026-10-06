@@ -103,9 +103,14 @@ RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
 	for wf in \
 		.github/workflows/reusable-test-node.yml \
 		.github/workflows/reusable-test-node-custom.yml \
+		.github/workflows/reusable-test-e2e.yml \
+		.github/workflows/reusable-test-e2e-matrix.yml \
 		.github/workflows/reusable-test-e2e-playwright.yml \
 		.github/workflows/reusable-deploy-site-with-reports.yml \
-		.github/workflows/reusable-site-quality.yml; do
+		.github/workflows/reusable-site-quality.yml \
+		.github/actions/run-vitest/action.yml \
+		.github/actions/run-playwright/action.yml \
+		.github/actions/run-lighthouse/action.yml; do
 		run python3 "$MATCHER" "$wf"
 		assert_success
 		assert_output --partial "bun"

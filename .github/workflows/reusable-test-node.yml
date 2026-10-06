@@ -8,7 +8,7 @@ on:
         description: "Node.js version to use"
         required: false
         type: string
-        default: "20"
+        default: "22"
       node-versions:
         description: "Comma-separated Node.js versions for a test matrix"
         required: false
@@ -89,6 +89,14 @@ on:
         default: "npm"
       pre-test-command:
         description: "Optional command to run after dependency install and before tests"
+        required: false
+        type: string
+        default: ""
+      post-test-command:
+        description: >-
+          Optional command to run in working-directory right after vitest,
+          before results are parsed; runs whether or not the tests passed, and
+          a non-zero exit fails the job (e.g. a clean-tree assertion, #1077).
         required: false
         type: string
         default: ""
@@ -391,7 +399,7 @@ jobs:
         env:
           MATRIX_KEY: node-version
           MATRIX_LABEL: Node.js
-          DEFAULT_VERSION: ${{ inputs.node-version || '20' }}
+          DEFAULT_VERSION: ${{ inputs.node-version || '22' }}
           VERSIONS_INPUT: ${{ inputs.node-versions }}
           FIRST_VERSION_OUTPUT: pages-coverage-node-version
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-version-matrix.sh
@@ -534,6 +542,7 @@ jobs:
         shell: bash
         env:
           STEP: setup
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
           COVERAGE: ${{ inputs.coverage }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
@@ -542,6 +551,7 @@ jobs:
         shell: bash
         env:
           STEP: run
+          PACKAGE_MANAGER: ${{ inputs.package-manager }}
           TEST_PATH: ${{ inputs.test-path }}
           COVERAGE: ${{ inputs.coverage }}
           COVERAGE_FORMAT: ${{ inputs.coverage-format }}
@@ -549,6 +559,13 @@ jobs:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
         continue-on-error: true
+      - name: Run post-test command
+        if: inputs.post-test-command != ''
+        shell: bash
+        env:
+          COMMAND: ${{ inputs.post-test-command }}
+          WORKING_DIRECTORY: ${{ inputs.working-directory }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
       - name: Parse results
         id: parse
         if: always()

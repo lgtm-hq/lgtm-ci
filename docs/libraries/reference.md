@@ -122,6 +122,17 @@ Presets reach the reusable workflows as a generated literal map
 (`scripts/ci/egress/render-presets.sh`, `scripts/ci/egress/sync-workflow-presets.sh`);
 see [workflow-contract.md](../workflow-contract.md#egress-allowlists).
 
+## Node package-manager dispatch
+
+- `pm_require` (node/pm.sh) - Validate `$PACKAGE_MANAGER` (`bun`/`npm`/`pnpm`) and print it; empty or unknown exits 2
+- `pm_run` (node/pm.sh) - Run a package.json script through the selected manager
+- `pm_exec` (node/pm.sh) - Run a locally installed binary (`bun run`, `npx --no-install`, `pnpm exec`); no registry fallback
+- `pm_add_dev` (node/pm.sh) - Add devDependencies through the selected manager (unused by the runners)
+- `pm_has` (node/pm.sh) - True when the manager reports the package installed in the project tree
+
+The manager is never inferred from lockfiles (#181); see
+[workflow-contract.md](../workflow-contract.md#node-package-manager-contract-1077).
+
 ## SBOM format & severity
 
 - `get_sbom_extension` / `validate_sbom_format` / `normalize_sbom_format` / `get_sbom_mime_type` (sbom/format.sh) - Format helpers

@@ -4,6 +4,8 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, run, parse, summary
+#   PACKAGE_MANAGER - bun, npm, or pnpm (setup and run steps; never inferred
+#                     from lockfiles, see lib/node/pm.sh)
 #
 # Optional environment variables:
 #   PROJECT - Playwright project to run
@@ -12,6 +14,9 @@
 #   SHARD - Shard configuration (e.g., "1/3" for shard 1 of 3)
 #   EXTRA_ARGS - Additional arguments to pass to playwright
 #   WORKING_DIRECTORY - Directory to run tests in
+#
+# @playwright/test is a consumer prerequisite: the setup step installs browser
+# binaries (outside the project tree) but never the package itself (#1077).
 
 set -euo pipefail
 
@@ -23,6 +28,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/testing.sh
 source "$SCRIPT_DIR/../lib/testing.sh"
+# shellcheck source=../lib/node/pm.sh
+source "$SCRIPT_DIR/../lib/node/pm.sh"
 
 case "$STEP" in
 setup)
@@ -31,25 +38,20 @@ setup)
 
 	cd "$WORKING_DIRECTORY"
 
-	log_info "Checking Playwright installation..."
+	pm_require >/dev/null || exit $?
 
-	# Check if @playwright/test is installed
-	if ! bun pm ls 2>/dev/null | grep -q "@playwright/test"; then
-		if [[ -f "package.json" ]]; then
-			log_info "Installing dependencies..."
-			bun install
-		else
-			log_info "Installing @playwright/test..."
-			bun add -d @playwright/test
-		fi
+	log_info "Checking Playwright installation (${PACKAGE_MANAGER})..."
+
+	if ! pm_has @playwright/test; then
+		die "@playwright/test is not installed in $(pwd): install @playwright/test as a devDependency and commit the ${PACKAGE_MANAGER} lockfile"
 	fi
 
 	# Install browser binaries
 	log_info "Installing Playwright browsers..."
 	if [[ "$BROWSER" == "all" ]]; then
-		bunx playwright install --with-deps
+		pm_exec playwright install --with-deps
 	else
-		bunx playwright install --with-deps "$BROWSER"
+		pm_exec playwright install --with-deps "$BROWSER"
 	fi
 
 	log_success "Playwright setup complete"
@@ -64,6 +66,8 @@ run)
 	: "${WORKING_DIRECTORY:=.}"
 
 	cd "$WORKING_DIRECTORY"
+
+	pm_require >/dev/null || exit $?
 
 	# Build playwright command
 	PLAYWRIGHT_ARGS=()
@@ -114,7 +118,7 @@ run)
 	log_info "Running Playwright with args: ${PLAYWRIGHT_ARGS[*]}"
 
 	exit_code=0
-	bunx playwright "${PLAYWRIGHT_ARGS[@]}" || exit_code=$?
+	pm_exec playwright "${PLAYWRIGHT_ARGS[@]}" || exit_code=$?
 
 	# Set outputs
 	set_github_output "exit-code" "$exit_code"

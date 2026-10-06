@@ -31,6 +31,7 @@ Run Lighthouse CI audits with configurable score thresholds.
 ```yaml
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-lighthouse@main
   with:
+    package-manager: npm # required: 'bun', 'npm', 'pnpm'
     url: "http://localhost:3000"
     threshold-performance: "80"
     threshold-accessibility: "90"
@@ -39,9 +40,12 @@ Run Lighthouse CI audits with configurable score thresholds.
 ```
 
 **Outputs:** `performance`, `accessibility`, `best-practices`, `seo`,
-`passed`, `failed-categories`, `results-path`. Automatic `@lhci/cli`
-install; Chrome flags tuned for CI; filesystem upload (no external
-services).
+`passed`, `failed-categories`, `results-path`. `@lhci/cli` is a
+prerequisite — a devDependency of the project in `working-directory`
+(default `.`) resolved through the selected manager, or an `lhci` already on
+`PATH`; nothing is installed (#1077). `output-dir` and `config-path` are
+relative to `working-directory`. Chrome flags tuned for CI; filesystem
+upload (no external services).
 
 ## generate-lighthouse-comment
 

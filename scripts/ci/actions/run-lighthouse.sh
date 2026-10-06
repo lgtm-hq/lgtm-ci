@@ -4,6 +4,8 @@
 #
 # Required environment variables:
 #   STEP - Which step to run: setup, run, parse, summary
+#   PACKAGE_MANAGER - bun, npm, or pnpm (setup and run steps; never inferred
+#                     from lockfiles, see lib/node/pm.sh)
 #
 # Optional environment variables:
 #   URL - URL to audit (required for run step)
@@ -14,6 +16,10 @@
 #   THRESHOLD_BEST_PRACTICES - Minimum best practices score (default: 80)
 #   THRESHOLD_SEO - Minimum SEO score (default: 80)
 #   EXTRA_ARGS - Additional arguments to pass to LHCI
+#
+# @lhci/cli is a consumer prerequisite: either already on PATH, or installed
+# in the project tree (resolved from the current directory) by the selected
+# package manager. Nothing is installed here (#1077).
 
 set -euo pipefail
 
@@ -25,28 +31,30 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 source "$SCRIPT_DIR/../lib/actions.sh"
 # shellcheck source=../lib/testing.sh
 source "$SCRIPT_DIR/../lib/testing.sh"
+# shellcheck source=../lib/node/pm.sh
+source "$SCRIPT_DIR/../lib/node/pm.sh"
+
+# Run lhci from PATH when present, otherwise from the project tree via the
+# selected package manager. Shared by the setup and run steps.
+run_lhci() {
+	if command -v lhci &>/dev/null; then
+		lhci "$@"
+	else
+		pm_exec lhci "$@"
+	fi
+}
 
 case "$STEP" in
 setup)
-	log_info "Setting up Lighthouse CI..."
+	pm_require >/dev/null || exit $?
 
-	# Check if @lhci/cli is available
-	if ! command -v lhci &>/dev/null; then
-		log_info "Installing @lhci/cli..."
-		bun add -g @lhci/cli
+	log_info "Checking Lighthouse CI installation (${PACKAGE_MANAGER})..."
+
+	if ! command -v lhci &>/dev/null && ! pm_has @lhci/cli; then
+		die "@lhci/cli is not installed in $(pwd): install @lhci/cli as a devDependency and commit the ${PACKAGE_MANAGER} lockfile"
 	fi
 
-	# Verify installation
-	if command -v lhci &>/dev/null; then
-		log_success "Lighthouse CI installed: $(lhci --version)"
-	else
-		# Try with bunx as fallback
-		if bunx @lhci/cli --version &>/dev/null; then
-			log_success "Lighthouse CI available via bunx"
-		else
-			die "Failed to install Lighthouse CI"
-		fi
-	fi
+	log_success "Lighthouse CI available: $(run_lhci --version)"
 	;;
 
 run)
@@ -54,6 +62,8 @@ run)
 	: "${CONFIG_PATH:=}"
 	: "${OUTPUT_DIR:=lighthouse-reports}"
 	: "${EXTRA_ARGS:=}"
+
+	pm_require >/dev/null || exit $?
 
 	mkdir -p "$OUTPUT_DIR"
 
@@ -86,11 +96,7 @@ run)
 	log_info "Running Lighthouse CI..."
 
 	exit_code=0
-	if command -v lhci &>/dev/null; then
-		lhci "${LHCI_ARGS[@]}" || exit_code=$?
-	else
-		bunx @lhci/cli "${LHCI_ARGS[@]}" || exit_code=$?
-	fi
+	run_lhci "${LHCI_ARGS[@]}" || exit_code=$?
 
 	# Set outputs
 	set_github_output "exit-code" "$exit_code"
