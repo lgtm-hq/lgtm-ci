@@ -84,19 +84,21 @@ outputs:
   failed-categories:
     description: "Comma-separated list of failed categories"
     value: ${{ steps.parse.outputs.failed-categories }}
-  # Both paths are workspace-relative: the run step writes them relative to
-  # working-directory, so they are re-based here for callers that run from
-  # the workspace root.
+  # The run step writes both paths relative to working-directory, so a
+  # relative value is re-based here for callers that resolve it from the
+  # workspace root; an absolute output-dir passes through untouched.
   results-path:
-    description: "Path to results JSON file (workspace-relative)"
+    description: "Path to results JSON file (workspace-relative, or absolute as given)"
     value: >-
       ${{ inputs.working-directory != '.' && steps.run.outputs.results-path != ''
+      && !startsWith(steps.run.outputs.results-path, '/')
       && format('{0}/{1}', inputs.working-directory, steps.run.outputs.results-path)
       || steps.run.outputs.results-path }}
   output-dir:
-    description: "Directory containing all results (workspace-relative)"
+    description: "Directory containing all results (workspace-relative, or absolute as given)"
     value: >-
       ${{ inputs.working-directory != '.' && steps.run.outputs.output-dir != ''
+      && !startsWith(steps.run.outputs.output-dir, '/')
       && format('{0}/{1}', inputs.working-directory, steps.run.outputs.output-dir)
       || steps.run.outputs.output-dir }}
 
@@ -196,7 +198,9 @@ runs:
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
       with:
         name: lighthouse-reports
-        path: ${{ inputs.working-directory }}/${{ inputs.output-dir }}
+        path: >-
+          ${{ startsWith(inputs.output-dir, '/') && inputs.output-dir
+          || format('{0}/{1}', inputs.working-directory, inputs.output-dir) }}
         retention-days: 30
         if-no-files-found: ignore
 

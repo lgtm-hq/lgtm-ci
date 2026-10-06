@@ -565,6 +565,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
         continue-on-error: true
       - name: Run post-test command
+        id: post-test
         if: inputs.post-test-command != ''
         shell: bash
         env:
@@ -612,6 +613,10 @@ jobs:
           PASSED: >-
             ${{
               steps.run.outputs.exit-code == '0'
+              && (
+                steps.post-test.outcome == 'success'
+                || steps.post-test.outcome == 'skipped'
+              )
               && (
                 steps.coverage-gate.outcome == 'success'
                 || steps.coverage-gate.outcome == 'skipped'

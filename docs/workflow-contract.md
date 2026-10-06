@@ -540,6 +540,13 @@ and `run-lighthouse`, where `package-manager` is **required** and
 tests. The generic `run-tests` composite forwards an optional
 `package-manager` to its Vitest/Playwright branches.
 
+The direct composites do **not** cache dependencies: the Bun/`node_modules`
+cache that the former `setup-node` nesting restored is gone, deliberately —
+one composite cannot key a cache correctly for three managers, and npm/pnpm
+never had one there. Callers that want install caching should either call
+the reusable workflows (which keep the Bun cache) or add their own
+`actions/cache` step in front and pass `install-dependencies: "false"`.
+
 ### Tested runtime matrix
 
 <!-- markdownlint-disable MD013 -- matrix table -->
