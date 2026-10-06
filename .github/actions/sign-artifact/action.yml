@@ -81,6 +81,9 @@ runs:
       shell: bash
       env:
         STEP: upload-release
+        # gh resolves the target repo from the git remote in the workspace;
+        # pass it explicitly so the upload works without a caller checkout (#935).
+        GH_REPO: ${{ github.repository }}
         RELEASE_TAG: ${{ inputs.release-tag }}
         SIGNATURES_DIR: ${{ steps.sign.outputs.signatures-dir }}
       run: $SCRIPTS_DIR/ci/actions/sign-artifact.sh

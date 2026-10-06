@@ -4,6 +4,9 @@
 #
 # Required environment variables:
 #   GH_TOKEN          - Token for gh release upload
+#   GH_REPO           - owner/repo the release lives in. The upload job has no
+#                       caller checkout, so gh cannot infer it from a git
+#                       remote (#935)
 #   RELEASE_TAG       - Release tag to attach assets to
 #   ARTIFACT_NAME     - Artifact name (for error messages)
 #   SBOM_ARTIFACT_DIR - Directory containing downloaded SBOM files
@@ -11,6 +14,7 @@
 set -euo pipefail
 
 : "${GH_TOKEN:?GH_TOKEN is required}"
+: "${GH_REPO:?GH_REPO is required}"
 : "${RELEASE_TAG:?RELEASE_TAG is required}"
 : "${ARTIFACT_NAME:?ARTIFACT_NAME is required}"
 : "${SBOM_ARTIFACT_DIR:?SBOM_ARTIFACT_DIR is required}"

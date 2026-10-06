@@ -10,6 +10,7 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/upload-sbom-release-assets.sh"
 setup() {
 	setup_temp_dir
 	export GH_TOKEN="test-token"
+	export GH_REPO="owner/repo"
 	export RELEASE_TAG="v1.2.3"
 	export ARTIFACT_NAME="sbom"
 	export SBOM_ARTIFACT_DIR="${BATS_TEST_TMPDIR}/sbom-artifact"
@@ -24,6 +25,14 @@ teardown() {
 	run env -u GH_TOKEN bash "$SCRIPT"
 	assert_failure
 	assert_output --partial "GH_TOKEN is required"
+}
+
+# The upload job has no caller checkout, so gh cannot fall back to a git
+# remote; the script refuses to run rather than fail inside gh (#935).
+@test "upload-sbom-release-assets.sh: fails without GH_REPO" {
+	run env -u GH_REPO bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "GH_REPO is required"
 }
 
 @test "upload-sbom-release-assets.sh: fails when artifact dir missing" {

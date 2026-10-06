@@ -71,7 +71,7 @@ into its own reusable workflow, which a caller invokes only when it publishes.
 
 | Scope | Now declared by | Why it is real |
 | --- | --- | --- |
-| `contents: write` | `reusable-sbom-release-upload.yml` | `gh release upload --clobber` with `GITHUB_TOKEN` (`scripts/ci/actions/upload-sbom-release-assets.sh:29`) |
+| `contents: write` | `reusable-sbom-release-upload.yml` | `gh release upload --clobber` with `GITHUB_TOKEN` (`scripts/ci/actions/upload-sbom-release-assets.sh:33`); the step sets `GH_REPO` because the job has no caller checkout for `gh` to read a remote from (#935) |
 | `pages: write` | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` posts `/repos/{owner}/{repo}/pages/deployments` with `GITHUB_TOKEN` |
 | `id-token: write` | `reusable-publish-test-results-pages.yml` | `actions/deploy-pages` calls `core.getIDToken()` and sends it as the deployment's `oidc_token` |
 | `actions: write` | `reusable-publish-test-results-pages.yml` | `gh api --method DELETE /repos/{}/actions/artifacts/{id}` clears stale same-run Pages artifacts on rerun (`scripts/ci/actions/delete-run-pages-artifacts.sh:45-46`, #415) |
