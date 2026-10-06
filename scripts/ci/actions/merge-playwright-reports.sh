@@ -105,15 +105,21 @@ merge)
 		# Use the first parseable file as base (suites/tests not merged, only
 		# stats updated); a truncated shard must not become the merged report.
 		first_file=""
+		base_rejected=0
 		while IFS= read -r candidate; do
-			if [[ -f "$candidate" ]] && jq -e . "$candidate" >/dev/null 2>&1; then
+			if [[ -f "$candidate" ]] && jq -e 'true' "$candidate" >/dev/null 2>&1; then
 				first_file="$candidate"
 				break
 			fi
 			log_warn "Unparseable Playwright report skipped as merge base: $candidate"
+			base_rejected=$((base_rejected + 1))
 		done <<<"$json_files"
 		if [[ -z "$first_file" ]]; then
+			# Every report was rejected: still publish the count so the summary
+			# shows the skipped reports instead of an all-green zero.
 			log_warn "No valid JSON reports found to merge"
+			set_github_output "unparseable-count" "$base_rejected"
+			echo "::warning title=Playwright merge::${base_rejected} shard report(s) were not valid JSON; nothing merged" >&2
 			set_github_output "merged-path" ""
 			exit 0
 		fi

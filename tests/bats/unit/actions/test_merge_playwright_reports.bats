@@ -68,7 +68,10 @@ _github_output_value() {
 	run env STEP=merge REPORT_FORMAT=json bash "$SCRIPT"
 	assert_success
 	assert_output --partial "No valid JSON reports found to merge"
+	assert_output --partial "::warning title=Playwright merge::1 shard report(s) were not valid JSON; nothing merged"
 	assert_equal "" "$(_github_output_value merged-path)"
+	# The summary must still be able to show the skipped report.
+	assert_equal "1" "$(_github_output_value unparseable-count)"
 	assert_file_not_exists "${OUTPUT_DIR}/merged-results.json"
 }
 
