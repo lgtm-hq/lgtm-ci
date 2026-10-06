@@ -101,6 +101,13 @@ detect_all_runners() {
 # Coverage format detection
 # =============================================================================
 
+# Internal: does any of the first N lines match an ERE? One awk process, so
+# a huge line cannot SIGPIPE a head|grep pipeline under pipefail (#1078).
+# Usage: _head_matches "file" 20 'regex'
+_head_matches() {
+	awk -v max="$2" -v re="$3" 'NR > max { exit } $0 ~ re { found = 1; exit } END { exit !found }' "$1" 2>/dev/null
+}
+
 # Detect coverage format from file extension or content
 # Usage: detect_coverage_format "coverage.xml"
 # Output: cobertura|clover|xml|coverage-py|istanbul|json|lcov|html|unknown
@@ -125,9 +132,9 @@ detect_coverage_format() {
 	xml)
 		# Determine if cobertura or clover format
 		# Use grep -E with POSIX alternation for portability (BSD/macOS)
-		if head -20 "$file" | grep -qE '<coverage.*line-rate|<coverage.*lines-valid|<package.*name='; then
+		if _head_matches "$file" 20 '<coverage.*line-rate|<coverage.*lines-valid|<package.*name='; then
 			echo "cobertura"
-		elif head -20 "$file" | grep -qE '<coverage.*clover'; then
+		elif _head_matches "$file" 20 '<coverage.*clover'; then
 			echo "clover"
 		else
 			echo "xml"
@@ -137,9 +144,9 @@ detect_coverage_format() {
 	json)
 		# Determine if istanbul or coverage.py format
 		# Use grep -E with POSIX character classes for portability (BSD/macOS)
-		if head -5 "$file" | grep -qE '"meta"[[:space:]]*:[[:space:]]*\{.*"version"'; then
+		if _head_matches "$file" 5 '"meta"[[:space:]]*:[[:space:]]*\\{.*"version"'; then
 			echo "coverage-py"
-		elif head -20 "$file" | grep -qE '"path"[[:space:]]*:[[:space:]]*"|"statementMap"[[:space:]]*:'; then
+		elif _head_matches "$file" 20 '"path"[[:space:]]*:[[:space:]]*"|"statementMap"[[:space:]]*:'; then
 			echo "istanbul"
 		else
 			echo "json"
@@ -255,7 +262,7 @@ validate_coverage_file() {
 		# Cheap shape check only: a <coverage> element within the first 20
 		# lines (minified output keeps it on the XML declaration's line). One
 		# awk process, so no head|grep pipe to SIGPIPE under pipefail.
-		if ! awk 'NR > 20 { exit } /<coverage[[:space:]>]/ { found = 1; exit } END { exit !found }' "$file" 2>/dev/null; then
+		if ! _head_matches "$file" 20 '<coverage[[:space:]>]'; then
 			echo "invalid xml: no <coverage> root element - $file" >&2
 			return 1
 		fi
@@ -327,4 +334,4 @@ detect_coverage_source() {
 # Export functions
 # =============================================================================
 export -f detect_test_runner detect_all_runners
-export -f detect_coverage_format is_coverage_py_data_file validate_coverage_file detect_coverage_source
+export -f _head_matches detect_coverage_format is_coverage_py_data_file validate_coverage_file detect_coverage_source

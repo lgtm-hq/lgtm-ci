@@ -337,6 +337,27 @@ refute_github_output_key() {
 	assert_file_not_exists "$WORK/coverage.json"
 }
 
+@test "collect-coverage convert: a converter that emits a header-only LCOV is rejected, not published" {
+	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
+	echo "caller-owned" >"$WORK/out.lcov"
+
+	run_step convert INPUT_FILE=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov OUTPUT_FILE=out.lcov
+	assert_failure 1
+	assert_output --partial "Conversion produced no usable lcov report"
+	run cat "$WORK/out.lcov"
+	assert_output "caller-owned"
+}
+
+@test "collect-coverage convert: cobertura to lcov publishes a validated LCOV" {
+	install_fixture "coverage/sample_cobertura.xml" "$WORK/coverage.xml"
+
+	run_step convert INPUT_FILE=coverage.xml OUTPUT_FORMAT=lcov
+	assert_success
+	assert_github_output "converted-file" "coverage.lcov"
+	assert_file_contains "$WORK/coverage.lcov" "^SF:"
+	assert_file_contains "$WORK/coverage.lcov" "^LF:"
+}
+
 # =============================================================================
 # summary step: line-only LCOV renders n/a for unmeasured metrics
 # =============================================================================

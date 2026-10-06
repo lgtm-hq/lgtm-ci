@@ -428,13 +428,22 @@ convert)
 
 	log_info "Converting $INPUT_FILE to $OUTPUT_FORMAT..."
 
-	if convert_coverage "$INPUT_FILE" "$OUTPUT_FILE" "$INPUT_FORMAT" "$OUTPUT_FORMAT"; then
-		log_success "Converted coverage written to: $OUTPUT_FILE"
-		set_github_output "converted-file" "$OUTPUT_FILE"
-	else
+	# Same scratch-and-validate discipline as the merge step: never publish a
+	# header-only file a converter exited 0 with, and never clobber
+	# OUTPUT_FILE on failure
+	temp_converted=$(mktemp)
+	trap 'rm -f "$temp_converted"' EXIT
+	if ! convert_coverage "$INPUT_FILE" "$temp_converted" "$INPUT_FORMAT" "$OUTPUT_FORMAT"; then
 		log_error "Failed to convert coverage"
 		exit 1
 	fi
+	if ! validate_coverage_file "$temp_converted" "$OUTPUT_FORMAT"; then
+		log_error "Conversion produced no usable $OUTPUT_FORMAT report from $INPUT_FORMAT input"
+		exit 1
+	fi
+	mv "$temp_converted" "$OUTPUT_FILE"
+	log_success "Converted coverage written to: $OUTPUT_FILE"
+	set_github_output "converted-file" "$OUTPUT_FILE"
 	;;
 
 summary)
