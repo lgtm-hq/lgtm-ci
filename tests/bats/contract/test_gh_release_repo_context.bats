@@ -18,12 +18,29 @@
 
 load "../../helpers/common"
 
+# Does this `gh release` command pass `--repo`/`-R`? Only the command's own
+# segment counts: the text from `gh release` up to the next `&&`, `||`, `;`
+# or `|`, so a flag in a later command (`&& echo "--repo x"`) is not credited
+# to gh. Shared by the script discovery and the step scanner below.
+_GH_RELEASE_HAS_REPO_AWK='
+	function gh_release_has_repo(line, seg, cut) {
+		seg = substr(line, index(line, "gh release"))
+		cut = match(seg, /(&&|\|\||;|\|)/)
+		if (cut > 0) { seg = substr(seg, 1, cut - 1) }
+		return seg ~ /(--repo|-R)([[:space:]]|=)/
+	}
+'
+
 # Basenames of scripts under scripts/ci/ with at least one non-comment
-# `gh release` invocation that does not pass `--repo`/`-R` on the same line.
+# `gh release` invocation that does not pass `--repo`/`-R`.
 _repo_less_release_scripts() {
 	grep -rlE '^[^#]*gh release' "${PROJECT_ROOT}/scripts/ci" --include='*.sh' |
 		while IFS= read -r script; do
-			if grep -E '^[^#]*gh release' "$script" | grep -qvE -- '(--repo|-R)([[:space:]]|=)'; then
+			if awk "$_GH_RELEASE_HAS_REPO_AWK"'
+				/^[[:space:]]*#/ { next }
+				/gh release/ && !gh_release_has_repo($0) { found = 1; exit }
+				END { exit !found }
+			' "$script"; then
 				basename "$script"
 			fi
 		done | sort
@@ -53,7 +70,7 @@ _release_script_patterns() {
 _release_steps() {
 	local file="$1" scripts="$2"
 
-	awk -v scripts="$scripts" '
+	awk -v scripts="$scripts" "$_GH_RELEASE_HAS_REPO_AWK"'
 		function indent_of(line, prefix) {
 			prefix = line
 			sub(/[^ ].*$/, "", prefix)
@@ -161,7 +178,7 @@ _release_steps() {
 			}
 			line = $0
 			sub(/[[:space:]]+#.*$/, "", line)
-			if (line ~ /gh release/ && line !~ /(--repo|-R)([[:space:]]|=)/) { release = 1 }
+			if (line ~ /gh release/ && !gh_release_has_repo(line)) { release = 1 }
 			for (i = 1; i <= n; i++) {
 				if (index(line, list[i]) > 0) { seen[i] = 1 }
 			}
@@ -292,6 +309,10 @@ jobs:
         run: gh release upload v1 file --repo owner/repo
       - name: Explicit -R is exempt
         run: gh release upload v1 file -R owner/repo
+      - name: A --repo in a later command is not gh's
+        run: gh release upload v1 file && echo "--repo owner/repo"
+      - name: A --repo after a semicolon is not gh's
+        run: gh release upload v1 file; true --repo owner/repo
       - name: Unrelated
         run: echo done # gh release upload happens elsewhere
       - name: Comment only
@@ -332,6 +353,8 @@ YAML
 	assert_output --partial ':1:0:GH_REPO inside the run block does not count'
 	assert_output --partial ':0:0:Explicit --repo is exempt'
 	assert_output --partial ':0:0:Explicit -R is exempt'
+	assert_output --partial ":1:0:A --repo in a later command is not gh's"
+	assert_output --partial ":1:0:A --repo after a semicolon is not gh's"
 	assert_output --partial ':0:0:Unrelated'
 	assert_output --partial ':0:0:Comment only'
 	assert_output --partial ":1:0:'Release: colon in name'"

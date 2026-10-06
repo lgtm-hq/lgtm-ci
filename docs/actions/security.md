@@ -240,8 +240,10 @@ Sign release artifacts with Sigstore/Cosign keyless signing.
 Requires `id-token: write` (and `contents: write` when uploading to a
 release). The release upload targets `repository` (default
 `${{ github.repository }}`) through `GH_REPO` rather than whatever git remote
-is in the workspace, so it works without a checkout (#935); set `repository`
-when the release belongs to another repository.
+is in the workspace, so it works without a checkout (#935). Set `repository`
+when the release belongs to another repository — and supply a `GH_TOKEN` with
+`contents: write` on *that* repository, since the workflow token's
+`contents: write` covers only the calling repository.
 
 Each blob is signed with a bounded, transient-only retry (shared with the
 image-signing path via `scripts/ci/lib/cosign.sh`): only an ambient-OIDC
