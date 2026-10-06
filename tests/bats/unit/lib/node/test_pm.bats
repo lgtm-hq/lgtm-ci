@@ -65,7 +65,7 @@ _calls() {
 @test "pm_require: unknown manager does not invoke any tool" {
 	run _pm yarn pm_run test
 	assert_failure 2
-	assert_equal "" "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)"
+	assert_equal "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)" ""
 }
 
 # =============================================================================
@@ -75,19 +75,19 @@ _calls() {
 @test "pm_run bun: bun run <script> with args" {
 	run _pm bun pm_run test --watch=false
 	assert_success
-	assert_equal "run test --watch=false" "$(_calls bun)"
+	assert_equal "$(_calls bun)" "run test --watch=false"
 }
 
 @test "pm_run npm: npm run <script> -- args" {
 	run _pm npm pm_run test --watch=false
 	assert_success
-	assert_equal "run test -- --watch=false" "$(_calls npm)"
+	assert_equal "$(_calls npm)" "run test -- --watch=false"
 }
 
 @test "pm_run pnpm: pnpm run <script> with args" {
 	run _pm pnpm pm_run test --watch=false
 	assert_success
-	assert_equal "run test --watch=false" "$(_calls pnpm)"
+	assert_equal "$(_calls pnpm)" "run test --watch=false"
 }
 
 @test "pm_run: script name is required" {
@@ -103,26 +103,26 @@ _calls() {
 @test "pm_exec bun: bun run <bin> resolves node_modules/.bin without a registry fallback" {
 	run _pm bun pm_exec vitest run --reporter=json
 	assert_success
-	assert_equal "run vitest run --reporter=json" "$(_calls bun)"
+	assert_equal "$(_calls bun)" "run vitest run --reporter=json"
 }
 
 @test "pm_exec npm: npx --no-install <bin>" {
 	run _pm npm pm_exec vitest run --reporter=json
 	assert_success
-	assert_equal "--no-install vitest run --reporter=json" "$(_calls npx)"
-	assert_equal "" "$(_calls npm)"
+	assert_equal "$(_calls npx)" "--no-install vitest run --reporter=json"
+	assert_equal "$(_calls npm)" ""
 }
 
 @test "pm_exec pnpm: pnpm exec <bin>" {
 	run _pm pnpm pm_exec playwright install --with-deps chromium
 	assert_success
-	assert_equal "exec playwright install --with-deps chromium" "$(_calls pnpm)"
+	assert_equal "$(_calls pnpm)" "exec playwright install --with-deps chromium"
 }
 
 @test "pm_exec npm: never touches bun" {
 	run _pm npm pm_exec vitest run
 	assert_success
-	assert_equal "" "$(_calls bun)"
+	assert_equal "$(_calls bun)" ""
 }
 
 @test "pm_exec: propagates the binary's exit code" {
@@ -138,26 +138,26 @@ _calls() {
 @test "pm_add_dev bun: bun add -d" {
 	run _pm bun pm_add_dev vitest @vitest/coverage-v8
 	assert_success
-	assert_equal "add -d vitest @vitest/coverage-v8" "$(_calls bun)"
+	assert_equal "$(_calls bun)" "add -d vitest @vitest/coverage-v8"
 }
 
 @test "pm_add_dev npm: npm install --save-dev" {
 	run _pm npm pm_add_dev vitest
 	assert_success
-	assert_equal "install --save-dev vitest" "$(_calls npm)"
+	assert_equal "$(_calls npm)" "install --save-dev vitest"
 }
 
 @test "pm_add_dev pnpm: pnpm add -D" {
 	run _pm pnpm pm_add_dev vitest
 	assert_success
-	assert_equal "add -D vitest" "$(_calls pnpm)"
+	assert_equal "$(_calls pnpm)" "add -D vitest"
 }
 
 @test "pm_add_dev: at least one package is required" {
 	run _pm npm pm_add_dev
 	assert_failure 2
 	assert_output --partial "at least one package required"
-	assert_equal "" "$(_calls npm)"
+	assert_equal "$(_calls npm)" ""
 }
 
 # =============================================================================
@@ -168,7 +168,7 @@ _calls() {
 	mock_command_record bun "$(printf '%s\n' '/tmp/node_modules (2)' '├── @vitest/coverage-v8@3.2.4' '└── vitest@3.2.4')"
 	run _pm bun pm_has vitest
 	assert_success
-	assert_equal "pm ls" "$(_calls bun)"
+	assert_equal "$(_calls bun)" "pm ls"
 }
 
 @test "pm_has bun: absent from bun pm ls" {
@@ -189,7 +189,7 @@ _calls() {
 	mock_command_record npm '{"name":"fixture","dependencies":{"vitest":{"version":"3.2.4"}}}'
 	run _pm npm pm_has vitest
 	assert_success
-	assert_equal "ls --json --depth=0 vitest" "$(_calls npm)"
+	assert_equal "$(_calls npm)" "ls --json --depth=0 vitest"
 }
 
 @test "pm_has npm: absent from npm ls --json even when npm exits non-zero" {
@@ -208,7 +208,7 @@ _calls() {
 	mock_command_record pnpm '[{"name":"fixture","devDependencies":{"@playwright/test":{"version":"1.49.1"}}}]'
 	run _pm pnpm pm_has @playwright/test
 	assert_success
-	assert_equal "ls --json --depth 0 @playwright/test" "$(_calls pnpm)"
+	assert_equal "$(_calls pnpm)" "ls --json --depth 0 @playwright/test"
 }
 
 @test "pm_has pnpm: present as a dependency in pnpm ls --json" {

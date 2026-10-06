@@ -16,6 +16,8 @@ setup() {
 	mkdir -p "$WORK_DIR"
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
+	# Start every test from clean runner defaults regardless of the CI env.
+	unset PROJECT BROWSER REPORTER SHARD EXTRA_ARGS PACKAGE_MANAGER
 	mock_command_record bun
 	mock_command_record npm
 	mock_command_record npx
@@ -39,7 +41,7 @@ _github_output_value() {
 	run env STEP=setup PACKAGE_MANAGER="" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_failure 2
 	assert_output --partial "package-manager is required for execution actions"
-	assert_equal "" "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)"
+	assert_equal "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)" ""
 }
 
 @test "run-playwright setup npm: missing @playwright/test fails with an actionable message, no install" {
@@ -48,17 +50,17 @@ _github_output_value() {
 	assert_failure 1
 	assert_output --partial "@playwright/test is not installed"
 	assert_output --partial "install @playwright/test as a devDependency"
-	assert_equal "ls --json --depth=0 @playwright/test" "$(_calls npm)"
-	assert_equal "" "$(_calls npx)"
-	assert_equal "" "$(_calls bun)"
+	assert_equal "$(_calls npm)" "ls --json --depth=0 @playwright/test"
+	assert_equal "$(_calls npx)" ""
+	assert_equal "$(_calls bun)" ""
 }
 
 @test "run-playwright setup npm: installs the selected browser through npx --no-install" {
 	mock_command_record npm '{"name":"fixture","dependencies":{"@playwright/test":{"version":"1.49.1"}}}'
 	run env STEP=setup PACKAGE_MANAGER=npm BROWSER=firefox WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "--no-install playwright install --with-deps firefox" "$(_calls npx)"
-	assert_equal "" "$(_calls bun)"
+	assert_equal "$(_calls npx)" "--no-install playwright install --with-deps firefox"
+	assert_equal "$(_calls bun)" ""
 }
 
 @test "run-playwright setup pnpm: BROWSER=all installs every browser through pnpm exec" {
@@ -92,21 +94,21 @@ EOF
 @test "run-playwright run npm: executes npx --no-install playwright test with reporter and shard" {
 	run env STEP=run PACKAGE_MANAGER=npm REPORTER=junit SHARD=1/3 WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "--no-install playwright test --project=chromium --reporter=junit --shard=1/3" "$(_calls npx)"
-	assert_equal "" "$(_calls bun)"
-	assert_equal "0" "$(_github_output_value exit-code)"
+	assert_equal "$(_calls npx)" "--no-install playwright test --project=chromium --reporter=junit --shard=1/3"
+	assert_equal "$(_calls bun)" ""
+	assert_equal "$(_github_output_value exit-code)" "0"
 }
 
 @test "run-playwright run bun: executes bun run playwright" {
 	run env STEP=run PACKAGE_MANAGER=bun PROJECT=desktop WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "run playwright test --project=desktop --reporter=json" "$(_calls bun)"
+	assert_equal "$(_calls bun)" "run playwright test --project=desktop --reporter=json"
 }
 
 @test "run-playwright run: empty PACKAGE_MANAGER fails before running anything" {
 	run env STEP=run PACKAGE_MANAGER="" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_failure 2
-	assert_equal "" "$(_calls bun)$(_calls npx)$(_calls pnpm)"
+	assert_equal "$(_calls bun)$(_calls npx)$(_calls pnpm)" ""
 }
 
 @test "run-playwright: no hard-coded bun, bunx, npx or pnpm invocation remains in the script" {

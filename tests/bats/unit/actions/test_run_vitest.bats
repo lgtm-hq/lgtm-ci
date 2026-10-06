@@ -16,6 +16,9 @@ setup() {
 	mkdir -p "$WORK_DIR"
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
+	# The CI bats job exports TEST_PATH / COVERAGE for its own run; the
+	# runner reads the same names, so start every test from clean defaults.
+	unset TEST_PATH COVERAGE COVERAGE_FORMAT EXTRA_ARGS PACKAGE_MANAGER
 	mock_command_record bun
 	mock_command_record npm
 	mock_command_record npx
@@ -43,7 +46,7 @@ _github_output_value() {
 	run env STEP=setup PACKAGE_MANAGER="" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_failure 2
 	assert_output --partial "package-manager is required for execution actions"
-	assert_equal "" "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)"
+	assert_equal "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)" ""
 }
 
 @test "run-vitest setup: unset PACKAGE_MANAGER fails the same way" {
@@ -65,9 +68,9 @@ _github_output_value() {
 	assert_output --partial "vitest is not installed"
 	assert_output --partial "install vitest as a devDependency"
 	assert_output --partial "npm lockfile"
-	assert_equal "ls --json --depth=0 vitest" "$(_calls npm)"
-	assert_equal "" "$(_calls bun)"
-	assert_equal "" "$(_calls npx)"
+	assert_equal "$(_calls npm)" "ls --json --depth=0 vitest"
+	assert_equal "$(_calls bun)" ""
+	assert_equal "$(_calls npx)" ""
 }
 
 @test "run-vitest setup npm: vitest present passes without touching bun" {
@@ -75,7 +78,7 @@ _github_output_value() {
 	run env STEP=setup PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
 	assert_output --partial "vitest setup complete"
-	assert_equal "" "$(_calls bun)"
+	assert_equal "$(_calls bun)" ""
 	refute_output --partial "bun"
 }
 
@@ -118,15 +121,15 @@ EOF
 	run env STEP=setup PACKAGE_MANAGER=bun WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_failure 1
 	assert_output --partial "install vitest as a devDependency"
-	assert_equal "pm ls" "$(_calls bun)"
+	assert_equal "$(_calls bun)" "pm ls"
 }
 
 @test "run-vitest setup pnpm: vitest present passes" {
 	mock_command_record pnpm '[{"name":"fixture","devDependencies":{"vitest":{"version":"3.2.4"}}}]'
 	run env STEP=setup PACKAGE_MANAGER=pnpm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "ls --json --depth 0 vitest" "$(_calls pnpm)"
-	assert_equal "" "$(_calls bun)"
+	assert_equal "$(_calls pnpm)" "ls --json --depth 0 vitest"
+	assert_equal "$(_calls bun)" ""
 }
 
 @test "run-vitest: no hard-coded bun, bunx, npx or pnpm invocation remains in the script" {
@@ -142,9 +145,9 @@ EOF
 @test "run-vitest run npm: executes npx --no-install vitest and records outputs" {
 	run env STEP=run PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "--no-install vitest run --reporter=json --outputFile=vitest-results.json" "$(_calls npx)"
-	assert_equal "" "$(_calls bun)"
-	assert_equal "0" "$(_github_output_value exit-code)"
+	assert_equal "$(_calls npx)" "--no-install vitest run --reporter=json --outputFile=vitest-results.json"
+	assert_equal "$(_calls bun)" ""
+	assert_equal "$(_github_output_value exit-code)" "0"
 }
 
 @test "run-vitest run npm: generated command contains no bun token" {
@@ -160,28 +163,28 @@ EOF
 @test "run-vitest run bun: executes bun run vitest" {
 	run env STEP=run PACKAGE_MANAGER=bun WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "run vitest run --reporter=json --outputFile=vitest-results.json" "$(_calls bun)"
-	assert_equal "" "$(_calls npx)"
+	assert_equal "$(_calls bun)" "run vitest run --reporter=json --outputFile=vitest-results.json"
+	assert_equal "$(_calls npx)" ""
 }
 
 @test "run-vitest run pnpm: executes pnpm exec vitest" {
 	run env STEP=run PACKAGE_MANAGER=pnpm TEST_PATH=tests WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "exec vitest run tests --reporter=json --outputFile=vitest-results.json" "$(_calls pnpm)"
+	assert_equal "$(_calls pnpm)" "exec vitest run tests --reporter=json --outputFile=vitest-results.json"
 }
 
 @test "run-vitest run: empty PACKAGE_MANAGER fails before running anything" {
 	run env STEP=run PACKAGE_MANAGER="" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_failure 2
 	assert_output --partial "package-manager is required"
-	assert_equal "" "$(_calls bun)$(_calls npx)$(_calls pnpm)"
+	assert_equal "$(_calls bun)$(_calls npx)$(_calls pnpm)" ""
 }
 
 @test "run-vitest run: vitest exit code is propagated through exit-code output" {
 	mock_command_record npx "" 1
 	run env STEP=run PACKAGE_MANAGER=npm WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_failure 1
-	assert_equal "1" "$(_github_output_value exit-code)"
+	assert_equal "$(_github_output_value exit-code)" "1"
 }
 
 # =============================================================================
@@ -195,6 +198,6 @@ EOF
 	run env -u PACKAGE_MANAGER STEP=parse RESULTS_FILE="${WORK_DIR}/vitest-results.json" \
 		COVERAGE_FILE="${WORK_DIR}/none.json" bash "$SCRIPT"
 	assert_success
-	assert_equal "3" "$(_github_output_value tests-total)"
-	assert_equal "1" "$(_github_output_value tests-failed)"
+	assert_equal "$(_github_output_value tests-total)" "3"
+	assert_equal "$(_github_output_value tests-failed)" "1"
 }

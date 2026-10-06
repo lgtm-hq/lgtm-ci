@@ -17,6 +17,8 @@ setup() {
 	cd "$WORK_DIR"
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
+	# Start every test from clean runner defaults regardless of the CI env.
+	unset URL CONFIG_PATH OUTPUT_DIR EXTRA_ARGS PACKAGE_MANAGER
 	mock_command_record bun
 	mock_command_record npm
 	mock_command_record npx
@@ -36,7 +38,7 @@ _calls() {
 	run env STEP=setup PACKAGE_MANAGER="" bash "$SCRIPT"
 	assert_failure 2
 	assert_output --partial "package-manager is required for execution actions"
-	assert_equal "" "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)"
+	assert_equal "$(_calls bun)$(_calls npm)$(_calls npx)$(_calls pnpm)" ""
 }
 
 @test "run-lighthouse setup npm: missing @lhci/cli fails with an actionable message, no install" {
@@ -45,9 +47,9 @@ _calls() {
 	assert_failure 1
 	assert_output --partial "@lhci/cli is not installed"
 	assert_output --partial "install @lhci/cli as a devDependency"
-	assert_equal "ls --json --depth=0 @lhci/cli" "$(_calls npm)"
-	assert_equal "" "$(_calls bun)"
-	assert_equal "" "$(_calls npx)"
+	assert_equal "$(_calls npm)" "ls --json --depth=0 @lhci/cli"
+	assert_equal "$(_calls bun)" ""
+	assert_equal "$(_calls npx)" ""
 }
 
 @test "run-lighthouse setup npm: project-installed @lhci/cli is reported through npx --no-install" {
@@ -56,7 +58,7 @@ _calls() {
 	run env STEP=setup PACKAGE_MANAGER=npm bash "$SCRIPT"
 	assert_success
 	assert_output --partial "Lighthouse CI available: 0.14.0"
-	assert_equal "--no-install lhci --version" "$(_calls npx)"
+	assert_equal "$(_calls npx)" "--no-install lhci --version"
 }
 
 @test "run-lighthouse setup: lhci already on PATH skips the package lookup" {
@@ -64,8 +66,8 @@ _calls() {
 	run env STEP=setup PACKAGE_MANAGER=pnpm bash "$SCRIPT"
 	assert_success
 	assert_output --partial "Lighthouse CI available: 0.14.0"
-	assert_equal "--version" "$(_calls lhci)"
-	assert_equal "" "$(_calls pnpm)"
+	assert_equal "$(_calls lhci)" "--version"
+	assert_equal "$(_calls pnpm)" ""
 }
 
 @test "run-lighthouse run pnpm: executes pnpm exec lhci autorun with the filesystem target" {
@@ -74,7 +76,7 @@ _calls() {
 	run _calls pnpm
 	assert_output --partial "exec lhci autorun --upload.target=filesystem --upload.outputDir=${WORK_DIR}/out"
 	assert_output --partial "--collect.url=http://localhost:3000"
-	assert_equal "" "$(_calls bun)"
+	assert_equal "$(_calls bun)" ""
 }
 
 @test "run-lighthouse run: lhci on PATH is preferred over the package manager" {
@@ -83,13 +85,13 @@ _calls() {
 	assert_success
 	run _calls lhci
 	assert_output --partial "autorun"
-	assert_equal "" "$(_calls npx)"
+	assert_equal "$(_calls npx)" ""
 }
 
 @test "run-lighthouse run: empty PACKAGE_MANAGER fails before running anything" {
 	run env STEP=run PACKAGE_MANAGER="" URL=http://localhost:3000 bash "$SCRIPT"
 	assert_failure 2
-	assert_equal "" "$(_calls bun)$(_calls npx)$(_calls pnpm)"
+	assert_equal "$(_calls bun)$(_calls npx)$(_calls pnpm)" ""
 }
 
 @test "run-lighthouse: no hard-coded bun, bunx, npx or pnpm invocation remains in the script" {
