@@ -107,6 +107,26 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	[[ "$output" -ge 2 ]]
 }
 
+@test "reusable-ai-review: review step is bounded below the job cap and owns its conclusion (#1098)" {
+	# The run step receives the job cap so the script can bound lintro with
+	# GNU timeout; the job cap itself must never be what ends the review
+	# (a cancelled job is a failed check → UNSTABLE).
+	run awk '/- name: Run AI review/{f=1} f&&/- name: Upload review-state/{exit} f{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial 'JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}'
+	assert_output --partial 'JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}'
+	assert_output --partial 'MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}'
+	# No continue-on-error on the review step: the script exits 0 on a
+	# timed-out / size-skipped review itself, and continue-on-error would
+	# green real failures (INCOMPLETE, unexpected exit codes, blocking).
+	run bash -c "awk '/- name: Run AI review/{f=1} f&&/- name: Upload review-state/{exit} f' '$WORKFLOW' | grep -vE '^[[:space:]]*#' | grep -c 'continue-on-error:'"
+	assert_output "0"
+	run awk '/^      max-diff-lines:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial "type: number"
+	assert_output --partial "default: 0"
+}
+
 @test "reusable-ai-review: defaults to the ai-review egress preset" {
 	run awk '/^      egress-preset:$/{f=1;next} f&&/^      [a-z]/{exit} f&&/default:/{print}' "$WORKFLOW"
 	assert_success

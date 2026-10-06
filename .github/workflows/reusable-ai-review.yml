@@ -95,6 +95,15 @@ on:
         required: false
         type: boolean
         default: false
+      max-diff-lines:
+        description: >-
+          Skip the review (neutral, with a PR comment) when the PR's
+          additions+deletions exceed this. 0 disables the gate. A review the
+          model cannot finish inside the bound is skipped before any spend
+          (#1098).
+        required: false
+        type: number
+        default: 0
 
       # --- Standard reusable contract inputs -------------------------------
       tooling-ref:
@@ -140,7 +149,11 @@ on:
         type: string
         default: "ubuntu-24.04"
       timeout-minutes:
-        description: "Job timeout in minutes"
+        description: >-
+          Job timeout in minutes. The review call itself is bounded to what
+          remains of this cap (measured from preflight) minus a 4-minute
+          margin, so a slow review ends as a neutral `timed-out` outcome
+          instead of a cancelled (failed) job (#1098).
         required: false
         type: number
         default: 30
@@ -478,6 +491,12 @@ jobs:
       - name: Run AI review
         id: review
         if: steps.preflight.outputs.should-run == 'true'
+        # No continue-on-error here on purpose: the script bounds the review
+        # with GNU timeout below the job cap and exits 0 itself on a timed-out
+        # (or size-skipped) review, so the job never reaches the runner's
+        # cancel-at-cap path that flips the PR to UNSTABLE (#1098). Adding
+        # continue-on-error would only green real failures (INCOMPLETE,
+        # unexpected exit codes, blocking verdicts), which must stay red.
         shell: bash
         env:
           STEP: run
@@ -489,6 +508,9 @@ jobs:
           LINTRO_VERSION: ${{ inputs.lintro-version }}
           PYTHON_VERSION: ${{ inputs.python-version }}
           BLOCKING: ${{ inputs.blocking }}
+          JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}
+          MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
           LINTRO_AI_ENABLED: "1"
           # Requires the 0.130.0 floor (py-lintro#2159): forces ai.review on
