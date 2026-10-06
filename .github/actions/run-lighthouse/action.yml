@@ -84,12 +84,21 @@ outputs:
   failed-categories:
     description: "Comma-separated list of failed categories"
     value: ${{ steps.parse.outputs.failed-categories }}
+  # Both paths are workspace-relative: the run step writes them relative to
+  # working-directory, so they are re-based here for callers that run from
+  # the workspace root.
   results-path:
-    description: "Path to results JSON file"
-    value: ${{ steps.run.outputs.results-path }}
+    description: "Path to results JSON file (workspace-relative)"
+    value: >-
+      ${{ inputs.working-directory != '.' && steps.run.outputs.results-path != ''
+      && format('{0}/{1}', inputs.working-directory, steps.run.outputs.results-path)
+      || steps.run.outputs.results-path }}
   output-dir:
-    description: "Directory containing all results"
-    value: ${{ steps.run.outputs.output-dir }}
+    description: "Directory containing all results (workspace-relative)"
+    value: >-
+      ${{ inputs.working-directory != '.' && steps.run.outputs.output-dir != ''
+      && format('{0}/{1}', inputs.working-directory, steps.run.outputs.output-dir)
+      || steps.run.outputs.output-dir }}
 
 runs:
   using: "composite"
