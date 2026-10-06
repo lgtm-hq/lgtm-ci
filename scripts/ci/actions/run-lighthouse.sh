@@ -44,6 +44,15 @@ run_lhci() {
 	fi
 }
 
+# First Lighthouse report (LHR JSON) under a filesystem-upload directory.
+# `lhci autorun --upload.target=filesystem` writes `<slug>.report.json` next to
+# a manifest.json; older layouts used `lhr-*.json`. Both are accepted.
+find_lighthouse_report() {
+	local dir="$1"
+	find "$dir" -type f \( -name "*.report.json" -o -name "lhr-*.json" \) 2>/dev/null |
+		sort | head -1 || true
+}
+
 case "$STEP" in
 setup)
 	pm_require >/dev/null || exit $?
@@ -104,8 +113,7 @@ run)
 
 	# Find the results file
 	if [[ -d "$OUTPUT_DIR" ]]; then
-		# LHCI creates files like lhr-*.json
-		results_file=$(find "$OUTPUT_DIR" -name "lhr-*.json" -type f 2>/dev/null | sort | head -1 || true)
+		results_file=$(find_lighthouse_report "$OUTPUT_DIR")
 		if [[ -n "$results_file" ]]; then
 			set_github_output "results-path" "$results_file"
 		fi
@@ -125,7 +133,7 @@ parse)
 	# Find results file if not specified
 	if [[ -z "$RESULTS_PATH" ]] || [[ ! -f "$RESULTS_PATH" ]]; then
 		if [[ -d "$OUTPUT_DIR" ]]; then
-			RESULTS_PATH=$(find "$OUTPUT_DIR" -name "lhr-*.json" -type f 2>/dev/null | sort | head -1 || true)
+			RESULTS_PATH=$(find_lighthouse_report "$OUTPUT_DIR")
 		fi
 	fi
 

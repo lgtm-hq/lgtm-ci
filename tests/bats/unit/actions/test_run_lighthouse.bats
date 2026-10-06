@@ -94,6 +94,32 @@ _calls() {
 	assert_equal "$(_calls bun)$(_calls npx)$(_calls pnpm)" ""
 }
 
+@test "run-lighthouse run: finds the *.report.json that lhci's filesystem target writes" {
+	cat >"${BATS_TEST_TMPDIR}/bin/lhci" <<'EOF'
+#!/usr/bin/env bash
+out=""
+for a in "$@"; do case "$a" in --upload.outputDir=*) out="${a#--upload.outputDir=}" ;; esac; done
+mkdir -p "$out"
+echo '{"categories":{"performance":{"score":0.91}}}' > "$out/localhost-_-2026_10_06.report.json"
+echo '[]' > "$out/manifest.json"
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/lhci"
+	run env STEP=run PACKAGE_MANAGER=npm URL=http://localhost:3000 OUTPUT_DIR="${WORK_DIR}/out" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(grep '^results-path=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "${WORK_DIR}/out/localhost-_-2026_10_06.report.json"
+}
+
+@test "run-lighthouse parse: resolves a *.report.json under OUTPUT_DIR and scores it" {
+	mkdir -p "${WORK_DIR}/out"
+	echo '{"categories":{"performance":{"score":0.91},"accessibility":{"score":1},"best-practices":{"score":0.8},"seo":{"score":0.7}}}' \
+		>"${WORK_DIR}/out/site.report.json"
+	run env STEP=parse RESULTS_PATH="" OUTPUT_DIR="${WORK_DIR}/out" THRESHOLD_SEO=50 bash "$SCRIPT"
+	assert_success
+	refute_output --partial "No Lighthouse results found"
+	assert_equal "$(grep '^performance=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "91"
+	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "true"
+}
+
 @test "run-lighthouse: no hard-coded bun, bunx, npx or pnpm invocation remains in the script" {
 	run grep -nE '^\s*(bun|bunx|npx|pnpm) ' "$SCRIPT"
 	assert_failure
