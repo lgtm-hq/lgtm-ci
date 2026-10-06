@@ -179,8 +179,11 @@ _job_run_commands() {
 		in_aggregate && /aggregate-results\.sh/ { agg = NR }
 		in_aggregate && /GH_TOKEN: \$\{\{ github\.token \}\}/ { token = 1 }
 		in_aggregate && /EXPECTED_COUNT: \$\{\{ needs\.prepare\.outputs\.matrix-count \}\}/ { count = 1 }
+		in_aggregate && /MATRIX_KEY: python-version$/ { key = 1 }
+		in_aggregate && /DOWNLOAD_DIR: python-results$/ { dir = 1 }
+		in_aggregate && /\x27python-results-\*\x27/ { pattern = 1 }
 		in_aggregate && /actions\/download-artifact@/ { dl = 1 }
-		END { exit !(wait && agg && wait < agg && token && count && !dl) }
+		END { exit !(wait && agg && wait < agg && token && count && key && dir && pattern && !dl) }
 	' "$WORKFLOW"
 	assert_success
 	run grep -F "matrix-count: \${{ steps.matrix.outputs.matrix-count }}" "$WORKFLOW"

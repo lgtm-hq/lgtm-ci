@@ -249,7 +249,7 @@ EXPECTED_NAMES=()
 # Plain command substitution, not process substitution: the parser's exit
 # status must reach this shell so a partial name list can never pass as whole.
 if ! expected_output="$(expected_names 2>"$STDERR_FILE")"; then
-	echo "::error::MATRIX_JSON could not be parsed for expected artifact names: $(tr '\n' ' ' <"$STDERR_FILE")"
+	echo "::error::Expected artifact names could not be derived from MATRIX_JSON, MATRIX_KEY and PATTERN: $(tr '\n' ' ' <"$STDERR_FILE")"
 	exit 1
 fi
 while IFS= read -r expected; do

@@ -805,7 +805,7 @@ EOF
 
 	run_wait 2 'python-results-*'
 	assert_failure
-	assert_output --partial "::error::MATRIX_JSON could not be parsed for expected artifact names"
+	assert_output --partial "::error::Expected artifact names could not be derived from MATRIX_JSON, MATRIX_KEY and PATTERN"
 	[[ ! -s "$GH_CALLS" ]]
 }
 
@@ -819,7 +819,7 @@ EOF
 
 	run_wait 1 'python-results-*'
 	assert_failure
-	assert_output --partial "::error::MATRIX_JSON could not be parsed for expected artifact names"
+	assert_output --partial "::error::Expected artifact names could not be derived from MATRIX_JSON, MATRIX_KEY and PATTERN"
 	[[ ! -s "$GH_CALLS" ]]
 }
 
@@ -831,7 +831,7 @@ EOF
 
 	run_wait 1 'python-results-*'
 	assert_failure
-	assert_output --partial "::error::MATRIX_JSON could not be parsed for expected artifact names"
+	assert_output --partial "::error::Expected artifact names could not be derived from MATRIX_JSON, MATRIX_KEY and PATTERN"
 }
 
 @test "wait-for-artifacts: the final sleep is clamped to the remaining budget" {
@@ -907,6 +907,7 @@ _sha256_of() {
 
 @test "wait-for-artifacts: an archive whose entries escape the destination is refused" {
 	_require_zip_tools
+	command -v python3 >/dev/null 2>&1 || skip "python3 not available"
 	_mock_gh
 	# `zip` normalises away `..`, so craft the archive with Python's zipfile.
 	local evil="${BATS_TEST_TMPDIR}/evil.zip"
@@ -921,8 +922,10 @@ with zipfile.ZipFile(sys.argv[1], "w") as z:
 	run_wait 1 'python-results-*'
 	assert_failure
 	assert_output --partial "::error::Artifact python-results-3.11 (id 1) contains entries that escape the destination directory; not retrying"
-	[[ ! -e "${BATS_TEST_TMPDIR}/escape.json" ]]
+	# `../escape.json` relative to DOWNLOAD_DIR/python-results-3.11 lands in
+	# DOWNLOAD_DIR itself; nothing may have been extracted at all.
 	[[ ! -e "${DOWNLOAD_DIR}/escape.json" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
 	[[ ! -s "$SLEEP_CALLS" ]]
 }
 
