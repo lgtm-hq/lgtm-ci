@@ -14,7 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `upload-report-when` input (`failure` default, `always` to upload the report
   on green runs). The JUnit file `playwright-results.xml` joins the report
   artifact. `parse_playwright_json` now also sets `TESTS_DURATION_MS` and
-  returns 2 for a report that is not valid JSON (#804).
+  returns 2 for a report that is not valid JSON; `merge-playwright-reports`
+  skips such shard reports, counts them in a new `unparseable-count` output
+  and a summary row, and sums durations in integer milliseconds (#804).
 
 ### Changed
 

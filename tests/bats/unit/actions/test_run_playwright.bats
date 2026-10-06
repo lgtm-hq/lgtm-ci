@@ -134,6 +134,13 @@ EOF
 	assert_equal "$(_github_output_value json-report-path)" "playwright-results.json"
 }
 
+@test "run-playwright run: warns when extra-args already carries --reporter" {
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=json EXTRA_ARGS="--reporter=dot" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "::warning title=reporter::extra-args passes --reporter"
+	assert_equal "$(_calls npx)" "--no-install playwright test --project=chromium --reporter=json --reporter=dot"
+}
+
 @test "run-playwright run REPORTER=html: a failing run with no report keeps Playwright's exit code" {
 	mock_command_record npx "" 1
 	run env STEP=run PACKAGE_MANAGER=npm REPORTER=html WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"

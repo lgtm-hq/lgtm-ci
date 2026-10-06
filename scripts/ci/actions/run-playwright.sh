@@ -96,6 +96,8 @@ run)
 		PLAYWRIGHT_ARGS+=("--reporter=html,json")
 		export PLAYWRIGHT_JSON_OUTPUT_NAME="playwright-results.json"
 		export PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report"
+		# Legacy name of the same setting (Playwright < 1.45 reads only this one).
+		export PLAYWRIGHT_HTML_REPORT="playwright-report"
 		export PLAYWRIGHT_HTML_OPEN="never"
 		;;
 	junit)
@@ -115,6 +117,11 @@ run)
 
 	# Add extra args
 	if [[ -n "$EXTRA_ARGS" ]]; then
+		if [[ "$EXTRA_ARGS" == *--reporter* ]]; then
+			# Playwright keeps only the last --reporter flag, so this replaces
+			# the reporter input's set (and its report/sidecar outputs).
+			echo "::warning title=reporter::extra-args passes --reporter; it overrides reporter=${REPORTER} and may drop the ${REPORTER} output" >&2
+		fi
 		read -ra EXTRA_ARRAY <<<"$EXTRA_ARGS"
 		PLAYWRIGHT_ARGS+=("${EXTRA_ARRAY[@]}")
 	fi

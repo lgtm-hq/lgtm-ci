@@ -224,10 +224,18 @@ EOF
 @test "run-playwright-tests run: pins reporter output locations through the environment" {
 	_install_fake_playwright
 
+	# Inherited values must not win: parse and the upload globs use the
+	# fixed names, so an override would pass the HTML check with an empty artifact.
 	run env \
 		STEP=run \
 		WORKING_DIRECTORY="$WORK_DIR" \
 		TEST_COMMAND="./fake-pw.sh test" \
+		PLAYWRIGHT_JSON_OUTPUT_NAME="elsewhere.json" \
+		PLAYWRIGHT_JSON_OUTPUT_FILE="/tmp/elsewhere.json" \
+		PLAYWRIGHT_JUNIT_OUTPUT_FILE="/tmp/elsewhere.xml" \
+		PLAYWRIGHT_HTML_OUTPUT_DIR="elsewhere" \
+		PLAYWRIGHT_HTML_REPORT="legacy-elsewhere" \
+		PLAYWRIGHT_HTML_OPEN="always" \
 		bash "$SCRIPT"
 
 	assert_success
@@ -236,6 +244,9 @@ EOF
 	assert_line "PLAYWRIGHT_JUNIT_OUTPUT_NAME=playwright-results.xml"
 	assert_line "PLAYWRIGHT_HTML_OUTPUT_DIR=playwright-report"
 	assert_line "PLAYWRIGHT_HTML_OPEN=never"
+	assert_line "PLAYWRIGHT_HTML_REPORT=playwright-report"
+	refute_output --partial "OUTPUT_FILE"
+	assert_equal "playwright-report" "$(_github_output_value html-report-path)"
 }
 
 @test "run-playwright-tests run: missing HTML report fails a green run" {
@@ -306,6 +317,41 @@ EOF
 	# junit was not requested: no junit output path is advertised.
 	run grep '^junit-report-path=' "$GITHUB_OUTPUT"
 	assert_failure
+}
+
+@test "run-playwright-tests run: custom reporter path with spaces stays one argument" {
+	_install_fake_playwright
+
+	run env \
+		STEP=run \
+		WORKING_DIRECTORY="$WORK_DIR" \
+		TEST_COMMAND="./fake-pw.sh test" \
+		REPORTERS="json,html,./reporters/custom reporter.js" \
+		bash "$SCRIPT"
+
+	assert_success
+	run cat "${WORK_DIR}/argv.txt"
+	assert_line --index 1 "--reporter=json,html,./reporters/custom reporter.js"
+	run wc -l <"${WORK_DIR}/argv.txt"
+	assert_output --partial "2"
+}
+
+@test "run-playwright-tests run: pre-run validation failures publish exit-code=1" {
+	# The workflow's run step is continue-on-error; without this output the
+	# verdict step would have nothing to re-raise and the job stayed green.
+	run env STEP=run WORKING_DIRECTORY="$WORK_DIR" TEST_COMMAND='   ' bash "$SCRIPT"
+	assert_failure 1
+	assert_equal "1" "$(_github_output_value exit-code)"
+
+	: >"$GITHUB_OUTPUT"
+	run env STEP=run WORKING_DIRECTORY="${WORK_DIR}/missing" TEST_COMMAND='echo x' bash "$SCRIPT"
+	assert_failure 1
+	assert_equal "1" "$(_github_output_value exit-code)"
+
+	: >"$GITHUB_OUTPUT"
+	run env STEP=run WORKING_DIRECTORY="$WORK_DIR" TEST_COMMAND='echo x' REPORTERS="list" bash "$SCRIPT"
+	assert_failure 1
+	assert_equal "1" "$(_github_output_value exit-code)"
 }
 
 @test "run-playwright-tests run: reporters without html fail before running anything" {

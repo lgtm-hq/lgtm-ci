@@ -170,3 +170,13 @@ _tooling_sparse_cone_ok() {
 	run grep -F '${{ inputs.working-directory }}/playwright-results.xml' "$WORKFLOW"
 	assert_success
 }
+
+@test "reusable-test-e2e-playwright: verdict step re-raises a run step that failed without an exit code" {
+	run awk '
+		/Fail on Playwright errors/ { in_step = 1 }
+		in_step && /steps\.run\.outcome == .failure./ { outcome = 1 }
+		in_step && /EXIT_CODE: \$\{\{ steps\.run\.outputs\.exit-code \|\| .1. \}\}/ { fallback = 1 }
+		END { exit !(outcome && fallback) }
+	' "$WORKFLOW"
+	assert_success
+}

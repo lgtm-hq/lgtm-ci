@@ -475,14 +475,18 @@ jobs:
         run: |
           echo "::warning::Playwright report upload failed; the test result is unaffected."
       - name: Fail on Playwright errors
-        # always(): re-raise even if a prior always() step (report upload) failed
+        # always(): re-raise even if a prior always() step (report upload) failed.
+        # A run step that failed before publishing exit-code (pre-run
+        # validation) must fail the job too, not pass it silently (#804).
         if: >-
           always()
-          && steps.run.outputs.exit-code != ''
-          && steps.run.outputs.exit-code != '0'
+          && (
+            steps.run.outcome == 'failure'
+            || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0')
+          )
         shell: bash
         env:
-          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          EXIT_CODE: ${{ steps.run.outputs.exit-code || '1' }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
 
   publish-test-summary:

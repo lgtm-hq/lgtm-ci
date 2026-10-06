@@ -84,6 +84,7 @@ runs:
         TOTAL_FAILED: ${{ steps.parse.outputs.total-failed }}
         TOTAL_SKIPPED: ${{ steps.parse.outputs.total-skipped }}
         REPORT_COUNT: ${{ steps.collect.outputs.report-count }}
+        UNPARSEABLE_COUNT: ${{ steps.merge.outputs.unparseable-count }}
       run: $SCRIPTS_DIR/ci/actions/merge-playwright-reports.sh
 
 branding:

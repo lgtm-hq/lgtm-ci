@@ -269,6 +269,30 @@ _parse_report() {
 	refute_output
 }
 
+@test "parse_playwright_json: zero-byte report returns 2 with zero counts" {
+	: >"${BATS_TEST_TMPDIR}/playwright.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/playwright.sh\"
+		parse_playwright_json \"${BATS_TEST_TMPDIR}/playwright.json\"
+		echo \"total=\$TESTS_TOTAL ms=\$TESTS_DURATION_MS ret=\$?\"
+	"
+	assert_success
+	assert_output "total=0 ms=0 ret=2"
+}
+
+@test "parse_playwright_json: valid JSON that is not a report parses to zero counts" {
+	echo 'null' >"${BATS_TEST_TMPDIR}/playwright.json"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/playwright.sh\"
+		parse_playwright_json \"${BATS_TEST_TMPDIR}/playwright.json\"
+		echo \"total=\$TESTS_TOTAL ms=\$TESTS_DURATION_MS ret=\$?\"
+	"
+	assert_success
+	assert_output "total=0 ms=0 ret=0"
+}
+
 @test "parse_playwright_json: sharded reports parse per shard" {
 	run _parse_report json-shard-1of2.json
 	assert_success

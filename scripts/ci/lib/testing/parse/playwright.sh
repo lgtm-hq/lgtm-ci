@@ -40,7 +40,9 @@ parse_playwright_json() {
 
 	# A truncated or otherwise unparseable report (Playwright killed mid-write)
 	# is not an empty one: say so instead of reporting zero tests as a parse.
-	if ! jq -e . "$file" >/dev/null 2>&1; then
+	# `-e true` fails on a zero-byte file (no document) and on bad syntax, but
+	# accepts any JSON document, including a bare `null`.
+	if ! jq -e 'true' "$file" >/dev/null 2>&1; then
 		return 2
 	fi
 

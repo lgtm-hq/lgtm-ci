@@ -223,15 +223,23 @@ run)
 	if [[ -z "$working_directory" ]]; then
 		working_directory="."
 	fi
+	# Pre-run validation failures still publish exit-code=1: the workflow's
+	# run step is continue-on-error and the final verdict step re-raises only
+	# a non-empty, non-zero exit-code, so exiting without it left the job green.
 	if [[ -z "$test_command" ]]; then
 		echo "::error::TEST_COMMAND must not be empty" >&2
+		set_github_output "exit-code" "1"
 		exit 1
 	fi
 	if [[ ! -d "$working_directory" ]]; then
 		echo "::error::Working directory does not exist: ${working_directory}" >&2
+		set_github_output "exit-code" "1"
 		exit 1
 	fi
-	reporters="$(normalize_playwright_reporters "$REPORTERS")" || exit 1
+	if ! reporters="$(normalize_playwright_reporters "$REPORTERS")"; then
+		set_github_output "exit-code" "1"
+		exit 1
+	fi
 	if [[ "$test_command" == *--reporter* ]]; then
 		echo "::warning title=reporters::test-command already passes --reporter; Playwright keeps only the last flag, so the reporters input (${reporters}) wins" >&2
 	fi
@@ -249,16 +257,22 @@ run)
 	fi
 
 	filter_args="$(assemble_playwright_filter_args)"
-	# Fixed output locations: parse reads the JSON sidecar and the workflow's
-	# upload step globs these exact paths. Env wins over any outputFile the
-	# consumer config sets, because the CLI --reporter below replaces the
-	# config reporters wholesale.
-	export PLAYWRIGHT_JSON_OUTPUT_NAME="${PLAYWRIGHT_JSON_OUTPUT_NAME:-playwright-results.json}"
-	export PLAYWRIGHT_JUNIT_OUTPUT_NAME="${PLAYWRIGHT_JUNIT_OUTPUT_NAME:-playwright-results.xml}"
-	export PLAYWRIGHT_HTML_OUTPUT_DIR="${PLAYWRIGHT_HTML_OUTPUT_DIR:-playwright-report}"
+	# Fixed output locations, assigned unconditionally: parse reads the JSON
+	# sidecar and the workflow's upload step globs these exact paths, so an
+	# inherited override would pass the HTML check while the artifact and
+	# metrics came up empty. Env wins over any outputFile the consumer config
+	# sets, because the CLI --reporter below replaces the config reporters.
+	export PLAYWRIGHT_JSON_OUTPUT_NAME="playwright-results.json"
+	export PLAYWRIGHT_JUNIT_OUTPUT_NAME="playwright-results.xml"
+	export PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report"
+	# Legacy name of the same setting (Playwright < 1.45 reads only this one).
+	export PLAYWRIGHT_HTML_REPORT="playwright-report"
+	# *_OUTPUT_FILE outranks *_OUTPUT_NAME in Playwright; drop any inherited
+	# value so nothing redirects the sidecars.
+	unset PLAYWRIGHT_JSON_OUTPUT_FILE PLAYWRIGHT_JUNIT_OUTPUT_FILE
 	# Never try to open the HTML report in a browser (the html reporter's
 	# default is on-failure outside CI).
-	export PLAYWRIGHT_HTML_OPEN="${PLAYWRIGHT_HTML_OPEN:-never}"
+	export PLAYWRIGHT_HTML_OPEN="never"
 
 	full_command="${test_command}"
 	if [[ -n "$filter_args" ]]; then
@@ -266,7 +280,9 @@ run)
 	fi
 	# Exactly one --reporter flag: Playwright keeps only the last one, so two
 	# flags dropped the HTML report while the run stayed green (#804).
-	full_command="${full_command} --reporter=${reporters}"
+	# Shell-quoted like the filter args: the command is re-parsed by bash -c,
+	# and a custom reporter path may contain spaces or metacharacters.
+	full_command="${full_command} $(printf '%q' "--reporter=${reporters}")"
 
 	log_info "Running Playwright: ${full_command}"
 
