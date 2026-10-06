@@ -123,6 +123,31 @@ refute_github_output_key() {
 	assert_output "42.0"
 }
 
+@test "collect-coverage merge: lone coverage.py data file renders straight to a requested lcov output" {
+	printf 'SQLite format 3\000rest-of-data' >"$WORK/.coverage"
+	# shellcheck disable=SC2016 # case body runs inside the mock, not here
+	mock_command_multi "coverage" '
+		lcov\ -o\ *) printf "TN:\nSF:src/a.py\nDA:1,1\nDA:2,0\nLF:2\nLH:1\nend_of_record\n" >"${3}";;
+		*) echo "unexpected coverage args: $*" >&2; exit 1;;
+	'
+
+	run_step merge COVERAGE_FILES=.coverage OUTPUT_FORMAT=lcov
+	assert_success
+	assert_github_output "merged-coverage-file" "merged-coverage.lcov"
+	assert_github_output "merged-format" "lcov"
+	assert_github_output "coverage-percent" "50.00"
+	refute_output --partial "unsupported coverage conversion"
+}
+
+@test "collect-coverage merge: explicit lcov label over a coverage.py JSON report fails by name" {
+	install_fixture "coverage/coverage.json" "$WORK/coverage.json"
+
+	run_step merge COVERAGE_FILES=coverage.json INPUT_FORMAT=lcov
+	assert_failure 1
+	assert_output --partial "invalid lcov"
+	assert_file_not_exists "$WORK/merged-coverage.lcov"
+}
+
 @test "collect-coverage merge: lone coverage.py data file without the coverage CLI fails by name" {
 	if command -v coverage >/dev/null 2>&1; then
 		skip "a real coverage CLI is on PATH"
@@ -143,6 +168,32 @@ refute_github_output_key() {
 	assert_github_output "merged-coverage-file" "merged-coverage.xml"
 	assert_github_output "merged-format" "cobertura"
 	assert_github_output "coverage-percent" "85.00"
+}
+
+@test "collect-coverage merge: explicit lcov label over a Cobertura XML fails by name, never 0%" {
+	install_fixture "coverage/sample_cobertura.xml" "$WORK/coverage.xml"
+
+	run_step merge COVERAGE_FILES=coverage.xml INPUT_FORMAT=lcov
+	assert_failure 1
+	assert_output --partial "invalid lcov"
+	assert_file_not_exists "$WORK/merged-coverage.lcov"
+}
+
+@test "collect-coverage merge: explicit istanbul label over a Cobertura XML fails by name" {
+	install_fixture "coverage/sample_cobertura.xml" "$WORK/coverage.xml"
+
+	run_step merge COVERAGE_FILES=coverage.xml INPUT_FORMAT=istanbul
+	assert_failure 1
+	assert_output --partial "invalid json"
+	assert_file_not_exists "$WORK/merged-coverage.json"
+}
+
+@test "collect-coverage merge: cobertura label over a Clover XML is rejected, not passed through" {
+	install_fixture "detect/clover-php.xml" "$WORK/clover.xml"
+
+	run_step merge COVERAGE_FILES=clover.xml INPUT_FORMAT=cobertura
+	assert_failure 1
+	assert_output --partial "Cannot use a clover file under the cobertura label"
 }
 
 @test "collect-coverage merge: reports merged-format for LCOV and JSON inputs" {
@@ -222,6 +273,18 @@ refute_github_output_key() {
 	assert_output --partial "Conversion failed"
 	refute_output --partial "unsupported coverage conversion"
 	assert_file_not_exists "$WORK/merged-coverage.xml"
+}
+
+@test "collect-coverage merge: failed conversion leaves a pre-existing OUTPUT_FILE untouched" {
+	install_fixture "coverage/lcov-line-only.info" "$WORK/lcov.info"
+	echo "caller-owned" >"$WORK/existing.xml"
+	mock_command "lcov_cobertura" "boom" 1
+
+	run_step merge COVERAGE_FILES=lcov.info OUTPUT_FORMAT=cobertura OUTPUT_FILE=existing.xml
+	assert_failure 1
+	assert_output --partial "Conversion failed"
+	run cat "$WORK/existing.xml"
+	assert_output "caller-owned"
 }
 
 @test "collect-coverage merge: unknown OUTPUT_FORMAT is rejected up front" {

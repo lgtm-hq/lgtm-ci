@@ -201,12 +201,20 @@ merge)
 
 	# Detection trusts the extension; check the content matches before any of
 	# it is merged, so a mislabeled file fails by name instead of yielding an
-	# empty report (#1078). Each file is checked against what it detects as,
-	# not the INPUT_FORMAT label: an explicit coverage-py label legitimately
-	# covers coverage.xml and .coverage data files, which the merge below
-	# re-detects anyway.
+	# empty report (#1078). An lcov/istanbul/json label is a claim about the
+	# content and is checked as such; the coverage-py/cobertura label covers
+	# coverage.xml, JSON reports and .coverage data files alike (the merge
+	# below re-detects which), so those are checked against what they
+	# detect as.
 	for file in "${existing_files[@]}"; do
-		file_format=$(detect_coverage_format "$file" 2>/dev/null) || file_format="$INPUT_FORMAT"
+		case "$INPUT_FORMAT" in
+		coverage-py | cobertura)
+			file_format=$(detect_coverage_format "$file" 2>/dev/null) || file_format="$INPUT_FORMAT"
+			;;
+		*)
+			file_format="$INPUT_FORMAT"
+			;;
+		esac
 		if ! validate_coverage_file "$file" "$file_format"; then
 			log_error "Coverage file is not valid $file_format: $file"
 			exit 1
@@ -246,9 +254,8 @@ merge)
 		# Check if files are .coverage binary data files (for coverage combine)
 		all_binary=true
 		for file in "${existing_files[@]}"; do
-			basename_file=$(basename "$file")
-			# .coverage files are binary data, not JSON/XML
-			if [[ ! "$basename_file" =~ ^\.coverage ]] && [[ ! "$file" =~ \.coverage$ ]]; then
+			# Data files are SQLite; a ".coverage.json" report is not one
+			if ! is_coverage_py_data_file "$file"; then
 				all_binary=false
 				break
 			fi
@@ -262,7 +269,17 @@ merge)
 				log_error "Install coverage, or produce a JSON/XML report in the test job instead"
 				exit 1
 			fi
-			case "$INPUT_FORMAT" in
+			# Render straight to the requested output when the CLI can, so a
+			# coverage-py -> lcov request does not detour through JSON
+			render_format="${OUTPUT_FORMAT:-}"
+			if [[ -z "$render_format" ]]; then
+				[[ "$INPUT_FORMAT" == "cobertura" ]] && render_format="cobertura" || render_format="json"
+			fi
+			case "$render_format" in
+			lcov)
+				COVERAGE_FILE="${existing_files[0]}" coverage lcov -o "$temp_merged"
+				MERGED_FORMAT="lcov"
+				;;
 			cobertura)
 				COVERAGE_FILE="${existing_files[0]}" coverage xml -o "$temp_merged"
 				MERGED_FORMAT="cobertura"
@@ -274,8 +291,16 @@ merge)
 			esac
 		elif [[ ${#existing_files[@]} -eq 1 ]]; then
 			cp "${existing_files[0]}" "$temp_merged"
-			# Detect actual format of the copied report
+			# Detect actual format of the copied report; only report formats
+			# the rest of the pipeline reads may leave this branch
 			MERGED_FORMAT=$(detect_coverage_format "$temp_merged" 2>/dev/null) || MERGED_FORMAT="$INPUT_FORMAT"
+			case "$MERGED_FORMAT" in
+			json | istanbul | coverage-py | cobertura) ;;
+			*)
+				log_error "Cannot use a $MERGED_FORMAT file under the $INPUT_FORMAT label: ${existing_files[0]}"
+				exit 1
+				;;
+			esac
 		elif [[ "$all_binary" == "true" ]] && command -v coverage &>/dev/null; then
 			# Only use coverage combine for actual .coverage binary files
 			# Use --keep to preserve original files for debugging/re-runs
@@ -326,13 +351,17 @@ merge)
 		require_conversion_supported "$MERGED_FORMAT" "$OUTPUT_FORMAT"
 
 		log_info "Converting from $MERGED_FORMAT to $OUTPUT_FORMAT..."
-		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$MERGED_FORMAT" "$OUTPUT_FORMAT"; then
+		# Convert into a scratch file and move it into place only on success,
+		# so a failed conversion never leaves a partial or stale OUTPUT_FILE
+		temp_converted="${temp_merged}.converted"
+		if convert_coverage "$temp_merged" "$temp_converted" "$MERGED_FORMAT" "$OUTPUT_FORMAT"; then
+			mv "$temp_converted" "$OUTPUT_FILE"
 			log_info "Conversion successful"
 		else
+			rm -f "$temp_converted"
 			log_error "Conversion failed: cannot convert from $MERGED_FORMAT to $OUTPUT_FORMAT"
 			log_error "Merged file was: $temp_merged"
 			log_error "This would produce an incorrectly labeled output file"
-			rm -f "$OUTPUT_FILE"
 			exit 1
 		fi
 	else

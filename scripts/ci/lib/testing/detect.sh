@@ -225,6 +225,12 @@ validate_coverage_file() {
 			echo "invalid lcov: no SF:/end_of_record records - $file" >&2
 			return 1
 		fi
+		# Every producer writes line records (DA) and totals (LF/LH); a file
+		# with neither is truncated, not a 0% report
+		if ! grep -qE '^(DA|LF):' "$file"; then
+			echo "invalid lcov: no DA:/LF: line records - $file" >&2
+			return 1
+		fi
 		;;
 	json | istanbul | coverage-py)
 		# A coverage.py data file is SQLite, not a report; nothing to parse
@@ -245,8 +251,9 @@ validate_coverage_file() {
 		fi
 		;;
 	cobertura | clover | xml)
-		# Cheap shape check only: an XML document with a <coverage> root
-		if ! grep -qE '^[[:space:]]*<coverage[[:space:]>]' "$file" 2>/dev/null; then
+		# Cheap shape check only: a <coverage> element near the top (minified
+		# output keeps it on the XML declaration's line)
+		if ! head -20 "$file" 2>/dev/null | grep -qE '<coverage[[:space:]>]'; then
 			echo "invalid xml: no <coverage> root element - $file" >&2
 			return 1
 		fi

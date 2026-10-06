@@ -253,7 +253,11 @@ COVERAGE_EMOJI=$(score_emoji "$LINES" "$THRESHOLD_LINES")
 if [[ "$PASSED" == "true" ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
-	COVERAGE_STATUS="Target met (lines >= ${THRESHOLD_LINES}%, branches >= ${THRESHOLD_BRANCHES}%, functions >= ${THRESHOLD_FUNCTIONS}%)"
+	# Name only the thresholds that were actually checked
+	CHECKED="lines >= ${THRESHOLD_LINES}%"
+	is_measured "$BRANCHES_RAW" && CHECKED+=", branches >= ${THRESHOLD_BRANCHES}%"
+	is_measured "$FUNCTIONS_RAW" && CHECKED+=", functions >= ${THRESHOLD_FUNCTIONS}%"
+	COVERAGE_STATUS="Target met (${CHECKED})"
 else
 	STATUS_EMOJI="⚠️"
 	STATUS_TEXT="BELOW TARGET"

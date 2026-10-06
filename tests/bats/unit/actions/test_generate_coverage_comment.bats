@@ -160,6 +160,10 @@ EOF
 	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Statements** | 50% | - |"
 	run grep -c "n/a%" "$GITHUB_OUTPUT"
 	assert_output "0"
+	# The passing status names only the threshold that was checked
+	assert_file_contains_literal "$GITHUB_OUTPUT" "Target met (lines >= 40%)"
+	run grep -c "branches >= 70%" "$GITHUB_OUTPUT"
+	assert_output "0"
 }
 
 @test "generate-coverage-comment: line-only lcov still fails on the lines threshold" {

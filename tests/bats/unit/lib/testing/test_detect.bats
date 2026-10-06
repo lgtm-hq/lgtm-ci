@@ -490,6 +490,15 @@ teardown() {
 	assert_output --partial "no SF:/end_of_record records"
 }
 
+@test "validate_coverage_file: rejects truncated LCOV with no DA/LF line records" {
+	local file="${BATS_TEST_TMPDIR}/truncated.info"
+	printf 'TN:\nSF:a.js\nend_of_record\n' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" lcov"
+	assert_failure
+	assert_output --partial "no DA:/LF: line records"
+}
+
 @test "validate_coverage_file: accepts the coverage.json fixture as coverage-py" {
 	run bash -c 'source "$LIB_DIR/testing/detect.sh" && validate_coverage_file "$FIXTURES_DIR/coverage/coverage.json" coverage-py'
 	assert_success
@@ -571,6 +580,14 @@ teardown() {
 		run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"\$FIXTURES_DIR/$fixture\" cobertura"
 		assert_success
 	done
+}
+
+@test "validate_coverage_file: accepts minified XML with <coverage> on the declaration line" {
+	local file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '<?xml version="1.0"?><coverage line-rate="0.5" branch-rate="0.5"><packages/></coverage>\n' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" cobertura"
+	assert_success
 }
 
 @test "validate_coverage_file: rejects XML without a <coverage> root" {
