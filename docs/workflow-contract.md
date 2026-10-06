@@ -2153,6 +2153,8 @@ jobs:
   rust-coverage:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:

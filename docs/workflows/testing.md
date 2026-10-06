@@ -101,6 +101,8 @@ jobs:
   shell:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@main
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:

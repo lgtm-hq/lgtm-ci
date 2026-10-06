@@ -489,6 +489,8 @@ jobs:
   node:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node.yml@<sha>
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:
@@ -499,6 +501,8 @@ jobs:
   python:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:
@@ -508,6 +512,8 @@ jobs:
   shell:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@<sha>
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:
@@ -549,6 +555,56 @@ coverage was collected, otherwise test pass/fail totals). Artifact-based comment
 use `reusable-publish-artifact-report.yml`.
 Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 `reusable-publish-quality-summary.yml` (called directly by the caller workflow).
+
+### Matrix aggregation waits for the artifact listing (#803)
+
+`reusable-test-python.yml`, `reusable-test-node.yml` and
+`reusable-rust-test.yml` collect per-leg results into one aggregate job.
+GitHub's artifact listing is eventually consistent: a leg whose upload
+reported success can be absent from the run's artifact list for tens of
+seconds, and a listed artifact can still 404 on download for a few more. A
+one-shot download then fails the aggregate with
+`Expected 2 matrix summaries, found 1` on a run whose legs all passed.
+
+The aggregate job therefore runs `scripts/ci/actions/wait-for-artifacts.sh`
+before aggregating. It polls
+`GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts` until the count of
+artifacts matching the matrix pattern reaches the matrix size (from the
+`prepare` job's `matrix-count` output), backing off 2/4/8/16/30 s within a 90 s
+budget, then downloads each listed artifact over the REST zip endpoint. Every
+API call runs under coreutils `timeout` (30 s) so a stalled request cannot
+burn the job budget. The retry is narrow on purpose:
+
+<!-- markdownlint-disable MD013 -- behaviour column exceeds default line length -->
+
+| Condition | Behaviour |
+| --- | --- |
+| Listing shows fewer than expected | retried until the budget expires; the failure names the missing legs |
+| HTTP 404 downloading an id the listing returned | retried within the same budget |
+| Listing shows **more** than expected, or a matching name outside the matrix | fails at once — a sibling call in the same run uploaded under the same names (see [Artifact names](#artifact-names), #752) |
+| Any other listing/download error, timeout, corrupt archive | fails at once |
+
+<!-- markdownlint-enable MD013 -->
+
+Aggregation then runs once against the downloaded set with its existing
+strictness (#1058). The happy path adds one API call and no sleep. A rerun
+of failed jobs lists the earlier attempt's artifacts too; the wait keeps the
+newest artifact per name, as `actions/download-artifact` does, so a rerun is
+not mistaken for contamination.
+
+The sharded path of `reusable-test-shell.yml` is affected by the same race
+and runs the script in a lighter mode: listing only (no `DOWNLOAD_DIR`),
+expecting `coverage-shards` TAP artifacts, as a `continue-on-error` pre-check
+ahead of its existing best-effort downloads. The strict shard count in
+`run-bats-tests.sh` stays the verdict there; the wait's log names the shard a
+permanent under-count is missing.
+
+This is why all four workflows request `actions: read` on the aggregate job:
+`GITHUB_TOKEN` cannot read the artifact listing without it, and a reusable
+workflow's request is validated statically, so every caller must grant
+`actions: read` alongside `contents: read` and `pull-requests: write`. The
+job previously used only `actions/download-artifact`, which authenticates with
+the per-run runtime token, so the scope was deliberately absent (#730).
 
 ### Playwright E2E (`reusable-test-e2e-playwright.yml`)
 
@@ -644,6 +700,8 @@ jobs:
   rust-compat:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       # Declared by the `publish-test-summary` job; still required with
       # publish-test-summary: false, since the request is validated statically.
@@ -659,6 +717,8 @@ jobs:
   rust-test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:
@@ -671,6 +731,8 @@ jobs:
   rust-coverage:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:

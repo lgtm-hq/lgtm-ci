@@ -117,12 +117,14 @@ When `egress-policy: block`, include `api.github.com:443` if PR summaries and re
 jobs:
   rust-test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
+    permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
+      contents: read
+      pull-requests: write
     with:
       tooling-ref: "<sha>"
       coverage: false
-    permissions:
-      contents: read
-      pull-requests: write
 ```
 
 ## Rust workspace with a frontend package
