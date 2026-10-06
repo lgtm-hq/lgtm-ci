@@ -225,11 +225,16 @@ EOF
 
 # =============================================================================
 # extract_coverage_details tests - lcov fixtures (#1078)
+#
+# These run under `set -eo pipefail` (not -u): in a `bash -c` string there is
+# no BASH_SOURCE, which bash 5.2 reports as unbound while sourcing. The full
+# `set -euo pipefail` path is covered by test_collect_coverage.bats, which
+# runs the real script.
 # =============================================================================
 
 @test "extract_coverage_details: line-only LCOV reports branches and functions as n/a" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/testing/coverage/extract.sh"
 		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-line-only.info"
 		echo "lines=$COVERAGE_LINES"
@@ -246,7 +251,7 @@ EOF
 
 @test "extract_coverage_details: full LCOV fixture sums every record type" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/testing/coverage/extract.sh"
 		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-full.info"
 		echo "lines=$COVERAGE_LINES"
@@ -261,7 +266,7 @@ EOF
 
 @test "extract_coverage_details: empty LCOV fixture is 0 lines and n/a elsewhere" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/testing/coverage/extract.sh"
 		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-empty.info"
 		echo "lines=$COVERAGE_LINES"
@@ -276,7 +281,7 @@ EOF
 
 @test "extract_coverage_details: invalid LCOV fixture does not abort a set -e caller" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/testing/coverage/extract.sh"
 		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-invalid.info"
 		echo "lines=$COVERAGE_LINES"
@@ -287,9 +292,9 @@ EOF
 	assert_line "branches=n/a"
 }
 
-@test "extract_coverage_percent: line-only LCOV fixture under set -euo pipefail" {
+@test "extract_coverage_percent: line-only LCOV fixture under set -eo pipefail" {
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$LIB_DIR/testing/coverage/extract.sh"
 		extract_coverage_percent "$FIXTURES_DIR/coverage/lcov-line-only.info"
 	'
