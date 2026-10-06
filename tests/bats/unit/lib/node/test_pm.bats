@@ -27,20 +27,21 @@ teardown() {
 	teardown_temp_dir
 }
 
-# Run one helper under a given manager; args are passed verbatim. The shell
-# options match the runner scripts (`set -euo pipefail`) so a listing
-# command's exit status leaking through a pipe shows up here, not in CI.
+# Run one helper under a given manager; args are passed verbatim. `-e` and
+# `pipefail` match the runner scripts, so a listing command's exit status
+# leaking through a pipe shows up here, not in CI.
 #
-# The options are set inside the child rather than on the bash command line:
-# kcov instruments nested bash via a BASH_ENV preamble that reads BASH_SOURCE,
-# which is unbound under `set -u` in a `bash -c` child, so `bash -u` would
-# abort before the helper runs. Setting them after the preamble keeps the
-# instrumentation (and this file's coverage of pm.sh) intact.
+# No `-u` here: kcov instruments nested bash through a BASH_ENV preamble that
+# enables `set -x` with `PS4='kcov@${BASH_SOURCE}…'`, and BASH_SOURCE is unset
+# in a `bash -c` child, so every traced line would abort with "unbound
+# variable" under `-u`. The runner scripts (test_run_*.bats) source pm.sh as
+# files under the full `set -euo pipefail`, which covers the `-u` contract;
+# keeping BASH_ENV here keeps this file's coverage of pm.sh.
 _pm() {
 	local manager="$1"
 	shift
 	PACKAGE_MANAGER="$manager" \
-		bash -c 'set -euo pipefail; source "$1"; shift; "$@"' _ "$PM_LIB" "$@"
+		bash -c 'set -eo pipefail; source "$1"; shift; "$@"' _ "$PM_LIB" "$@"
 }
 
 _calls() {
