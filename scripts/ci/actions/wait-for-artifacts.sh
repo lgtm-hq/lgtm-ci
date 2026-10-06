@@ -42,7 +42,9 @@
 #   MATRIX_KEY          (optional) Include key whose value fills PATTERN's `*`.
 #                       Both set: the check is by name — a matching artifact
 #                       outside the matrix fails like an over-count, and a
-#                       permanent under-count names the missing legs.
+#                       permanent under-count names the missing legs. PATTERN
+#                       must then contain exactly one `*`; any other shape is
+#                       rejected rather than silently checked by count only.
 #   WAIT_BUDGET_SECONDS (optional) Total wait budget (default: 90).
 #   BACKOFF_SCHEDULE    (optional) Space-separated sleep seconds between polls;
 #                       the last value repeats (default: "2 4 8 16 30").
@@ -142,7 +144,10 @@ gh_bounded() {
 # rather than silently degrading or treating the diagnostic as a name.
 expected_names() {
 	[[ -n "$MATRIX_JSON" && -n "$MATRIX_KEY" ]] || return 0
-	[[ "$PATTERN" == *"*"* && "${PATTERN//[^*]/}" == "*" ]] || return 0
+	if [[ "${PATTERN//[^*]/}" != "*" ]]; then
+		echo "PATTERN '${PATTERN}' must contain exactly one '*' for MATRIX_KEY to fill" >&2
+		return 1
+	fi
 	local prefix="${PATTERN%%\**}" suffix="${PATTERN#*\*}"
 	if ! jq -e 'type == "object" and ((.include // []) | type == "array" and all(type == "object"))' \
 		<<<"$MATRIX_JSON" >/dev/null 2>&1; then
@@ -400,6 +405,17 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 				echo "::error::Artifact ${name} (id ${id}) digest mismatch: listing says ${digest}, download is ${actual}; not retrying"
 				exit 1
 			fi
+		fi
+		# Entry paths that escape the destination (`../` components or an
+		# absolute path) are an integrity failure too: unzip 6.0 strips a
+		# leading `/` but not `..`.
+		if ! entries="$(unzip -Z1 "$zip" 2>/dev/null)"; then
+			echo "::error::Artifact ${name} (id ${id}) downloaded but is not a valid zip; not retrying"
+			exit 1
+		fi
+		if grep -Eq '(^|/)\.\.(/|$)|^/' <<<"$entries"; then
+			echo "::error::Artifact ${name} (id ${id}) contains entries that escape the destination directory; not retrying"
+			exit 1
 		fi
 		mkdir -p "$dest"
 		if ! unzip -oq "$zip" -d "$dest"; then

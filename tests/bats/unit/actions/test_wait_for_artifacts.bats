@@ -664,6 +664,7 @@ EOF
 }
 
 @test "wait-for-artifacts: a corrupt archive is an integrity failure, not retried" {
+	_require_zip_tools
 	_mock_gh
 	_list_sequence "$(_listing 1:python-results-3.11)"
 	_download_sequence 1 "this is not a zip"
@@ -902,4 +903,37 @@ _sha256_of() {
 	run_wait 1 'python-results-*'
 	assert_failure
 	[[ -z "$(ls -A "$TMPDIR")" ]] || fail "scratch left behind: $(ls -A "$TMPDIR")"
+}
+
+@test "wait-for-artifacts: an archive whose entries escape the destination is refused" {
+	_require_zip_tools
+	_mock_gh
+	# `zip` normalises away `..`, so craft the archive with Python's zipfile.
+	local evil="${BATS_TEST_TMPDIR}/evil.zip"
+	python3 -I -c 'import sys, zipfile
+with zipfile.ZipFile(sys.argv[1], "w") as z:
+    z.writestr("../escape.json", "{}")
+    z.writestr("summary.json", "{}")' "$evil"
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 "zip:${evil}"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact python-results-3.11 (id 1) contains entries that escape the destination directory; not retrying"
+	[[ ! -e "${BATS_TEST_TMPDIR}/escape.json" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/escape.json" ]]
+	[[ ! -s "$SLEEP_CALLS" ]]
+}
+
+@test "wait-for-artifacts: a multi-wildcard PATTERN with the matrix set is rejected, not checked by count" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11 2:python-results-3.14)"
+	export MATRIX_JSON='{"include":[{"python-version":"3.11"},{"python-version":"3.14"}]}'
+	export MATRIX_KEY="python-version"
+
+	run_wait 2 '*-results-*'
+	assert_failure
+	assert_output --partial "PATTERN '*-results-*' must contain exactly one '*' for MATRIX_KEY to fill"
+	[[ ! -s "$GH_CALLS" ]]
 }

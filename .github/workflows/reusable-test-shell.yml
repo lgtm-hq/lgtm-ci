@@ -764,6 +764,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_COUNT: ${{ inputs.coverage-shards }}
           COMMENT_MARKER: ${{ inputs.comment-marker }}
+          # A shard that never uploaded will not appear; do not spend the
+          # full budget on it when the shard job already failed.
+          WAIT_BUDGET_SECONDS: ${{ needs.test-sharded.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
           "$EXPECTED_COUNT" "shell-test-results-${COMMENT_MARKER}-shard-*"
@@ -787,6 +790,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_COUNT: ${{ inputs.coverage-shards }}
           COMMENT_MARKER: ${{ inputs.comment-marker }}
+          # A shard that never uploaded will not appear; do not spend the
+          # full budget on it when the shard job already failed.
+          WAIT_BUDGET_SECONDS: ${{ needs.test-sharded.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
           "$EXPECTED_COUNT" "shell-coverage-${COMMENT_MARKER}-shard-*"
