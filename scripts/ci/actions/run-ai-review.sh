@@ -18,9 +18,11 @@
 #              reddens the check (lintro exit codes stay 0/1/2).
 #              The call is bounded by GNU timeout to the cap's remainder; a
 #              review the bound ended (124, or 137 after --kill-after) is
-#              `timed-out` and neutral unless BLOCKING (#1098). A diff above
-#              MAX_DIFF_LINES is `skipped-size` and never runs the model.
-#              Both warn and post (update in place) a PR comment.
+#              `timed-out` and neutral unless BLOCKING (#1098); so is a run
+#              with under 60s of cap left, which never starts lintro and
+#              reports exit-code 0. A diff above MAX_DIFF_LINES is
+#              `skipped-size` and never runs the model. All warn and post
+#              (best-effort update in place) a PR comment.
 #
 # Trusted-install invariant: this script only installs a *pinned lintro from
 # PyPI* and runs `lintro review`, which reads the PR diff via the GitHub API

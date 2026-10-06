@@ -2081,9 +2081,10 @@ the raw values and cannot fold case.
   and the artifact upload (~110 s worst case). When the bound ends the
   review (GNU `timeout -v`'s "sending signal" diagnostic is the evidence;
   a 124/137 that lintro produced on its own stays `broken`) the step logs
-  a `::warning`, adds a step-summary line, posts or updates one "did not
-  complete" PR comment as the bot (only its own comment is updated; the
-  comment stays once a later round completes), and exits `0`
+  a `::warning`, adds a step-summary line, posts a "did not complete" PR
+  comment as the bot (best effort: it updates its own earlier comment when
+  the bounded lookup finds one, and the comment stays once a later round
+  completes), and exits `0`
   (`outcome=timed-out`; fails only with `blocking: true`). If under 60 s
   remain the same outcome is recorded without running the model. The job
   cap is never what ends the review — a job cancelled at its cap records a
