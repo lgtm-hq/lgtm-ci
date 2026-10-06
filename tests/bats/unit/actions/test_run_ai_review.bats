@@ -228,6 +228,9 @@ write_hanging_lintro() {
 		if [[ "${1:-}" == "ignore-term" ]]; then
 			echo "trap '' TERM"
 		fi
+		# A partial stderr line (no newline) at the moment the bound fires —
+		# the wrapper's diagnostic must still be recognised (#1099 review).
+		echo 'printf "partial line" >&2'
 		echo 'sleep 30'
 		echo 'exit 0'
 	} >"$bin"
@@ -257,6 +260,7 @@ if [[ " \$* " == *" --method "* ]]; then
 	exit 0
 fi
 if [[ " \$* " == *"/issues/"*"/comments?per_page="* ]]; then
+	[[ " \$* " == *" --paginate "* ]] || { echo "comment lookup must paginate" >&2; exit 1; }
 	jq_filter=""
 	while [[ \$# -gt 0 ]]; do
 		if [[ "\$1" == "--jq" ]]; then jq_filter="\$2"; fi
@@ -386,9 +390,18 @@ USER_MARKER_COMMENT='[{"id":7,"user":{"type":"User","login":"someone"},"body":"<
 	# "sending signal" diagnostic is the only evidence that counts.
 	: >"$GITHUB_OUTPUT"
 	bin="${BATS_TEST_TMPDIR}/lintro"
-	printf '#!/usr/bin/env bash\nsleep 0.8\nexit 124\n' >"$bin"
+	printf '#!/usr/bin/env bash\nsleep 2.3\nexit 124\n' >"$bin"
 	chmod +x "$bin"
-	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=1
+	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=3
+	assert_failure
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "outcome=broken"
+	# lintro printing the wrapper's diagnostic itself is not evidence: the
+	# wrapper's stderr is a separate stream.
+	: >"$GITHUB_OUTPUT"
+	printf '#!/usr/bin/env bash\necho "timeout: sending signal TERM to command lintro" >&2\nexit 124\n' >"$bin"
+	chmod +x "$bin"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=60
 	assert_failure
 	run cat "$GITHUB_OUTPUT"
 	assert_output --partial "outcome=broken"
@@ -434,6 +447,27 @@ USER_MARKER_COMMENT='[{"id":7,"user":{"type":"User","login":"someone"},"body":"<
 	assert_output --partial "outcome=timed-out"
 	# lintro did not run, so there is no lintro exit code to report.
 	assert_output --partial "exit-code=0"
+}
+
+@test "run: wrapper pins LC_ALL=C for itself but lintro keeps the caller's locale" {
+	command -v timeout >/dev/null || skip "GNU timeout not installed"
+	local bin="${BATS_TEST_TMPDIR}/lintro"
+	{
+		echo '#!/usr/bin/env bash'
+		echo "printf '%s' \"\${LC_ALL:-unset}\" >'${BATS_TEST_TMPDIR}/lc'"
+		printf 'cat <<'\''LINTRO_OUT'\''\n%s\nLINTRO_OUT\n' "$(success_json)"
+		echo 'exit 0'
+	} >"$bin"
+	chmod +x "$bin"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false LC_ALL=fr_FR.UTF-8
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/lc"
+	assert_output "fr_FR.UTF-8"
+	# Empty LC_ALL in the caller's env: the shim unsets it for lintro.
+	run run_review LINTRO_BIN="$bin" BLOCKING=false LC_ALL=
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/lc"
+	assert_output "unset"
 }
 
 @test "run: without GNU timeout a 124 is broken, not timed-out" {

@@ -85,13 +85,15 @@ readonly REVIEW_STATUS_KILLED=137
 # Seconds reserved out of the job cap. The anchor is preflight, which runs
 # after harden-runner and the checkouts (~15s on the evidence run, #1097),
 # so the margin must absorb those plus everything after the bound fires:
-# kill-after grace (30s), up to three 20s gh calls, artifact upload, and
-# post hooks (~100s worst case). 240s leaves ~2 minutes for slow checkouts.
+# kill-after grace (30s), up to four 20s gh calls, artifact upload, and
+# post hooks (~110s worst case). 240s leaves ~2 minutes for slow checkouts.
 readonly REVIEW_CAP_MARGIN_SECONDS=240
 readonly REVIEW_NOTICE_MARKER="<!-- lintro-ai-review-incomplete -->"
-# GNU timeout -v writes this to stderr when its deadline fires — the only
-# evidence that distinguishes the wrapper's 124/137 from lintro's own.
-readonly REVIEW_TIMEOUT_EVIDENCE='^timeout: sending signal '
+# GNU timeout -v writes this to its own stderr when its deadline fires — the
+# only evidence that distinguishes the wrapper's 124/137 from lintro's own.
+# The wrapper's stderr is kept apart from lintro's (see the run step) so a
+# partial lintro line cannot hide it and lintro cannot spoof it.
+readonly REVIEW_TIMEOUT_EVIDENCE='timeout: sending signal [A-Z0-9]+ to command '
 readonly REVIEW_DEFAULT_HINT="Split the PR, or re-run once it is smaller, to get a full review."
 
 emit_output() {
@@ -141,15 +143,15 @@ notice_review_not_completed() {
 	local comment_body="${REVIEW_NOTICE_MARKER}
 :warning: ${body}"
 	# Update in place only a comment the bot itself wrote: anyone can post
-	# the marker, and a PATCH on their comment would 403. Newest-first single
-	# page: the notice is recent by construction, and --paginate could not
-	# finish inside the 20s bound on a long thread.
+	# the marker, and a PATCH on their comment would 403. The endpoint is
+	# oldest-first only (it ignores direction=), so page through under the
+	# 20s bound; the filter runs per page and head keeps the first hit.
 	local existing
 	existing="$(
 		GH_TOKEN="$GITHUB_TOKEN" MARKER="$REVIEW_NOTICE_MARKER" \
-			bounded_gh api "${comments}?per_page=100&direction=desc" \
-			--jq 'map(select(.user.type == "Bot" and (.body | startswith(env.MARKER)))) | .[0].id // empty' 2>/dev/null ||
-			true
+			bounded_gh api --paginate "${comments}?per_page=100" \
+			--jq 'map(select(.user.type == "Bot" and (.body | startswith(env.MARKER)))) | .[0].id // empty' 2>/dev/null |
+			head -n1 || true
 	)"
 	if [[ "$existing" =~ ^[0-9]+$ ]]; then
 		GH_TOKEN="$GITHUB_TOKEN" bounded_gh api --method PATCH \
@@ -318,7 +320,8 @@ if [[ "$STEP" == "run" ]]; then
 
 	out_file="$(mktemp)"
 	err_file="$(mktemp)"
-	trap 'rm -f "$out_file" "$err_file"' EXIT
+	wrap_file="$(mktemp)"
+	trap 'rm -f "$out_file" "$err_file" "$wrap_file"' EXIT
 
 	# Bounded below the job cap so the step — not the runner — ends a review
 	# that will not finish, and this script maps the result (#1098). A job-
@@ -350,26 +353,34 @@ if [[ "$STEP" == "run" ]]; then
 	runner=()
 	if command -v timeout >/dev/null 2>&1; then
 		# -v: the "sending signal" diagnostic is the evidence the deadline
-		# fired (lintro's own 124/137 would otherwise look identical).
-		runner=(timeout -v --kill-after="$kill_after" "$review_timeout")
+		# fired (lintro's own 124/137 would otherwise look identical). LC_ALL=C
+		# pins its English text; the shim below restores lintro's own locale.
+		runner=(env LC_ALL=C timeout -v --kill-after="$kill_after" "$review_timeout")
 		echo "ai-review: review-timeout=${review_timeout}s (${bound_source})"
 	else
 		echo "::warning::GNU timeout not found; the review is bounded only by the job cap"
 	fi
 
 	set +e
+	# lintro's stderr goes to err_file inside the exec'd child; what reaches
+	# wrap_file is the wrapper's own stderr (the -v diagnostic). exec keeps
+	# lintro as the wrapper's direct child, so the signal lands on it.
 	# ${arr[@]+...}: an empty array is unbound under set -u on bash < 4.4.
-	${runner[@]+"${runner[@]}"} "$lintro_bin" "${args[@]}" >"$out_file" 2>"$err_file"
+	# shellcheck disable=SC2016 # the shim body expands inside the child bash
+	LINTRO_ERR_FILE="$err_file" LINTRO_LC_ALL="${LC_ALL:-}" ${runner[@]+"${runner[@]}"} \
+		bash -c 'if [[ -n "$LINTRO_LC_ALL" ]]; then export LC_ALL="$LINTRO_LC_ALL"; else unset LC_ALL; fi; exec "$@" 2>"$LINTRO_ERR_FILE"' \
+		lintro-wrapper "$lintro_bin" "${args[@]}" \
+		>"$out_file" 2>"$wrap_file"
 	exit_code=$?
 	set -e
 	bound_fired=false
-	if [[ ${#runner[@]} -gt 0 ]] && grep -q "$REVIEW_TIMEOUT_EVIDENCE" "$err_file"; then
+	if [[ ${#runner[@]} -gt 0 ]] && grep -Eq "$REVIEW_TIMEOUT_EVIDENCE" "$wrap_file"; then
 		bound_fired=true
 	fi
 
 	# Combined log so the classifier and humans see the same stream.
 	cat "$out_file"
-	cat "$err_file" >&2
+	cat "$err_file" "$wrap_file" >&2
 
 	outcome="reviewed"
 	verdict=""

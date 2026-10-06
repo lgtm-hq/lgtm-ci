@@ -2078,7 +2078,7 @@ the raw values and cannot fold case.
   minus a 4-minute margin. The margin absorbs the harden-runner and
   checkout steps that run before preflight (~15 s on the evidence run)
   plus everything after the bound fires: kill escalation, the notices,
-  and the artifact upload (~100 s worst case). When the bound ends the
+  and the artifact upload (~110 s worst case). When the bound ends the
   review (GNU `timeout -v`'s "sending signal" diagnostic is the evidence;
   a 124/137 that lintro produced on its own stays `broken`) the step logs
   a `::warning`, adds a step-summary line, posts or updates one "did not
