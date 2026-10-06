@@ -267,3 +267,52 @@ pages: write"
 		"${PROJECT_ROOT}/docs/reusable-workflows.md"
 	assert_success
 }
+
+# The matrix test workflows widened by one scope in #803: the aggregate job now
+# polls the REST artifact listing with GITHUB_TOKEN, which needs `actions: read`.
+# Pinning the union at exactly `read` keeps the #730 over-grant (`actions:
+# write`) from returning under the new justification, and the docs assertion
+# keeps every documented caller snippet in step with the static request.
+@test "matrix test workflows: caller permission union is pinned at actions: read" {
+	local workflow
+	for workflow in reusable-test-python.yml reusable-test-node.yml \
+		reusable-rust-test.yml reusable-test-shell.yml; do
+		run _permission_union "${PROJECT_ROOT}/.github/workflows/${workflow}"
+		assert_success
+		assert_output "actions: read
+contents: read
+pull-requests: write"
+	done
+}
+
+@test "docs: matrix test workflow caller snippets grant exactly the union" {
+	run _assert_docs_match_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml" \
+		"reusable-test-python.yml" \
+		2 \
+		"${PROJECT_ROOT}/docs/reusable-workflows.md" \
+		"${PROJECT_ROOT}/examples/ci-python.yml"
+	assert_success
+	run _assert_docs_match_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml" \
+		"reusable-test-node.yml" \
+		2 \
+		"${PROJECT_ROOT}/docs/reusable-workflows.md" \
+		"${PROJECT_ROOT}/examples/ci-node-vitest.yml"
+	assert_success
+	run _assert_docs_match_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml" \
+		"reusable-rust-test.yml" \
+		5 \
+		"${PROJECT_ROOT}/docs/reusable-workflows.md" \
+		"${PROJECT_ROOT}/docs/rust-testing.md" \
+		"${PROJECT_ROOT}/examples/ci-rust.yml"
+	assert_success
+	run _assert_docs_match_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml" \
+		"reusable-test-shell.yml" \
+		2 \
+		"${PROJECT_ROOT}/docs/reusable-workflows.md" \
+		"${PROJECT_ROOT}/docs/workflows/testing.md"
+	assert_success
+}

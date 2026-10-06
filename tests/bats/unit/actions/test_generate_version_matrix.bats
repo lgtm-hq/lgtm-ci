@@ -22,6 +22,7 @@ teardown() {
 	assert_success
 	assert_output --partial "Python matrix: 3.12"
 	assert_file_contains "$GITHUB_OUTPUT" 'matrix=\{"include":\[\{"python-version":"3.12"\}\]\}'
+	assert_file_contains "$GITHUB_OUTPUT" '^matrix-count=1$'
 }
 
 @test "generate-version-matrix: uses comma-separated python versions" {
@@ -54,6 +55,9 @@ teardown() {
 	assert_success
 	assert_output --partial "Python matrix: 3.12, 3.14"
 	assert_file_contains "$GITHUB_OUTPUT" 'matrix=\{"include":\[\{"python-version":"3.12"\},\{"python-version":"3.14"\}\]\}'
+	# Deduplicated count: the aggregate job waits for exactly this many
+	# artifacts (#803), so it must match the include list, not the raw input.
+	assert_file_contains "$GITHUB_OUTPUT" '^matrix-count=2$'
 }
 
 @test "generate-version-matrix: emits first-version output for first matrix leg" {

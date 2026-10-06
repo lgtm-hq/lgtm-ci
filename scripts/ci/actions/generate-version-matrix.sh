@@ -11,6 +11,11 @@
 #                        defaults to MATRIX_KEY.
 #   FIRST_VERSION_OUTPUT (optional) When set, also writes
 #                        "<FIRST_VERSION_OUTPUT>=<first version>" to GITHUB_OUTPUT.
+#
+# Outputs (GITHUB_OUTPUT):
+#   matrix        {"include":[{<MATRIX_KEY>: version}, ...]}
+#   matrix-count  Number of include entries — the artifact count the
+#                 aggregate job waits for (#803).
 
 set -euo pipefail
 
@@ -53,6 +58,7 @@ matrix = {"include": [{matrix_key: version} for version in versions]}
 
 with open(github_output, "a", encoding="utf-8") as output:
     output.write(f"matrix={json.dumps(matrix, separators=(',', ':'))}\n")
+    output.write(f"matrix-count={len(versions)}\n")
     if first_version_output:
         output.write(f"{first_version_output}={versions[0]}\n")
 

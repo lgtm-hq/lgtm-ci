@@ -18,7 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   skips such shard reports, counts them in a new `unparseable-count` output
   and a summary row, and sums durations in integer milliseconds (#804).
 
+- `scripts/ci/actions/wait-for-artifacts.sh`: bounded artifact-availability
+  wait (2/4/8/16/30 s backoff, 90 s budget) that the matrix aggregate jobs
+  run before `aggregate-results.sh`, retrying only listing under-counts and
+  HTTP 404 on a listed artifact id; over-counts, names outside the matrix and
+  unrelated errors still fail at once (#803).
+
 ### Changed
+
+- **Callers of `reusable-test-python.yml`, `reusable-test-node.yml`,
+  `reusable-rust-test.yml` and `reusable-test-shell.yml` must grant
+  `actions: read`** on the calling job alongside `contents: read` and
+  `pull-requests: write`. The aggregate job now reads the run's artifact
+  listing with `GITHUB_TOKEN`, and a reusable workflow's permission request is
+  validated statically, so a caller without the scope fails at startup. See
+  "Matrix aggregation waits for the artifact listing" in
+  `docs/reusable-workflows.md` (#803).
 
 - Node runners (`run-vitest`, `run-playwright`, `run-lighthouse`) dispatch on
   `package-manager` (bun/npm/pnpm) and never install test tooling into the

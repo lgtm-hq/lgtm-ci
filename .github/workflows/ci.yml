@@ -37,6 +37,8 @@ jobs:
   shell-tests:
     uses: ./.github/workflows/reusable-test-shell.yml
     permissions:
+      # actions: read — the sharded aggregate's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:

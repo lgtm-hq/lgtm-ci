@@ -414,7 +414,7 @@ _with_mutated() {
 	for wf in reusable-test-python.yml:python-versions reusable-rust-test.yml:rust-toolchains; do
 		input="${wf#*:}"
 		wf="${wf%%:*}"
-		for step in "Download matrix test summaries" "Aggregate matrix test summaries"; do
+		for step in "Wait for and download matrix test summaries" "Aggregate matrix test summaries"; do
 			run _eval "$(_step_if "$wf" aggregate "$step")" "inputs.${input}=" "job.status=success"
 			assert_output "false"
 			run _eval "$(_step_if "$wf" aggregate "$step")" "inputs.${input}=1.0,2.0" "job.status=success"
