@@ -233,8 +233,9 @@ validate_coverage_file() {
 		fi
 		;;
 	json | istanbul | coverage-py)
-		# A coverage.py data file is SQLite, not a report; nothing to parse
-		is_coverage_py_data_file "$file" && return 0
+		# Only the coverage-py label covers the SQLite data file; a json or
+		# istanbul label is a claim that the content is a JSON report
+		[[ "$format" == "coverage-py" ]] && is_coverage_py_data_file "$file" && return 0
 		# Must parse, and must look like one of the report layouts the
 		# extractors read: coverage.py (.totals), istanbul summary (.total),
 		# istanbul per-file entries (.statementMap/.lines) or generic
@@ -251,9 +252,10 @@ validate_coverage_file() {
 		fi
 		;;
 	cobertura | clover | xml)
-		# Cheap shape check only: a <coverage> element near the top (minified
-		# output keeps it on the XML declaration's line)
-		if ! head -20 "$file" 2>/dev/null | grep -qE '<coverage[[:space:]>]'; then
+		# Cheap shape check only: a <coverage> element within the first 20
+		# lines (minified output keeps it on the XML declaration's line). One
+		# awk process, so no head|grep pipe to SIGPIPE under pipefail.
+		if ! awk 'NR > 20 { exit } /<coverage[[:space:]>]/ { found = 1; exit } END { exit !found }' "$file" 2>/dev/null; then
 			echo "invalid xml: no <coverage> root element - $file" >&2
 			return 1
 		fi

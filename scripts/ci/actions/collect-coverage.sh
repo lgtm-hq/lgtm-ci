@@ -33,6 +33,31 @@ merged_output_name() {
 	esac
 }
 
+# Render coverage.py data (COVERAGE_FILE, or the default .coverage) straight
+# to the requested OUTPUT_FORMAT when the CLI can produce it, so a request
+# for lcov or cobertura does not detour through JSON. Sets MERGED_FORMAT.
+# Usage: render_coverage_py_data <output-path>
+render_coverage_py_data() {
+	local out="$1" render_format="${OUTPUT_FORMAT:-}"
+	if [[ -z "$render_format" ]]; then
+		[[ "$INPUT_FORMAT" == "cobertura" ]] && render_format="cobertura" || render_format="json"
+	fi
+	case "$render_format" in
+	lcov)
+		coverage lcov -o "$out"
+		MERGED_FORMAT="lcov"
+		;;
+	cobertura)
+		coverage xml -o "$out"
+		MERGED_FORMAT="cobertura"
+		;;
+	*)
+		coverage json -o "$out"
+		MERGED_FORMAT="json"
+		;;
+	esac
+}
+
 # Fail by name when no converter exists for src -> dst
 require_conversion_supported() {
 	local src="${1:-}" dst="${2:-}"
@@ -269,33 +294,15 @@ merge)
 				log_error "Install coverage, or produce a JSON/XML report in the test job instead"
 				exit 1
 			fi
-			# Render straight to the requested output when the CLI can, so a
-			# coverage-py -> lcov request does not detour through JSON
-			render_format="${OUTPUT_FORMAT:-}"
-			if [[ -z "$render_format" ]]; then
-				[[ "$INPUT_FORMAT" == "cobertura" ]] && render_format="cobertura" || render_format="json"
-			fi
-			case "$render_format" in
-			lcov)
-				COVERAGE_FILE="${existing_files[0]}" coverage lcov -o "$temp_merged"
-				MERGED_FORMAT="lcov"
-				;;
-			cobertura)
-				COVERAGE_FILE="${existing_files[0]}" coverage xml -o "$temp_merged"
-				MERGED_FORMAT="cobertura"
-				;;
-			*)
-				COVERAGE_FILE="${existing_files[0]}" coverage json -o "$temp_merged"
-				MERGED_FORMAT="json"
-				;;
-			esac
+			COVERAGE_FILE="${existing_files[0]}" render_coverage_py_data "$temp_merged"
 		elif [[ ${#existing_files[@]} -eq 1 ]]; then
 			cp "${existing_files[0]}" "$temp_merged"
-			# Detect actual format of the copied report; only report formats
-			# the rest of the pipeline reads may leave this branch
+			# Detect actual format of the copied report (extensionless, so a
+			# coverage.py JSON report reads as plain json); only report
+			# formats the rest of the pipeline reads may leave this branch
 			MERGED_FORMAT=$(detect_coverage_format "$temp_merged" 2>/dev/null) || MERGED_FORMAT="$INPUT_FORMAT"
 			case "$MERGED_FORMAT" in
-			json | istanbul | coverage-py | cobertura) ;;
+			json | istanbul | cobertura) ;;
 			*)
 				log_error "Cannot use a $MERGED_FORMAT file under the $INPUT_FORMAT label: ${existing_files[0]}"
 				exit 1
@@ -305,20 +312,9 @@ merge)
 			# Only use coverage combine for actual .coverage binary files
 			# Use --keep to preserve original files for debugging/re-runs
 			coverage combine --keep "${existing_files[@]}"
-			case "$INPUT_FORMAT" in
-			coverage-py)
-				coverage json -o "$temp_merged"
-				MERGED_FORMAT="json"
-				;;
-			cobertura)
-				coverage xml -o "$temp_merged"
-				MERGED_FORMAT="cobertura"
-				;;
-			*)
-				coverage json -o "$temp_merged"
-				MERGED_FORMAT="json"
-				;;
-			esac
+			# Combined data lands in the default .coverage; render it the same
+			# way a lone data file is rendered
+			render_coverage_py_data "$temp_merged"
 		else
 			# Files are XML/JSON reports, not binary - can't use coverage combine
 			log_error "Cannot merge ${#existing_files[@]} coverage-py/cobertura files"
@@ -355,6 +351,14 @@ merge)
 		# so a failed conversion never leaves a partial or stale OUTPUT_FILE
 		temp_converted="${temp_merged}.converted"
 		if convert_coverage "$temp_merged" "$temp_converted" "$MERGED_FORMAT" "$OUTPUT_FORMAT"; then
+			# A converter that cannot read this report layout may still exit 0
+			# with a header-only file; hold it to the same content check as
+			# an input before it becomes the report
+			if ! validate_coverage_file "$temp_converted" "$OUTPUT_FORMAT"; then
+				rm -f "$temp_converted"
+				log_error "Conversion produced no usable $OUTPUT_FORMAT report from $MERGED_FORMAT input"
+				exit 1
+			fi
 			mv "$temp_converted" "$OUTPUT_FILE"
 			log_info "Conversion successful"
 		else

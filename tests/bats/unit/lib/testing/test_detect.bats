@@ -590,6 +590,26 @@ teardown() {
 	assert_success
 }
 
+@test "validate_coverage_file: XML check survives a huge first line under pipefail" {
+	local file="${BATS_TEST_TMPDIR}/coverage.xml"
+	{
+		printf '<?xml version="1.0"?><coverage line-rate="0.5">'
+		head -c 300000 /dev/zero | tr '\0' ' '
+		printf '</coverage>\n'
+	} >"$file"
+
+	run bash -c "set -o pipefail; source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" cobertura"
+	assert_success
+}
+
+@test "validate_coverage_file: json label does not accept a SQLite data file" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json"
+	printf 'SQLite format 3\000data' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" json"
+	assert_failure
+}
+
 @test "validate_coverage_file: rejects XML without a <coverage> root" {
 	local file="${BATS_TEST_TMPDIR}/coverage.xml"
 	printf '<?xml version="1.0"?>\n<testsuite tests="1"/>\n' >"$file"

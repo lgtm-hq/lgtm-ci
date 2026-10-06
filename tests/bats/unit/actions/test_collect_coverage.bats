@@ -287,6 +287,26 @@ refute_github_output_key() {
 	assert_output "caller-owned"
 }
 
+@test "collect-coverage merge: a converter that emits a header-only LCOV is rejected, not published" {
+	# An istanbul summary has no statementMap; the manual istanbul->lcov
+	# converter falls back to a bare "TN:" file and exits 0
+	echo '{"total": {"lines": {"total": 10, "covered": 8, "pct": 80}}}' >"$WORK/coverage-summary.json"
+
+	run_step merge COVERAGE_FILES=coverage-summary.json INPUT_FORMAT=istanbul OUTPUT_FORMAT=lcov
+	assert_failure 1
+	assert_output --partial "Conversion produced no usable lcov report"
+	assert_file_not_exists "$WORK/merged-coverage.lcov"
+}
+
+@test "collect-coverage merge: explicit json label over a coverage.py data file fails by name" {
+	printf 'SQLite format 3\000rest-of-data' >"$WORK/coverage.json"
+
+	run_step merge COVERAGE_FILES=coverage.json INPUT_FORMAT=json
+	assert_failure 1
+	assert_output --partial "invalid json"
+	assert_file_not_exists "$WORK/merged-coverage.json"
+}
+
 @test "collect-coverage merge: unknown OUTPUT_FORMAT is rejected up front" {
 	install_fixture "coverage/lcov-line-only.info" "$WORK/lcov.info"
 
