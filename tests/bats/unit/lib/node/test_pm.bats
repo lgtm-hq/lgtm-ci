@@ -6,6 +6,8 @@
 # npx and pnpm, so the assertions are on the exact command the helper emits.
 # Nothing here touches a real package manager.
 
+bats_require_minimum_version 1.5.0
+
 load "../../../../helpers/common"
 load "../../../../helpers/mocks"
 
