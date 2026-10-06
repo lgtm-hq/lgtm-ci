@@ -98,12 +98,17 @@ runners.
 - uses: lgtm-hq/lgtm-ci/.github/actions/run-tests@main
   with:
     runner: "auto" # 'pytest', 'vitest', 'playwright', or 'auto'
+    package-manager: npm # 'bun', 'npm', 'pnpm'; required when vitest/playwright run
     coverage: "true" # optional
     coverage-format: "json" # 'xml', 'json', 'lcov'
 ```
 
 **Outputs:** `exit-code`, `runner`, `tests-passed`, `tests-failed`,
-`tests-skipped`, `coverage-file`.
+`tests-skipped`, `coverage-file`. Node callers must set `package-manager`
+whenever the vitest or playwright runner is selected (or auto-detected) — the
+runner fails with `package-manager is required for execution actions`
+otherwise; pytest ignores it. This action installs no toolchain or
+dependencies itself.
 
 ## run-pytest
 
