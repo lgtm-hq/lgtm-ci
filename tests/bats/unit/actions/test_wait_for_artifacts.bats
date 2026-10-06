@@ -81,11 +81,19 @@ EOF
 }
 
 # JSON for one listing page (already in the `--slurp` array shape) holding the
-# given "id:name" artifacts.
+# given "id:name" or "id:name:sha256hex" artifacts. Without a digest the
+# entry has `"digest": null`, as pre-v4 artifacts do.
 _listing() {
-	local items=() entry
+	local items=() entry id name digest
 	for entry in "$@"; do
-		items+=("{\"id\":${entry%%:*},\"name\":\"${entry#*:}\",\"expired\":false}")
+		id="${entry%%:*}"
+		name="${entry#*:}"
+		digest="null"
+		if [[ "$name" == *:* ]]; then
+			digest="\"sha256:${name#*:}\""
+			name="${name%%:*}"
+		fi
+		items+=("{\"id\":${id},\"name\":\"${name}\",\"expired\":false,\"digest\":${digest}}")
 	done
 	local joined
 	joined="$(
@@ -393,10 +401,11 @@ run_wait() {
 
 	run_wait 2 'python-results-*'
 	assert_failure
-	assert_output --partial "found 1 after 3 polls over 6s (found: python-results-3.11)"
+	assert_output --partial "found 1 after 4 polls over 10s (found: python-results-3.11)"
 	refute_output --partial "missing:"
-	# 2+4 = 6 s fits a 10 s budget; the next 8 s step would not.
-	[[ "$(cat "$SLEEP_CALLS")" == $'2\n4' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
+	# 2+4 = 6 s, then the 8 s step is clamped to the 4 s left so the whole
+	# budget is used; nothing remains for a fifth poll.
+	[[ "$(cat "$SLEEP_CALLS")" == $'2\n4\n4' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
 }
 
 @test "wait-for-artifacts: a zero budget polls exactly once" {
@@ -419,12 +428,8 @@ run_wait() {
 
 	run_wait 2 'python-results-*'
 	assert_failure
-	# 1+3+3+3 = 10 fits exactly; a fifth 3 s step would exceed the budget.
-	run cat "$SLEEP_CALLS"
-	assert_output "1
-3
-3
-3"
+	# 1+3+3+3 = 10 spends the budget exactly; no fifth sleep follows.
+	[[ "$(cat "$SLEEP_CALLS")" == $'1\n3\n3\n3' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
 }
 
 @test "wait-for-artifacts: over-count fails immediately without retrying" {
@@ -609,11 +614,11 @@ EOF
 
 	run_wait 2 'python-results-*'
 	assert_failure
-	assert_output --partial "Artifact python-results-3.14 (id 2) still returned HTTP 404 after 3 download attempts over 8s; giving up"
+	assert_output --partial "Artifact python-results-3.14 (id 2) still returned HTTP 404 after 4 download attempts over 10s; giving up"
 	# 2 s spent on the listing retry leaves 8 s: the download's own backoff
-	# restarts at 2, then 4 fits, then 8 would not.
-	[[ "$(cat "$SLEEP_CALLS")" == $'2\n2\n4' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
-	[[ "$(_count_calls "$GH_CALLS" "artifacts/2/zip")" == "3" ]]
+	# restarts at 2, then 4, then the 8 s step is clamped to the 2 s left.
+	[[ "$(cat "$SLEEP_CALLS")" == $'2\n2\n4\n2' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
+	[[ "$(_count_calls "$GH_CALLS" "artifacts/2/zip")" == "4" ]]
 }
 
 @test "wait-for-artifacts: a non-404 download error fails immediately" {
@@ -716,10 +721,22 @@ EOF
 	[[ ! -s "$GH_CALLS" ]]
 }
 
-@test "wait-for-artifacts: a matrix key absent from MATRIX_JSON falls back to the count check" {
+@test "wait-for-artifacts: a MATRIX_KEY that names no include entry fails instead of silently losing the by-name check" {
 	_mock_gh
 	_list_sequence "$(_listing 1:python-results-3.11 2:python-results-3.14)"
 	export MATRIX_JSON='{"include":[{"node-version":"22"},{"node-version":"24"}]}'
+	export MATRIX_KEY="python-version"
+
+	run_wait 2 'python-results-*'
+	assert_failure
+	assert_output --partial "MATRIX_KEY 'python-version' matches no include entry of MATRIX_JSON"
+	[[ ! -s "$GH_CALLS" ]]
+}
+
+@test "wait-for-artifacts: an empty include list with MATRIX_KEY set falls back to the count check" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11 2:python-results-3.14)"
+	export MATRIX_JSON='{"include":[]}'
 	export MATRIX_KEY="python-version"
 
 	run_wait 2 'python-results-*'
@@ -787,6 +804,102 @@ EOF
 
 	run_wait 2 'python-results-*'
 	assert_failure
-	assert_output --partial "::error::MATRIX_JSON is set but is not a JSON object"
+	assert_output --partial "::error::MATRIX_JSON could not be parsed for expected artifact names"
 	[[ ! -s "$GH_CALLS" ]]
+}
+
+@test "wait-for-artifacts: a matrix include entry that is not an object fails instead of passing a partial name list" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	# jq would emit "python-results-3.11" and then fail on the number; a partial
+	# list of one name must not satisfy EXPECTED_COUNT=1.
+	export MATRIX_JSON='{"include":[{"python-version":"3.11"},0]}'
+	export MATRIX_KEY="python-version"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::MATRIX_JSON could not be parsed for expected artifact names"
+	[[ ! -s "$GH_CALLS" ]]
+}
+
+@test "wait-for-artifacts: a malformed MATRIX_JSON with EXPECTED_COUNT=1 does not pass via the diagnostic line" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	export MATRIX_JSON='not json'
+	export MATRIX_KEY="python-version"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::MATRIX_JSON could not be parsed for expected artifact names"
+}
+
+@test "wait-for-artifacts: the final sleep is clamped to the remaining budget" {
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	export BACKOFF_SCHEDULE="3"
+	export WAIT_BUDGET_SECONDS=5
+
+	run_wait 2 'python-results-*'
+	assert_failure
+	# 3 s, then 2 s of budget left: sleep exactly that, then fail at 5 s —
+	# not at 3 s with budget unused.
+	[[ "$(cat "$SLEEP_CALLS")" == $'3\n2' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
+	assert_output --partial "after 3 polls over 5s"
+}
+
+# =============================================================================
+# Digest verification
+# =============================================================================
+
+_sha256_of() {
+	if command -v sha256sum >/dev/null 2>&1; then
+		sha256sum "$1" | cut -d' ' -f1
+	else
+		shasum -a 256 "$1" | cut -d' ' -f1
+	fi
+}
+
+@test "wait-for-artifacts: a download matching the listed digest is accepted and reported as verified" {
+	_require_zip_tools
+	_mock_gh
+	local zip
+	zip="$(_zip_for python-results-3.11)"
+	_list_sequence "$(_listing "1:python-results-3.11:$(_sha256_of "$zip")")"
+	_download_sequence 1 "zip:${zip}"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_success
+	assert_output --partial "Downloaded python-results-3.11 (id 1) to ${DOWNLOAD_DIR}/python-results-3.11 (digest verified)"
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+}
+
+@test "wait-for-artifacts: a download whose digest differs from the listing is an integrity failure, not retried" {
+	_require_zip_tools
+	_mock_gh
+	_list_sequence "$(_listing "1:python-results-3.11:$(printf 'a%.0s' {1..64})")"
+	_download_sequence 1 "zip:$(_zip_for python-results-3.11)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact python-results-3.11 (id 1) digest mismatch: listing says sha256:aaaa"
+	assert_output --partial "not retrying"
+	[[ ! -s "$SLEEP_CALLS" ]]
+	[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "1" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+}
+
+@test "wait-for-artifacts: scratch files are removed on every exit path" {
+	_require_zip_tools
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 "this is not a zip"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+	export TMPDIR="${BATS_TEST_TMPDIR}/scratch"
+	mkdir -p "$TMPDIR"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	[[ -z "$(ls -A "$TMPDIR")" ]] || fail "scratch left behind: $(ls -A "$TMPDIR")"
 }

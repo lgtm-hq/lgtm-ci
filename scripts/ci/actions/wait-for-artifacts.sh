@@ -121,8 +121,12 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 
 readonly ARTIFACTS_ENDPOINT="repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts"
 
-STDERR_FILE="$(mktemp "${TMPDIR:-/tmp}/wait-for-artifacts.XXXXXX")"
-trap 'rm -f "$STDERR_FILE"' EXIT
+# Scratch space for captured stderr and in-flight archives; removed on every
+# exit path so an aborted download cannot leave zips behind.
+WORK_DIR="$(mktemp -d "${TMPDIR:-/tmp}/wait-for-artifacts.XXXXXX")"
+trap 'rm -rf "$WORK_DIR"' EXIT
+STDERR_FILE="${WORK_DIR}/stderr"
+: >"$STDERR_FILE"
 
 # SIGTERM first, then SIGKILL for a `gh` that ignores it, so a wedged request
 # can never outlive the bound.
@@ -130,21 +134,32 @@ gh_bounded() {
 	"$TIMEOUT_BIN" --kill-after=10s "$GH_CMD_TIMEOUT" gh "$@" </dev/null
 }
 
-# Expected artifact names, one per line, when the matrix is known. Empty when
-# MATRIX_JSON/MATRIX_KEY are unset or the pattern has no single `*` to fill.
-# A MATRIX_JSON that does not parse is a caller bug, not a reason to fall back
-# to the weaker count-only check: fail so the degradation is never silent.
+# Expected artifact names, one per line on stdout, when the matrix is known.
+# Empty when MATRIX_JSON/MATRIX_KEY are unset or the pattern has no single `*`
+# to fill. A MATRIX_JSON that does not parse, or whose include entries are not
+# objects, is a caller bug, not a reason to fall back to the weaker count-only
+# check: return non-zero (diagnostic on stderr) so the caller fails loudly
+# rather than silently degrading or treating the diagnostic as a name.
 expected_names() {
 	[[ -n "$MATRIX_JSON" && -n "$MATRIX_KEY" ]] || return 0
 	[[ "$PATTERN" == *"*"* && "${PATTERN//[^*]/}" == "*" ]] || return 0
 	local prefix="${PATTERN%%\**}" suffix="${PATTERN#*\*}"
-	if ! jq -e 'type == "object"' <<<"$MATRIX_JSON" >/dev/null 2>&1; then
-		echo "::error::MATRIX_JSON is set but is not a JSON object; refusing to wait with an unknown matrix"
-		exit 1
+	if ! jq -e 'type == "object" and ((.include // []) | type == "array" and all(type == "object"))' \
+		<<<"$MATRIX_JSON" >/dev/null 2>&1; then
+		echo "MATRIX_JSON is not an object whose include entries are all objects" >&2
+		return 1
 	fi
-	jq -r --arg key "$MATRIX_KEY" --arg prefix "$prefix" --arg suffix "$suffix" \
+	local names
+	names="$(jq -r --arg key "$MATRIX_KEY" --arg prefix "$prefix" --arg suffix "$suffix" \
 		'.include[]? | .[$key] | select(. != null) | "\($prefix)\(.)\($suffix)"' \
-		<<<"$MATRIX_JSON"
+		<<<"$MATRIX_JSON")" || return 1
+	# A key that names no include entry is a typo in the workflow, not a
+	# matrix without legs: fail rather than quietly lose the by-name check.
+	if [[ -z "$names" ]] && jq -e '(.include // []) | length > 0' <<<"$MATRIX_JSON" >/dev/null; then
+		echo "MATRIX_KEY '${MATRIX_KEY}' matches no include entry of MATRIX_JSON" >&2
+		return 1
+	fi
+	printf '%s\n' "$names"
 }
 
 # Lines of "<id>\t<name>" for every non-expired artifact on the run whose name
@@ -161,13 +176,25 @@ list_matching() {
 		2>"$STDERR_FILE")" || return $?
 	jq -r '[.[].artifacts[]? | select(.expired != true)]
 		| group_by(.name) | map(max_by(.id)) | sort_by(.id)
-		| .[] | "\(.id)\t\(.name)"' <<<"$listing" |
-		while IFS=$'\t' read -r id name; do
+		| .[] | "\(.id)\t\(.name)\t\(.digest // "")"' <<<"$listing" |
+		while IFS=$'\t' read -r id name digest; do
 			# shellcheck disable=SC2254 # PATTERN is a glob by contract
 			case "$name" in
-			$PATTERN) printf '%s\t%s\n' "$id" "$name" ;;
+			$PATTERN) printf '%s\t%s\t%s\n' "$id" "$name" "$digest" ;;
 			esac
 		done
+}
+
+# sha256 of a file as "sha256:<hex>", matching the listing's `digest` field.
+# ubuntu has sha256sum; macOS only shasum.
+file_digest() {
+	local file="$1" hex
+	if command -v sha256sum >/dev/null 2>&1; then
+		hex="$(sha256sum "$file" | cut -d' ' -f1)"
+	else
+		hex="$(shasum -a 256 "$file" | cut -d' ' -f1)"
+	fi
+	printf 'sha256:%s' "$hex"
 }
 
 join_names() {
@@ -178,17 +205,22 @@ join_names() {
 	return 0
 }
 
-# Format the deadline-bounded sleep before the next poll. Returns 1 when the
-# budget cannot accommodate another delay.
+# The sleep before the next poll: the scheduled backoff, clamped to whatever
+# budget remains so the final wait uses it all rather than giving up early.
+# Returns 1 once the budget is spent.
 next_delay() {
-	local attempt="$1" elapsed="$2" idx delay
+	local attempt="$1" elapsed="$2" idx delay remaining
+	remaining=$((WAIT_BUDGET_SECONDS - elapsed))
+	if ((remaining <= 0)); then
+		return 1
+	fi
 	idx=$((attempt - 1))
 	if ((idx >= ${#BACKOFF[@]})); then
 		idx=$((${#BACKOFF[@]} - 1))
 	fi
 	delay="${BACKOFF[$idx]}"
-	if ((elapsed + delay > WAIT_BUDGET_SECONDS)); then
-		return 1
+	if ((delay > remaining)); then
+		delay=$remaining
 	fi
 	printf '%s' "$delay"
 }
@@ -209,9 +241,15 @@ elapsed() {
 # name, not just by count: a sibling call's artifact standing in for a missing
 # leg would otherwise satisfy the count while the wrong set gets aggregated.
 EXPECTED_NAMES=()
+# Plain command substitution, not process substitution: the parser's exit
+# status must reach this shell so a partial name list can never pass as whole.
+if ! expected_output="$(expected_names 2>"$STDERR_FILE")"; then
+	echo "::error::MATRIX_JSON could not be parsed for expected artifact names: $(tr '\n' ' ' <"$STDERR_FILE")"
+	exit 1
+fi
 while IFS= read -r expected; do
 	[[ -n "$expected" ]] && EXPECTED_NAMES+=("$expected")
-done < <(expected_names)
+done <<<"$expected_output"
 if ((${#EXPECTED_NAMES[@]} > 0)) && ((${#EXPECTED_NAMES[@]} != EXPECTED_COUNT)); then
 	echo "::error::EXPECTED_COUNT is ${EXPECTED_COUNT} but MATRIX_JSON names ${#EXPECTED_NAMES[@]} legs ($(join_names "${EXPECTED_NAMES[@]}")); the matrix and the count disagree"
 	exit 1
@@ -246,7 +284,7 @@ while :; do
 
 	found_names=()
 	unexpected=()
-	while IFS=$'\t' read -r _ name; do
+	while IFS=$'\t' read -r _ name _; do
 		[[ -n "$name" ]] || continue
 		# Artifact names are used as directory names below. GitHub rejects
 		# path separators at upload time; refuse them here too so a listing
@@ -319,10 +357,10 @@ download_one() {
 if [[ -n "$DOWNLOAD_DIR" ]]; then
 	mkdir -p "$DOWNLOAD_DIR"
 	download_attempts=0
-	while IFS=$'\t' read -r id name; do
+	while IFS=$'\t' read -r id name digest; do
 		[[ -n "$id" ]] || continue
 		dest="${DOWNLOAD_DIR}/${name}"
-		zip="$(mktemp "${TMPDIR:-/tmp}/artifact-${id}.XXXXXX")"
+		zip="${WORK_DIR}/artifact-${id}.zip"
 		attempt=0
 		while :; do
 			attempt=$((attempt + 1))
@@ -333,7 +371,6 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 				break
 			fi
 			if ((status == 124 || status == 137)); then
-				rm -f "$zip"
 				echo "::error::Download of artifact ${name} (id ${id}) timed out after ${GH_CMD_TIMEOUT}s (exit ${status}); not retrying — only HTTP 404 on a listed id is retried"
 				exit 1
 			fi
@@ -341,7 +378,6 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 			# consistency lag (#803, third occurrence). Anything else is a
 			# real error and fails at once.
 			if ! grep -q 'HTTP 404' "$STDERR_FILE"; then
-				rm -f "$zip"
 				echo "::error::Download of artifact ${name} (id ${id}) failed (exit ${status}): $(tr '\n' ' ' <"$STDERR_FILE")"
 				exit 1
 			fi
@@ -352,20 +388,26 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 				slept=$((slept + delay))
 				continue
 			fi
-			rm -f "$zip"
 			echo "::error::Artifact ${name} (id ${id}) still returned HTTP 404 after ${attempt} download attempts over ${now}s; giving up (#803)"
 			exit 1
 		done
+		# Integrity, not lag — neither is retried. The listing's digest is the
+		# sha256 of the archive as uploaded (what actions/download-artifact
+		# verifies too); absent on pre-v4 artifacts, so only checked when set.
+		if [[ -n "$digest" ]]; then
+			actual="$(file_digest "$zip")"
+			if [[ "$actual" != "$digest" ]]; then
+				echo "::error::Artifact ${name} (id ${id}) digest mismatch: listing says ${digest}, download is ${actual}; not retrying"
+				exit 1
+			fi
+		fi
 		mkdir -p "$dest"
-		# A listed, downloadable artifact that does not unzip is corruption,
-		# not lag: fail immediately.
 		if ! unzip -oq "$zip" -d "$dest"; then
-			rm -f "$zip"
 			echo "::error::Artifact ${name} (id ${id}) downloaded but is not a valid zip; not retrying"
 			exit 1
 		fi
 		rm -f "$zip"
-		log_info "Downloaded ${name} (id ${id}) to ${dest}"
+		log_info "Downloaded ${name} (id ${id}) to ${dest}${digest:+ (digest verified)}"
 	done <<<"$matched"
 	log_success "Downloaded ${EXPECTED_COUNT} artifact(s) to ${DOWNLOAD_DIR} in ${download_attempts} request(s)"
 fi

@@ -776,6 +776,20 @@ jobs:
           pattern: shell-test-results-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-taps
           merge-multiple: false
+      # The coverage artifacts upload after the TAP ones, so a complete TAP
+      # listing says nothing about them; wait for them separately so the
+      # Cobertura merge and the threshold check see every shard (#803).
+      - name: Wait for shard coverage artifacts
+        if: always()
+        continue-on-error: true
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_COUNT: ${{ inputs.coverage-shards }}
+          COMMENT_MARKER: ${{ inputs.comment-marker }}
+        run: >-
+          bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
+          "$EXPECTED_COUNT" "shell-coverage-${COMMENT_MARKER}-shard-*"
       - name: Download shard coverage artifacts
         if: always()
         continue-on-error: true

@@ -119,3 +119,27 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
 	' "$WORKFLOW"
 	assert_success
 }
+
+# The aggregate job waits for the matrix artifact listing before aggregating
+# (#803): the wait step must precede aggregation, carry the token, take its
+# count from the prepare job, fill the pattern with the matrix key, and the
+# one-shot download-artifact step must be gone.
+@test "reusable-test-node: aggregate waits for the matrix artifact count before aggregating" {
+	run awk '
+		/^  aggregate-tests:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate-tests:/ { in_job = 0 }
+		in_job && /wait-for-artifacts\.sh/ { wait = NR }
+		in_job && /aggregate-results\.sh/ { agg = NR }
+		in_job && /GH_TOKEN: \$\{\{ github\.token \}\}/ { token = 1 }
+		in_job && /EXPECTED_COUNT: \$\{\{ needs\.prepare\.outputs\.matrix-count \}\}/ { count = 1 }
+		in_job && /MATRIX_KEY: node-version$/ { key = 1 }
+		in_job && /DOWNLOAD_DIR: node-results$/ { dir = 1 }
+		in_job && /\x27node-results-\*\x27/ { pattern = 1 }
+		in_job && /actions\/download-artifact@/ { dl = 1 }
+		in_job && /^ *actions: read$/ { scope = 1 }
+		END { exit !(wait && agg && wait < agg && token && count && key && dir && pattern && scope && !dl) }
+	' "$WORKFLOW"
+	assert_success
+	run grep -F "matrix-count: \${{ steps.matrix.outputs.matrix-count }}" "$WORKFLOW"
+	assert_success
+}

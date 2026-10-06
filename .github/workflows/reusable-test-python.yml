@@ -703,6 +703,10 @@ jobs:
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
           MATRIX_KEY: python-version
           EXPECTED_COUNT: ${{ needs.prepare.outputs.matrix-count }}
+          # A leg that was cancelled or crashed before uploading never shows
+          # up; the aggregate still fails closed, so do not spend the full
+          # budget waiting for it.
+          WAIT_BUDGET_SECONDS: ${{ needs.test.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
           "$EXPECTED_COUNT" 'python-results-*'

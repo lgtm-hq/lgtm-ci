@@ -571,9 +571,11 @@ before aggregating. It polls
 `GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts` until the count of
 artifacts matching the matrix pattern reaches the matrix size (from the
 `prepare` job's `matrix-count` output), backing off 2/4/8/16/30 s within a 90 s
-budget, then downloads each listed artifact over the REST zip endpoint. Every
-API call runs under coreutils `timeout` (30 s) so a stalled request cannot
-burn the job budget. The retry is narrow on purpose:
+budget, then downloads each listed artifact over the REST zip endpoint and
+checks it against the listing's sha256 `digest` before extracting. Every API
+call runs under coreutils `timeout` (30 s) so a stalled request cannot burn
+the job budget; when a leg already failed the budget drops to 10 s, since a
+leg that never uploaded will not appear. The retry is narrow on purpose:
 
 <!-- markdownlint-disable MD013 -- behaviour column exceeds default line length -->
 
@@ -582,7 +584,7 @@ burn the job budget. The retry is narrow on purpose:
 | Listing shows fewer than expected | retried until the budget expires; the failure names the missing legs |
 | HTTP 404 downloading an id the listing returned | retried within the same budget |
 | Listing shows **more** than expected, or a matching name outside the matrix | fails at once — a sibling call in the same run uploaded under the same names (see [Artifact names](#artifact-names), #752) |
-| Any other listing/download error, timeout, corrupt archive | fails at once |
+| Any other listing/download error, timeout, digest mismatch, corrupt archive | fails at once |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -595,9 +597,11 @@ not mistaken for contamination.
 The sharded path of `reusable-test-shell.yml` is affected by the same race
 and runs the script in a lighter mode: listing only (no `DOWNLOAD_DIR`),
 expecting `coverage-shards` TAP artifacts, as a `continue-on-error` pre-check
-ahead of its existing best-effort downloads. The strict shard count in
+ahead of its existing best-effort downloads — once for the TAP artifacts and
+once for the coverage artifacts, which upload later. The strict shard count in
 `run-bats-tests.sh` stays the verdict there; the wait's log names the shard a
-permanent under-count is missing.
+permanent under-count is missing. The artifact pattern embeds `comment-marker`,
+so keep the marker free of glob characters (`*`, `?`, `[`).
 
 This is why all four workflows request `actions: read` on the aggregate job:
 `GITHUB_TOKEN` cannot read the artifact listing without it, and a reusable
