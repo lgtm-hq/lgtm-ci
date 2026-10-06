@@ -25,11 +25,13 @@ teardown() {
 	teardown_temp_dir
 }
 
-# Run one helper under a given manager; args are passed verbatim.
+# Run one helper under a given manager; args are passed verbatim. The shell
+# options match the runner scripts (`set -euo pipefail`) so a listing
+# command's exit status leaking through a pipe shows up here, not in CI.
 _pm() {
 	local manager="$1"
 	shift
-	PACKAGE_MANAGER="$manager" bash -c 'source "$1"; shift; "$@"' _ "$PM_LIB" "$@"
+	PACKAGE_MANAGER="$manager" bash -euo pipefail -c 'source "$1"; shift; "$@"' _ "$PM_LIB" "$@"
 }
 
 _calls() {
@@ -214,6 +216,18 @@ _calls() {
 @test "pm_has pnpm: present as a dependency in pnpm ls --json" {
 	mock_command_record pnpm '[{"name":"fixture","dependencies":{"vitest":{"version":"3.2.4"}}}]'
 	run _pm pnpm pm_has vitest
+	assert_success
+}
+
+@test "pm_has pnpm: present survives a non-zero pnpm exit under pipefail" {
+	mock_command_record pnpm '[{"name":"fixture","devDependencies":{"vitest":{"version":"3.2.4"}}}]' 1
+	run _pm pnpm pm_has vitest
+	assert_success
+}
+
+@test "pm_has bun: present survives a non-zero bun exit under pipefail" {
+	mock_command_record bun "$(printf '%s\n' '/tmp/node_modules (1)' '└── vitest@3.2.4')" 1
+	run _pm bun pm_has vitest
 	assert_success
 }
 

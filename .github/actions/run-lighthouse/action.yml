@@ -170,6 +170,7 @@ runs:
       env:
         STEP: parse
         RESULTS_PATH: ${{ steps.run.outputs.results-path }}
+        RUN_MARKER: ${{ steps.run.outputs.run-marker }}
         OUTPUT_DIR: ${{ inputs.output-dir }}
         THRESHOLD_PERFORMANCE: ${{ inputs.threshold-performance }}
         THRESHOLD_ACCESSIBILITY: ${{ inputs.threshold-accessibility }}
@@ -205,12 +206,23 @@ runs:
         if-no-files-found: ignore
 
     - name: Check result
-      if: steps.parse.outputs.passed == 'false'
+      # Thresholds below target, no fresh report, or a non-zero lhci exit
+      # (e.g. a failed assertion in the consumer's lighthouserc) all fail.
+      if: >-
+        steps.parse.outputs.passed == 'false'
+        || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0')
       shell: bash
       env:
         FAILED_CATS: ${{ steps.parse.outputs.failed-categories }}
+        LHCI_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+        PASSED: ${{ steps.parse.outputs.passed }}
       run: |
-        echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
+        if [[ "$PASSED" == "false" ]]; then
+          echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
+        fi
+        if [[ -n "$LHCI_EXIT_CODE" && "$LHCI_EXIT_CODE" != "0" ]]; then
+          echo "::error::Lighthouse CI exited with code $LHCI_EXIT_CODE"
+        fi
         exit 1
 
 branding:

@@ -100,7 +100,10 @@ pm_add_dev() {
 
 # Check whether a package is installed in the project tree, as reported by
 # the selected manager. Returns 0 when present, 1 when absent, 2 on a
-# contract violation.
+# contract violation. Each listing command is wrapped in `{ ...; } || true`
+# because callers run under `set -o pipefail` and every manager exits
+# non-zero for tree problems unrelated to the package being asked about;
+# only the parsed output decides.
 # Usage: pm_has <pkg>
 pm_has() {
 	local pkg="${1:?pm_has: package name required}"
@@ -112,18 +115,18 @@ pm_has() {
 		# `bun pm ls` prints one tree line per top-level package, e.g.
 		# "├── vitest@3.2.4"; the leading space keeps "vitest@" from matching
 		# inside a scoped name such as "@vitest/coverage-v8@3.2.4".
-		bun pm ls 2>/dev/null | grep -qF -- " ${pkg}@"
+		{ bun pm ls 2>/dev/null || true; } | grep -qF -- " ${pkg}@"
 		;;
 	npm)
 		# `npm ls <pkg>` exits non-zero for any tree problem, not only an
 		# absent package, so read the JSON and ignore the exit code.
-		npm ls --json --depth=0 "$pkg" 2>/dev/null |
+		{ npm ls --json --depth=0 "$pkg" 2>/dev/null || true; } |
 			jq -e --arg pkg "$pkg" '(.dependencies // {}) | has($pkg)' >/dev/null
 		;;
 	pnpm)
 		# `pnpm ls --json` returns one object per project; a hit in either
 		# dependency map counts.
-		pnpm ls --json --depth 0 "$pkg" 2>/dev/null |
+		{ pnpm ls --json --depth 0 "$pkg" 2>/dev/null || true; } |
 			jq -e --arg pkg "$pkg" '
 				any(.[]?;
 					((.dependencies // {}) | has($pkg))

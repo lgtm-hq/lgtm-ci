@@ -11,6 +11,8 @@
 #   URL - URL to audit (required for run step)
 #   CONFIG_PATH - Path to lighthouserc.json
 #   OUTPUT_DIR - Directory for results (default: lighthouse-reports)
+#   RUN_MARKER - Marker file from the run step; parse only accepts reports
+#                newer than it (default: unset, any report in OUTPUT_DIR)
 #   THRESHOLD_PERFORMANCE - Minimum performance score (default: 80)
 #   THRESHOLD_ACCESSIBILITY - Minimum accessibility score (default: 90)
 #   THRESHOLD_BEST_PRACTICES - Minimum best practices score (default: 80)
@@ -124,6 +126,9 @@ run)
 	# Set outputs
 	set_github_output "exit-code" "$exit_code"
 	set_github_output "output-dir" "$OUTPUT_DIR"
+	# The parse step reuses the marker so its fallback search cannot pick a
+	# report that predates this audit either.
+	set_github_output "run-marker" "$run_marker"
 
 	# Find the results file
 	if [[ -d "$OUTPUT_DIR" ]]; then
@@ -139,15 +144,21 @@ run)
 parse)
 	: "${RESULTS_PATH:=}"
 	: "${OUTPUT_DIR:=lighthouse-reports}"
+	: "${RUN_MARKER:=}"
 	: "${THRESHOLD_PERFORMANCE:=80}"
 	: "${THRESHOLD_ACCESSIBILITY:=90}"
 	: "${THRESHOLD_BEST_PRACTICES:=80}"
 	: "${THRESHOLD_SEO:=80}"
 
-	# Find results file if not specified
+	# Find results file if not specified. With RUN_MARKER (set by the run
+	# step) only a report written by that audit qualifies; a marker that no
+	# longer exists means nothing can qualify.
 	if [[ -z "$RESULTS_PATH" ]] || [[ ! -f "$RESULTS_PATH" ]]; then
-		if [[ -d "$OUTPUT_DIR" ]]; then
-			RESULTS_PATH=$(find_lighthouse_report "$OUTPUT_DIR")
+		if [[ -n "$RUN_MARKER" && ! -f "$RUN_MARKER" ]]; then
+			log_warn "Run marker not found: $RUN_MARKER"
+			RESULTS_PATH=""
+		elif [[ -d "$OUTPUT_DIR" ]]; then
+			RESULTS_PATH=$(find_lighthouse_report "$OUTPUT_DIR" "$RUN_MARKER")
 		fi
 	fi
 

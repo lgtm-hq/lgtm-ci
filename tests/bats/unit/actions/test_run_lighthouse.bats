@@ -136,6 +136,36 @@ EOF
 	assert_failure
 }
 
+@test "run-lighthouse parse: with RUN_MARKER a stale passing report does not count" {
+	mkdir -p "${WORK_DIR}/out"
+	echo '{"categories":{"performance":{"score":1},"accessibility":{"score":1},"best-practices":{"score":1},"seo":{"score":1}}}' \
+		>"${WORK_DIR}/out/stale.report.json"
+	touch -t 202001010000 "${WORK_DIR}/out/stale.report.json"
+	marker="${BATS_TEST_TMPDIR}/marker"
+	: >"$marker"
+	run env STEP=parse RESULTS_PATH="" RUN_MARKER="$marker" OUTPUT_DIR="${WORK_DIR}/out" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "No Lighthouse results found"
+	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "false"
+}
+
+@test "run-lighthouse parse: a missing RUN_MARKER disables fallback discovery" {
+	mkdir -p "${WORK_DIR}/out"
+	echo '{"categories":{"performance":{"score":1}}}' >"${WORK_DIR}/out/stale.report.json"
+	run env STEP=parse RESULTS_PATH="" RUN_MARKER="${BATS_TEST_TMPDIR}/gone" OUTPUT_DIR="${WORK_DIR}/out" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Run marker not found"
+	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "false"
+}
+
+@test "run-lighthouse run: publishes the run marker for the parse step" {
+	mock_command_record lhci
+	run env STEP=run PACKAGE_MANAGER=npm URL=http://localhost:3000 OUTPUT_DIR="${WORK_DIR}/out" bash "$SCRIPT"
+	assert_success
+	marker="$(grep '^run-marker=' "$GITHUB_OUTPUT" | cut -d= -f2-)"
+	test -f "$marker"
+}
+
 @test "run-lighthouse parse: resolves a *.report.json under OUTPUT_DIR and scores it" {
 	mkdir -p "${WORK_DIR}/out"
 	echo '{"categories":{"performance":{"score":0.91},"accessibility":{"score":1},"best-practices":{"score":0.8},"seo":{"score":0.7}}}' \
