@@ -419,7 +419,10 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 		fi
 		# Symlink entries could point outside the destination and be written
 		# through by a later entry; result summaries never need them.
-		if unzip -Z "$zip" 2>/dev/null | grep -Eq '^l'; then
+		# Captured first rather than piped into `grep -q`: under pipefail an
+		# early grep exit can SIGPIPE unzip and turn a match into "no match".
+		details="$(unzip -Z "$zip" 2>/dev/null || true)"
+		if grep -Eq '^l' <<<"$details"; then
 			echo "::error::Artifact ${name} (id ${id}) contains symlink entries; not retrying"
 			exit 1
 		fi
