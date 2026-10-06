@@ -8,12 +8,40 @@
 # Optional environment variables:
 #   COVERAGE_FILES - Glob pattern or comma-separated list of coverage files
 #   INPUT_FORMAT - Input format: auto, istanbul, coverage-py, lcov (default: auto)
-#   OUTPUT_FORMAT - Output format: json, lcov (default: json)
+#   OUTPUT_FORMAT - Output format: json, lcov, cobertura; empty keeps the input
+#                   format (default: empty). A requested format with no
+#                   converter exits 2 (#1078).
 #   MERGE_STRATEGY - How to merge: union, intersection (default: union)
-#   OUTPUT_FILE - Output file path (default: merged-coverage.json or merged-coverage.lcov)
+#   OUTPUT_FILE - Output file path (default: merged-coverage.<json|lcov|xml>)
 #   WORKING_DIRECTORY - Directory to run in
+#
+# Exit codes:
+#   1 - invalid input (no files, mixed formats, unreadable content, tool failure)
+#   2 - unsupported coverage conversion: <src> -> <dst>
 
 set -euo pipefail
+
+# Exit code for a requested output format this script cannot produce
+readonly EXIT_UNSUPPORTED_CONVERSION=2
+
+# Default merged-file name for a format
+merged_output_name() {
+	case "${1:-}" in
+	lcov) echo "merged-coverage.lcov" ;;
+	cobertura) echo "merged-coverage.xml" ;;
+	*) echo "merged-coverage.json" ;;
+	esac
+}
+
+# Fail by name when no converter exists for src -> dst
+require_conversion_supported() {
+	local src="${1:-}" dst="${2:-}"
+	if ! coverage_conversion_supported "$src" "$dst"; then
+		echo "::error::unsupported coverage conversion: $src -> $dst"
+		log_error "No converter implements $src -> $dst; leave OUTPUT_FORMAT empty to keep the input format"
+		exit "$EXIT_UNSUPPORTED_CONVERSION"
+	fi
+}
 
 : "${STEP:?STEP is required}"
 
@@ -69,10 +97,20 @@ detect)
 merge)
 	: "${COVERAGE_FILES:=}"
 	: "${INPUT_FORMAT:=auto}"
-	: "${OUTPUT_FORMAT:=json}"
+	: "${OUTPUT_FORMAT:=}"
 	: "${MERGE_STRATEGY:=union}"
 	: "${OUTPUT_FILE:=}"
 	: "${WORKING_DIRECTORY:=.}"
+
+	# Validate OUTPUT_FORMAT early so a typo fails before any merging work;
+	# empty means "same as the input format" (#1078)
+	case "$OUTPUT_FORMAT" in
+	"" | json | lcov | cobertura) ;;
+	*)
+		log_error "Invalid OUTPUT_FORMAT: $OUTPUT_FORMAT (must be json, lcov, cobertura, or empty for same-as-input)"
+		exit 1
+		;;
+	esac
 
 	# Validate MERGE_STRATEGY (only 'union' is currently implemented)
 	case "$MERGE_STRATEGY" in
@@ -138,15 +176,6 @@ merge)
 
 	log_info "Merging ${#existing_files[@]} coverage files..."
 
-	# Determine output file if not specified
-	if [[ -z "$OUTPUT_FILE" ]]; then
-		case "$OUTPUT_FORMAT" in
-		json) OUTPUT_FILE="merged-coverage.json" ;;
-		lcov) OUTPUT_FILE="merged-coverage.lcov" ;;
-		*) OUTPUT_FILE="merged-coverage.json" ;;
-		esac
-	fi
-
 	# Determine input format from files if auto
 	if [[ "$INPUT_FORMAT" == "auto" ]]; then
 		INPUT_FORMAT=$(detect_coverage_format "${existing_files[0]}")
@@ -163,6 +192,16 @@ merge)
 			fi
 		done
 	fi
+
+	# Detection trusts the extension; check the content matches before any of
+	# it is merged, so a mislabeled file fails by name instead of yielding an
+	# empty report (#1078)
+	for file in "${existing_files[@]}"; do
+		if ! validate_coverage_file "$file" "$INPUT_FORMAT"; then
+			log_error "Coverage file is not valid $INPUT_FORMAT: $file"
+			exit 1
+		fi
+	done
 
 	# Create temp file for merging in input format
 	temp_merged=$(mktemp)
@@ -230,8 +269,22 @@ merge)
 		;;
 	esac
 
+	# Empty OUTPUT_FORMAT keeps whatever the merge produced (#1078)
+	if [[ -z "$OUTPUT_FORMAT" ]]; then
+		OUTPUT_FORMAT="$MERGED_FORMAT"
+	fi
+
+	# Determine output file if not specified
+	if [[ -z "$OUTPUT_FILE" ]]; then
+		OUTPUT_FILE=$(merged_output_name "$OUTPUT_FORMAT")
+	fi
+
 	# Convert to output format if different from merged format
 	if [[ "$MERGED_FORMAT" != "$OUTPUT_FORMAT" ]]; then
+		# Fail by name when no converter exists; a runtime failure of an
+		# implemented converter (missing tool) stays exit 1 below
+		require_conversion_supported "$MERGED_FORMAT" "$OUTPUT_FORMAT"
+
 		log_info "Converting from $MERGED_FORMAT to $OUTPUT_FORMAT..."
 		if convert_coverage "$temp_merged" "$OUTPUT_FILE" "$MERGED_FORMAT" "$OUTPUT_FORMAT"; then
 			log_info "Conversion successful"
@@ -239,6 +292,7 @@ merge)
 			log_error "Conversion failed: cannot convert from $MERGED_FORMAT to $OUTPUT_FORMAT"
 			log_error "Merged file was: $temp_merged"
 			log_error "This would produce an incorrectly labeled output file"
+			rm -f "$OUTPUT_FILE"
 			exit 1
 		fi
 	else
@@ -253,6 +307,16 @@ merge)
 		coverage_percent=$(extract_coverage_percent "$OUTPUT_FILE")
 		set_github_output "coverage-percent" "$coverage_percent"
 		log_info "Combined coverage: ${coverage_percent}%"
+
+		# Valid LCOV with no measured lines is 0% by arithmetic; say so rather
+		# than let it pass as a quiet green (#1078)
+		if [[ "$OUTPUT_FORMAT" == "lcov" ]]; then
+			lines_found=$(_lcov_sum_totals "$OUTPUT_FILE" LF)
+			if [[ "$lines_found" -eq 0 ]]; then
+				echo "::warning::merged LCOV has no lines found (LF total 0); coverage is 0%"
+				log_warn "No instrumented lines in: ${existing_files[*]}"
+			fi
+		fi
 	else
 		log_error "Failed to create merged coverage file"
 		exit 1
@@ -279,6 +343,11 @@ convert)
 		*) OUTPUT_FILE="coverage.out" ;;
 		esac
 	fi
+
+	if [[ "$INPUT_FORMAT" == "auto" ]]; then
+		INPUT_FORMAT=$(detect_coverage_format "$INPUT_FILE")
+	fi
+	require_conversion_supported "$INPUT_FORMAT" "$OUTPUT_FORMAT"
 
 	log_info "Converting $INPUT_FILE to $OUTPUT_FORMAT..."
 
@@ -311,18 +380,19 @@ summary)
 		add_github_summary "| Metric | Coverage |"
 		add_github_summary "|--------|----------|"
 
-		if [[ -n "$COVERAGE_LINES" ]] && [[ "$COVERAGE_LINES" != "0" ]]; then
-			add_github_summary "| Lines | ${COVERAGE_LINES}% |"
-		fi
-		if [[ -n "$COVERAGE_BRANCHES" ]] && [[ "$COVERAGE_BRANCHES" != "0" ]]; then
-			add_github_summary "| Branches | ${COVERAGE_BRANCHES}% |"
-		fi
-		if [[ -n "$COVERAGE_FUNCTIONS" ]] && [[ "$COVERAGE_FUNCTIONS" != "0" ]]; then
-			add_github_summary "| Functions | ${COVERAGE_FUNCTIONS}% |"
-		fi
-		if [[ -n "$COVERAGE_STATEMENTS" ]] && [[ "$COVERAGE_STATEMENTS" != "0" ]]; then
-			add_github_summary "| Statements | ${COVERAGE_STATEMENTS}% |"
-		fi
+		# A metric the file does not measure renders as n/a, not 0% (#1078)
+		add_summary_metric() {
+			local label="$1" value="$2"
+			if [[ "$value" == "${COVERAGE_NOT_MEASURED:-n/a}" ]]; then
+				add_github_summary "| $label | ${COVERAGE_NOT_MEASURED:-n/a} |"
+			elif [[ -n "$value" ]] && [[ "$value" != "0" ]]; then
+				add_github_summary "| $label | ${value}% |"
+			fi
+		}
+		add_summary_metric "Lines" "$COVERAGE_LINES"
+		add_summary_metric "Branches" "$COVERAGE_BRANCHES"
+		add_summary_metric "Functions" "$COVERAGE_FUNCTIONS"
+		add_summary_metric "Statements" "$COVERAGE_STATEMENTS"
 
 		set_github_output "lines-coverage" "$COVERAGE_LINES"
 		set_github_output "branches-coverage" "$COVERAGE_BRANCHES"

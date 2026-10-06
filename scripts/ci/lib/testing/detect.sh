@@ -185,6 +185,50 @@ detect_coverage_format() {
 	return 1
 }
 
+# Check that a coverage file's content matches the format it was detected as.
+# detect_coverage_format trusts the extension, so a `.info` full of garbage
+# still reads as lcov; this is the content check callers run before trusting
+# a detected format (#1078).
+# Usage: validate_coverage_file "coverage.info" "lcov"
+# Returns: 0 when the content is plausible for the format, 1 with a reason on
+#          stderr otherwise. Formats without a cheap content check pass.
+validate_coverage_file() {
+	local file="${1:-}"
+	local format="${2:-}"
+
+	if [[ ! -f "$file" ]]; then
+		echo "coverage file not found: $file" >&2
+		return 1
+	fi
+
+	case "$format" in
+	lcov)
+		# A record starts with TN: or SF:; at least one SF/end_of_record pair
+		# must exist, or there is nothing to measure.
+		local first_line
+		first_line=$(grep -m1 -v '^[[:space:]]*$' "$file" || true)
+		if [[ ! "$first_line" =~ ^(TN|SF): ]]; then
+			echo "invalid lcov: first record must start with TN: or SF: (got '${first_line:0:40}') - $file" >&2
+			return 1
+		fi
+		if ! grep -q '^SF:' "$file" || ! grep -q '^end_of_record' "$file"; then
+			echo "invalid lcov: no SF:/end_of_record records - $file" >&2
+			return 1
+		fi
+		;;
+	json | istanbul | coverage-py)
+		# .coverage* files are SQLite, not JSON; only reports are parsed
+		[[ "$(basename "$file")" == .coverage* ]] && return 0
+		if ! jq -e . "$file" >/dev/null 2>&1; then
+			echo "invalid json: does not parse - $file" >&2
+			return 1
+		fi
+		;;
+	esac
+
+	return 0
+}
+
 # Detect if a coverage file is from Python (coverage.py) or JavaScript (istanbul/v8)
 # Usage: detect_coverage_source "coverage.json"
 # Output: python|javascript|php|java|unknown
@@ -247,4 +291,4 @@ detect_coverage_source() {
 # Export functions
 # =============================================================================
 export -f detect_test_runner detect_all_runners
-export -f detect_coverage_format detect_coverage_source
+export -f detect_coverage_format validate_coverage_file detect_coverage_source

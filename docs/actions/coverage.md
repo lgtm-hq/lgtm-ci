@@ -13,13 +13,24 @@ Aggregate coverage from multiple sources and formats.
   with:
     coverage-files: "coverage/*.json" # glob or comma-separated
     input-format: "auto" # 'auto', 'istanbul', 'coverage-py', 'lcov'
-    output-format: "json" # 'json', 'lcov'
+    output-format: "" # '' (same as input, default), 'json', 'lcov', 'cobertura'
     merge-strategy: "union" # 'union', 'intersection'
 ```
 
 **Outputs:** `merged-coverage-file`, `coverage-percent`, `lines-coverage`,
 `branches-coverage`, `functions-coverage`. Auto-detects format from file
 content; merges coverage across Python and JavaScript projects.
+
+Format integrity (#1078): a detected format is checked against the file's
+content before merging, so a mislabeled file fails by name rather than
+yielding an empty report. With `output-format` empty the merged file keeps
+the input format (`merged-coverage.json`, `.lcov` or `.xml`); requesting a
+format with no converter (such as LCOV to JSON) exits 2 with
+`unsupported coverage conversion: <src> -> <dst>`. A single LCOV file passes
+through untouched, so full LCOV with branch/function records does not need
+the `lcov` binary. Line-only LCOV reports `branches-coverage` and
+`functions-coverage` as `n/a`; a valid LCOV file with no lines found merges
+to 0% with a `::warning::` annotation.
 
 ## check-coverage-threshold
 

@@ -464,6 +464,61 @@ teardown() {
 	assert_success
 }
 
+# =============================================================================
+# validate_coverage_file tests (#1078)
+# =============================================================================
+
+@test "validate_coverage_file: accepts the line-only, full and empty LCOV fixtures" {
+	for name in lcov-line-only lcov-full lcov-empty; do
+		run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"\$FIXTURES_DIR/coverage/$name.info\" lcov"
+		assert_success
+	done
+}
+
+@test "validate_coverage_file: rejects the invalid LCOV fixture with a reason" {
+	run bash -c 'source "$LIB_DIR/testing/detect.sh" && validate_coverage_file "$FIXTURES_DIR/coverage/lcov-invalid.info" lcov'
+	assert_failure
+	assert_output --partial "invalid lcov: first record must start with TN: or SF:"
+}
+
+@test "validate_coverage_file: rejects LCOV with a header but no records" {
+	local file="${BATS_TEST_TMPDIR}/header-only.info"
+	echo "TN:" >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" lcov"
+	assert_failure
+	assert_output --partial "no SF:/end_of_record records"
+}
+
+@test "validate_coverage_file: accepts the coverage.json fixture as coverage-py" {
+	run bash -c 'source "$LIB_DIR/testing/detect.sh" && validate_coverage_file "$FIXTURES_DIR/coverage/coverage.json" coverage-py'
+	assert_success
+}
+
+@test "validate_coverage_file: rejects unparsable JSON" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json"
+	echo '{"totals": ' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" json"
+	assert_failure
+	assert_output --partial "invalid json"
+}
+
+@test "validate_coverage_file: passes formats without a content check" {
+	run bash -c 'source "$LIB_DIR/testing/detect.sh" && validate_coverage_file "$FIXTURES_DIR/coverage/sample_cobertura.xml" cobertura'
+	assert_success
+}
+
+@test "validate_coverage_file: missing file fails" {
+	run bash -c 'source "$LIB_DIR/testing/detect.sh" && validate_coverage_file "/nonexistent.info" lcov'
+	assert_failure
+}
+
+@test "testing/detect.sh: exports validate_coverage_file function" {
+	run bash -c 'source "$LIB_DIR/testing/detect.sh" && bash -c "type validate_coverage_file"'
+	assert_success
+}
+
 @test "testing/detect.sh: exports detect_coverage_format function" {
 	run bash -c 'source "$LIB_DIR/testing/detect.sh" && bash -c "type detect_coverage_format"'
 	assert_success

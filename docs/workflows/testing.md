@@ -271,8 +271,20 @@ It does **not** publish to Pages; since #770 that is a separate call to
 `reusable-publish-test-results-pages.yml`, described below.
 
 **Inputs:** `coverage-files` (glob or list, default auto-detect), `format`
-(auto/istanbul/coverage-py/lcov, default 'auto'), `threshold` (default 0),
-`generate-badge` (default true).
+(input format: auto/istanbul/coverage-py/lcov, default 'auto'),
+`output-format` (json/lcov/cobertura; empty by default, meaning the merged
+report keeps the input format), `threshold` (default 0), `generate-badge`
+(default true).
+
+Since #1078 the merged report is never converted unless `output-format`
+asks for it, so an LCOV producer stays LCOV through merge, threshold and the
+PR comment. Asking for a format no converter implements (for example LCOV to
+JSON) fails the job with `unsupported coverage conversion: <src> -> <dst>`
+(exit 2) instead of producing an empty report. Line-only LCOV (no `BRF`/`FNF`
+records) is a first-class input: branch and function coverage render as `n/a`
+rather than `0%`, and their thresholds in the PR comment are skipped. The
+merged file is `merged-coverage.json`, `.lcov` or `.xml` by format; the
+`coverage-report` artifact name is unchanged.
 
 `publish-pages` is **deprecated and inert** since #770: the Pages publish job
 moved to `reusable-publish-test-results-pages.yml` so that callers which never

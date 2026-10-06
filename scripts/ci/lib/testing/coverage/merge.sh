@@ -54,6 +54,18 @@ merge_lcov_files() {
 		return 1
 	fi
 
+	# A single file has nothing to merge with: pass it through unchanged so
+	# full LCOV (with BR/FN records) does not need the lcov binary that the
+	# fallback below lacks (#1078).
+	if [[ ${#files[@]} -eq 1 ]]; then
+		if [[ ! -f "${files[0]}" ]]; then
+			echo "Error: LCOV file not found: ${files[0]}" >&2
+			return 1
+		fi
+		cp "${files[0]}" "$output"
+		return 0
+	fi
+
 	# Check if lcov is available
 	if command -v lcov &>/dev/null; then
 		local lcov_args=()
@@ -173,6 +185,27 @@ merge_istanbul_files() {
 	fi
 }
 
+# Report whether convert_coverage implements a conversion at all, independent
+# of which tools are installed. Callers use this to fail with
+# "unsupported coverage conversion" by name before producing output (#1078).
+# Usage: coverage_conversion_supported "lcov" "json"
+# Returns: 0 when supported (same format counts), 1 otherwise
+coverage_conversion_supported() {
+	local from_format="${1:-}"
+	local to_format="${2:-}"
+
+	[[ "$from_format" == "$to_format" ]] && return 0
+
+	case "${from_format}->${to_format}" in
+	"cobertura->lcov" | "istanbul->lcov" | "coverage-py->lcov" | "lcov->cobertura" | "istanbul->json")
+		return 0
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
 # Convert coverage from one format to another
 # Usage: convert_coverage "input.xml" "output.lcov" "cobertura" "lcov"
 convert_coverage() {
@@ -243,6 +276,10 @@ convert_coverage() {
 		else
 			return 1
 		fi
+		;;
+	"istanbul->json")
+		# Istanbul reports are already JSON; the label is the only difference
+		cp "$input" "$output"
 		;;
 	*)
 		# Same format or unsupported conversion
@@ -322,4 +359,4 @@ _convert_istanbul_to_lcov() {
 }
 
 # Export functions
-export -f merge_lcov_files merge_istanbul_files convert_coverage
+export -f merge_lcov_files merge_istanbul_files coverage_conversion_supported convert_coverage

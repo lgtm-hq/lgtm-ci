@@ -346,6 +346,21 @@ Rich coverage comments use `generate-coverage-comment` with an optional
 `## 📊 Code Coverage Report — {test-suite-name}`; `comment-marker` remains the
 upsert identity.
 
+### Coverage format integrity (#1078)
+
+`reusable-coverage.yml` keeps the merged report in its input format unless
+`output-format` requests another one; LCOV is preserved end-to-end (merge,
+threshold, badge, comment). `collect-coverage` checks a detected format
+against the file's content before merging and fails by name on a mismatch,
+and exits 2 with `unsupported coverage conversion: <src> -> <dst>` when the
+requested output has no converter — it never falls through to an empty
+report. Line-only LCOV (no `BRF`/`BRH`/`FNF`/`FNH` records) is a supported
+input: branch and function coverage are reported as `n/a`, not `0%`, and the
+rich comment skips those two thresholds. Coverage stays single-runtime; this
+does not reintroduce matrix merging (#756). Artifact names and the
+`merged-coverage.json` path for JSON inputs are unchanged; LCOV inputs now
+produce `merged-coverage.lcov`.
+
 Node test reusables upload the coverage payload from
 `{working-directory}/{coverage-summary-file}` under `coverage-artifact-name`,
 which defaults to `node-coverage` on `reusable-test-node` and

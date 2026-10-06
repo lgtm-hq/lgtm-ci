@@ -22,6 +22,28 @@ else
 	return 1
 fi
 
+# Value extract_coverage_details assigns to a metric the coverage file does not
+# measure (for example branches in line-only LCOV). Consumers must treat it as
+# "unknown", not as 0%.
+readonly COVERAGE_NOT_MEASURED="n/a"
+
+# Internal: sum LCOV record totals in one pass.
+# Usage: _lcov_sum_totals "coverage.info" LF LH [BRF BRH ...]
+# Output: one line with a sum per requested key, in order; a key with no
+# records sums to 0, so the output always has one number per key.
+_lcov_sum_totals() {
+	local file="${1:-}"
+	shift
+	awk -F: -v keys="$*" '
+		BEGIN { n = split(keys, key, " "); for (i = 1; i <= n; i++) sum[key[i]] = 0 }
+		($1 in sum) { sum[$1] += $2 + 0 }
+		END {
+			for (i = 1; i <= n; i++) printf "%s%d", (i > 1 ? " " : ""), sum[key[i]]
+			printf "\n"
+		}
+	' "$file"
+}
+
 # Extract coverage percentage from various coverage file formats
 # Usage: extract_coverage_percent "coverage.json"
 # Output: coverage percentage as a number (e.g., "85.5")
@@ -75,9 +97,8 @@ extract_coverage_percent() {
 	lcov)
 		# LCOV format - calculate from LF (lines found) and LH (lines hit)
 		local lines_found lines_hit
-		lines_found=$(grep -E '^LF:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		lines_hit=$(grep -E '^LH:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		if [[ -n "$lines_found" ]] && [[ "$lines_found" -gt 0 ]]; then
+		read -r lines_found lines_hit < <(_lcov_sum_totals "$file" LF LH)
+		if [[ "$lines_found" -gt 0 ]]; then
 			echo "$lines_hit $lines_found" | awk '{printf "%.2f", ($1 / $2) * 100}'
 		else
 			echo "0"
@@ -178,28 +199,29 @@ extract_coverage_details() {
 		fi
 		;;
 	lcov)
+		# One awk pass sums every total; a record type that is absent (line-only
+		# LCOV omits BRF/BRH/FNF/FNH) sums to 0 instead of killing a `set -e`
+		# caller through a grep that matched nothing (#1078).
+		local lf lh bf bh ff fh
+		read -r lf lh bf bh ff fh < <(_lcov_sum_totals "$file" LF LH BRF BRH FNF FNH)
+
 		# Lines
-		local lf lh
-		lf=$(grep -E '^LF:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		lh=$(grep -E '^LH:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		if [[ -n "$lf" ]] && [[ "$lf" -gt 0 ]]; then
+		if [[ "$lf" -gt 0 ]]; then
 			COVERAGE_LINES=$(echo "$lh $lf" | awk '{printf "%.2f", ($1 / $2) * 100}')
 		fi
 
-		# Branches
-		local bf bh
-		bf=$(grep -E '^BRF:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		bh=$(grep -E '^BRH:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		if [[ -n "$bf" ]] && [[ "$bf" -gt 0 ]]; then
+		# Branches and functions: a zero total means the producer did not
+		# measure the metric, which is not the same as measuring 0% of it.
+		if [[ "$bf" -gt 0 ]]; then
 			COVERAGE_BRANCHES=$(echo "$bh $bf" | awk '{printf "%.2f", ($1 / $2) * 100}')
+		else
+			COVERAGE_BRANCHES="${COVERAGE_NOT_MEASURED:-n/a}"
 		fi
 
-		# Functions
-		local ff fh
-		ff=$(grep -E '^FNF:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		fh=$(grep -E '^FNH:' "$file" | cut -d: -f2 | awk '{sum+=$1} END {print sum}')
-		if [[ -n "$ff" ]] && [[ "$ff" -gt 0 ]]; then
+		if [[ "$ff" -gt 0 ]]; then
 			COVERAGE_FUNCTIONS=$(echo "$fh $ff" | awk '{printf "%.2f", ($1 / $2) * 100}')
+		else
+			COVERAGE_FUNCTIONS="${COVERAGE_NOT_MEASURED:-n/a}"
 		fi
 
 		# LCOV does not report statements separately; line coverage is the
@@ -212,4 +234,4 @@ extract_coverage_details() {
 }
 
 # Export functions
-export -f extract_coverage_percent extract_coverage_details
+export -f _lcov_sum_totals extract_coverage_percent extract_coverage_details
