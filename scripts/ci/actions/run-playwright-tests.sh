@@ -15,9 +15,13 @@
 #   TEST_COMMAND - Base CLI command (default: npx playwright test)
 #   PROJECT - Playwright --project filter
 #   GREP - Playwright --grep filter
+#   REPORTERS - Comma-separated reporter set passed as ONE --reporter flag
+#               (default: list,json,junit,html). Must contain json (parse
+#               reads the sidecar) and html (asserted after the run, #804).
 #   BASE_URL - Exported as BASE_URL / PLAYWRIGHT_BASE_URL for config passthrough
 #   WEB_SERVER - Exported as PLAYWRIGHT_WEB_SERVER for config passthrough
 #   UPLOAD_REPORT - true/false; with EXIT_CODE gates artifact upload
+#   UPLOAD_REPORT_WHEN - failure (default) or always; narrows UPLOAD_REPORT
 #   EXIT_CODE - Playwright process exit code for upload-gate / summary
 #   TESTS_PASSED / TESTS_FAILED / TESTS_SKIPPED / TESTS_TOTAL - summary inputs
 #   REPORT_PATH - JSON results path for parse (default: playwright-results.json)
@@ -96,6 +100,52 @@ assemble_playwright_filter_args() {
 	printf '%s' "${args[*]}"
 }
 
+# Normalize REPORTERS into the comma-separated value of one --reporter flag.
+# Playwright keeps only the last --reporter flag on the CLI, so emitting
+# `--reporter=html --reporter=json` silently dropped the HTML report (#804).
+# Prints the normalized list; fails when json or html is absent.
+normalize_playwright_reporters() {
+	local raw="${1:-}"
+	local -a parts=() kept=()
+	local part has_json=0 has_html=0
+
+	IFS=',' read -ra parts <<<"$raw"
+	for part in "${parts[@]}"; do
+		part="$(trim "$part")"
+		[[ -z "$part" ]] && continue
+		# Entries are built-in names (`html`) or paths to custom reporters;
+		# only the bare names take part in the json/html check.
+		case "$part" in
+		json) has_json=1 ;;
+		html) has_html=1 ;;
+		esac
+		kept+=("$part")
+	done
+
+	if [[ ${#kept[@]} -eq 0 ]]; then
+		echo "::error title=reporters::reporters must not be empty (default: list,json,junit,html)" >&2
+		return 1
+	fi
+	if [[ "$has_json" -ne 1 || "$has_html" -ne 1 ]]; then
+		echo "::error title=reporters::reporters must include json (metrics sidecar) and html (uploaded report); got '${raw}'" >&2
+		return 1
+	fi
+
+	local IFS=','
+	printf '%s' "${kept[*]}"
+}
+
+# True when the comma-separated reporter list contains the bare name.
+reporters_include() {
+	local list="$1" wanted="$2" part
+	local -a parts=()
+	IFS=',' read -ra parts <<<"$list"
+	for part in "${parts[@]}"; do
+		[[ "$part" == "$wanted" ]] && return 0
+	done
+	return 1
+}
+
 case "$STEP" in
 cache-key)
 	: "${WORKING_DIRECTORY:=.}"
@@ -161,6 +211,7 @@ run)
 	: "${TEST_COMMAND:=npx playwright test}"
 	: "${PROJECT:=}"
 	: "${GREP:=}"
+	: "${REPORTERS:=list,json,junit,html}"
 	: "${BASE_URL:=}"
 	: "${WEB_SERVER:=}"
 
@@ -180,6 +231,10 @@ run)
 		echo "::error::Working directory does not exist: ${working_directory}" >&2
 		exit 1
 	fi
+	reporters="$(normalize_playwright_reporters "$REPORTERS")" || exit 1
+	if [[ "$test_command" == *--reporter* ]]; then
+		echo "::warning title=reporters::test-command already passes --reporter; Playwright keeps only the last flag, so the reporters input (${reporters}) wins" >&2
+	fi
 
 	cd "$working_directory"
 
@@ -194,15 +249,24 @@ run)
 	fi
 
 	filter_args="$(assemble_playwright_filter_args)"
-	# JSON sidecar for metrics + HTML report for failure artifacts.
+	# Fixed output locations: parse reads the JSON sidecar and the workflow's
+	# upload step globs these exact paths. Env wins over any outputFile the
+	# consumer config sets, because the CLI --reporter below replaces the
+	# config reporters wholesale.
 	export PLAYWRIGHT_JSON_OUTPUT_NAME="${PLAYWRIGHT_JSON_OUTPUT_NAME:-playwright-results.json}"
+	export PLAYWRIGHT_JUNIT_OUTPUT_NAME="${PLAYWRIGHT_JUNIT_OUTPUT_NAME:-playwright-results.xml}"
+	export PLAYWRIGHT_HTML_OUTPUT_DIR="${PLAYWRIGHT_HTML_OUTPUT_DIR:-playwright-report}"
+	# Never try to open the HTML report in a browser (the html reporter's
+	# default is on-failure outside CI).
+	export PLAYWRIGHT_HTML_OPEN="${PLAYWRIGHT_HTML_OPEN:-never}"
 
 	full_command="${test_command}"
 	if [[ -n "$filter_args" ]]; then
 		full_command="${full_command} ${filter_args}"
 	fi
-	# Ensure machine-readable + HTML reporters for parse/upload (additive).
-	full_command="${full_command} --reporter=html --reporter=json"
+	# Exactly one --reporter flag: Playwright keeps only the last one, so two
+	# flags dropped the HTML report while the run stayed green (#804).
+	full_command="${full_command} --reporter=${reporters}"
 
 	log_info "Running Playwright: ${full_command}"
 
@@ -211,15 +275,26 @@ run)
 	# script trips `set -u` inside user commands, which are not coverage targets.
 	env -u BASH_ENV bash -euo pipefail -c "$full_command" || exit_code=$?
 
-	set_github_output "exit-code" "$exit_code"
 	if [[ -f "playwright-results.json" ]]; then
 		set_github_output "report-path" "playwright-results.json"
 		set_github_output "json-report-path" "playwright-results.json"
 	fi
-	if [[ -d "playwright-report" ]]; then
-		set_github_output "html-report-path" "playwright-report"
+	if reporters_include "$reporters" junit && [[ -f "playwright-results.xml" ]]; then
+		set_github_output "junit-report-path" "playwright-results.xml"
 	fi
 
+	# The HTML report is the artifact this workflow promises: its absence is a
+	# failure of the run, not a warning, even when every test passed (#804).
+	if [[ -d "$PLAYWRIGHT_HTML_OUTPUT_DIR" ]]; then
+		set_github_output "html-report-path" "$PLAYWRIGHT_HTML_OUTPUT_DIR"
+	else
+		echo "::error title=Playwright HTML report missing::expected ${PLAYWRIGHT_HTML_OUTPUT_DIR}/ after '${full_command}' (exit ${exit_code}); the html reporter did not run or wrote elsewhere" >&2
+		if [[ "$exit_code" -eq 0 ]]; then
+			exit_code=1
+		fi
+	fi
+
+	set_github_output "exit-code" "$exit_code"
 	exit "$exit_code"
 	;;
 
@@ -238,12 +313,15 @@ parse)
 	fi
 
 	if [[ -f "$json_file" ]]; then
-		parse_playwright_json "$json_file"
+		if parse_playwright_json "$json_file"; then
+			log_info "Test results: $(format_test_summary)"
+		else
+			log_warn "Results file is not valid JSON; reporting zero tests: $json_file"
+		fi
 		set_github_output "tests-passed" "$TESTS_PASSED"
 		set_github_output "tests-failed" "$TESTS_FAILED"
 		set_github_output "tests-skipped" "$TESTS_SKIPPED"
 		set_github_output "tests-total" "$TESTS_TOTAL"
-		log_info "Test results: $(format_test_summary)"
 	else
 		log_warn "Results file not found: $json_file"
 		set_github_output "tests-passed" "0"
@@ -295,19 +373,32 @@ summary)
 
 upload-gate)
 	: "${UPLOAD_REPORT:=false}"
+	: "${UPLOAD_REPORT_WHEN:=failure}"
 	: "${EXIT_CODE:=0}"
 
 	upload_report="$(trim "$UPLOAD_REPORT")"
+	upload_when="$(trim "$UPLOAD_REPORT_WHEN")"
 	exit_code="$(trim "$EXIT_CODE")"
 	: "${exit_code:=0}"
+	: "${upload_when:=failure}"
+
+	case "$upload_when" in
+	failure | always) ;;
+	*)
+		echo "::error title=upload-report-when::expected failure or always, got '${upload_when}'" >&2
+		exit 1
+		;;
+	esac
 
 	should_upload="false"
-	if [[ "$upload_report" == "true" && "$exit_code" != "0" ]]; then
-		should_upload="true"
+	if [[ "$upload_report" == "true" ]]; then
+		if [[ "$upload_when" == "always" || "$exit_code" != "0" ]]; then
+			should_upload="true"
+		fi
 	fi
 
 	set_github_output "should-upload" "$should_upload"
-	log_info "Report upload gate: should-upload=${should_upload} (upload-report=${upload_report}, exit-code=${exit_code})"
+	log_info "Report upload gate: should-upload=${should_upload} (upload-report=${upload_report}, upload-report-when=${upload_when}, exit-code=${exit_code})"
 	;;
 
 *)

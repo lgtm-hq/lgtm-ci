@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `reusable-test-e2e-playwright.yml`: `reporters` input (default
+  `list,json,junit,html`, must keep `json` and `html`) and
+  `upload-report-when` input (`failure` default, `always` to upload the report
+  on green runs). The JUnit file `playwright-results.xml` joins the report
+  artifact. `parse_playwright_json` now also sets `TESTS_DURATION_MS` and
+  returns 2 for a report that is not valid JSON (#804).
+
 ### Changed
 
 - Node runners (`run-vitest`, `run-playwright`, `run-lighthouse`) dispatch on
@@ -24,6 +31,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Removed
 
 ### Fixed
+
+- Playwright: `reusable-test-e2e-playwright.yml` and the `run-playwright`
+  composite (`reporter: html`) emitted two `--reporter` flags; Playwright keeps
+  only the last one, so the HTML report was never written while the job stayed
+  green. Both now emit exactly one combined flag, pin the output locations
+  through `PLAYWRIGHT_*_OUTPUT_*`, and fail the run when `playwright-report/`
+  is missing afterwards. `parse_playwright_json` rounds Playwright's fractional
+  `stats.duration` half-up to integer milliseconds before any Bash arithmetic,
+  removing the `invalid arithmetic operator` noise from every run. Fixtures for
+  JSON, JUnit, HTML+sidecar, fractional, empty, malformed, sharded and merged
+  reports live under `tests/fixtures/playwright/reports/` (#804).
 
 ### Security
 

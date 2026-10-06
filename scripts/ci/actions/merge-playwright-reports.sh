@@ -112,7 +112,9 @@ merge)
 
 		while IFS= read -r file; do
 			if [[ -f "$file" ]]; then
-				parse_playwright_json "$file"
+				# A malformed shard report (rc 2) contributes zero counts; keep
+				# merging the others rather than aborting under set -e.
+				parse_playwright_json "$file" || log_warn "Unparseable Playwright report skipped: $file"
 				total_passed=$((total_passed + TESTS_PASSED))
 				total_failed=$((total_failed + TESTS_FAILED))
 				total_skipped=$((total_skipped + TESTS_SKIPPED))
@@ -155,7 +157,7 @@ parse-merged)
 
 	if [[ -n "$json_file" ]] && [[ -f "$json_file" ]]; then
 		log_info "Parsing merged results from: $json_file"
-		parse_playwright_json "$json_file"
+		parse_playwright_json "$json_file" || log_warn "Merged results are not valid JSON; reporting zero tests: $json_file"
 		set_github_output "total-passed" "$TESTS_PASSED"
 		set_github_output "total-failed" "$TESTS_FAILED"
 		set_github_output "total-skipped" "$TESTS_SKIPPED"

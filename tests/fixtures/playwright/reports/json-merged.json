@@ -1,0 +1,372 @@
+{
+  "config": {
+    "argv": [],
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 2
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/work/consumer/test-results",
+        "repeatEach": 1,
+        "retries": 1,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "chromium",
+        "testDir": "/work/consumer/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      },
+      {
+        "outputDir": "/work/consumer/test-results",
+        "repeatEach": 1,
+        "retries": 1,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "name": "chromium",
+        "testDir": "/work/consumer/tests",
+        "testIgnore": [],
+        "testMatch": [
+          "**/*.@(spec|test).?(c|m)[jt]s?(x)"
+        ],
+        "timeout": 30000
+      }
+    ],
+    "reporter": [
+      [
+        "dot"
+      ]
+    ],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "rootDir": "/work/consumer/tests",
+    "quiet": false,
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.63.0",
+    "workers": 10,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "failing.spec.js",
+      "file": "failing.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [
+        {
+          "title": "fails on purpose",
+          "ok": false,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 0,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 416,
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator: getByRole('heading')\nExpected: \"missing\"\nTimeout: 200ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveText\" getByRole('heading') with timeout 200ms\n  - waiting for getByRole('heading')\n",
+                    "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator: getByRole('heading')\nExpected: \"missing\"\nTimeout: 200ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveText\" getByRole('heading') with timeout 200ms\n  - waiting for getByRole('heading')\n\n    at /work/consumer/tests/failing.spec.js:5:43",
+                    "location": {
+                      "file": "/work/consumer/tests/failing.spec.js",
+                      "column": 43,
+                      "line": 5
+                    },
+                    "snippet": "  3 | test(\"fails on purpose\", async ({ page }) => {\n  4 |   await page.setContent(\"<p>fixture</p>\");\n> 5 |   await expect(page.getByRole(\"heading\")).toHaveText(\"missing\", { timeout: 200 });\n    |                                           ^\n  6 | });\n  7 |\n  8 | test(\"flaky on purpose\", async ({}, testInfo) => {"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/work/consumer/tests/failing.spec.js",
+                        "column": 43,
+                        "line": 5
+                      },
+                      "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator: getByRole('heading')\nExpected: \"missing\"\nTimeout: 200ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveText\" getByRole('heading') with timeout 200ms\n  - waiting for getByRole('heading')\n\n\n  3 | test(\"fails on purpose\", async ({ page }) => {\n  4 |   await page.setContent(\"<p>fixture</p>\");\n> 5 |   await expect(page.getByRole(\"heading\")).toHaveText(\"missing\", { timeout: 200 });\n    |                                           ^\n  6 | });\n  7 |\n  8 | test(\"flaky on purpose\", async ({}, testInfo) => {\n    at /work/consumer/tests/failing.spec.js:5:43"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-06T14:51:00.750Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/work/consumer/out/blob-merge/resources/74a4b762707ae7ae4f2a59d7415619f65f99a0f3.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/work/consumer/tests/failing.spec.js",
+                    "column": 43,
+                    "line": 5
+                  }
+                },
+                {
+                  "workerIndex": 1,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 266,
+                  "error": {
+                    "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator: getByRole('heading')\nExpected: \"missing\"\nTimeout: 200ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveText\" getByRole('heading') with timeout 200ms\n  - waiting for getByRole('heading')\n",
+                    "stack": "Error: expect(locator).toHaveText(expected) failed\n\nLocator: getByRole('heading')\nExpected: \"missing\"\nTimeout: 200ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveText\" getByRole('heading') with timeout 200ms\n  - waiting for getByRole('heading')\n\n    at /work/consumer/tests/failing.spec.js:5:43",
+                    "location": {
+                      "file": "/work/consumer/tests/failing.spec.js",
+                      "column": 43,
+                      "line": 5
+                    },
+                    "snippet": "  3 | test(\"fails on purpose\", async ({ page }) => {\n  4 |   await page.setContent(\"<p>fixture</p>\");\n> 5 |   await expect(page.getByRole(\"heading\")).toHaveText(\"missing\", { timeout: 200 });\n    |                                           ^\n  6 | });\n  7 |\n  8 | test(\"flaky on purpose\", async ({}, testInfo) => {"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/work/consumer/tests/failing.spec.js",
+                        "column": 43,
+                        "line": 5
+                      },
+                      "message": "Error: expect(locator).toHaveText(expected) failed\n\nLocator: getByRole('heading')\nExpected: \"missing\"\nTimeout: 200ms\nError: element(s) not found\n\nCall log:\n  - Expect \"toHaveText\" getByRole('heading') with timeout 200ms\n  - waiting for getByRole('heading')\n\n\n  3 | test(\"fails on purpose\", async ({ page }) => {\n  4 |   await page.setContent(\"<p>fixture</p>\");\n> 5 |   await expect(page.getByRole(\"heading\")).toHaveText(\"missing\", { timeout: 200 });\n    |                                           ^\n  6 | });\n  7 |\n  8 | test(\"flaky on purpose\", async ({}, testInfo) => {\n    at /work/consumer/tests/failing.spec.js:5:43"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "2026-10-06T14:51:01.741Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/work/consumer/out/blob-merge/resources/022a469f17046f5d1ef438892ec53d3b2a51d2db.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/work/consumer/tests/failing.spec.js",
+                    "column": 43,
+                    "line": 5
+                  }
+                }
+              ],
+              "status": "unexpected"
+            }
+          ],
+          "id": "19b57b174e83ab22c314-13d31cef2c5c2a7c345f",
+          "file": "failing.spec.js",
+          "line": 3,
+          "column": 5
+        },
+        {
+          "title": "flaky on purpose",
+          "ok": true,
+          "tags": [],
+          "tests": [
+            {
+              "timeout": 30000,
+              "annotations": [],
+              "expectedStatus": "passed",
+              "projectName": "chromium",
+              "results": [
+                {
+                  "workerIndex": 2,
+                  "parallelIndex": 0,
+                  "status": "failed",
+                  "duration": 3,
+                  "error": {
+                    "message": "Error: fails on the first attempt, passes on retry\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: 1\nReceived: 0",
+                    "stack": "Error: fails on the first attempt, passes on retry\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: 1\nReceived: 0\n    at /work/consumer/tests/failing.spec.js:9:73",
+                    "location": {
+                      "file": "/work/consumer/tests/failing.spec.js",
+                      "column": 73,
+                      "line": 9
+                    },
+                    "snippet": "   7 |\n   8 | test(\"flaky on purpose\", async ({}, testInfo) => {\n>  9 |   expect(testInfo.retry, \"fails on the first attempt, passes on retry\").toBe(1);\n     |                                                                         ^\n  10 | });\n  11 |"
+                  },
+                  "errors": [
+                    {
+                      "location": {
+                        "file": "/work/consumer/tests/failing.spec.js",
+                        "column": 73,
+                        "line": 9
+                      },
+                      "message": "Error: fails on the first attempt, passes on retry\n\nexpect(received).toBe(expected) // Object.is equality\n\nExpected: 1\nReceived: 0\n\n   7 |\n   8 | test(\"flaky on purpose\", async ({}, testInfo) => {\n>  9 |   expect(testInfo.retry, \"fails on the first attempt, passes on retry\").toBe(1);\n     |                                                                         ^\n  10 | });\n  11 |\n    at /work/consumer/tests/failing.spec.js:9:73"
+                    }
+                  ],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 0,
+                  "startTime": "2026-10-06T14:51:02.458Z",
+                  "annotations": [],
+                  "attachments": [
+                    {
+                      "name": "error-context",
+                      "contentType": "text/markdown",
+                      "path": "/work/consumer/out/blob-merge/resources/8ba12087054a0409d0eb92f368d9bbb8e1199db2.md"
+                    }
+                  ],
+                  "errorLocation": {
+                    "file": "/work/consumer/tests/failing.spec.js",
+                    "column": 73,
+                    "line": 9
+                  }
+                },
+                {
+                  "workerIndex": 3,
+                  "parallelIndex": 0,
+                  "status": "passed",
+                  "duration": 2,
+                  "errors": [],
+                  "stdout": [],
+                  "stderr": [],
+                  "retry": 1,
+                  "startTime": "2026-10-06T14:51:02.777Z",
+                  "annotations": [],
+                  "attachments": []
+                }
+              ],
+              "status": "flaky"
+            }
+          ],
+          "id": "19b57b174e83ab22c314-970d6abe8388a6e0b063",
+          "file": "failing.spec.js",
+          "line": 8,
+          "column": 5
+        }
+      ]
+    },
+    {
+      "title": "smoke.spec.js",
+      "file": "smoke.spec.js",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "smoke",
+          "file": "smoke.spec.js",
+          "line": 3,
+          "column": 6,
+          "specs": [
+            {
+              "title": "renders inline content",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 74,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-06T14:51:03.504Z",
+                      "annotations": [],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "2c14808d47b386fba9eb-b55783e1e2280e06308d",
+              "file": "smoke.spec.js",
+              "line": 4,
+              "column": 7
+            },
+            {
+              "title": "skipped on purpose",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 30000,
+                  "annotations": [
+                    {
+                      "type": "skip",
+                      "description": "fixture: exercises the skipped status",
+                      "location": {
+                        "file": "/work/consumer/tests/smoke.spec.js",
+                        "line": 10,
+                        "column": 10
+                      }
+                    }
+                  ],
+                  "expectedStatus": "skipped",
+                  "projectName": "chromium",
+                  "results": [
+                    {
+                      "workerIndex": 4,
+                      "parallelIndex": 0,
+                      "status": "skipped",
+                      "duration": 0,
+                      "errors": [],
+                      "stdout": [],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-06T14:51:03.711Z",
+                      "annotations": [
+                        {
+                          "type": "skip",
+                          "description": "fixture: exercises the skipped status",
+                          "location": {
+                            "file": "/work/consumer/tests/smoke.spec.js",
+                            "line": 10,
+                            "column": 10
+                          }
+                        }
+                      ],
+                      "attachments": []
+                    }
+                  ],
+                  "status": "skipped"
+                }
+              ],
+              "id": "2c14808d47b386fba9eb-f277862cdaec6c3d279b",
+              "file": "smoke.spec.js",
+              "line": 9,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-06T14:51:00.434Z",
+    "duration": 3316.22509765625,
+    "expected": 1,
+    "skipped": 1,
+    "unexpected": 1,
+    "flaky": 1
+  }
+}

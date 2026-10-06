@@ -105,6 +105,69 @@ EOF
 	assert_equal "$(_calls bun)" "x --no-install playwright test --project=desktop --reporter=json"
 }
 
+@test "run-playwright run npm REPORTER=html: one combined reporter flag, missing report dir fails a green run" {
+	# The recording npx mock exits 0 without writing playwright-report/.
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=html WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_failure 1
+	assert_equal "$(_calls npx)" "--no-install playwright test --project=chromium --reporter=html,json"
+	assert_output --partial "::error title=Playwright HTML report missing::"
+	assert_equal "$(_github_output_value exit-code)" "1"
+	run grep '^report-path=' "$GITHUB_OUTPUT"
+	assert_failure
+}
+
+@test "run-playwright run npm REPORTER=html: report dir present passes and is the report-path" {
+	cat >"${BATS_TEST_TMPDIR}/bin/npx" <<'EOF'
+#!/usr/bin/env bash
+echo "$@" >> "${MOCK_CALLS}"
+mkdir -p playwright-report && echo '<html></html>' > playwright-report/index.html
+echo '{"stats":{"expected":1,"unexpected":0,"flaky":0,"skipped":0,"duration":10.4}}' > "${PLAYWRIGHT_JSON_OUTPUT_NAME:?}"
+[[ "${PLAYWRIGHT_HTML_OPEN:-}" == "never" ]] || { echo "PLAYWRIGHT_HTML_OPEN not pinned" >&2; exit 9; }
+exit 0
+EOF
+	export MOCK_CALLS="${BATS_TEST_TMPDIR}/mock_calls_npx"
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=html WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_success
+	refute_output --partial "HTML report missing"
+	assert_equal "$(_github_output_value exit-code)" "0"
+	assert_equal "$(_github_output_value report-path)" "playwright-report"
+	assert_equal "$(_github_output_value json-report-path)" "playwright-results.json"
+}
+
+@test "run-playwright run REPORTER=html: a failing run with no report keeps Playwright's exit code" {
+	mock_command_record npx "" 1
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=html WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	assert_failure 1
+	assert_output --partial "Playwright HTML report missing"
+	assert_equal "$(_github_output_value exit-code)" "1"
+}
+
+@test "run-playwright parse REPORTER=json: malformed report warns and reports zero tests" {
+	run env STEP=parse REPORTER=json REPORT_PATH="${FIXTURES_DIR}/playwright/reports/json-malformed.json" bash "$SCRIPT"
+	assert_success
+	assert_output --partial "Results file is not valid JSON"
+	assert_equal "$(_github_output_value tests-total)" "0"
+}
+
+@test "run-playwright parse REPORTER=html: reads the JSON sidecar next to the report" {
+	cp -R "${FIXTURES_DIR}/playwright/reports/html-sidecar/." "$WORK_DIR/"
+	cd "$WORK_DIR"
+	run env STEP=parse REPORTER=html REPORT_PATH="playwright-report" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value tests-passed)" "1"
+	assert_equal "$(_github_output_value tests-skipped)" "1"
+	assert_equal "$(_github_output_value tests-total)" "2"
+}
+
+@test "run-playwright parse REPORTER=junit: reads Playwright's junit reporter output" {
+	run env STEP=parse REPORTER=junit REPORT_PATH="${FIXTURES_DIR}/playwright/reports/junit-mixed.xml" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(_github_output_value tests-passed)" "2"
+	assert_equal "$(_github_output_value tests-failed)" "1"
+	assert_equal "$(_github_output_value tests-skipped)" "1"
+	assert_equal "$(_github_output_value tests-total)" "4"
+}
+
 @test "run-playwright run: empty PACKAGE_MANAGER fails before running anything" {
 	run env STEP=run PACKAGE_MANAGER="" WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_failure 2

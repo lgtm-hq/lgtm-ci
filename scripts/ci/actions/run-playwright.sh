@@ -90,9 +90,13 @@ run)
 		export PLAYWRIGHT_JSON_OUTPUT_NAME="playwright-results.json"
 		;;
 	html)
-		# HTML reporter with JSON sidecar for machine-readable metrics
-		PLAYWRIGHT_ARGS+=("--reporter=html" "--reporter=json")
+		# HTML reporter with JSON sidecar for machine-readable metrics. One
+		# combined flag: Playwright keeps only the last --reporter, so two
+		# flags silently dropped the HTML report (#804).
+		PLAYWRIGHT_ARGS+=("--reporter=html,json")
 		export PLAYWRIGHT_JSON_OUTPUT_NAME="playwright-results.json"
+		export PLAYWRIGHT_HTML_OUTPUT_DIR="playwright-report"
+		export PLAYWRIGHT_HTML_OPEN="never"
 		;;
 	junit)
 		PLAYWRIGHT_ARGS+=("--reporter=junit")
@@ -120,9 +124,6 @@ run)
 	exit_code=0
 	pm_exec playwright "${PLAYWRIGHT_ARGS[@]}" || exit_code=$?
 
-	# Set outputs
-	set_github_output "exit-code" "$exit_code"
-
 	case "$REPORTER" in
 	json)
 		if [[ -f "playwright-results.json" ]]; then
@@ -130,8 +131,15 @@ run)
 		fi
 		;;
 	html)
+		# The HTML report is what reporter=html promises (the action uploads
+		# it): its absence fails the run even when every test passed (#804).
 		if [[ -d "playwright-report" ]]; then
 			set_github_output "report-path" "playwright-report"
+		else
+			echo "::error title=Playwright HTML report missing::expected playwright-report/ after playwright ${PLAYWRIGHT_ARGS[*]} (exit ${exit_code})" >&2
+			if [[ "$exit_code" -eq 0 ]]; then
+				exit_code=1
+			fi
 		fi
 		# Also output JSON sidecar path for parsing
 		if [[ -f "playwright-results.json" ]]; then
@@ -144,6 +152,9 @@ run)
 		fi
 		;;
 	esac
+
+	# Set outputs (after the report checks, which may raise the code)
+	set_github_output "exit-code" "$exit_code"
 
 	exit "$exit_code"
 	;;
@@ -163,14 +174,16 @@ parse)
 		fi
 
 		if [[ -f "$json_file" ]]; then
-			parse_playwright_json "$json_file"
+			if parse_playwright_json "$json_file"; then
+				log_info "Test results: $(format_test_summary)"
+			else
+				log_warn "Results file is not valid JSON; reporting zero tests: $json_file"
+			fi
 
 			set_github_output "tests-passed" "$TESTS_PASSED"
 			set_github_output "tests-failed" "$TESTS_FAILED"
 			set_github_output "tests-skipped" "$TESTS_SKIPPED"
 			set_github_output "tests-total" "$TESTS_TOTAL"
-
-			log_info "Test results: $(format_test_summary)"
 		else
 			log_warn "Results file not found: $json_file"
 			set_github_output "tests-passed" "0"

@@ -1,0 +1,26 @@
+{
+  "config": {
+    "argv": [
+      "/usr/bin/node",
+      "/work/consumer/node_modules/.bin/playwright",
+      "test",
+      "--reporter=json,junit,html"
+    ],
+    "configFile": "/work/consumer/playwright.config.js",
+    "rootDir": "/work/consumer/tests",
+    "failOnFlakyTests": false,
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": null,
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 2
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "ou

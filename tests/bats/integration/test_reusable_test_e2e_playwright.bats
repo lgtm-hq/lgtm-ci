@@ -118,3 +118,55 @@ _tooling_sparse_cone_ok() {
 	' "$WORKFLOW"
 	assert_success
 }
+
+# -----------------------------------------------------------------------------
+# Reporter contract (#804)
+# -----------------------------------------------------------------------------
+
+@test "reusable-test-e2e-playwright: reporters input defaults to one list,json,junit,html set" {
+	run awk '
+		/^      reporters:/ { in_input = 1 }
+		in_input && /^      [a-zA-Z0-9_-]+:/ && !/^      reporters:/ { in_input = 0 }
+		in_input && /default: "list,json,junit,html"/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-e2e-playwright: run step receives REPORTERS from the reporters input" {
+	run awk '
+		/Run Playwright/ { in_step = 1 }
+		in_step && /REPORTERS: \$\{\{ inputs\.reporters \}\}/ { found = 1 }
+		in_step && /Parse results/ { in_step = 0 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-e2e-playwright: no literal --reporter flag is assembled in the workflow" {
+	# Reporter selection lives in run-playwright-tests.sh (one flag); the
+	# workflow must not append a second one.
+	run grep -E -- '--reporter=' "$WORKFLOW"
+	assert_failure
+}
+
+@test "reusable-test-e2e-playwright: upload-report-when defaults to failure and reaches the gate" {
+	run awk '
+		/^      upload-report-when:/ { in_input = 1 }
+		in_input && /^      [a-zA-Z0-9_-]+:/ && !/^      upload-report-when:/ { in_input = 0 }
+		in_input && /default: "failure"/ { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
+	assert_success
+	run grep -F 'UPLOAD_REPORT_WHEN: ${{ inputs.upload-report-when }}' "$WORKFLOW"
+	assert_success
+}
+
+@test "reusable-test-e2e-playwright: report artifact includes HTML, JSON and JUnit outputs" {
+	run grep -F '${{ inputs.working-directory }}/playwright-report/' "$WORKFLOW"
+	assert_success
+	run grep -F '${{ inputs.working-directory }}/playwright-results.json' "$WORKFLOW"
+	assert_success
+	run grep -F '${{ inputs.working-directory }}/playwright-results.xml' "$WORKFLOW"
+	assert_success
+}

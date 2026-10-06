@@ -181,6 +181,19 @@ teardown() {
 	assert_output "passed=7 failed=2 skipped=1 total=10"
 }
 
+@test "parse_junit_xml: parses Playwright's junit reporter output" {
+	install_fixture "playwright/reports/junit-mixed.xml" "${BATS_TEST_TMPDIR}/junit.xml"
+
+	run bash -c "
+		source \"\$LIB_DIR/testing/parse/junit.sh\"
+		parse_junit_xml \"${BATS_TEST_TMPDIR}/junit.xml\"
+		echo \"passed=\$TESTS_PASSED failed=\$TESTS_FAILED skipped=\$TESTS_SKIPPED total=\$TESTS_TOTAL errors=\$TESTS_ERRORS\"
+	"
+	assert_success
+	# Playwright's JUnit reporter counts the flaky test as passed (#804 fixtures).
+	assert_output "passed=2 failed=1 skipped=1 total=4 errors=0"
+}
+
 # =============================================================================
 # Function export tests
 # =============================================================================
