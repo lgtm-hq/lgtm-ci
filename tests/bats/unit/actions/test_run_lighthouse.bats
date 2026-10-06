@@ -109,6 +109,33 @@ EOF
 	assert_equal "$(grep '^results-path=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "${WORK_DIR}/out/localhost-_-2026_10_06.report.json"
 }
 
+@test "run-lighthouse run: ignores a stale report left in OUTPUT_DIR by an earlier audit" {
+	mkdir -p "${WORK_DIR}/out"
+	echo '{"categories":{"performance":{"score":1}}}' >"${WORK_DIR}/out/aaa-old.report.json"
+	touch -t 202001010000 "${WORK_DIR}/out/aaa-old.report.json"
+	cat >"${BATS_TEST_TMPDIR}/bin/lhci" <<'EOF'
+#!/usr/bin/env bash
+out=""
+for a in "$@"; do case "$a" in --upload.outputDir=*) out="${a#--upload.outputDir=}" ;; esac; done
+echo '{"categories":{"performance":{"score":0.2}}}' > "$out/zzz-new.report.json"
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/lhci"
+	run env STEP=run PACKAGE_MANAGER=npm URL=http://localhost:3000 OUTPUT_DIR="${WORK_DIR}/out" bash "$SCRIPT"
+	assert_success
+	assert_equal "$(grep '^results-path=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "${WORK_DIR}/out/zzz-new.report.json"
+}
+
+@test "run-lighthouse run: no report written after the audit yields an empty results-path" {
+	mkdir -p "${WORK_DIR}/out"
+	echo '{}' >"${WORK_DIR}/out/stale.report.json"
+	touch -t 202001010000 "${WORK_DIR}/out/stale.report.json"
+	mock_command_record lhci
+	run env STEP=run PACKAGE_MANAGER=npm URL=http://localhost:3000 OUTPUT_DIR="${WORK_DIR}/out" bash "$SCRIPT"
+	assert_success
+	run grep '^results-path=' "$GITHUB_OUTPUT"
+	assert_failure
+}
+
 @test "run-lighthouse parse: resolves a *.report.json under OUTPUT_DIR and scores it" {
 	mkdir -p "${WORK_DIR}/out"
 	echo '{"categories":{"performance":{"score":0.91},"accessibility":{"score":1},"best-practices":{"score":0.8},"seo":{"score":0.7}}}' \

@@ -44,13 +44,24 @@ run_lhci() {
 	fi
 }
 
-# First Lighthouse report (LHR JSON) under a filesystem-upload directory.
+# Newest Lighthouse report (LHR JSON) under a filesystem-upload directory.
 # `lhci autorun --upload.target=filesystem` writes `<slug>.report.json` next to
-# a manifest.json; older layouts used `lhr-*.json`. Both are accepted.
+# a manifest.json; older layouts used `lhr-*.json`. Both are accepted. With a
+# marker file as the second argument only reports written after it count, so
+# a report left over from an earlier audit in the same directory is never
+# mistaken for this run's result.
 find_lighthouse_report() {
-	local dir="$1"
-	find "$dir" -type f \( -name "*.report.json" -o -name "lhr-*.json" \) 2>/dev/null |
-		sort | head -1 || true
+	local dir="$1" marker="${2:-}" newest="" f
+	local -a find_args=("$dir" -type f \( -name "*.report.json" -o -name "lhr-*.json" \))
+	if [[ -n "$marker" ]]; then
+		find_args+=(-newer "$marker")
+	fi
+	while IFS= read -r f; do
+		if [[ -z "$newest" || "$f" -nt "$newest" ]]; then
+			newest="$f"
+		fi
+	done < <(find "${find_args[@]}" 2>/dev/null | sort)
+	printf '%s\n' "$newest"
 }
 
 case "$STEP" in
@@ -75,6 +86,9 @@ run)
 	pm_require >/dev/null || exit $?
 
 	mkdir -p "$OUTPUT_DIR"
+
+	# Anything in OUTPUT_DIR older than this marker predates the audit.
+	run_marker=$(mktemp "${TMPDIR:-/tmp}/lhci-run-marker.XXXXXX")
 
 	# Build LHCI command
 	LHCI_ARGS=()
@@ -113,7 +127,7 @@ run)
 
 	# Find the results file
 	if [[ -d "$OUTPUT_DIR" ]]; then
-		results_file=$(find_lighthouse_report "$OUTPUT_DIR")
+		results_file=$(find_lighthouse_report "$OUTPUT_DIR" "$run_marker")
 		if [[ -n "$results_file" ]]; then
 			set_github_output "results-path" "$results_file"
 		fi
