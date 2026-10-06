@@ -117,6 +117,7 @@ EOF
 
 @test "merge_lcov_files: awk fallback rejects branch/function records" {
 	local file1="${BATS_TEST_TMPDIR}/a.lcov"
+	local file2="${BATS_TEST_TMPDIR}/b.lcov"
 	local outfile="${BATS_TEST_TMPDIR}/merged.lcov"
 	cat >"$file1" <<'EOF'
 TN:
@@ -128,11 +129,14 @@ LF:1
 LH:1
 end_of_record
 EOF
+	# A single file is passed through untouched (#1078); the fallback only
+	# runs for an actual merge of two or more files
+	cp "$file1" "$file2"
 
 	run bash -c "
 		$(stub_hide_lcov)
 		source \"\$LIB_DIR/testing/coverage/merge.sh\"
-		merge_lcov_files \"$outfile\" \"$file1\" 2>&1
+		merge_lcov_files \"$outfile\" \"$file1\" \"$file2\" 2>&1
 	"
 	assert_failure
 	assert_output --partial "branch/function coverage records"
@@ -260,6 +264,58 @@ EOF
 
 	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && convert_coverage \"$input\" \"${BATS_TEST_TMPDIR}/output\" \"unknown\" \"unknown2\""
 	assert_failure
+}
+
+@test "convert_coverage: istanbul to json is a copy" {
+	local input="${BATS_TEST_TMPDIR}/coverage-final.json"
+	local outfile="${BATS_TEST_TMPDIR}/output.json"
+	echo '{"/src/a.js": {"path": "/src/a.js", "statementMap": {}, "s": {}}}' >"$input"
+
+	run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && convert_coverage \"$input\" \"$outfile\" \"istanbul\" \"json\""
+	assert_success
+	run diff "$input" "$outfile"
+	assert_success
+}
+
+# =============================================================================
+# coverage_conversion_supported tests (#1078)
+# =============================================================================
+
+@test "coverage_conversion_supported: same format is supported" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/merge.sh" && coverage_conversion_supported lcov lcov'
+	assert_success
+}
+
+@test "coverage_conversion_supported: implemented pairs are supported regardless of installed tools" {
+	for pair in "cobertura lcov" "istanbul lcov" "coverage-py lcov" "lcov cobertura" "istanbul json"; do
+		# shellcheck disable=SC2086 # pair is intentionally split into two args
+		run bash -c "source \"\$LIB_DIR/testing/coverage/merge.sh\" && coverage_conversion_supported $pair"
+		assert_success
+	done
+}
+
+@test "coverage_conversion_supported: lcov to json is not implemented" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/merge.sh" && coverage_conversion_supported lcov json'
+	assert_failure
+}
+
+@test "coverage_conversion_supported: json to lcov is not implemented" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/merge.sh" && coverage_conversion_supported json lcov'
+	assert_failure
+}
+
+@test "merge.sh: exports coverage_conversion_supported function" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/merge.sh" && bash -c "type coverage_conversion_supported"'
+	assert_success
+}
+
+@test "merge_lcov_files: single full LCOV file is copied without lcov" {
+	local outfile="${BATS_TEST_TMPDIR}/merged.lcov"
+
+	run bash -c "$(stub_hide_lcov); source \"\$LIB_DIR/testing/coverage/merge.sh\" && merge_lcov_files \"$outfile\" \"\$FIXTURES_DIR/coverage/lcov-full.info\""
+	assert_success
+	run diff "${FIXTURES_DIR}/coverage/lcov-full.info" "$outfile"
+	assert_success
 }
 
 @test "convert_coverage: auto-detects format" {

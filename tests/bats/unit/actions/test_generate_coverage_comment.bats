@@ -138,6 +138,61 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "Statements.*0%"
 }
 
+@test "generate-coverage-comment: line-only lcov renders branches and functions as n/a and skips their thresholds" {
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="${FIXTURES_DIR}/coverage/lcov-line-only.info" \
+		FORMAT="lcov" \
+		THRESHOLD_LINES="40" \
+		THRESHOLD_BRANCHES="70" \
+		THRESHOLD_FUNCTIONS="80" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "^lines=50$"
+	assert_file_contains "$GITHUB_OUTPUT" "^branches=n/a$"
+	assert_file_contains "$GITHUB_OUTPUT" "^functions=n/a$"
+	assert_file_contains "$GITHUB_OUTPUT" "^statements=50$"
+	# Unmeasured metrics neither fail nor pass their thresholds
+	assert_file_contains "$GITHUB_OUTPUT" "^passed=true$"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Branches** | n/a | 70% |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Functions** | n/a | 80% |"
+	assert_file_contains_literal "$GITHUB_OUTPUT" "| **Statements** | 50% | - |"
+	run grep -c "n/a%" "$GITHUB_OUTPUT"
+	assert_output "0"
+	# The passing status names only the threshold that was checked
+	assert_file_contains_literal "$GITHUB_OUTPUT" "Target met (lines >= 40%)"
+	run grep -c "branches >= 70%" "$GITHUB_OUTPUT"
+	assert_output "0"
+}
+
+@test "generate-coverage-comment: line-only lcov still fails on the lines threshold" {
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="${FIXTURES_DIR}/coverage/lcov-line-only.info" \
+		FORMAT="lcov" \
+		THRESHOLD_LINES="80" \
+		THRESHOLD_BRANCHES="0" \
+		THRESHOLD_FUNCTIONS="0" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "^passed=false$"
+}
+
+@test "generate-coverage-comment: json format is detected like auto" {
+	run env \
+		GITHUB_OUTPUT="$GITHUB_OUTPUT" \
+		COVERAGE_FILE="${FIXTURES_DIR}/coverage/coverage.json" \
+		FORMAT="json" \
+		THRESHOLD_LINES="50" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/generate-coverage-comment.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "^lines=80$"
+	assert_file_contains "$GITHUB_OUTPUT" "^passed=true$"
+}
+
 @test "generate-coverage-comment: fails lcov thresholds when metrics are below minimums" {
 	local coverage_file="${BATS_TEST_TMPDIR}/rust-coverage.lcov"
 	write_lcov_fixture "$coverage_file"

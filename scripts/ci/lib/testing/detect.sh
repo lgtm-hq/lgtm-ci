@@ -101,6 +101,13 @@ detect_all_runners() {
 # Coverage format detection
 # =============================================================================
 
+# Internal: does any of the first N lines match an ERE? One awk process, so
+# a huge line cannot SIGPIPE a head|grep pipeline under pipefail (#1078).
+# Usage: _head_matches "file" 20 'regex'
+_head_matches() {
+	awk -v max="$2" -v re="$3" 'NR > max { exit } $0 ~ re { found = 1; exit } END { exit !found }' "$1" 2>/dev/null
+}
+
 # Detect coverage format from file extension or content
 # Usage: detect_coverage_format "coverage.xml"
 # Output: cobertura|clover|xml|coverage-py|istanbul|json|lcov|html|unknown
@@ -125,9 +132,9 @@ detect_coverage_format() {
 	xml)
 		# Determine if cobertura or clover format
 		# Use grep -E with POSIX alternation for portability (BSD/macOS)
-		if head -20 "$file" | grep -qE '<coverage.*line-rate|<coverage.*lines-valid|<package.*name='; then
+		if _head_matches "$file" 20 '<coverage.*line-rate|<coverage.*lines-valid|<package.*name='; then
 			echo "cobertura"
-		elif head -20 "$file" | grep -qE '<coverage.*clover'; then
+		elif _head_matches "$file" 20 '<coverage.*clover'; then
 			echo "clover"
 		else
 			echo "xml"
@@ -137,9 +144,9 @@ detect_coverage_format() {
 	json)
 		# Determine if istanbul or coverage.py format
 		# Use grep -E with POSIX character classes for portability (BSD/macOS)
-		if head -5 "$file" | grep -qE '"meta"[[:space:]]*:[[:space:]]*\{.*"version"'; then
+		if _head_matches "$file" 5 '"meta"[[:space:]]*:[[:space:]]*\\{.*"version"'; then
 			echo "coverage-py"
-		elif head -20 "$file" | grep -qE '"path"[[:space:]]*:[[:space:]]*"|"statementMap"[[:space:]]*:'; then
+		elif _head_matches "$file" 20 '"path"[[:space:]]*:[[:space:]]*"|"statementMap"[[:space:]]*:'; then
 			echo "istanbul"
 		else
 			echo "json"
@@ -183,6 +190,86 @@ detect_coverage_format() {
 
 	echo "unknown"
 	return 1
+}
+
+# Check whether a file is a coverage.py data file (SQLite), as opposed to a
+# JSON/XML report it generated. The name is not enough: detect_coverage_format
+# labels both ".coverage" and a ".coverage.json" report "coverage-py".
+# Usage: is_coverage_py_data_file ".coverage"
+is_coverage_py_data_file() {
+	local file="${1:-}"
+	[[ -f "$file" ]] || return 1
+	[[ "$(head -c 15 "$file" 2>/dev/null)" == "SQLite format 3" ]]
+}
+
+# Check that a coverage file's content matches the format it was detected as.
+# detect_coverage_format trusts the extension, so a `.info` full of garbage
+# still reads as lcov; this is the content check callers run before trusting
+# a detected format (#1078).
+# Usage: validate_coverage_file "coverage.info" "lcov"
+# Returns: 0 when the content is plausible for the format, 1 with a reason on
+#          stderr otherwise. Formats without a cheap content check pass.
+validate_coverage_file() {
+	local file="${1:-}"
+	local format="${2:-}"
+
+	if [[ ! -f "$file" ]]; then
+		echo "coverage file not found: $file" >&2
+		return 1
+	fi
+
+	case "$format" in
+	lcov)
+		# A record starts with TN: or SF:; at least one SF/end_of_record pair
+		# must exist, or there is nothing to measure.
+		local first_line
+		first_line=$(grep -m1 -v '^[[:space:]]*$' "$file" || true)
+		if [[ ! "$first_line" =~ ^(TN|SF): ]]; then
+			echo "invalid lcov: first record must start with TN: or SF: (got '${first_line:0:40}') - $file" >&2
+			return 1
+		fi
+		if ! grep -q '^SF:' "$file" || ! grep -q '^end_of_record' "$file"; then
+			echo "invalid lcov: no SF:/end_of_record records - $file" >&2
+			return 1
+		fi
+		# Every producer writes line records (DA) and totals (LF/LH); a file
+		# with neither is truncated, not a 0% report
+		if ! grep -qE '^(DA|LF):' "$file"; then
+			echo "invalid lcov: no DA:/LF: line records - $file" >&2
+			return 1
+		fi
+		;;
+	json | istanbul | coverage-py)
+		# Only the coverage-py label covers the SQLite data file; a json or
+		# istanbul label is a claim that the content is a JSON report
+		[[ "$format" == "coverage-py" ]] && is_coverage_py_data_file "$file" && return 0
+		# Must parse, and must look like one of the report layouts the
+		# extractors read: coverage.py (.totals), istanbul summary (.total),
+		# istanbul per-file entries (.statementMap/.lines) or generic
+		# {"coverage": n}. Unrelated JSON would otherwise read as 0%.
+		if ! jq -e '
+			type == "object" and (
+				(.totals | type == "object")
+				or (.total | type == "object")
+				or (.coverage | type == "number")
+				or ([.[] | objects | has("statementMap") or has("lines")] | any)
+			)' "$file" >/dev/null 2>&1; then
+			echo "invalid json: not a parsable coverage report (expected .totals, .total, .coverage or per-file entries) - $file" >&2
+			return 1
+		fi
+		;;
+	cobertura | clover | xml)
+		# Cheap shape check only: a <coverage> element within the first 20
+		# lines (minified output keeps it on the XML declaration's line). One
+		# awk process, so no head|grep pipe to SIGPIPE under pipefail.
+		if ! _head_matches "$file" 20 '<coverage[[:space:]>]'; then
+			echo "invalid xml: no <coverage> root element - $file" >&2
+			return 1
+		fi
+		;;
+	esac
+
+	return 0
 }
 
 # Detect if a coverage file is from Python (coverage.py) or JavaScript (istanbul/v8)
@@ -247,4 +334,4 @@ detect_coverage_source() {
 # Export functions
 # =============================================================================
 export -f detect_test_runner detect_all_runners
-export -f detect_coverage_format detect_coverage_source
+export -f _head_matches detect_coverage_format is_coverage_py_data_file validate_coverage_file detect_coverage_source

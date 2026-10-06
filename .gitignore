@@ -49,6 +49,8 @@ coverage.lcov
 coverage-report/
 coverage/
 !tests/**/coverage/
+# Committed coverage.py sample report (#1078)
+!tests/fixtures/coverage/coverage.json
 
 # Lintro
 .lintro/

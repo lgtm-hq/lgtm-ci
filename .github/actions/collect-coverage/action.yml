@@ -15,9 +15,12 @@ inputs:
     required: false
     default: "auto"
   output-format:
-    description: "Output format: json, lcov"
+    description: >-
+      Output format: json, lcov, cobertura. Empty (default) keeps the input
+      format; a format with no converter fails with exit 2
+      "unsupported coverage conversion: <src> -> <dst>" (#1078).
     required: false
-    default: "json"
+    default: ""
   merge-strategy:
     description: "How to merge coverage: union, intersection"
     required: false
@@ -33,8 +36,15 @@ inputs:
 
 outputs:
   merged-coverage-file:
-    description: "Path to merged coverage file"
+    description: >-
+      Path to merged coverage file (merged-coverage.json, .lcov or .xml by
+      output format)
     value: ${{ steps.merge.outputs.merged-coverage-file }}
+  merged-format:
+    description: >-
+      Format of merged-coverage-file (json, istanbul, lcov, cobertura); equals
+      output-format when one was requested, else what the input merged to
+    value: ${{ steps.merge.outputs.merged-format }}
   coverage-percent:
     description: "Overall coverage percentage"
     value: ${{ steps.merge.outputs.coverage-percent }}
@@ -42,10 +52,10 @@ outputs:
     description: "Lines coverage percentage"
     value: ${{ steps.summary.outputs.lines-coverage }}
   branches-coverage:
-    description: "Branches coverage percentage"
+    description: "Branches coverage percentage, or n/a when the input does not measure branches"
     value: ${{ steps.summary.outputs.branches-coverage }}
   functions-coverage:
-    description: "Functions coverage percentage"
+    description: "Functions coverage percentage, or n/a when the input does not measure functions"
     value: ${{ steps.summary.outputs.functions-coverage }}
 
 runs:

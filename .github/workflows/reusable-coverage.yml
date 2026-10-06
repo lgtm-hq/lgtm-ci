@@ -10,10 +10,19 @@ on:
         type: string
         default: ""
       format:
-        description: "Coverage format: auto, istanbul, coverage-py, lcov"
+        description: "Input coverage format: auto, istanbul, coverage-py, lcov"
         required: false
         type: string
         default: "auto"
+      output-format:
+        description: >-
+          Format of the merged report: json, lcov, cobertura. Empty (default)
+          keeps the input format, so LCOV stays LCOV end-to-end; a format no
+          converter implements fails the job with
+          "unsupported coverage conversion: <src> -> <dst>" (#1078).
+        required: false
+        type: string
+        default: ""
       threshold:
         description: "Minimum coverage percentage to pass"
         required: false
@@ -255,6 +264,7 @@ jobs:
     outputs:
       coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
       merged-coverage-file: ${{ steps.collect.outputs.merged-coverage-file }}
+      merged-format: ${{ steps.collect.outputs.merged-format }}
       badge-url: ${{ steps.badge.outputs.badge-url }}
       passed: ${{ steps.threshold.outputs.passed }}
 
@@ -339,7 +349,7 @@ jobs:
         with:
           coverage-files: ${{ inputs.coverage-files }}
           input-format: ${{ inputs.format }}
-          output-format: json
+          output-format: ${{ inputs.output-format }}
           working-directory: ${{ inputs.working-directory }}
       - name: Check coverage threshold
         id: threshold
@@ -393,5 +403,7 @@ jobs:
       rich-coverage-comment: true
       coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
       coverage-file: ${{ needs.coverage.outputs.merged-coverage-file }}
-      coverage-format: ${{ inputs.format }}
+      # The merged file's actual format, which can differ from inputs.format
+      # (a coverage-py label over coverage.xml merges to cobertura)
+      coverage-format: ${{ needs.coverage.outputs.merged-format || 'auto' }}
       tooling-ref: ${{ inputs.tooling-ref }}

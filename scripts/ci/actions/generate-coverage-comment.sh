@@ -115,6 +115,9 @@ ${COMMIT_LINE}"
 	exit 0
 fi
 
+# "json" names a file type, not a report layout; detect which one it is
+[[ "$FORMAT" == "json" ]] && FORMAT="auto"
+
 # Auto-detect format
 if [[ "$FORMAT" == "auto" ]]; then
 	if jq -e '.total' "$COVERAGE_FILE" >/dev/null 2>&1; then
@@ -176,24 +179,47 @@ cobertura)
 	;;
 esac
 
+# A metric the coverage file does not measure (line-only LCOV has no branch or
+# function totals) is reported as n/a: it neither passes nor fails its
+# threshold and is never shown as 0% (#1078).
+NOT_MEASURED="${COVERAGE_NOT_MEASURED:-n/a}"
+is_measured() { [[ "$1" != "$NOT_MEASURED" ]]; }
+
 # Check thresholds using raw float values to avoid false positives from rounding
 # Use awk for float comparison (POSIX-compatible)
 PASSED=true
 if ! awk -v val="$LINES_RAW" -v thresh="$THRESHOLD_LINES" 'BEGIN { exit !(val >= thresh) }'; then
 	PASSED=false
 fi
-if ! awk -v val="$BRANCHES_RAW" -v thresh="$THRESHOLD_BRANCHES" 'BEGIN { exit !(val >= thresh) }'; then
+if is_measured "$BRANCHES_RAW" && ! awk -v val="$BRANCHES_RAW" -v thresh="$THRESHOLD_BRANCHES" 'BEGIN { exit !(val >= thresh) }'; then
 	PASSED=false
 fi
-if ! awk -v val="$FUNCTIONS_RAW" -v thresh="$THRESHOLD_FUNCTIONS" 'BEGIN { exit !(val >= thresh) }'; then
+if is_measured "$FUNCTIONS_RAW" && ! awk -v val="$FUNCTIONS_RAW" -v thresh="$THRESHOLD_FUNCTIONS" 'BEGIN { exit !(val >= thresh) }'; then
 	PASSED=false
 fi
 
-# Round to integers for display
+# Round to integers for display; n/a passes through
+display_percent() {
+	if is_measured "$1"; then
+		printf "%.0f" "$1"
+	else
+		printf "%s" "$NOT_MEASURED"
+	fi
+}
 LINES=$(printf "%.0f" "$LINES_RAW")
-BRANCHES=$(printf "%.0f" "$BRANCHES_RAW")
-FUNCTIONS=$(printf "%.0f" "$FUNCTIONS_RAW")
-STATEMENTS=$(printf "%.0f" "$STATEMENTS_RAW")
+BRANCHES=$(display_percent "$BRANCHES_RAW")
+FUNCTIONS=$(display_percent "$FUNCTIONS_RAW")
+STATEMENTS=$(display_percent "$STATEMENTS_RAW")
+
+# Table cell: emoji + percent for a measured metric, bare n/a otherwise
+metric_cell() {
+	local value="$1" threshold="$2"
+	if is_measured "$value"; then
+		echo "$(score_emoji "$value" "$threshold") ${value}%"
+	else
+		echo "$NOT_MEASURED"
+	fi
+}
 
 {
 	echo "lines=$LINES"
@@ -227,7 +253,11 @@ COVERAGE_EMOJI=$(score_emoji "$LINES" "$THRESHOLD_LINES")
 if [[ "$PASSED" == "true" ]]; then
 	STATUS_EMOJI="✅"
 	STATUS_TEXT="PASSED"
-	COVERAGE_STATUS="Target met (lines >= ${THRESHOLD_LINES}%, branches >= ${THRESHOLD_BRANCHES}%, functions >= ${THRESHOLD_FUNCTIONS}%)"
+	# Name only the thresholds that were actually checked
+	CHECKED="lines >= ${THRESHOLD_LINES}%"
+	is_measured "$BRANCHES_RAW" && CHECKED+=", branches >= ${THRESHOLD_BRANCHES}%"
+	is_measured "$FUNCTIONS_RAW" && CHECKED+=", functions >= ${THRESHOLD_FUNCTIONS}%"
+	COVERAGE_STATUS="Target met (${CHECKED})"
 else
 	STATUS_EMOJI="⚠️"
 	STATUS_TEXT="BELOW TARGET"
@@ -250,10 +280,10 @@ This PR has been analyzed using **lgtm-ci** - our unified code coverage workflow
 
 | Metric | Coverage | Threshold |
 |--------|----------|-----------|
-| **Lines** | $(score_emoji "$LINES" "$THRESHOLD_LINES") ${LINES}% | ${THRESHOLD_LINES}% |
-| **Branches** | $(score_emoji "$BRANCHES" "$THRESHOLD_BRANCHES") ${BRANCHES}% | ${THRESHOLD_BRANCHES}% |
-| **Functions** | $(score_emoji "$FUNCTIONS" "$THRESHOLD_FUNCTIONS") ${FUNCTIONS}% | ${THRESHOLD_FUNCTIONS}% |
-| **Statements** | ${STATEMENTS}% | - |
+| **Lines** | $(metric_cell "$LINES" "$THRESHOLD_LINES") | ${THRESHOLD_LINES}% |
+| **Branches** | $(metric_cell "$BRANCHES" "$THRESHOLD_BRANCHES") | ${THRESHOLD_BRANCHES}% |
+| **Functions** | $(metric_cell "$FUNCTIONS" "$THRESHOLD_FUNCTIONS") | ${THRESHOLD_FUNCTIONS}% |
+| **Statements** | $(is_measured "$STATEMENTS" && echo "${STATEMENTS}%" || echo "$NOT_MEASURED") | - |
 
 ### 📋 Report Details
 - **Generated:** ${GENERATED_DATE}

@@ -53,13 +53,13 @@ outputs:
     description: "Line coverage percentage"
     value: ${{ steps.generate.outputs.lines }}
   branches-coverage:
-    description: "Branch coverage percentage"
+    description: "Branch coverage percentage, or n/a when the input does not measure branches"
     value: ${{ steps.generate.outputs.branches }}
   functions-coverage:
-    description: "Function coverage percentage"
+    description: "Function coverage percentage, or n/a when the input does not measure functions"
     value: ${{ steps.generate.outputs.functions }}
   statements-coverage:
-    description: "Statement coverage percentage"
+    description: "Statement coverage percentage, or n/a when the input does not measure statements"
     value: ${{ steps.generate.outputs.statements }}
   passed:
     description: "Whether coverage meets all thresholds"

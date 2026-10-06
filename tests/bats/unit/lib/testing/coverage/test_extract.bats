@@ -224,6 +224,100 @@ EOF
 }
 
 # =============================================================================
+# extract_coverage_details tests - lcov fixtures (#1078)
+#
+# These run under `set -eo pipefail` (not -u): in a `bash -c` string there is
+# no BASH_SOURCE, which bash 5.2 reports as unbound while sourcing. The full
+# `set -euo pipefail` path is covered by test_collect_coverage.bats, which
+# runs the real script.
+# =============================================================================
+
+@test "extract_coverage_details: line-only LCOV reports branches and functions as n/a" {
+	run bash -c '
+		set -eo pipefail
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-line-only.info"
+		echo "lines=$COVERAGE_LINES"
+		echo "branches=$COVERAGE_BRANCHES"
+		echo "functions=$COVERAGE_FUNCTIONS"
+		echo "statements=$COVERAGE_STATEMENTS"
+	'
+	assert_success
+	assert_line "lines=50.00"
+	assert_line "branches=n/a"
+	assert_line "functions=n/a"
+	assert_line "statements=50.00"
+}
+
+@test "extract_coverage_details: full LCOV fixture sums every record type" {
+	run bash -c '
+		set -eo pipefail
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-full.info"
+		echo "lines=$COVERAGE_LINES"
+		echo "branches=$COVERAGE_BRANCHES"
+		echo "functions=$COVERAGE_FUNCTIONS"
+	'
+	assert_success
+	assert_line "lines=62.50"
+	assert_line "branches=33.33"
+	assert_line "functions=66.67"
+}
+
+@test "extract_coverage_details: empty LCOV fixture is 0 lines and n/a elsewhere" {
+	run bash -c '
+		set -eo pipefail
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-empty.info"
+		echo "lines=$COVERAGE_LINES"
+		echo "branches=$COVERAGE_BRANCHES"
+		echo "functions=$COVERAGE_FUNCTIONS"
+	'
+	assert_success
+	assert_line "lines=0"
+	assert_line "branches=n/a"
+	assert_line "functions=n/a"
+}
+
+@test "extract_coverage_details: invalid LCOV fixture does not abort a set -e caller" {
+	run bash -c '
+		set -eo pipefail
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_details "$FIXTURES_DIR/coverage/lcov-invalid.info"
+		echo "lines=$COVERAGE_LINES"
+		echo "branches=$COVERAGE_BRANCHES"
+	'
+	assert_success
+	assert_line "lines=0"
+	assert_line "branches=n/a"
+}
+
+@test "extract_coverage_percent: line-only LCOV fixture under set -eo pipefail" {
+	run bash -c '
+		set -eo pipefail
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_percent "$FIXTURES_DIR/coverage/lcov-line-only.info"
+	'
+	assert_success
+	assert_output "50.00"
+}
+
+@test "extract_coverage_percent: coverage.json fixture is read as coverage-py" {
+	run bash -c '
+		source "$LIB_DIR/testing/coverage/extract.sh"
+		extract_coverage_percent "$FIXTURES_DIR/coverage/coverage.json"
+	'
+	assert_success
+	assert_output "80.0"
+}
+
+@test "extract.sh: COVERAGE_NOT_MEASURED is n/a" {
+	run bash -c 'source "$LIB_DIR/testing/coverage/extract.sh" && echo "$COVERAGE_NOT_MEASURED"'
+	assert_success
+	assert_output "n/a"
+}
+
+# =============================================================================
 # extract_coverage_details tests - istanbul summary
 # =============================================================================
 
