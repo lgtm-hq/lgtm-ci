@@ -805,6 +805,15 @@ layout so the artifact root is browsable HTML.
 [release-changelog.md](release-changelog.md) for the consumer migration guide
 (minimum pin, heading mapping, MD024 lint note).
 
+A repository without a `CHANGELOG.md` does not need to create one first: the
+`Update CHANGELOG.md` step seeds a Keep a Changelog header with an empty
+`## [Unreleased]` section and writes the first release into it, so the file
+appears in the same version PR as its first entry (#1092). Under
+`egress-policy: block` the default `egress-preset: release-version-pr` already
+covers the registries the ecosystem bumps reach (PyPI for `ecosystems: python`
+/ kind `pep621`, rustup and crates.io for `ecosystems: rust`), so selecting an
+ecosystem needs no `allowed-endpoints` (#1093).
+
 When release automation fails on the default branch, the follow-up
 `report-release-failure` job runs two steps in order: it first writes release
 trigger context to the job step summary, then creates or updates a deduplicated

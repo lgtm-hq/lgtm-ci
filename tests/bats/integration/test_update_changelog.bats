@@ -528,6 +528,83 @@ run_update_changelog() {
 }
 
 # =============================================================================
+# Tests: absent CHANGELOG.md is bootstrapped (#1092)
+# =============================================================================
+
+@test "update-changelog: creates CHANGELOG.md with a Keep a Changelog header when absent" {
+	setup_changelog_repo
+	rm -f "${MOCK_GIT_REPO}/CHANGELOG.md"
+
+	run_update_changelog "0.1.0" "### Added
+
+- first feature (ddd4444)"
+	assert_success
+	assert_output --partial "CHANGELOG.md not found"
+	assert_output --partial "creating it"
+
+	[[ -f "${MOCK_GIT_REPO}/CHANGELOG.md" ]] || fail "CHANGELOG.md was not created"
+	local changelog
+	changelog=$(cat "${MOCK_GIT_REPO}/CHANGELOG.md")
+
+	# Header, then a fresh [Unreleased] section, then the first release.
+	[[ "$changelog" == "# Changelog"* ]] || fail "file does not start with '# Changelog'"
+	echo "$changelog" | grep -q 'keepachangelog.com/en/1.1.0' || fail "Keep a Changelog reference missing"
+	echo "$changelog" | grep -q 'semver.org/spec/v2.0.0' || fail "Semantic Versioning reference missing"
+	echo "$changelog" | grep -q '^## \[Unreleased\]$' || fail "'## [Unreleased]' not found"
+	echo "$changelog" | grep -q '^## \[0\.1\.0\] - ' || fail "'## [0.1.0]' not found"
+	echo "$changelog" | grep -q 'first feature' || fail "generated entry missing"
+	# The placeholder link was rewritten into real compare links.
+	if echo "$changelog" | grep -q 'placeholder'; then
+		echo "placeholder link survived" >&2
+		echo "$changelog" >&2
+		return 1
+	fi
+	echo "$changelog" | grep -q '^\[Unreleased\]: https://github.com/test-org/test-repo/compare/v0.1.0...HEAD$' || fail "Unreleased compare link not rewritten"
+	echo "$changelog" | grep -q '^\[0\.1\.0\]: https://github.com/test-org/test-repo/releases/tag/v0.1.0$' || fail "first-release link missing"
+	# Exactly one [Unreleased] heading and one 0.1.0 section.
+	[[ "$(echo "$changelog" | grep -c '^## \[Unreleased\]')" -eq 1 ]] || fail "duplicate [Unreleased] headings"
+	[[ "$(echo "$changelog" | grep -c '^## \[0\.1\.0\]')" -eq 1 ]] || fail "duplicate 0.1.0 sections"
+}
+
+@test "update-changelog: bootstrapped CHANGELOG.md is registered as an added path, not untracked" {
+	setup_changelog_repo
+	rm -f "${MOCK_GIT_REPO}/CHANGELOG.md"
+
+	run_update_changelog "0.1.0" "### Added
+
+- first feature (ddd4444)"
+	assert_success
+
+	# check-version-files-changed.sh drops `??` lines, so the new file must
+	# show up as intent-to-add (` A`) for a CHANGELOG-only caller to open a PR.
+	run git -C "$MOCK_GIT_REPO" status --porcelain -- CHANGELOG.md
+	assert_success
+	assert_output --regexp '^ A CHANGELOG\.md$'
+}
+
+@test "update-changelog: bootstraps a CHANGELOG.md in a nested directory" {
+	setup_changelog_repo
+	rm -f "${MOCK_GIT_REPO}/CHANGELOG.md"
+
+	run bash -c "
+		cd '$MOCK_GIT_REPO'
+		export VERSION='0.1.0'
+		export CHANGELOG_BODY='### Added
+
+- nested (eee5555)'
+		export CHANGELOG_FILE='docs/CHANGELOG.md'
+		export TAG_PREFIX='v'
+		export REPO_URL='https://github.com/test-org/test-repo'
+		export PUSH='false'
+		'$PROJECT_ROOT/scripts/ci/release/update-changelog.sh' 2>&1
+	"
+	assert_success
+	[[ -f "${MOCK_GIT_REPO}/docs/CHANGELOG.md" ]] || fail "docs/CHANGELOG.md was not created"
+	run grep -c '^## \[0\.1\.0\] - ' "${MOCK_GIT_REPO}/docs/CHANGELOG.md"
+	assert_output "1"
+}
+
+# =============================================================================
 # Tests: existing versioned sections preserved
 # =============================================================================
 

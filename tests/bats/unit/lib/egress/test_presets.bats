@@ -341,6 +341,39 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'oauth2.sigstore.dev:443'
 }
 
+@test "egress preset release-version-pr is github-tooling plus the ecosystem bump registries" {
+	# Default of both version-PR reusables (#1093): python/pep621 install
+	# tomlkit from PyPI, rust regenerates Cargo.lock via rustup + crates.io.
+	run bash -c "source '$PRESETS' && egress_preset_endpoints release-version-pr"
+	assert_success
+	local host
+	while IFS= read -r host; do
+		assert_output --partial "$host"
+	done < <(bash -c "source '$PRESETS' && egress_preset_endpoints github-tooling")
+	assert_output --partial 'pypi.org:443'
+	assert_output --partial 'files.pythonhosted.org:443'
+	assert_output --partial 'static.rust-lang.org:443'
+	assert_output --partial 'crates.io:443'
+	assert_output --partial 'static.crates.io:443'
+	assert_output --partial 'index.crates.io:443'
+	# No publish-side hosts: the bump never uploads anywhere.
+	refute_output --partial 'upload.pypi.org:443'
+	refute_output --partial 'test.pypi.org:443'
+	refute_output --partial 'sigstore'
+}
+
+@test "version-PR reusables default egress-preset to release-version-pr" {
+	local workflow
+	for workflow in reusable-release-version-pr reusable-release-multi-ecosystem; do
+		run awk '
+			/^      egress-preset:$/ { on = 1; next }
+			on && /^        default:/ { gsub(/"/, "", $2); print $2; exit }
+			on && /^      [a-z-]+:$/ { on = 0 }
+		' "${PROJECT_ROOT}/.github/workflows/${workflow}.yml"
+		assert_output "release-version-pr"
+	done
+}
+
 @test "egress presets never emit duplicate hosts" {
 	local preset
 	while IFS= read -r preset; do

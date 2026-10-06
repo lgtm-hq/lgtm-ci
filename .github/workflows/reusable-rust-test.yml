@@ -21,7 +21,12 @@ on:
         type: string
         default: "--all-features"
       workspace:
-        description: "Run tests with --workspace"
+        description: >-
+          Run tests with --workspace. Both paths run `cargo nextest run
+          --profile ci` and read target/nextest/ci/junit.xml, so the
+          repository needs .config/nextest.toml with a `ci` profile whose
+          junit.path is "junit.xml" (relative to that store dir): copy
+          examples/nextest-ci.toml (#1086).
         required: false
         type: boolean
         default: true
@@ -48,7 +53,11 @@ on:
         type: string
         default: ""
       test-script:
-        description: "Optional override for the test run script"
+        description: >-
+          Optional override for the test run script. The default runs the
+          nextest `ci` profile from the repository's .config/nextest.toml
+          (prerequisite; see examples/nextest-ci.toml); an override must
+          still leave JUnit at target/nextest/ci/junit.xml for the parser.
         required: false
         type: string
         default: ""
@@ -275,7 +284,12 @@ env:
     release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
     *.blob.core.windows.net:443 pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
     rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
-    pkg-containers.githubusercontent.com:443"}
+    pkg-containers.githubusercontent.com:443",
+    "release-version-pr":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:

@@ -47,7 +47,8 @@ egress_preset_names() {
 		osv-scanner \
 		ai-review \
 		rust-release \
-		release-recover
+		release-recover \
+		release-version-pr
 }
 
 egress_preset_endpoints() {
@@ -385,6 +386,24 @@ egress_preset_endpoints() {
 			oauth2.sigstore.dev:443 \
 			ghcr.io:443 \
 			pkg-containers.githubusercontent.com:443
+		;;
+	release-version-pr)
+		# Default of reusable-release-version-pr.yml and
+		# reusable-release-multi-ecosystem.yml: github-tooling plus every
+		# registry an ecosystem bump script reaches under block policy.
+		# `ecosystems: python` / kind `pep621` `pip install tomlkit` when the
+		# runner lacks it (PyPI, #1093); `ecosystems: rust` installs the
+		# toolchain via dtolnay/rust-toolchain and runs `cargo
+		# generate-lockfile` (rustup dist + crates.io index). node, ruby,
+		# swift, dart and kotlin edit files in place with no registry access.
+		egress_preset_endpoints github-tooling
+		printf '%s\n' \
+			pypi.org:443 \
+			files.pythonhosted.org:443 \
+			static.rust-lang.org:443 \
+			crates.io:443 \
+			static.crates.io:443 \
+			index.crates.io:443
 		;;
 	*)
 		echo "unknown egress preset: $preset" >&2

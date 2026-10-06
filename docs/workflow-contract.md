@@ -520,6 +520,18 @@ Use separate caller jobs (different `name:` and/or `job-name`) when rulesets
 require distinct required checks; the reusable never runs nextest and llvm-cov in
 one job.
 
+**Prerequisite — nextest `ci` profile (#1086).** Both paths run
+`cargo nextest run --profile ci` and then parse `target/nextest/ci/junit.xml`,
+so the consumer repository must carry `.config/nextest.toml` (under
+`working-directory`) with a `ci` profile that emits JUnit. Copy
+[`examples/nextest-ci.toml`](../examples/nextest-ci.toml) verbatim. nextest
+resolves `junit.path` relative to the profile's store directory
+(`target/nextest/ci/`), so the path must be the bare file name `junit.xml`;
+a directory-qualified value writes the report under
+`target/nextest/ci/target/nextest/ci/` and the parser fails with
+`JUnit file not found` after a green test run. Without the file at all the run
+fails earlier with `profile 'ci' not found`.
+
 ## Node package-manager contract (#1077)
 
 The Node family (`reusable-test-node`, `reusable-test-node-custom`,
@@ -819,6 +831,26 @@ Keep `Create GitHub App installation token` before any step that uses
 `steps.app-token.outputs` (actionlint enforces step order). Every mint passes
 `repositories: ${{ github.event.repository.name }}`.
 
+**Egress (#1093):** both version-PR reusables default to
+`egress-preset: release-version-pr` — `github-tooling` plus the registries the
+ecosystem bump scripts reach under `block`: `pypi.org` /
+`files.pythonhosted.org` (`ecosystems: python` and kind `pep621` run
+`pip install tomlkit` when the runner lacks it) and `static.rust-lang.org` +
+the crates.io hosts (`ecosystems: rust` installs the toolchain and regenerates
+`Cargo.lock`). Selecting an ecosystem is therefore enough; the pre-#913 advice
+to paste the PyPI hosts into `allowed-endpoints` is obsolete. Callers that
+still pass `allowed-endpoints` in the default `replace` mode substitute their
+list for the preset and must carry those registry hosts themselves.
+
+**First release without a `CHANGELOG.md` (#1092):**
+`scripts/ci/release/update-changelog.sh` no longer fails when the file is
+absent. It seeds a Keep a Changelog header with an empty `## [Unreleased]`
+section, registers the file with `git add --intent-to-add` (so
+`check-version-files-changed.sh` sees an added path rather than an ignored
+`??` entry), and writes the first release section into it; the file lands in
+the same version PR as its first entry. Contract:
+`tests/bats/integration/test_update_changelog.bats`.
+
 <!-- markdownlint-enable MD013 -->
 
 Canonical preset definitions live in `scripts/ci/lib/egress/presets.sh`;
@@ -1036,7 +1068,7 @@ one release family; a separate workflow keeps the consumer contracts clear.
 
 **Runner policy:** same two-checkout harden path as `reusable-release-version-pr`
 (GitHub-hosted Linux under `egress-policy: block` with `egress-preset:
-github-tooling` by default). Failure reporting uses workflow key
+release-version-pr` by default). Failure reporting uses workflow key
 `release-multi-ecosystem` and the shared `report-release-failure` job (see
 [Release failure reporting](#release-failure-reporting)).
 
@@ -1044,10 +1076,11 @@ Kinds update only the listed path: `npm` → `package.json` `.version`; `raw` �
 plain-text `VERSION`; `gemspec` → literal `.version = "..."` in a `.gemspec`
 (constant-backed gemspecs need `version-update-script` / `version.rb`);
 `pep621` → `[project].version` only (no `__init__.py` / `uv.lock`).
-When `pep621` needs to install `tomlkit` under `egress-policy: block`, callers
-must allow `pypi.org:443` and `files.pythonhosted.org:443`: either
-`egress-preset: pypi` with `allowed-endpoints-mode: append`, or list them in
-`allowed-endpoints` together with the GitHub hosts the job needs.
+`pep621` installs `tomlkit` from PyPI when the runner lacks it; the default
+`release-version-pr` preset already allows `pypi.org:443` and
+`files.pythonhosted.org:443`, so no caller allowlist is needed (#1093).
+Callers that pass their own `allowed-endpoints` in `replace` mode must include
+those two hosts themselves.
 
 ## Egress presets
 
@@ -1092,27 +1125,28 @@ same list without blocking.
 
 <!-- markdownlint-disable MD013 -->
 
-| Preset            | Use case                                                                         |
-| ----------------- | -------------------------------------------------------------------------------- |
-| `github-minimal`  | PR summaries and reports (API, tooling checkout, workflow artifacts)             |
-| `github-results`  | `github-minimal` + results blob storage (`reusable-auto-rerun-on-infra-failure`) |
-| `github-tooling`  | Validate action pinning + GitHub raw/codeload/release-assets                     |
-| `github-pages`    | GitHub Pages deploy/publish (OIDC)                                               |
-| `docker`          | Docker build/pull/push (`reusable-docker.yml`)                                   |
-| `playwright`      | Playwright E2E + browser CDN downloads (`reusable-test-e2e*.yml`)                |
-| `pypi`            | PyPI/TestPyPI publish and availability checks                                    |
-| `python-dist`     | `pypi` + Sigstore attestation (`reusable-build-python-dist.yml`)                 |
-| `rubygems`        | RubyGems publish                                                                 |
-| `npm-publish`     | npm OIDC trusted publish + Sigstore + artifact download                          |
-| `quality`         | Docker `lintro chk` (default on quality lint, Node/Rust tests)                   |
-| `build-artifact`  | Every vetted toolchain's registry (`reusable-build-artifact.yml`)                |
-| `shell-test`      | `github-tooling` + Ubuntu apt mirrors (`reusable-test-shell.yml`)                |
-| `sbom`            | SBOM, Grype scan, Sigstore attestation/cosign, release upload                    |
-| `scorecard`       | OpenSSF Scorecard (`reusable-scorecards.yml`)                                    |
-| `osv-scanner`     | GitHub tooling + release assets + OSV APIs                                       |
-| `ai-review`       | GitHub tooling + PyPI/uv (`reusable-ai-review.yml`; provider hosts appended)     |
-| `rust-release`    | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)                 |
-| `release-recover` | Registry probes + npm resume (`reusable-release-recover.yml`)                    |
+| Preset               | Use case                                                                         |
+| -------------------- | -------------------------------------------------------------------------------- |
+| `github-minimal`     | PR summaries and reports (API, tooling checkout, workflow artifacts)             |
+| `github-results`     | `github-minimal` + results blob storage (`reusable-auto-rerun-on-infra-failure`) |
+| `github-tooling`     | Validate action pinning + GitHub raw/codeload/release-assets                     |
+| `github-pages`       | GitHub Pages deploy/publish (OIDC)                                               |
+| `docker`             | Docker build/pull/push (`reusable-docker.yml`)                                   |
+| `playwright`         | Playwright E2E + browser CDN downloads (`reusable-test-e2e*.yml`)                |
+| `pypi`               | PyPI/TestPyPI publish and availability checks                                    |
+| `python-dist`        | `pypi` + Sigstore attestation (`reusable-build-python-dist.yml`)                 |
+| `rubygems`           | RubyGems publish                                                                 |
+| `npm-publish`        | npm OIDC trusted publish + Sigstore + artifact download                          |
+| `quality`            | Docker `lintro chk` (default on quality lint, Node/Rust tests)                   |
+| `build-artifact`     | Every vetted toolchain's registry (`reusable-build-artifact.yml`)                |
+| `shell-test`         | `github-tooling` + Ubuntu apt mirrors (`reusable-test-shell.yml`)                |
+| `sbom`               | SBOM, Grype scan, Sigstore attestation/cosign, release upload                    |
+| `scorecard`          | OpenSSF Scorecard (`reusable-scorecards.yml`)                                    |
+| `osv-scanner`        | GitHub tooling + release assets + OSV APIs                                       |
+| `ai-review`          | GitHub tooling + PyPI/uv (`reusable-ai-review.yml`; provider hosts appended)     |
+| `rust-release`       | Rust cross-compile releases (`reusable-build-rust-binaries.yml`)                 |
+| `release-recover`    | Registry probes + npm resume (`reusable-release-recover.yml`)                    |
+| `release-version-pr` | `github-tooling` + PyPI + rustup/crates.io (version-PR reusables, #1093)         |
 
 <!-- markdownlint-enable MD013 -->
 

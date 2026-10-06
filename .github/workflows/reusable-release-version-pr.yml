@@ -119,11 +119,13 @@ name: "Reusable: Release Version PR"
       egress-preset:
         description: >-
           Named baseline allowlist from scripts/ci/lib/egress/presets.sh
-          (default github-tooling). Selected at job start inside every harden-runner
-          step, so it is enforced (#913).
+          (default release-version-pr: github-tooling plus PyPI for the
+          python/pep621 tomlkit install and the rustup/crates.io hosts for
+          the rust lockfile regeneration, #1093). Selected at job start
+          inside every harden-runner step, so it is enforced (#913).
         required: false
         type: string
-        default: "github-tooling"
+        default: "release-version-pr"
       report-failures:
         description: >-
           When true, open or update a deduplicated GitHub issue when the release
@@ -265,7 +267,12 @@ env:
     release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
     *.blob.core.windows.net:443 pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
     rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
-    pkg-containers.githubusercontent.com:443"}
+    pkg-containers.githubusercontent.com:443",
+    "release-version-pr":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:
@@ -310,13 +317,13 @@ jobs:
             ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
             && inputs.allowed-endpoints
             || format('{0} {1}',
-            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'],
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'],
             inputs.allowed-endpoints) }}
       - name: Fail on unknown egress-preset
         if: >-
           inputs.egress-policy != 'audit'
           && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
-          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'] == null
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'] == null
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
@@ -450,13 +457,13 @@ jobs:
             ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
             && inputs.allowed-endpoints
             || format('{0} {1}',
-            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'],
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'],
             inputs.allowed-endpoints) }}
       - name: Fail on unknown egress-preset
         if: >-
           inputs.egress-policy != 'audit'
           && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
-          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'] == null
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'] == null
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
@@ -579,7 +586,7 @@ jobs:
             ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
             && inputs.allowed-endpoints
             || format('{0} {1}',
-            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'],
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'],
             inputs.allowed-endpoints) }}
       - name: Fail on unknown egress-preset
         # harden-runner's pre hook already ran with whatever the selector
@@ -588,7 +595,7 @@ jobs:
         if: >-
           inputs.egress-policy != 'audit'
           && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
-          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-tooling'] == null
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-version-pr'] == null
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
