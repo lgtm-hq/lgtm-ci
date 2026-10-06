@@ -417,6 +417,12 @@ if [[ -n "$DOWNLOAD_DIR" ]]; then
 			echo "::error::Artifact ${name} (id ${id}) contains entries that escape the destination directory; not retrying"
 			exit 1
 		fi
+		# Symlink entries could point outside the destination and be written
+		# through by a later entry; result summaries never need them.
+		if unzip -Z "$zip" 2>/dev/null | grep -Eq '^l'; then
+			echo "::error::Artifact ${name} (id ${id}) contains symlink entries; not retrying"
+			exit 1
+		fi
 		mkdir -p "$dest"
 		if ! unzip -oq "$zip" -d "$dest"; then
 			echo "::error::Artifact ${name} (id ${id}) downloaded but is not a valid zip; not retrying"

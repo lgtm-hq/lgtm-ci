@@ -584,7 +584,7 @@ leg that never uploaded will not appear. The retry is narrow on purpose:
 | Listing shows fewer than expected | retried until the budget expires; the failure names the missing legs |
 | HTTP 404 downloading an id the listing returned | retried within the same budget |
 | Listing shows **more** than expected, or a matching name outside the matrix | fails at once — a sibling call in the same run uploaded under the same names (see [Artifact names](#artifact-names), #752) |
-| Any other listing/download error, timeout, digest mismatch, corrupt archive | fails at once |
+| Any other listing/download error, timeout, digest mismatch, corrupt or escaping archive | fails at once |
 
 <!-- markdownlint-enable MD013 -->
 

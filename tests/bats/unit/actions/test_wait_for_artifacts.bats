@@ -70,12 +70,15 @@ EOF
 
 # A `timeout` stand-in that reports the bound tripped (exit 124) for every
 # wrapped command, without running it.
+# `timeout` reports 124 when the command died on SIGTERM and 137 when it had
+# to be SIGKILLed after --kill-after; the default here is 124.
 _mock_timeout_trips() {
+	local code="${1:-124}"
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
-	cat >"${mock_bin}/timeout" <<'EOF'
+	cat >"${mock_bin}/timeout" <<EOF
 #!/usr/bin/env bash
-exit 124
+exit ${code}
 EOF
 	chmod +x "${mock_bin}/timeout"
 }
@@ -939,4 +942,61 @@ with zipfile.ZipFile(sys.argv[1], "w") as z:
 	assert_failure
 	assert_output --partial "PATTERN '*-results-*' must contain exactly one '*' for MATRIX_KEY to fill"
 	[[ ! -s "$GH_CALLS" ]]
+}
+
+@test "wait-for-artifacts: a listing killed after --kill-after (exit 137) is reported as a timeout" {
+	_mock_gh
+	_mock_timeout_trips 137
+	_list_sequence "$(_listing 1:python-results-3.11 2:python-results-3.14)"
+
+	run_wait 2 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact listing timed out after 30s (poll 1, exit 137); not retrying"
+	[[ ! -s "$SLEEP_CALLS" ]]
+}
+
+@test "wait-for-artifacts: a download killed after --kill-after (exit 137) is reported as a timeout" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	cat >"${mock_bin}/timeout" <<'EOF'
+#!/usr/bin/env bash
+while [[ "$1" == -* ]]; do
+	case "$1" in
+	-k | -s) shift 2 ;;
+	*) shift ;;
+	esac
+done
+shift
+case "$*" in
+*/zip*) exit 137 ;;
+*) exec "$@" ;;
+esac
+EOF
+	chmod +x "${mock_bin}/timeout"
+	_mock_gh
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "Download of artifact python-results-3.11 (id 1) timed out after 30s (exit 137); not retrying"
+	[[ ! -s "$SLEEP_CALLS" ]]
+}
+
+@test "wait-for-artifacts: an archive containing a symlink entry is refused" {
+	_require_zip_tools
+	_mock_gh
+	local dir="${BATS_TEST_TMPDIR}/symlinked" zip="${BATS_TEST_TMPDIR}/symlinked.zip"
+	mkdir -p "$dir"
+	ln -s /etc/passwd "${dir}/link"
+	printf '{}' >"${dir}/summary.json"
+	(cd "$dir" && zip -qy "$zip" link summary.json)
+	_list_sequence "$(_listing 1:python-results-3.11)"
+	_download_sequence 1 "zip:${zip}"
+	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
+
+	run_wait 1 'python-results-*'
+	assert_failure
+	assert_output --partial "::error::Artifact python-results-3.11 (id 1) contains symlink entries; not retrying"
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+	[[ ! -s "$SLEEP_CALLS" ]]
 }
