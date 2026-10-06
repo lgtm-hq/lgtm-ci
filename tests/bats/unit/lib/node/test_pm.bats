@@ -236,6 +236,30 @@ _calls() {
 	assert_failure 1
 }
 
+@test "pm_has npm: an npm that prints nothing and fails reports absent, not present" {
+	mock_command_record npm "" 1
+	run _pm npm pm_has vitest
+	assert_failure
+}
+
+@test "pm_has npm: malformed npm output reports absent" {
+	mock_command_record npm "npm ERR! something broke" 1
+	run _pm npm pm_has vitest
+	assert_failure
+}
+
+@test "pm_has pnpm: a pnpm that prints nothing and fails reports absent" {
+	mock_command_record pnpm "" 1
+	run _pm pnpm pm_has vitest
+	assert_failure
+}
+
+@test "pm_has bun: a bun that prints nothing and fails reports absent" {
+	mock_command_record bun "" 1
+	run _pm bun pm_has vitest
+	assert_failure
+}
+
 @test "pm_has: empty manager fails with exit 2 before any lookup" {
 	run _pm "" pm_has vitest
 	assert_failure 2
