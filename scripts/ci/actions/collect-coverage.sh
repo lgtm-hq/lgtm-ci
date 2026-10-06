@@ -178,11 +178,17 @@ merge)
 
 	# Determine input format from files if auto
 	if [[ "$INPUT_FORMAT" == "auto" ]]; then
-		INPUT_FORMAT=$(detect_coverage_format "${existing_files[0]}")
+		INPUT_FORMAT=$(detect_coverage_format "${existing_files[0]}") || {
+			log_error "Cannot detect coverage format: ${existing_files[0]}"
+			exit 1
+		}
 
 		# Validate all files have the same format
 		for file in "${existing_files[@]:1}"; do
-			file_format=$(detect_coverage_format "$file")
+			file_format=$(detect_coverage_format "$file") || {
+				log_error "Cannot detect coverage format: $file"
+				exit 1
+			}
 			if [[ "$file_format" != "$INPUT_FORMAT" ]]; then
 				log_error "Mixed coverage formats detected:"
 				log_error "  - ${existing_files[0]}: $INPUT_FORMAT"
@@ -195,13 +201,29 @@ merge)
 
 	# Detection trusts the extension; check the content matches before any of
 	# it is merged, so a mislabeled file fails by name instead of yielding an
-	# empty report (#1078)
+	# empty report (#1078). Each file is checked against what it detects as,
+	# not the INPUT_FORMAT label: an explicit coverage-py label legitimately
+	# covers coverage.xml and .coverage data files, which the merge below
+	# re-detects anyway.
 	for file in "${existing_files[@]}"; do
-		if ! validate_coverage_file "$file" "$INPUT_FORMAT"; then
-			log_error "Coverage file is not valid $INPUT_FORMAT: $file"
+		file_format=$(detect_coverage_format "$file" 2>/dev/null) || file_format="$INPUT_FORMAT"
+		if ! validate_coverage_file "$file" "$file_format"; then
+			log_error "Coverage file is not valid $file_format: $file"
 			exit 1
 		fi
 	done
+
+	# Refuse an output nothing can produce before any merge work, so the
+	# exit-2 contract holds even when the merge itself would fail first (for
+	# example full LCOV without the lcov binary). Only formats whose merge
+	# result is fixed are checked here; coverage-py/cobertura inputs can
+	# merge to json or xml, so they are checked on the merged result below.
+	if [[ -n "$OUTPUT_FORMAT" ]]; then
+		case "$INPUT_FORMAT" in
+		lcov) require_conversion_supported "lcov" "$OUTPUT_FORMAT" ;;
+		istanbul | json) require_conversion_supported "istanbul" "$OUTPUT_FORMAT" ;;
+		esac
+	fi
 
 	# Create temp file for merging in input format
 	temp_merged=$(mktemp)
@@ -232,9 +254,27 @@ merge)
 			fi
 		done
 
-		if [[ ${#existing_files[@]} -eq 1 ]]; then
+		if [[ ${#existing_files[@]} -eq 1 ]] && is_coverage_py_data_file "${existing_files[0]}"; then
+			# A lone .coverage data file is SQLite; render it to a report so the
+			# output is never binary data under a .json name (#1078)
+			if ! command -v coverage &>/dev/null; then
+				log_error "Cannot read coverage.py data file without the coverage CLI: ${existing_files[0]}"
+				log_error "Install coverage, or produce a JSON/XML report in the test job instead"
+				exit 1
+			fi
+			case "$INPUT_FORMAT" in
+			cobertura)
+				COVERAGE_FILE="${existing_files[0]}" coverage xml -o "$temp_merged"
+				MERGED_FORMAT="cobertura"
+				;;
+			*)
+				COVERAGE_FILE="${existing_files[0]}" coverage json -o "$temp_merged"
+				MERGED_FORMAT="json"
+				;;
+			esac
+		elif [[ ${#existing_files[@]} -eq 1 ]]; then
 			cp "${existing_files[0]}" "$temp_merged"
-			# Detect actual format of the copied file
+			# Detect actual format of the copied report
 			MERGED_FORMAT=$(detect_coverage_format "$temp_merged" 2>/dev/null) || MERGED_FORMAT="$INPUT_FORMAT"
 		elif [[ "$all_binary" == "true" ]] && command -v coverage &>/dev/null; then
 			# Only use coverage combine for actual .coverage binary files
@@ -302,6 +342,7 @@ merge)
 	if [[ -f "$OUTPUT_FILE" ]]; then
 		log_success "Merged coverage written to: $OUTPUT_FILE"
 		set_github_output "merged-coverage-file" "$OUTPUT_FILE"
+		set_github_output "merged-format" "$OUTPUT_FORMAT"
 
 		# Extract coverage percentage
 		coverage_percent=$(extract_coverage_percent "$OUTPUT_FILE")
@@ -345,7 +386,10 @@ convert)
 	fi
 
 	if [[ "$INPUT_FORMAT" == "auto" ]]; then
-		INPUT_FORMAT=$(detect_coverage_format "$INPUT_FILE")
+		INPUT_FORMAT=$(detect_coverage_format "$INPUT_FILE") || {
+			log_error "Cannot detect coverage format: $INPUT_FILE"
+			exit 1
+		}
 	fi
 	require_conversion_supported "$INPUT_FORMAT" "$OUTPUT_FORMAT"
 
@@ -380,16 +424,19 @@ summary)
 		add_github_summary "| Metric | Coverage |"
 		add_github_summary "|--------|----------|"
 
-		# A metric the file does not measure renders as n/a, not 0% (#1078)
+		# A metric the file does not measure renders as n/a, not 0% (#1078).
+		# Lines is always measured, so a 0 there is a real 0%; for the other
+		# rows a bare "0" is extract_coverage_details' initial value for a
+		# metric the format never set, and is hidden as before.
 		add_summary_metric() {
-			local label="$1" value="$2"
+			local label="$1" value="$2" show_zero="${3:-false}"
 			if [[ "$value" == "${COVERAGE_NOT_MEASURED:-n/a}" ]]; then
 				add_github_summary "| $label | ${COVERAGE_NOT_MEASURED:-n/a} |"
-			elif [[ -n "$value" ]] && [[ "$value" != "0" ]]; then
+			elif [[ -n "$value" ]] && { [[ "$value" != "0" ]] || [[ "$show_zero" == "true" ]]; }; then
 				add_github_summary "| $label | ${value}% |"
 			fi
 		}
-		add_summary_metric "Lines" "$COVERAGE_LINES"
+		add_summary_metric "Lines" "$COVERAGE_LINES" true
 		add_summary_metric "Branches" "$COVERAGE_BRANCHES"
 		add_summary_metric "Functions" "$COVERAGE_FUNCTIONS"
 		add_summary_metric "Statements" "$COVERAGE_STATEMENTS"

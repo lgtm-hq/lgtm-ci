@@ -62,7 +62,7 @@ merge_lcov_files() {
 			echo "Error: LCOV file not found: ${files[0]}" >&2
 			return 1
 		fi
-		cp "${files[0]}" "$output"
+		cp "${files[0]}" "$output" || return 1
 		return 0
 	fi
 

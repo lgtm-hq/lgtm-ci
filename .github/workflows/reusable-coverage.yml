@@ -264,6 +264,7 @@ jobs:
     outputs:
       coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
       merged-coverage-file: ${{ steps.collect.outputs.merged-coverage-file }}
+      merged-format: ${{ steps.collect.outputs.merged-format }}
       badge-url: ${{ steps.badge.outputs.badge-url }}
       passed: ${{ steps.threshold.outputs.passed }}
 
@@ -402,6 +403,7 @@ jobs:
       rich-coverage-comment: true
       coverage-artifact-name: ${{ inputs.coverage-artifact-name }}
       coverage-file: ${{ needs.coverage.outputs.merged-coverage-file }}
-      # The merged file is in output-format when one was requested, else the input format
-      coverage-format: ${{ inputs.output-format != '' && inputs.output-format || inputs.format }}
+      # The merged file's actual format, which can differ from inputs.format
+      # (a coverage-py label over coverage.xml merges to cobertura)
+      coverage-format: ${{ needs.coverage.outputs.merged-format || 'auto' }}
       tooling-ref: ${{ inputs.tooling-ref }}

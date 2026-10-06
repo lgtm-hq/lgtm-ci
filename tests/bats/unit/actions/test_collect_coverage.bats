@@ -106,6 +106,66 @@ refute_github_output_key() {
 	assert_output "80.0"
 }
 
+@test "collect-coverage merge: lone coverage.py data file is rendered with the coverage CLI, never copied as JSON" {
+	# Minimal SQLite-headed stand-in for a .coverage data file
+	printf 'SQLite format 3\000rest-of-data' >"$WORK/.coverage"
+	# shellcheck disable=SC2016 # case body runs inside the mock, not here
+	mock_command_multi "coverage" '
+		json\ -o\ *) printf "{\"meta\":{\"version\":\"7.6.1\"},\"totals\":{\"percent_covered\":42.0}}\n" >"${3}";;
+		*) echo "unexpected coverage args: $*" >&2; exit 1;;
+	'
+
+	run_step merge COVERAGE_FILES=.coverage
+	assert_success
+	assert_github_output "merged-coverage-file" "merged-coverage.json"
+	assert_github_output "coverage-percent" "42.0"
+	run jq -r '.totals.percent_covered' "$WORK/merged-coverage.json"
+	assert_output "42.0"
+}
+
+@test "collect-coverage merge: lone coverage.py data file without the coverage CLI fails by name" {
+	if command -v coverage >/dev/null 2>&1; then
+		skip "a real coverage CLI is on PATH"
+	fi
+	printf 'SQLite format 3\000rest-of-data' >"$WORK/.coverage"
+
+	run_step merge COVERAGE_FILES=.coverage
+	assert_failure 1
+	assert_output --partial "Cannot read coverage.py data file without the coverage CLI"
+	assert_file_not_exists "$WORK/merged-coverage.json"
+}
+
+@test "collect-coverage merge: explicit coverage-py label over a Cobertura XML validates the file, not the label" {
+	install_fixture "coverage/sample_cobertura.xml" "$WORK/coverage.xml"
+
+	run_step merge COVERAGE_FILES=coverage.xml INPUT_FORMAT=coverage-py
+	assert_success
+	assert_github_output "merged-coverage-file" "merged-coverage.xml"
+	assert_github_output "merged-format" "cobertura"
+	assert_github_output "coverage-percent" "85.00"
+}
+
+@test "collect-coverage merge: reports merged-format for LCOV and JSON inputs" {
+	install_fixture "coverage/lcov-line-only.info" "$WORK/lcov.info"
+	run_step merge COVERAGE_FILES=lcov.info
+	assert_success
+	assert_github_output "merged-format" "lcov"
+
+	: >"$GITHUB_OUTPUT"
+	install_fixture "coverage/coverage.json" "$WORK/coverage.json"
+	run_step merge COVERAGE_FILES=coverage.json
+	assert_success
+	assert_github_output "merged-format" "json"
+}
+
+@test "collect-coverage merge: undetectable input fails with a message" {
+	echo "nothing to see" >"$WORK/report.txt"
+
+	run_step merge COVERAGE_FILES=report.txt
+	assert_failure 1
+	assert_output --partial "Cannot detect coverage format: report.txt"
+}
+
 @test "collect-coverage merge: explicit json output on a coverage.py report is a no-op conversion" {
 	install_fixture "coverage/coverage.json" "$WORK/coverage.json"
 
@@ -135,6 +195,20 @@ refute_github_output_key() {
 	assert_file_not_exists "$WORK/merged-coverage.json"
 	refute_github_output_key "merged-coverage-file"
 	refute_github_output_key "coverage-percent"
+}
+
+@test "collect-coverage merge: unsupported conversion is refused before a merge that would itself fail" {
+	install_fixture "coverage/lcov-full.info" "$WORK/a.info"
+	install_fixture "coverage/lcov-full.info" "$WORK/b.info"
+	# Two full LCOV files need the lcov binary; shadow it with one that fails
+	# so the awk fallback path (which rejects BR/FN records) is what would run
+	mock_command "lcov" "lcov should not be reached" 1
+
+	run_step merge COVERAGE_FILES="a.info,b.info" OUTPUT_FORMAT=json
+	assert_failure 2
+	assert_output --partial "::error::unsupported coverage conversion: lcov -> json"
+	refute_output --partial "lcov should not be reached"
+	refute_output --partial "branch/function coverage records"
 }
 
 @test "collect-coverage merge: implemented converter failing at runtime stays exit 1" {
@@ -212,7 +286,7 @@ refute_github_output_key() {
 	assert_line "| Functions | 66.67% |"
 }
 
-@test "collect-coverage summary: empty LCOV does not fail the step" {
+@test "collect-coverage summary: empty LCOV does not fail the step and shows a real 0% for lines" {
 	install_fixture "coverage/lcov-empty.info" "$WORK/merged-coverage.lcov"
 
 	run_step summary COVERAGE_FILE=merged-coverage.lcov
@@ -220,6 +294,18 @@ refute_github_output_key() {
 	assert_github_output "lines-coverage" "0"
 	assert_github_output "branches-coverage" "n/a"
 	assert_github_output "functions-coverage" "n/a"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_line "| Lines | 0% |"
+	assert_line "| Branches | n/a |"
+}
+
+@test "collect-coverage merge: unrelated JSON is rejected instead of reading as 0%" {
+	echo '{"unrelated": true}' >"$WORK/coverage.json"
+
+	run_step merge COVERAGE_FILES=coverage.json
+	assert_failure 1
+	assert_output --partial "not a parsable coverage report"
+	assert_file_not_exists "$WORK/merged-coverage.json"
 }
 
 # =============================================================================

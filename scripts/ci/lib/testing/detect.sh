@@ -185,6 +185,16 @@ detect_coverage_format() {
 	return 1
 }
 
+# Check whether a file is a coverage.py data file (SQLite), as opposed to a
+# JSON/XML report it generated. The name is not enough: detect_coverage_format
+# labels both ".coverage" and a ".coverage.json" report "coverage-py".
+# Usage: is_coverage_py_data_file ".coverage"
+is_coverage_py_data_file() {
+	local file="${1:-}"
+	[[ -f "$file" ]] || return 1
+	[[ "$(head -c 15 "$file" 2>/dev/null)" == "SQLite format 3" ]]
+}
+
 # Check that a coverage file's content matches the format it was detected as.
 # detect_coverage_format trusts the extension, so a `.info` full of garbage
 # still reads as lcov; this is the content check callers run before trusting
@@ -217,10 +227,27 @@ validate_coverage_file() {
 		fi
 		;;
 	json | istanbul | coverage-py)
-		# .coverage* files are SQLite, not JSON; only reports are parsed
-		[[ "$(basename "$file")" == .coverage* ]] && return 0
-		if ! jq -e . "$file" >/dev/null 2>&1; then
-			echo "invalid json: does not parse - $file" >&2
+		# A coverage.py data file is SQLite, not a report; nothing to parse
+		is_coverage_py_data_file "$file" && return 0
+		# Must parse, and must look like one of the report layouts the
+		# extractors read: coverage.py (.totals), istanbul summary (.total),
+		# istanbul per-file entries (.statementMap/.lines) or generic
+		# {"coverage": n}. Unrelated JSON would otherwise read as 0%.
+		if ! jq -e '
+			type == "object" and (
+				(.totals | type == "object")
+				or (.total | type == "object")
+				or (.coverage | type == "number")
+				or ([.[] | objects | has("statementMap") or has("lines")] | any)
+			)' "$file" >/dev/null 2>&1; then
+			echo "invalid json: not a parsable coverage report (expected .totals, .total, .coverage or per-file entries) - $file" >&2
+			return 1
+		fi
+		;;
+	cobertura | clover | xml)
+		# Cheap shape check only: an XML document with a <coverage> root
+		if ! grep -qE '^[[:space:]]*<coverage[[:space:]>]' "$file" 2>/dev/null; then
+			echo "invalid xml: no <coverage> root element - $file" >&2
 			return 1
 		fi
 		;;
@@ -291,4 +318,4 @@ detect_coverage_source() {
 # Export functions
 # =============================================================================
 export -f detect_test_runner detect_all_runners
-export -f detect_coverage_format validate_coverage_file detect_coverage_source
+export -f detect_coverage_format is_coverage_py_data_file validate_coverage_file detect_coverage_source

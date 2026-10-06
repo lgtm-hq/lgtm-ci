@@ -28,7 +28,10 @@ the input format (`merged-coverage.json`, `.lcov` or `.xml`); requesting a
 format with no converter (such as LCOV to JSON) exits 2 with
 `unsupported coverage conversion: <src> -> <dst>`. A single LCOV file passes
 through untouched, so full LCOV with branch/function records does not need
-the `lcov` binary. Line-only LCOV reports `branches-coverage` and
+the `lcov` binary; merging **two or more** full LCOV files still does (the
+built-in fallback merges line records only and refuses `FN`/`BRDA` records
+by name — install `lcov` in the producing job or upload one file per call;
+coverage is single-runtime by design, #756). Line-only LCOV reports `branches-coverage` and
 `functions-coverage` as `n/a`; a valid LCOV file with no lines found merges
 to 0% with a `::warning::` annotation.
 

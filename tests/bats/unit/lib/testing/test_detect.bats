@@ -504,8 +504,89 @@ teardown() {
 	assert_output --partial "invalid json"
 }
 
+@test "validate_coverage_file: rejects JSON that is not an object" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json"
+	echo '[]' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" coverage-py"
+	assert_failure
+	assert_output --partial "not a parsable coverage report"
+}
+
+@test "validate_coverage_file: rejects unrelated JSON that is not a coverage report" {
+	local file="${BATS_TEST_TMPDIR}/coverage.json"
+	echo '{"unrelated": true}' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" json"
+	assert_failure
+	assert_output --partial "not a parsable coverage report"
+}
+
+@test "validate_coverage_file: accepts every JSON report layout the extractors read" {
+	local dir="${BATS_TEST_TMPDIR}/layouts"
+	mkdir -p "$dir"
+	echo '{"total": {"lines": {"pct": 80}}}' >"$dir/summary.json"
+	echo '{"/src/a.js": {"path": "/src/a.js", "statementMap": {}, "s": {}}}' >"$dir/final.json"
+	echo '{"coverage": 92.5}' >"$dir/generic.json"
+
+	for name in summary final generic; do
+		run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$dir/$name.json\" json"
+		assert_success
+	done
+}
+
+@test "validate_coverage_file: accepts a coverage.py SQLite data file by header, not name" {
+	local file="${BATS_TEST_TMPDIR}/.coverage"
+	printf 'SQLite format 3\000data' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" coverage-py"
+	assert_success
+}
+
+@test "validate_coverage_file: a .coverage-named file that is neither SQLite nor JSON is rejected" {
+	local file="${BATS_TEST_TMPDIR}/.coverage"
+	echo "not a database" >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" coverage-py"
+	assert_failure
+	assert_output --partial "invalid json"
+}
+
+@test "is_coverage_py_data_file: true only for the SQLite header" {
+	local data="${BATS_TEST_TMPDIR}/.coverage"
+	local report="${BATS_TEST_TMPDIR}/.coverage.json"
+	printf 'SQLite format 3\000data' >"$data"
+	echo '{"totals": {"percent_covered": 1}}' >"$report"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && is_coverage_py_data_file \"$data\""
+	assert_success
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && is_coverage_py_data_file \"$report\""
+	assert_failure
+	run bash -c 'source "$LIB_DIR/testing/detect.sh" && is_coverage_py_data_file "/nonexistent"'
+	assert_failure
+}
+
+@test "validate_coverage_file: accepts Cobertura and Clover XML with a <coverage> root" {
+	for fixture in coverage/sample_cobertura.xml detect/cobertura-python.xml detect/clover-php.xml; do
+		run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"\$FIXTURES_DIR/$fixture\" cobertura"
+		assert_success
+	done
+}
+
+@test "validate_coverage_file: rejects XML without a <coverage> root" {
+	local file="${BATS_TEST_TMPDIR}/coverage.xml"
+	printf '<?xml version="1.0"?>\n<testsuite tests="1"/>\n' >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" cobertura"
+	assert_failure
+	assert_output --partial "no <coverage> root element"
+}
+
 @test "validate_coverage_file: passes formats without a content check" {
-	run bash -c 'source "$LIB_DIR/testing/detect.sh" && validate_coverage_file "$FIXTURES_DIR/coverage/sample_cobertura.xml" cobertura'
+	local file="${BATS_TEST_TMPDIR}/index.html"
+	echo "<html></html>" >"$file"
+
+	run bash -c "source \"\$LIB_DIR/testing/detect.sh\" && validate_coverage_file \"$file\" html"
 	assert_success
 }
 

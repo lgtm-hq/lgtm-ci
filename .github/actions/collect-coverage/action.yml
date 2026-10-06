@@ -40,6 +40,11 @@ outputs:
       Path to merged coverage file (merged-coverage.json, .lcov or .xml by
       output format)
     value: ${{ steps.merge.outputs.merged-coverage-file }}
+  merged-format:
+    description: >-
+      Format of merged-coverage-file (json, istanbul, lcov, cobertura); equals
+      output-format when one was requested, else what the input merged to
+    value: ${{ steps.merge.outputs.merged-format }}
   coverage-percent:
     description: "Overall coverage percentage"
     value: ${{ steps.merge.outputs.coverage-percent }}
