@@ -29,15 +29,16 @@ teardown() {
 # options match the runner scripts (`set -euo pipefail`) so a listing
 # command's exit status leaking through a pipe shows up here, not in CI.
 #
-# env -u BASH_ENV: kcov instruments nested bash via BASH_ENV, and its injected
-# preamble reads BASH_SOURCE, which is unbound under `set -u` in a `bash -c`
-# child — the same idiom as test_cosign.bats, so the child's output is only
-# the helper's own.
+# The options are set inside the child rather than on the bash command line:
+# kcov instruments nested bash via a BASH_ENV preamble that reads BASH_SOURCE,
+# which is unbound under `set -u` in a `bash -c` child, so `bash -u` would
+# abort before the helper runs. Setting them after the preamble keeps the
+# instrumentation (and this file's coverage of pm.sh) intact.
 _pm() {
 	local manager="$1"
 	shift
-	env -u BASH_ENV PACKAGE_MANAGER="$manager" \
-		bash -euo pipefail -c 'source "$1"; shift; "$@"' _ "$PM_LIB" "$@"
+	PACKAGE_MANAGER="$manager" \
+		bash -c 'set -euo pipefail; source "$1"; shift; "$@"' _ "$PM_LIB" "$@"
 }
 
 _calls() {
