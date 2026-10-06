@@ -1,0 +1,84 @@
+<testsuites id="" name="" tests="4" failures="1" skipped="1" errors="0" time="2.3746090000000004">
+<testsuite name="failing.spec.js" timestamp="2026-10-06T14:50:31.630Z" hostname="chromium" tests="2" failures="1" skipped="0" time="0.691" errors="0">
+<testcase name="fails on purpose" classname="failing.spec.js" time="0.686">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/failing-fails-on-purpose-chromium/error-context.md]]
+
+[[ATTACHMENT|../test-results/failing-fails-on-purpose-chromium-retry1/error-context.md]]
+]]>
+</system-out>
+<failure message="expect(locator).toHaveText(expected) failed" type="expect.toHaveText">
+<![CDATA[  [chromium] › failing.spec.js:3:5 › fails on purpose ──────────────────────────────────────────────
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator: getByRole('heading')
+    Expected: "missing"
+    Timeout: 200ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveText" getByRole('heading') with timeout 200ms
+      - waiting for getByRole('heading')
+
+
+      3 | test("fails on purpose", async ({ page }) => {
+      4 |   await page.setContent("<p>fixture</p>");
+    > 5 |   await expect(page.getByRole("heading")).toHaveText("missing", { timeout: 200 });
+        |                                           ^
+      6 | });
+      7 |
+      8 | test("flaky on purpose", async ({}, testInfo) => {
+        at /work/consumer/tests/failing.spec.js:5:43
+
+    Error Context: ../test-results/failing-fails-on-purpose-chromium/error-context.md
+
+    Retry #1 ───────────────────────────────────────────────────────────────────────────────────────
+
+    Error: expect(locator).toHaveText(expected) failed
+
+    Locator: getByRole('heading')
+    Expected: "missing"
+    Timeout: 200ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toHaveText" getByRole('heading') with timeout 200ms
+      - waiting for getByRole('heading')
+
+
+      3 | test("fails on purpose", async ({ page }) => {
+      4 |   await page.setContent("<p>fixture</p>");
+    > 5 |   await expect(page.getByRole("heading")).toHaveText("missing", { timeout: 200 });
+        |                                           ^
+      6 | });
+      7 |
+      8 | test("flaky on purpose", async ({}, testInfo) => {
+        at /work/consumer/tests/failing.spec.js:5:43
+
+    Error Context: ../test-results/failing-fails-on-purpose-chromium-retry1/error-context.md
+]]>
+</failure>
+</testcase>
+<testcase name="flaky on purpose" classname="failing.spec.js" time="0.005">
+<system-out>
+<![CDATA[
+[[ATTACHMENT|../test-results/failing-flaky-on-purpose-chromium/error-context.md]]
+]]>
+</system-out>
+</testcase>
+</testsuite>
+<testsuite name="smoke.spec.js" timestamp="2026-10-06T14:50:31.630Z" hostname="chromium" tests="2" failures="0" skipped="1" time="0.245" errors="0">
+<testcase name="smoke › renders inline content" classname="smoke.spec.js" time="0.245">
+</testcase>
+<testcase name="smoke › skipped on purpose" classname="smoke.spec.js">
+<properties>
+<property name="skip" value="fixture: exercises the skipped status">
+</property>
+</properties>
+<skipped>
+</skipped>
+</testcase>
+</testsuite>
+</testsuites>

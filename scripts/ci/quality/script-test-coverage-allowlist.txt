@@ -7,7 +7,6 @@ actions/generate-coverage-badge.sh
 actions/generate-lintro-comment.sh
 actions/generate-sbom.sh
 actions/merge-node-coverage.sh
-actions/merge-playwright-reports.sh
 actions/run-command.sh
 actions/run-pytest.sh
 actions/run-tests.sh

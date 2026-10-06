@@ -37,11 +37,28 @@ on:
         required: false
         type: string
         default: "chromium"
+      reporters:
+        description: >-
+          Comma-separated Playwright reporters, emitted as exactly one
+          --reporter flag (Playwright keeps only the last flag, #804). They
+          replace the reporters in playwright.config; append custom ones
+          here. Must include json (metrics sidecar) and html (asserted after
+          the run; a missing playwright-report/ fails the job).
+        required: false
+        type: string
+        default: "list,json,junit,html"
       upload-report:
-        description: "Upload HTML/blob Playwright report artifacts on failure"
+        description: "Upload HTML/JUnit/blob Playwright report artifacts"
         required: false
         type: boolean
         default: true
+      upload-report-when:
+        description: >-
+          When upload-report is true: failure (default) uploads only when
+          Playwright exited non-zero; always uploads on every run.
+        required: false
+        type: string
+        default: "failure"
       report-artifact-name:
         description: >-
           Artifact name for the uploaded Playwright report. Empty resolves to
@@ -388,6 +405,7 @@ jobs:
           TEST_COMMAND: ${{ inputs.test-command }}
           PROJECT: ${{ inputs.project }}
           GREP: ${{ inputs.grep }}
+          REPORTERS: ${{ inputs.reporters }}
           BASE_URL: ${{ inputs.base-url }}
           WEB_SERVER: ${{ inputs.web-server }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
@@ -422,10 +440,12 @@ jobs:
         env:
           STEP: upload-gate
           UPLOAD_REPORT: ${{ inputs.upload-report }}
+          UPLOAD_REPORT_WHEN: ${{ inputs.upload-report-when }}
           EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
       # Debug convenience only: nothing downloads this report, and the "Fail on
-      # Playwright errors" step below owns the job verdict.
+      # Playwright errors" step below owns the job verdict. The run step already
+      # failed the job if playwright-report/ is missing (#804).
       - name: Upload Playwright report
         id: upload-report
         if: >-
@@ -441,6 +461,7 @@ jobs:
           path: |
             ${{ inputs.working-directory }}/playwright-report/
             ${{ inputs.working-directory }}/playwright-results.json
+            ${{ inputs.working-directory }}/playwright-results.xml
             ${{ inputs.working-directory }}/blob-report/
             ${{ inputs.working-directory }}/test-results/
           retention-days: 30
@@ -454,14 +475,18 @@ jobs:
         run: |
           echo "::warning::Playwright report upload failed; the test result is unaffected."
       - name: Fail on Playwright errors
-        # always(): re-raise even if a prior always() step (report upload) failed
+        # always(): re-raise even if a prior always() step (report upload) failed.
+        # A run step that failed before publishing exit-code (pre-run
+        # validation) must fail the job too, not pass it silently (#804).
         if: >-
           always()
-          && steps.run.outputs.exit-code != ''
-          && steps.run.outputs.exit-code != '0'
+          && (
+            steps.run.outcome == 'failure'
+            || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0')
+          )
         shell: bash
         env:
-          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          EXIT_CODE: ${{ steps.run.outputs.exit-code || '1' }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/fail-with-exit-code.sh
 
   publish-test-summary:

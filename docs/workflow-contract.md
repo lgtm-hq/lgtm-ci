@@ -1874,24 +1874,35 @@ lockstep (#514).
 Single always-run job uses `name: ${{ inputs.job-name }}`. Browser binaries are
 cached under `~/.cache/ms-playwright` keyed on the resolved `@playwright/test`
 version plus `browsers`. Install uses `npx playwright install --with-deps
-<browsers>`. HTML/blob reports upload only on failure when `upload-report: true`.
-Default `egress-preset: playwright` (CDN + apt mirrors); the workflow default
+<browsers>`. Reporters are passed as **exactly one** `--reporter=` flag
+(`reporters`, default `list,json,junit,html`); Playwright keeps only the last
+flag, so repeating it used to drop the HTML report while the job stayed green
+(#804). The flag replaces the consumer's `playwright.config` reporters, so add
+custom ones to `reporters` rather than to the config. Output locations are
+pinned: `playwright-results.json` (parsed for the summary),
+`playwright-results.xml`, `playwright-report/`. A missing `playwright-report/`
+after the run **fails the job**, even when every test passed. HTML/JUnit/blob
+reports upload when `upload-report: true`, on failure by default
+(`upload-report-when: failure`) or on every run (`always`). Default
+`egress-preset: playwright` (CDN + apt mirrors); the workflow default
 `allowed-endpoints` mirrors that full baseline under replace semantics (#512).
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
-| Input            | Default                | Notes                                              |
-| ---------------- | ---------------------- | -------------------------------------------------- |
-| `job-name`       | required               | Check name / summary suite title                   |
-| `test-command`   | `npx playwright test`  | Base CLI; `project` / `grep` append                |
-| `project`        | empty                  | `--project=` filter                                |
-| `grep`           | empty                  | `--grep=` filter (e.g. `@smoke`)                   |
-| `node-version`   | `22`                   | setup-node                                         |
-| `browsers`       | `chromium`             | install `--with-deps` list or `all`                |
-| `upload-report`  | `true`                 | HTML/blob artifact **on failure only**             |
-| `base-url`       | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                 |
-| `web-server`     | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config        |
-| `package-manager` | `npm`                  | `npm` / `bun` / `pnpm`                             |
+| Input                | Default                | Notes                                                        |
+| -------------------- | ---------------------- | ------------------------------------------------------------ |
+| `job-name`           | required               | Check name / summary suite title                             |
+| `test-command`       | `npx playwright test`  | Base CLI; `project` / `grep` append                          |
+| `project`            | empty                  | `--project=` filter                                          |
+| `grep`               | empty                  | `--grep=` filter (e.g. `@smoke`)                             |
+| `node-version`       | `22`                   | setup-node                                                   |
+| `browsers`           | `chromium`             | install `--with-deps` list or `all`                          |
+| `reporters`          | `list,json,junit,html` | One `--reporter=` flag; must include `json` and `html`       |
+| `upload-report`      | `true`                 | HTML/JUnit/blob artifact                                     |
+| `upload-report-when` | `failure`              | `failure` (non-zero exit only) or `always`                   |
+| `base-url`           | empty                  | `BASE_URL` + `PLAYWRIGHT_BASE_URL`                           |
+| `web-server`         | empty                  | `PLAYWRIGHT_WEB_SERVER` for consumer config                  |
+| `package-manager`    | `npm`                  | `npm` / `bun` / `pnpm`                                       |
 
 <!-- markdownlint-enable MD013 MD060 -->
 

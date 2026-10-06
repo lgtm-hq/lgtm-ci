@@ -150,7 +150,10 @@ default 'npm'), `bun-version` (exact Renovate-managed pin, used only with
 
 Preferred Playwright E2E reusable for thin smoke / a11y / full callers with
 distinct required `job-name` values. Caches `~/.cache/ms-playwright` by
-resolved Playwright version; uploads HTML/blob reports on failure only.
+resolved Playwright version; passes reporters as one `--reporter` flag and
+fails the job when `playwright-report/` is missing afterwards (#804); uploads
+HTML/JUnit/blob reports on failure by default (`upload-report-when: always`
+to keep them on every run).
 
 ```yaml
 jobs:
@@ -164,8 +167,10 @@ jobs:
 
 **Inputs:** `job-name` (**required**), `test-command` (default
 `npx playwright test`), `project`, `grep`, `node-version`, `browsers`
-(default `chromium`), `upload-report` (default true, failure-only),
-`base-url`, `web-server`, plus standard egress / tooling inputs.
+(default `chromium`), `reporters` (default `list,json,junit,html`; must keep
+`json` and `html`), `upload-report` (default true), `upload-report-when`
+(`failure` default, or `always`), `base-url`, `web-server`, plus standard
+egress / tooling inputs.
 
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`, `passed`.
 

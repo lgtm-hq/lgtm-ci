@@ -9,6 +9,8 @@
 #   INPUT_DIR - Directory containing report artifacts (default: playwright-reports)
 #   OUTPUT_DIR - Directory for merged report (default: merged-report)
 #   REPORT_FORMAT - Format: json, html (default: html)
+#   UNPARSEABLE_COUNT - summary step: shard reports skipped as invalid JSON
+#                       (merge step output unparseable-count)
 
 set -euo pipefail
 
@@ -100,33 +102,64 @@ merge)
 		# Stats-only merge: copy first file structure, then aggregate stats
 		combined_file="$OUTPUT_DIR/merged-results.json"
 
-		# Use first file as base (suites/tests not merged, only stats updated)
-		read -r first_file <<<"$json_files"
+		# Use the first parseable file as base (suites/tests not merged, only
+		# stats updated); a truncated shard must not become the merged report.
+		first_file=""
+		base_rejected=0
+		while IFS= read -r candidate; do
+			if [[ -f "$candidate" ]] && jq -e 'true' "$candidate" >/dev/null 2>&1; then
+				first_file="$candidate"
+				break
+			fi
+			log_warn "Unparseable Playwright report skipped as merge base: $candidate"
+			base_rejected=$((base_rejected + 1))
+		done <<<"$json_files"
+		if [[ -z "$first_file" ]]; then
+			# Every report was rejected: still publish the count so the summary
+			# shows the skipped reports instead of an all-green zero.
+			log_warn "No valid JSON reports found to merge"
+			set_github_output "unparseable-count" "$base_rejected"
+			echo "::warning title=Playwright merge::${base_rejected} shard report(s) were not valid JSON; nothing merged" >&2
+			set_github_output "merged-path" ""
+			exit 0
+		fi
 		cp "$first_file" "$combined_file"
 
 		# Aggregate stats from all files
 		total_passed=0
 		total_failed=0
 		total_skipped=0
-		total_duration=0
+		total_duration_ms=0
+		unparseable=0
 
 		while IFS= read -r file; do
 			if [[ -f "$file" ]]; then
-				parse_playwright_json "$file"
+				# A malformed shard report (rc 2) contributes zero counts; keep
+				# merging the others rather than aborting under set -e, but
+				# count it so the summary cannot read as all green.
+				if ! parse_playwright_json "$file"; then
+					log_warn "Unparseable Playwright report skipped: $file"
+					unparseable=$((unparseable + 1))
+				fi
 				total_passed=$((total_passed + TESTS_PASSED))
 				total_failed=$((total_failed + TESTS_FAILED))
 				total_skipped=$((total_skipped + TESTS_SKIPPED))
-				total_duration=$((total_duration + TESTS_DURATION))
+				total_duration_ms=$((total_duration_ms + TESTS_DURATION_MS))
 			fi
 		done <<<"$json_files"
 
-		# Update combined file with aggregated stats
+		# Update combined file with aggregated stats (duration in integer ms)
 		jq --argjson passed "$total_passed" \
 			--argjson failed "$total_failed" \
 			--argjson skipped "$total_skipped" \
-			--argjson duration "$total_duration" \
-			'.stats.expected = $passed | .stats.unexpected = $failed | .stats.skipped = $skipped | .stats.duration = ($duration * 1000)' \
+			--argjson duration "$total_duration_ms" \
+			'.stats.expected = $passed | .stats.unexpected = $failed | .stats.skipped = $skipped | .stats.duration = $duration' \
 			"$combined_file" >"$combined_file.tmp" && mv "$combined_file.tmp" "$combined_file"
+
+		set_github_output "unparseable-count" "$unparseable"
+		if [[ "$unparseable" -gt 0 ]]; then
+			echo "::warning title=Playwright merge::${unparseable} shard report(s) were not valid JSON and contributed no counts" >&2
+		fi
 	fi
 
 	# Set outputs
@@ -155,7 +188,7 @@ parse-merged)
 
 	if [[ -n "$json_file" ]] && [[ -f "$json_file" ]]; then
 		log_info "Parsing merged results from: $json_file"
-		parse_playwright_json "$json_file"
+		parse_playwright_json "$json_file" || log_warn "Merged results are not valid JSON; reporting zero tests: $json_file"
 		set_github_output "total-passed" "$TESTS_PASSED"
 		set_github_output "total-failed" "$TESTS_FAILED"
 		set_github_output "total-skipped" "$TESTS_SKIPPED"
@@ -173,6 +206,7 @@ summary)
 	: "${TOTAL_FAILED:=0}"
 	: "${TOTAL_SKIPPED:=0}"
 	: "${REPORT_COUNT:=0}"
+	: "${UNPARSEABLE_COUNT:=0}"
 
 	total=$((TOTAL_PASSED + TOTAL_FAILED + TOTAL_SKIPPED))
 
@@ -189,6 +223,9 @@ summary)
 	add_github_summary "| Metric | Value |"
 	add_github_summary "|--------|-------|"
 	add_github_summary "| Reports merged | $REPORT_COUNT |"
+	if [[ "$UNPARSEABLE_COUNT" -gt 0 ]]; then
+		add_github_summary "| Reports skipped (invalid JSON) | :warning: $UNPARSEABLE_COUNT |"
+	fi
 	add_github_summary "| Passed | $TOTAL_PASSED |"
 	add_github_summary "| Failed | $TOTAL_FAILED |"
 	add_github_summary "| Skipped | $TOTAL_SKIPPED |"

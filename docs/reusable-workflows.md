@@ -555,21 +555,26 @@ Quality lint-only checks use `reusable-quality-lint.yml`; PR lint summaries use
 Thin callers express full / smoke / a11y as separate jobs with distinct
 `job-name` values. `project` and `grep` append to `test-command` (default
 `npx playwright test`). Browser cache key uses the resolved Playwright version.
-Reports upload on failure only when `upload-report` is true. Default egress
-preset is `playwright`.
+Reporters go out as one `--reporter=` flag (`reporters`, default
+`list,json,junit,html`), replacing the config's reporters; a missing
+`playwright-report/` after the run fails the job (#804). Reports upload when
+`upload-report` is true, on failure by default or on every run with
+`upload-report-when: always`. Default egress preset is `playwright`.
 
 <!-- markdownlint-disable MD013 -->
 
-| Input             | Type    | Required | Default               | Purpose                          |
-| ----------------- | ------- | -------- | --------------------- | -------------------------------- |
-| `job-name`        | string  | yes      | —                     | Check / summary title            |
-| `test-command`    | string  | no       | `npx playwright test` | Base CLI                         |
-| `project`         | string  | no       | empty                 | `--project` filter               |
-| `grep`            | string  | no       | empty                 | `--grep` filter                  |
-| `browsers`        | string  | no       | `chromium`            | install `--with-deps` targets    |
-| `upload-report`   | boolean | no       | `true`                | HTML/blob artifact on failure    |
-| `base-url`        | string  | no       | empty                 | `BASE_URL` passthrough           |
-| `web-server`      | string  | no       | empty                 | `PLAYWRIGHT_WEB_SERVER`          |
+| Input                | Type    | Required | Default                | Purpose                                      |
+| -------------------- | ------- | -------- | ---------------------- | -------------------------------------------- |
+| `job-name`           | string  | yes      | —                      | Check / summary title                        |
+| `test-command`       | string  | no       | `npx playwright test`  | Base CLI                                     |
+| `project`            | string  | no       | empty                  | `--project` filter                           |
+| `grep`               | string  | no       | empty                  | `--grep` filter                              |
+| `browsers`           | string  | no       | `chromium`             | install `--with-deps` targets                |
+| `reporters`          | string  | no       | `list,json,junit,html` | One `--reporter` flag; needs `json` + `html` |
+| `upload-report`      | boolean | no       | `true`                 | HTML/JUnit/blob artifact                     |
+| `upload-report-when` | string  | no       | `failure`              | `failure` or `always`                        |
+| `base-url`           | string  | no       | empty                  | `BASE_URL` passthrough                       |
+| `web-server`         | string  | no       | empty                  | `PLAYWRIGHT_WEB_SERVER`                      |
 
 <!-- markdownlint-enable MD013 -->
 
