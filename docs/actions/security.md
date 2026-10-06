@@ -238,7 +238,10 @@ Sign release artifacts with Sigstore/Cosign keyless signing.
 
 **Outputs:** `signatures`, `certificate`, `signatures-dir`, `signed-count`.
 Requires `id-token: write` (and `contents: write` when uploading to a
-release).
+release). The release upload targets `repository` (default
+`${{ github.repository }}`) through `GH_REPO` rather than whatever git remote
+is in the workspace, so it works without a checkout (#935); set `repository`
+when the release belongs to another repository.
 
 Each blob is signed with a bounded, transient-only retry (shared with the
 image-signing path via `scripts/ci/lib/cosign.sh`): only an ambient-OIDC
