@@ -163,11 +163,16 @@ _tooling_sparse_cone_ok() {
 }
 
 @test "reusable-test-e2e-playwright: report artifact includes HTML, JSON and JUnit outputs" {
-	run grep -F '${{ inputs.working-directory }}/playwright-report/' "$WORKFLOW"
-	assert_success
-	run grep -F '${{ inputs.working-directory }}/playwright-results.json' "$WORKFLOW"
-	assert_success
-	run grep -F '${{ inputs.working-directory }}/playwright-results.xml' "$WORKFLOW"
+	# Anchored to the upload step: the JSON path also appears in the parse
+	# step's REPORT_PATH, which must not satisfy this assertion.
+	run awk '
+		/name: Upload Playwright report/ { in_step = 1 }
+		in_step && /name: Warn on failed report upload/ { in_step = 0 }
+		in_step && /\$\{\{ inputs\.working-directory \}\}\/playwright-report\/$/ { html = 1 }
+		in_step && /\$\{\{ inputs\.working-directory \}\}\/playwright-results\.json$/ { json = 1 }
+		in_step && /\$\{\{ inputs\.working-directory \}\}\/playwright-results\.xml$/ { junit = 1 }
+		END { exit !(html && json && junit) }
+	' "$WORKFLOW"
 	assert_success
 }
 

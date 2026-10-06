@@ -83,7 +83,9 @@ run)
 		PLAYWRIGHT_ARGS+=("--project=$BROWSER")
 	fi
 
-	# Add reporter
+	# Add reporter. *_OUTPUT_FILE outranks *_OUTPUT_NAME in Playwright, so an
+	# inherited value would silently redirect the sidecar the parse step reads.
+	unset PLAYWRIGHT_JSON_OUTPUT_FILE PLAYWRIGHT_JUNIT_OUTPUT_FILE
 	case "$REPORTER" in
 	json)
 		PLAYWRIGHT_ARGS+=("--reporter=json")

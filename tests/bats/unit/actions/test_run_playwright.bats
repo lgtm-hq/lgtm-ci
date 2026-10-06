@@ -121,14 +121,20 @@ EOF
 #!/usr/bin/env bash
 echo "$@" >> "${MOCK_CALLS}"
 mkdir -p playwright-report && echo '<html></html>' > playwright-report/index.html
+[[ -z "${PLAYWRIGHT_JSON_OUTPUT_FILE:-}${PLAYWRIGHT_JUNIT_OUTPUT_FILE:-}" ]] || { echo "inherited *_OUTPUT_FILE leaked" >&2; exit 8; }
 echo '{"stats":{"expected":1,"unexpected":0,"flaky":0,"skipped":0,"duration":10.4}}' > "${PLAYWRIGHT_JSON_OUTPUT_NAME:?}"
 [[ "${PLAYWRIGHT_HTML_OPEN:-}" == "never" ]] || { echo "PLAYWRIGHT_HTML_OPEN not pinned" >&2; exit 9; }
 exit 0
 EOF
 	export MOCK_CALLS="${BATS_TEST_TMPDIR}/mock_calls_npx"
-	run env STEP=run PACKAGE_MANAGER=npm REPORTER=html WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
+	# An inherited *_OUTPUT_FILE must not redirect the sidecar (the mock fails
+	# on an unset PLAYWRIGHT_JSON_OUTPUT_NAME and writes where NAME points).
+	run env STEP=run PACKAGE_MANAGER=npm REPORTER=html WORKING_DIRECTORY="$WORK_DIR" \
+		PLAYWRIGHT_JSON_OUTPUT_FILE=/tmp/elsewhere.json PLAYWRIGHT_JUNIT_OUTPUT_FILE=/tmp/elsewhere.xml \
+		bash "$SCRIPT"
 	assert_success
 	refute_output --partial "HTML report missing"
+	assert_file_exists "${WORK_DIR}/playwright-results.json"
 	assert_equal "$(_github_output_value exit-code)" "0"
 	assert_equal "$(_github_output_value report-path)" "playwright-report"
 	assert_equal "$(_github_output_value json-report-path)" "playwright-results.json"
@@ -153,6 +159,9 @@ EOF
 	run env STEP=parse REPORTER=json REPORT_PATH="${FIXTURES_DIR}/playwright/reports/json-malformed.json" bash "$SCRIPT"
 	assert_success
 	assert_output --partial "Results file is not valid JSON"
+	assert_equal "$(_github_output_value tests-passed)" "0"
+	assert_equal "$(_github_output_value tests-failed)" "0"
+	assert_equal "$(_github_output_value tests-skipped)" "0"
 	assert_equal "$(_github_output_value tests-total)" "0"
 }
 
