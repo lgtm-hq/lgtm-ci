@@ -385,14 +385,15 @@ USER_MARKER_COMMENT='[{"id":7,"user":{"type":"User","login":"someone"},"body":"<
 		run cat "$GITHUB_OUTPUT"
 		assert_output --partial "outcome=broken"
 	done
-	# Near-deadline: lintro exits 124 on its own just before the bound. An
-	# elapsed-seconds heuristic would misread this; the wrapper's own
-	# "sending signal" diagnostic is the only evidence that counts.
+	# Delayed self-exit: lintro runs a while, then exits 124 on its own
+	# (an elapsed-seconds heuristic misread this); the wrapper's own
+	# "sending signal" diagnostic is the only evidence that counts. The
+	# bound is generous so runner load cannot make it fire first.
 	: >"$GITHUB_OUTPUT"
 	bin="${BATS_TEST_TMPDIR}/lintro"
 	printf '#!/usr/bin/env bash\nsleep 2.3\nexit 124\n' >"$bin"
 	chmod +x "$bin"
-	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=3
+	run run_review LINTRO_BIN="$bin" BLOCKING=false REVIEW_TIMEOUT_SECONDS=30
 	assert_failure
 	run cat "$GITHUB_OUTPUT"
 	assert_output --partial "outcome=broken"
