@@ -160,10 +160,10 @@ EOF
 	assert_output --partial "--bail 1"
 }
 
-@test "run-vitest run bun: executes bun run vitest" {
+@test "run-vitest run bun: executes bun x --no-install vitest" {
 	run env STEP=run PACKAGE_MANAGER=bun WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "$(_calls bun)" "run vitest run --reporter=json --outputFile=vitest-results.json"
+	assert_equal "$(_calls bun)" "x --no-install vitest run --reporter=json --outputFile=vitest-results.json"
 	assert_equal "$(_calls npx)" ""
 }
 

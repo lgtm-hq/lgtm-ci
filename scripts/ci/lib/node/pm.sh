@@ -16,15 +16,19 @@
 #
 # Per-manager command table (run / exec / add-dev / has):
 #
-#   bun   bun run <script>   bun run <bin>          bun add -d        bun pm ls
+#   bun   bun run <script>   bun x --no-install     bun add -d        bun pm ls
 #   npm   npm run <script>   npx --no-install <bin> npm install -D    npm ls --json
 #   pnpm  pnpm run <script>  pnpm exec <bin>        pnpm add -D       pnpm ls --json
 #
-# pm_exec resolves binaries from the installed tree only: `npx --no-install`
-# and `pnpm exec` never reach the registry, and `bun run <bin>` resolves
-# node_modules/.bin without the registry fallback that `bunx` has. That is
-# what keeps a missing devDependency an actionable failure (pm_has) instead
-# of a silent install into the consumer's project.
+# pm_exec only runs binaries already in the installed tree: `npx --no-install`,
+# `pnpm exec`, and `bun x --no-install` all refuse to install a missing one
+# (npx may still query the registry to resolve the name before refusing).
+# `bun x` rather than `bun run` because `bun run <name>` prefers a package.json
+# script of that name over node_modules/.bin, and a project `lhci`/`vitest`
+# script would be invoked with the runner's arguments appended. Without
+# `--bun` the binary keeps its Node runtime. That is what keeps a missing
+# devDependency an actionable failure (pm_has) instead of a silent install
+# into the consumer's project.
 
 [[ -n "${_LGTM_CI_NODE_PM_LOADED:-}" ]] && return 0
 readonly _LGTM_CI_NODE_PM_LOADED=1
@@ -72,7 +76,7 @@ pm_exec() {
 	manager=$(pm_require) || return $?
 
 	case "$manager" in
-	bun) bun run "$bin" "$@" ;;
+	bun) bun x --no-install "$bin" "$@" ;;
 	npm) npx --no-install "$bin" "$@" ;;
 	pnpm) pnpm exec "$bin" "$@" ;;
 	esac

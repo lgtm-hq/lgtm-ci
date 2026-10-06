@@ -523,10 +523,13 @@ contract. It drives three things in one job:
    absent. No manager touches another manager's lockfile.
 3. **Execution** — the runner scripts `run-vitest.sh`, `run-playwright.sh`,
    and `run-lighthouse.sh` dispatch through `scripts/ci/lib/node/pm.sh`
-   (`pm_run`, `pm_exec`, `pm_add_dev`, `pm_has`). `pm_exec` only resolves
-   binaries already in the project tree (`bun run <bin>`,
-   `npx --no-install <bin>`, `pnpm exec <bin>`); an empty `PACKAGE_MANAGER`
-   fails with `package-manager is required for execution actions`.
+   (`pm_run`, `pm_exec`, `pm_add_dev`, `pm_has`). `pm_exec` only runs
+   binaries already in the project tree (`bun x --no-install <bin>`,
+   `npx --no-install <bin>`, `pnpm exec <bin>`) and never installs a missing
+   one (npx may still query the registry to resolve the name before it
+   refuses, so under an egress block a missing binary can surface as a
+   network error); an empty `PACKAGE_MANAGER` fails with
+   `package-manager is required for execution actions`.
 
 **Test tooling is a consumer prerequisite.** The runners never install into
 the project: `vitest` (plus `@vitest/coverage-v8` or
@@ -544,8 +547,23 @@ The direct composites do **not** cache dependencies: the Bun/`node_modules`
 cache that the former `setup-node` nesting restored is gone, deliberately —
 one composite cannot key a cache correctly for three managers, and npm/pnpm
 never had one there. Callers that want install caching should either call
-the reusable workflows (which keep the Bun cache) or add their own
-`actions/cache` step in front and pass `install-dependencies: "false"`.
+`reusable-test-node.yml` / `reusable-test-node-custom.yml` (which keep their
+Bun cache; the e2e reusables go through `run-playwright` and only cache
+Playwright browsers) or add their own `actions/cache` step in front and pass
+`install-dependencies: "false"`.
+
+### Migration (#1077)
+
+- `reusable-test-e2e.yml` and `reusable-test-e2e-matrix.yml` now honour
+  `package-manager` (default `npm`). Before #1077 the e2e path always ran
+  Bun regardless of the input, so a Bun project that never set it must now
+  pass `package-manager: bun` or the frozen `npm ci` fails for want of a
+  `package-lock.json`.
+- The direct `run-vitest`, `run-playwright`, `run-lighthouse` composites
+  require `package-manager`; `run-tests` needs it whenever the vitest or
+  playwright runner is selected.
+- Test tooling (`vitest`, a coverage provider, `@playwright/test`,
+  `@lhci/cli`) must be a committed devDependency; nothing is installed.
 
 ### Tested runtime matrix
 

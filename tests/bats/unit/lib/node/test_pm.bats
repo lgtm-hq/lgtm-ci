@@ -93,8 +93,7 @@ _calls() {
 }
 
 @test "pm_run: script name is required" {
-	run _pm npm pm_run
-	assert_failure
+	run -1 _pm npm pm_run
 	assert_output --partial "script name required"
 }
 
@@ -102,10 +101,10 @@ _calls() {
 # pm_exec
 # =============================================================================
 
-@test "pm_exec bun: bun run <bin> resolves node_modules/.bin without a registry fallback" {
+@test "pm_exec bun: bun x --no-install <bin> (never bun run, which prefers a same-named script)" {
 	run _pm bun pm_exec vitest run --reporter=json
 	assert_success
-	assert_equal "$(_calls bun)" "run vitest run --reporter=json"
+	assert_equal "$(_calls bun)" "x --no-install vitest run --reporter=json"
 }
 
 @test "pm_exec npm: npx --no-install <bin>" {

@@ -126,7 +126,7 @@ see [workflow-contract.md](../workflow-contract.md#egress-allowlists).
 
 - `pm_require` (node/pm.sh) - Validate `$PACKAGE_MANAGER` (`bun`/`npm`/`pnpm`) and print it; empty or unknown exits 2
 - `pm_run` (node/pm.sh) - Run a package.json script through the selected manager
-- `pm_exec` (node/pm.sh) - Run a locally installed binary (`bun run`, `npx --no-install`, `pnpm exec`); no registry fallback
+- `pm_exec` (node/pm.sh) - Run a locally installed binary (`bun x --no-install`, `npx --no-install`, `pnpm exec`); never installs a missing one
 - `pm_add_dev` (node/pm.sh) - Add devDependencies through the selected manager (unused by the runners)
 - `pm_has` (node/pm.sh) - True when the manager reports the package installed in the project tree
 

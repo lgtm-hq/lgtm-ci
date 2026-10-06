@@ -84,7 +84,7 @@ EOF
 	assert_success
 	run _calls bun
 	assert_line --index 0 "pm ls"
-	assert_line --index 1 "run playwright install --with-deps chromium"
+	assert_line --index 1 "x --no-install playwright install --with-deps chromium"
 	# No `bun add` / bare `bun install`: the package is a prerequisite.
 	refute_output --partial "add"
 	run grep -E '^install' "${MOCK_CALLS}"
@@ -99,10 +99,10 @@ EOF
 	assert_equal "$(_github_output_value exit-code)" "0"
 }
 
-@test "run-playwright run bun: executes bun run playwright" {
+@test "run-playwright run bun: executes bun x --no-install playwright" {
 	run env STEP=run PACKAGE_MANAGER=bun PROJECT=desktop WORKING_DIRECTORY="$WORK_DIR" bash "$SCRIPT"
 	assert_success
-	assert_equal "$(_calls bun)" "run playwright test --project=desktop --reporter=json"
+	assert_equal "$(_calls bun)" "x --no-install playwright test --project=desktop --reporter=json"
 }
 
 @test "run-playwright run: empty PACKAGE_MANAGER fails before running anything" {
