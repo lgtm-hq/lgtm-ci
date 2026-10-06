@@ -25,6 +25,12 @@ inputs:
     description: "Release tag to upload signatures to (REQUIRED when upload-to-release is 'true')"
     required: false
     default: ""
+  repository:
+    description: >-
+      owner/repo the release lives in. Defaults to the calling repository;
+      set it when signing another repository's release (#935).
+    required: false
+    default: ${{ github.repository }}
 
 outputs:
   signatures:
@@ -81,6 +87,9 @@ runs:
       shell: bash
       env:
         STEP: upload-release
+        # gh resolves the target repo from the git remote in the workspace;
+        # pass it explicitly so the upload works without a caller checkout (#935).
+        GH_REPO: ${{ inputs.repository }}
         RELEASE_TAG: ${{ inputs.release-tag }}
         SIGNATURES_DIR: ${{ steps.sign.outputs.signatures-dir }}
       run: $SCRIPTS_DIR/ci/actions/sign-artifact.sh

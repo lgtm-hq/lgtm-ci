@@ -189,7 +189,7 @@ jobs:
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # `gh release upload --clobber` in
-      # scripts/ci/actions/upload-sbom-release-assets.sh:29 authenticates with
+      # scripts/ci/actions/upload-sbom-release-assets.sh:33 authenticates with
       # GITHUB_TOKEN (GH_TOKEN below) and writes a release asset, which the REST
       # release API gates on `contents: write`. Unlike #730's `actions: write`,
       # there is no runtime-token code path to fall back on — which is exactly
@@ -255,6 +255,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          # This job never checks out the caller (#796), so there is no git
+          # remote for gh to infer the target repository from; without GH_REPO
+          # `gh release upload` fails with "not a git repository" (#935).
+          GH_REPO: ${{ github.repository }}
           RELEASE_TAG: ${{ inputs.release-tag != '' && inputs.release-tag || github.ref_name }}
           ARTIFACT_NAME: ${{ inputs.artifact-name }}
           SBOM_ARTIFACT_DIR: sbom-artifact

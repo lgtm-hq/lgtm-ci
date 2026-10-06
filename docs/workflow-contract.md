@@ -1396,6 +1396,13 @@ sbom-release:
     sign: true
 ```
 
+`reusable-sbom-release-upload.yml` checks out lgtm-ci tooling only, never the
+caller (#796), so its upload step passes the target repository explicitly as
+`GH_REPO: ${{ github.repository }}` instead of letting `gh` read a git remote
+that is not there (#935). Every `gh release` step in a publisher workflow or
+composite is held to that rule by
+`tests/bats/contract/test_gh_release_repo_context.bats`.
+
 ## Action pinning policy
 
 Org repos must pin GitHub Actions to **commit SHAs only** and add a trailing
