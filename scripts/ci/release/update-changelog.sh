@@ -54,9 +54,40 @@ if [[ -z "$REPO_URL" ]]; then
 fi
 RELEASE_DATE="${RELEASE_DATE:-$(date +%Y-%m-%d)}"
 
+# First release of a repository that never had a changelog: seed a Keep a
+# Changelog header with an empty [Unreleased] section and continue, so the
+# file is born in the same version PR as its first entry instead of being an
+# undocumented prerequisite (#1092). The link definition is a placeholder the
+# rewrite below replaces with the real compare links. Inside a work tree the
+# new file is registered with intent-to-add so `git status --porcelain`
+# reports it as an added path, not `??` — check-version-files-changed.sh
+# ignores untracked entries, and a CHANGELOG-only caller would otherwise see
+# no change and open no PR.
 if [[ ! -f "$CHANGELOG_FILE" ]]; then
-	log_error "CHANGELOG.md not found at: $CHANGELOG_FILE"
-	exit 1
+	log_warn "CHANGELOG.md not found at: $CHANGELOG_FILE — creating it with a Keep a Changelog header"
+	changelog_dir="$(dirname "$CHANGELOG_FILE")"
+	[[ -d "$changelog_dir" ]] || mkdir -p "$changelog_dir"
+	cat >"$CHANGELOG_FILE" <<'EOF'
+# Changelog
+
+All notable changes to this project will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [Unreleased]
+
+[Unreleased]: placeholder
+EOF
+	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+		# Not best-effort: an ignored or out-of-tree path would stay `??`,
+		# be skipped by check-version-files-changed.sh, and silently bring
+		# the CHANGELOG-only no-PR failure back. Fail by name instead.
+		if ! git add --intent-to-add -- "$CHANGELOG_FILE"; then
+			log_error "Could not register $CHANGELOG_FILE with git (ignored by .gitignore or outside the work tree); the version PR cannot include it"
+			exit 1
+		fi
+	fi
 fi
 
 log_info "Updating $CHANGELOG_FILE for version $CLEAN_VERSION"

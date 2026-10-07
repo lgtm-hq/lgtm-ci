@@ -56,11 +56,25 @@ is workflow-contract.md
 | Quality / lint                    | `contents: read`, `packages: read` (pulls `ghcr.io/lgtm-hq/py-lintro`) | None                             |
 | Quality / test PR summaries       | `contents: read`, `pull-requests: write` on the publish job     | None                                   |
 | Tests / coverage                  | `contents: read`                                                | None                                   |
-| Release version PR                | `contents: write`, `pull-requests: write`, `actions: read`, `issues: write` | GitHub App + two secrets (below) |
+| Rust tests (`reusable-rust-test`) | `contents: read`                                                | `.config/nextest.toml` with a `ci` profile — copy [examples/nextest-ci.toml](../examples/nextest-ci.toml) verbatim (below) |
+| Release version PR                | `contents: write`, `pull-requests: write`, `actions: read`, `issues: write` | GitHub App + two secrets (below); `CHANGELOG.md` is created on the first run if absent (below) |
 | Release auto-tag                  | `contents: write`, `actions: read`, `issues: write`             | GitHub App + two secrets (below)       |
 | PyPI publish (OIDC)               | `contents: read`; `id-token: write` + `attestations: write` on the upload job | PyPI trusted publisher (below) |
 
 <!-- markdownlint-enable MD013 -->
+
+### Rust tests: nextest `ci` profile
+
+`reusable-rust-test.yml` runs `cargo nextest run --profile ci` and parses
+`target/nextest/ci/junit.xml`, so the repository must define that profile
+before the first run. Copy
+[`examples/nextest-ci.toml`](../examples/nextest-ci.toml) to
+`.config/nextest.toml` (relative to `working-directory`) as-is. Keep
+`junit.path = "junit.xml"`: nextest resolves the path relative to the
+profile's store directory (`target/nextest/ci/`), so a directory-qualified
+path puts the report where the reusable cannot find it and the job fails
+with `JUnit file not found` after the tests pass (#1086). Without the file the
+run fails with `profile 'ci' not found`.
 
 ### Release workflows: GitHub App and secrets
 
@@ -111,6 +125,24 @@ secrets:
   RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
   RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
 ```
+
+Two things the version-PR reusable handles itself, so they are **not**
+prerequisites:
+
+- **`CHANGELOG.md`.** A repository without one gets the file created on the
+  first run — Keep a Changelog header, empty `## [Unreleased]` section, and
+  the first release section — inside the same version PR (#1092). Existing
+  changelogs are updated in place as before.
+- **Registry egress for ecosystem bumps.** The default
+  `egress-preset: release-version-pr` already allows PyPI (`ecosystems:
+  python` installs `tomlkit` when the runner lacks it) and rustup/crates.io
+  (`ecosystems: rust` regenerates `Cargo.lock`), so neither ecosystem needs
+  `allowed-endpoints` under `egress-policy: block` (#1093). Callers that
+  pinned `egress-preset: github-tooling` (the previous starter example) must
+  switch to `release-version-pr` or drop the input. If you pass
+  `allowed-endpoints` in the default `replace` mode, your list replaces the
+  preset and must include those hosts; in `append` mode the base the extras
+  are merged onto is now `release-version-pr` rather than `github-tooling`.
 
 #### Upgrading an existing release App
 

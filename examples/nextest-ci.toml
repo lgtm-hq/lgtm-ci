@@ -1,8 +1,16 @@
 # Example nextest profile for lgtm-ci reusable-rust-test.yml
 # Copy to your repo as .config/nextest.toml (merge with existing profiles if needed).
+#
+# The reusable runs `cargo nextest run --profile ci` and then reads
+# target/nextest/ci/junit.xml, so the `ci` profile is a prerequisite: without
+# this file the run fails with `profile 'ci' not found`.
 
 [profile.ci]
 retries = 0
 
 [profile.ci.junit]
-path = "target/nextest/ci/junit.xml"
+# Relative to the profile's store directory (target/nextest/ci/), not the
+# workspace root: a path with directories (e.g. "target/nextest/ci/junit.xml")
+# lands at target/nextest/ci/target/nextest/ci/junit.xml and the reusable
+# reports `JUnit file not found` after a green test run (#1086).
+path = "junit.xml"

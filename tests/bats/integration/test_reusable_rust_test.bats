@@ -117,3 +117,40 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 	run grep -F "matrix-count: \${{ steps.matrix.outputs.matrix-count }}" "$WORKFLOW"
 	assert_success
 }
+
+# The starter profile consumers copy must put JUnit where the parser reads it.
+# nextest resolves junit.path relative to the profile's store directory
+# (target/nextest/ci/), so the only value that lands at
+# target/nextest/ci/junit.xml is the bare file name (#1086).
+@test "examples/nextest-ci.toml: ci profile junit.path is a bare file name" {
+	local example="${PROJECT_ROOT}/examples/nextest-ci.toml"
+	run grep -cE '^\[profile\.ci\]$' "$example"
+	assert_output "1"
+	run grep -cE '^\[profile\.ci\.junit\]$' "$example"
+	assert_output "1"
+	local junit_path
+	junit_path="$(awk '
+		/^\[profile\.ci\.junit\]$/ { on = 1; next }
+		/^\[/ { on = 0 }
+		on && /^path *=/ { sub(/^path *= */, ""); gsub(/"/, ""); print; exit }
+	' "$example")"
+	[[ "$junit_path" == "junit.xml" ]] || {
+		echo "junit.path is '$junit_path'; expected 'junit.xml' (no directory component)"
+		return 1
+	}
+	# The parser's default and the workflow's explicit env must both be
+	# exactly the store dir + that file name.
+	run grep -F ': "${JUNIT_FILE:=target/nextest/ci/junit.xml}"' \
+		"${PROJECT_ROOT}/scripts/ci/testing/rust/parse-rust-test-results.sh"
+	assert_success
+	run grep -cE '^\s+JUNIT_FILE: target/nextest/ci/junit\.xml$' "$WORKFLOW"
+	assert_output "1"
+}
+
+@test "reusable-rust-test: documents the nextest ci-profile prerequisite on its inputs" {
+	run grep -c 'examples/nextest-ci.toml' "$WORKFLOW"
+	[[ "$output" -ge 2 ]] || {
+		echo "expected the workspace and test-script inputs to point at examples/nextest-ci.toml; got $output"
+		return 1
+	}
+}

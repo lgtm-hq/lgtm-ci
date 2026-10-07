@@ -4,6 +4,8 @@
 # Copy into your repository as .github/workflows/release-version-pr.yml.
 # Pair with examples/release-auto-tag.yml, which tags once the PR merges.
 # Requires a GitHub App (RELEASE_APP_ID / RELEASE_APP_PRIVATE_KEY secrets).
+# CHANGELOG.md is not a prerequisite: when absent it is created with a Keep a
+# Changelog header in the same version PR as the first entry (#1092).
 # Permissions per docs/workflow-contract.md "Permissions by mode":
 # actions: read + issues: write cover the report-release-failure job.
 # CHANGELOG-only repos: see examples/release-version-pr-changelog-only.yml.
@@ -37,7 +39,10 @@ jobs:
       ecosystems: python
       max-bump: minor
       egress-policy: block
-      egress-preset: github-tooling
+      # Default preset: github-tooling plus the registries the ecosystem
+      # bumps reach (PyPI for the python tomlkit install, rustup/crates.io
+      # for rust), so `ecosystems: python` needs no allowed-endpoints (#1093).
+      egress-preset: release-version-pr
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

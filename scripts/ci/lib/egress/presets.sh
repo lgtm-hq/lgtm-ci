@@ -47,7 +47,8 @@ egress_preset_names() {
 		osv-scanner \
 		ai-review \
 		rust-release \
-		release-recover
+		release-recover \
+		release-version-pr
 }
 
 egress_preset_endpoints() {
@@ -385,6 +386,30 @@ egress_preset_endpoints() {
 			oauth2.sigstore.dev:443 \
 			ghcr.io:443 \
 			pkg-containers.githubusercontent.com:443
+		;;
+	release-version-pr)
+		# Default of reusable-release-version-pr.yml and
+		# reusable-release-multi-ecosystem.yml: github-tooling plus every
+		# registry an ecosystem bump script reaches under block policy.
+		# `ecosystems: python` / kind `pep621` `pip install tomlkit` when the
+		# runner lacks it (PyPI, #1093); `ecosystems: rust` installs the
+		# toolchain via dtolnay/rust-toolchain (static.rust-lang.org) and
+		# runs `cargo generate-lockfile` against the sparse index
+		# (index.crates.io). crates.io / static.crates.io are not strictly
+		# needed by those two commands; they stay for parity with the
+		# rust-release and build-artifact presets so a cargo that falls back
+		# to the git index or fetches a .crate does not fail opaquely. node,
+		# ruby, swift, dart and kotlin edit files in place with no registry
+		# access. reusable-release-multi-ecosystem.yml shares this preset
+		# although its kinds (npm|raw|gemspec|pep621) only reach PyPI.
+		egress_preset_endpoints github-tooling
+		printf '%s\n' \
+			pypi.org:443 \
+			files.pythonhosted.org:443 \
+			static.rust-lang.org:443 \
+			crates.io:443 \
+			static.crates.io:443 \
+			index.crates.io:443
 		;;
 	*)
 		echo "unknown egress preset: $preset" >&2
