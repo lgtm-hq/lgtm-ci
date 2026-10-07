@@ -25,8 +25,11 @@ on:
         default: ""
       targets:
         description: >-
-          JSON matrix override (array of {target, cross, archive} objects).
-          Defaults to Linux musl + aarch64 gnu + Windows MSVC cross-compile.
+          JSON matrix override: array of {target, builder, archive} objects
+          where builder is native (cargo), cross, or xwin (cargo-xwin, MSVC
+          targets only); the legacy cross:true key still selects cross.
+          cross with an *-msvc target is rejected before the build (#1076).
+          Defaults to Linux musl (native) + aarch64 gnu (cross) + Windows.
         required: false
         type: string
         default: ""
@@ -210,13 +213,13 @@ env:
     releases.astral.sh:443",
     "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
-    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 static.rust-lang.org:443
-    sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443 ghcr.io:443
-    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
-    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 archive.ubuntu.com:80
-    azure.archive.ubuntu.com:80 security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
-    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
-    sigstore-tuf-root.storage.googleapis.com:443",
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
     "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
     actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -323,19 +326,34 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
+          # cargo-xwin needs llvm-tools for assembly-heavy dependencies.
+          components: ${{ matrix.builder == 'xwin' && 'llvm-tools' || '' }}
       - name: Install musl toolchain
         if: contains(matrix.target, 'musl')
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Install cross
-        if: matrix.cross
+        if: matrix.builder == 'cross' || (matrix.builder == null && matrix.cross == true)
         shell: bash
         run: bash .lgtm-ci-tooling/scripts/ci/release/install-cross.sh
+      - name: Cache the xwin Windows SDK and CRT
+        if: matrix.builder == 'xwin'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/cargo-xwin
+          key: >-
+            cargo-xwin-${{ runner.os }}-${{ matrix.target }}-${{
+            hashFiles('.lgtm-ci-tooling/scripts/ci/versions.env') }}
+      - name: Install cargo-xwin
+        if: matrix.builder == 'xwin'
+        shell: bash
+        run: bash .lgtm-ci-tooling/scripts/ci/release/install-cargo-xwin.sh
       - name: Build release binaries
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
           PACKAGES: ${{ inputs.packages }}
+          BUILDER: ${{ matrix.builder }}
           USE_CROSS: ${{ matrix.cross }}
           RAW_SCRIPT_PATH: ${{ inputs.build-script }}
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/release/build-rust-binary.sh

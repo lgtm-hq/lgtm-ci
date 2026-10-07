@@ -11,8 +11,8 @@
 #            differs (exit 1). The default.
 #   --write  rewrite the DEFAULT_<TOOL>_SHA256_*/_COMMIT values in place.
 #   TOOL     restrict to one or more tools (osv-scanner syft cargo-nextest
-#            cargo-llvm-cov cross cargo-binstall bats-core bats-support
-#            bats-assert bats-file kcov). Default: all.
+#            cargo-llvm-cov cross cargo-xwin cargo-binstall bats-core
+#            bats-support bats-assert bats-file kcov). Default: all.
 #
 # Pin-time verification (this is where the supplier's own signatures are
 # checked, so the runtime installers only ever compare against the committed
@@ -22,7 +22,7 @@
 #                  cross-checked against the upstream SHA256SUMS.
 #   syft           checksums.txt is verified with cosign against its Sigstore
 #                  bundle, then every asset digest is cross-checked against it.
-#   cargo-nextest  the per-asset .sha256 files are cross-checked.
+#   cargo-nextest, cargo-xwin  the per-asset .sha256 files are cross-checked.
 #   cargo-llvm-cov, cross, cargo-binstall  publish no checksum manifest; the
 #                  digest is computed from the TLS-downloaded asset.
 #   git clones     the tag is resolved to its commit with `git ls-remote`.
@@ -68,8 +68,8 @@ for arg in "$@"; do
 	esac
 done
 if [[ ${#TOOLS[@]} -eq 0 ]]; then
-	TOOLS=(osv-scanner syft cargo-nextest cargo-llvm-cov cross cargo-binstall
-		bats-core bats-support bats-assert bats-file kcov)
+	TOOLS=(osv-scanner syft cargo-nextest cargo-llvm-cov cross cargo-xwin
+		cargo-binstall bats-core bats-support bats-assert bats-file kcov)
 fi
 
 WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/lgtm-ci-digests.XXXXXXXXXX")"
@@ -259,6 +259,18 @@ refresh_cross() {
 	done
 }
 
+refresh_cargo_xwin() {
+	local v="$DEFAULT_CARGO_XWIN_VERSION" tag target asset manifest
+	tag="v${v}"
+	for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+		asset="cargo-xwin-${tag}.${target}.tar.gz"
+		manifest="$WORKDIR/${asset}.sha256"
+		fetch "${GH_DL}/rust-cross/cargo-xwin/releases/download/${tag}/${asset}.sha256" "$manifest"
+		asset_digest rust-cross/cargo-xwin "$tag" "$asset" \
+			"DEFAULT_CARGO_XWIN_SHA256_$(supply_chain_var_suffix "$target")" "$manifest"
+	done
+}
+
 refresh_cargo_binstall() {
 	local tag="v${DEFAULT_CARGO_BINSTALL_VERSION}" target ext
 	for target in x86_64-unknown-linux-musl aarch64-unknown-linux-musl \
@@ -280,6 +292,7 @@ for tool in "${TOOLS[@]}"; do
 	cargo-nextest) refresh_cargo_nextest ;;
 	cargo-llvm-cov) refresh_cargo_llvm_cov ;;
 	cross) refresh_cross ;;
+	cargo-xwin) refresh_cargo_xwin ;;
 	cargo-binstall) refresh_cargo_binstall ;;
 	bats-core) tag_commit bats-core/bats-core "v${DEFAULT_BATS_CORE_VERSION}" DEFAULT_BATS_CORE_COMMIT ;;
 	bats-support) tag_commit bats-core/bats-support "$DEFAULT_BATS_SUPPORT_VERSION" DEFAULT_BATS_SUPPORT_COMMIT ;;

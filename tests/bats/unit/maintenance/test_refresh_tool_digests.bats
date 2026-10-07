@@ -208,3 +208,32 @@ _pin() {
 	run grep -c 'LINUX_ARM64' "$VERSIONS_FILE"
 	assert_output "0"
 }
+
+@test "refresh-tool-digests: cargo-xwin assets are cross-checked against their .sha256 files" {
+	cat >>"$VERSIONS_FILE" <<'EOF'
+# renovate: datasource=github-releases depName=rust-cross/cargo-xwin
+DEFAULT_CARGO_XWIN_VERSION="0.23.1"
+# renovate: datasource=github-release-attachments depName=rust-cross/cargo-xwin
+DEFAULT_CARGO_XWIN_SHA256_X86_64_UNKNOWN_LINUX_MUSL="0000000000000000000000000000000000000000000000000000000000000000" # v0.23.1
+# renovate: datasource=github-release-attachments depName=rust-cross/cargo-xwin
+DEFAULT_CARGO_XWIN_SHA256_AARCH64_UNKNOWN_LINUX_MUSL="0000000000000000000000000000000000000000000000000000000000000000" # v0.23.1
+EOF
+	local t asset digest
+	for t in x86_64-unknown-linux-musl aarch64-unknown-linux-musl; do
+		asset="cargo-xwin-v0.23.1.${t}.tar.gz"
+		printf '%s bytes\n' "$t" >"${SERVER_DIR}/${asset}"
+		digest="$(_sha256_of "${SERVER_DIR}/${asset}")"
+		printf '%s  %s\n' "$digest" "$asset" >"${SERVER_DIR}/${asset}.sha256"
+	done
+	_run --write cargo-xwin
+	assert_success
+	[[ "$(_pin DEFAULT_CARGO_XWIN_SHA256_X86_64_UNKNOWN_LINUX_MUSL)" == "$(_sha256_of "${SERVER_DIR}/cargo-xwin-v0.23.1.x86_64-unknown-linux-musl.tar.gz")" ]]
+	[[ "$(_pin DEFAULT_CARGO_XWIN_SHA256_AARCH64_UNKNOWN_LINUX_MUSL)" == "$(_sha256_of "${SERVER_DIR}/cargo-xwin-v0.23.1.aarch64-unknown-linux-musl.tar.gz")" ]]
+	run cat "$CALLS"
+	assert_output --partial "rust-cross/cargo-xwin/releases/download/v0.23.1/cargo-xwin-v0.23.1.x86_64-unknown-linux-musl.tar.gz.sha256"
+	# A payload that disagrees with its .sha256 is fatal.
+	printf 'tampered\n' >"${SERVER_DIR}/cargo-xwin-v0.23.1.aarch64-unknown-linux-musl.tar.gz"
+	_run --check cargo-xwin
+	assert_failure
+	assert_output --partial "download hashes to"
+}

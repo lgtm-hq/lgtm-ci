@@ -1,0 +1,104 @@
+# SPDX-License-Identifier: MIT
+# TEMPORARY (#1076 spike): build x86_64-pc-windows-msvc on ubuntu-24.04 with
+# the pinned, digest-verified cargo-xwin, package it with the release
+# scripts, and execute the .exe on windows-latest. Removed before merge; the
+# outcome is recorded in the PR body and the durable compile+run proof is the
+# consumer fixture's rust-release-build.yml.
+---
+name: Spike xwin Windows smoke
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  build:
+    name: "xwin build (ubuntu-24.04)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: block
+          allowed-endpoints: >-
+            github.com:443 api.github.com:443 codeload.github.com:443
+            objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+            raw.githubusercontent.com:443 release-assets.githubusercontent.com:443
+            static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443 static.crates.io:443
+            index.crates.io:443 aka.ms:443 download.visualstudio.microsoft.com:443
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Checkout the consumer fixture crate
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: TurboCoder13/lgtm-ci-consumer-fixture
+          path: fixture
+          persist-credentials: false
+      - name: Setup Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: llvm-tools
+          cache: "false"
+      - name: Install cargo-xwin
+        shell: bash
+        run: bash scripts/ci/release/install-cargo-xwin.sh
+      - name: Build release binary with builder=xwin
+        shell: bash
+        working-directory: fixture/rust
+        env:
+          TARGET: x86_64-pc-windows-msvc
+          PACKAGES: fixture-rs
+          BUILDER: xwin
+        run: bash "${GITHUB_WORKSPACE}/scripts/ci/release/build-rust-binary.sh"
+      - name: Package release binary
+        shell: bash
+        working-directory: fixture/rust
+        env:
+          VERSION: 0.1.0
+          TARGET: x86_64-pc-windows-msvc
+          PACKAGES: fixture-rs
+          BINARY_NAMES: fixture-rs
+          ARCHIVE_FORMAT: zip
+        run: bash "${GITHUB_WORKSPACE}/scripts/ci/release/package-rust-binary.sh"
+      - name: Upload archive
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: spike-xwin-x86_64-pc-windows-msvc
+          path: |
+            fixture/rust/*.zip
+            fixture/rust/SHA256SUMS-x86_64-pc-windows-msvc
+          if-no-files-found: error
+          retention-days: 1
+
+  smoke:
+    name: "run exe (windows-latest)"
+    needs: build
+    runs-on: windows-latest
+    timeout-minutes: 10
+    permissions: {}
+    steps:
+      - name: Download archive
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: spike-xwin-x86_64-pc-windows-msvc
+          path: dist
+      - name: Verify checksum, unzip and run
+        shell: pwsh
+        run: |
+          Set-Location dist
+          $expected = (Get-Content SHA256SUMS-x86_64-pc-windows-msvc).Split(' ')[0]
+          $actual = (Get-FileHash fixture-rs-0.1.0-x86_64-pc-windows-msvc.zip -Algorithm SHA256).Hash.ToLower()
+          if ($expected -ne $actual) { throw "checksum mismatch: $expected != $actual" }
+          Expand-Archive fixture-rs-0.1.0-x86_64-pc-windows-msvc.zip -DestinationPath out
+          $output = (& .\out\fixture-rs.exe | Out-String).Trim()
+          Write-Host "fixture-rs.exe printed: $output"
+          if ($output -ne "5") { throw "expected 5, got '$output'" }
