@@ -15,10 +15,10 @@ inputs:
     description: "Requested egress policy (block or audit; audit rejected except permissive advisory)"
     required: true
   runner-environment:
-    description: "Pass ${{ runner.environment }}"
+    description: "The runner.environment context value (github-hosted or self-hosted)"
     required: true
   runner-os:
-    description: "Pass ${{ runner.os }}"
+    description: "The runner.os context value (Linux, Windows, or macOS)"
     required: true
 
 outputs:

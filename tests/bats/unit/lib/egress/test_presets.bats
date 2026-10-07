@@ -226,6 +226,15 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'tuf-repo-cdn.sigstore.dev:443'
 }
 
+@test "egress preset rust-release includes the xwin Windows SDK hosts" {
+	# cargo-xwin fetches the MSVC CRT and Windows SDK through aka.ms and the
+	# Visual Studio download CDN (#1076).
+	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
+	assert_success
+	assert_output --partial 'aka.ms:443'
+	assert_output --partial 'download.visualstudio.microsoft.com:443'
+}
+
 @test "egress preset rust-release excludes unrelated quality-only hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
 	assert_success

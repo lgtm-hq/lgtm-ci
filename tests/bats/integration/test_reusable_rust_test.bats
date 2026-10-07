@@ -154,3 +154,17 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 		return 1
 	}
 }
+
+@test "reusable-rust-test: concurrency group is namespaced by callee and caller workflow" {
+	# `github` in a called workflow is the caller's, so a group keyed on the
+	# ref alone is shared across callers (#1076). The group must start with a
+	# stable callee prefix, include github.workflow, and never use github.job.
+	run bash -c "awk '/^    concurrency:\$/,/cancel-in-progress/ { print }' '$WORKFLOW' | tr -d '\n' | tr -s ' '"
+	assert_success
+	assert_output --partial 'lgtm-ci-rust-test-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}-'
+	assert_output --partial "\${{ inputs.concurrency-scope || 'default' }}"
+	assert_output --partial 'cancel-in-progress: true'
+	refute_output --partial 'github.job'
+	run grep -E 'group: *rust-test-' "$WORKFLOW"
+	assert_failure
+}

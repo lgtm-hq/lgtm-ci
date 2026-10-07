@@ -156,3 +156,28 @@ _run_policy() {
 	assert_failure
 	assert_output --partial "invalid RUNNER_OS"
 }
+
+@test "action metadata: no action.yml embeds an expression in an input description" {
+	# GitHub validates action.yml as a template: a `${{ runner.* }}` inside a
+	# description fails the whole action with "Unrecognized named-value:
+	# 'runner'" before any step runs. Every reusable-build-rust-binaries leg
+	# failed at Validate runner policy this way (#1076).
+	# Outside runs: and outputs:, only an input `default:` may carry an
+	# expression, and only over the github/inputs contexts; a `${{` on any
+	# other metadata line (name, author, descriptions folded or not) or a
+	# runner/steps/env/job reference fails template validation.
+	run bash -c "for f in '${PROJECT_ROOT}'/.github/actions/*/action.yml; do awk -v f=\"\$f\" '/^(runs|outputs):/{skip=1;next} /^[a-z]/{skip=0} !skip&&/\\\$\\{\\{/&&!(/^ +default: /&&!/\\\$\\{\\{ *(runner|steps|env|job|matrix)\\./){print f\":\"NR\": \"\$0}' \"\$f\"; done"
+	assert_success
+	assert_output ""
+}
+
+@test "action metadata: the inputs-block scan catches a folded description and a runner default" {
+	local d="${BATS_TEST_TMPDIR}/actions/x"
+	mkdir -p "$d"
+	printf 'name: x\ninputs:\n  a:\n    description: >-\n      Pass\n      ${{ runner.os }}\n  b:\n    default: ${{ runner.os }}\n  c:\n    default: ${{ github.repository }}\nruns:\n  using: composite\n  steps:\n    - run: echo ${{ runner.os }}\n      shell: bash\n' >"${d}/action.yml"
+	run bash -c "for f in '${BATS_TEST_TMPDIR}'/actions/*/action.yml; do awk -v f=\"\$f\" '/^(runs|outputs):/{skip=1;next} /^[a-z]/{skip=0} !skip&&/\\\$\\{\\{/&&!(/^ +default: /&&!/\\\$\\{\\{ *(runner|steps|env|job|matrix)\\./){print f\":\"NR\": \"\$0}' \"\$f\"; done"
+	assert_output --partial ':6:'
+	assert_output --partial ':8:'
+	refute_output --partial ':10:'
+	refute_output --partial ':14:'
+}

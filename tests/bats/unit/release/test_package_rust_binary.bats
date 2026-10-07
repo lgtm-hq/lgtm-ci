@@ -18,7 +18,10 @@ teardown() {
 @test "package-rust-binary: zip archive contains the Windows executable" {
 	local target="x86_64-pc-windows-msvc"
 	mkdir -p "target/${target}/release"
-	printf 'MZ' >"target/${target}/release/myapp.exe"
+	# A stand-in file, not an executable: packaging only needs a path. The
+	# compile+run proof for the Windows leg is the consumer fixture's
+	# rust-release-build.yml job on windows-latest (#1076).
+	printf 'stand-in' >"target/${target}/release/myapp.exe"
 
 	run env \
 		VERSION=1.2.3 \
@@ -83,7 +86,10 @@ teardown() {
 @test "package-rust-binary: uses TARGET not ARCHIVE_FORMAT for Windows exe suffix" {
 	local target="x86_64-pc-windows-msvc"
 	mkdir -p "target/${target}/release"
-	printf 'MZ' >"target/${target}/release/myapp.exe"
+	# A stand-in file, not an executable: packaging only needs a path. The
+	# compile+run proof for the Windows leg is the consumer fixture's
+	# rust-release-build.yml job on windows-latest (#1076).
+	printf 'stand-in' >"target/${target}/release/myapp.exe"
 
 	run env \
 		VERSION=4.0.0 \

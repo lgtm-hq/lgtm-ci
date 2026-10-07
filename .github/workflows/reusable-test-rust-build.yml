@@ -67,6 +67,15 @@ on:
         required: false
         type: number
         default: 30
+      concurrency-scope:
+        description: >-
+          Optional suffix for the concurrency group. The group is namespaced
+          by callee, caller repository, caller workflow and ref, so two caller
+          workflows on one ref never cancel each other (#1076, #108 history);
+          set this when one caller workflow invokes this reusable twice.
+        required: false
+        type: string
+        default: ""
 
     outputs:
       passed:
@@ -162,13 +171,13 @@ env:
     releases.astral.sh:443",
     "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
-    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 static.rust-lang.org:443
-    sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443 ghcr.io:443
-    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
-    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 archive.ubuntu.com:80
-    azure.archive.ubuntu.com:80 security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
-    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
-    sigstore-tuf-root.storage.googleapis.com:443",
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
     "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
     actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -196,9 +205,16 @@ jobs:
       contents: read
     outputs:
       passed: ${{ steps.record.outputs.passed }}
+    # `github` inside a called workflow is the caller's context, so a group
+    # keyed on the ref alone is shared by every caller on that ref (#1076).
+    # Namespace by callee, caller repository, caller workflow and ref;
+    # never github.job (null outside execution steps).
+    # yamllint disable rule:line-length
     concurrency:
-      group: rust-build-${{ github.ref }}
+      group: >-
+        lgtm-ci-rust-build-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}-${{ inputs.concurrency-scope || 'default' }}
       cancel-in-progress: true
+    # yamllint enable rule:line-length
 
     steps:
       - name: Harden runner

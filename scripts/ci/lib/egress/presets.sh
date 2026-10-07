@@ -339,12 +339,17 @@ egress_preset_endpoints() {
 		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
 		# Minimal base: GitHub checkout/tooling, Rust/crates, cross Docker, apt, Sigstore.
 		# release-assets.githubusercontent.com is where github.com/<repo>/releases/
-		# download/ redirects; install-cross.sh and the setup-rust binstall step
-		# fetch their digest-verified release archives from it (#1096).
+		# download/ redirects; install-cross.sh, install-cargo-xwin.sh and the
+		# setup-rust binstall step fetch their digest-verified release archives
+		# from it (#1096). aka.ms and download.visualstudio.microsoft.com are
+		# where xwin fetches the Windows SDK and CRT manifest and payloads for
+		# the MSVC leg (#1076).
 		egress_preset_endpoints github-minimal
 		printf '%s\n' \
 			raw.githubusercontent.com:443 \
 			release-assets.githubusercontent.com:443 \
+			aka.ms:443 \
+			download.visualstudio.microsoft.com:443 \
 			static.rust-lang.org:443 \
 			sh.rustup.rs:443 \
 			crates.io:443 \

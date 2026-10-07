@@ -62,3 +62,6 @@ Thumbs.db
 # Local development
 *.local
 .env
+
+# lintro AI review state (local only)
+.lintro-cache/

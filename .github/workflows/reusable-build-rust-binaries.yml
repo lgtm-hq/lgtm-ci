@@ -25,8 +25,11 @@ on:
         default: ""
       targets:
         description: >-
-          JSON matrix override (array of {target, cross, archive} objects).
-          Defaults to Linux musl + aarch64 gnu + Windows MSVC cross-compile.
+          JSON matrix override: array of {target, builder, archive} objects
+          where builder is native (cargo), cross, or xwin (cargo-xwin, MSVC
+          targets only); the legacy cross:true key still selects cross.
+          cross with an *-msvc target is rejected before the build (#1076).
+          Defaults to Linux musl (native) + aarch64 gnu (cross) + Windows MSVC (xwin).
         required: false
         type: string
         default: ""
@@ -97,15 +100,29 @@ on:
         required: false
         type: string
         default: "Cargo.toml"
+      concurrency-scope:
+        description: >-
+          Optional suffix for the concurrency group. The group is namespaced
+          by callee, caller repository, caller workflow and ref, so two caller
+          workflows on one ref never cancel each other (#1076, #108 history);
+          set this when one caller workflow invokes this reusable twice.
+        required: false
+        type: string
+        default: ""
 
     outputs:
       version:
         description: "Cargo workspace version"
         value: ${{ jobs.build.outputs.version }}
 
+# Queued, never cancelled: release legs must finish. Namespaced by callee,
+# caller repository and caller workflow as well as the ref (#1076).
+# yamllint disable rule:line-length
 concurrency:
-  group: rust-binaries-${{ github.ref_name }}
+  group: >-
+    lgtm-ci-rust-binaries-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}-${{ inputs.concurrency-scope || 'default' }}
   cancel-in-progress: false
+# yamllint enable rule:line-length
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -196,13 +213,13 @@ env:
     releases.astral.sh:443",
     "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
-    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 static.rust-lang.org:443
-    sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443 ghcr.io:443
-    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
-    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 archive.ubuntu.com:80
-    azure.archive.ubuntu.com:80 security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
-    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
-    sigstore-tuf-root.storage.googleapis.com:443",
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
     "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
     actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -237,9 +254,9 @@ jobs:
             fromJson(
               inputs.targets != '' && inputs.targets ||
               '[
-                {"target":"x86_64-unknown-linux-musl","cross":false,"archive":"tar.gz"},
-                {"target":"aarch64-unknown-linux-gnu","cross":true,"archive":"tar.gz"},
-                {"target":"x86_64-pc-windows-msvc","cross":true,"archive":"zip"}
+                {"target":"x86_64-unknown-linux-musl","builder":"native","archive":"tar.gz"},
+                {"target":"aarch64-unknown-linux-gnu","builder":"cross","archive":"tar.gz"},
+                {"target":"x86_64-pc-windows-msvc","builder":"xwin","archive":"zip"}
               ]'
             )
           }}
@@ -309,20 +326,40 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
         with:
           targets: ${{ matrix.target }}
+          # cargo-xwin needs llvm-tools for assembly-heavy dependencies.
+          components: ${{ matrix.builder == 'xwin' && 'llvm-tools' || '' }}
       - name: Install musl toolchain
         if: contains(matrix.target, 'musl')
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Install cross
-        if: matrix.cross
+        # The legacy key may arrive as the boolean true or the string "true".
+        if: matrix.builder == 'cross' || (!matrix.builder && (matrix.cross == true || matrix.cross == 'true'))
         shell: bash
         run: bash .lgtm-ci-tooling/scripts/ci/release/install-cross.sh
+      - name: Install cargo-xwin
+        id: xwin
+        if: matrix.builder == 'xwin'
+        shell: bash
+        run: bash .lgtm-ci-tooling/scripts/ci/release/install-cargo-xwin.sh
+      - name: Cache the xwin Windows SDK and CRT
+        # Keyed on the cargo-xwin pin alone, so unrelated versions.env bumps
+        # keep the SDK cache. cargo-xwin never writes here at install time.
+        if: matrix.builder == 'xwin'
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cache/cargo-xwin
+          key: cargo-xwin-${{ runner.os }}-${{ matrix.target }}-${{ steps.xwin.outputs.version }}
       - name: Build release binaries
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
           PACKAGES: ${{ inputs.packages }}
-          USE_CROSS: ${{ matrix.cross }}
+          BUILDER: ${{ matrix.builder }}
+          # Legacy signal for caller build-script overrides: true whenever the
+          # effective builder is cross, whichever key selected it.
+          # yamllint disable-line rule:line-length
+          USE_CROSS: ${{ matrix.builder == 'cross' || (!matrix.builder && (matrix.cross == true || matrix.cross == 'true')) }}
           RAW_SCRIPT_PATH: ${{ inputs.build-script }}
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/release/build-rust-binary.sh
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh

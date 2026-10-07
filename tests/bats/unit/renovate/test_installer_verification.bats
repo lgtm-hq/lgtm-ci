@@ -210,6 +210,7 @@ _plant() {
 		scripts/ci/actions/prime-syft-tool-cache.sh \
 		scripts/ci/testing/rust/setup-rust-nextest.sh \
 		scripts/ci/release/install-cross.sh \
+		scripts/ci/release/install-cargo-xwin.sh \
 		scripts/ci/actions/setup-rust.sh \
 		scripts/ci/actions/run-bats-tests.sh \
 		scripts/ci/actions/install-ai-review-cli.sh; do
