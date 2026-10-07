@@ -15,7 +15,7 @@ concurrency:
 
 jobs:
   version-pr:
-    # Replace both <sha> placeholders with the same pinned commit SHA.
+    # Replace <sha> with a pinned lgtm-ci commit SHA (see docs/onboarding.md).
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@<sha>
     with:
       max-bump: minor

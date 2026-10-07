@@ -82,6 +82,8 @@ ACTION_REQUIREMENTS: dict[str, dict[str, str]] = {
 FRAGMENT_MARKER = re.compile(r"permissions omitted for brevity", re.IGNORECASE)
 WORKFLOW_PREFIX = r"^uses:\s*[\"']?(?:\./|lgtm-hq/lgtm-ci/)\.github/workflows/"
 WORKFLOW_USES = re.compile(WORKFLOW_PREFIX + r"(?P<name>[\w.-]+\.ya?ml)")
+# `$/` is GitHub's self-repository form for nested composite references
+# (#1089), alongside the tooling checkout path and the external form.
 ACTION_USES = re.compile(
     r"^(?:-\s*)?uses:\s*[\"']?(?:\./\.lgtm-ci-tooling/|lgtm-hq/lgtm-ci/|\$/)"
     r"\.github/actions/(?P<name>[\w-]+)",
