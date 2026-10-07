@@ -53,18 +53,17 @@ _run_deps() {
 	assert_line --index 0 "sync --frozen --extra dev --extra full"
 }
 
-@test "setup-python deps: never calls uv sync without --frozen" {
-	touch "$WORK_DIR/pyproject.toml" "$WORK_DIR/uv.lock"
-	export EXTRAS="dev"
+@test "setup-python deps: workspace member finds the root uv.lock and stays frozen" {
+	# uv workspaces keep one uv.lock at the root; working-directory may be
+	# a member package below it. No `uv lock`, no false warning.
+	mkdir -p "$WORK_DIR/packages/member"
+	touch "$WORK_DIR/uv.lock" "$WORK_DIR/pyproject.toml" "$WORK_DIR/packages/member/pyproject.toml"
 
-	_run_deps
+	run bash -c "cd '$WORK_DIR/packages/member' && STEP=deps bash '$SCRIPT'"
 	assert_success
-	run grep -E '^sync( |$)' "${BATS_TEST_TMPDIR}/mock_calls_uv"
-	assert_success
-	run grep -E '^sync( |$)' "${BATS_TEST_TMPDIR}/mock_calls_uv"
-	refute_output --regexp '^sync( (--extra [^ ]+))*$'
-	run grep -vE '^sync --frozen' "${BATS_TEST_TMPDIR}/mock_calls_uv"
-	assert_output ""
+	refute_output --partial "::warning title=uv.lock missing::"
+	run _uv_calls
+	assert_output "sync --frozen"
 }
 
 @test "setup-python deps: missing uv.lock resolves once then installs frozen" {

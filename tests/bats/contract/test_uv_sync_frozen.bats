@@ -25,9 +25,8 @@ _step_block() {
 	# Executable lines only: strip comments and echo text, then look for a
 	# `uv sync` invocation that is not immediately followed by --frozen.
 	run bash -c "
-		grep -rn 'uv sync' '${PROJECT_ROOT}/scripts/ci' \
+		grep -rnE 'uv sync( |$)' '${PROJECT_ROOT}/scripts/ci' \
 			| grep -vE ':[[:space:]]*#' \
-			| grep -vE 'echo ' \
 			| grep -vE 'uv sync --frozen' || true
 	"
 	assert_output ""
@@ -100,9 +99,12 @@ _step_block() {
 @test "uv-sync-frozen: cleanup step always runs when the secret is set" {
 	run _step_block "Remove git auth for private dependencies"
 	assert_success
-	assert_line --partial "if: always() && env.GIT_DEPS_TOKEN_PRESENT == 'true'"
+	assert_line --partial "if: always() && steps.git-deps-auth.outcome != 'skipped'"
 	assert_line --partial "STEP: cleanup"
+	assert_line --partial "GIT_DEPS_USERNAME: \${{ inputs.git-deps-username }}"
 	refute_line --partial "GIT_DEPS_TOKEN: "
+	run _step_block "Configure git auth for private dependencies"
+	assert_line --partial "id: git-deps-auth"
 }
 
 @test "uv-sync-frozen: host and username inputs are declared with safe defaults" {

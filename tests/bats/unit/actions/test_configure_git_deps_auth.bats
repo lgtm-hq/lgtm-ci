@@ -90,17 +90,60 @@ _plain() {
 }
 
 @test "git-deps-auth: cleanup removes only this host's rewrite" {
-	git config --global "$(_key x-access-token tok github.com)" "$(_plain github.com)"
+	git config --global "$(_key x-access-token zzsecret github.com)" "$(_plain github.com)"
 	git config --global "$(_key oauth2 other gitlab.example.com)" "$(_plain gitlab.example.com)"
 
 	run bash -c "STEP=cleanup bash '$SCRIPT'"
 	assert_success
 	assert_output --partial "Removed git auth rewrite for $(_plain github.com)"
-	refute_output --partial "tok"
-	run git config --global --get "$(_key x-access-token tok github.com)"
+	refute_output --partial "zzsecret"
+	run git config --global --get "$(_key x-access-token zzsecret github.com)"
 	assert_failure
 	run git config --global --get "$(_key oauth2 other gitlab.example.com)"
 	assert_success
+}
+
+@test "git-deps-auth: cleanup leaves another username's rewrite for the same host" {
+	git config --global "$(_key x-access-token tok github.com)" "$(_plain github.com)"
+	git config --global "$(_key deploy-bot other github.com)" "$(_plain github.com)"
+
+	run bash -c "STEP=cleanup bash '$SCRIPT'"
+	assert_success
+	run git config --global --get "$(_key x-access-token tok github.com)"
+	assert_failure
+	run git config --global --get "$(_key deploy-bot other github.com)"
+	assert_success
+}
+
+@test "git-deps-auth: host is lower-cased so the rewrite matches lockfile URLs" {
+	export GIT_DEPS_TOKEN="tok"
+	export GIT_DEPS_HOST="GitHub.COM"
+
+	run bash -c "STEP=configure bash '$SCRIPT'"
+	assert_success
+	assert_output --partial "Configured git auth for $(_plain github.com)"
+	run git config --global --get "$(_key x-access-token tok github.com)"
+	assert_output "$(_plain github.com)"
+}
+
+@test "git-deps-auth: host with a port is accepted verbatim" {
+	export GIT_DEPS_TOKEN="tok"
+	export GIT_DEPS_HOST="git.example.com:8443"
+
+	run bash -c "STEP=configure bash '$SCRIPT'"
+	assert_success
+	run git config --global --get "$(_key x-access-token tok git.example.com:8443)"
+	assert_output "$(_plain git.example.com:8443)"
+}
+
+@test "git-deps-auth: rejects malformed hosts" {
+	export GIT_DEPS_TOKEN="tok"
+	for host in "-foo.com" "a..b" "." "github.com:" "foo-.com"; do
+		export GIT_DEPS_HOST="$host"
+		run bash -c "STEP=configure bash '$SCRIPT'"
+		assert_failure
+		assert_output --partial "::error title=git-deps-host::"
+	done
 }
 
 @test "git-deps-auth: cleanup with nothing configured succeeds" {
@@ -118,8 +161,21 @@ _plain() {
 	assert_output ""
 }
 
-@test "git-deps-auth: rejects a token containing query or fragment delimiters" {
-	for tok in "abc?x=1" "abc#frag" "abc[1]"; do
+@test "git-deps-auth: cleanup tolerates a key with several values" {
+	# git lists a multi-valued key once per value; the first --unset-all
+	# removes all of them and a second attempt would exit 5.
+	git config --global --add "$(_key x-access-token tok github.com)" "$(_plain github.com)"
+	git config --global --add "$(_key x-access-token tok github.com)" "https://github.com/org/"
+	git config --global --add "$(_key x-access-token tok2 github.com)" "$(_plain github.com)"
+
+	run bash -c "STEP=cleanup bash '$SCRIPT'"
+	assert_success
+	run git config --global --name-only --get-regexp '^url\..*\.insteadof$'
+	assert_output ""
+}
+
+@test "git-deps-auth: rejects a token containing query, fragment or percent characters" {
+	for tok in "abc?x=1" "abc#frag" "abc[1]" "abc%2F"; do
 		export GIT_DEPS_TOKEN="$tok"
 		run bash -c "STEP=configure bash '$SCRIPT'"
 		assert_failure

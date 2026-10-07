@@ -49,7 +49,20 @@ python-version)
 deps)
 	: "${EXTRAS:=}"
 	if [[ -f "pyproject.toml" ]] || [[ -f "uv.lock" ]]; then
-		if [[ ! -f "uv.lock" ]]; then
+		# In a uv workspace the lockfile lives at the workspace root, which
+		# may be an ancestor of working-directory; look upwards before
+		# deciding there is no lock.
+		lockfile_found=false
+		dir="$PWD"
+		while :; do
+			if [[ -f "$dir/uv.lock" ]]; then
+				lockfile_found=true
+				break
+			fi
+			[[ "$dir" == "/" ]] && break
+			dir="$(dirname "$dir")"
+		done
+		if [[ "$lockfile_found" != "true" ]]; then
 			# No committed lockfile: resolve once so --frozen has something
 			# to install from. This is the only path that resolves in CI;
 			# commit uv.lock to make installs reproducible and offline-safe.

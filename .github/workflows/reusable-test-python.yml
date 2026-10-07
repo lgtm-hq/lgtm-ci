@@ -525,6 +525,7 @@ jobs:
         # Opt-in (#1021): runs only when the caller passed GIT_DEPS_TOKEN.
         # Host-scoped insteadOf rewrite so uv's git fetches of locked private
         # sources authenticate; removed again right after the install step.
+        id: git-deps-auth
         if: env.GIT_DEPS_TOKEN_PRESENT == 'true'
         shell: bash
         env:
@@ -541,11 +542,14 @@ jobs:
           EXTRAS: ${{ inputs.extras }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/setup-python.sh"
       - name: Remove git auth for private dependencies
-        if: always() && env.GIT_DEPS_TOKEN_PRESENT == 'true'
+        # Runs whenever the configure step ran (success or failure), never
+        # when it was skipped or the job stopped before reaching it.
+        if: always() && steps.git-deps-auth.outcome != 'skipped'
         shell: bash
         env:
           STEP: cleanup
           GIT_DEPS_HOST: ${{ inputs.git-deps-host }}
+          GIT_DEPS_USERNAME: ${{ inputs.git-deps-username }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/configure-git-deps-auth.sh"
       - name: Setup pytest
         shell: bash

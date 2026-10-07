@@ -445,10 +445,18 @@ Consequences for callers:
   Pass the named optional secret `GIT_DEPS_TOKEN`; the workflow configures a
   host-scoped `url.https://<user>:<token>@<host>/.insteadOf https://<host>/`
   rewrite in a dedicated step immediately before the install and removes it
-  right after. The step does not exist in the job when the secret is empty.
-  `git-deps-host` (default `github.com`) scopes the rewrite to one host;
-  `git-deps-username` (default `x-access-token`, the username GitHub App
-  installation tokens and fine-grained PATs expect) pairs with the token.
+  right after. Both steps are skipped when the secret is empty.
+  `git-deps-host` (default `github.com`, lower-cased) scopes the rewrite to
+  one host; `git-deps-username` (default `x-access-token`, the username
+  GitHub App installation tokens and fine-grained PATs expect) pairs with
+  the token. Cleanup removes only entries for that user@host. The token
+  must match `[A-Za-z0-9._~-]+`. Between the two steps the rewrite sits in
+  the runner's global git config, so a build backend of a dependency being
+  built during the install could read it; scope the token to the
+  repositories the dependency lives in.
+- **The `setup-python` composite** runs the same frozen install but has no
+  `GIT_DEPS_TOKEN` path of its own; callers of the composite configure git
+  auth in their own step when an installed extra is private.
 - **Egress.** The host must be reachable under the job's allowlist.
   `github.com:443` is in the `pypi` preset; any other host goes through
   `allowed-endpoints` with `allowed-endpoints-mode: append`.
