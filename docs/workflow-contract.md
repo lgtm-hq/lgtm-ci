@@ -593,6 +593,15 @@ Use separate caller jobs (different `name:` and/or `job-name`) when rulesets
 require distinct required checks; the reusable never runs nextest and llvm-cov in
 one job.
 
+**Concurrency (#1076).** `reusable-test-rust-build`, `reusable-rust-test` and
+`reusable-build-rust-binaries` key their concurrency group on the callee name,
+the caller repository, the caller workflow (`github.workflow`) and the ref, so
+two caller workflows on one ref (a CI wrapper and a release wrapper, say) no
+longer cancel each other. One caller workflow that invokes the same reusable
+twice on one ref should give each call a distinct `concurrency-scope` string;
+without it the second call cancels the first. The build-only and test
+workflows cancel in progress; the binary build queues and never cancels.
+
 **Prerequisite — nextest `ci` profile (#1086).** Both paths run
 `cargo nextest run --profile ci` and then parse `target/nextest/ci/junit.xml`,
 so the consumer repository must carry `.config/nextest.toml` (under

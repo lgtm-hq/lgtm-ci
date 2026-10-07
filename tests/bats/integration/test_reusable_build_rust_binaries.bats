@@ -49,9 +49,15 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
 	assert_success
 }
 
-@test "reusable-build-rust-binaries: workflow-level concurrency uses ref name" {
-	run bash -c "awk '/^concurrency:\$/,/^jobs:/ { print }' '$WORKFLOW' | grep -F 'rust-binaries-\${{ github.ref_name }}'"
+@test "reusable-build-rust-binaries: workflow-level concurrency is namespaced by callee and caller workflow" {
+	# `github` in a called workflow is the caller's, so the group carries a
+	# stable callee prefix plus the caller repository and workflow (#1076).
+	run bash -c "awk '/^concurrency:\$/,/^jobs:/ { print }' '$WORKFLOW' | tr -d '\n' | tr -s ' '"
 	assert_success
+	assert_output --partial 'lgtm-ci-rust-binaries-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}-'
+	assert_output --partial "\${{ inputs.concurrency-scope || 'default' }}"
+	assert_output --partial 'cancel-in-progress: false'
+	refute_output --partial 'github.job'
 }
 
 @test "reusable-build-rust-binaries: attests release archives not checksum manifests" {

@@ -97,15 +97,29 @@ on:
         required: false
         type: string
         default: "Cargo.toml"
+      concurrency-scope:
+        description: >-
+          Optional suffix for the concurrency group. The group is namespaced
+          by callee, caller repository, caller workflow and ref, so two caller
+          workflows on one ref never cancel each other (#1076, #108 history);
+          set this when one caller workflow invokes this reusable twice.
+        required: false
+        type: string
+        default: ""
 
     outputs:
       version:
         description: "Cargo workspace version"
         value: ${{ jobs.build.outputs.version }}
 
+# Queued, never cancelled: release legs must finish. Namespaced by callee,
+# caller repository and caller workflow as well as the ref (#1076).
+# yamllint disable rule:line-length
 concurrency:
-  group: rust-binaries-${{ github.ref_name }}
+  group: >-
+    lgtm-ci-rust-binaries-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}-${{ inputs.concurrency-scope || 'default' }}
   cancel-in-progress: false
+# yamllint enable rule:line-length
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by

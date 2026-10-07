@@ -161,6 +161,16 @@ on:
         type: number
         default: 45
 
+      concurrency-scope:
+        description: >-
+          Optional suffix for the concurrency group. The group is namespaced
+          by callee, caller repository, caller workflow and ref, so two caller
+          workflows on one ref never cancel each other (#1076, #108 history);
+          set this when one caller workflow invokes this reusable twice.
+        required: false
+        type: string
+        default: ""
+
     outputs:
       tests-passed:
         description: "Number of tests passed"
@@ -421,10 +431,15 @@ jobs:
       passed: ${{ steps.record-passed.outputs.passed }}
       pages-coverage-artifact-name: ${{ inputs.pages-coverage-artifact-name }}
       pages-coverage-uploaded: ${{ steps.record-pages-upload.outputs.uploaded }}
+    # `github` inside a called workflow is the caller's context, so the group
+    # is namespaced by callee, caller repository and caller workflow as well
+    # as the ref (#1076); never github.job.
+    # yamllint disable rule:line-length
     concurrency:
       group: >-
-        rust-test-${{ inputs.job-name }}-${{ matrix.rust-toolchain }}-${{ github.ref }}
+        lgtm-ci-rust-test-${{ github.repository }}-${{ github.workflow }}-${{ github.ref }}-${{ inputs.job-name }}-${{ matrix.rust-toolchain }}-${{ inputs.concurrency-scope || 'default' }}
       cancel-in-progress: true
+    # yamllint enable rule:line-length
 
     steps:
       - name: Harden runner
