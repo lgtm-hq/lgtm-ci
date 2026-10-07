@@ -139,19 +139,19 @@ _run() {
 }
 
 @test "setup-rust-nextest: installs llvm-cov when coverage tools are requested" {
-	local nv lv nd ld
-	nv="$(_pin DEFAULT_CARGO_NEXTEST_VERSION)"
-	lv="$(_pin DEFAULT_CARGO_LLVM_COV_VERSION)"
-	nd="$(_publish cargo-nextest "$nv")"
-	ld="$(_publish cargo-llvm-cov "$lv")"
+	local nextest_version llvm_cov_version nextest_sha llvm_cov_sha
+	nextest_version="$(_pin DEFAULT_CARGO_NEXTEST_VERSION)"
+	llvm_cov_version="$(_pin DEFAULT_CARGO_LLVM_COV_VERSION)"
+	nextest_sha="$(_publish cargo-nextest "$nextest_version")"
+	llvm_cov_sha="$(_publish cargo-llvm-cov "$llvm_cov_version")"
 	_run INSTALL_COVERAGE_TOOLS=true \
-		CARGO_NEXTEST_SHA256_X86_64_UNKNOWN_LINUX_GNU="$nd" \
-		CARGO_LLVM_COV_SHA256_X86_64_UNKNOWN_LINUX_GNU="$ld"
+		CARGO_NEXTEST_SHA256_X86_64_UNKNOWN_LINUX_GNU="$nextest_sha" \
+		CARGO_LLVM_COV_SHA256_X86_64_UNKNOWN_LINUX_GNU="$llvm_cov_sha"
 	assert_success
 	[[ -x "${CARGO_HOME}/bin/cargo-llvm-cov" ]]
 	run cat "$CALLS_FILE"
 	assert_output --partial "rustup component add llvm-tools-preview"
-	assert_output --partial "releases/download/v${lv}/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"
+	assert_output --partial "releases/download/v${llvm_cov_version}/cargo-llvm-cov-x86_64-unknown-linux-gnu.tar.gz"
 }
 
 @test "setup-rust-nextest: version override without a matching digest is refused" {

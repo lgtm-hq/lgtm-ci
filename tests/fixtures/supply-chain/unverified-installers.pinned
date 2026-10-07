@@ -3,6 +3,7 @@
 # it here too, in review. Kept out of the .bats file because
 # validate-script-test-coverage treats a script basename in a .bats file as
 # test coverage.
+scripts/ci/actions/publish-test-results.sh
 scripts/ci/actions/run-ai-review.sh
 scripts/ci/actions/run-pytest.sh
 scripts/ci/actions/setup-package-manager.sh

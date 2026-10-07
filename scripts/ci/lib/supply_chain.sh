@@ -85,20 +85,28 @@ supply_chain_resolve_digest() {
 	printf '%s' "${!name:-${!default_name:-}}"
 }
 
+# Exit status _supply_chain_prepare uses for "skip verification" (escape
+# hatch). Any other non-zero status from it is fatal to the caller, so a
+# missing helper in a child shell (127) can never read as "skip".
+readonly _SUPPLY_CHAIN_SKIP=3
+
 # Shared pre-checks for sha256 and commit pins.
 # Usage: _supply_chain_prepare NAME expected_pattern version default_version
-# Sets _SUPPLY_CHAIN_EXPECTED. Returns 1 when verification must be skipped
-# (escape hatch), exits on a hard error.
+# Sets _SUPPLY_CHAIN_EXPECTED. Returns _SUPPLY_CHAIN_SKIP when verification
+# must be skipped (escape hatch), exits on a hard error.
 _supply_chain_prepare() {
 	local name="$1" pattern="$2" version="${3:-}" default_version="${4:-}"
 	local default_name="DEFAULT_${name}"
 	local expected override
 	override="${!name:-}"
 	expected="${override:-${!default_name:-}}"
+	# Hex digests compare case-insensitively; the cursor-agent contract
+	# accepted upper-case overrides and still does.
+	expected="$(printf '%s' "$expected" | tr '[:upper:]' '[:lower:]')"
 
 	if [[ -z "$expected" ]]; then
 		_supply_chain_gap "no committed digest for ${name} in scripts/ci/versions.env" || return 1
-		return 1
+		return "$_SUPPLY_CHAIN_SKIP"
 	fi
 	if [[ ! "$expected" =~ $pattern ]]; then
 		echo "::error title=unverified install::${name} is not a valid digest: '${expected}'" >&2
@@ -106,10 +114,26 @@ _supply_chain_prepare() {
 	fi
 	if [[ -n "$version" && -n "$default_version" && "$version" != "$default_version" && -z "$override" ]]; then
 		_supply_chain_gap "version overridden to ${version} (pinned ${default_version}) without a matching ${name}" || return 1
-		return 1
+		return "$_SUPPLY_CHAIN_SKIP"
 	fi
 	_SUPPLY_CHAIN_EXPECTED="$expected"
 	return 0
+}
+
+# Run _supply_chain_prepare and translate its status: 0 = verify, 1 = skip,
+# anything else (including 127 when the helper is missing) = fatal.
+# Usage: _supply_chain_gate NAME pattern version default_version
+_supply_chain_gate() {
+	local rc=0
+	_supply_chain_prepare "$@" || rc=$?
+	case "$rc" in
+	0) return 0 ;;
+	"$_SUPPLY_CHAIN_SKIP") return 1 ;;
+	*)
+		echo "::error title=unverified install::digest pre-check for ${1} failed (status ${rc}); refusing to install" >&2
+		exit 1
+		;;
+	esac
 }
 
 # =============================================================================
@@ -128,7 +152,7 @@ supply_chain_verify_sha256() {
 	local file="$1" name="$2" version="${3:-}" default_version="${4:-}"
 	local expected
 
-	if ! _supply_chain_prepare "$name" '^[a-f0-9]{64}$' "$version" "$default_version"; then
+	if ! _supply_chain_gate "$name" '^[a-f0-9]{64}$' "$version" "$default_version"; then
 		return 0
 	fi
 	expected="$_SUPPLY_CHAIN_EXPECTED"
@@ -152,7 +176,7 @@ supply_chain_verify_commit() {
 	local dir="$1" name="$2" version="${3:-}" default_version="${4:-}"
 	local expected actual
 
-	if ! _supply_chain_prepare "$name" '^[a-f0-9]{40}$' "$version" "$default_version"; then
+	if ! _supply_chain_gate "$name" '^[a-f0-9]{40}$' "$version" "$default_version"; then
 		return 0
 	fi
 	expected="$_SUPPLY_CHAIN_EXPECTED"
@@ -178,6 +202,9 @@ supply_chain_var_suffix() {
 # =============================================================================
 # Export functions
 # =============================================================================
+# The private helpers are exported too: an exported verify function that
+# cannot find them in a child shell would fail open.
 export -f supply_chain_unverified_allowed supply_chain_require_tool \
 	supply_chain_resolve_digest supply_chain_verify_sha256 \
-	supply_chain_verify_commit supply_chain_var_suffix
+	supply_chain_verify_commit supply_chain_var_suffix \
+	_supply_chain_gap _supply_chain_prepare _supply_chain_gate

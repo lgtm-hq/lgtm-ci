@@ -24,3 +24,4 @@ scripts/ci/lib/node/pm.sh: pm_add installs consumer devDependencies on request; 
 scripts/ci/lib/installer/binary.sh: generic installer library; callers pass a checksum when they have one (no caller in scripts/ci today).
 scripts/ci/lib/installer/fallbacks.sh: generic go install / brew / cargo install fallbacks for the installer library; registry trust root.
 scripts/ci/lib/testing/coverage/merge.sh: prints an `npm install -g nyc` hint in an error message; installs nothing.
+scripts/ci/actions/publish-test-results.sh: wget mirrors the consumer's live GitHub Pages site into the publish artifact; nothing is installed or executed.

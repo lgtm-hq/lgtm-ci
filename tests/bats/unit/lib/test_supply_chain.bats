@@ -93,11 +93,12 @@ _sc() {
 }
 
 @test "supply_chain: missing sha256 tool is a hard error by default" {
-	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	# Minimal PATH: everything the library needs except a sha256 tool.
+	local mock_bin="${BATS_TEST_TMPDIR}/bin" t
 	mkdir -p "$mock_bin"
-	ln -s "$(command -v bash)" "$mock_bin/bash"
-	ln -s "$(command -v awk)" "$mock_bin/awk"
-	ln -s "$(command -v basename)" "$mock_bin/basename"
+	for t in bash awk basename dirname tr grep sed cat; do
+		ln -s "$(command -v "$t")" "$mock_bin/$t"
+	done
 	run env -i PATH="$mock_bin" HOME="$HOME" bash -c "source '$LIB'; DEFAULT_TOOL_SHA256_X='$GOOD'; supply_chain_verify_sha256 '$ARTIFACT' TOOL_SHA256_X; echo NOT-REACHED"
 	assert_failure
 	assert_output --partial "sha256sum is required"
@@ -149,4 +150,22 @@ _sc() {
 	_sc "declare -F | grep -c '^declare -fx supply_chain_'"
 	assert_success
 	assert_output "6"
+}
+
+@test "supply_chain: exported verify function still fails closed in a child shell" {
+	# export -f without the private helpers would make the child's
+	# `_supply_chain_prepare` a missing command (127) and fail open.
+	_sc "export DEFAULT_TOOL_SHA256_X='$BAD'; bash -c 'supply_chain_verify_sha256 \"$ARTIFACT\" TOOL_SHA256_X; echo NOT-REACHED'"
+	assert_failure
+	assert_output --partial "digest mismatch"
+	refute_output --partial "command not found"
+	refute_output --partial "NOT-REACHED"
+}
+
+@test "supply_chain: an upper-case digest override is accepted" {
+	local upper
+	upper="$(printf '%s' "$GOOD" | tr '[:lower:]' '[:upper:]')"
+	_sc "export TOOL_SHA256_X='$upper'; supply_chain_verify_sha256 '$ARTIFACT' TOOL_SHA256_X"
+	assert_success
+	assert_output --partial "sha256 verified"
 }

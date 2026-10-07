@@ -80,7 +80,11 @@ install_npm_cli() {
 		echo "::error::missing committed lockfile ${src}/package-lock.json" >&2
 		exit 1
 	fi
-	pinned="$(lockfile_version "$src" "$package")"
+	pinned="$(lockfile_version "$src" "$package" 2>/dev/null || true)"
+	if [[ ! "$pinned" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "::error::${src}/package.json pins ${package} to '${pinned:-<missing>}'; expected an exact X.Y.Z version" >&2
+		exit 1
+	fi
 	prefix="${AI_TOOLS_PREFIX:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ai-tools}"
 	dir="${prefix}/${name}"
 	mkdir -p "$dir"
@@ -92,12 +96,14 @@ install_npm_cli() {
 		fi
 		echo "::warning title=unverified install::${package}@${version} installed outside the committed lockfile (LGTM_CI_ALLOW_UNVERIFIED=1 set by caller)" >&2
 		echo "Installing ${package}@${version}..."
+		# unverified-fallback: LGTM_CI_ALLOW_UNVERIFIED=1 only; registry-side integrity, no committed lockfile
 		npm install -g --no-fund --no-audit "${package}@${version}"
 		return 0
 	fi
 
 	echo "Installing ${package}@${version} from the committed lockfile..."
 	cp "${src}/package.json" "${src}/package-lock.json" "$dir/"
+	# verified-by: npm ci checks every package against the integrity hashes in the committed package-lock.json
 	(cd "$dir" && npm ci --no-fund --no-audit)
 	add_github_path "${dir}/node_modules/.bin"
 	export PATH="${dir}/node_modules/.bin:${PATH}"

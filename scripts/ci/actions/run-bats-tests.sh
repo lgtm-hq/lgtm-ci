@@ -168,6 +168,9 @@ if [[ "$STEP" == "install-kcov" ]]; then
 
 	git clone --depth 1 --branch "$KCOV_VERSION" \
 		https://github.com/SimonKagstrom/kcov.git /tmp/kcov-src
+	# The committed commit for the tag is the content pin; no tag-signature
+	# check (runner keyrings never carry the upstream keys).
+	supply_chain_verify_commit /tmp/kcov-src KCOV_COMMIT "$KCOV_VERSION" "$DEFAULT_KCOV_VERSION"
 	cd /tmp/kcov-src
 
 	# Verify we're on the expected tag
@@ -176,10 +179,6 @@ if [[ "$STEP" == "install-kcov" ]]; then
 		echo "::error::Tag mismatch: expected $KCOV_VERSION, got $CURRENT_TAG"
 		exit 1
 	fi
-
-	# The committed commit for the tag is the content pin; no tag-signature
-	# check (runner keyrings never carry the upstream keys).
-	supply_chain_verify_commit /tmp/kcov-src KCOV_COMMIT "$KCOV_VERSION" "$DEFAULT_KCOV_VERSION"
 
 	# Build and install (mkdir -p for idempotency)
 	mkdir -p build

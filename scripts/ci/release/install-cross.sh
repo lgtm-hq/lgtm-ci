@@ -6,8 +6,9 @@
 # On x86_64 Linux and x86_64 macOS the upstream release archive is downloaded
 # and verified against the sha256 committed in versions.env before `cross`
 # lands in $CARGO_HOME/bin (#1096). Other hosts fall back to
-# `cargo install --locked`, where crates.io is the trust root; that path is
-# listed in scripts/ci/maintenance/unverified-installers.allowlist.
+# `cargo install --locked`, where crates.io is the trust root and no committed
+# archive digest applies; that line carries an `# unverified-fallback:` marker
+# for the installer contract test and is documented in docs/workflow-contract.md.
 
 set -euo pipefail
 
@@ -32,6 +33,7 @@ esac
 if [[ -z "$target" ]]; then
 	echo "::notice::no committed digest for cross on $(uname -s)/$(uname -m); installing from crates.io with --locked"
 	echo "Installing cross ${CROSS_VERSION}..."
+	# unverified-fallback: no committed archive digest for this host; crates.io is the trust root (registry checksums, --locked graph)
 	cargo install cross --locked --version "$CROSS_VERSION"
 	exit 0
 fi

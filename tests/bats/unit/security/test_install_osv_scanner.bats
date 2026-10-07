@@ -12,6 +12,8 @@ load "../../../helpers/mocks"
 
 setup() {
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/security/install-osv-scanner.sh"
+	PINNED="$(sed -n 's/^DEFAULT_OSV_SCANNER_VERSION="\([^"]*\)".*/\1/p' "$PROJECT_ROOT/scripts/ci/versions.env")"
+	export PINNED
 	setup_temp_dir
 	save_path
 	export CALLS_FILE="${BATS_TEST_TMPDIR}/mock_calls_curl"
@@ -230,7 +232,7 @@ EOF
 	"
 	assert_success
 	run cat "$CALLS_FILE"
-	assert_output --partial "/download/v2.3.5/"
+	assert_output --partial "/download/v${PINNED}/"
 }
 
 @test "install-osv-scanner: explicit version with its own digest overrides the default" {
@@ -246,7 +248,7 @@ EOF
 	assert_success
 	run cat "$CALLS_FILE"
 	assert_output --partial "/download/v9.9.9/"
-	refute_output --partial "/download/v2.3.5/"
+	refute_output --partial "/download/v${PINNED}/"
 }
 
 @test "install-osv-scanner: explicit version without a digest is refused" {
@@ -261,7 +263,7 @@ EOF
 		bash '$SCRIPT' 9.9.9 2>&1
 	"
 	assert_failure
-	assert_output --partial "version overridden to 9.9.9 (pinned 2.3.5) without a matching OSV_SCANNER_SHA256_LINUX_AMD64"
+	assert_output --partial "version overridden to 9.9.9 (pinned ${PINNED}) without a matching OSV_SCANNER_SHA256_LINUX_AMD64"
 }
 
 @test "install-osv-scanner: explicit version without a digest installs under the escape hatch" {

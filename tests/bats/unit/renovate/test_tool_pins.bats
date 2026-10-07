@@ -74,7 +74,9 @@ _pin() {
 }
 
 @test "versions.env: sources cleanly with no side effects" {
-	run bash -c "set -euo pipefail; source '$VERSIONS_ENV'; declare -p | grep -c '^declare -- DEFAULT_'"
+	# No -u: under kcov the child shell inherits a PS4 that expands
+	# ${BASH_SOURCE}, which is unset in `bash -c` (#856).
+	run bash -c "set -eo pipefail; source '$VERSIONS_ENV'; declare -p | grep -c '^declare -- DEFAULT_'"
 	assert_success
 	[[ "$output" -ge 40 ]]
 }
@@ -114,7 +116,7 @@ _pin() {
 @test "versions.env: every digest-line tag ends with the tool's pinned version" {
 	# DEFAULT_<TOOL>_SHA256_<X>="…" # <tag>  must agree with DEFAULT_<TOOL>_VERSION.
 	run bash -c '
-		set -euo pipefail
+		set -eo pipefail
 		source "$1"
 		bad=0
 		while IFS= read -r line; do
@@ -146,31 +148,25 @@ _pin() {
 # Every pin is regex-visible to the versions.env manager
 # =============================================================================
 
-@test "tool pins: versions.env version lines match the manager" {
-	run python3 "$MATCHER" scripts/ci/versions.env
-	assert_success
-	local dep
-	for dep in google/osv-scanner anchore/syft nextest-rs/nextest taiki-e/cargo-llvm-cov \
-		cross-rs/cross cargo-bins/cargo-binstall bats-core/bats-core bats-core/bats-support \
-		bats-core/bats-assert bats-core/bats-file SimonKagstrom/kcov \
-		@anthropic-ai/claude-code @openai/codex lintro; do
-		assert_output --partial "$dep"
-	done
-	assert_output --partial "2.3.5"
-	assert_output --partial "0.9.92"
-	assert_output --partial "cargo-nextest-"
-	assert_output --partial "0.8.6"
-	assert_output --partial "0.2.5"
-	assert_output --partial "1.25.1"
-	assert_output --partial "1.54.0"
-	assert_output --partial "1.10.0"
-	assert_output --partial "v0.3.0"
-	assert_output --partial "v2.2.4"
-	assert_output --partial "v0.4.0"
-	assert_output --partial "v43"
-	assert_output --partial "2.1.232"
-	assert_output --partial "0.147.0"
-	assert_output --partial "0.171.3"
+@test "tool pins: every versions.env version line is a manager match with its own value" {
+	# Expected values come from versions.env itself so a Renovate bump that
+	# moves the version and its digest tags together keeps this test green.
+	local matches line var value dep
+	matches="$(python3 "$MATCHER" scripts/ci/versions.env)"
+	while IFS= read -r line; do
+		var="${line%%=*}"
+		value="$(_pin "$var")"
+		dep="$(grep -B1 -F "${var}=" "$VERSIONS_ENV" | sed -n 's/^# renovate: datasource=[a-z-]* depName=\([^ ]*\).*/\1/p')"
+		[[ -n "$dep" ]] || {
+			echo "no annotation for $var" >&2
+			return 1
+		}
+		grep -qF $'\t'"${dep}"$'\t'"${value}"$'\t' <<<"$matches" || {
+			echo "manager did not extract $dep $value from $var" >&2
+			return 1
+		}
+	done < <(grep -E '^DEFAULT_[A-Z0-9_]+_VERSION=' "$VERSIONS_ENV" | grep -v CURSOR_AGENT)
+	grep -qF "cargo-nextest-" <<<"$matches"
 }
 
 @test "tool pins: every digest line in versions.env is a manager match" {
@@ -192,10 +188,10 @@ _pin() {
 		scripts/ci/actions/prime-syft-tool-cache.sh \
 		scripts/ci/actions/install-ai-review-cli.sh \
 		scripts/ci/actions/run-bats-tests.sh; do
-		for v in 2.3.5 0.9.92 0.8.6 0.2.5 1.25.1 1.54.0 1.10.0 v0.3.0 v2.2.4 v0.4.0 2.1.232 0.147.0 2026.08.11; do
+		while IFS= read -r v; do
 			run grep -F "\"$v\"" "${PROJECT_ROOT}/${f}"
 			assert_failure
-		done
+		done < <(sed -n 's/^DEFAULT_[A-Z0-9_]*_VERSION="\([^"]*\)".*/\1/p' "$VERSIONS_ENV")
 	done
 }
 
@@ -223,19 +219,23 @@ _pin() {
 	done
 }
 
+# Annotated YAML default for a tool in an action.yml (the source copy).
+_yaml_pin() {
+	python3 "$MATCHER" "$1" | awk -F'\t' -v dep="$2" 'NR>1 && $2 == dep {print $3; exit}'
+}
+
 @test "tool pins: uv and bun action defaults match the YAML manager" {
-	run python3 "$MATCHER" ".github/actions/setup-python/action.yml"
-	assert_success
-	assert_output --partial "uv"
-	assert_output --partial "0.12.22"
-	run python3 "$MATCHER" ".github/actions/setup-node/action.yml"
-	assert_success
-	assert_output --partial "bun"
-	assert_output --partial "1.4.2"
+	local uv bun
+	uv="$(_yaml_pin .github/actions/setup-python/action.yml uv)"
+	bun="$(_yaml_pin .github/actions/setup-node/action.yml bun)"
+	[[ "$uv" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+	[[ "$bun" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
 }
 
 @test "tool pins: every workflow bun copy matches the grouped pin" {
-	local wf
+	local wf bun
+	bun="$(_yaml_pin .github/actions/setup-node/action.yml bun)"
+	[[ -n "$bun" ]]
 	for wf in \
 		.github/workflows/reusable-test-node.yml \
 		.github/workflows/reusable-test-node-custom.yml \
@@ -247,10 +247,9 @@ _pin() {
 		.github/actions/run-vitest/action.yml \
 		.github/actions/run-playwright/action.yml \
 		.github/actions/run-lighthouse/action.yml; do
-		run python3 "$MATCHER" "$wf"
+		run _yaml_pin "$wf" bun
 		assert_success
-		assert_output --partial "bun"
-		assert_output --partial "1.4.2"
+		assert_output "$bun"
 	done
 	run grep -R -n "bun-version: latest" "${PROJECT_ROOT}/.github"
 	assert_failure

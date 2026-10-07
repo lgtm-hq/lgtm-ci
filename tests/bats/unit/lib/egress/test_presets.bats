@@ -218,6 +218,8 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints rust-release"
 	assert_success
 	assert_output --partial 'crates.io:443'
+	# Digest-verified release archives (cross, cargo-binstall) redirect here (#1096).
+	assert_output --partial 'release-assets.githubusercontent.com:443'
 	assert_output --partial 'docker.io:443'
 	assert_output --partial 'fulcio.sigstore.dev:443'
 	assert_output --partial 'rekor.sigstore.dev:443'

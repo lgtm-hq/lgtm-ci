@@ -77,6 +77,29 @@ EOF
 	assert_output --partial "/ai-tools/claude/node_modules/.bin"
 }
 
+@test "install-ai-review-cli: a lockfile manifest without an exact pin is refused" {
+	local calls="${BATS_TEST_TMPDIR}/npm_calls" mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	: >"$calls"
+	cat >"${mock_bin}/npm" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>'${calls}'
+EOF
+	chmod +x "${mock_bin}/npm"
+	# node is what lockfile_version shells out to; a manifest with a range
+	# must be rejected before npm runs.
+	cat >"${mock_bin}/node" <<'EOF'
+#!/usr/bin/env bash
+echo "^2.0.0"
+EOF
+	chmod +x "${mock_bin}/node"
+	run env PATH="${mock_bin}:${PATH}" PROVIDER=anthropic TRANSPORT=cli bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "pins @anthropic-ai/claude-code to '^2.0.0'; expected an exact X.Y.Z version"
+	run cat "$calls"
+	assert_output ""
+}
+
 @test "install-ai-review-cli: npm version outside the lockfile is refused" {
 	run env PROVIDER=openai TRANSPORT=cli CODEX_VERSION=0.1.0 bash "$SCRIPT"
 	assert_failure

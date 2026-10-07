@@ -1565,18 +1565,30 @@ fails closed:
 
 - A digest or commit **mismatch** always fails the job. It is never retried
   and never downgraded.
-- A **missing** committed digest, a missing verification tool (`sha256sum`,
-  `git`), or a version override that was not paired with the matching
-  `<TOOL>_SHA256_<PLATFORM>` / `<TOOL>_COMMIT` env var is also an error,
-  unless the caller sets `LGTM_CI_ALLOW_UNVERIFIED=1`. With that escape set
-  the gap is reported as a `::warning` and the install continues unverified.
+- A **missing** committed digest, a missing `sha256sum`/`shasum`, or a
+  version override that was not paired with the matching
+  `<TOOL>_SHA256_<PLATFORM>` / `<TOOL>_COMMIT` value is also an error, unless
+  the caller sets `LGTM_CI_ALLOW_UNVERIFIED=1`. With that escape set the gap
+  is reported as a `::warning` and the install continues unverified.
   lgtm-ci's own workflows never set it; it exists for callers that
   deliberately pin a version lgtm-ci has no digest for and accept the risk.
-- Version-override inputs (`osv-version` on
-  `reusable-vuln-suppression-check`, `bats-version` on `reusable-test-shell`,
+- Version overrides therefore need the matching digest: `bats-version` on
+  `reusable-test-shell` takes it through the companion `bats-commit` input;
+  `osv-version` on `reusable-vuln-suppression-check` through a caller
+  `install-script` that exports `OSV_SCANNER_SHA256_<PLATFORM>`;
   `CARGO_NEXTEST_VERSION` / `CARGO_LLVM_COV_VERSION` through a caller
-  `setup-script`) therefore need the matching digest exported by the caller's
-  own script, or the escape hatch.
+  `setup-script` that exports `CARGO_<TOOL>_SHA256_<TARGET>`. Caller `env:`
+  does not cross the `workflow_call` boundary, so those are the only routes.
+- Hosts with no committed archive digest (cargo-nextest, cargo-llvm-cov and
+  cross outside the targets listed in `versions.env`) fall back to
+  `cargo install --locked`, where crates.io is the trust root: registry-side
+  checksums and the crate's own lockfile. Each such line carries an
+  `# unverified-fallback: <reason>` marker so the contract test can see it;
+  it is not an escape-hatch path.
+- A binary already on `PATH` at the pinned version is reused without a digest
+  check. The setup-rust action restores `~/.cargo/bin` from the Actions
+  cache, which is scoped to the consumer repository and ref, so that shortcut
+  trusts the consumer's own prior job rather than a fresh download. Accepted.
 
 Upstream signatures are checked when a pin is created or refreshed, not on
 every run: `scripts/ci/maintenance/refresh-tool-digests.sh --check` downloads
@@ -1602,11 +1614,19 @@ equal `versions.env`, and every YAML copy that cannot read a file (`uv`, `bun`,
 `grype`) equals its annotated source.
 
 `tests/bats/unit/renovate/test_installer_verification.bats` enumerates every
-installer-shaped command under `scripts/ci` and requires each file to call
-`supply_chain_verify_sha256` / `supply_chain_verify_commit` or to appear in
+installer-shaped command line under `scripts/ci` (`git clone`, `cargo
+install`/`binstall`, `npm install`/`ci`, `bun add`, `pip install`, `uv tool
+install`, `go install`, `pipx`/`gem install`, `download_with_retries`,
+`curl -o`/`-O`, `wget`; image pulls are pinned by their `@sha256` reference
+and `npx`/`bunx` only run consumer-installed packages). Each line must be followed
+within a few lines by a `supply_chain_verify_sha256` /
+`supply_chain_verify_commit` / `sha256sum -c` call that is not a comment, or
+carry an explicit `# unverified-fallback: <reason>` or `# verified-by: <reason>`
+marker, or live in a file listed in
 `scripts/ci/maintenance/unverified-installers.allowlist` with a reason. The
 test pins the exact set of paths the allowlist may contain, so the list can
-only shrink; a new installer fails the test by default.
+only shrink; a new installer fails the test by default, and the test proves
+that with planted fixtures.
 
 Catalog note (#1079): until the catalog lands, treat every reusable listed in
 the table above as "installs `<tool> <version>`, digest-verified". Rows for
