@@ -9,6 +9,8 @@ set -euo pipefail
 
 : "${STEP:?STEP is required}"
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 case "$STEP" in
 version)
 	rustc_version=$(rustc --version | awk '{print $2}')
@@ -31,11 +33,14 @@ cargo-env)
 binstall)
 	if ! command -v cargo-binstall &>/dev/null; then
 		# Pinned release binary download (no pipe-to-bash of main-branch
-		# script). cargo-binstall publishes minisign signatures (.sig)
-		# but no sha256 checksum files, so pinning the version + TLS is
-		# the integrity control here.
-		# renovate: datasource=github-releases depName=cargo-bins/cargo-binstall
-		CARGO_BINSTALL_VERSION="1.25.1"
+		# script). cargo-binstall publishes no sha256 checksum files, so
+		# the archive is verified against the digest committed in
+		# scripts/ci/versions.env (#1096).
+		# shellcheck source=../lib/supply_chain.sh
+		source "$SCRIPT_DIR/../lib/supply_chain.sh"
+		# shellcheck source=../versions.env
+		source "$SCRIPT_DIR/../versions.env"
+		CARGO_BINSTALL_VERSION="${CARGO_BINSTALL_VERSION:-$DEFAULT_CARGO_BINSTALL_VERSION}"
 		echo "Installing cargo-binstall v${CARGO_BINSTALL_VERSION}..."
 
 		os=$(uname -s)
@@ -84,6 +89,9 @@ binstall)
 
 		echo "Downloading pinned release: $url"
 		curl -L --proto '=https' --tlsv1.2 -sSf -o "$tmpdir/cargo-binstall.$ext" "$url"
+		supply_chain_verify_sha256 "$tmpdir/cargo-binstall.$ext" \
+			"CARGO_BINSTALL_SHA256_$(supply_chain_var_suffix "$target")" \
+			"$CARGO_BINSTALL_VERSION" "$DEFAULT_CARGO_BINSTALL_VERSION"
 
 		if [[ "$ext" == "tgz" ]]; then
 			tar -xzf "$tmpdir/cargo-binstall.$ext" -C "$tmpdir"

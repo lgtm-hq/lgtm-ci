@@ -12,6 +12,8 @@ load "../../../helpers/mocks"
 
 setup() {
 	export SCRIPT="$PROJECT_ROOT/scripts/ci/security/install-osv-scanner.sh"
+	PINNED="$(sed -n 's/^DEFAULT_OSV_SCANNER_VERSION="\([^"]*\)".*/\1/p' "$PROJECT_ROOT/scripts/ci/versions.env")"
+	export PINNED
 	setup_temp_dir
 	save_path
 	export CALLS_FILE="${BATS_TEST_TMPDIR}/mock_calls_curl"
@@ -24,14 +26,14 @@ teardown() {
 	teardown_temp_dir
 }
 
-# Build mocks for curl, uname, and sha256sum so the install script can run to
-# completion off-Linux without network access.
+# Build mocks for curl and uname so the install script can run to completion
+# off-Linux without network access. The real sha256 tool stays in play: the
+# fake binary's digest is exported as OSV_SCANNER_SHA256_LINUX_AMD64, the same
+# env override a caller would use, so the committed-digest gate is exercised
+# for real (#1096).
 #
-#   curl      - records every argv; serves a fake binary for the binary URL,
-#               a checksum line for SHA256SUMS, and fails the .sig/.pem
-#               fetches so signature verification is skipped.
+#   curl      - records every argv; serves a fake binary for the binary URL.
 #   uname     - reports Linux/x86_64 for a deterministic platform.
-#   sha256sum - succeeds on `-c` so the checksum gate passes.
 _setup_osv_mocks() {
 	local mock_bin="${BATS_TEST_TMPDIR}/mock_bin"
 	mkdir -p "$mock_bin"
@@ -40,6 +42,13 @@ _setup_osv_mocks() {
 	local fake_binary="${BATS_TEST_TMPDIR}/fake-osv-scanner"
 	printf '#!/usr/bin/env bash\necho "osv-scanner 2.3.5 (mock)"\n' >"$fake_binary"
 	chmod +x "$fake_binary"
+	if command -v sha256sum >/dev/null 2>&1; then
+		FAKE_DIGEST="$(sha256sum "$fake_binary" | awk '{print $1}')"
+	else
+		FAKE_DIGEST="$(shasum -a 256 "$fake_binary" | awk '{print $1}')"
+	fi
+	export FAKE_DIGEST
+	export OSV_SCANNER_SHA256_LINUX_AMD64="$FAKE_DIGEST"
 
 	cat >"${mock_bin}/curl" <<EOF
 #!/usr/bin/env bash
@@ -54,9 +63,7 @@ while [[ \$# -gt 0 ]]; do
 	esac
 done
 case "\$url" in
-*SHA256SUMS.sig|*SHA256SUMS.pem) exit 22;;
 *_linux_amd64) cp '${fake_binary}' "\$out";;
-*SHA256SUMS) printf '%s  osv-scanner_linux_amd64\n' deadbeef >"\$out";;
 *) exit 22;;
 esac
 exit 0
@@ -72,14 +79,6 @@ esac
 EOF
 	chmod +x "${mock_bin}/uname"
 
-	cat >"${mock_bin}/sha256sum" <<'EOF'
-#!/usr/bin/env bash
-# Consume stdin when invoked as `sha256sum -c -` and report success.
-[[ "$1" == "-c" ]] && { cat >/dev/null; exit 0; }
-exit 0
-EOF
-	chmod +x "${mock_bin}/sha256sum"
-
 	export MOCK_BIN="$mock_bin"
 }
 
@@ -94,8 +93,59 @@ EOF
 		bash '$SCRIPT' 2>&1
 	"
 	assert_success
+	assert_output --partial "sha256 verified against committed OSV_SCANNER_SHA256_LINUX_AMD64"
 	assert_output --partial "installed to"
 	[[ -x "${INSTALL_DIR}/osv-scanner" ]]
+	# No checksum manifest or signature is fetched at install time (#1096).
+	run cat "$CALLS_FILE"
+	refute_output --partial "SHA256SUMS"
+}
+
+@test "install-osv-scanner: a wrong digest fails the install" {
+	if ! bash4_available; then
+		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
+	fi
+	_setup_osv_mocks
+	run bash -c "
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export INSTALL_DIR='${INSTALL_DIR}'
+		export OSV_SCANNER_SHA256_LINUX_AMD64=0000000000000000000000000000000000000000000000000000000000000000
+		bash '$SCRIPT' 2>&1
+	"
+	assert_failure
+	assert_output --partial "::error title=digest mismatch::"
+	[[ ! -e "${INSTALL_DIR}/osv-scanner" ]]
+}
+
+@test "install-osv-scanner: the committed digest is the default and rejects other bytes" {
+	if ! bash4_available; then
+		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
+	fi
+	_setup_osv_mocks
+	run bash -c "
+		unset OSV_SCANNER_SHA256_LINUX_AMD64
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export INSTALL_DIR='${INSTALL_DIR}'
+		bash '$SCRIPT' 2>&1
+	"
+	assert_failure
+	assert_output --partial "does not match committed OSV_SCANNER_SHA256_LINUX_AMD64"
+}
+
+@test "install-osv-scanner: a wrong digest is still fatal with LGTM_CI_ALLOW_UNVERIFIED=1" {
+	if ! bash4_available; then
+		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
+	fi
+	_setup_osv_mocks
+	run bash -c "
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export INSTALL_DIR='${INSTALL_DIR}'
+		export LGTM_CI_ALLOW_UNVERIFIED=1
+		export OSV_SCANNER_SHA256_LINUX_AMD64=0000000000000000000000000000000000000000000000000000000000000000
+		bash '$SCRIPT' 2>&1
+	"
+	assert_failure
+	assert_output --partial "digest mismatch"
 }
 
 @test "install-osv-scanner: downloads enforce the HTTPS-only + TLS 1.2 floor" {
@@ -132,7 +182,7 @@ EOF
 	# bypass the configured CA bundle.
 	run grep -c "^" "$CALLS_FILE"
 	local total="$output"
-	[[ "$total" -ge 2 ]]
+	[[ "$total" -ge 1 ]]
 	run grep -cv -- "--cacert ${bundle}" "$CALLS_FILE"
 	assert_output "0"
 }
@@ -182,10 +232,10 @@ EOF
 	"
 	assert_success
 	run cat "$CALLS_FILE"
-	assert_output --partial "/download/v2.3.5/"
+	assert_output --partial "/download/v${PINNED}/"
 }
 
-@test "install-osv-scanner: explicit version overrides the annotated default" {
+@test "install-osv-scanner: explicit version with its own digest overrides the default" {
 	if ! bash4_available; then
 		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
 	fi
@@ -198,7 +248,38 @@ EOF
 	assert_success
 	run cat "$CALLS_FILE"
 	assert_output --partial "/download/v9.9.9/"
-	refute_output --partial "/download/v2.3.5/"
+	refute_output --partial "/download/v${PINNED}/"
+}
+
+@test "install-osv-scanner: explicit version without a digest is refused" {
+	if ! bash4_available; then
+		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
+	fi
+	_setup_osv_mocks
+	run bash -c "
+		unset OSV_SCANNER_SHA256_LINUX_AMD64
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export INSTALL_DIR='${INSTALL_DIR}'
+		bash '$SCRIPT' 9.9.9 2>&1
+	"
+	assert_failure
+	assert_output --partial "version overridden to 9.9.9 (pinned ${PINNED}) without a matching OSV_SCANNER_SHA256_LINUX_AMD64"
+}
+
+@test "install-osv-scanner: explicit version without a digest installs under the escape hatch" {
+	if ! bash4_available; then
+		skip "bash 3 detected - requires bash 4+ (macOS system bash is outdated)"
+	fi
+	_setup_osv_mocks
+	run bash -c "
+		unset OSV_SCANNER_SHA256_LINUX_AMD64
+		export LGTM_CI_ALLOW_UNVERIFIED=1
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export INSTALL_DIR='${INSTALL_DIR}'
+		bash '$SCRIPT' 9.9.9 2>&1
+	"
+	assert_success
+	assert_output --partial "::warning title=unverified install::"
 }
 
 @test "install-osv-scanner: fails closed on unreadable CA bundle" {

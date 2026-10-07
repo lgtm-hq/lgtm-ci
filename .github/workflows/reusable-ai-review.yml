@@ -61,11 +61,12 @@ on:
         type: string
         default: ""
       lintro-version:
-        description: "Pinned lintro PyPI version (Renovate-managed centrally)"
+        description: >-
+          Pinned lintro PyPI version. Empty uses DEFAULT_LINTRO_VERSION from
+          scripts/ci/versions.env (Renovate-managed centrally, #1096).
         required: false
         type: string
-        # renovate: datasource=pypi depName=lintro
-        default: "0.171.3"
+        default: ""
       python-version:
         description: "CPython version for the scratch venv that installs lintro"
         required: false
@@ -283,12 +284,13 @@ env:
     releases.astral.sh:443",
     "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
-    raw.githubusercontent.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
-    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
-    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
-    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
-    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
-    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 static.rust-lang.org:443
+    sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 archive.ubuntu.com:80
+    azure.archive.ubuntu.com:80 security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
+    sigstore-tuf-root.storage.googleapis.com:443",
     "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
     actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443

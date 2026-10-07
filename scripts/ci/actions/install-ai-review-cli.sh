@@ -3,8 +3,12 @@
 # Purpose: Install the pinned CLI binary for one (provider, transport) pair.
 #
 # Gated: does nothing when transport is not cli or the provider is unknown.
-# Versions are exact pins (Renovate-managed for npm packages). Cursor has no
-# registry datasource — bump version and both checksums together.
+# Versions come from scripts/ci/versions.env. The npm CLIs install with
+# `npm ci` from the committed, integrity-pinned lockfiles under
+# scripts/ci/ai-review-cli/<binary>/ (Renovate's npm manager keeps the
+# lockfile and versions.env in step; test_tool_pins.bats asserts they agree).
+# Cursor has no registry datasource — bump version and both checksums together
+# in versions.env.
 #
 # Environment:
 #   PROVIDER                 Resolved provider (anthropic|cursor|openai)
@@ -15,6 +19,10 @@
 #   CURSOR_AGENT_SHA256_X64  sha256 of the linux/x64 tarball
 #   CURSOR_AGENT_SHA256_ARM64 sha256 of the linux/arm64 tarball
 #   AI_TOOLS_PREFIX          Install prefix (default: $RUNNER_TEMP/ai-tools)
+#
+# Overriding an npm CLI version away from the lockfile pin bypasses the
+# lockfile; that is refused unless LGTM_CI_ALLOW_UNVERIFIED=1 (then
+# `npm install -g pkg@version` runs with registry-side integrity only).
 
 set -euo pipefail
 
@@ -25,18 +33,17 @@ source "${SCRIPT_DIR}/../lib/ai_review_matrix.sh"
 source "${SCRIPT_DIR}/../lib/github/output.sh"
 # shellcheck source=../lib/network/download.sh
 source "${SCRIPT_DIR}/../lib/network/download.sh"
+# shellcheck source=../lib/supply_chain.sh
+source "${SCRIPT_DIR}/../lib/supply_chain.sh"
+# shellcheck source=../versions.env
+source "${SCRIPT_DIR}/../versions.env"
 
-# renovate: datasource=npm depName=@anthropic-ai/claude-code
-DEFAULT_CLAUDE_CODE_VERSION="2.1.232"
 CLAUDE_CODE_VERSION="${CLAUDE_CODE_VERSION:-$DEFAULT_CLAUDE_CODE_VERSION}"
-# renovate: datasource=npm depName=@openai/codex
-DEFAULT_CODEX_VERSION="0.147.0"
 CODEX_VERSION="${CODEX_VERSION:-$DEFAULT_CODEX_VERSION}"
-# Cursor publishes no registry feed; bump by hand with both checksums.
-# 2026.08.11 fixes wedged uploads silently stalling long headless sessions.
-CURSOR_AGENT_VERSION="${CURSOR_AGENT_VERSION:-2026.08.11-e8db854}"
-CURSOR_AGENT_SHA256_X64="${CURSOR_AGENT_SHA256_X64:-bfff4bf6f4e9dd30c1d0ef0a70b6077b074015dd2948e4c50685d53afdcfce5a}"
-CURSOR_AGENT_SHA256_ARM64="${CURSOR_AGENT_SHA256_ARM64:-ea13f92e295f523a99ce8d8f57d6894d21e5d1e2d030ffad718ccd5955ca2eed}"
+CURSOR_AGENT_VERSION="${CURSOR_AGENT_VERSION:-$DEFAULT_CURSOR_AGENT_VERSION}"
+CURSOR_AGENT_SHA256_X64="${CURSOR_AGENT_SHA256_X64:-$DEFAULT_CURSOR_AGENT_SHA256_X64}"
+CURSOR_AGENT_SHA256_ARM64="${CURSOR_AGENT_SHA256_ARM64:-$DEFAULT_CURSOR_AGENT_SHA256_ARM64}"
+LOCKFILE_DIR="${SCRIPT_DIR}/../ai-review-cli"
 
 provider="$(ai_review_normalize "${PROVIDER:-}")"
 transport="$(ai_review_normalize "${TRANSPORT:-}")"
@@ -55,11 +62,51 @@ require_exact_semver() {
 	fi
 }
 
+# Version pinned for a package in the committed lockfile directory.
+lockfile_version() {
+	local dir="$1" package="$2"
+	node -p "require(process.argv[1]).dependencies[process.argv[2]]" \
+		"${dir}/package.json" "$package"
+}
+
+# Install from the committed lockfile: copy package.json + package-lock.json to
+# a scratch prefix and run `npm ci` there, then expose node_modules/.bin.
+# Usage: install_npm_cli <binary> <package> <version>
 install_npm_cli() {
-	local package="$1" version="$2"
+	local name="$1" package="$2" version="$3"
+	local src="${LOCKFILE_DIR}/${name}" prefix dir pinned
 	require_exact_semver "${package}" "$version"
-	echo "Installing ${package}@${version}..."
-	npm install -g --no-fund --no-audit "${package}@${version}"
+	if [[ ! -f "${src}/package-lock.json" ]]; then
+		echo "::error::missing committed lockfile ${src}/package-lock.json" >&2
+		exit 1
+	fi
+	pinned="$(lockfile_version "$src" "$package" 2>/dev/null || true)"
+	if [[ ! "$pinned" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "::error::${src}/package.json pins ${package} to '${pinned:-<missing>}'; expected an exact X.Y.Z version" >&2
+		exit 1
+	fi
+	prefix="${AI_TOOLS_PREFIX:-${RUNNER_TEMP:-${TMPDIR:-/tmp}}/ai-tools}"
+	dir="${prefix}/${name}"
+	mkdir -p "$dir"
+
+	if [[ "$version" != "$pinned" ]]; then
+		if ! supply_chain_unverified_allowed; then
+			echo "::error title=unverified install::${package}@${version} requested but the committed lockfile pins ${pinned}; set LGTM_CI_ALLOW_UNVERIFIED=1 to install outside the lockfile" >&2
+			exit 1
+		fi
+		echo "::warning title=unverified install::${package}@${version} installed outside the committed lockfile (LGTM_CI_ALLOW_UNVERIFIED=1 set by caller)" >&2
+		echo "Installing ${package}@${version}..."
+		# unverified-fallback: LGTM_CI_ALLOW_UNVERIFIED=1 only; registry-side integrity, no committed lockfile
+		npm install -g --no-fund --no-audit "${package}@${version}"
+		return 0
+	fi
+
+	echo "Installing ${package}@${version} from the committed lockfile..."
+	cp "${src}/package.json" "${src}/package-lock.json" "$dir/"
+	# verified-by: npm ci checks every package against the integrity hashes in the committed package-lock.json
+	(cd "$dir" && npm ci --no-fund --no-audit)
+	add_github_path "${dir}/node_modules/.bin"
+	export PATH="${dir}/node_modules/.bin:${PATH}"
 }
 
 install_cursor_agent() {
@@ -109,11 +156,11 @@ install_cursor_agent() {
 
 case "$binary" in
 claude)
-	install_npm_cli "@anthropic-ai/claude-code" "$CLAUDE_CODE_VERSION"
+	install_npm_cli claude "@anthropic-ai/claude-code" "$CLAUDE_CODE_VERSION"
 	claude --version
 	;;
 codex)
-	install_npm_cli "@openai/codex" "$CODEX_VERSION"
+	install_npm_cli codex "@openai/codex" "$CODEX_VERSION"
 	codex --version
 	;;
 agent)

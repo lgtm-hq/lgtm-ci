@@ -1,0 +1,16 @@
+# Every path scripts/ci/maintenance/unverified-installers.allowlist may contain
+# (#1096). The allowlist can only shrink: adding an entry there requires adding
+# it here too, in review. Kept out of the .bats file because
+# validate-script-test-coverage treats a script basename in a .bats file as
+# test coverage.
+scripts/ci/actions/publish-test-results.sh
+scripts/ci/actions/run-ai-review.sh
+scripts/ci/actions/run-pytest.sh
+scripts/ci/actions/setup-package-manager.sh
+scripts/ci/actions/setup-python.sh
+scripts/ci/lib/installer/binary.sh
+scripts/ci/lib/installer/fallbacks.sh
+scripts/ci/lib/node/pm.sh
+scripts/ci/lib/testing/coverage/merge.sh
+scripts/ci/release/ecosystems/pep621.sh
+scripts/ci/release/ecosystems/python.sh

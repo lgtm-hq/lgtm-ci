@@ -46,7 +46,6 @@ setup() {
 		;;
 	esac
 	ARCHIVE_NAME="syft_${SYFT_TEST_VERSION}_${SYFT_OS}_${SYFT_GOARCH}.tar.gz"
-	CHECKSUMS_NAME="syft_${SYFT_TEST_VERSION}_checksums.txt"
 	TOOL_DIR="${RUNNER_TOOL_CACHE}/syft/${SYFT_TEST_VERSION}/${SYFT_NODE_ARCH}"
 
 	_install_mocks
@@ -66,9 +65,10 @@ _sha256_of() {
 	fi
 }
 
-# Build a syft release tarball plus a matching checksums.txt in the fake
-# release server directory. Pass "mismatch" to publish a checksum that does not
-# describe the served archive (the tampered/corrupt-artifact case).
+# Build a syft release tarball in the fake release server directory and
+# export its digest as SYFT_SHA256_<OS>_<ARCH>, the same env override a caller
+# would use beside SYFT_VERSION (#1096). Pass "mismatch" to export a digest
+# that does not describe the served archive (the tampered/corrupt case).
 _publish_release() {
 	local mode="${1:-valid}"
 	local build="${BATS_TEST_TMPDIR}/build"
@@ -85,7 +85,7 @@ _publish_release() {
 	else
 		sum="$(_sha256_of "${SERVER_DIR}/${ARCHIVE_NAME}")"
 	fi
-	printf '%s  %s\n' "$sum" "$ARCHIVE_NAME" >"${SERVER_DIR}/${CHECKSUMS_NAME}"
+	export "SYFT_SHA256_$(echo "${SYFT_OS}_${SYFT_GOARCH}" | tr '[:lower:]' '[:upper:]')=${sum}"
 }
 
 # curl stub that serves files out of SERVER_DIR, records every requested URL,
@@ -188,8 +188,8 @@ _run_script() {
 	assert_success
 	[[ -f "${TOOL_DIR}.complete" ]]
 	! grep -qF "half-written" "${TOOL_DIR}/syft"
-	# archive + checksums: the stale entry was not reused.
-	assert_equal "$(_curl_call_count)" "2"
+	# one archive fetch: the stale entry was not reused.
+	assert_equal "$(_curl_call_count)" "1"
 }
 
 # @actions/tool-cache keys on semver.clean(), which drops build metadata. The
@@ -198,7 +198,6 @@ _run_script() {
 @test "prime-syft-tool-cache: strips build metadata from the cache path only" {
 	local meta_version="${SYFT_TEST_VERSION}+ci.1"
 	ARCHIVE_NAME="syft_${meta_version}_${SYFT_OS}_${SYFT_GOARCH}.tar.gz"
-	CHECKSUMS_NAME="syft_${meta_version}_checksums.txt"
 	_publish_release valid
 
 	_run_script SYFT_VERSION="$meta_version"
@@ -224,8 +223,8 @@ _run_script() {
 	assert_success
 	[[ -x "${TOOL_DIR}/syft" ]]
 	[[ -f "${TOOL_DIR}.complete" ]]
-	# 2 failed archive attempts + 1 success + 1 checksums fetch
-	assert_equal "$(_curl_call_count)" "4"
+	# 2 failed archive attempts + 1 success (no checksums fetch, #1096)
+	assert_equal "$(_curl_call_count)" "3"
 }
 
 @test "prime-syft-tool-cache: fails non-zero when the download never succeeds" {
@@ -240,16 +239,6 @@ _run_script() {
 	assert_equal "$(_curl_call_count)" "3"
 }
 
-@test "prime-syft-tool-cache: fails non-zero when the checksums file is unreachable" {
-	_publish_release valid
-	rm -f "${SERVER_DIR}/${CHECKSUMS_NAME}"
-
-	_run_script SYFT_DOWNLOAD_ATTEMPTS=2
-	assert_failure
-	assert_output --partial "Failed to download Syft checksums after 2 attempts"
-	[[ ! -e "${TOOL_DIR}.complete" ]]
-}
-
 # =============================================================================
 # Integrity failures: fail closed, never retried
 # =============================================================================
@@ -259,21 +248,33 @@ _run_script() {
 
 	_run_script SYFT_DOWNLOAD_ATTEMPTS=3
 	assert_failure
-	assert_output --partial "checksum verification failed"
-	# Exactly one archive fetch and one checksums fetch: a mismatch is a tamper
-	# signal, so it must not be re-attempted.
-	assert_equal "$(_curl_call_count)" "2"
+	assert_output --partial "::error title=digest mismatch::"
+	# Exactly one archive fetch: no checksum manifest is fetched any more, and
+	# a mismatch is a tamper signal, so it must not be re-attempted.
+	assert_equal "$(_curl_call_count)" "1"
 	[[ ! -e "${TOOL_DIR}/syft" ]]
 	[[ ! -e "${TOOL_DIR}.complete" ]]
 }
 
-@test "prime-syft-tool-cache: fails closed when no checksum covers the archive" {
+@test "prime-syft-tool-cache: never fetches the upstream checksums file" {
 	_publish_release valid
-	printf 'deadbeef  some-other-file.tar.gz\n' >"${SERVER_DIR}/${CHECKSUMS_NAME}"
+
+	_run_script
+	assert_success
+	run cat "$CURL_CALLS"
+	refute_output --partial "checksums.txt"
+}
+
+@test "prime-syft-tool-cache: version override without a digest is refused" {
+	_publish_release valid
+	local var
+	var="SYFT_SHA256_$(echo "${SYFT_OS}_${SYFT_GOARCH}" | tr '[:lower:]' '[:upper:]')"
+	unset "$var"
 
 	_run_script
 	assert_failure
-	assert_output --partial "No checksum for ${ARCHIVE_NAME}"
+	assert_output --partial "version overridden to ${SYFT_TEST_VERSION}"
+	assert_output --partial "without a matching ${var}"
 	[[ ! -e "${TOOL_DIR}.complete" ]]
 }
 
@@ -315,10 +316,12 @@ _run_script() {
 # Renovate pin contract
 # =============================================================================
 
-@test "prime-syft-tool-cache: pinned syft version carries a renovate annotation" {
-	run grep -B1 '^SYFT_PINNED_VERSION=' "$SCRIPT"
+@test "prime-syft-tool-cache: pinned syft version lives in versions.env with a renovate annotation" {
+	run grep -B1 '^DEFAULT_SYFT_VERSION=' "${PROJECT_ROOT}/scripts/ci/versions.env"
 	assert_success
 	assert_output --partial "# renovate: datasource=github-releases depName=anchore/syft"
+	run grep -F 'SYFT_PINNED_VERSION' "$SCRIPT"
+	assert_failure
 }
 
 # =============================================================================

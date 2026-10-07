@@ -8,4 +8,5 @@ extend-ignore-re = ["\\(ba\\)\\?sh", "mis-ordered"]
 [default.extend-words]
 # Valid project/domain terms.
 hass = "hass"
+intoto = "intoto"
 unparseable = "unparseable"

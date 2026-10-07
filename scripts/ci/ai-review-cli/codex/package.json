@@ -1,0 +1,9 @@
+{
+  "name": "lgtm-ci-ai-review-cli-codex",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Integrity-pinned install manifest for the OpenAI Codex CLI used by reusable-ai-review.yml (#1096). Keep the version equal to DEFAULT_CODEX_VERSION in scripts/ci/versions.env.",
+  "dependencies": {
+    "@openai/codex": "0.147.0"
+  }
+}

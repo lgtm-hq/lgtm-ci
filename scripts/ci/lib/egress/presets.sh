@@ -338,9 +338,13 @@ egress_preset_endpoints() {
 	rust-release)
 		# Rust cross-compile release builds (reusable-build-rust-binaries.yml).
 		# Minimal base: GitHub checkout/tooling, Rust/crates, cross Docker, apt, Sigstore.
+		# release-assets.githubusercontent.com is where github.com/<repo>/releases/
+		# download/ redirects; install-cross.sh and the setup-rust binstall step
+		# fetch their digest-verified release archives from it (#1096).
 		egress_preset_endpoints github-minimal
 		printf '%s\n' \
 			raw.githubusercontent.com:443 \
+			release-assets.githubusercontent.com:443 \
 			static.rust-lang.org:443 \
 			sh.rustup.rs:443 \
 			crates.io:443 \

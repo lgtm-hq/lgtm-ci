@@ -41,7 +41,8 @@
 #   PR_NUMBER    Pull request number.
 #
 # Environment variables (run):
-#   LINTRO_VERSION     Pinned lintro version.
+#   LINTRO_VERSION     Pinned lintro version (default: DEFAULT_LINTRO_VERSION
+#                      from scripts/ci/versions.env).
 #   PYTHON_VERSION     CPython for the scratch venv (default: 3.12).
 #   PR_NUMBER          Pull request number.
 #   GITHUB_REPOSITORY  owner/name.
@@ -304,7 +305,11 @@ if [[ "$STEP" == "run" ]]; then
 
 	lintro_bin="${LINTRO_BIN:-}"
 	if [[ -z "$lintro_bin" ]]; then
-		: "${LINTRO_VERSION:?LINTRO_VERSION is required}"
+		if [[ -z "${LINTRO_VERSION:-}" ]]; then
+			# shellcheck source=../versions.env
+			source "$SCRIPT_DIR/../versions.env"
+			LINTRO_VERSION="$DEFAULT_LINTRO_VERSION"
+		fi
 		venv_dir="${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}"
 		python_version="${PYTHON_VERSION:-3.12}"
 		echo "Installing lintro[ai]==${LINTRO_VERSION} from PyPI (pinned, trusted)…"

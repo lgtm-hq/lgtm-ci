@@ -55,6 +55,12 @@ config_file = ".lintro-config.yaml"
 # resolve the import there (E0401). pytest itself ships in the container.
 ignored-modules = ["assertpy"]
 
+[tool.lintro.dotenv_linter]
+# scripts/ci/versions.env is a bash-sourced pin file with a Renovate-facing
+# grammar (#1096); dotenv-linter's key-ordering and quoting fixes would rewrite
+# it into something neither bash nor Renovate can read.
+exclude = ["scripts/ci/versions.env"]
+
 [tool.lintro.pylint]
 # Ratchet for pylint's duplicate-code checker (R0801). The baseline is zero:
 # shared code among the standalone scripts under scripts/ci must live in

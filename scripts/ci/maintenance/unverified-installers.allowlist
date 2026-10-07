@@ -1,0 +1,27 @@
+# SPDX-License-Identifier: MIT
+# Installers under scripts/ci that run without a committed digest (#1096).
+#
+# tests/bats/unit/renovate/test_installer_verification.bats enumerates every
+# script under scripts/ci that fetches and installs software (git clone,
+# cargo install/binstall, npm install -g / npm ci, bun add, pip install,
+# uv pip/tool install, go install, download_with_retries, curl -o) and
+# requires each one to verify a committed digest through
+# scripts/ci/lib/supply_chain.sh, or to be listed here with a reason.
+#
+# This list may only shrink. The contract test pins the exact set of paths
+# allowed to appear here; adding one requires editing the test and
+# justifying the new entry in review.
+#
+# Format: <repo-relative path>: <reason>
+
+scripts/ci/release/ecosystems/python.sh: pip installs tomlkit with a range pin; PyPI is the trust root (registry-side hashes); hash-pinned requirements are a follow-up to #1096.
+scripts/ci/release/ecosystems/pep621.sh: pip installs tomlkit with a range pin; PyPI is the trust root (registry-side hashes); hash-pinned requirements are a follow-up to #1096.
+scripts/ci/actions/run-ai-review.sh: installs lintro[ai]==<pin> from PyPI; uv verifies the registry-side wheel hashes; a --require-hashes requirements file is a follow-up to #1096.
+scripts/ci/actions/run-pytest.sh: installs pytest plugins into the consumer venv; consumer-facing test tooling, PyPI is the trust root.
+scripts/ci/actions/setup-python.sh: installs the consumer's own requirements.txt; the consumer owns those pins.
+scripts/ci/actions/setup-package-manager.sh: installs the consumer's own package.json dependencies from the consumer's lockfile.
+scripts/ci/lib/node/pm.sh: pm_add installs consumer devDependencies on request; the consumer owns the lockfile.
+scripts/ci/lib/installer/binary.sh: generic installer library; callers pass a checksum when they have one (no caller in scripts/ci today).
+scripts/ci/lib/installer/fallbacks.sh: generic go install / brew / cargo install fallbacks for the installer library; registry trust root.
+scripts/ci/lib/testing/coverage/merge.sh: prints an `npm install -g nyc` hint in an error message; installs nothing.
+scripts/ci/actions/publish-test-results.sh: wget mirrors the consumer's live GitHub Pages site into the publish artifact; nothing is installed or executed.

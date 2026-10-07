@@ -6,8 +6,12 @@
 #   STEP - Which step to run: install-bats, install-kcov, run-tests,
 #          run-coverage, parse-results, parse-coverage, check-threshold,
 #          aggregate-results, merge-coverage
-#   BATS_VERSION - BATS version to install (for install-bats step)
-#   KCOV_VERSION - kcov version to install (for install-kcov step, default: v43)
+#   BATS_VERSION - BATS version to install (for install-bats step; default
+#              from scripts/ci/versions.env). Overriding it requires the
+#              matching BATS_CORE_COMMIT, or LGTM_CI_ALLOW_UNVERIFIED=1.
+#   KCOV_VERSION - kcov version to install (for install-kcov step; default
+#              from scripts/ci/versions.env, same override rule with
+#              KCOV_COMMIT)
 #   TEST_PATH - Path to test files (for run-tests/run-coverage steps)
 #   TEST_FILTER - Filter tests by name pattern (optional)
 #   PARALLEL - Number of parallel jobs (optional, must be a positive integer).
@@ -77,33 +81,39 @@ filter_kcov_console() {
 # Step: install-bats - Install BATS core and helper libraries
 # =============================================================================
 if [[ "$STEP" == "install-bats" ]]; then
-	# renovate: datasource=github-releases depName=bats-core/bats-core
-	DEFAULT_BATS_VERSION="1.10.0"
-	BATS_VERSION="${BATS_VERSION:-$DEFAULT_BATS_VERSION}"
+	# shellcheck source=../lib/supply_chain.sh
+	source "$SCRIPT_DIR/../lib/supply_chain.sh"
+	# shellcheck source=../versions.env
+	source "$SCRIPT_DIR/../versions.env"
+	BATS_VERSION="${BATS_VERSION:-$DEFAULT_BATS_CORE_VERSION}"
 	# Normalize BATS_VERSION to avoid double "v" (strip leading "v" if present)
 	BATS_VERSION="${BATS_VERSION#v}"
-	# renovate: datasource=github-releases depName=bats-core/bats-support versioning=loose
-	DEFAULT_BATS_SUPPORT_VERSION="v0.3.0"
 	BATS_SUPPORT_VERSION="${BATS_SUPPORT_VERSION:-$DEFAULT_BATS_SUPPORT_VERSION}"
-	# renovate: datasource=github-releases depName=bats-core/bats-assert versioning=loose
-	DEFAULT_BATS_ASSERT_VERSION="v2.2.4"
 	BATS_ASSERT_VERSION="${BATS_ASSERT_VERSION:-$DEFAULT_BATS_ASSERT_VERSION}"
-	# renovate: datasource=github-releases depName=bats-core/bats-file versioning=loose
-	DEFAULT_BATS_FILE_VERSION="v0.4.0"
 	BATS_FILE_VERSION="${BATS_FILE_VERSION:-$DEFAULT_BATS_FILE_VERSION}"
+	BATS_SRC="${BATS_INSTALL_SRC:-/tmp}"
+	BATS_PREFIX="${BATS_INSTALL_PREFIX:-/usr/local}"
+	BATS_LIB_PREFIX="${BATS_LIB_INSTALL_PREFIX:-/usr/lib}"
+	SUDO="sudo"
+	if [[ "${BATS_INSTALL_NO_SUDO:-}" == "1" ]]; then
+		SUDO=""
+	fi
 
-	# Install BATS core from source at specified version
+	# Install BATS core from source at the specified tag. The content pin is
+	# the tag's commit from versions.env (#1096): a moved tag fails here.
 	git clone --depth 1 --branch "v${BATS_VERSION}" \
-		https://github.com/bats-core/bats-core.git /tmp/bats-core
-	sudo /tmp/bats-core/install.sh /usr/local
+		https://github.com/bats-core/bats-core.git "${BATS_SRC}/bats-core"
+	supply_chain_verify_commit "${BATS_SRC}/bats-core" BATS_CORE_COMMIT \
+		"$BATS_VERSION" "$DEFAULT_BATS_CORE_VERSION"
+	$SUDO "${BATS_SRC}/bats-core/install.sh" "$BATS_PREFIX"
 
-	# Install bats helper libraries (pinned to tags)
+	# Install bats helper libraries (pinned to tags, verified by commit)
 	for lib in bats-support bats-assert bats-file; do
 		case "$lib" in
-		bats-support) version="$BATS_SUPPORT_VERSION" ;;
-		bats-assert) version="$BATS_ASSERT_VERSION" ;;
-		bats-file) version="$BATS_FILE_VERSION" ;;
-		*) version="" ;;
+		bats-support) version="$BATS_SUPPORT_VERSION" default_version="$DEFAULT_BATS_SUPPORT_VERSION" ;;
+		bats-assert) version="$BATS_ASSERT_VERSION" default_version="$DEFAULT_BATS_ASSERT_VERSION" ;;
+		bats-file) version="$BATS_FILE_VERSION" default_version="$DEFAULT_BATS_FILE_VERSION" ;;
+		*) version="" default_version="" ;;
 		esac
 
 		if [[ -z "$version" ]]; then
@@ -111,24 +121,22 @@ if [[ "$STEP" == "install-bats" ]]; then
 			exit 1
 		fi
 
-		git clone --branch "$version" "https://github.com/bats-core/${lib}.git" "/tmp/${lib}"
+		git clone --depth 1 --branch "$version" "https://github.com/bats-core/${lib}.git" "${BATS_SRC}/${lib}"
 
 		# Verify tag matches expected version
-		if ! git -C "/tmp/${lib}" describe --tags --exact-match "$version" >/dev/null 2>&1; then
+		if ! git -C "${BATS_SRC}/${lib}" describe --tags --exact-match "$version" >/dev/null 2>&1; then
 			echo "::error::Tag mismatch for ${lib}: expected $version"
 			exit 1
 		fi
 
-		# Verify tag signature if GPG key is available
-		if git -C "/tmp/${lib}" verify-tag "$version" 2>/dev/null; then
-			echo "::notice::Tag $version signature verified for ${lib}"
-		else
-			echo "::warning::Could not verify tag signature for $version (GPG key not available)"
-		fi
+		# The committed commit for the tag is the content pin; no tag-signature
+		# check (runner keyrings never carry the upstream keys, #1096).
+		supply_chain_verify_commit "${BATS_SRC}/${lib}" \
+			"$(supply_chain_var_suffix "$lib")_COMMIT" "$version" "$default_version"
 
-		sudo mkdir -p "/usr/lib/${lib}/src"
-		sudo cp -r "/tmp/${lib}/src/"* "/usr/lib/${lib}/src/"
-		sudo cp "/tmp/${lib}/load.bash" "/usr/lib/${lib}/"
+		$SUDO mkdir -p "${BATS_LIB_PREFIX}/${lib}/src"
+		$SUDO cp -r "${BATS_SRC}/${lib}/src/"* "${BATS_LIB_PREFIX}/${lib}/src/"
+		$SUDO cp "${BATS_SRC}/${lib}/load.bash" "${BATS_LIB_PREFIX}/${lib}/"
 	done
 
 	# Verify installation
@@ -150,15 +158,19 @@ if [[ "$STEP" == "install-kcov" ]]; then
 		zlib1g-dev \
 		cmake
 
-	# Install kcov from source with integrity verification
-	# KCOV_VERSION can be overridden via environment variable
-	# renovate: datasource=github-releases depName=SimonKagstrom/kcov versioning=loose
-	DEFAULT_KCOV_VERSION="v43"
+	# Install kcov from source. The content pin is the tag's commit from
+	# scripts/ci/versions.env (#1096); the release publishes no assets.
+	# shellcheck source=../lib/supply_chain.sh
+	source "$SCRIPT_DIR/../lib/supply_chain.sh"
+	# shellcheck source=../versions.env
+	source "$SCRIPT_DIR/../versions.env"
 	KCOV_VERSION="${KCOV_VERSION:-$DEFAULT_KCOV_VERSION}"
 
-	# Clone repo (need full history for tag verification)
-	git clone --branch "$KCOV_VERSION" \
+	git clone --depth 1 --branch "$KCOV_VERSION" \
 		https://github.com/SimonKagstrom/kcov.git /tmp/kcov-src
+	# The committed commit for the tag is the content pin; no tag-signature
+	# check (runner keyrings never carry the upstream keys).
+	supply_chain_verify_commit /tmp/kcov-src KCOV_COMMIT "$KCOV_VERSION" "$DEFAULT_KCOV_VERSION"
 	cd /tmp/kcov-src
 
 	# Verify we're on the expected tag
@@ -166,13 +178,6 @@ if [[ "$STEP" == "install-kcov" ]]; then
 	if [[ "$CURRENT_TAG" != "$KCOV_VERSION" ]]; then
 		echo "::error::Tag mismatch: expected $KCOV_VERSION, got $CURRENT_TAG"
 		exit 1
-	fi
-
-	# Verify tag signature if GPG key is available
-	if git verify-tag "$KCOV_VERSION" 2>/dev/null; then
-		echo "::notice::Tag $KCOV_VERSION signature verified"
-	else
-		echo "::warning::Could not verify tag signature for $KCOV_VERSION (GPG key not available)"
 	fi
 
 	# Build and install (mkdir -p for idempotency)
