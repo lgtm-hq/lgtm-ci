@@ -1538,6 +1538,83 @@ that is not there (#935). Every `gh release` step in a publisher workflow or
 composite is held to that rule by
 `tests/bats/contract/test_gh_release_repo_context.bats`.
 
+## Supplier tool pins and digests
+
+Every tool that a script under `scripts/ci` installs (osv-scanner, syft,
+cargo-nextest, cargo-llvm-cov, cross, cargo-binstall, bats-core and its helper
+libraries, kcov, the Claude Code / Codex / Cursor review CLIs, lintro) is
+pinned in exactly one place, `scripts/ci/versions.env`, and every direct
+download or clone is verified against a value committed next to that pin
+(#1096). Block-mode egress constrains where bytes come from; the committed
+digest decides what they are.
+
+<!-- markdownlint-disable MD013 MD060 -- wide pin reference table -->
+
+| Tool                             | Pin                                   | Content check at install time                                     |
+| -------------------------------- | ------------------------------------- | ----------------------------------------------------------------- |
+| osv-scanner, syft, cargo-nextest, cargo-llvm-cov, cross, cargo-binstall | `DEFAULT_<TOOL>_VERSION` | release asset sha256 equals `DEFAULT_<TOOL>_SHA256_<PLATFORM>`     |
+| bats-core, bats-support, bats-assert, bats-file, kcov | `DEFAULT_<TOOL>_VERSION` | clone `HEAD` equals `DEFAULT_<TOOL>_COMMIT`                       |
+| Claude Code, Codex               | `DEFAULT_<TOOL>_VERSION`              | `npm ci` from `scripts/ci/ai-review-cli/<cli>/package-lock.json` (integrity-pinned) |
+| Cursor agent                     | `DEFAULT_CURSOR_AGENT_VERSION`        | tarball sha256 equals `DEFAULT_CURSOR_AGENT_SHA256_<ARCH>`        |
+| lintro                           | `DEFAULT_LINTRO_VERSION`              | PyPI version pin; registry-side hashes (allowlisted, see below)    |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Verification is implemented once, in `scripts/ci/lib/supply_chain.sh`, and
+fails closed:
+
+- A digest or commit **mismatch** always fails the job. It is never retried
+  and never downgraded.
+- A **missing** committed digest, a missing verification tool (`sha256sum`,
+  `git`), or a version override that was not paired with the matching
+  `<TOOL>_SHA256_<PLATFORM>` / `<TOOL>_COMMIT` env var is also an error,
+  unless the caller sets `LGTM_CI_ALLOW_UNVERIFIED=1`. With that escape set
+  the gap is reported as a `::warning` and the install continues unverified.
+  lgtm-ci's own workflows never set it; it exists for callers that
+  deliberately pin a version lgtm-ci has no digest for and accept the risk.
+- Version-override inputs (`osv-version` on
+  `reusable-vuln-suppression-check`, `bats-version` on `reusable-test-shell`,
+  `CARGO_NEXTEST_VERSION` / `CARGO_LLVM_COV_VERSION` through a caller
+  `setup-script`) therefore need the matching digest exported by the caller's
+  own script, or the escape hatch.
+
+Upstream signatures are checked when a pin is created or refreshed, not on
+every run: `scripts/ci/maintenance/refresh-tool-digests.sh --check` downloads
+every pinned asset, verifies osv-scanner's SLSA provenance with
+`slsa-verifier` and syft's checksum manifest with `cosign`, cross-checks the
+nextest `.sha256` files, resolves every clone tag to its commit, and compares
+all of it with `versions.env` (`--write` rewrites the values). Both verifiers
+are hard prerequisites of that script; the same `LGTM_CI_ALLOW_UNVERIFIED=1`
+escape downgrades a missing verifier, never a failed verification. The old
+install-time `cosign` and `git verify-tag` paths that logged a warning and
+continued are gone.
+
+Renovate reads `versions.env` through one regex manager. A version line bumps
+the version; each digest line is its own dependency on the
+`github-release-attachments` (asset sha256) or `github-tags` (tag commit)
+datasource, carrying the release tag as a trailing comment so Renovate can map
+the asset into the next release. The version line and its digest lines share a
+branch, so one PR carries both. A digest-only update means an upstream asset
+or tag was replaced in place; `renovate.json` never automerges those.
+`tests/bats/unit/renovate/test_tool_pins.bats` proves every line is
+regex-visible, every digest-line tag matches its version, the npm lockfiles
+equal `versions.env`, and every YAML copy that cannot read a file (`uv`, `bun`,
+`grype`) equals its annotated source.
+
+`tests/bats/unit/renovate/test_installer_verification.bats` enumerates every
+installer-shaped command under `scripts/ci` and requires each file to call
+`supply_chain_verify_sha256` / `supply_chain_verify_commit` or to appear in
+`scripts/ci/maintenance/unverified-installers.allowlist` with a reason. The
+test pins the exact set of paths the allowlist may contain, so the list can
+only shrink; a new installer fails the test by default.
+
+Catalog note (#1079): until the catalog lands, treat every reusable listed in
+the table above as "installs `<tool> <version>`, digest-verified". Rows for
+tools delegated to a SHA-pinned action (`uv`, `bun`, `grype`) should read
+"version-pinned, verified inside the action", and anything in the allowlist
+should read "version-pinned, not digest-verified" rather than imply parity
+with the SHA-pinned `uses:` lines.
+
 ## Action pinning policy
 
 Org repos must pin GitHub Actions to **commit SHAs only** and add a trailing
