@@ -7,7 +7,6 @@ actions/generate-coverage-badge.sh
 actions/generate-lintro-comment.sh
 actions/generate-sbom.sh
 actions/run-command.sh
-actions/run-pytest.sh
 actions/run-tests.sh
 actions/run-validate-script.sh
 actions/setup-env.sh

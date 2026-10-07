@@ -38,7 +38,10 @@ python-install)
 	;;
 
 python-version)
-	version=$(uv run python --version | awk '{print $2}')
+	# `uv run` locks and syncs the project first, which on a cold cache
+	# re-resolves a stale lock (the #1021 failure) before any install step.
+	# Ask uv for the interpreter instead and query it directly.
+	version=$("$(uv python find)" --version | awk '{print $2}')
 	echo "version=$version" >>"$GITHUB_OUTPUT"
 	echo "Python version: $version"
 	;;

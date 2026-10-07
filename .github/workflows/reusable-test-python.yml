@@ -169,10 +169,10 @@ on:
       GIT_DEPS_TOKEN:
         description: >-
           Optional token for private git dependencies (#1021). When set, a
-          host-scoped `url.<https://user:token@host/>.insteadOf` rewrite is
-          configured for `git-deps-host` immediately before `uv sync --frozen`
-          and removed right after. Pass it explicitly; this workflow never
-          uses `secrets: inherit`.
+          host-scoped git `url.<...>.insteadOf` rewrite embedding the token
+          for `git-deps-host` is configured immediately before
+          `uv sync --frozen` and removed right after. Pass it explicitly; this
+          workflow never uses `secrets: inherit`.
         required: false
 
     outputs:

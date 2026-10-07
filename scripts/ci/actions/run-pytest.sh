@@ -33,7 +33,7 @@ setup)
 	log_info "Checking pytest installation..."
 
 	# Check for both pytest and pytest-json-report
-	if ! uv run python -c "import pytest; import pytest_jsonreport" 2>/dev/null; then
+	if ! uv run --frozen python -c "import pytest; import pytest_jsonreport" 2>/dev/null; then
 		log_info "Installing pytest and pytest-json-report..."
 		uv pip install pytest pytest-json-report
 	fi
@@ -41,7 +41,7 @@ setup)
 	# Install coverage plugin if needed
 	: "${COVERAGE:=false}"
 	if [[ "$COVERAGE" == "true" ]]; then
-		if ! uv run python -c "import pytest_cov" 2>/dev/null; then
+		if ! uv run --frozen python -c "import pytest_cov" 2>/dev/null; then
 			log_info "Installing pytest-cov..."
 			uv pip install pytest-cov
 		fi
@@ -108,7 +108,7 @@ run)
 	log_info "Running pytest with args: ${PYTEST_ARGS[*]}"
 
 	exit_code=0
-	uv run pytest "${PYTEST_ARGS[@]}" || exit_code=$?
+	uv run --frozen pytest "${PYTEST_ARGS[@]}" || exit_code=$?
 
 	# Set outputs
 	set_github_output "exit-code" "$exit_code"

@@ -89,6 +89,25 @@ _run_deps() {
 	refute_line --partial "sync"
 }
 
+@test "setup-python python-version: queries the interpreter without uv run" {
+	# `uv python find` prints a path; the script runs that path with
+	# --version. Point it at a tiny fake interpreter.
+	local fake="${BATS_TEST_TMPDIR}/fakepython"
+	printf '#!/usr/bin/env bash\necho "Python 3.12.9"\n' >"$fake"
+	chmod +x "$fake"
+	mock_command_record uv "$fake"
+	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
+	: >"$GITHUB_OUTPUT"
+
+	run bash -c "cd '$WORK_DIR' && STEP=python-version GITHUB_OUTPUT='$GITHUB_OUTPUT' bash '$SCRIPT'"
+	assert_success
+	assert_output --partial "Python version: 3.12.9"
+	run cat "$GITHUB_OUTPUT"
+	assert_output "version=3.12.9"
+	run _uv_calls
+	assert_output "python find"
+}
+
 @test "setup-python deps: no dependency file skips install" {
 	_run_deps
 	assert_success

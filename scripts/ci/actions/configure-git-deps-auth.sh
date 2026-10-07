@@ -55,7 +55,7 @@ configure)
 	fi
 	# A token containing URL delimiters would change which host the rewrite
 	# targets; refuse rather than build a URL from it.
-	if [[ "$GIT_DEPS_TOKEN" == *[@/:[:space:]]* ]]; then
+	if [[ "$GIT_DEPS_TOKEN" == *[@/:?#\[\][:space:]]* ]]; then
 		echo "::error title=GIT_DEPS_TOKEN::token contains URL delimiters or whitespace"
 		exit 1
 	fi

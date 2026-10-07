@@ -33,6 +33,20 @@ _step_block() {
 	assert_output ""
 }
 
+@test "uv-sync-frozen: project-scoped uv run calls in the Python test path are --frozen" {
+	# A plain `uv run` re-locks and re-syncs the project on every call, which
+	# would reintroduce the cold-cache fetch right after the frozen install.
+	run bash -c "
+		grep -nE '^[[:space:]]*(if ! )?uv run' \
+			'${PROJECT_ROOT}/scripts/ci/actions/run-pytest.sh' \
+			'${PROJECT_ROOT}/scripts/ci/actions/setup-python.sh' \
+			| grep -v 'uv run --frozen' || true
+	"
+	assert_output ""
+	run grep -c 'uv run --frozen' "${PROJECT_ROOT}/scripts/ci/actions/run-pytest.sh"
+	assert_output "3"
+}
+
 @test "uv-sync-frozen: setup-python.sh deps step uses --frozen in both branches" {
 	# Executable invocations only (no comments, no echo text): exactly the
 	# EXTRAS branch and the plain branch.

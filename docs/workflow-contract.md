@@ -456,6 +456,16 @@ Consequences for callers:
   secret for this purpose and no generic pre-sync hook; a caller forwards the
   token explicitly, scoped to the repositories the dependency lives in.
 
+The workflow selects optional dependencies through `extras`, which maps to
+`uv sync --extra`, so a private git dependency the job must install has to
+live in a `[project.optional-dependencies]` extra (not a
+`[dependency-groups]` group, which `extras` cannot select):
+
+```toml
+[project.optional-dependencies]
+engine = ["trading @ git+https://github.com/acme/trading@<sha>"]
+```
+
 ```yaml
 jobs:
   test:
@@ -465,11 +475,16 @@ jobs:
       contents: read
       pull-requests: write
     with:
-      extras: "engine" # the group that pulls the private git dependency
+      extras: "engine" # the extra that pulls the private git dependency
       git-deps-host: github.com
     secrets:
       GIT_DEPS_TOKEN: ${{ secrets.ENGINE_REPO_TOKEN }}
 ```
+
+The same frozen discipline applies to every `uv` invocation after the
+install: `run-pytest.sh` uses `uv run --frozen`, because a plain `uv run`
+re-locks and re-syncs the project on every call and would reintroduce the
+cold-cache fetch the install step just avoided.
 
 ## Permissions by mode
 
