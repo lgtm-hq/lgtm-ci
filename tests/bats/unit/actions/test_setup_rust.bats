@@ -33,6 +33,14 @@ create_binstall_curl_mock() {
 	chmod +x "$archive_dir/cargo-binstall"
 	local archive_file="${BATS_TEST_TMPDIR}/cargo-binstall.tgz"
 	tar -czf "$archive_file" -C "$archive_dir" cargo-binstall
+	# The committed digest describes the real release; export the fake
+	# archive's digest the way a caller would override it (#1096).
+	if command -v sha256sum >/dev/null 2>&1; then
+		CARGO_BINSTALL_SHA256_X86_64_UNKNOWN_LINUX_MUSL="$(sha256sum "$archive_file" | awk '{print $1}')"
+	else
+		CARGO_BINSTALL_SHA256_X86_64_UNKNOWN_LINUX_MUSL="$(shasum -a 256 "$archive_file" | awk '{print $1}')"
+	fi
+	export CARGO_BINSTALL_SHA256_X86_64_UNKNOWN_LINUX_MUSL
 
 	cat >"${mock_bin}/curl" <<EOF
 #!/usr/bin/env bash
@@ -76,20 +84,44 @@ EOF
 	"
 	assert_success
 	assert_output --partial "Installing cargo-binstall"
+	assert_output --partial "sha256 verified against committed CARGO_BINSTALL_SHA256_X86_64_UNKNOWN_LINUX_MUSL"
 	assert_output --partial "installed to"
 
 	# Binary installed to CARGO_HOME/bin
 	[[ -x "$CARGO_HOME/bin/cargo-binstall" ]]
 
-	# Requested URL is the release pinned to the version literal in the script
+	# Requested URL is the release pinned in scripts/ci/versions.env
 	local pinned_version
-	pinned_version=$(grep -oE 'CARGO_BINSTALL_VERSION="[0-9.]+"' "$SCRIPT" | grep -oE '[0-9.]+')
+	pinned_version=$(sed -n 's/^DEFAULT_CARGO_BINSTALL_VERSION="\([^"]*\)".*/\1/p' "${PROJECT_ROOT}/scripts/ci/versions.env")
 	[[ -n "$pinned_version" ]]
 
 	run cat "$BATS_TEST_TMPDIR/mock_calls_curl"
 	assert_output --partial "releases/download/v${pinned_version}/cargo-binstall-x86_64-unknown-linux-musl.tgz"
 	refute_output --partial "/main/"
 	refute_output --partial "install-from-binstall-release.sh"
+}
+
+@test "setup-rust: binstall step fails on a wrong committed digest" {
+	create_binstall_curl_mock
+	cat >"${MOCK_BIN}/uname" <<'EOF'
+#!/usr/bin/env bash
+case "$1" in
+    -m) echo "x86_64";;
+    *) echo "Linux";;
+esac
+EOF
+	chmod +x "${MOCK_BIN}/uname"
+
+	run bash -c "
+		export PATH='${MOCK_BIN}:/usr/bin:/bin'
+		export STEP=binstall
+		export CARGO_HOME='$CARGO_HOME'
+		export CARGO_BINSTALL_SHA256_X86_64_UNKNOWN_LINUX_MUSL=0000000000000000000000000000000000000000000000000000000000000000
+		bash '$SCRIPT' 2>&1
+	"
+	assert_failure
+	assert_output --partial "::error title=digest mismatch::"
+	[[ ! -e "$CARGO_HOME/bin/cargo-binstall" ]]
 }
 
 @test "setup-rust: binstall step skips install when cargo-binstall present" {
@@ -150,6 +182,12 @@ EOF
 	chmod +x "$archive_dir/cargo-binstall.exe"
 	local archive_file="${BATS_TEST_TMPDIR}/cargo-binstall.zip"
 	(cd "$archive_dir" && zip -q "$archive_file" cargo-binstall.exe)
+	local digest
+	if command -v sha256sum >/dev/null 2>&1; then
+		digest="$(sha256sum "$archive_file" | awk '{print $1}')"
+	else
+		digest="$(shasum -a 256 "$archive_file" | awk '{print $1}')"
+	fi
 
 	cat >"${mock_bin}/curl" <<EOF
 #!/usr/bin/env bash
@@ -182,6 +220,7 @@ EOF
 		export PATH='${mock_bin}:/usr/bin:/bin'
 		export STEP=binstall
 		export CARGO_HOME='$CARGO_HOME'
+		export CARGO_BINSTALL_SHA256_X86_64_PC_WINDOWS_MSVC='${digest}'
 		bash '$SCRIPT' 2>&1
 	"
 	assert_success
@@ -196,10 +235,12 @@ EOF
 	assert_output --partial "cargo-binstall-x86_64-pc-windows-msvc.zip"
 }
 
-@test "setup-rust: pinned version carries a renovate comment" {
-	run bash -c "grep -B1 'CARGO_BINSTALL_VERSION=' '$SCRIPT' | head -2"
+@test "setup-rust: pinned version lives in versions.env with a renovate comment" {
+	run grep -B1 '^DEFAULT_CARGO_BINSTALL_VERSION=' "${PROJECT_ROOT}/scripts/ci/versions.env"
 	assert_success
 	assert_output --partial "renovate: datasource=github-releases depName=cargo-bins/cargo-binstall"
+	run grep -E 'CARGO_BINSTALL_VERSION="[0-9]' "$SCRIPT"
+	assert_failure
 }
 
 @test "setup-rust: does not pipe remote content to a shell" {

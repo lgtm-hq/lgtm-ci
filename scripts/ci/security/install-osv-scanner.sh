@@ -6,8 +6,17 @@
 # Usage:
 #   install-osv-scanner.sh [version]
 #
-# Resolves version as: $1 > $OSV_VERSION env var > DEFAULT_OSV_VERSION.
+# Resolves version as: $1 > $OSV_VERSION env var > DEFAULT_OSV_SCANNER_VERSION
+# (scripts/ci/versions.env).
 # Resolves install dir as: $INSTALL_DIR env var > /usr/local/bin > ~/.local/bin.
+#
+# Verification (#1096): the downloaded binary must match the sha256 committed
+# in scripts/ci/versions.env (DEFAULT_OSV_SCANNER_SHA256_<PLATFORM>). The
+# upstream SHA256SUMS and its Sigstore signature are checked at pin time by
+# scripts/ci/maintenance/refresh-tool-digests.sh, not here, so nothing fetched
+# from the release decides whether the binary is installed. Overriding the
+# version requires the matching OSV_SCANNER_SHA256_<PLATFORM> env var (or
+# LGTM_CI_ALLOW_UNVERIFIED=1, see scripts/ci/lib/supply_chain.sh).
 
 set -euo pipefail
 
@@ -15,9 +24,11 @@ if [[ "${1:-}" == "--help" || "${1:-}" == "-h" ]]; then
 	cat <<'EOF'
 Usage: install-osv-scanner.sh [version]
 
-Download and verify the osv-scanner release binary.
+Download the osv-scanner release binary and verify it against the sha256
+committed in scripts/ci/versions.env.
 
-Version: $1 > $OSV_VERSION > annotated DEFAULT_OSV_VERSION
+Version: $1 > $OSV_VERSION > DEFAULT_OSV_SCANNER_VERSION (versions.env)
+Digest:  $OSV_SCANNER_SHA256_<PLATFORM> > DEFAULT_OSV_SCANNER_SHA256_<PLATFORM>
 Install dir: $INSTALL_DIR > /usr/local/bin > ~/.local/bin
 EOF
 	exit 0
@@ -30,10 +41,12 @@ LIB_DIR="$SCRIPT_DIR/../lib"
 source "$LIB_DIR/fs.sh"
 # shellcheck source=../lib/network/download.sh
 source "$LIB_DIR/network/download.sh"
+# shellcheck source=../lib/supply_chain.sh
+source "$LIB_DIR/supply_chain.sh"
+# shellcheck source=../versions.env
+source "$SCRIPT_DIR/../versions.env"
 
-# renovate: datasource=github-releases depName=google/osv-scanner
-DEFAULT_OSV_VERSION="2.3.5"
-OSV_VERSION="${1:-${OSV_VERSION:-$DEFAULT_OSV_VERSION}}"
+OSV_VERSION="${1:-${OSV_VERSION:-$DEFAULT_OSV_SCANNER_VERSION}}"
 
 OS=$(uname -s)
 if [[ "$OS" != "Linux" ]]; then
@@ -53,7 +66,6 @@ esac
 
 BASE_URL="https://github.com/google/osv-scanner/releases/download/v${OSV_VERSION}"
 BINARY_URL="${BASE_URL}/osv-scanner_${PLATFORM}"
-CHECKSUMS_URL="${BASE_URL}/osv-scanner_SHA256SUMS"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 if [[ ! -w "$INSTALL_DIR" ]]; then
 	INSTALL_DIR="${HOME}/.local/bin"
@@ -76,40 +88,10 @@ log_info "Installing osv-scanner v${OSV_VERSION}..."
 _lgtm_ci_build_curl_args 300 || exit 1
 
 curl "${_LGTM_CI_CURL_ARGS[@]}" "$BINARY_URL" -o "${WORKDIR}/osv-scanner"
-curl "${_LGTM_CI_CURL_ARGS[@]}" "$CHECKSUMS_URL" -o "${WORKDIR}/SHA256SUMS"
 
-CHECKSUMS_SIG_URL="${BASE_URL}/osv-scanner_SHA256SUMS.sig"
-CHECKSUMS_CERT_URL="${BASE_URL}/osv-scanner_SHA256SUMS.pem"
-if curl "${_LGTM_CI_CURL_ARGS[@]}" "$CHECKSUMS_SIG_URL" -o "${WORKDIR}/SHA256SUMS.sig" 2>/dev/null &&
-	curl "${_LGTM_CI_CURL_ARGS[@]}" "$CHECKSUMS_CERT_URL" -o "${WORKDIR}/SHA256SUMS.pem" 2>/dev/null; then
-	if command -v cosign >/dev/null 2>&1; then
-		log_info "Verifying SHA256SUMS sigstore signature..."
-		cosign verify-blob \
-			--signature "${WORKDIR}/SHA256SUMS.sig" \
-			--certificate "${WORKDIR}/SHA256SUMS.pem" \
-			--certificate-identity-regexp='https://github\.com/google/osv-scanner/.*' \
-			--certificate-oidc-issuer='https://token.actions.githubusercontent.com' \
-			"${WORKDIR}/SHA256SUMS"
-		log_success "SHA256SUMS signature verified"
-	else
-		log_warn "cosign not found; skipping SHA256SUMS signature verification"
-	fi
-else
-	log_info "Release does not publish SHA256SUMS sigstore assets; verifying binary checksum only"
-fi
-
-EXPECTED=$(
-	awk -v fn="osv-scanner_${PLATFORM}" '$2 == fn { print $1; exit }' "${WORKDIR}/SHA256SUMS"
-)
-if [[ -z "$EXPECTED" ]]; then
-	log_error "No checksum entry for osv-scanner_${PLATFORM} in SHA256SUMS"
-	exit 1
-fi
-
-printf '%s  osv-scanner\n' "$EXPECTED" | (
-	cd "${WORKDIR}" && sha256sum -c -
-)
-log_success "SHA256 verified: ${EXPECTED}"
+supply_chain_verify_sha256 "${WORKDIR}/osv-scanner" \
+	"OSV_SCANNER_SHA256_$(supply_chain_var_suffix "$PLATFORM")" \
+	"$OSV_VERSION" "$DEFAULT_OSV_SCANNER_VERSION"
 
 chmod +x "${WORKDIR}/osv-scanner"
 mv "${WORKDIR}/osv-scanner" "${INSTALL_DIR}/osv-scanner"

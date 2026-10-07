@@ -1,0 +1,9 @@
+{
+  "name": "lgtm-ci-ai-review-cli-claude",
+  "version": "0.0.0",
+  "private": true,
+  "description": "Integrity-pinned install manifest for the Claude Code CLI used by reusable-ai-review.yml (#1096). Keep the version equal to DEFAULT_CLAUDE_CODE_VERSION in scripts/ci/versions.env.",
+  "dependencies": {
+    "@anthropic-ai/claude-code": "2.1.232"
+  }
+}

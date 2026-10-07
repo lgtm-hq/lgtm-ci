@@ -25,13 +25,19 @@
 # Fail-closed contract:
 #   - Transport failures (5xx, connection reset, curl-detected truncation) are
 #     retried with exponential backoff by download_with_retries.
+#   - The archive must match the sha256 committed in scripts/ci/versions.env
+#     (DEFAULT_SYFT_SHA256_<OS>_<ARCH>, #1096). The upstream checksums.txt and
+#     its Sigstore bundle are verified at pin time by
+#     scripts/ci/maintenance/refresh-tool-digests.sh, not fetched here.
 #   - A checksum mismatch on a fully downloaded artifact fails IMMEDIATELY with
 #     no retry. A truncation that curl cannot detect is indistinguishable from
 #     tampering, so it is treated as tampering and fails closed.
 #
 # Environment variables:
 #   RUNNER_TOOL_CACHE - required; set by the GitHub Actions runner
-#   SYFT_VERSION      - optional; overrides the pinned default
+#   SYFT_VERSION      - optional; overrides the pinned default (requires the
+#                       matching SYFT_SHA256_<OS>_<ARCH>, or
+#                       LGTM_CI_ALLOW_UNVERIFIED=1)
 #   SYFT_DOWNLOAD_BASE_URL - optional; override for tests
 #   SYFT_DOWNLOAD_ATTEMPTS - optional; download attempts (default 3)
 
@@ -45,18 +51,16 @@ source "$SCRIPT_DIR/../lib/actions.sh"
 source "$SCRIPT_DIR/../lib/network.sh"
 # shellcheck source=../lib/platform.sh
 source "$SCRIPT_DIR/../lib/platform.sh"
-
-# Keep this in lockstep with the Syft version anchore/sbom-action pins. When it
-# drifts the cache simply misses and sbom-action downloads as before, so drift
-# degrades the fix rather than breaking the job.
-# renovate: datasource=github-releases depName=anchore/syft
-SYFT_PINNED_VERSION="1.54.0"
+# shellcheck source=../lib/supply_chain.sh
+source "$SCRIPT_DIR/../lib/supply_chain.sh"
+# shellcheck source=../versions.env
+source "$SCRIPT_DIR/../versions.env"
 
 SYFT_DOWNLOAD_BASE_URL="${SYFT_DOWNLOAD_BASE_URL:-https://github.com/anchore/syft/releases/download}"
 SYFT_DOWNLOAD_ATTEMPTS="${SYFT_DOWNLOAD_ATTEMPTS:-3}"
 
 # Normalise to a bare semver (no leading v); tool-cache stores semver.clean()
-version="${SYFT_VERSION:-$SYFT_PINNED_VERSION}"
+version="${SYFT_VERSION:-$DEFAULT_SYFT_VERSION}"
 version="${version#v}"
 
 if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]; then
@@ -109,7 +113,6 @@ fi
 
 archive_name="syft_${version}_${os}_${goarch}.tar.gz"
 archive_url="${SYFT_DOWNLOAD_BASE_URL}/v${version}/${archive_name}"
-checksums_url="${SYFT_DOWNLOAD_BASE_URL}/v${version}/syft_${version}_checksums.txt"
 
 workdir="$(mktemp -d "${TMPDIR:-/tmp}/lgtm-syft.XXXXXXXXXX")"
 trap 'rm -rf "$workdir"' EXIT
@@ -121,29 +124,11 @@ if ! download_with_retries "$archive_url" "${workdir}/${archive_name}" \
 	exit 1
 fi
 
-log_info "Downloading ${checksums_url}"
-if ! download_with_retries "$checksums_url" "${workdir}/checksums.txt" \
-	"$SYFT_DOWNLOAD_ATTEMPTS"; then
-	echo "::error::Failed to download Syft checksums after ${SYFT_DOWNLOAD_ATTEMPTS} attempts" >&2
-	exit 1
-fi
-
-expected="$(awk -v name="$archive_name" '$2 == name || $2 == "*" name {print $1; exit}' \
-	"${workdir}/checksums.txt")"
-
-if [[ -z "$expected" ]]; then
-	# No checksum to verify against is a fail-closed condition, not a reason to
-	# install an unverified binary.
-	echo "::error::No checksum for ${archive_name} in ${checksums_url}" >&2
-	exit 1
-fi
-
 # Deliberately NOT retried: a mismatch here means the bytes we hold are not the
 # release artifact. Retrying would turn a tamper signal into a flaky one.
-if ! verify_checksum "${workdir}/${archive_name}" "$expected" sha256; then
-	echo "::error::Syft checksum verification failed for ${archive_name}; refusing to install" >&2
-	exit 1
-fi
+supply_chain_verify_sha256 "${workdir}/${archive_name}" \
+	"SYFT_SHA256_$(supply_chain_var_suffix "${os}_${goarch}")" \
+	"$version" "$DEFAULT_SYFT_VERSION"
 
 log_info "Checksum verified for ${archive_name}"
 

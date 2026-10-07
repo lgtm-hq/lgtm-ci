@@ -6,8 +6,10 @@ on:
     inputs:
       bats-version:
         description: >-
-          BATS version to use. Empty uses the annotated default in
-          scripts/ci/actions/run-bats-tests.sh.
+          BATS version to use. Empty uses the pin in scripts/ci/versions.env,
+          whose committed tag commit the install verifies. A different version
+          has no committed commit, so it is refused unless the caller exports
+          the matching BATS_CORE_COMMIT (#1096).
         required: false
         type: string
         default: ""

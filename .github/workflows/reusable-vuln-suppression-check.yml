@@ -11,8 +11,11 @@ on:
         default: "Check Vulnerability Suppressions"
       osv-version:
         description: >-
-          osv-scanner release version to install. Empty uses the annotated
-          default in scripts/ci/security/install-osv-scanner.sh.
+          osv-scanner release version to install. Empty uses the pin in
+          scripts/ci/versions.env, whose committed sha256 the install verifies.
+          A different version has no committed digest, so it is refused unless
+          a caller-supplied install-script exports the matching
+          OSV_SCANNER_SHA256_<PLATFORM> (#1096).
         required: false
         type: string
         default: ""
