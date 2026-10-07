@@ -49,6 +49,19 @@ jobs:
       coverage-shards: 4
       upload-coverage: true
 
+  python-tests:
+    uses: ./.github/workflows/reusable-test-python.yml
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    with:
+      job-name: "🐍 Python Tests"
+      test-path: tests/python
+      extras: test
+      coverage: false
+      publish-test-summary: false
+
   file-breakdown:
     if: >-
       github.event_name == 'pull_request'
@@ -59,7 +72,7 @@ jobs:
       pull-requests: write
 
   notify-failure:
-    needs: [quality, shell-tests]
+    needs: [quality, shell-tests, python-tests]
     if: failure() && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:

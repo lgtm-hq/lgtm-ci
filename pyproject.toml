@@ -37,9 +37,23 @@ dev = [
   "bandit>=1.9.4",
   "mypy>=1.19.1",
 ]
+# pytest suite for the standalone scripts under scripts/ci (tests/python).
+# Separate from `dev` so CI installs only this; locally use
+# `uv sync --extra dev --extra test`.
+test = ["pytest>=8.4.0", "assertpy>=1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+addopts = "-ra"
 
 [tool.lintro]
 config_file = ".lintro-config.yaml"
+
+[tool.pylint.typecheck]
+# assertpy lives only in the `test` extra; the quality job lints inside the
+# pinned py-lintro container without syncing project extras, so pylint cannot
+# resolve the import there (E0401). pytest itself ships in the container.
+ignored-modules = ["assertpy"]
 
 [tool.lintro.pylint]
 # Ratchet for pylint's duplicate-code checker (R0801). The baseline is zero:
