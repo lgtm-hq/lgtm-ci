@@ -1799,8 +1799,9 @@ whole comment body with its formatter-failure placeholder (no vulnerability
 table), reports "FORMAT FAILED" / `status=failed`, and the audit job exits 1 until
 probe metadata appears (there is no opt-out input; the stderr diagnostic in the
 job log names the entries and next steps). When the scan failed, the
-scanner-error section is kept and the status line is marked unavailable. Entries without a plain-date `ignoreUntil` are listed
-and labelled as unclassified. Malformed probe entries also fail the formatter.
+scanner-error section is kept and the status line is marked unavailable.
+Entries without a plain-date `ignoreUntil` are listed and labelled as
+unclassified. Malformed probe entries also fail the formatter.
 
 ## Vulnerability suppression check (osv-scanner)
 
