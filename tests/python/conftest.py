@@ -41,8 +41,14 @@ def load_script_module(relative_path: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Register before executing: dataclasses resolve string annotations through
+    # sys.modules[cls.__module__] at class-creation time (Python 3.14+).
     sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
     return module
 
 
