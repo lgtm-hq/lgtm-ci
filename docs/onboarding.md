@@ -41,7 +41,7 @@ their own tooling from the `uses:` pin, #995); examples that contain `<sha>`
 placeholders must be filled in before use. The shipped pin ages; resolve the
 current release SHA (see
 [Resolve the release commit SHA](#4-resolve-the-release-commit-sha)) and
-update both pins together before committing.
+update every `uses:` pin before committing.
 
 ## 2. Prerequisites per capability
 
@@ -243,8 +243,8 @@ ref itself already points at the commit, so use
 `gh api repos/lgtm-hq/lgtm-ci/git/ref/tags/vX.Y.Z --jq '.object.sha'`
 directly. Use the commit SHA on every `uses:` line:
 
-_Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](workflow-contract.md#permissions-by-mode)._
+*Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](workflow-contract.md#permissions-by-mode).*
 
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 

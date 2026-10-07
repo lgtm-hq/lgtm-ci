@@ -240,7 +240,6 @@ jobs:
       packages: read
     with:
       runner-image: ubuntu-24.04
-      tooling-ref: <sha>
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see

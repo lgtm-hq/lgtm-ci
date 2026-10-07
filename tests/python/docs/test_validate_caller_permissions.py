@@ -9,6 +9,8 @@ marker, and the detect-changes derivation (#669).
 The ``load_script`` fixture comes from ``tests/python/conftest.py``.
 """
 
+# pytest injects fixtures by parameter name; the shadowing is the mechanism.
+# pylint: disable=redefined-outer-name
 from __future__ import annotations
 
 from collections.abc import Callable

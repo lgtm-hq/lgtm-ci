@@ -80,16 +80,18 @@ ACTION_REQUIREMENTS: dict[str, dict[str, str]] = {
 }
 
 FRAGMENT_MARKER = re.compile(r"permissions omitted for brevity", re.IGNORECASE)
-WORKFLOW_USES = re.compile(
-    r"^uses:\s*(?:\./|lgtm-hq/lgtm-ci/)\.github/workflows/(?P<name>[\w.-]+\.ya?ml)",
-)
+WORKFLOW_PREFIX = r"^uses:\s*[\"']?(?:\./|lgtm-hq/lgtm-ci/)\.github/workflows/"
+WORKFLOW_USES = re.compile(WORKFLOW_PREFIX + r"(?P<name>[\w.-]+\.ya?ml)")
 ACTION_USES = re.compile(
-    r"^-\s*uses:\s*(?:\./\.lgtm-ci-tooling/|lgtm-hq/lgtm-ci/|\$/)"
+    r"^(?:-\s*)?uses:\s*[\"']?(?:\./\.lgtm-ci-tooling/|lgtm-hq/lgtm-ci/|\$/)"
     r"\.github/actions/(?P<name>[\w-]+)",
 )
 KEY_LINE = re.compile(r"^(?P<key>[\w.-]+):(?P<value>.*)$")
-SCOPE_LINE = re.compile(r"^(?P<scope>[a-z-]+):\s*(?P<level>read|write|none)$")
-FENCE = re.compile(r"^\s*```(?P<lang>[\w+-]*)\s*$")
+SCOPE_LINE = re.compile(
+    r"^(?P<scope>[a-z-]+):\s*[\"']?(?P<level>read|write|none)[\"']?$",
+)
+FENCE = re.compile(r"^(?P<indent> *)(?P<fence>`{3,}|~{3,})(?P<info>.*)$")
+CLOSING_FENCE = re.compile(r"^ *(?P<fence>`{3,}|~{3,}) *$")
 TRAILING_COMMENT = re.compile(r"\s+#.*$")
 
 Permissions = dict[str, str]
@@ -125,6 +127,25 @@ class Snippet:
     lines: list[Line]
     complete: bool
     marked: bool
+
+
+@dataclass(frozen=True)
+class CallSite:
+    """One reusable-workflow or action call to check.
+
+    Attributes:
+        snippet: Source the call was found in.
+        line: The ``uses:`` line.
+        target: Name of the called workflow or action.
+        required: Scopes the target declares.
+        granted: Scopes the caller grants, or None when no block governs.
+    """
+
+    snippet: Snippet
+    line: Line
+    target: str
+    required: Permissions
+    granted: Permissions | None
 
 
 @dataclass
@@ -412,17 +433,25 @@ def workflow_union(
         return None
     lines = parse_lines(text=path.read_text(encoding="utf-8"))
     union: Permissions = {}
-    top = workflow_level_permissions(lines=lines)
+    try:
+        top = workflow_level_permissions(lines=lines)
+    except ValueError as exc:
+        raise ValueError(f"{WORKFLOWS_SUBDIR / name}: {exc}") from exc
     if top is not None:
         merge_permissions(target=union, source=top)
     for _job_id, start, end, body_indent in iter_jobs(lines=lines):
         body = [i for i in range(start, end) if lines[i].indent == body_indent]
         declared = next((i for i in body if is_permissions_line(lines[i])), None)
         if declared is not None:
-            merge_permissions(
-                target=union,
-                source=block_permissions(lines=lines, index=declared),
-            )
+            try:
+                declared_scopes = block_permissions(lines=lines, index=declared)
+            except ValueError as exc:
+                raise ValueError(f"{WORKFLOWS_SUBDIR / name}: {exc}") from exc
+            merge_permissions(target=union, source=declared_scopes)
+            # A job that declares its own block is the boundary GitHub
+            # validates a nested call against: the nested workflow's union must
+            # fit inside this block or the reusable itself fails at startup, so
+            # the caller only ever has to cover the declared block.
             continue
         nested = next(
             (
@@ -486,24 +515,18 @@ def format_scopes(
 
 
 def check_site(
-    snippet: Snippet,
-    line: Line,
-    target: str,
-    required: Permissions,
-    granted: Permissions | None,
+    site: CallSite,
     report: Report,
 ) -> None:
     """Compare one call site's grant against its requirement.
 
     Args:
-        snippet: Source being scanned.
-        line: The ``uses:`` line.
-        target: Name of the called workflow or action.
-        required: Scopes the target declares.
-        granted: Scopes the caller grants, or None when no block governs.
+        site: The call to check.
         report: Report to append to.
     """
-    where = f"{snippet.path}:{line.number}"
+    snippet, target = site.snippet, site.target
+    required, granted = site.required, site.granted
+    where = f"{snippet.path}:{site.line.number}"
     report.checked += 1
     if granted is None:
         if snippet.marked and not snippet.complete:
@@ -567,11 +590,13 @@ def scan_snippet(
                 body_indent=line.indent,
             )
             check_site(
-                snippet=snippet,
-                line=line,
-                target=name,
-                required=required,
-                granted=granted,
+                site=CallSite(
+                    snippet=snippet,
+                    line=line,
+                    target=name,
+                    required=required,
+                    granted=granted,
+                ),
                 report=report,
             )
             continue
@@ -582,7 +607,7 @@ def scan_snippet(
             (
                 i
                 for i in range(index - 1, -1, -1)
-                if lines[i].indent < line.indent and lines[i].text == "steps:"
+                if lines[i].indent <= line.indent and lines[i].text == "steps:"
             ),
             None,
         )
@@ -594,11 +619,13 @@ def scan_snippet(
             body_indent=snippet.lines[steps_index].indent,
         )
         check_site(
-            snippet=snippet,
-            line=line,
-            target=f"actions/{action.group('name')}",
-            required=ACTION_REQUIREMENTS[action.group("name")],
-            granted=granted,
+            site=CallSite(
+                snippet=snippet,
+                line=line,
+                target=f"actions/{action.group('name')}",
+                required=ACTION_REQUIREMENTS[action.group("name")],
+                granted=granted,
+            ),
             report=report,
         )
 
@@ -624,7 +651,9 @@ def preceded_by_marker(
     """Return whether the prose directly above a fence carries the marker.
 
     Up to four non-blank lines above the fence are inspected; markdownlint
-    directive comments are skipped so they do not hide the marker.
+    directive comments are skipped so they do not hide the marker, and the
+    scan stops at the previous fence so a marker never leaks onto the next
+    block.
 
     Args:
         raw_lines: All lines of the Markdown file.
@@ -637,12 +666,51 @@ def preceded_by_marker(
     for raw in reversed(raw_lines[:fence_index]):
         if not raw.strip() or raw.lstrip().startswith("<!--"):
             continue
+        if CLOSING_FENCE.match(raw) or FENCE.match(raw):
+            break
         if FRAGMENT_MARKER.search(raw):
             return True
         inspected += 1
         if inspected >= 4:
             break
     return False
+
+
+def closes_fence(
+    raw: str,
+    fence: str,
+) -> bool:
+    """Return whether a line closes a fence opened with ``fence``.
+
+    Args:
+        raw: Candidate line.
+        fence: The opening fence string (backticks or tildes).
+
+    Returns:
+        True for a fence of the same character at least as long as the opener.
+    """
+    match = CLOSING_FENCE.match(raw)
+    if match is None:
+        return False
+    closing = match.group("fence")
+    return closing[0] == fence[0] and len(closing) >= len(fence)
+
+
+def dedent_fence_line(
+    raw: str,
+    indent: int,
+) -> str:
+    """Strip the opening fence's Markdown indentation from a body line.
+
+    Args:
+        raw: Body line as written in the Markdown file.
+        indent: Indentation of the opening fence.
+
+    Returns:
+        The line with up to ``indent`` leading spaces removed.
+    """
+    leading = len(raw) - len(raw.lstrip(" "))
+    return raw[min(indent, leading) :]
 
 
 def markdown_snippets(
@@ -656,7 +724,8 @@ def markdown_snippets(
         text: File contents.
 
     Yields:
-        One snippet per ``yaml``/``yml`` fence.
+        One snippet per ``yaml``/``yml`` fence (backtick or tilde, any info
+        string, indentation of the opening fence removed from the body).
     """
     raw_lines = text.splitlines()
     index = 0
@@ -665,11 +734,16 @@ def markdown_snippets(
         if opening is None:
             index += 1
             continue
+        fence = opening.group("fence")
+        indent = len(opening.group("indent"))
+        info = opening.group("info").split()
+        lang = info[0] if info else ""
         end = index + 1
-        while end < len(raw_lines) and not raw_lines[end].lstrip().startswith("```"):
+        while end < len(raw_lines) and not closes_fence(raw_lines[end], fence):
             end += 1
-        if opening.group("lang") in ("yaml", "yml"):
-            body = "\n".join(raw_lines[index + 1 : end])
+        if lang in ("yaml", "yml"):
+            fenced = raw_lines[index + 1 : end]
+            body = "\n".join(dedent_fence_line(raw, indent) for raw in fenced)
             lines = parse_lines(text=body, first_line_number=index + 2)
             marked = preceded_by_marker(raw_lines=raw_lines, fence_index=index) or any(
                 FRAGMENT_MARKER.search(raw) for raw in raw_lines[index + 1 : end]
@@ -789,7 +863,11 @@ def main(
         print(f"ERROR: workflows directory not found: {workflows_dir}", file=sys.stderr)
         return 1
     if args.union:
-        union = workflow_union(name=args.union, workflows_dir=workflows_dir)
+        try:
+            union = workflow_union(name=args.union, workflows_dir=workflows_dir)
+        except ValueError as exc:
+            print(f"ERROR: unparseable permissions block ({exc})", file=sys.stderr)
+            return 1
         if union is None:
             print(f"ERROR: no such workflow: {args.union}", file=sys.stderr)
             return 1

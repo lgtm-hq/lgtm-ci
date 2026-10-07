@@ -771,17 +771,21 @@ The job is skipped only on the explicit skip paths: a draft PR with
 ### Matrix legs and check-run names
 
 The context a ruleset sees is `{caller_job_id} / {inner job name}`, and the
-inner name is the called job's `name:` rendered verbatim. Every work job in the
-reusables is named statically from `job-name`, so a matrix call
+inner name is the called job's `name:` rendered verbatim. GitHub appends the
+matrix values as a `(…)` suffix only when a matrix job's `name:` contains no
+`${{ }}` expression (or is absent). The test and build reusables name their
+work jobs `${{ inputs.job-name }}`, an expression, so a matrix call
 (`python-versions`, `node-versions`, `rust-toolchains`,
-`reusable-build-artifact.yml`'s `matrix`, Docker `platforms`) produces **one
-check run per leg under one shared name**, with no per-leg suffix:
-`python-versions: "3.12,3.13"` under caller job `compat` reports two check
-runs both named `compat / Python Compat` (observed on the external fixture,
-#1074; the same shape #623 recorded for `build / 🏗️ Build & Quality Checks`
-on turbo-themes#598). GitHub appends matrix values only to jobs that have no
-explicit `name:`, so the only way a leg value reaches the context is the caller
-putting it in `job-name` itself.
+`reusable-build-artifact.yml`'s `matrix`) produces **one check run per leg
+under one shared name**, with no per-leg suffix: `python-versions:
+"3.12,3.13"` under caller job `compat` reports two check runs both named
+`compat / Python Compat` (observed on the external fixture, #1074; the same
+shape #623 recorded for `build / 🏗️ Build & Quality Checks` on
+turbo-themes#598). The only way a leg value reaches such a context is the
+caller putting it in `job-name` itself. The Docker per-platform jobs in
+`reusable-docker-multiplatform.yml` use literal names (`Docker build per
+platform`, `Docker verify per platform`, `Docker health check per platform`),
+so their legs **do** carry the platform values as a suffix.
 
 When several check runs on the head commit share a required name, GitHub
 evaluates the most recently created one (see
@@ -805,22 +809,20 @@ the ruleset must require its prefixed path too (below:
 optional `passed-output` / `status-output` from the work job. Use `always()`
 on the caller job so the gate still runs when the upstream job fails.
 
-_Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](#permissions-by-mode)._
+*Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode).*
 
 ```yaml
 test:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
   with:
     job-name: Python Compatibility
-    tooling-ref: <sha>
 
 test-suite-coverage:
   needs: test
   if: always()
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@<sha>
   with:
-    tooling-ref: <sha>
     job-name: "🧪 Test Suite & Coverage"
     upstream-result: ${{ needs.test.result }}
     passed-output: ${{ needs.test.outputs.passed }}
@@ -1049,8 +1051,8 @@ for unsigned macOS binaries.
 contains `{package}-{version}-{target}.tar.gz` or `.zip` with the binary at the
 archive root (`cargo-binstall` compatible) plus a `SHA256SUMS` manifest.
 
-_Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](#permissions-by-mode)._
+*Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode).*
 
 ```yaml
 release:
@@ -1621,8 +1623,8 @@ issue #480). The Grype gate fails the job when findings meet or exceed that
 threshold. Callers that need the previous advisory-only posture must pass
 `fail-on-severity: ""` (or `none`):
 
-_Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](#permissions-by-mode)._
+*Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode).*
 
 ```yaml
 sbom:
@@ -2221,8 +2223,8 @@ legs keep a static inner `name: ${{ inputs.job-name }}`, so every leg reports
 under the **same** check-run name, `{caller_job_id} / {job-name}` (for example
 `build / 🏗️ Build & Quality Checks`, one check run per leg). There is no
 `({node-version})` or `(x86_64-apple-darwin, stable)` suffix: GitHub appends
-matrix values only to jobs without an explicit `name:` (#623). What a ruleset
-sees and how to require it is in
+matrix values only when a matrix job's `name:` carries no expression (#623).
+What a ruleset sees and how to require it is in
 [Matrix legs and check-run names](#matrix-legs-and-check-run-names). Plan org
 ruleset updates in lockstep with consumer migration.
 

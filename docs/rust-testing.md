@@ -43,8 +43,8 @@ Use `rust-toolchains` (comma-separated) for multi-toolchain compat checks
 (MSRV, stable, beta). Compat matrix runs require `coverage: false` and
 `publish-test-summary: false`. Use `rust-toolchain` for single-toolchain coverage and PR comments.
 
-_Fragment: permissions omitted for brevity, not copyable as-is. See
-[Permissions by mode](workflow-contract.md#permissions-by-mode)._
+*Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](workflow-contract.md#permissions-by-mode).*
 
 ```yaml
 rust-compat:
@@ -65,7 +65,6 @@ jobs:
   rust-test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     with:
-      tooling-ref: "<sha>"
       job-name: "Rust Tests"
       coverage: false
       egress-policy: block
@@ -87,7 +86,6 @@ jobs:
   rust-coverage:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     with:
-      tooling-ref: "<sha>"
       job-name: "Rust Coverage"
       coverage: true
       upload-pages-coverage-html: true
