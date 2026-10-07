@@ -79,8 +79,8 @@ def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
 # pytest injects the `workspace` fixture by parameter name; the shadowing is
 # the mechanism, not a mistake.
 def install_fixture(
-    workspace: Path,
-) -> Callable[[str, str], Path]:  # pylint: disable=redefined-outer-name
+    workspace: Path,  # pylint: disable=redefined-outer-name
+) -> Callable[[str, str], Path]:
     """Return a copier from ``tests/fixtures`` into the workspace.
 
     The returned callable takes the fixture path relative to
