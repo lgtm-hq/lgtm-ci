@@ -2218,7 +2218,7 @@ the raw values and cannot fold case.
 | ----------------- | ------- | ----- |
 | `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
 | `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
-| `lintro-version`  | `0.131.5` | Renovate-managed. Floor = 0.130.0 (py-lintro#2159). Default includes resume / INCOMPLETE work and persist-on-timeout support. |
+| `lintro-version`  | `""`    | Empty resolves `DEFAULT_LINTRO_VERSION` from `scripts/ci/versions.env` (Renovate-managed, #1096). Floor = 0.130.0 (py-lintro#2159). |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`). |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → `vars.LINTRO_AI_MAX_COST_USD`). |

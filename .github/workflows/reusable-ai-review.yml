@@ -61,11 +61,12 @@ on:
         type: string
         default: ""
       lintro-version:
-        description: "Pinned lintro PyPI version (Renovate-managed centrally)"
+        description: >-
+          Pinned lintro PyPI version. Empty uses DEFAULT_LINTRO_VERSION from
+          scripts/ci/versions.env (Renovate-managed centrally, #1096).
         required: false
         type: string
-        # renovate: datasource=pypi depName=lintro
-        default: "0.171.3"
+        default: ""
       python-version:
         description: "CPython version for the scratch venv that installs lintro"
         required: false

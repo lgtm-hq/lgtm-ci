@@ -22,19 +22,19 @@
     },
     {
       "customType": "regex",
-      "description": "Track pinned tool versions in shell scripts via renovate comments",
-      "managerFilePatterns": ["/^scripts/.*\\.sh$/"],
+      "description": "Supplier tool pins and digests: scripts/ci/versions.env is the single source for every tool version installed by scripts/ci (#1096). Version lines bump the version; digest lines (sha256 of a release asset via github-release-attachments, or a tag commit via github-tags) carry the release tag as a trailing comment and bump version+digest together. Same depName => same branch, so one PR carries both.",
+      "managerFilePatterns": ["/^scripts/ci/versions\\.env$/"],
       "matchStrings": [
-        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?:\\s+extractVersion=(?<extractVersion>\\S+))?(?:\\s+versioning=(?<versioning>\\S+))?\\s*\\n\\s*[A-Za-z_]+=\"?(?<currentValue>v?[0-9]+(?:\\.[0-9]+){0,2})\"?"
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?:\\s+extractVersion=(?<extractVersion>\\S+))?(?:\\s+versioning=(?<versioning>\\S+))?\\s*\\nDEFAULT_[A-Z0-9_]+_VERSION=\"(?<currentValue>v?[0-9]+(?:\\.[0-9]+){0,2})\"",
+        "# renovate: datasource=(?<datasource>[a-z-]+) depName=(?<depName>[^\\s]+)(?:\\s+extractVersion=(?<extractVersion>\\S+))?(?:\\s+versioning=(?<versioning>\\S+))?\\s*\\nDEFAULT_[A-Z0-9_]+_(?:SHA256|COMMIT)[A-Z0-9_]*=\"(?<currentDigest>[a-f0-9]{40}|[a-f0-9]{64})\" # (?<currentValue>\\S+)"
       ],
       "extractVersionTemplate": "{{#if extractVersion}}{{{extractVersion}}}{{/if}}",
       "versioningTemplate": "{{#if versioning}}{{{versioning}}}{{/if}}"
     },
     {
       "customType": "regex",
-      "description": "Track annotated YAML version pins (workflow/action defaults and with: values)",
+      "description": "Track annotated YAML version pins (action defaults and with: values that cannot read versions.env; every copy is asserted equal by tests/bats/unit/renovate/test_tool_pins.bats)",
       "managerFilePatterns": [
-        "/^\\.github/workflows/reusable-ai-review\\.yml$/",
         "/^\\.github/actions/setup-python/action\\.yml$/",
         "/^\\.github/actions/setup-node/action\\.yml$/",
         "/^\\.github/actions/run-vitest/action\\.yml$/",
@@ -118,6 +118,24 @@
       "description": "Group bun pins so the setup-node default and workflow setup-bun copies bump together",
       "groupName": "bun",
       "matchPackageNames": ["bun"],
+      "automerge": false
+    },
+    {
+      "description": "A digest-only change in versions.env means an upstream release asset or tag was replaced in place: a tamper signal, never automerged (#1096)",
+      "matchFileNames": ["scripts/ci/versions.env"],
+      "matchUpdateTypes": ["digest"],
+      "automerge": false
+    },
+    {
+      "description": "Group each AI review CLI's versions.env pin with its lockfile under scripts/ci/ai-review-cli so the two cannot drift (#1096)",
+      "groupName": "ai-review-cli claude-code",
+      "matchPackageNames": ["@anthropic-ai/claude-code"],
+      "automerge": false
+    },
+    {
+      "description": "Group each AI review CLI's versions.env pin with its lockfile under scripts/ci/ai-review-cli so the two cannot drift (#1096)",
+      "groupName": "ai-review-cli codex",
+      "matchPackageNames": ["@openai/codex"],
       "automerge": false
     }
   ]

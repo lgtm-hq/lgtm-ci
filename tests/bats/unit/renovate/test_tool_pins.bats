@@ -1,18 +1,43 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Prove #1062 supplier pins are regex-visible to renovate.json
+# Purpose: Prove #1062/#1096 supplier pins are regex-visible to renovate.json,
+#          that scripts/ci/versions.env is the single source for every tool
+#          version installed by scripts/ci, and that every remaining YAML copy
+#          equals its annotated source.
 
 load "../../../helpers/common"
 
 MATCHER="${PROJECT_ROOT}/scripts/ci/maintenance/match-renovate-pins.py"
 RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
+VERSIONS_ENV="${PROJECT_ROOT}/scripts/ci/versions.env"
 
-@test "renovate.json: generic script manager allows extractVersion and versioning" {
-	run jq -r '.customManagers[] | select(.description | test("shell scripts")) | .matchStrings[0]' \
+# Value of one DEFAULT_* assignment in versions.env.
+_pin() {
+	sed -n "s/^${1}=\"\([^\"]*\)\".*/\1/p" "$VERSIONS_ENV"
+}
+
+# =============================================================================
+# renovate.json shape
+# =============================================================================
+
+@test "renovate.json: versions.env manager captures version and digest lines" {
+	run jq -r '.customManagers[] | select(.description | test("Supplier tool pins")) | .managerFilePatterns[]' \
 		"$RENOVATE_JSON"
 	assert_success
-	assert_output --partial "extractVersion"
-	assert_output --partial "versioning"
+	assert_output '/^scripts/ci/versions\.env$/'
+	run jq -r '.customManagers[] | select(.description | test("Supplier tool pins")) | .matchStrings | length' \
+		"$RENOVATE_JSON"
+	assert_output "2"
+	run jq -r '.customManagers[] | select(.description | test("Supplier tool pins")) | .matchStrings[1]' \
+		"$RENOVATE_JSON"
+	assert_output --partial "currentDigest"
+	assert_output --partial "SHA256|COMMIT"
+}
+
+@test "renovate.json: no manager still scans scripts/*.sh for private annotations" {
+	run jq -r '.customManagers[].managerFilePatterns[]' "$RENOVATE_JSON"
+	assert_success
+	refute_output --partial 'scripts/.*\\.sh'
 }
 
 @test "renovate.json: YAML manager lists the annotated action and workflow files" {
@@ -21,70 +46,181 @@ RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
 	assert_success
 	assert_output --partial "setup-python"
 	assert_output --partial "setup-node"
-	assert_output --partial "reusable-ai-review"
 	assert_output --partial "reusable-test-node"
+	refute_output --partial "reusable-ai-review"
 }
 
-@test "tool pins: nextest and llvm-cov match the script manager" {
-	run python3 "$MATCHER" "scripts/ci/testing/rust/setup-rust-nextest.sh"
+@test "renovate.json: digest-only versions.env updates are never automerged" {
+	run jq -r '.packageRules[] | select(.matchFileNames != null and (.matchFileNames | index("scripts/ci/versions.env"))) | "\(.matchUpdateTypes | join(",")) automerge=\(.automerge)"' \
+		"$RENOVATE_JSON"
 	assert_success
-	assert_output --partial "nextest-rs/nextest"
+	assert_output "digest automerge=false"
+}
+
+@test "renovate.json: validator accepts the config (recorded run)" {
+	# `bunx --package renovate renovate-config-validator` was run against this
+	# file when the manager was added; this guards the JSON shape offline.
+	run jq -e '.customManagers | length >= 5' "$RENOVATE_JSON"
+	assert_success
+}
+
+# =============================================================================
+# versions.env grammar
+# =============================================================================
+
+@test "versions.env: every non-comment line is a quoted DEFAULT_ assignment" {
+	run bash -c "grep -vE '^\s*(#|$)' '$VERSIONS_ENV' | grep -vE '^DEFAULT_[A-Z0-9_]+=\"[^\"]*\"( # \S+)?$'"
+	assert_output ""
+}
+
+@test "versions.env: sources cleanly with no side effects" {
+	run bash -c "set -euo pipefail; source '$VERSIONS_ENV'; declare -p | grep -c '^declare -- DEFAULT_'"
+	assert_success
+	[[ "$output" -ge 40 ]]
+}
+
+@test "versions.env: every version line and every digest line is annotated" {
+	# A DEFAULT_*_VERSION / _SHA256_* / _COMMIT line must be preceded by a
+	# `# renovate:` line, except the cursor-agent pins (no registry datasource).
+	run awk '
+		/^# renovate:/ { annotated = 1; next }
+		/^DEFAULT_CURSOR_AGENT_/ { annotated = 0; next }
+		/^DEFAULT_[A-Z0-9_]+_(VERSION|SHA256|COMMIT)/ {
+			if (!annotated) { print "unannotated: " $0; bad = 1 }
+			annotated = 0; next
+		}
+		{ annotated = 0 }
+		END { exit bad }' "$VERSIONS_ENV"
+	assert_success
+	assert_output ""
+}
+
+@test "versions.env: digest lines use a digest datasource and carry the release tag" {
+	run awk '
+		/^# renovate:/ { ds = $0; next }
+		/^DEFAULT_[A-Z0-9_]+_SHA256/ {
+			if (ds !~ /datasource=github-release-attachments/ && $0 !~ /CURSOR_AGENT/) { print "bad datasource: " $0; bad = 1 }
+			if ($0 !~ /" # [^ ]+$/ && $0 !~ /CURSOR_AGENT/) { print "no tag comment: " $0; bad = 1 }
+		}
+		/^DEFAULT_[A-Z0-9_]+_COMMIT=/ {
+			if (ds !~ /datasource=github-tags/) { print "bad datasource: " $0; bad = 1 }
+			if ($0 !~ /" # [^ ]+$/) { print "no tag comment: " $0; bad = 1 }
+		}
+		END { exit bad }' "$VERSIONS_ENV"
+	assert_success
+	assert_output ""
+}
+
+@test "versions.env: every digest-line tag ends with the tool's pinned version" {
+	# DEFAULT_<TOOL>_SHA256_<X>="…" # <tag>  must agree with DEFAULT_<TOOL>_VERSION.
+	run bash -c '
+		set -euo pipefail
+		source "$1"
+		bad=0
+		while IFS= read -r line; do
+			var="${line%%=*}"
+			tag="${line##* # }"
+			tool="${var%_SHA256*}"
+			tool="${tool%_COMMIT}"
+			vname="${tool}_VERSION"
+			version="${!vname:-}"
+			if [[ -z "$version" ]]; then echo "no version for $var"; bad=1; continue; fi
+			if [[ "$tag" != *"$version" ]]; then echo "$var tag $tag does not end with $version"; bad=1; fi
+		done < <(grep -E "^DEFAULT_[A-Z0-9_]+_(SHA256[A-Z0-9_]*|COMMIT)=\"[a-f0-9]+\" # " "$1")
+		exit $bad
+	' _ "$VERSIONS_ENV"
+	assert_success
+	assert_output ""
+}
+
+@test "versions.env: digests are well-formed hex and no placeholder survives" {
+	run bash -c "grep -E '^DEFAULT_[A-Z0-9_]+_SHA256' '$VERSIONS_ENV' | grep -vE '=\"[a-f0-9]{64}\"'"
+	assert_output ""
+	run bash -c "grep -E '^DEFAULT_[A-Z0-9_]+_COMMIT=' '$VERSIONS_ENV' | grep -vE '=\"[a-f0-9]{40}\"'"
+	assert_output ""
+	run grep -c '"0000000000000000000000000000000000000000000000000000000000000000"' "$VERSIONS_ENV"
+	assert_output "0"
+}
+
+# =============================================================================
+# Every pin is regex-visible to the versions.env manager
+# =============================================================================
+
+@test "tool pins: versions.env version lines match the manager" {
+	run python3 "$MATCHER" scripts/ci/versions.env
+	assert_success
+	local dep
+	for dep in google/osv-scanner anchore/syft nextest-rs/nextest taiki-e/cargo-llvm-cov \
+		cross-rs/cross cargo-bins/cargo-binstall bats-core/bats-core bats-core/bats-support \
+		bats-core/bats-assert bats-core/bats-file SimonKagstrom/kcov \
+		@anthropic-ai/claude-code @openai/codex lintro; do
+		assert_output --partial "$dep"
+	done
+	assert_output --partial "2.3.5"
 	assert_output --partial "0.9.92"
 	assert_output --partial "cargo-nextest-"
-	assert_output --partial "taiki-e/cargo-llvm-cov"
 	assert_output --partial "0.8.6"
-}
-
-@test "tool pins: osv-scanner has one annotated script default" {
-	run python3 "$MATCHER" "scripts/ci/security/install-osv-scanner.sh"
-	assert_success
-	assert_output --partial "google/osv-scanner"
-	assert_output --partial "2.3.5"
-	run grep -c '2.3.5' "${PROJECT_ROOT}/scripts/ci/security/install-osv-scanner.sh"
-	assert_output "1"
-}
-
-@test "tool pins: bats, helpers, and kcov match the script manager" {
-	run python3 "$MATCHER" "scripts/ci/actions/run-bats-tests.sh"
-	assert_success
-	assert_output --partial "bats-core/bats-core"
-	assert_output --partial "1.10.0"
-	assert_output --partial "bats-core/bats-support"
-	assert_output --partial "v0.3.0"
-	assert_output --partial "bats-core/bats-assert"
-	assert_output --partial "v2.2.4"
-	assert_output --partial "bats-core/bats-file"
-	assert_output --partial "v0.4.0"
-	assert_output --partial "SimonKagstrom/kcov"
-	assert_output --partial "v43"
-}
-
-@test "tool pins: AI CLI annotations match after DEFAULT_ rewrite" {
-	run python3 "$MATCHER" "scripts/ci/actions/install-ai-review-cli.sh"
-	assert_success
-	assert_output --partial "@anthropic-ai/claude-code"
-	assert_output --partial "2.1.232"
-	assert_output --partial "@openai/codex"
-	assert_output --partial "0.147.0"
-}
-
-@test "tool pins: cross pin lives in install-cross.sh" {
-	run python3 "$MATCHER" "scripts/ci/release/install-cross.sh"
-	assert_success
-	assert_output --partial "cross"
 	assert_output --partial "0.2.5"
-	run grep -F "scripts/ci/release/install-cross.sh" \
-		"${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
-	assert_success
+	assert_output --partial "1.25.1"
+	assert_output --partial "1.54.0"
+	assert_output --partial "1.10.0"
+	assert_output --partial "v0.3.0"
+	assert_output --partial "v2.2.4"
+	assert_output --partial "v0.4.0"
+	assert_output --partial "v43"
+	assert_output --partial "2.1.232"
+	assert_output --partial "0.147.0"
+	assert_output --partial "0.171.3"
 }
 
-@test "tool pins: existing cargo-binstall and syft pins still match" {
-	run python3 "$MATCHER" "scripts/ci/actions/setup-rust.sh"
-	assert_success
-	assert_output --partial "cargo-bins/cargo-binstall"
-	run python3 "$MATCHER" "scripts/ci/actions/prime-syft-tool-cache.sh"
-	assert_success
-	assert_output --partial "anchore/syft"
+@test "tool pins: every digest line in versions.env is a manager match" {
+	local expected matched
+	expected="$(grep -cE '^DEFAULT_[A-Z0-9_]+_(SHA256[A-Z0-9_]*|COMMIT)="[a-f0-9]+" # ' "$VERSIONS_ENV")"
+	matched="$(python3 "$MATCHER" scripts/ci/versions.env | awk -F'\t' 'NR>1 && $3 ~ /^(v|cargo-nextest-)/ && $1 == "scripts/ci/versions.env"' | wc -l | tr -d ' ')"
+	[[ "$expected" -ge 20 ]]
+	# Digest matches report the tag (v-prefixed or cargo-nextest-) as currentValue;
+	# the version lines for bats helpers and kcov also carry a v, so matched >= expected.
+	[[ "$matched" -ge "$expected" ]]
+}
+
+@test "tool pins: no installer under scripts/ci carries its own version literal" {
+	local f v
+	for f in scripts/ci/security/install-osv-scanner.sh \
+		scripts/ci/testing/rust/setup-rust-nextest.sh \
+		scripts/ci/release/install-cross.sh \
+		scripts/ci/actions/setup-rust.sh \
+		scripts/ci/actions/prime-syft-tool-cache.sh \
+		scripts/ci/actions/install-ai-review-cli.sh \
+		scripts/ci/actions/run-bats-tests.sh; do
+		for v in 2.3.5 0.9.92 0.8.6 0.2.5 1.25.1 1.54.0 1.10.0 v0.3.0 v2.2.4 v0.4.0 2.1.232 0.147.0 2026.08.11; do
+			run grep -F "\"$v\"" "${PROJECT_ROOT}/${f}"
+			assert_failure
+		done
+	done
+}
+
+# =============================================================================
+# Remaining duplicates equal their source
+# =============================================================================
+
+@test "tool pins: npm CLI lockfile manifests equal versions.env" {
+	run jq -r '.dependencies["@anthropic-ai/claude-code"]' "${PROJECT_ROOT}/scripts/ci/ai-review-cli/claude/package.json"
+	assert_output "$(_pin DEFAULT_CLAUDE_CODE_VERSION)"
+	run jq -r '.packages["node_modules/@anthropic-ai/claude-code"].version' "${PROJECT_ROOT}/scripts/ci/ai-review-cli/claude/package-lock.json"
+	assert_output "$(_pin DEFAULT_CLAUDE_CODE_VERSION)"
+	run jq -r '.dependencies["@openai/codex"]' "${PROJECT_ROOT}/scripts/ci/ai-review-cli/codex/package.json"
+	assert_output "$(_pin DEFAULT_CODEX_VERSION)"
+	run jq -r '.packages["node_modules/@openai/codex"].version' "${PROJECT_ROOT}/scripts/ci/ai-review-cli/codex/package-lock.json"
+	assert_output "$(_pin DEFAULT_CODEX_VERSION)"
+}
+
+@test "tool pins: npm CLI lockfiles pin integrity for every package" {
+	local f
+	for f in claude codex; do
+		run jq -r '[.packages | to_entries[] | select(.key != "") | .value.integrity // "MISSING"] | map(select(. == "MISSING")) | length' \
+			"${PROJECT_ROOT}/scripts/ci/ai-review-cli/${f}/package-lock.json"
+		assert_output "0"
+	done
 }
 
 @test "tool pins: uv and bun action defaults match the YAML manager" {
@@ -120,10 +256,26 @@ RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
 	assert_failure
 }
 
-@test "tool pins: lintro workflow default still matches" {
-	run python3 "$MATCHER" ".github/workflows/reusable-ai-review.yml"
+@test "tool pins: grype default matches its manager" {
+	run python3 "$MATCHER" ".github/actions/scan-vulnerabilities/action.yml"
 	assert_success
-	assert_output --partial "lintro"
+	assert_output --partial "grype"
+}
+
+@test "tool pins: versions.env lists the YAML duplicates it cannot absorb" {
+	run grep -E '^#   (uv|bun|grype) ' "$VERSIONS_ENV"
+	assert_success
+	[[ "$(echo "$output" | wc -l | tr -d ' ')" -eq 3 ]]
+}
+
+@test "tool pins: lintro lives in versions.env and the workflow input defaults to empty" {
+	run awk '/^      lintro-version:$/{show=1;next} show&&/^      [a-z]/{exit} show{print}' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
+	assert_success
+	assert_output --partial 'default: ""'
+	refute_output --partial "# renovate:"
+	run grep -F 'DEFAULT_LINTRO_VERSION' "${PROJECT_ROOT}/scripts/ci/actions/run-ai-review.sh"
+	assert_success
 }
 
 @test "reusable-vuln-suppression-check: osv-version defaults to empty" {
@@ -140,15 +292,13 @@ RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
 	assert_output --partial 'default: ""'
 }
 
-@test "run-bats-tests: empty BATS_VERSION falls back to annotated default" {
-	local default resolved
-	default="$(sed -n 's/^[[:space:]]*DEFAULT_BATS_VERSION="\([^"]*\)"/\1/p' \
-		"${PROJECT_ROOT}/scripts/ci/actions/run-bats-tests.sh")"
-	[[ "$default" == "1.10.0" ]]
+@test "run-bats-tests: empty BATS_VERSION falls back to the versions.env default" {
+	local resolved
 	resolved="$(
+		set -euo pipefail
+		source "$VERSIONS_ENV"
 		BATS_VERSION=""
-		DEFAULT_BATS_VERSION="$default"
-		BATS_VERSION="${BATS_VERSION:-$DEFAULT_BATS_VERSION}"
+		BATS_VERSION="${BATS_VERSION:-$DEFAULT_BATS_CORE_VERSION}"
 		printf '%s' "$BATS_VERSION"
 	)"
 	[[ "$resolved" == "1.10.0" ]]

@@ -53,15 +53,21 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output --partial 'default: ""'
 }
 
-@test "reusable-ai-review: lintro-version is pinned with a Renovate annotation" {
+@test "reusable-ai-review: lintro-version pin lives in versions.env with a Renovate annotation (#1096)" {
+	# The workflow input defaults to empty; run-ai-review.sh resolves the pin
+	# from scripts/ci/versions.env, the single source for supplier versions.
+	run awk '/^      lintro-version:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f&&/default:/{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial 'default: ""'
 	run grep -F "# renovate: datasource=pypi depName=lintro" "$WORKFLOW"
+	assert_failure
+	run grep -B1 -E '^DEFAULT_LINTRO_VERSION="[0-9]+\.[0-9]+\.[0-9]+"' "${PROJECT_ROOT}/scripts/ci/versions.env"
 	assert_success
-	run grep -E 'default: "[0-9]+\.[0-9]+\.[0-9]+"' "$WORKFLOW"
-	assert_success
+	assert_output --partial "# renovate: datasource=pypi depName=lintro"
 }
 
-@test "reusable-ai-review: lintro-version default meets the LINTRO_AI_REVIEW floor" {
-	run awk '/^      lintro-version:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f&&/default:/{gsub(/"/,""); print $2; exit}' "$WORKFLOW"
+@test "reusable-ai-review: lintro-version pin meets the LINTRO_AI_REVIEW floor" {
+	run sed -n 's/^DEFAULT_LINTRO_VERSION="\([^"]*\)".*/\1/p' "${PROJECT_ROOT}/scripts/ci/versions.env"
 	assert_success
 	[[ -n "$output" ]]
 	printf '%s\n' "0.130.0" "$output" | sort -C -V

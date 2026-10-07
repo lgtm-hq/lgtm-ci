@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: MIT
 """Print regex customManager matches from renovate.json against files.
 
-Used to prove #1062 annotations are visible to the managers in this repo.
+Used to prove #1062/#1096 annotations are visible to the managers in this repo.
 Does not call Renovate or the network.
 
 Usage:
@@ -23,14 +23,7 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PIN_FILES = (
-    "scripts/ci/testing/rust/setup-rust-nextest.sh",
-    "scripts/ci/security/install-osv-scanner.sh",
-    "scripts/ci/actions/run-bats-tests.sh",
-    "scripts/ci/actions/install-ai-review-cli.sh",
-    "scripts/ci/release/install-cross.sh",
-    "scripts/ci/actions/setup-rust.sh",
-    "scripts/ci/actions/prime-syft-tool-cache.sh",
-    ".github/workflows/reusable-ai-review.yml",
+    "scripts/ci/versions.env",
     ".github/actions/setup-python/action.yml",
     ".github/actions/setup-node/action.yml",
     ".github/workflows/reusable-test-node.yml",
@@ -218,7 +211,7 @@ def parse_args(
     parser.add_argument(
         "paths",
         nargs="*",
-        help="Repo-relative files to scan (default: #1062 pin files)",
+        help="Repo-relative files to scan (default: #1062/#1096 pin files)",
     )
     return parser.parse_args(argv)
 
