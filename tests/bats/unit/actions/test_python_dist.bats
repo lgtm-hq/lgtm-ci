@@ -81,9 +81,11 @@ _run_build() {
 
 # Mimic a default actions/checkout on a tag event: a fresh repository with the
 # remote configured, only the tag fetched at depth 1, nothing under
-# refs/remotes/origin/. The result is shallow and has no origin/main ref.
+# refs/remotes/origin/. The result is shallow and has no origin/<default>
+# ref (second argument, default main).
 _shallow_checkout_of_tag() {
 	local tag="$1"
+	local default_branch="${2:-main}"
 	local dir="${BATS_TEST_TMPDIR}/shallow"
 	mkdir -p "$dir"
 	cd "$dir" || return 1
@@ -92,7 +94,7 @@ _shallow_checkout_of_tag() {
 	git fetch -q --no-tags --depth=1 origin "+refs/tags/${tag}:refs/tags/${tag}"
 	git checkout -q --detach "$tag"
 	[[ "$(git rev-parse --is-shallow-repository)" == "true" ]]
-	! git show-ref --verify --quiet refs/remotes/origin/main
+	! git show-ref --verify --quiet "refs/remotes/origin/${default_branch}"
 }
 
 @test "python-dist preflight: shallow checkout without origin/main fetches the default branch and passes" {
