@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 import sys
-from datetime import date
+from datetime import date, datetime
 from pathlib import Path
 from typing import Any
 
@@ -51,6 +51,8 @@ PROBE_METADATA_KEY = "metadata"
 LEGACY_PROBE_METADATA_KEY = "ai_metadata"
 #: List key inside the probe metadata object.
 SUPPRESSIONS_KEY = "suppressions"
+#: ``status`` values lintro's ``SuppressionStatus`` serializes to.
+PROBE_STATUSES = frozenset({"active", "stale", "expired"})
 
 
 def _escape_md_cell(value: str) -> str:
@@ -94,20 +96,51 @@ def _read_suppressions_from_toml() -> list[dict[str, object]]:
         return []
 
 
-def _probe_eligible(entries: list[dict[str, object]]) -> list[dict[str, object]]:
-    """Return the TOML entries lintro's probe classifies.
+def _is_probe_eligible(entry: dict[str, object]) -> bool:
+    """Return whether lintro's probe classifies a TOML entry.
 
     Mirrors lintro's ``parse_suppressions``: an entry takes part in the probe
-    only when its ``ignoreUntil`` is a date, so entries without one never
-    produce probe metadata.
+    only when its ``ignoreUntil`` is a plain date. Entries without one, or
+    with a TOML datetime (a ``date`` subclass lintro rejects), never produce
+    probe metadata.
 
     Args:
-        entries: Entries returned by :func:`_read_suppressions_from_toml`.
+        entry: An entry returned by :func:`_read_suppressions_from_toml`.
 
     Returns:
-        The subset carrying a date ``ignoreUntil``.
+        ``True`` when ``ignoreUntil`` is a date and not a datetime.
     """
-    return [entry for entry in entries if isinstance(entry.get("ignoreUntil"), date)]
+    ignore_until = entry.get("ignoreUntil")
+    return isinstance(ignore_until, date) and not isinstance(ignore_until, datetime)
+
+
+def _probe_entry_error(entries: list[Any]) -> str | None:
+    """Validate classified suppression entries against lintro's shape.
+
+    lintro emits ``{"id": str, "ignore_until": str, "reason": str,
+    "status": "active" | "stale" | "expired"}`` per entry; anything else is
+    not probe output and must not be rendered as status.
+
+    Args:
+        entries: The ``suppressions`` list from the probe metadata.
+
+    Returns:
+        A diagnostic describing the first malformed entry, or ``None`` when
+        every entry is well-formed.
+    """
+    for index, entry in enumerate(entries):
+        if not isinstance(entry, dict):
+            return f"entry {index} is not an object: {entry!r}"
+        sid = entry.get("id")
+        if not isinstance(sid, str) or not sid.strip():
+            return f"entry {index} has no string 'id': {entry!r}"
+        status = entry.get("status")
+        if status not in PROBE_STATUSES:
+            return (
+                f"entry {index} ({sid}) has status {status!r}; expected one of "
+                f"{sorted(PROBE_STATUSES)}"
+            )
+    return None
 
 
 def _fence_code_block(text: str) -> str:
@@ -296,7 +329,8 @@ def _add_probe_suppression_table(
 
     Args:
         sections: Section list to append to.
-        probe_suppressions: Classified suppression entries.
+        probe_suppressions: Classified suppression entries, already checked
+            by :func:`_probe_entry_error`.
     """
     if not probe_suppressions:
         sections.append("No suppressions configured.")
@@ -304,11 +338,9 @@ def _add_probe_suppression_table(
     sections.append("| ID | Expires | Status | Reason |")
     sections.append("|----|---------|--------|--------|")
     for suppression in probe_suppressions:
-        if not isinstance(suppression, dict):
-            continue
-        sid = _escape_md_cell(str(suppression.get("id", "?")))
+        sid = _escape_md_cell(str(suppression["id"]))
         expires = _escape_md_cell(str(suppression.get("ignore_until", "?")))
-        status = str(suppression.get("status", "active"))
+        status = str(suppression["status"])
         reason = _escape_md_cell(str(suppression.get("reason", "")))
         if status == "expired":
             icon = ":warning:"
@@ -381,23 +413,38 @@ def _add_suppression_sections(
             or ``None`` when the result carried none.
 
     Returns:
-        ``False`` when the probe metadata is missing although the TOML
-        declares probe-eligible entries (diagnostic printed to stderr),
-        else ``True``.
+        ``False`` when the probe metadata is malformed, or missing although
+        the TOML declares probe-eligible entries (diagnostic printed to
+        stderr), else ``True``.
     """
     sections.append("### 🔇 Suppressed Vulnerabilities:")
-    if probe_suppressions is not None:
-        _add_probe_suppression_table(sections, probe_suppressions)
-        return True
-
     toml_suppressions = _read_suppressions_from_toml()
-    eligible = _probe_eligible(toml_suppressions)
-    if eligible:
-        _report_probe_metadata_missing(eligible)
-        return False
-    if toml_suppressions:
-        _add_toml_suppression_table(sections, toml_suppressions)
+    eligible = [e for e in toml_suppressions if _is_probe_eligible(e)]
+    unclassified = [e for e in toml_suppressions if not _is_probe_eligible(e)]
+
+    if probe_suppressions is None:
+        if eligible:
+            _report_probe_metadata_missing(eligible)
+            return False
     else:
+        error = _probe_entry_error(probe_suppressions)
+        if error is not None:
+            print(
+                "Suppression status unavailable: malformed probe metadata "
+                f"'{PROBE_METADATA_KEY}.{SUPPRESSIONS_KEY}' — {error}",
+                file=sys.stderr,
+            )
+            return False
+        if probe_suppressions or not unclassified:
+            _add_probe_suppression_table(sections, probe_suppressions)
+        if probe_suppressions and unclassified:
+            sections.append("")
+
+    # lintro's probe never sees undated entries, so list them alongside
+    # whatever the probe classified rather than dropping them.
+    if unclassified:
+        _add_toml_suppression_table(sections, unclassified)
+    elif probe_suppressions is None:
         sections.append("No suppressions configured.")
     return True
 

@@ -8,6 +8,7 @@ Covers the lintro result schemas the script consumes: the current
 
 from __future__ import annotations
 
+import json
 import shutil
 from collections.abc import Callable
 from pathlib import Path
@@ -209,6 +210,100 @@ def test_neither_key_with_unclassifiable_toml_lists_entries_as_static(
         "| `GHSA-xxxx-yyyy-zzzz` | ? | No fix available |",
     )
     assert_that(output).does_not_contain("No suppressions configured.")
+
+
+def test_mixed_toml_lists_undated_entries_next_to_probe_table(
+    formatter: ModuleType,
+    fixtures_dir: Path,
+    workspace: Path,
+) -> None:
+    """Undated entries the probe never saw are kept when probe data exists."""
+    json_path = _install(
+        fixtures_dir,
+        "security/osv-results-metadata-suppressions.json",
+        workspace / "osv-results.json",
+    )
+    _install(
+        fixtures_dir,
+        "security/osv-scanner-mixed-dated-undated.toml",
+        workspace / ".osv-scanner.toml",
+    )
+
+    output = formatter.format_comment(str(json_path))
+
+    assert_that(output).contains(
+        STALE_ROW,
+        "Status unavailable",
+        "| `GHSA-undated-4444` | ? | no expiry date |",
+    )
+
+
+def test_datetime_ignore_until_is_not_probe_eligible(
+    formatter: ModuleType,
+    fixtures_dir: Path,
+    workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """lintro rejects TOML datetimes, so they must not trigger the failure."""
+    json_path = _install(
+        fixtures_dir,
+        "security/osv-results-no-suppressions-meta.json",
+        workspace / "osv-results.json",
+    )
+    (workspace / ".osv-scanner.toml").write_text(
+        '[[IgnoredVulns]]\nid = "GHSA-datetime-5555"\n'
+        'ignoreUntil = 2099-12-31T00:00:00Z\nreason = "timestamp"\n',
+        encoding="utf-8",
+    )
+
+    output = formatter.format_comment(str(json_path))
+
+    assert_that(output).contains("Status unavailable", "`GHSA-datetime-5555`")
+    assert_that(capsys.readouterr().err).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("entries", "fragment"),
+    [
+        ([None], "entry 0 is not an object"),
+        ([{"id": "GHSA-x", "status": "active"}, {"status": "stale"}], "no string 'id'"),
+        ([{"id": "GHSA-x"}], "status None"),
+        ([{"id": "GHSA-x", "status": "ignored"}], "status 'ignored'"),
+    ],
+    ids=["non-object", "missing-id", "missing-status", "unknown-status"],
+)
+def test_malformed_probe_entries_fail_loudly(
+    formatter: ModuleType,
+    workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+    entries: list[object],
+    fragment: str,
+) -> None:
+    """Probe lists that do not match lintro's entry shape are rejected."""
+    json_path = workspace / "osv-results.json"
+    json_path.write_text(
+        json.dumps(
+            {
+                "results": [
+                    {
+                        "tool": "osv_scanner",
+                        "issues_count": 0,
+                        "success": True,
+                        "metadata": {"suppressions": entries},
+                    },
+                ],
+            },
+        ),
+        encoding="utf-8",
+    )
+
+    output = formatter.format_comment(str(json_path))
+
+    assert_that(output).is_none()
+    assert_that(capsys.readouterr().err).contains(
+        "malformed probe metadata",
+        fragment,
+    )
 
 
 def test_vulnerability_table_renders_issue_rows(

@@ -1,0 +1,8 @@
+[[IgnoredVulns]]
+id = "GHSA-stale-2222"
+ignoreUntil = 2099-12-31
+reason = "resolved upstream"
+
+[[IgnoredVulns]]
+id = "GHSA-undated-4444"
+reason = "no expiry date"
