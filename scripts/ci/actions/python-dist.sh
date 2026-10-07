@@ -86,9 +86,11 @@ preflight)
 	fi
 
 	if [[ "$ENSURE_TAG_ON_DEFAULT_BRANCH" == "true" ]]; then
-		# DEFAULT_BRANCH goes into a refspec below; reject globs, colons and
-		# other non-branch names before building anything from it.
-		if ! git check-ref-format --branch "$DEFAULT_BRANCH" >/dev/null 2>&1; then
+		# DEFAULT_BRANCH goes into a refspec below; reject globs, colons,
+		# @{upstream}-style shorthands and other non-branch names before
+		# building anything from it (full-ref form, not --branch, so the
+		# local-only shorthands are refused too).
+		if ! git check-ref-format "refs/heads/${DEFAULT_BRANCH}" >/dev/null 2>&1; then
 			die "Invalid default-branch: ${DEFAULT_BRANCH}"
 		fi
 		default_ref="refs/remotes/origin/${DEFAULT_BRANCH}"

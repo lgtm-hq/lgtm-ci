@@ -158,6 +158,19 @@ _shallow_checkout_of_tag() {
 
 	assert_failure
 	assert_output --partial "Invalid default-branch: *"
+
+	run env \
+		STEP=preflight \
+		WORKING_DIRECTORY=. \
+		VERIFY_TAG_VERSION=false \
+		ENSURE_TAG_ON_DEFAULT_BRANCH=true \
+		DEFAULT_BRANCH='@{upstream}' \
+		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+		GITHUB_REF="$GITHUB_REF" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_failure
+	assert_output --partial "Invalid default-branch: @{upstream}"
 }
 
 @test "python-dist preflight: shallow checkout passes when the default branch has advanced past the tag" {
@@ -173,7 +186,8 @@ _shallow_checkout_of_tag() {
 	export GITHUB_REF_NAME="v1.2.3"
 	export GITHUB_REF="refs/tags/v1.2.3"
 
-	_run_preflight true true
+	# Ancestry check only; the version check is covered elsewhere.
+	_run_preflight false true
 
 	assert_success
 	assert_output --partial "fetching refs/heads/main from origin"
