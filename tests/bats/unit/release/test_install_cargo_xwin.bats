@@ -117,6 +117,15 @@ _run() {
 	refute_output --partial "cargo install"
 }
 
+@test "install-cargo-xwin: reports the installed version to GITHUB_OUTPUT for the cache key" {
+	local digest out="${BATS_TEST_TMPDIR}/github_output"
+	digest="$(_publish)"
+	_run CARGO_XWIN_SHA256_X86_64_UNKNOWN_LINUX_MUSL="$digest" GITHUB_OUTPUT="$out"
+	assert_success
+	run cat "$out"
+	assert_output "version=$(_version)"
+}
+
 @test "install-cargo-xwin: aarch64 Linux selects the aarch64 musl archive" {
 	_mock_uname aarch64 Linux
 	local digest

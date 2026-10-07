@@ -68,6 +68,14 @@ on:
         required: false
         type: number
         default: 30
+      concurrency-scope:
+        description: >-
+          Forwarded to reusable-test-rust-build.yml: distinct values let one
+          caller workflow invoke this wrapper twice on one ref without the
+          second call cancelling the first (#1076).
+        required: false
+        type: string
+        default: ""
 
     outputs:
       passed:
@@ -198,3 +206,4 @@ jobs:
       allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       runner-image: ${{ inputs.runner-image }}
       timeout-minutes: ${{ inputs.timeout-minutes }}
+      concurrency-scope: ${{ inputs.concurrency-scope }}

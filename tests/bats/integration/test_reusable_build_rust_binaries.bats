@@ -81,11 +81,12 @@ _default_matrix() {
 }
 
 @test "reusable-build-rust-binaries: every default matrix entry names a builder" {
-	run _default_matrix
-	assert_success
-	[[ "$(echo "$output" | wc -l | tr -d ' ')" -eq 3 ]]
-	run bash -c "echo '$output' | grep -v '\"builder\":\"'"
+	local matrix
+	matrix="$(_default_matrix)"
+	[[ "$(echo "$matrix" | wc -l | tr -d ' ')" -eq 3 ]]
+	run bash -c "echo '$matrix' | grep -v '\"builder\":\"'"
 	assert_output ""
+	run echo "$matrix"
 	refute_output --partial '"cross":'
 }
 
@@ -104,13 +105,51 @@ _default_matrix() {
 	run awk '/- name: Build release binaries/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
 	assert_output --partial 'BUILDER: ${{ matrix.builder }}'
 	run awk '/- name: Install cross/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
-	assert_output --partial "if: matrix.builder == 'cross' || (matrix.builder == null && matrix.cross == true)"
+	assert_output --partial "if: matrix.builder == 'cross' || (!matrix.builder && (matrix.cross == true || matrix.cross == 'true'))"
 	run awk '/- name: Install cargo-xwin/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
 	assert_output --partial "if: matrix.builder == 'xwin'"
 	assert_output --partial 'scripts/ci/release/install-cargo-xwin.sh'
 	run awk '/- name: Cache the xwin Windows SDK and CRT/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
 	assert_output --partial "if: matrix.builder == 'xwin'"
 	assert_output --partial '~/.cache/cargo-xwin'
+	# Keyed on the cargo-xwin pin the installer reports, not on all of versions.env.
+	assert_output --partial 'key: cargo-xwin-${{ runner.os }}-${{ matrix.target }}-${{ steps.xwin.outputs.version }}'
+	refute_output --partial 'hashFiles'
+	run awk '/- name: Install cargo-xwin/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
+	assert_output --partial 'id: xwin'
+}
+
+EVAL="${PROJECT_ROOT}/tests/helpers/gha_expr.py"
+
+# The Install cross `if:` and the USE_CROSS value, as written in the workflow.
+_cross_gate() {
+	awk '/- name: Install cross/{show=1;next} show&&/- name:/{exit} show&&/^        if: /{sub(/^        if: /,""); print; exit}' "$WORKFLOW"
+}
+_use_cross() {
+	grep -E '^          USE_CROSS: ' "$WORKFLOW" | sed -E 's/^ *USE_CROSS: \$\{\{ (.*) \}\}$/\1/'
+}
+
+@test "reusable-build-rust-binaries: cross gate and USE_CROSS agree with the build script for every key shape" {
+	local gate use
+	gate="$(_cross_gate)"
+	use="$(_use_cross)"
+	[[ -n "$gate" && "$gate" == "$use" ]]
+	# builder wins; the legacy key as boolean or string selects cross; native
+	# and plain xwin entries never install cross.
+	run python3 "$EVAL" --value "$gate" "matrix.builder=cross"
+	assert_output "true"
+	run python3 "$EVAL" --value "$gate" "matrix.cross:=true"
+	assert_output "true"
+	run python3 "$EVAL" --value "$gate" "matrix.cross=true"
+	assert_output "true"
+	run python3 "$EVAL" --value "$gate" "matrix.builder=native" "matrix.cross:=true"
+	assert_output "false"
+	run python3 "$EVAL" --value "$gate" "matrix.builder=xwin"
+	assert_output "false"
+	run python3 "$EVAL" --value "$gate" "matrix.cross:=false"
+	assert_output "false"
+	run python3 "$EVAL" --value "$gate"
+	assert_output "false"
 }
 
 @test "reusable-build-rust-binaries: xwin legs get llvm-tools from setup-rust" {

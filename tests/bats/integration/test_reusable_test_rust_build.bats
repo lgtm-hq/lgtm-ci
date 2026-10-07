@@ -41,7 +41,7 @@ _group() {
 
 @test "reusable-test-rust-build: concurrency group never uses github.job" {
 	# Comments may name it; expressions may not.
-	run bash -c "grep -v '^\s*#' '$WORKFLOW' | grep -F 'github.job'"
+	run bash -c "grep -vE '^[[:space:]]*#' '$WORKFLOW' | grep -F 'github.job'"
 	assert_failure
 }
 
@@ -54,6 +54,15 @@ _group() {
 	assert_output --partial 'default: ""'
 	run _group
 	assert_output --regexp "\\$\\{\\{ inputs\\.concurrency-scope \\|\\| 'default' \\}\\}$"
+}
+
+@test "reusable-rust-build wrapper: exposes and forwards concurrency-scope" {
+	local wrapper="${PROJECT_ROOT}/.github/workflows/reusable-rust-build.yml"
+	run awk '/^      concurrency-scope:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' "$wrapper"
+	assert_success
+	assert_output --partial 'default: ""'
+	run grep -F 'concurrency-scope: ${{ inputs.concurrency-scope }}' "$wrapper"
+	assert_success
 }
 
 @test "reusable-test-rust-build: cancel-in-progress stays enabled for the build job" {

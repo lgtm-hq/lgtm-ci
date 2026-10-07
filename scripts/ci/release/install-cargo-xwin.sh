@@ -27,6 +27,10 @@ source "$LIB_DIR/supply_chain.sh"
 source "$SCRIPT_DIR/../versions.env"
 
 CARGO_XWIN_VERSION="${CARGO_XWIN_VERSION:-$DEFAULT_CARGO_XWIN_VERSION}"
+# The workflow keys the xwin SDK cache on this value.
+if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+	echo "version=${CARGO_XWIN_VERSION}" >>"$GITHUB_OUTPUT"
+fi
 
 case "$(uname -s)/$(uname -m)" in
 Linux/x86_64) target="x86_64-unknown-linux-musl" ;;

@@ -143,6 +143,40 @@ EOF
 	assert_output "XWIN_ARCH=aarch64"
 }
 
+@test "build-rust-binary.sh: BUILDER=xwin maps an i686 target to xwin's x86 architecture" {
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/cargo" <<EOF
+#!/usr/bin/env bash
+printf 'XWIN_ARCH=%s\n' "\${XWIN_ARCH:-unset}" >>'${BATS_TEST_TMPDIR}/mock_calls_cargo'
+EOF
+	chmod +x "${mock_bin}/cargo"
+	export PATH="${mock_bin}:${PATH}"
+
+	run env \
+		TARGET=i686-pc-windows-msvc \
+		PACKAGES=cli \
+		BUILDER=xwin \
+		bash "$SCRIPT"
+	assert_success
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_cargo"
+	assert_output "XWIN_ARCH=x86"
+}
+
+@test "build-rust-binary.sh: BUILDER=xwin rejects an MSVC target with no xwin architecture" {
+	mock_command_record "cargo"
+
+	run env \
+		TARGET=riscv64gc-pc-windows-msvc \
+		PACKAGES=cli \
+		BUILDER=xwin \
+		bash "$SCRIPT"
+	assert_failure 2
+	assert_output --partial "xwin has no architecture for target riscv64gc-pc-windows-msvc"
+	run cat "${BATS_TEST_TMPDIR}/mock_calls_cargo"
+	assert_output ""
+}
+
 @test "build-rust-binary.sh: rejects xwin with a non-MSVC target" {
 	mock_command_record "cargo"
 

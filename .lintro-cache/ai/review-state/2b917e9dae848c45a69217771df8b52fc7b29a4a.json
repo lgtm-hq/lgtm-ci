@@ -1,0 +1,646 @@
+{
+  "base_sha": "8fb115c5fa15e3772bfd7c87a59b1f5cc4565bf0",
+  "consumed_flags": [],
+  "coverage": [
+    {
+      "hash": "bad143c166b8ae99f34c13e4738afbd7254994f4f95a2e807f5a7c7fb4694e21",
+      "path": ".github/actions/validate-runner-policy/action.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-ai-review.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-auto-rerun-on-infra-failure.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-build-artifact.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-build-python-dist.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "bb8af0c3ba4b60c585c0f97cc16b40a4bd30e39a9252b86bd1de7fd676f777b4",
+      "path": ".github/workflows/reusable-build-rust-binaries.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-codeql.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-coverage.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-dependency-review.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-deploy-pages.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-deploy-site-with-reports.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-docker-build.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-docker-multiplatform.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-docker-smoke-test.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-docker.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-ghcr-cleanup.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-github-release.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-link-check.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-main-failure-notifier.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-pr-auto-assign.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-pr-labeler.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-prune-build-staging-tags.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-artifact-preview.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-artifact-report.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-file-breakdown.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-gem.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-npm-set.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-npm.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-quality-summary.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-rust-release.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-security-audit-comment.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-test-results-pages.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-publish-test-summary.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-quality-lint.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-registry-health-check.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-release-auto-tag.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-release-failure-notifier.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-release-multi-ecosystem.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-release-recover.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-release-version-pr.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-required-check.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-rust-build.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "a51fe6227b48437a94e24d1b093d3be9ea1855e7a725d10aeb4af8c968963953",
+      "path": ".github/workflows/reusable-rust-test.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-sbom-release-upload.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-sbom.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-scorecards.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-security-audit.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-semantic-pr-title.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-site-quality.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-e2e-matrix.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-e2e-playwright.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-e2e.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-node-custom.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-node-publish.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-node.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-python-publish.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-python.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "e4726f7a986f3fb6a6e7e3209cdec3a3b155718f5294196771e65be0042fcccc",
+      "path": ".github/workflows/reusable-test-rust-build.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-test-shell.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-validate-action-pinning.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-validate-lintro-version.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-validate.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "6c5b35d78a870acf50257dd0745e8ea6dd4910def2095151eeeb1be8ecb10eca",
+      "path": ".github/workflows/reusable-vuln-suppression-check.yml",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "7cdc479ce5c44a425f1faf6c32333e45a6bc688b4b784d55b229d8d739985a08",
+      "path": "docs/reusable-workflows.md",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "a565d1954f612cf070416f514e179f929f0626528cc9dc548f7b0962155de644",
+      "path": "docs/workflow-contract.md",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "0874fd56b2f2f3f792093cae64b5b458c28432bc3f886af64efabe1e15ff740c",
+      "path": "scripts/ci/lib/egress/presets.sh",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "32e8cde5f94bb076e8de3ff2298878b572d1daaac0aa559e07fdbb0780328663",
+      "path": "scripts/ci/maintenance/refresh-tool-digests.sh",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "b512ed7106d19521be4dfd2f5e142f8a9244839010974f6d004cbca9fc992d5a",
+      "path": "scripts/ci/release/build-rust-binary.sh",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "b82f90fa5d91951004f2a80fc8736589493bbf7eac3ec0c40e74461b6201b36b",
+      "path": "scripts/ci/release/install-cargo-xwin.sh",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "49939c835eec6d2ef888f214c15235f712ed2a94e9693b86ab1cf5333cea7b87",
+      "path": "scripts/ci/versions.env",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "e6fbe1d19f654c08f70c6b32f7b8bc86b412d2f514583b11147001360ee597cb",
+      "path": "tests/bats/integration/test_reusable_build_rust_binaries.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "28cf97fd988cb0ec9ad77605500b64c92439b16d4d361e464ca1baf98ae4f37a",
+      "path": "tests/bats/integration/test_reusable_rust_test.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "a13b9b92f71ee3e13b025ac679c304a8088ca77d5e0f9234b1f101442fd11185",
+      "path": "tests/bats/integration/test_reusable_test_rust_build.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "1730fa7084228d4086c4dff6999d4bc7abc7c7f9cc1f45cdb4adc79a87233389",
+      "path": "tests/bats/unit/actions/test_validate_runner_policy.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "5cecd40ff4ccee9be891667c1429986e96290db0ea13f949cd1bead6358eedc7",
+      "path": "tests/bats/unit/lib/egress/test_presets.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "8a9accdc6b07a5ae495e8946f39fed64790825f49978c86701e3f7e0235c77f3",
+      "path": "tests/bats/unit/maintenance/test_refresh_tool_digests.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "2f4c03cf6621ea55ce8fbf380b24d1e34e4820b5961935ee57bf642931b267b6",
+      "path": "tests/bats/unit/release/test_build_rust_binary.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "d55eba6ec181c9007f9321849e9a46e0367485e7f657a7c58a4f3ef581b511f7",
+      "path": "tests/bats/unit/release/test_install_cargo_xwin.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "7130ce099ba959d4d3ca9ca362ce1e3bca61881a9bf086a250c09221692a1f3e",
+      "path": "tests/bats/unit/release/test_package_rust_binary.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "5c3a059ba49d9b57124012e1fdb13b405e3a64c332f74277a536d7ae052b7c74",
+      "path": "tests/bats/unit/renovate/test_installer_verification.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    },
+    {
+      "hash": "5c3a059ba49d9b57124012e1fdb13b405e3a64c332f74277a536d7ae052b7c74",
+      "path": "tests/bats/unit/renovate/test_tool_pins.bats",
+      "reviewed_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "round": 1
+    }
+  ],
+  "event": "",
+  "findings": [
+    {
+      "category": "integration",
+      "cause": "`concurrency-scope` was added to `reusable-test-rust-build.yml` but not to the wrapper `reusable-rust-build.yml` that most callers use, and the group key drops `inputs.job-name`, so nothing distinguishes two wrapper invocations in one caller workflow.",
+      "checklist_ids": [
+        1
+      ],
+      "confidence": "medium",
+      "description": "The new job concurrency group for `reusable-test-rust-build` is keyed on callee + caller repository + caller workflow + ref + `concurrency-scope`, and omits `inputs.job-name` (unlike `reusable-rust-test.yml:440`, which includes it). docs/workflow-contract.md:600-602 tells callers that a workflow invoking the same reusable twice on one ref must pass a distinct `concurrency-scope`. But the in-repo public wrapper `.github/workflows/reusable-rust-build.yml` exposes no `concurrency-scope` input and forwards only `job-name` (lines 190-200), so a caller workflow with two `reusable-rust-build` jobs (e.g. two build scripts / two crates) puts both nested jobs in the identical group with `cancel-in-progress: true`, and the second silently cancels the first with no available mitigation. P3 because the single-call path this PR targets is correct and the pre-existing ref-only key collided too; what remains is the missing plumbing for the documented remedy.",
+      "evidence_style": "cross_file",
+      "file": ".github/workflows/reusable-test-rust-build.yml",
+      "fingerprint": "42f629dabacc35ca",
+      "fix": "Either add a `concurrency-scope` input to `reusable-rust-build.yml` and forward it in the `uses:` block, or include `inputs.job-name` in the group key (as `reusable-rust-test.yml` already does) so distinct required-check names deconflict automatically.",
+      "line": 215,
+      "ordinal": 1,
+      "severity": "P3",
+      "since_round": 1,
+      "status": "open",
+      "title": "concurrency-scope escape hatch unreachable via rust-build wrapper"
+    },
+    {
+      "category": "contract-drift",
+      "cause": "The tier table was written describing the validation performed while developing #1076 (manually running the cross-built `.exe` on a Windows box) rather than what the shipped workflow does on every run; no smoke-test job was added alongside it.",
+      "checklist_ids": [
+        4
+      ],
+      "confidence": "medium",
+      "description": "The new tier table's \"What it proves\" cell for the default `xwin` leg claims the artifact's `.exe` is \"executed on `windows-latest`\". Nothing in the repository executes the produced binary on a Windows runner: `reusable-build-rust-binaries.yml` ends at package \u2192 attest \u2192 upload-artifact (`.github/workflows/reusable-build-rust-binaries.yml:353-405`), and a repo-wide search for `windows-latest` finds only doc prose and shell comments \u2014 no workflow job runs on a Windows runner at all. A consumer reading this row will believe the default MSVC leg carries a run-the-binary smoke check it does not have. P3 because the code path itself is correct (block-mode egress, digest-verified cargo-xwin and the attested archive all hold); only the documented claim is overstated.",
+      "evidence_style": "cross_file",
+      "file": "docs/workflow-contract.md",
+      "fingerprint": "fcebd8a371af63ce",
+      "fix": "Either drop `, .exe executed on windows-latest` from the Default row (or reword it as \"validated manually on Windows during #1076\"), or add a Windows smoke job that downloads the artifact and runs the binary, and then keep the claim.",
+      "line": 1031,
+      "ordinal": 1,
+      "severity": "P3",
+      "since_round": 1,
+      "status": "open",
+      "title": "Tier table claims a Windows exe smoke run that no job performs"
+    },
+    {
+      "category": "logic-bug",
+      "cause": "`${TARGET%%-*}` assumes the Rust triple's arch component is spelled the same way xwin spells it. That holds for x86_64 and aarch64 only; Rust's `i686`/`i586` map to xwin `x86` and `thumbv7a` maps to xwin `aarch`.",
+      "checklist_ids": [
+        4,
+        8
+      ],
+      "confidence": "medium",
+      "description": "The xwin branch accepts any `*-pc-windows-msvc` target and then derives `XWIN_ARCH` from the triple prefix (`${TARGET%%-*}`). cargo-xwin/xwin's `--xwin-arch` accepts only `x86`, `x86_64`, `aarch`, `aarch64`. For the two other MSVC triples a caller can legitimately put in the `targets` override \u2014 `i686-pc-windows-msvc` (prefix `i686`) and `thumbv7a-pc-windows-msvc` (prefix `thumbv7a`) \u2014 the exported value is not an xwin arch name, so `cargo xwin build` aborts on an invalid `XWIN_ARCH` value on a leg that would have built fine had the variable been left unset (xwin would then pick the arch itself). P2 because this is incorrect behaviour on a reachable input: `docs/reusable-workflows.md:884` explicitly invites callers to override the matrix with their own Windows target, and `docs/workflow-contract.md:1041` documents `XWIN_ARCH` as \"derived from the target triple\" without noting that only x86_64/aarch64 derive correctly.",
+      "evidence_style": "speculative",
+      "file": "scripts/ci/release/build-rust-binary.sh",
+      "fingerprint": "bb2319845575cdc2",
+      "fix": "Map the triple prefix to xwin's arch vocabulary instead of passing it through, and reject (or leave `XWIN_ARCH` unset for) prefixes with no mapping so the build keeps xwin's own default rather than an invalid value.",
+      "line": 56,
+      "ordinal": 1,
+      "severity": "P2",
+      "since_round": 1,
+      "status": "open",
+      "title": "Derived XWIN_ARCH is invalid for i686/thumbv7a MSVC targets"
+    },
+    {
+      "category": "test-gap",
+      "cause": "`grep -v '^\\s*#'` relies on a GNU-only escape; the test's own comment states the intent (\"Comments may name it; expressions may not\"), which silently does not happen under BSD grep, and the workflow does carry `github.job` inside a comment.",
+      "checklist_ids": [
+        14,
+        24
+      ],
+      "confidence": "medium",
+      "description": "The guard that `github.job` never appears in an expression strips comment lines with `grep -v '^\\s*#'`. `\\s` is a GNU extension; BSD grep (macOS, the stated dev platform here) treats `\\s` as the literal character `s`, so the pattern becomes `^s*#` and never matches the 4-space-indented comments in the workflow. reusable-test-rust-build.yml:211 contains the comment `# never github.job (null outside execution steps).`, so on macOS the second grep matches that comment, exits 0, and `assert_failure` fails \u2014 the test reports a violation that does not exist. P3 because the production workflow is correct and the defect is confined to test portability (it still passes on the GNU-grep CI runner); only the local-run reliability of this new test is affected.",
+      "evidence_style": "cross_file",
+      "file": "tests/bats/integration/test_reusable_test_rust_build.bats",
+      "fingerprint": "b6408bcdd770c50b",
+      "fix": "Use the POSIX character class: `grep -vE '^[[:space:]]*#'`.",
+      "line": 44,
+      "ordinal": 1,
+      "severity": "P3",
+      "since_round": 1,
+      "status": "open",
+      "title": "Comment-stripping grep uses non-portable \\s class"
+    },
+    {
+      "category": "test-gap",
+      "cause": "A line-oriented grep is used to validate a YAML structure whose values legally span multiple lines; it only sees inline scalars.",
+      "checklist_ids": [
+        18,
+        16
+      ],
+      "confidence": "high",
+      "description": "The new regression guard greps for `description:` and `${{` on the *same physical line*. Most action.yml files in this repo write descriptions as folded block scalars (`description: >-` with the text on following lines \u2014 e.g. `.github/actions/validate-runner-policy/action.yml:5`, `create-signed-commit/action.yml:24`, `prepare-pypi-upload/action.yml:29`), so reintroducing `${{ runner.os }}` on a continuation line of a folded description would not match and the guard would pass while GitHub still fails the action with \"Unrecognized named-value\". The same hole applies to the other non-templated metadata fields (`name:`, `author:`, `branding:`), which fail identically. P3 because the fix itself is correct and the guard does catch the exact single-line form that caused #1076; only regression coverage is incomplete.",
+      "evidence_style": "cross_file",
+      "file": "tests/bats/unit/actions/test_validate_runner_policy.bats",
+      "fingerprint": "b2551eb713981524",
+      "fix": "Match the whole metadata block rather than one line \u2014 e.g. `grep -rn '\\${{' .github/actions --include=action.yml` filtered to lines outside the `runs:`/`outputs[].value` sections, or parse each action.yml with yq/python and assert no `${{` appears in `name`, `author`, `description`, or any `inputs.*.description`.",
+      "line": 165,
+      "ordinal": 1,
+      "severity": "P3",
+      "since_round": 1,
+      "status": "open",
+      "title": "Guard misses folded descriptions and other template fields"
+    }
+  ],
+  "flagged_files": [],
+  "head_sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+  "lintro_version": "0.171.3",
+  "pending_invalidations": [],
+  "pr_number": null,
+  "pr_spend_usd": 17.99677125,
+  "repo": "",
+  "run_id": "",
+  "runs": [
+    {
+      "auth_mode": "subscription",
+      "checks": 28,
+      "chunks_reviewed": 12,
+      "chunks_total": 12,
+      "completion": 73723,
+      "confidence": "",
+      "context": 31303,
+      "convergence_score": 11.62,
+      "cost": 17.996771,
+      "cost_basis": "unpriceable",
+      "delta_reason": "not_pr",
+      "depth": 1,
+      "downgraded": 0,
+      "duration": 554.93,
+      "estimated": true,
+      "files_reviewed": 25,
+      "files_skipped": 56,
+      "generated_questions": 10,
+      "model": "claude-opus-5",
+      "narrative": "Reworks the Rust release matrix around an explicit per-target `builder` key (native/cross/xwin), adds a digest-verified cargo-xwin install plus SDK caching for the Windows MSVC leg, and namespaces the",
+      "open_after": 5,
+      "p1": 0,
+      "p2": 1,
+      "p3": 4,
+      "partial": false,
+      "prompt": 136,
+      "provider": "anthropic",
+      "questions": 1,
+      "questions_diff_trimmed": true,
+      "resolved": 0,
+      "round": 1,
+      "sha": "2b917e9dae848c45a69217771df8b52fc7b29a4a",
+      "strictness": "balanced",
+      "synthesis_degraded": true,
+      "timestamp": "2026-10-07T12:49:15.425728+00:00",
+      "total": 73859,
+      "transport": "cli",
+      "verdict": "changes_requested"
+    }
+  ],
+  "schema_version": 5,
+  "version": 5,
+  "workflow": "ai-review.yml"
+}

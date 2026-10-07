@@ -598,9 +598,12 @@ one job.
 the caller repository, the caller workflow (`github.workflow`) and the ref, so
 two caller workflows on one ref (a CI wrapper and a release wrapper, say) no
 longer cancel each other. One caller workflow that invokes the same reusable
-twice on one ref should give each call a distinct `concurrency-scope` string;
-without it the second call cancels the first. The build-only and test
-workflows cancel in progress; the binary build queues and never cancels.
+twice on one ref should give each call a distinct `concurrency-scope` string.
+Without it, the build-only and test workflows cancel the first call's
+in-progress run when the second starts; the binary build never cancels a
+running leg, so the second call queues behind the first, but GitHub keeps
+only one pending run per group and may replace a queued binary build with a
+newer one before it starts.
 
 **Prerequisite — nextest `ci` profile (#1086).** Both paths run
 `cargo nextest run --profile ci` and then parse `target/nextest/ci/junit.xml`,
@@ -1025,9 +1028,9 @@ MSVC toolchain and never compiled (#1076).
 
 | Tier (strict Linux unless noted) | Target / builder                                   | What it proves                                                                                   |
 | -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-24.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive, `.exe` executed on `windows-latest` |
+| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-24.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
 | Alternative, strict              | `x86_64-pc-windows-gnu` / `cross`                  | MinGW binary from the `cross` Docker image; no Microsoft SDK download                            |
-| Opt-in, hardened                 | `x86_64-pc-windows-msvc` / `native` on `windows-latest` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
+| Opt-in, hardened (`reusable-build-artifact.yml`) | `x86_64-pc-windows-msvc` / `native` on `windows-latest` via `runner-map` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -1040,13 +1043,19 @@ triple; export it to override). `cargo-xwin` itself is pinned in
 `scripts/ci/versions.env` and installed from a release archive whose sha256 is
 committed there (`scripts/ci/release/install-cargo-xwin.sh`).
 
-The native tier is a deliberate choice, not a fallback: `runner-image` is one
-value for the whole matrix, so a native Windows leg means a separate call with
-`runner-image: windows-latest`, a single-entry `targets` override and
-`egress-policy: block` still requested (the strict tier hard-fails on Windows;
-use `reusable-build-artifact.yml` with its `runner-map` for a hardened native
-leg). Switching the default to native needs an owner decision recorded in the
-PR that makes it.
+`reusable-build-rust-binaries.yml` is strict-only: its tier is baked in and
+`validate-runner-policy` hard-fails on a GitHub-hosted Windows runner, so it
+cannot run a native Windows leg at all. The native tier is a deliberate,
+separate call to `reusable-build-artifact.yml` (tier `hardened`) with
+`toolchain: rust`, a `matrix` entry for `x86_64-pc-windows-msvc` and a
+`runner-map` that sends it to `windows-latest`; see the Rustume example in
+[reusable-workflows.md](reusable-workflows.md). Switching this reusable's
+default to a native leg needs an owner decision recorded in the PR that makes
+it.
+
+Caller `build-script` overrides should read `BUILDER` (`native`, `cross` or
+`xwin`); `USE_CROSS` is still exported, and is `true` whenever the effective
+builder is `cross`, whichever key selected it.
 
 **Artifact naming:** `{artifact-prefix}-{target}` per matrix leg. Each artifact
 contains `{package}-{version}-{target}.tar.gz` or `.zip` with the binary at the

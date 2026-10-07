@@ -333,28 +333,33 @@ jobs:
         shell: bash
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Install cross
-        if: matrix.builder == 'cross' || (matrix.builder == null && matrix.cross == true)
+        # The legacy key may arrive as the boolean true or the string "true".
+        if: matrix.builder == 'cross' || (!matrix.builder && (matrix.cross == true || matrix.cross == 'true'))
         shell: bash
         run: bash .lgtm-ci-tooling/scripts/ci/release/install-cross.sh
+      - name: Install cargo-xwin
+        id: xwin
+        if: matrix.builder == 'xwin'
+        shell: bash
+        run: bash .lgtm-ci-tooling/scripts/ci/release/install-cargo-xwin.sh
       - name: Cache the xwin Windows SDK and CRT
+        # Keyed on the cargo-xwin pin alone, so unrelated versions.env bumps
+        # keep the SDK cache. cargo-xwin never writes here at install time.
         if: matrix.builder == 'xwin'
         uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/cargo-xwin
-          key: >-
-            cargo-xwin-${{ runner.os }}-${{ matrix.target }}-${{
-            hashFiles('.lgtm-ci-tooling/scripts/ci/versions.env') }}
-      - name: Install cargo-xwin
-        if: matrix.builder == 'xwin'
-        shell: bash
-        run: bash .lgtm-ci-tooling/scripts/ci/release/install-cargo-xwin.sh
+          key: cargo-xwin-${{ runner.os }}-${{ matrix.target }}-${{ steps.xwin.outputs.version }}
       - name: Build release binaries
         shell: bash
         env:
           TARGET: ${{ matrix.target }}
           PACKAGES: ${{ inputs.packages }}
           BUILDER: ${{ matrix.builder }}
-          USE_CROSS: ${{ matrix.cross }}
+          # Legacy signal for caller build-script overrides: true whenever the
+          # effective builder is cross, whichever key selected it.
+          # yamllint disable-line rule:line-length
+          USE_CROSS: ${{ matrix.builder == 'cross' || (!matrix.builder && (matrix.cross == true || matrix.cross == 'true')) }}
           RAW_SCRIPT_PATH: ${{ inputs.build-script }}
           DEFAULT_SCRIPT_PATH: .lgtm-ci-tooling/scripts/ci/release/build-rust-binary.sh
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh

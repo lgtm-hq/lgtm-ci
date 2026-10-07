@@ -52,9 +52,19 @@ xwin)
 		exit 2
 	fi
 	# Restrict the SDK/CRT download to the target's architecture: the xwin
-	# default fetches x86_64 and aarch64 together.
+	# default fetches x86_64 and aarch64 together. xwin's names are x86,
+	# x86_64, aarch and aarch64; anything else fails here, not inside xwin.
 	if [[ -z "${XWIN_ARCH:-}" ]]; then
-		export XWIN_ARCH="${TARGET%%-*}"
+		case "${TARGET%%-*}" in
+		x86_64 | aarch64) XWIN_ARCH="${TARGET%%-*}" ;;
+		i686 | i586) XWIN_ARCH="x86" ;;
+		thumbv7a) XWIN_ARCH="aarch" ;;
+		*)
+			echo "::error title=builder::xwin has no architecture for target ${TARGET}; export XWIN_ARCH (x86, x86_64, aarch, aarch64) to override" >&2
+			exit 2
+			;;
+		esac
+		export XWIN_ARCH
 	fi
 	BUILD_CMD=(cargo xwin)
 	;;
