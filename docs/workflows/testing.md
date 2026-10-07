@@ -27,6 +27,11 @@ today; a missing report still warns. See workflow-contract.md
 jobs:
   test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@main
+    permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
+      contents: read
+      pull-requests: write
     with:
       python-version: "3.12"
       test-path: "tests"
@@ -150,6 +155,8 @@ invocation in the same run so artifacts do not mix), plus standard
 jobs:
   e2e:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e.yml@main
+    permissions:
+      contents: read
     with:
       browsers: "chromium"
       shard: "1/3" # optional, for parallel execution
@@ -179,6 +186,9 @@ to keep them on every run).
 jobs:
   e2e-smoke:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-playwright.yml@main
+    permissions:
+      contents: read
+      pull-requests: write
     with:
       job-name: "🔥 Smoke E2E"
       grep: "@smoke"

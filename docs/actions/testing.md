@@ -35,6 +35,10 @@ mode has history.
 jobs:
   changes:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # dorny/paths-filter reads the PR files API on pull_request events (#669)
+      pull-requests: read
     outputs:
       changes: ${{ steps.detect.outputs.changes }}
     steps:

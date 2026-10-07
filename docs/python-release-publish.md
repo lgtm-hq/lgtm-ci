@@ -42,6 +42,11 @@ permissions: {}
 jobs:
   sbom:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: read
+      security-events: write
+      id-token: write
+      attestations: write
     # ...
 
   pypi-build:

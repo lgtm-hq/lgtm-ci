@@ -26,6 +26,12 @@ for caller examples (push, PR validation, health checks).
 jobs:
   docker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@main
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+      security-events: write
     with:
       context: "."
       platforms: "linux/amd64,linux/arm64"

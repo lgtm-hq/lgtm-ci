@@ -553,6 +553,18 @@ sibling when `coverage: true`). Node no longer uses inline matrix publish jobs
 `reusable-test-node.yml` does not include a publish job. Use
 `reusable-test-node-publish.yml` in a separate caller job for Pages publishing.
 
+Contract enforcement: `scripts/ci/docs/validate-caller-permissions.py` (CI job
+`caller-permissions`, covered by
+`tests/bats/integration/test_validate_caller_permissions.bats`) checks every
+`uses: lgtm-hq/lgtm-ci/.github/workflows/<file>.yml` call in `examples/**`,
+`docs/**` and `README.md`: the governing `permissions:` block must be a
+superset of the called workflow's declared union — its workflow-level block
+plus every job-level block, nested calls included, `write` outranking `read`.
+A call with no block fails unless the snippet is a fragment marked
+`permissions omitted for brevity`; the rule is in
+[docs/README.md](README.md#caller-snippets-and-permissions). Print a union
+with `--union reusable-test-python.yml`.
+
 ### Isolated publish jobs (Pages / coverage badge)
 
 `reusable-test-python-publish.yml` and `reusable-test-node-publish.yml` run in a
@@ -756,6 +768,35 @@ The job is skipped only on the explicit skip paths: a draft PR with
 `draft-pr-skip`, and `pipeline-skip` (Python). The job still exposes the
 `passed` output for callers that combine it with other jobs.
 
+### Matrix legs and check-run names
+
+The context a ruleset sees is `{caller_job_id} / {inner job name}`, and the
+inner name is the called job's `name:` rendered verbatim. Every work job in the
+reusables is named statically from `job-name`, so a matrix call
+(`python-versions`, `node-versions`, `rust-toolchains`,
+`reusable-build-artifact.yml`'s `matrix`, Docker `platforms`) produces **one
+check run per leg under one shared name**, with no per-leg suffix:
+`python-versions: "3.12,3.13"` under caller job `compat` reports two check
+runs both named `compat / Python Compat` (observed on the external fixture,
+#1074; the same shape #623 recorded for `build / 🏗️ Build & Quality Checks`
+on turbo-themes#598). GitHub appends matrix values only to jobs that have no
+explicit `name:`, so the only way a leg value reaches the context is the caller
+putting it in `job-name` itself.
+
+When several check runs on the head commit share a required name, GitHub
+evaluates the most recently created one (see
+[Troubleshooting required status checks](https://docs.github.com/en/pull-requests/collaborating-with-pull-requests/collaborating-on-repositories-with-code-quality-features/troubleshooting-required-status-checks)):
+a failing leg can be masked by a later passing leg, and re-running one leg
+replaces the verdict. Require a matrix work context directly only when every
+leg is green by construction; otherwise require the gate that fails closed —
+the `Aggregate … Results` job of the matrix test reusables (#1058), or a
+`reusable-required-check.yml` caller job fed by `needs.<job>.result` for
+`reusable-build-artifact.yml`, whose only jobs are `prepare` and `build`.
+Callers migrating from bespoke suffixed contexts (`… (20)` / `… (22)`) must
+require the unsuffixed name; the suffixed form never appears. Check names are
+deployment interfaces (#461, #796): nothing here renames a check, and the
+reusables will not add per-leg names without a migration.
+
 When a single ruleset context should summarize **multiple** work jobs, add a
 thin caller job that calls `reusable-required-check.yml` instead of
 hand-rolled `runs-on` shims. The gate itself is a `uses:` job, so
@@ -763,6 +804,9 @@ the ruleset must require its prefixed path too (below:
 `test-suite-coverage / 🧪 Test Suite & Coverage`). Pass `upstream-result` and
 optional `passed-output` / `status-output` from the work job. Use `always()`
 on the caller job so the gate still runs when the upstream job fails.
+
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode)._
 
 ```yaml
 test:
@@ -1004,6 +1048,9 @@ for unsigned macOS binaries.
 **Artifact naming:** `{artifact-prefix}-{target}` per matrix leg. Each artifact
 contains `{package}-{version}-{target}.tar.gz` or `.zip` with the binary at the
 archive root (`cargo-binstall` compatible) plus a `SHA256SUMS` manifest.
+
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode)._
 
 ```yaml
 release:
@@ -1574,6 +1621,9 @@ issue #480). The Grype gate fails the job when findings meet or exceed that
 threshold. Callers that need the previous advisory-only posture must pass
 `fail-on-severity: ""` (or `none`):
 
+_Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](#permissions-by-mode)._
+
 ```yaml
 sbom:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-sbom.yml@<sha>
@@ -1730,7 +1780,7 @@ Canonical examples:
 
 ```yaml
 uses: actions/checkout@a5ac7e51b41094c92402da3b24376905380afc29 # v4
-tooling-ref: "d32388495d571a0ee13383bacc732765bf4e9e7d"  # v0.74.6
+tooling-ref: "31750ecad528ca9312bfe169dd33325b18f6c637" # v0.75.3
 ```
 
 Template expressions (for example `${{ inputs.tooling-ref }}`) are ignored.
@@ -1890,6 +1940,9 @@ in the composite subpath are percent-encoded (`%2F`):
 jobs:
   dependency-review:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-dependency-review.yml@<sha> # vX.Y.Z
+    permissions:
+      contents: read
+      pull-requests: read
     with:
       allow-dependencies-licenses: >-
         pkg:githubactions/lgtm-hq/lgtm-ci%2F.github%2Factions%2Fharden-runner,
@@ -2164,12 +2217,13 @@ read its own target without a per-repo wrapper.
 Legacy Node callers pass **exactly one** of `node-version` (single) or
 `node-version-matrix` (JSON array such as `'["20","22"]'`); both are rejected
 alongside `matrix`, which is the general form every non-Node caller uses. Matrix
-legs keep a static inner `name: ${{ inputs.job-name }}` so GitHub appends the
-matrix suffix. For a legacy Node caller that suffix is the node version, so
-required-check contexts look like `{caller_job_id} / {job-name} ({node-version})`
-(for example `build / 🏗️ Build & Quality Checks (20)`) — unchanged by #760. An
-arbitrary `matrix` gets the fields it declares instead (`(x86_64-apple-darwin,
-stable)`), plus the injected `runner` when `runner-map` is non-empty. Plan org
+legs keep a static inner `name: ${{ inputs.job-name }}`, so every leg reports
+under the **same** check-run name, `{caller_job_id} / {job-name}` (for example
+`build / 🏗️ Build & Quality Checks`, one check run per leg). There is no
+`({node-version})` or `(x86_64-apple-darwin, stable)` suffix: GitHub appends
+matrix values only to jobs without an explicit `name:` (#623). What a ruleset
+sees and how to require it is in
+[Matrix legs and check-run names](#matrix-legs-and-check-run-names). Plan org
 ruleset updates in lockstep with consumer migration.
 
 Single-version uploads use `artifact-name` verbatim. Matrix mode appends the
@@ -2272,10 +2326,36 @@ Instead, drop the `paths:` filter, always run the workflow (including on
 
 1. A `changes` job runs `lgtm-hq/lgtm-ci/.github/actions/detect-changes`
    (checkout with `fetch-depth: 0` first) and exposes its `changes` output.
+   The job must grant `contents: read` **and** `pull-requests: read`:
+   `dorny/paths-filter` reads the PR files API on `pull_request` events even
+   with full history, and fails with `Resource not accessible by integration`
+   on a job that has only `contents: read` (#669).
 2. Downstream jobs keep their **static job name** (the required check's
    identity) and gate their steps on
    `fromJSON(needs.changes.outputs.changes).<filter>`, running a cheap
    "skipped" step (~seconds) when the filter didn't match.
+
+Minimal `changes` job:
+
+```yaml
+changes:
+  runs-on: ubuntu-24.04
+  permissions:
+    contents: read
+    pull-requests: read # dorny/paths-filter reads the PR files API (#669)
+  outputs:
+    changes: ${{ steps.detect.outputs.changes }}
+  steps:
+    - uses: actions/checkout@<sha> # vX.Y.Z
+      with:
+        fetch-depth: 0
+    - uses: lgtm-hq/lgtm-ci/.github/actions/detect-changes@<sha> # vX.Y.Z
+      id: detect
+      with:
+        filters: |
+          docs:
+            - 'docs/**'
+```
 
 `detect-changes` is a thin SHA-pinned wrapper around `dorny/paths-filter`
 (v4.0.2+), which supports `merge_group` natively. The wrapper resolves the
