@@ -29,7 +29,7 @@ on:
           where builder is native (cargo), cross, or xwin (cargo-xwin, MSVC
           targets only); the legacy cross:true key still selects cross.
           cross with an *-msvc target is rejected before the build (#1076).
-          Defaults to Linux musl (native) + aarch64 gnu (cross) + Windows.
+          Defaults to Linux musl (native) + aarch64 gnu (cross) + Windows MSVC (xwin).
         required: false
         type: string
         default: ""
@@ -254,9 +254,9 @@ jobs:
             fromJson(
               inputs.targets != '' && inputs.targets ||
               '[
-                {"target":"x86_64-unknown-linux-musl","cross":false,"archive":"tar.gz"},
-                {"target":"aarch64-unknown-linux-gnu","cross":true,"archive":"tar.gz"},
-                {"target":"x86_64-pc-windows-msvc","cross":true,"archive":"zip"}
+                {"target":"x86_64-unknown-linux-musl","builder":"native","archive":"tar.gz"},
+                {"target":"aarch64-unknown-linux-gnu","builder":"cross","archive":"tar.gz"},
+                {"target":"x86_64-pc-windows-msvc","builder":"xwin","archive":"zip"}
               ]'
             )
           }}

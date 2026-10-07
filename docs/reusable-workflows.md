@@ -878,6 +878,23 @@ jobs:
 See [workflow-contract.md](workflow-contract.md#rust-release-contract) for artifact
 naming, default target matrix, and runner policy tiers.
 
+Each `targets` entry names its builder (`native`, `cross`, or `xwin`); the
+default Windows leg is `x86_64-pc-windows-msvc` built with a digest-verified
+`cargo-xwin` on Linux, and `cross` with an MSVC target is rejected before the
+build. A caller that wants a MinGW artifact instead overrides the matrix:
+
+```yaml
+    with:
+      packages: "my-cli"
+      targets: >-
+        [{"target":"x86_64-unknown-linux-musl","builder":"native","archive":"tar.gz"},
+         {"target":"x86_64-pc-windows-gnu","builder":"cross","archive":"zip"}]
+```
+
+See
+[Windows targets and runner tiers](workflow-contract.md#windows-targets-and-runner-tiers)
+for the opt-in native Windows tier and the egress hosts the `xwin` leg needs.
+
 **`pages-coverage-upload-on` (v1):** Same gating semantics as the Node reusable
 (see table above). `push-main` is a literal selector meaning push events to
 `refs/heads/main`; it is not a Git ref alias. The `(v1)` suffix denotes the

@@ -1005,10 +1005,48 @@ step (its `if:` gates the platforms the tier supports), then call
 runners under block mode. `reusable-publish-rust-release.yml` orchestrates
 tag verification → binary build → GitHub release.
 
-**Default target matrix (v1):** `x86_64-unknown-linux-musl`,
-`aarch64-unknown-linux-gnu` (via `cross`), `x86_64-pc-windows-msvc` (via `cross`).
-Darwin targets are excluded from the default matrix; pass a JSON `targets` override
-for unsigned macOS binaries.
+**Default target matrix (v1):** `x86_64-unknown-linux-musl` (`builder: native`),
+`aarch64-unknown-linux-gnu` (`builder: cross`), `x86_64-pc-windows-msvc`
+(`builder: xwin`). Darwin targets are excluded from the default matrix; pass a
+JSON `targets` override for unsigned macOS binaries.
+
+#### Windows targets and runner tiers
+
+Every `targets` entry names its builder: `{"target": ..., "builder":
+"native|cross|xwin", "archive": ...}`. The legacy `"cross": true` key still
+selects `cross`. `scripts/ci/release/build-rust-binary.sh` validates the pair
+before cargo runs and exits 2 with
+`cross cannot build MSVC targets; use builder=xwin or a native Windows runner`
+for `cross` + `*-msvc`; `xwin` is accepted only for `*-pc-windows-msvc`. The
+previous default paired `x86_64-pc-windows-msvc` with `cross`, which ships no
+MSVC toolchain and never compiled (#1076).
+
+<!-- markdownlint-disable MD013 MD060 -- wide tier table -->
+
+| Tier (strict Linux unless noted) | Target / builder                                   | What it proves                                                                                   |
+| -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
+| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-24.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive, `.exe` executed on `windows-latest` |
+| Alternative, strict              | `x86_64-pc-windows-gnu` / `cross`                  | MinGW binary from the `cross` Docker image; no Microsoft SDK download                            |
+| Opt-in, hardened                 | `x86_64-pc-windows-msvc` / `native` on `windows-latest` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+`xwin` builds run under the `rust-release` preset, which allows `aka.ms:443`
+and `download.visualstudio.microsoft.com:443` for the Windows SDK and CRT
+manifest and payloads. The SDK cache (`~/.cache/cargo-xwin`) is restored from
+the Actions cache keyed on the `cargo-xwin` pin, and the build restricts the
+download to the target's architecture (`XWIN_ARCH` derived from the target
+triple; export it to override). `cargo-xwin` itself is pinned in
+`scripts/ci/versions.env` and installed from a release archive whose sha256 is
+committed there (`scripts/ci/release/install-cargo-xwin.sh`).
+
+The native tier is a deliberate choice, not a fallback: `runner-image` is one
+value for the whole matrix, so a native Windows leg means a separate call with
+`runner-image: windows-latest`, a single-entry `targets` override and
+`egress-policy: block` still requested (the strict tier hard-fails on Windows;
+use `reusable-build-artifact.yml` with its `runner-map` for a hardened native
+leg). Switching the default to native needs an owner decision recorded in the
+PR that makes it.
 
 **Artifact naming:** `{artifact-prefix}-{target}` per matrix leg. Each artifact
 contains `{package}-{version}-{target}.tar.gz` or `.zip` with the binary at the
@@ -1621,8 +1659,9 @@ composite is held to that rule by
 ## Supplier tool pins and digests
 
 Every tool that a script under `scripts/ci` installs (osv-scanner, syft,
-cargo-nextest, cargo-llvm-cov, cross, cargo-binstall, bats-core and its helper
-libraries, kcov, the Claude Code / Codex / Cursor review CLIs, lintro) is
+cargo-nextest, cargo-llvm-cov, cross, cargo-xwin, cargo-binstall, bats-core and
+its helper libraries, kcov, the Claude Code / Codex / Cursor review CLIs,
+lintro) is
 pinned in exactly one place, `scripts/ci/versions.env`, and every direct
 download or clone is verified against a value committed next to that pin
 (#1096). Block-mode egress constrains where bytes come from; the committed
@@ -1632,7 +1671,7 @@ digest decides what they are.
 
 | Tool                             | Pin                                   | Content check at install time                                     |
 | -------------------------------- | ------------------------------------- | ----------------------------------------------------------------- |
-| osv-scanner, syft, cargo-nextest, cargo-llvm-cov, cross, cargo-binstall | `DEFAULT_<TOOL>_VERSION` | release asset sha256 equals `DEFAULT_<TOOL>_SHA256_<PLATFORM>`     |
+| osv-scanner, syft, cargo-nextest, cargo-llvm-cov, cross, cargo-xwin, cargo-binstall | `DEFAULT_<TOOL>_VERSION` | release asset sha256 equals `DEFAULT_<TOOL>_SHA256_<PLATFORM>`     |
 | bats-core, bats-support, bats-assert, bats-file, kcov | `DEFAULT_<TOOL>_VERSION` | clone `HEAD` equals `DEFAULT_<TOOL>_COMMIT`                       |
 | Claude Code, Codex               | `DEFAULT_<TOOL>_VERSION`              | `npm ci` from `scripts/ci/ai-review-cli/<cli>/package-lock.json` (integrity-pinned) |
 | Cursor agent                     | `DEFAULT_CURSOR_AGENT_VERSION`        | tarball sha256 equals `DEFAULT_CURSOR_AGENT_SHA256_<ARCH>`        |
@@ -1659,8 +1698,8 @@ fails closed:
   `CARGO_NEXTEST_VERSION` / `CARGO_LLVM_COV_VERSION` through a caller
   `setup-script` that exports `CARGO_<TOOL>_SHA256_<TARGET>`. Caller `env:`
   does not cross the `workflow_call` boundary, so those are the only routes.
-- Hosts with no committed archive digest (cargo-nextest, cargo-llvm-cov and
-  cross outside the targets listed in `versions.env`) fall back to
+- Hosts with no committed archive digest (cargo-nextest, cargo-llvm-cov,
+  cross and cargo-xwin outside the targets listed in `versions.env`) fall back to
   `cargo install --locked`, where crates.io is the trust root: registry-side
   checksums and the crate's own lockfile. Each such line carries an
   `# unverified-fallback: <reason>` marker so the contract test can see it;
@@ -1674,7 +1713,7 @@ Upstream signatures are checked when a pin is created or refreshed, not on
 every run: `scripts/ci/maintenance/refresh-tool-digests.sh --check` downloads
 every pinned asset, verifies osv-scanner's SLSA provenance with
 `slsa-verifier` and syft's checksum manifest with `cosign`, cross-checks the
-nextest `.sha256` files, resolves every clone tag to its commit, and compares
+nextest and cargo-xwin `.sha256` files, resolves every clone tag to its commit, and compares
 all of it with `versions.env` (`--write` rewrites the values). Both verifiers
 are hard prerequisites of that script; the same `LGTM_CI_ALLOW_UNVERIFIED=1`
 escape downgrades a missing verifier, never a failed verification. The old

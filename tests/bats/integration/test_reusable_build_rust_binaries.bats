@@ -74,3 +74,46 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.yml"
 	run grep -F "cargo install cross --locked --version 0.2.5" "$WORKFLOW"
 	assert_failure
 }
+
+# The default matrix literal, one entry per line.
+_default_matrix() {
+	awk '/^              .\[$/{show=1;next} show&&/^              \]/{exit} show{print}' "$WORKFLOW" | tr -d ' '
+}
+
+@test "reusable-build-rust-binaries: every default matrix entry names a builder" {
+	run _default_matrix
+	assert_success
+	[[ "$(echo "$output" | wc -l | tr -d ' ')" -eq 3 ]]
+	run bash -c "echo '$output' | grep -v '\"builder\":\"'"
+	assert_output ""
+	refute_output --partial '"cross":'
+}
+
+@test "reusable-build-rust-binaries: default matrix never pairs cross with an MSVC target" {
+	run _default_matrix
+	assert_success
+	refute_output --regexp 'windows-msvc[^}]*"builder":"cross"'
+	refute_output --regexp '"builder":"cross"[^}]*windows-msvc'
+	assert_output --partial '{"target":"x86_64-unknown-linux-musl","builder":"native","archive":"tar.gz"}'
+	assert_output --partial '{"target":"aarch64-unknown-linux-gnu","builder":"cross","archive":"tar.gz"}'
+	assert_output --partial '{"target":"x86_64-pc-windows-msvc","builder":"xwin","archive":"zip"}'
+	refute_output --partial 'windows-gnu'
+}
+
+@test "reusable-build-rust-binaries: builder reaches the build script and gates the installers" {
+	run awk '/- name: Build release binaries/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
+	assert_output --partial 'BUILDER: ${{ matrix.builder }}'
+	run awk '/- name: Install cross/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
+	assert_output --partial "if: matrix.builder == 'cross' || (matrix.builder == null && matrix.cross == true)"
+	run awk '/- name: Install cargo-xwin/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
+	assert_output --partial "if: matrix.builder == 'xwin'"
+	assert_output --partial 'scripts/ci/release/install-cargo-xwin.sh'
+	run awk '/- name: Cache the xwin Windows SDK and CRT/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
+	assert_output --partial "if: matrix.builder == 'xwin'"
+	assert_output --partial '~/.cache/cargo-xwin'
+}
+
+@test "reusable-build-rust-binaries: xwin legs get llvm-tools from setup-rust" {
+	run awk '/- name: Setup Rust/{show=1;next} show&&/- name:/{exit} show{print}' "$WORKFLOW"
+	assert_output --partial 'components: ${{ matrix.builder == '"'"'xwin'"'"' && '"'"'llvm-tools'"'"' || '"'"''"'"' }}'
+}
