@@ -71,3 +71,8 @@ jobs:
       runner-image: ubuntu-24.04
       egress-policy: block
       egress-preset: pypi
+      # Dependencies install with `uv sync --frozen` from the committed
+      # uv.lock (#1021). Only if a group you install pulls a PRIVATE git
+      # dependency, forward a token explicitly (never `secrets: inherit`):
+      #   secrets:
+      #     GIT_DEPS_TOKEN: ${{ secrets.PRIVATE_DEPS_TOKEN }}

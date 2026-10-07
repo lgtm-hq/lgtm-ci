@@ -54,6 +54,22 @@ on:
         required: false
         type: string
         default: ""
+      git-deps-host:
+        description: >-
+          Host the optional GIT_DEPS_TOKEN secret authenticates against for
+          private git dependencies (#1021). Only this host's https:// URLs are
+          rewritten; the host must also be reachable under the job's egress
+          allowlist (github.com is in the pypi preset).
+        required: false
+        type: string
+        default: "github.com"
+      git-deps-username:
+        description: >-
+          Username paired with GIT_DEPS_TOKEN in the rewritten URL. GitHub App
+          installation tokens and fine-grained PATs use x-access-token.
+        required: false
+        type: string
+        default: "x-access-token"
       working-directory:
         description: "Working directory for running tests"
         required: false
@@ -149,6 +165,15 @@ on:
         required: false
         type: number
         default: 60
+    secrets:
+      GIT_DEPS_TOKEN:
+        description: >-
+          Optional token for private git dependencies (#1021). When set, a
+          host-scoped `url.<https://user:token@host/>.insteadOf` rewrite is
+          configured for `git-deps-host` immediately before `uv sync --frozen`
+          and removed right after. Pass it explicitly; this workflow never
+          uses `secrets: inherit`.
+        required: false
 
     outputs:
       tests-passed:
@@ -395,6 +420,10 @@ jobs:
     needs: prepare
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    env:
+      # The secrets context is not available in a step `if`; the opt-in
+      # private-dependency auth steps (#1021) gate on this job-level flag.
+      GIT_DEPS_TOKEN_PRESENT: ${{ secrets.GIT_DEPS_TOKEN != '' }}
     if: >-
       !inputs.pipeline-skip &&
       (
@@ -492,6 +521,18 @@ jobs:
           restore-keys: |
             uv-${{ runner.os }}-${{ matrix.python-version }}-
             uv-${{ runner.os }}-
+      - name: Configure git auth for private dependencies
+        # Opt-in (#1021): runs only when the caller passed GIT_DEPS_TOKEN.
+        # Host-scoped insteadOf rewrite so uv's git fetches of locked private
+        # sources authenticate; removed again right after the install step.
+        if: env.GIT_DEPS_TOKEN_PRESENT == 'true'
+        shell: bash
+        env:
+          STEP: configure
+          GIT_DEPS_TOKEN: ${{ secrets.GIT_DEPS_TOKEN }}
+          GIT_DEPS_HOST: ${{ inputs.git-deps-host }}
+          GIT_DEPS_USERNAME: ${{ inputs.git-deps-username }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/configure-git-deps-auth.sh"
       - name: Install dependencies
         shell: bash
         working-directory: ${{ inputs.working-directory }}
@@ -499,6 +540,13 @@ jobs:
           STEP: deps
           EXTRAS: ${{ inputs.extras }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/setup-python.sh"
+      - name: Remove git auth for private dependencies
+        if: always() && env.GIT_DEPS_TOKEN_PRESENT == 'true'
+        shell: bash
+        env:
+          STEP: cleanup
+          GIT_DEPS_HOST: ${{ inputs.git-deps-host }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/configure-git-deps-auth.sh"
       - name: Setup pytest
         shell: bash
         env:

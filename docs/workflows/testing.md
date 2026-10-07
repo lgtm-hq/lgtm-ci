@@ -41,7 +41,14 @@ default 'json'), `coverage-threshold` (default 0), `upload-coverage`
 (default false), `artifact-prefix` (default 'python'; artifacts upload as
 `<artifact-prefix>-coverage` and `<artifact-prefix>-results-<version>`, so a
 caller running this workflow twice in one run gives each call its own prefix —
-see [Calling a language test reusable twice in one run](../reusable-workflows.md#calling-a-language-test-reusable-twice-in-one-run-1091)).
+see [Calling a language test reusable twice in one run](../reusable-workflows.md#calling-a-language-test-reusable-twice-in-one-run-1091)),
+`extras`, `git-deps-host` (default 'github.com'), `git-deps-username`
+(default 'x-access-token').
+
+**Secrets:** `GIT_DEPS_TOKEN` (optional) — only for private git dependencies
+in the groups being installed. Dependencies install with `uv sync --frozen`,
+so commit a current `uv.lock`; see
+[Frozen installs and private git dependencies](../workflow-contract.md#frozen-installs-and-private-git-dependencies-1021).
 
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.

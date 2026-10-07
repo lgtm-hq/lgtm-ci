@@ -13,7 +13,6 @@ actions/run-validate-script.sh
 actions/setup-env.sh
 actions/setup-node.sh
 actions/setup-package-manager.sh
-actions/setup-python.sh
 actions/setup-ruby.sh
 quality/lint-check.sh
 testing/rust/build-workspace.sh

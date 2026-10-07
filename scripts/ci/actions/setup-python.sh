@@ -5,6 +5,20 @@
 # Required environment variables:
 #   STEP - Which step to run: uv-version, python-install, python-version, or deps
 #   PYTHON_VERSION - Python version to install (required for python-install step)
+#
+# Optional environment variables (deps step):
+#   EXTRAS - Comma-separated uv extras to install (e.g. "dev,full")
+#
+# The deps step always installs with `uv sync --frozen` (#1021). A plain
+# `uv sync` validates the lockfile against pyproject.toml first and, when it
+# finds the lock out of date (a version bump that skipped `uv lock`, for
+# example), re-resolves the whole project. That re-resolution fetches EVERY
+# locked git source, including dependency groups the job never installs, and
+# on a cold uv cache a private host without credentials fails the job with
+# "could not read Username for 'https://github.com'". `--frozen` installs the
+# committed lockfile verbatim, so only the groups being installed are ever
+# fetched. Keeping the lockfile current is the consumer's job (`uv lock
+# --check` in its own CI).
 
 set -euo pipefail
 
@@ -32,7 +46,14 @@ python-version)
 deps)
 	: "${EXTRAS:=}"
 	if [[ -f "pyproject.toml" ]] || [[ -f "uv.lock" ]]; then
-		echo "Installing dependencies with uv sync..."
+		if [[ ! -f "uv.lock" ]]; then
+			# No committed lockfile: resolve once so --frozen has something
+			# to install from. This is the only path that resolves in CI;
+			# commit uv.lock to make installs reproducible and offline-safe.
+			echo "::warning title=uv.lock missing::No uv.lock found; resolving dependencies in CI. Commit uv.lock for frozen installs."
+			uv lock
+		fi
+		echo "Installing dependencies with uv sync --frozen..."
 		if [[ -n "$EXTRAS" ]]; then
 			# Convert comma-separated extras to multiple --extra flags
 			UV_ARGS=()
@@ -44,9 +65,9 @@ deps)
 					UV_ARGS+=("--extra" "$trimmed")
 				fi
 			done
-			uv sync "${UV_ARGS[@]}"
+			uv sync --frozen "${UV_ARGS[@]}"
 		else
-			uv sync
+			uv sync --frozen
 		fi
 	elif [[ -f "requirements.txt" ]]; then
 		echo "Installing from requirements.txt..."
