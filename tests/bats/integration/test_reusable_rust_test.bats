@@ -108,7 +108,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 		in_job && /EXPECTED_COUNT: \$\{\{ needs\.prepare\.outputs\.matrix-count \}\}/ { count = 1 }
 		in_job && /MATRIX_KEY: rust-toolchain$/ { key = 1 }
 		in_job && /DOWNLOAD_DIR: rust-results$/ { dir = 1 }
-		in_job && /\x27rust-results-\*\x27/ { pattern = 1 }
+		in_job && /"\$\{ARTIFACT_PREFIX\}-results-\*"/ { pattern = 1 }
 		in_job && /actions\/download-artifact@/ { dl = 1 }
 		in_job && /^ *actions: read$/ { scope = 1 }
 		END { exit !(wait && agg && wait < agg && token && count && key && dir && pattern && scope && !dl) }

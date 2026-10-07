@@ -51,25 +51,31 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	assert_success
 }
 
-@test "reusable-test-shell: shard artifact names include comment-marker" {
-	run grep -F 'name: shell-test-results-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}' "$WORKFLOW"
+# Since #1091 artifact-prefix replaces the language word (default `shell`, so
+# the names a single call produces are unchanged); comment-marker stays as the
+# per-leg suffix of the sharded names.
+@test "reusable-test-shell: shard artifact names include artifact-prefix and comment-marker" {
+	run grep -F 'name: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}' "$WORKFLOW"
 	assert_success
-	run grep -F 'name: shell-coverage-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}' "$WORKFLOW"
+	run grep -F 'name: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}' "$WORKFLOW"
 	assert_success
-	run grep -F 'pattern: shell-test-results-${{ inputs.comment-marker }}-shard-*' "$WORKFLOW"
+	run grep -F 'pattern: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-*' "$WORKFLOW"
 	assert_success
-	run grep -F 'pattern: shell-coverage-${{ inputs.comment-marker }}-shard-*' "$WORKFLOW"
+	run grep -F 'pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*' "$WORKFLOW"
 	assert_success
-	# Default single-job path keeps unsuffixed names.
-	run grep -E '^          name: shell-test-results$' "$WORKFLOW"
+	# Default single-job path keeps unsuffixed (prefix-only) names.
+	run grep -F '          name: ${{ inputs.artifact-prefix }}-test-results' "$WORKFLOW"
 	assert_success
 	run awk '
 		/^  test:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
-		in_job && $0 == "          name: shell-coverage" { found = 1 }
+		in_job && $0 == "          name: ${{ inputs.artifact-prefix }}-coverage" { found = 1 }
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
+	# No flat language-word name survives anywhere in the file.
+	run grep -E 'name: shell-(test-results|coverage)' "$WORKFLOW"
+	assert_failure
 }
 
 @test "reusable-test-shell: publish-test-summary needs test and aggregate" {
@@ -96,7 +102,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	assert_success
 }
 
-@test "reusable-test-shell: aggregate uploads merged coverage as shell-coverage" {
+@test "reusable-test-shell: aggregate uploads merged coverage as <artifact-prefix>-coverage" {
 	run awk '
 		/^  aggregate:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  aggregate:/ { in_job = 0 }
@@ -104,7 +110,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 		in_job && in_step && /^      - name:/ && !/^      - name: Upload merged coverage report/ {
 			in_step = 0
 		}
-		in_step && /name: shell-coverage$/ { found = 1 }
+		in_step && /name: \$\{\{ inputs\.artifact-prefix \}\}-coverage$/ { found = 1 }
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
