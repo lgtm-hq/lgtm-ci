@@ -6,12 +6,28 @@ Reads lintro JSON output (from --output-format json) and extracts the
 osv_scanner result to produce a markdown PR comment body with a
 vulnerability table and suppression status table.
 
+Suppression status comes from the per-tool ``metadata.suppressions`` list that
+lintro's osv-scanner plugin attaches after its probe scan (``id``,
+``ignore_until``, ``reason``, ``status``). lintro omits the ``metadata`` key
+entirely when the probe did not run, which is the normal case for a repository
+without probe-eligible ``.osv-scanner.toml`` entries (every entry needs a
+string ``id`` and a date ``ignoreUntil``). When the key is missing but the TOML
+declares probe-eligible entries, the probe was skipped, disabled, or timed out,
+and this script fails instead of presenting static TOML entries as status.
+
+Compatibility shim: py-lintro < 0.95.0 emitted the same payload under
+``ai_metadata`` (dual-emitted with ``metadata`` from 0.94.x; removed in 0.95.0
+by lgtm-hq/py-lintro#1831 / #1863). The legacy key is still read, with a
+deprecation warning on stderr. Remove the shim once no supported caller pins a
+``lintro-image`` older than 0.95.0; ``LEGACY_PROBE_METADATA_KEY`` is the only
+place that needs to go (lgtm-hq/lgtm-ci#825).
+
 Usage:
     python3 scripts/ci/security/format-security-comment.py osv-results.json
 
 Exit codes:
     0 - Success (markdown printed to stdout)
-    1 - Invalid arguments or missing file
+    1 - Invalid arguments, missing file, or suppression status unavailable
 """
 
 # pylint: disable=invalid-name  # CLI script; hyphenated filename is the invocation contract
@@ -29,6 +45,13 @@ try:
 except ImportError:  # stdlib on Python >= 3.11; fallback omits TOML suppressions
     tomllib = None  # type: ignore[assignment]
 
+#: Per-tool key lintro >= 0.94 attaches probe classifications under.
+PROBE_METADATA_KEY = "metadata"
+#: Pre-0.95.0 alias of ``PROBE_METADATA_KEY``; see the module docstring.
+LEGACY_PROBE_METADATA_KEY = "ai_metadata"
+#: List key inside the probe metadata object.
+SUPPRESSIONS_KEY = "suppressions"
+
 
 def _escape_md_cell(value: str) -> str:
     """Escape a string for safe use inside a Markdown table cell."""
@@ -37,7 +60,13 @@ def _escape_md_cell(value: str) -> str:
 
 
 def _read_suppressions_from_toml() -> list[dict[str, object]]:
-    """Read suppression entries from .osv-scanner.toml as a fallback."""
+    """Read suppression entries from .osv-scanner.toml.
+
+    Returns:
+        Entries with a non-empty string ``id`` whose ``ignoreUntil`` is either
+        absent or a date. Returns an empty list when the file is missing,
+        unreadable, or ``tomllib`` is unavailable.
+    """
     if tomllib is None:
         return []
 
@@ -63,6 +92,22 @@ def _read_suppressions_from_toml() -> list[dict[str, object]]:
     except (tomllib.TOMLDecodeError, OSError) as e:
         print(f"Warning: failed to parse {toml_path}: {e}", file=sys.stderr)
         return []
+
+
+def _probe_eligible(entries: list[dict[str, object]]) -> list[dict[str, object]]:
+    """Return the TOML entries lintro's probe classifies.
+
+    Mirrors lintro's ``parse_suppressions``: an entry takes part in the probe
+    only when its ``ignoreUntil`` is a date, so entries without one never
+    produce probe metadata.
+
+    Args:
+        entries: Entries returned by :func:`_read_suppressions_from_toml`.
+
+    Returns:
+        The subset carrying a date ``ignoreUntil``.
+    """
+    return [entry for entry in entries if isinstance(entry.get("ignoreUntil"), date)]
 
 
 def _fence_code_block(text: str) -> str:
@@ -134,23 +179,54 @@ def _osv_scanner_result(results: list[Any]) -> dict[str, Any] | None:
     return None
 
 
-def _ai_meta_suppressions(osv_result: dict[str, Any]) -> list[dict[str, Any]] | None:
-    """Extract classified suppressions from a result's AI metadata.
+def _suppressions_under(
+    osv_result: dict[str, Any],
+    key: str,
+) -> list[dict[str, Any]] | None:
+    """Return ``<key>.suppressions`` from a result when it is a list.
+
+    Args:
+        osv_result: The ``osv_scanner`` result object.
+        key: Top-level result key holding the probe metadata object.
+
+    Returns:
+        The suppression list, or ``None`` when the key is absent, not an
+        object, or its ``suppressions`` value is not a list.
+    """
+    meta = osv_result.get(key)
+    if not isinstance(meta, dict):
+        return None
+    suppressions = meta.get(SUPPRESSIONS_KEY)
+    return suppressions if isinstance(suppressions, list) else None
+
+
+def _probe_suppressions(osv_result: dict[str, Any]) -> list[dict[str, Any]] | None:
+    """Extract classified suppressions from a result's probe metadata.
+
+    Reads ``metadata.suppressions`` first. Falls back to the legacy
+    ``ai_metadata.suppressions`` key (py-lintro < 0.95.0) with a deprecation
+    warning on stderr; see the module docstring for the removal note.
 
     Args:
         osv_result: The ``osv_scanner`` result object.
 
     Returns:
-        The suppression entry list when ``ai_metadata.suppressions`` is
-        present and well-formed, else ``None``.
+        The suppression entry list when either key carries one, else
+        ``None`` (the probe produced no classifications).
     """
-    ai_meta = osv_result.get("ai_metadata")
-    if not isinstance(ai_meta, dict):
-        return None
-    suppressions = ai_meta.get("suppressions")
-    if isinstance(suppressions, list):
+    suppressions = _suppressions_under(osv_result=osv_result, key=PROBE_METADATA_KEY)
+    if suppressions is not None:
         return suppressions
-    return None
+    legacy = _suppressions_under(osv_result=osv_result, key=LEGACY_PROBE_METADATA_KEY)
+    if legacy is not None:
+        print(
+            f"Warning: read suppression status from the legacy "
+            f"'{LEGACY_PROBE_METADATA_KEY}' key; py-lintro >= 0.95.0 emits "
+            f"'{PROBE_METADATA_KEY}' instead. Bump lintro-image — this "
+            "compatibility shim will be removed (lgtm-hq/lgtm-ci#825).",
+            file=sys.stderr,
+        )
+    return legacy
 
 
 def _add_issue_table(
@@ -216,7 +292,7 @@ def _add_probe_suppression_table(
     sections: list[str],
     probe_suppressions: list[dict[str, Any]],
 ) -> None:
-    """Append the classified suppression table from probe AI metadata.
+    """Append the classified suppression table from probe metadata.
 
     Args:
         sections: Section list to append to.
@@ -246,45 +322,96 @@ def _add_probe_suppression_table(
         sections.append(row)
 
 
-def _add_toml_suppression_table(sections: list[str]) -> None:
-    """Append the suppression table read from .osv-scanner.toml.
+def _add_toml_suppression_table(
+    sections: list[str],
+    toml_suppressions: list[dict[str, object]],
+) -> None:
+    """Append the unclassified suppression table read from .osv-scanner.toml.
+
+    Only reached for entries lintro's probe cannot classify (no ``ignoreUntil``
+    date), so the table is labelled as static rather than as probe status.
 
     Args:
         sections: Section list to append to.
+        toml_suppressions: Entries from :func:`_read_suppressions_from_toml`.
     """
-    toml_suppressions = _read_suppressions_from_toml()
-    if toml_suppressions:
-        sections.append("| ID | Expires | Reason |")
-        sections.append("|----|---------|--------|")
-        for suppression in toml_suppressions:
-            sid = _escape_md_cell(str(suppression.get("id", "?")))
-            expires = _escape_md_cell(str(suppression.get("ignoreUntil", "?")))
-            reason = _escape_md_cell(str(suppression.get("reason", "")))
-            sections.append(f"| `{sid}` | {expires} | {reason} |")
-    else:
-        sections.append("No suppressions configured.")
+    sections.append(
+        "_Status unavailable: these entries carry no `ignoreUntil` date, so "
+        "lintro's probe does not classify them. Listing `.osv-scanner.toml` "
+        "as written._",
+    )
+    sections.append("")
+    sections.append("| ID | Expires | Reason |")
+    sections.append("|----|---------|--------|")
+    for suppression in toml_suppressions:
+        sid = _escape_md_cell(str(suppression.get("id", "?")))
+        expires = _escape_md_cell(str(suppression.get("ignoreUntil", "?")))
+        reason = _escape_md_cell(str(suppression.get("reason", "")))
+        sections.append(f"| `{sid}` | {expires} | {reason} |")
+
+
+def _report_probe_metadata_missing(eligible: list[dict[str, object]]) -> None:
+    """Print the diagnostic for a probe that should have run but left no data.
+
+    Args:
+        eligible: Probe-eligible TOML entries the result failed to classify.
+    """
+    ids = ", ".join(str(entry.get("id")) for entry in eligible)
+    print(
+        "Suppression status unavailable: the osv_scanner result carries "
+        f"neither '{PROBE_METADATA_KEY}.{SUPPRESSIONS_KEY}' nor the legacy "
+        f"'{LEGACY_PROBE_METADATA_KEY}.{SUPPRESSIONS_KEY}', but "
+        f".osv-scanner.toml declares {len(eligible)} probe-eligible "
+        f"suppression(s): {ids}. lintro's probe scan was skipped, disabled "
+        "(check_suppressions=false), or timed out; refusing to report static "
+        "TOML entries as suppression status.",
+        file=sys.stderr,
+    )
 
 
 def _add_suppression_sections(
     sections: list[str],
     probe_suppressions: list[dict[str, Any]] | None,
-) -> None:
+) -> bool:
     """Append the suppressed-vulnerabilities section.
 
     Args:
         sections: Section list to append to.
-        probe_suppressions: Classified suppressions from the probe's AI
-            metadata, or ``None`` to fall back to .osv-scanner.toml.
+        probe_suppressions: Classified suppressions from the probe metadata,
+            or ``None`` when the result carried none.
+
+    Returns:
+        ``False`` when the probe metadata is missing although the TOML
+        declares probe-eligible entries (diagnostic printed to stderr),
+        else ``True``.
     """
     sections.append("### 🔇 Suppressed Vulnerabilities:")
     if probe_suppressions is not None:
         _add_probe_suppression_table(sections, probe_suppressions)
-        return
-    _add_toml_suppression_table(sections)
+        return True
+
+    toml_suppressions = _read_suppressions_from_toml()
+    eligible = _probe_eligible(toml_suppressions)
+    if eligible:
+        _report_probe_metadata_missing(eligible)
+        return False
+    if toml_suppressions:
+        _add_toml_suppression_table(sections, toml_suppressions)
+    else:
+        sections.append("No suppressions configured.")
+    return True
 
 
 def format_comment(json_path: str) -> str | None:
-    """Format osv-scanner JSON results as markdown."""
+    """Format osv-scanner JSON results as markdown.
+
+    Args:
+        json_path: Path to the lintro JSON output file.
+
+    Returns:
+        The markdown comment body, or ``None`` when the report is unusable
+        or suppression status is unavailable (diagnostic on stderr).
+    """
     results = _load_lintro_results(json_path)
     if results is None:
         return None
@@ -302,7 +429,8 @@ def format_comment(json_path: str) -> str | None:
 
     _add_vulnerability_sections(sections, osv_result)
     sections.append("")
-    _add_suppression_sections(sections, _ai_meta_suppressions(osv_result))
+    if not _add_suppression_sections(sections, _probe_suppressions(osv_result)):
+        return None
     return "\n".join(sections)
 
 

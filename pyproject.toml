@@ -37,6 +37,12 @@ dev = [
   "bandit>=1.9.4",
   "mypy>=1.19.1",
 ]
+# pytest suite for the standalone scripts under scripts/ci (tests/python).
+test = ["pytest>=8.4.0", "assertpy>=1.1"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests/python"]
+addopts = "-ra"
 
 [tool.lintro]
 config_file = ".lintro-config.yaml"

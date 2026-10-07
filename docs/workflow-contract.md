@@ -1788,6 +1788,15 @@ reusable itself requires only `contents: read` and `packages: read`.
 
 Outputs: `exit-code`, `has-vulns`, `audit-failed`, `status`.
 
+Suppression status in the comment comes from the per-tool `metadata.suppressions`
+list lintro attaches after its probe scan (py-lintro >= 0.94; the pre-0.95.0
+`ai_metadata` alias is still read with a deprecation warning and will be removed,
+see #825). lintro omits the key when the probe did not run. If the key is missing
+while `.osv-scanner.toml` declares entries with an `ignoreUntil` date, the
+formatter exits non-zero (`status=failed`, "FORMAT FAILED") instead of listing
+static TOML entries as status; entries without `ignoreUntil` are listed and
+labelled as unclassified.
+
 ## Vulnerability suppression check (osv-scanner)
 
 `reusable-vuln-suppression-check.yml` centralizes the weekly stale/expired OSV

@@ -1,0 +1,31 @@
+{
+  "results": [
+    {
+      "tool": "osv_scanner",
+      "issues_count": 0,
+      "success": true,
+      "ai_metadata": {
+        "suppressions": [
+          {
+            "id": "GHSA-active-1111",
+            "ignore_until": "2099-12-31",
+            "reason": "still present",
+            "status": "active"
+          },
+          {
+            "id": "GHSA-stale-2222",
+            "ignore_until": "2099-12-31",
+            "reason": "resolved upstream",
+            "status": "stale"
+          },
+          {
+            "id": "GHSA-expired-3333",
+            "ignore_until": "2020-01-01",
+            "reason": "past due",
+            "status": "expired"
+          }
+        ]
+      }
+    }
+  ]
+}

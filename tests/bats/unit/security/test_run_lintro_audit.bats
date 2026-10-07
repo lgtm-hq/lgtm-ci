@@ -58,7 +58,7 @@ if [[ "${1:-}" == "run" ]]; then
       "tool": "osv_scanner",
       "issues_count": 0,
       "success": true,
-      "ai_metadata": {
+      "metadata": {
         "suppressions": []
       }
     }
