@@ -377,16 +377,18 @@ jobs:
 The Node variants keep `coverage-artifact-name` as an escape hatch for a name
 outside the scheme; empty (the default) resolves to `<artifact-prefix>-coverage`
 at both the upload and the summary publisher, so an explicitly empty value no
-longer suppresses the rich coverage comment (use `rich-coverage-comment: false`
-or `coverage: false` for that). Two calls that both keep the default prefix
+longer suppresses the rich coverage comment (use `coverage: false` for that).
+Two calls that both keep the default prefix
 still share names: isolation is only as good as the prefixes the caller
 passes. `pages-coverage-artifact-name`
 is not derived from the prefix (its default is a published Pages contract, see
 above) and stays a per-call input of its own.
 
 `reusable-test-python-publish.yml` and `reusable-test-node-publish.yml` are
-consumers of these artifacts in a separate caller job (they download
-`<artifact-prefix>-coverage` and `<artifact-prefix>-coverage-*`). They take
+consumers of these artifacts in a separate caller job
+(`reusable-test-python-publish.yml` downloads `<artifact-prefix>-coverage`;
+`reusable-test-node-publish.yml` downloads `<artifact-prefix>-coverage-*`). They
+take
 the same `artifact-prefix` input with the same defaults; a caller that sets it
 on the test call must pass the same value to the matching publish call.
 

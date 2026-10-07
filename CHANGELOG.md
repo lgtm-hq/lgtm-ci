@@ -54,8 +54,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   remains on every upload, but only as a rerun safeguard for the same call.
   `coverage-artifact-name` on the Node variants now defaults to empty, which
   resolves to `<artifact-prefix>-coverage`, so an explicitly empty value no
-  longer suppresses the rich coverage comment (use `rich-coverage-comment`
-  or `coverage: false`); `reusable-test-node-custom.yml`'s
+  longer suppresses the rich coverage comment (use `coverage: false`);
+  `reusable-test-node-custom.yml`'s
   default coverage payload is therefore `node_custom-coverage` (was
   `node-custom-coverage`, `-` being the reserved separator) (#1091).
 
