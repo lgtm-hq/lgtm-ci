@@ -75,19 +75,162 @@ _run_build() {
 	assert_success
 	assert_output --partial "Tag version matches pyproject.toml"
 	assert_output --partial "Tag commit is on main"
+	# Full history: origin/main exists, so no fetch is attempted (#1031).
+	refute_output --partial "fetching refs/heads/main"
 }
 
-@test "python-dist preflight: fails clearly when the default branch ref is unavailable" {
+# Mimic a default actions/checkout on a tag event: a fresh repository with the
+# remote configured, only the tag fetched at depth 1, nothing under
+# refs/remotes/origin/. The result is shallow and has no origin/<default>
+# ref (second argument, default main).
+_shallow_checkout_of_tag() {
+	local tag="$1"
+	local default_branch="${2:-main}"
+	local dir="${BATS_TEST_TMPDIR}/shallow"
+	mkdir -p "$dir"
+	cd "$dir" || return 1
+	git init -q
+	git remote add origin "$ORIGIN"
+	git fetch -q --no-tags --depth=1 origin "+refs/tags/${tag}:refs/tags/${tag}"
+	git checkout -q --detach "$tag"
+	[[ "$(git rev-parse --is-shallow-repository)" == "true" ]]
+	! git show-ref --verify --quiet "refs/remotes/origin/${default_branch}"
+}
+
+@test "python-dist preflight: shallow checkout without origin/main fetches the default branch and passes" {
+	_init_repo_on_main "1.2.3"
+	# An extra tag on the remote that the preflight fetch must leave behind.
+	git tag -m "other release" v0.0.1
+	git push -q origin v0.0.1
+	_shallow_checkout_of_tag "v1.2.3"
+	export GITHUB_REF_NAME="v1.2.3"
+	export GITHUB_REF="refs/tags/v1.2.3"
+
+	_run_preflight true true
+
+	assert_success
+	assert_output --partial "refs/remotes/origin/main is missing (shallow checkout); fetching refs/heads/main from origin"
+	assert_output --partial "Tag commit is on main"
+	# The fetch brought only the default branch: no tags, still shallow.
+	run git show-ref --verify --quiet refs/remotes/origin/main
+	assert_success
+	run git show-ref --verify --quiet refs/tags/v0.0.1
+	assert_failure
+	run git rev-parse --is-shallow-repository
+	assert_output "true"
+}
+
+@test "python-dist preflight: shallow checkout with a default-branch missing on the remote points at default-branch" {
+	_init_repo_on_main "1.2.3"
+	_shallow_checkout_of_tag "v1.2.3"
+	export GITHUB_REF_NAME="v1.2.3"
+	export GITHUB_REF="refs/tags/v1.2.3"
+
+	run env \
+		STEP=preflight \
+		WORKING_DIRECTORY=. \
+		VERIFY_TAG_VERSION=false \
+		ENSURE_TAG_ON_DEFAULT_BRANCH=true \
+		DEFAULT_BRANCH=nope \
+		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+		GITHUB_REF="$GITHUB_REF" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_failure
+	assert_output --partial "Could not fetch refs/heads/nope from origin"
+	assert_output --partial "set default-branch"
+}
+
+@test "python-dist preflight: rejects a default-branch that is not a valid branch name" {
 	_init_repo_on_main "1.2.3"
 	export GITHUB_REF_NAME="v1.2.3"
 	export GITHUB_REF="refs/tags/v1.2.3"
-	git update-ref -d refs/remotes/origin/main
+
+	run env \
+		STEP=preflight \
+		WORKING_DIRECTORY=. \
+		VERIFY_TAG_VERSION=false \
+		ENSURE_TAG_ON_DEFAULT_BRANCH=true \
+		DEFAULT_BRANCH='*' \
+		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+		GITHUB_REF="$GITHUB_REF" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_failure
+	assert_output --partial "Invalid default-branch: *"
+
+	run env \
+		STEP=preflight \
+		WORKING_DIRECTORY=. \
+		VERIFY_TAG_VERSION=false \
+		ENSURE_TAG_ON_DEFAULT_BRANCH=true \
+		DEFAULT_BRANCH='@{upstream}' \
+		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+		GITHUB_REF="$GITHUB_REF" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_failure
+	assert_output --partial "Invalid default-branch: @{upstream}"
+}
+
+@test "python-dist preflight: shallow checkout passes when the default branch has advanced past the tag" {
+	_init_repo_on_main "1.2.3"
+	# A commit after the tag, so origin/main's tip is not the tag commit. A
+	# --depth=1 fetch of main would hide the tag commit behind the shallow
+	# boundary and wrongly report the tag as off-branch.
+	echo "# after tag" >>README.md
+	git add README.md
+	git commit -q -m "after tag"
+	git push -q origin main
+	_shallow_checkout_of_tag "v1.2.3"
+	export GITHUB_REF_NAME="v1.2.3"
+	export GITHUB_REF="refs/tags/v1.2.3"
+
+	# Ancestry check only; the version check is covered elsewhere.
+	_run_preflight false true
+
+	assert_success
+	assert_output --partial "fetching refs/heads/main from origin"
+	assert_output --partial "Tag commit is on main"
+}
+
+@test "python-dist preflight: shallow checkout still rejects a tag that is not on the default branch" {
+	_init_repo_on_main "1.2.3"
+	git checkout -q -b feature
+	echo "# feature" >>README.md
+	git add README.md
+	git commit -q -m "feature work"
+	git tag -m "feature release" v1.2.4
+	git push -q origin feature
+	git push -q origin v1.2.4
+	_shallow_checkout_of_tag "v1.2.4"
+	export GITHUB_REF_NAME="v1.2.4"
+	export GITHUB_REF="refs/tags/v1.2.4"
+
+	_run_preflight false true
+
+	assert_failure
+	assert_output --partial "fetching refs/heads/main from origin"
+	assert_output --partial "Tag commit is not on main"
+}
+
+@test "python-dist preflight: refused fetch on a shallow checkout names both remedies" {
+	_init_repo_on_main "1.2.3"
+	_shallow_checkout_of_tag "v1.2.3"
+	export GITHUB_REF_NAME="v1.2.3"
+	export GITHUB_REF="refs/tags/v1.2.3"
+	# Stand-in for a remote that rejects an unauthenticated fetch: a remote
+	# the checkout can no longer reach (as after persist-credentials: false).
+	git remote set-url origin "${BATS_TEST_TMPDIR}/no-such-origin.git"
 
 	_run_preflight true true
 
 	assert_failure
-	assert_output --partial "Default branch ref refs/remotes/origin/main is unavailable"
-	assert_output --partial "check out full history"
+	assert_output --partial "Could not fetch refs/heads/main from origin for the tag-on-default-branch check"
+	assert_output --partial "persist-credentials: false"
+	assert_output --partial "fetch-depth: 0"
+	assert_output --partial "persist-credentials: true"
+	refute_output --partial "Tag commit is on main"
 }
 
 @test "python-dist preflight: fails when tag version mismatches pyproject" {

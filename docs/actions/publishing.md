@@ -11,12 +11,39 @@ production tag-push layout and
 Build Python sdist/wheel and validate with twine. Does not upload to PyPI.
 
 ```yaml
+- uses: actions/checkout@<sha>
+  with:
+    fetch-depth: 0 # or a shallow checkout with persist-credentials: true, see below
+    persist-credentials: false
 - uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@main
   with:
     validate: "true"
 ```
 
 **Outputs:** `version`, `package-name`.
+
+**Prerequisite for `ensure-tag-on-default-branch` (default `true`):** the
+check compares the tagged commit against `refs/remotes/origin/<default-branch>`.
+A default `actions/checkout` on a tag is shallow (depth 1) and has no such ref,
+so the preflight fetches that one branch, without tags, through the remote the
+checkout configured. Pick one, in order of preference:
+
+- `fetch-depth: 0` with `persist-credentials: false` on `actions/checkout`:
+  the ref already exists, no fetch runs, and no token stays in `.git/config`
+  while the build backend (third-party code) runs. This is what the reusable
+  workflow does.
+- A shallow checkout with `persist-credentials: true` (the `actions/checkout`
+  default): the preflight fetches `refs/heads/<default-branch>` itself with
+  the checkout's credentials. Caveat: that token remains in `.git/config` for
+  the rest of the job, including the build step.
+
+A private repository needs the credentials for that fetch; a public one can
+fetch anonymously. A private repository on a shallow checkout with
+`persist-credentials: false` has its fetch rejected and fails the preflight
+with a message naming both options. Set
+`ensure-tag-on-default-branch: "false"` to skip the check. `default-branch`
+(default `main`) must name the branch the tag is expected on; a branch that
+does not exist on the remote fails the same step with a hint to set it.
 
 ## prepare-pypi-upload
 

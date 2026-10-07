@@ -16,7 +16,13 @@ inputs:
     required: false
     default: "true"
   ensure-tag-on-default-branch:
-    description: "Verify tagged commit is on the default branch"
+    description: >-
+      Verify tagged commit is on the default branch. Needs refs/remotes/origin/<default-branch>:
+      prefer actions/checkout fetch-depth: 0 with persist-credentials: false (ref exists, no
+      fetch). On a shallow checkout the step fetches that one branch with the checkout's
+      credentials (persist-credentials: true, the default; the token then stays in .git/config
+      for the build step). A private repository on a shallow checkout with
+      persist-credentials: false is rejected and fails here naming both options.
     required: false
     default: "true"
   default-branch:
