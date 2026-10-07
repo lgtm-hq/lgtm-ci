@@ -423,6 +423,77 @@ at the workflow level, which collapses nested contexts and deadlocks merges
 (py-lintro#1359). Pair with an always-green `reusable-required-check` gate in
 the caller when the org ruleset requires both nested and gate contexts.
 
+### Frozen installs and private git dependencies (#1021)
+
+`reusable-test-python` (and the `setup-python` composite) install with
+`uv sync --frozen`. A plain `uv sync` first validates `uv.lock` against
+`pyproject.toml`; when the lock is out of date (a version bump that skipped
+`uv lock` is the usual cause) it re-resolves the project, and re-resolution
+fetches **every** locked git source, including dependency groups the job never
+installs. On a cold cache a private host with no credentials fails the install
+with `could not read Username for 'https://github.com'`. `--frozen` installs
+the committed lock verbatim: only the groups being installed are fetched, and
+nothing is re-resolved.
+
+Consequences for callers:
+
+- **Commit `uv.lock` and keep it current.** The workflow does not refresh it;
+  run `uv lock --check` in your own CI. A project with `pyproject.toml` but no
+  `uv.lock` gets one `uv lock` in the job (with a warning) and then the frozen
+  install.
+- **Private git dependencies in groups you install** still need credentials.
+  Pass the named optional secret `GIT_DEPS_TOKEN`; the workflow configures a
+  host-scoped `url.https://<user>:<token>@<host>/.insteadOf https://<host>/`
+  rewrite in a dedicated step immediately before the install and removes it
+  right after. Both steps are skipped when the secret is empty.
+  `git-deps-host` (default `github.com`, lower-cased) scopes the rewrite to
+  one host; `git-deps-username` (default `x-access-token`, the username
+  GitHub App installation tokens and fine-grained PATs expect) pairs with
+  the token. Cleanup removes only entries for that user@host. The token
+  must match `[A-Za-z0-9._~-]+`. Between the two steps the rewrite sits in
+  the runner's global git config, so a build backend of a dependency being
+  built during the install could read it; scope the token to the
+  repositories the dependency lives in.
+- **The `setup-python` composite** runs the same frozen install but has no
+  `GIT_DEPS_TOKEN` path of its own; callers of the composite configure git
+  auth in their own step when an installed extra is private.
+- **Egress.** The host must be reachable under the job's allowlist.
+  `github.com:443` is in the `pypi` preset; any other host goes through
+  `allowed-endpoints` with `allowed-endpoints-mode: append`.
+- **Never `secrets: inherit`.** The workflow declares exactly one optional
+  secret for this purpose and no generic pre-sync hook; a caller forwards the
+  token explicitly, scoped to the repositories the dependency lives in.
+
+The workflow selects optional dependencies through `extras`, which maps to
+`uv sync --extra`, so a private git dependency the job must install has to
+live in a `[project.optional-dependencies]` extra (not a
+`[dependency-groups]` group, which `extras` cannot select):
+
+```toml
+[project.optional-dependencies]
+engine = ["trading @ git+https://github.com/acme/trading@<sha>"]
+```
+
+```yaml
+jobs:
+  test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    with:
+      extras: "engine" # the extra that pulls the private git dependency
+      git-deps-host: github.com
+    secrets:
+      GIT_DEPS_TOKEN: ${{ secrets.ENGINE_REPO_TOKEN }}
+```
+
+The same frozen discipline applies to every `uv` invocation after the
+install: `run-pytest.sh` uses `uv run --frozen`, because a plain `uv run`
+re-locks and re-syncs the project on every call and would reintroduce the
+cold-cache fetch the install step just avoided.
+
 ## Permissions by mode
 
 GitHub validates **all** jobs in a called reusable workflow at parse time,
