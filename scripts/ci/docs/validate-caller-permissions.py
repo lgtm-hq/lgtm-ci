@@ -413,6 +413,44 @@ def iter_jobs(
         index = end
 
 
+def job_requirements(
+    lines: list[Line],
+    body: list[int],
+    workflows_dir: Path,
+    seen: frozenset[str],
+) -> Permissions:
+    """Return the scopes one job of a reusable workflow forces on its caller.
+
+    A job that declares its own block is the boundary GitHub validates a
+    nested call against: the nested workflow's union must fit inside this
+    block or the reusable itself fails at startup, so the caller only ever
+    has to cover the declared block. A job without a block that calls a
+    nested workflow forwards that workflow's union instead.
+
+    Args:
+        lines: Significant lines of the workflow file.
+        body: Indices of the job's body lines at the body indent.
+        workflows_dir: Directory holding the workflow files.
+        seen: Names already on the nested-call stack (cycle guard).
+
+    Returns:
+        Scope mapping the job requires from the caller.
+    """
+    declared = next((i for i in body if is_permissions_line(lines[i])), None)
+    if declared is not None:
+        return block_permissions(lines=lines, index=declared)
+    matches = (WORKFLOW_USES.match(lines[i].text) for i in body)
+    nested = next((match for match in matches if match is not None), None)
+    if nested is None or nested.group("name") in seen:
+        return {}
+    nested_union = workflow_union(
+        name=nested.group("name"),
+        workflows_dir=workflows_dir,
+        seen=seen,
+    )
+    return nested_union or {}
+
+
 def workflow_union(
     name: str,
     workflows_dir: Path,
@@ -427,6 +465,10 @@ def workflow_union(
 
     Returns:
         Scope mapping, or None when the workflow file does not exist.
+
+    Raises:
+        ValueError: When a permissions block in the workflow is unparseable;
+            the message names the workflow.
     """
     path = workflows_dir / name
     if not path.is_file():
@@ -435,41 +477,21 @@ def workflow_union(
     union: Permissions = {}
     try:
         top = workflow_level_permissions(lines=lines)
+        if top is not None:
+            merge_permissions(target=union, source=top)
+        for _job_id, start, end, body_indent in iter_jobs(lines=lines):
+            body = [i for i in range(start, end) if lines[i].indent == body_indent]
+            merge_permissions(
+                target=union,
+                source=job_requirements(
+                    lines=lines,
+                    body=body,
+                    workflows_dir=workflows_dir,
+                    seen=seen | {name},
+                ),
+            )
     except ValueError as exc:
         raise ValueError(f"{WORKFLOWS_SUBDIR / name}: {exc}") from exc
-    if top is not None:
-        merge_permissions(target=union, source=top)
-    for _job_id, start, end, body_indent in iter_jobs(lines=lines):
-        body = [i for i in range(start, end) if lines[i].indent == body_indent]
-        declared = next((i for i in body if is_permissions_line(lines[i])), None)
-        if declared is not None:
-            try:
-                declared_scopes = block_permissions(lines=lines, index=declared)
-            except ValueError as exc:
-                raise ValueError(f"{WORKFLOWS_SUBDIR / name}: {exc}") from exc
-            merge_permissions(target=union, source=declared_scopes)
-            # A job that declares its own block is the boundary GitHub
-            # validates a nested call against: the nested workflow's union must
-            # fit inside this block or the reusable itself fails at startup, so
-            # the caller only ever has to cover the declared block.
-            continue
-        nested = next(
-            (
-                WORKFLOW_USES.match(lines[i].text)
-                for i in body
-                if WORKFLOW_USES.match(lines[i].text)
-            ),
-            None,
-        )
-        if nested is None or nested.group("name") in seen | {name}:
-            continue
-        nested_union = workflow_union(
-            name=nested.group("name"),
-            workflows_dir=workflows_dir,
-            seen=seen | {name},
-        )
-        if nested_union is not None:
-            merge_permissions(target=union, source=nested_union)
     return union
 
 

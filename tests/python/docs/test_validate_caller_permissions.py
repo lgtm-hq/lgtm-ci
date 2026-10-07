@@ -6,7 +6,8 @@ Covers the union computation (workflow-level, job-level, nested calls,
 complete snippets and fragments, Markdown fence extraction with the brevity
 marker, and the detect-changes derivation (#669).
 
-The ``load_script`` fixture comes from ``tests/python/conftest.py``.
+Fixtures ``permissions_validator``, ``caller_repo`` and ``run_validator``
+come from ``tests/python/conftest.py``.
 """
 
 # pytest injects fixtures by parameter name; the shadowing is the mechanism.
@@ -19,8 +20,6 @@ from types import ModuleType
 
 import pytest
 from assertpy import assert_that
-
-SCRIPT = "scripts/ci/docs/validate-caller-permissions.py"
 
 DEMO_WORKFLOW = """---
 name: Demo
@@ -58,40 +57,20 @@ jobs:
 """
 
 
-@pytest.fixture(scope="module")
-def validator(load_script: Callable[[str], ModuleType]) -> ModuleType:
-    """Load the validator script once per module."""
-    return load_script(SCRIPT)
-
-
 @pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    """Return a fixture repository root with the demo reusable workflows."""
-    workflows = tmp_path / ".github" / "workflows"
-    workflows.mkdir(parents=True)
-    (workflows / "reusable-demo.yml").write_text(DEMO_WORKFLOW, encoding="utf-8")
-    (workflows / "reusable-nested.yml").write_text(NESTED_WORKFLOW, encoding="utf-8")
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "examples").mkdir()
-    return tmp_path
-
-
-def _run(
-    validator: ModuleType,
-    repo: Path,
-    *paths: str,
-) -> int:
-    """Run the validator's entry point against ``repo`` and return the exit code."""
-    code: int = validator.main(argv=["--repo-root", str(repo), *paths])
-    return code
+def repo(caller_repo: Callable[[dict[str, str]], Path]) -> Path:
+    """Fixture repository whose demo workflow nests a second one."""
+    return caller_repo(
+        {"reusable-demo.yml": DEMO_WORKFLOW, "reusable-nested.yml": NESTED_WORKFLOW},
+    )
 
 
 def test_union_merges_levels_and_nested_calls(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
     repo: Path,
 ) -> None:
     """The union takes the stronger level per scope and follows nested calls."""
-    union = validator.workflow_union(
+    union = permissions_validator.workflow_union(
         name="reusable-demo.yml",
         workflows_dir=repo / ".github" / "workflows",
     )
@@ -102,11 +81,11 @@ def test_union_merges_levels_and_nested_calls(
 
 
 def test_union_of_missing_workflow_is_none(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
     repo: Path,
 ) -> None:
     """A call to a workflow that does not exist resolves to no union."""
-    union = validator.workflow_union(
+    union = permissions_validator.workflow_union(
         name="reusable-gone.yml",
         workflows_dir=repo / ".github" / "workflows",
     )
@@ -126,12 +105,14 @@ def test_union_of_missing_workflow_is_none(
     ids=["empty-map", "flow-map"],
 )
 def test_inline_permissions_parse(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
     value: str,
     expected: dict[str, str],
 ) -> None:
     """Inline ``permissions:`` values parse to scope mappings."""
-    assert_that(validator.parse_inline_permissions(value=value)).is_equal_to(expected)
+    parsed = permissions_validator.parse_inline_permissions(value=value)
+
+    assert_that(parsed).is_equal_to(expected)
 
 
 @pytest.mark.parametrize(
@@ -139,27 +120,27 @@ def test_inline_permissions_parse(
     [("read-all", "read"), ("write-all", "write")],
 )
 def test_inline_permissions_shorthands(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
     value: str,
     level: str,
 ) -> None:
     """``read-all`` / ``write-all`` expand to every known scope at that level."""
-    parsed = validator.parse_inline_permissions(value=value)
+    parsed = permissions_validator.parse_inline_permissions(value=value)
 
     assert_that(set(parsed.values())).is_equal_to({level})
     assert_that(parsed).contains_key("contents", "pull-requests", "id-token")
 
 
 def test_inline_permissions_rejects_expressions(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
 ) -> None:
     """An expression where a level is expected is reported, not skipped."""
     with pytest.raises(ValueError, match="unparseable"):
-        validator.parse_inline_permissions(value="${{ inputs.perms }}")
+        permissions_validator.parse_inline_permissions(value="${{ inputs.perms }}")
 
 
 def test_complete_snippet_without_block_fails(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -171,7 +152,7 @@ def test_complete_snippet_without_block_fails(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(1)
     err = capsys.readouterr().err
@@ -180,7 +161,7 @@ def test_complete_snippet_without_block_fails(
 
 
 def test_marked_fragment_without_block_passes(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -192,7 +173,7 @@ def test_marked_fragment_without_block_passes(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(0)
     assert_that(capsys.readouterr().out).contains(
@@ -201,7 +182,7 @@ def test_marked_fragment_without_block_passes(
 
 
 def test_unmarked_fragment_without_block_fails(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -212,7 +193,7 @@ def test_unmarked_fragment_without_block_fails(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(
@@ -221,7 +202,7 @@ def test_unmarked_fragment_without_block_fails(
 
 
 def test_understated_block_names_missing_scopes(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -233,7 +214,7 @@ def test_understated_block_names_missing_scopes(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "examples")
+    code = run_validator(repo, "examples")
 
     assert_that(code).is_equal_to(1)
     err = capsys.readouterr().err
@@ -242,7 +223,7 @@ def test_understated_block_names_missing_scopes(
 
 
 def test_workflow_level_block_governs_complete_snippet(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
 ) -> None:
     """A job without its own block inherits the workflow-level block."""
@@ -253,13 +234,13 @@ def test_workflow_level_block_governs_complete_snippet(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "examples")
+    code = run_validator(repo, "examples")
 
     assert_that(code).is_equal_to(0)
 
 
 def test_detect_changes_requires_pull_requests_read(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -271,7 +252,7 @@ def test_detect_changes_requires_pull_requests_read(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(
@@ -280,12 +261,12 @@ def test_detect_changes_requires_pull_requests_read(
 
 
 def test_union_flag_prints_sorted_scopes(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
     """``--union`` prints the union one scope per line, sorted."""
-    code = validator.main(
+    code = permissions_validator.main(
         argv=["--repo-root", str(repo), "--union", "reusable-demo.yml"],
     )
 

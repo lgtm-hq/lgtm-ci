@@ -7,7 +7,8 @@ that start with ``- name:``, indentless step sequences, indented and tilde
 fences, markers leaking across fences, quoted scope levels, nested calls
 behind an explicit job block, and the cycle guard.
 
-The ``load_script`` fixture comes from ``tests/python/conftest.py``.
+Fixtures ``permissions_validator``, ``caller_repo`` and ``run_validator``
+come from ``tests/python/conftest.py``.
 """
 
 # pytest injects fixtures by parameter name; the shadowing is the mechanism.
@@ -21,7 +22,6 @@ from types import ModuleType
 import pytest
 from assertpy import assert_that
 
-SCRIPT = "scripts/ci/docs/validate-caller-permissions.py"
 DEMO_CALL = "lgtm-hq/lgtm-ci/.github/workflows/reusable-demo.yml"
 DETECT = "lgtm-hq/lgtm-ci/.github/actions/detect-changes@<sha>"
 
@@ -51,36 +51,16 @@ jobs:
 """
 
 
-@pytest.fixture(scope="module")
-def validator(load_script: Callable[[str], ModuleType]) -> ModuleType:
-    """Load the validator script once per module."""
-    return load_script(SCRIPT)
-
-
 @pytest.fixture
-def repo(tmp_path: Path) -> Path:
-    """Return a fixture repository root with the demo reusable workflows."""
-    workflows = tmp_path / ".github" / "workflows"
-    workflows.mkdir(parents=True)
-    (workflows / "reusable-demo.yml").write_text(DEMO_WORKFLOW, encoding="utf-8")
-    (workflows / "reusable-outer.yml").write_text(OUTER_WORKFLOW, encoding="utf-8")
-    (tmp_path / "docs").mkdir()
-    (tmp_path / "examples").mkdir()
-    return tmp_path
-
-
-def _run(
-    validator: ModuleType,
-    repo: Path,
-    *paths: str,
-) -> int:
-    """Run the validator's entry point against ``repo`` and return the exit code."""
-    code: int = validator.main(argv=["--repo-root", str(repo), *paths])
-    return code
+def repo(caller_repo: Callable[[dict[str, str]], Path]) -> Path:
+    """Fixture repository with a demo workflow and a self-calling outer one."""
+    return caller_repo(
+        {"reusable-demo.yml": DEMO_WORKFLOW, "reusable-outer.yml": OUTER_WORKFLOW},
+    )
 
 
 def test_quoted_uses_value_is_checked(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -90,7 +70,7 @@ def test_quoted_uses_value_is_checked(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "examples")
+    code = run_validator(repo, "examples")
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(
@@ -108,7 +88,7 @@ def test_quoted_uses_value_is_checked(
     ids=["name-first", "indentless-sequence", "id-first-quoted"],
 )
 def test_detect_changes_step_layouts_are_derived(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
     steps: str,
@@ -120,7 +100,7 @@ def test_detect_changes_step_layouts_are_derived(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(
@@ -129,7 +109,7 @@ def test_detect_changes_step_layouts_are_derived(
 
 
 def test_indented_fence_complete_snippet_cannot_use_marker(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -140,7 +120,7 @@ def test_indented_fence_complete_snippet_cannot_use_marker(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(
@@ -149,7 +129,7 @@ def test_indented_fence_complete_snippet_cannot_use_marker(
 
 
 def test_indented_fence_workflow_level_block_governs(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
 ) -> None:
     """A list-indented complete snippet inherits its workflow-level block."""
@@ -160,7 +140,7 @@ def test_indented_fence_workflow_level_block_governs(
         encoding="utf-8",
     )
 
-    assert_that(_run(validator, repo, "docs")).is_equal_to(0)
+    assert_that(run_validator(repo, "docs")).is_equal_to(0)
 
 
 @pytest.mark.parametrize(
@@ -173,7 +153,7 @@ def test_indented_fence_workflow_level_block_governs(
     ids=["tilde", "four-backticks-with-attrs", "three-with-attrs"],
 )
 def test_other_fence_styles_are_scanned(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
     opener: str,
@@ -185,7 +165,7 @@ def test_other_fence_styles_are_scanned(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(1)
     assert_that(capsys.readouterr().err).contains(
@@ -194,7 +174,7 @@ def test_other_fence_styles_are_scanned(
 
 
 def test_marker_does_not_leak_onto_next_fence(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -206,40 +186,41 @@ def test_marker_does_not_leak_onto_next_fence(
         encoding="utf-8",
     )
 
-    code = _run(validator, repo, "docs")
+    code = run_validator(repo, "docs")
 
     assert_that(code).is_equal_to(1)
-    assert_that(capsys.readouterr().err).contains("docs/guide.md:10: unmarked fragment")
+    assert_that(capsys.readouterr().err).contains("guide.md:10: unmarked fragment")
 
 
 def test_top_level_uses_fragment_needs_marker(
-    validator: ModuleType,
+    run_validator: Callable[..., int],
     repo: Path,
 ) -> None:
     """A fragment whose ``uses:`` sits at column zero follows the marker rule."""
     guide = repo / "docs" / "guide.md"
     fence = f"```yaml\nuses: {DEMO_CALL}@<sha>\nwith:\n  x: 1\n```\n"
     guide.write_text(fence, encoding="utf-8")
-    assert_that(_run(validator, repo, "docs")).is_equal_to(1)
+    assert_that(run_validator(repo, "docs")).is_equal_to(1)
 
     guide.write_text("Permissions omitted for brevity.\n\n" + fence, encoding="utf-8")
-    assert_that(_run(validator, repo, "docs")).is_equal_to(0)
+    assert_that(run_validator(repo, "docs")).is_equal_to(0)
 
 
 def test_quoted_scope_levels_parse(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
 ) -> None:
     """``contents: "read"`` and ``{ contents: 'read' }`` are valid levels."""
-    inline = validator.parse_inline_permissions(value="{ contents: 'read' }")
-    lines = validator.parse_lines(text='permissions:\n  contents: "read"\n')
-    block = validator.block_permissions(lines=lines, index=0)
+    parse = permissions_validator.parse_inline_permissions
+    inline = parse(value="{ contents: 'read' }")
+    lines = permissions_validator.parse_lines(text='permissions:\n  contents: "read"\n')
+    block = permissions_validator.block_permissions(lines=lines, index=0)
 
     assert_that(inline).is_equal_to({"contents": "read"})
     assert_that(block).is_equal_to({"contents": "read"})
 
 
 def test_union_flag_reports_unparseable_workflow(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
     repo: Path,
     capsys: pytest.CaptureFixture[str],
 ) -> None:
@@ -250,7 +231,7 @@ def test_union_flag_reports_unparseable_workflow(
         encoding="utf-8",
     )
 
-    code = validator.main(
+    code = permissions_validator.main(
         argv=["--repo-root", str(repo), "--union", "reusable-bad.yml"],
     )
 
@@ -262,11 +243,11 @@ def test_union_flag_reports_unparseable_workflow(
 
 
 def test_explicit_job_block_bounds_nested_call_and_cycles_terminate(
-    validator: ModuleType,
+    permissions_validator: ModuleType,
     repo: Path,
 ) -> None:
     """A job's own block is the nested-call boundary; self-calls do not recurse."""
-    union = validator.workflow_union(
+    union = permissions_validator.workflow_union(
         name="reusable-outer.yml",
         workflows_dir=repo / ".github" / "workflows",
     )
