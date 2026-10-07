@@ -144,9 +144,11 @@ name: "Reusable: Release Multi-Ecosystem Version PR"
       egress-preset:
         description: >-
           Named baseline allowlist from scripts/ci/lib/egress/presets.sh
-          (default release-version-pr: github-tooling plus PyPI for the
-          pep621 tomlkit install, #1093). Selected at job start inside every
-          harden-runner step, so it is enforced (#913).
+          (default release-version-pr, shared with
+          reusable-release-version-pr: github-tooling plus PyPI for the
+          pep621 tomlkit install and the rustup/crates.io hosts the rust
+          ecosystem bump needs there, #1093). Selected at job start inside
+          every harden-runner step, so it is enforced (#913).
         required: false
         type: string
         default: "release-version-pr"

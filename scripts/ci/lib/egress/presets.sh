@@ -393,9 +393,15 @@ egress_preset_endpoints() {
 		# registry an ecosystem bump script reaches under block policy.
 		# `ecosystems: python` / kind `pep621` `pip install tomlkit` when the
 		# runner lacks it (PyPI, #1093); `ecosystems: rust` installs the
-		# toolchain via dtolnay/rust-toolchain and runs `cargo
-		# generate-lockfile` (rustup dist + crates.io index). node, ruby,
-		# swift, dart and kotlin edit files in place with no registry access.
+		# toolchain via dtolnay/rust-toolchain (static.rust-lang.org) and
+		# runs `cargo generate-lockfile` against the sparse index
+		# (index.crates.io). crates.io / static.crates.io are not strictly
+		# needed by those two commands; they stay for parity with the
+		# rust-release and build-artifact presets so a cargo that falls back
+		# to the git index or fetches a .crate does not fail opaquely. node,
+		# ruby, swift, dart and kotlin edit files in place with no registry
+		# access. reusable-release-multi-ecosystem.yml shares this preset
+		# although its kinds (npm|raw|gemspec|pep621) only reach PyPI.
 		egress_preset_endpoints github-tooling
 		printf '%s\n' \
 			pypi.org:443 \

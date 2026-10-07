@@ -582,6 +582,62 @@ run_update_changelog() {
 	assert_output --regexp '^ A CHANGELOG\.md$'
 }
 
+@test "update-changelog: bootstrapped CHANGELOG.md counts as a change for a CHANGELOG-only caller" {
+	setup_changelog_repo
+	rm -f "${MOCK_GIT_REPO}/CHANGELOG.md"
+
+	run_update_changelog "0.1.0" "### Added
+
+- first feature (ddd4444)"
+	assert_success
+
+	# The reusable's next step: with no ecosystems configured, the seeded
+	# file alone must yield has-pr-changes=true.
+	run bash -c "cd '$MOCK_GIT_REPO' && EXPECT_VERSION_FILES=false '$PROJECT_ROOT/scripts/ci/release/check-version-files-changed.sh' 2>&1"
+	assert_success
+	run grep -F 'has-pr-changes=true' "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "update-changelog: PUSH=true commits the bootstrapped CHANGELOG.md" {
+	setup_changelog_repo
+	rm -f "${MOCK_GIT_REPO}/CHANGELOG.md"
+
+	run bash -c "
+		cd '$MOCK_GIT_REPO'
+		export VERSION='0.1.0'
+		export CHANGELOG_BODY='### Added
+
+- pushed (fff6666)'
+		export CHANGELOG_FILE='CHANGELOG.md'
+		export TAG_PREFIX='v'
+		export REPO_URL='https://github.com/test-org/test-repo'
+		export PUSH='true'
+		export GITHUB_REF_NAME='main'
+		'$PROJECT_ROOT/scripts/ci/release/update-changelog.sh' 2>&1
+	"
+	assert_success
+	run git -C "$MOCK_GIT_REPO" show --stat --format=%s HEAD
+	assert_success
+	assert_line 'docs: update CHANGELOG.md for 0.1.0'
+	assert_output --partial 'CHANGELOG.md'
+	run git -C "$MOCK_GIT_REPO" status --porcelain -- CHANGELOG.md
+	assert_output ""
+}
+
+@test "update-changelog: fails by name when the bootstrapped path is gitignored" {
+	setup_changelog_repo
+	rm -f "${MOCK_GIT_REPO}/CHANGELOG.md"
+	echo 'CHANGELOG.md' >"${MOCK_GIT_REPO}/.gitignore"
+
+	run_update_changelog "0.1.0" "### Added
+
+- ignored (aaa7777)"
+	assert_failure
+	assert_output --partial "Could not register"
+	assert_output --partial "ignored by .gitignore"
+}
+
 @test "update-changelog: bootstraps a CHANGELOG.md in a nested directory" {
 	setup_changelog_repo
 	rm -f "${MOCK_GIT_REPO}/CHANGELOG.md"

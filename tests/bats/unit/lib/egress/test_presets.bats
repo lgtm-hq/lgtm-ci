@@ -346,19 +346,25 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	# tomlkit from PyPI, rust regenerates Cargo.lock via rustup + crates.io.
 	run bash -c "source '$PRESETS' && egress_preset_endpoints release-version-pr"
 	assert_success
-	local host
+	# Whole-line matches: a --partial on crates.io:443 would be satisfied by
+	# static.crates.io:443 alone.
+	local host n=0
 	while IFS= read -r host; do
-		assert_output --partial "$host"
+		assert_line "$host"
+		n=$((n + 1))
 	done < <(bash -c "source '$PRESETS' && egress_preset_endpoints github-tooling")
-	assert_output --partial 'pypi.org:443'
-	assert_output --partial 'files.pythonhosted.org:443'
-	assert_output --partial 'static.rust-lang.org:443'
-	assert_output --partial 'crates.io:443'
-	assert_output --partial 'static.crates.io:443'
-	assert_output --partial 'index.crates.io:443'
+	# The loop must have compared something: an empty substitution would pass vacuously.
+	[[ "$n" -ge 8 ]] || fail "github-tooling resolved to only $n hosts"
+	assert_line 'uploads.github.com:443'
+	assert_line 'pypi.org:443'
+	assert_line 'files.pythonhosted.org:443'
+	assert_line 'static.rust-lang.org:443'
+	assert_line 'crates.io:443'
+	assert_line 'static.crates.io:443'
+	assert_line 'index.crates.io:443'
 	# No publish-side hosts: the bump never uploads anywhere.
-	refute_output --partial 'upload.pypi.org:443'
-	refute_output --partial 'test.pypi.org:443'
+	refute_line 'upload.pypi.org:443'
+	refute_line 'test.pypi.org:443'
 	refute_output --partial 'sigstore'
 }
 

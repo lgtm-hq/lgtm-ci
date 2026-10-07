@@ -80,7 +80,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 [Unreleased]: placeholder
 EOF
 	if git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-		git add --intent-to-add -- "$CHANGELOG_FILE"
+		# Not best-effort: an ignored or out-of-tree path would stay `??`,
+		# be skipped by check-version-files-changed.sh, and silently bring
+		# the CHANGELOG-only no-PR failure back. Fail by name instead.
+		if ! git add --intent-to-add -- "$CHANGELOG_FILE"; then
+			log_error "Could not register $CHANGELOG_FILE with git (ignored by .gitignore or outside the work tree); the version PR cannot include it"
+			exit 1
+		fi
 	fi
 fi
 

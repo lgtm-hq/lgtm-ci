@@ -136,10 +136,13 @@ prerequisites:
 - **Registry egress for ecosystem bumps.** The default
   `egress-preset: release-version-pr` already allows PyPI (`ecosystems:
   python` installs `tomlkit` when the runner lacks it) and rustup/crates.io
-  (`ecosystems: rust` regenerates `Cargo.lock`), so `ecosystems: python` under
-  `egress-policy: block` needs no `allowed-endpoints` (#1093). If you pass
+  (`ecosystems: rust` regenerates `Cargo.lock`), so neither ecosystem needs
+  `allowed-endpoints` under `egress-policy: block` (#1093). Callers that
+  pinned `egress-preset: github-tooling` (the previous starter example) must
+  switch to `release-version-pr` or drop the input. If you pass
   `allowed-endpoints` in the default `replace` mode, your list replaces the
-  preset and must include those hosts.
+  preset and must include those hosts; in `append` mode the base the extras
+  are merged onto is now `release-version-pr` rather than `github-tooling`.
 
 #### Upgrading an existing release App
 

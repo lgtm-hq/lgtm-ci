@@ -138,10 +138,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 		echo "junit.path is '$junit_path'; expected 'junit.xml' (no directory component)"
 		return 1
 	}
-	# The parser's default must be exactly the store dir + that file name.
+	# The parser's default and the workflow's explicit env must both be
+	# exactly the store dir + that file name.
 	run grep -F ': "${JUNIT_FILE:=target/nextest/ci/junit.xml}"' \
 		"${PROJECT_ROOT}/scripts/ci/testing/rust/parse-rust-test-results.sh"
 	assert_success
+	run grep -cE '^\s+JUNIT_FILE: target/nextest/ci/junit\.xml$' "$WORKFLOW"
+	assert_output "1"
 }
 
 @test "reusable-rust-test: documents the nextest ci-profile prerequisite on its inputs" {

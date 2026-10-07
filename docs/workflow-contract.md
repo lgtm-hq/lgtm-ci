@@ -839,8 +839,13 @@ ecosystem bump scripts reach under `block`: `pypi.org` /
 the crates.io hosts (`ecosystems: rust` installs the toolchain and regenerates
 `Cargo.lock`). Selecting an ecosystem is therefore enough; the pre-#913 advice
 to paste the PyPI hosts into `allowed-endpoints` is obsolete. Callers that
-still pass `allowed-endpoints` in the default `replace` mode substitute their
-list for the preset and must carry those registry hosts themselves.
+pinned `egress-preset: github-tooling` explicitly (the previous starter
+example) keep that narrower baseline and must switch to `release-version-pr`
+or drop the input. Callers that still pass `allowed-endpoints` in the default
+`replace` mode substitute their list for the preset and must carry those
+registry hosts themselves; `append`-mode callers without an explicit
+`egress-preset` now merge onto `release-version-pr` instead of
+`github-tooling` (pin `egress-preset: github-tooling` to keep the old base).
 
 **First release without a `CHANGELOG.md` (#1092):**
 `scripts/ci/release/update-changelog.sh` no longer fails when the file is
