@@ -57,10 +57,7 @@ if [[ "${1:-}" == "run" ]]; then
     {
       "tool": "osv_scanner",
       "issues_count": 0,
-      "success": true,
-      "metadata": {
-        "suppressions": []
-      }
+      "success": true
     }
   ]
 }
@@ -89,6 +86,86 @@ EOF
 	assert_file_contains "${workspace}/security-audit-comment.txt" "Security Audit Report"
 	assert_file_contains "$GITHUB_OUTPUT" "status=passed"
 	assert_file_contains "$GITHUB_OUTPUT" "has-vulns=0"
+}
+
+# Install a docker mock whose `run` writes the given lintro JSON into the
+# mounted workspace and exits with the given scan status.
+# Usage: install_docker_mock <mock-bin-dir> <json-fixture> <scan-exit-code>
+install_docker_mock() {
+	local mock_bin="$1"
+	local fixture="$2"
+	local scan_exit="$3"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/docker" <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ "\${1:-}" == "pull" ]]; then
+	exit 0
+fi
+workspace=""
+for ((i = 1; i <= \$#; i++)); do
+	if [[ "\${!i}" == "-v" ]]; then
+		next=\$((i + 1))
+		mount="\${!next}"
+		workspace="\${mount%%:/code}"
+	fi
+done
+cp "${fixture}" "\${workspace}/osv-results.json"
+printf 'mock scan\n' >"\${workspace}/osv-output.txt"
+exit ${scan_exit}
+EOF
+	chmod +x "${mock_bin}/docker"
+}
+
+@test "run-lintro-audit: FORMAT FAILED when probe metadata is missing but TOML has dated entries" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace"
+	install_fixture "security/osv-scanner-active-stale-expired.toml" "${workspace}/.osv-scanner.toml"
+	install_docker_mock "$mock_bin" "${FIXTURES_DIR}/security/osv-results-no-suppressions-meta.json" 0
+
+	# cwd is the audited directory, as the reusable's working-directory sets it.
+	run bash -c "cd '${workspace}' && PATH='${mock_bin}:${PATH}' \
+		LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef' \
+		GITHUB_OUTPUT='${GITHUB_OUTPUT}' WORKSPACE='${workspace}' MAP_HOST_USER=false \
+		bash '${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh'"
+
+	assert_failure
+	assert_output --partial "Suppression status unavailable"
+	assert_file_contains "${workspace}/security-audit-comment.txt" "FORMAT FAILED"
+	assert_file_contains "$GITHUB_OUTPUT" "format-failed=1"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
+}
+
+@test "run-lintro-audit: scanner error keeps its diagnostic when TOML has dated entries" {
+	local workspace="${BATS_TEST_TMPDIR}/workspace"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$workspace"
+	install_fixture "security/osv-scanner-active-stale-expired.toml" "${workspace}/.osv-scanner.toml"
+	cat >"${BATS_TEST_TMPDIR}/scan-error.json" <<'JSON'
+{
+  "results": [
+    {
+      "tool": "osv_scanner",
+      "issues_count": 0,
+      "success": false,
+      "output": "OSV-Scanner timed out after 300s"
+    }
+  ]
+}
+JSON
+	install_docker_mock "$mock_bin" "${BATS_TEST_TMPDIR}/scan-error.json" 1
+
+	run bash -c "cd '${workspace}' && PATH='${mock_bin}:${PATH}' \
+		LINTRO_IMAGE='ghcr.io/lgtm-hq/py-lintro@sha256:deadbeef' \
+		GITHUB_OUTPUT='${GITHUB_OUTPUT}' WORKSPACE='${workspace}' MAP_HOST_USER=false \
+		bash '${PROJECT_ROOT}/scripts/ci/security/run-lintro-audit.sh'"
+
+	assert_failure
+	assert_file_contains "${workspace}/security-audit-comment.txt" "AUDIT FAILED"
+	assert_file_contains "${workspace}/security-audit-comment.txt" "OSV-Scanner timed out after 300s"
+	assert_file_contains "${workspace}/security-audit-comment.txt" "the scan failed"
+	assert_file_contains "$GITHUB_OUTPUT" "format-failed=0"
 }
 
 @test "run-lintro-audit: writes github outputs when docker pull fails" {

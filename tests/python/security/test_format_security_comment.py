@@ -22,6 +22,7 @@ SCRIPT = "scripts/ci/security/format-security-comment.py"
 STALE_ROW = "| `GHSA-stale-2222` | 2099-12-31 | :warning: **Stale — safe to remove** |"
 EXPIRED_ROW = "| :warning: `GHSA-expired-3333` | **EXPIRED** 2020-01-01 |"
 ACTIVE_ROW = "| `GHSA-active-1111` | 2099-12-31 | Active | still present |"
+NO_SUPPRESSIONS = "No suppressions configured."
 
 
 @pytest.fixture(scope="module")
@@ -48,8 +49,26 @@ def _install(fixtures_dir: Path, relative: str, dest: Path) -> Path:
     Returns:
         The destination path.
     """
-    shutil.copyfile(fixtures_dir / relative, dest)
+    shutil.copyfile(src=fixtures_dir / relative, dst=dest)
     return dest
+
+
+def _write_result(workspace: Path, result: dict[str, object]) -> Path:
+    """Write a one-result lintro report into the workspace.
+
+    Args:
+        workspace: Directory to write ``osv-results.json`` into.
+        result: The ``osv_scanner`` result object.
+
+    Returns:
+        The report path.
+    """
+    json_path = workspace / "osv-results.json"
+    json_path.write_text(
+        json.dumps({"results": [{"tool": "osv_scanner", **result}]}),
+        encoding="utf-8",
+    )
+    return json_path
 
 
 @pytest.mark.parametrize(
@@ -69,13 +88,17 @@ def test_probe_suppressions_render_status_table(
     expect_warning: bool,
 ) -> None:
     """Both schemas render the classified table; only legacy warns."""
-    json_path = _install(fixtures_dir, fixture, workspace / "osv-results.json")
+    json_path = _install(
+        fixtures_dir=fixtures_dir,
+        relative=fixture,
+        dest=workspace / "osv-results.json",
+    )
 
     output = formatter.format_comment(str(json_path))
 
     assert_that(output).is_not_none()
     assert_that(output).contains(ACTIVE_ROW, STALE_ROW, EXPIRED_ROW)
-    assert_that(output).does_not_contain("No suppressions configured.")
+    assert_that(output).does_not_contain(NO_SUPPRESSIONS)
     stderr = capsys.readouterr().err
     if expect_warning:
         assert_that(stderr).contains("legacy 'ai_metadata'", "lgtm-hq/lgtm-ci#825")
@@ -83,18 +106,52 @@ def test_probe_suppressions_render_status_table(
         assert_that(stderr).is_empty()
 
 
-def test_metadata_key_wins_over_legacy_key(formatter: ModuleType) -> None:
+def test_metadata_key_wins_over_legacy_key(
+    formatter: ModuleType,
+    workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
     """When both keys are present the current key is read and legacy ignored."""
-    result = {
-        "tool": "osv_scanner",
-        "metadata": {"suppressions": [{"id": "GHSA-new", "status": "stale"}]},
-        "ai_metadata": {"suppressions": [{"id": "GHSA-old", "status": "active"}]},
-    }
+    json_path = _write_result(
+        workspace=workspace,
+        result={
+            "issues_count": 0,
+            "success": True,
+            "metadata": {"suppressions": [{"id": "GHSA-new", "status": "stale"}]},
+            "ai_metadata": {
+                "suppressions": [{"id": "GHSA-old", "status": "active"}],
+            },
+        },
+    )
 
-    suppressions = formatter._probe_suppressions(result)
+    output = formatter.format_comment(str(json_path))
 
-    assert_that(suppressions).is_length(1)
-    assert_that(suppressions[0]["id"]).is_equal_to("GHSA-new")
+    assert_that(output).contains("`GHSA-new`").does_not_contain("GHSA-old")
+    assert_that(capsys.readouterr().err).is_empty()
+
+
+def test_unusable_metadata_falls_back_to_legacy_with_warning(
+    formatter: ModuleType,
+    workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A metadata object without a suppression list still honours legacy."""
+    json_path = _write_result(
+        workspace=workspace,
+        result={
+            "issues_count": 0,
+            "success": True,
+            "metadata": {"fixed_count": 0},
+            "ai_metadata": {
+                "suppressions": [{"id": "GHSA-old", "status": "active"}],
+            },
+        },
+    )
+
+    output = formatter.format_comment(str(json_path))
+
+    assert_that(output).contains("| `GHSA-old` | ? | Active |  |")
+    assert_that(capsys.readouterr().err).contains("legacy 'ai_metadata'")
 
 
 @pytest.mark.parametrize(
@@ -117,25 +174,24 @@ def test_probe_suppressions_none_without_list(
 
 def test_empty_probe_list_reports_no_suppressions(
     formatter: ModuleType,
-    fixtures_dir: Path,
     workspace: Path,
 ) -> None:
-    """A probe that ran and classified nothing renders the empty message."""
-    json_path = _install(
-        fixtures_dir,
-        "security/osv-results-clean.json",
-        workspace / "osv-results.json",
+    """Defensive: an empty list renders the empty message.
+
+    lintro never emits an empty list (the key is omitted instead), so this
+    only pins the behaviour for hand-written or future producers.
+    """
+    json_path = _write_result(
+        workspace=workspace,
+        result={"issues_count": 0, "success": True, "metadata": {"suppressions": []}},
     )
 
     output = formatter.format_comment(str(json_path))
 
-    assert_that(output).contains(
-        "No security vulnerabilities found in dependencies.",
-        "No suppressions configured.",
-    )
+    assert_that(output).contains(NO_SUPPRESSIONS)
 
 
-def test_neither_key_and_no_toml_reports_no_suppressions(
+def test_clean_scan_without_probe_reports_no_suppressions(
     formatter: ModuleType,
     fixtures_dir: Path,
     workspace: Path,
@@ -143,14 +199,17 @@ def test_neither_key_and_no_toml_reports_no_suppressions(
 ) -> None:
     """No probe metadata and no TOML is the legitimate nothing-to-classify case."""
     json_path = _install(
-        fixtures_dir,
-        "security/osv-results-no-suppressions-meta.json",
-        workspace / "osv-results.json",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-clean.json",
+        dest=workspace / "osv-results.json",
     )
 
     output = formatter.format_comment(str(json_path))
 
-    assert_that(output).contains("No suppressions configured.")
+    assert_that(output).contains(
+        "No security vulnerabilities found in dependencies.",
+        NO_SUPPRESSIONS,
+    )
     assert_that(capsys.readouterr().err).is_empty()
 
 
@@ -162,14 +221,14 @@ def test_neither_key_with_probe_eligible_toml_fails_loudly(
 ) -> None:
     """Missing probe metadata with classifiable TOML entries is an error."""
     json_path = _install(
-        fixtures_dir,
-        "security/osv-results-no-suppressions-meta.json",
-        workspace / "osv-results.json",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-no-suppressions-meta.json",
+        dest=workspace / "osv-results.json",
     )
     _install(
-        fixtures_dir,
-        "security/osv-scanner-active-stale-expired.toml",
-        workspace / ".osv-scanner.toml",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-scanner-active-stale-expired.toml",
+        dest=workspace / ".osv-scanner.toml",
     )
 
     output = formatter.format_comment(str(json_path))
@@ -183,7 +242,39 @@ def test_neither_key_with_probe_eligible_toml_fails_loudly(
         "3 probe-eligible",
         "GHSA-active-1111",
         "GHSA-expired-3333",
+        "Next steps",
     )
+
+
+def test_scanner_error_keeps_diagnostic_when_probe_is_missing(
+    formatter: ModuleType,
+    fixtures_dir: Path,
+    workspace: Path,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """A failed scan has no probe data; the scanner error must stay visible."""
+    json_path = _write_result(
+        workspace=workspace,
+        result={
+            "issues_count": 0,
+            "success": False,
+            "output": "OSV-Scanner timed out after 300s",
+        },
+    )
+    _install(
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-scanner-active-stale-expired.toml",
+        dest=workspace / ".osv-scanner.toml",
+    )
+
+    output = formatter.format_comment(str(json_path))
+
+    assert_that(output).contains(
+        "### ⚠️ Scanner Error:",
+        "OSV-Scanner timed out after 300s",
+        "_Suppression status unavailable: the scan failed",
+    )
+    assert_that(capsys.readouterr().err).is_empty()
 
 
 def test_neither_key_with_unclassifiable_toml_lists_entries_as_static(
@@ -193,14 +284,14 @@ def test_neither_key_with_unclassifiable_toml_lists_entries_as_static(
 ) -> None:
     """Entries without ``ignoreUntil`` never reach the probe, so list them."""
     json_path = _install(
-        fixtures_dir,
-        "security/osv-results-no-suppressions-meta.json",
-        workspace / "osv-results.json",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-no-suppressions-meta.json",
+        dest=workspace / "osv-results.json",
     )
     _install(
-        fixtures_dir,
-        "security/osv-scanner-no-ignore-until.toml",
-        workspace / ".osv-scanner.toml",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-scanner-no-ignore-until.toml",
+        dest=workspace / ".osv-scanner.toml",
     )
 
     output = formatter.format_comment(str(json_path))
@@ -209,7 +300,7 @@ def test_neither_key_with_unclassifiable_toml_lists_entries_as_static(
         "Status unavailable",
         "| `GHSA-xxxx-yyyy-zzzz` | ? | No fix available |",
     )
-    assert_that(output).does_not_contain("No suppressions configured.")
+    assert_that(output).does_not_contain(NO_SUPPRESSIONS)
 
 
 def test_mixed_toml_lists_undated_entries_next_to_probe_table(
@@ -219,14 +310,14 @@ def test_mixed_toml_lists_undated_entries_next_to_probe_table(
 ) -> None:
     """Undated entries the probe never saw are kept when probe data exists."""
     json_path = _install(
-        fixtures_dir,
-        "security/osv-results-metadata-suppressions.json",
-        workspace / "osv-results.json",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-metadata-suppressions.json",
+        dest=workspace / "osv-results.json",
     )
     _install(
-        fixtures_dir,
-        "security/osv-scanner-mixed-dated-undated.toml",
-        workspace / ".osv-scanner.toml",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-scanner-mixed-dated-undated.toml",
+        dest=workspace / ".osv-scanner.toml",
     )
 
     output = formatter.format_comment(str(json_path))
@@ -246,9 +337,9 @@ def test_datetime_ignore_until_is_not_probe_eligible(
 ) -> None:
     """lintro rejects TOML datetimes, so they must not trigger the failure."""
     json_path = _install(
-        fixtures_dir,
-        "security/osv-results-no-suppressions-meta.json",
-        workspace / "osv-results.json",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-no-suppressions-meta.json",
+        dest=workspace / "osv-results.json",
     )
     (workspace / ".osv-scanner.toml").write_text(
         '[[IgnoredVulns]]\nid = "GHSA-datetime-5555"\n'
@@ -280,21 +371,13 @@ def test_malformed_probe_entries_fail_loudly(
     fragment: str,
 ) -> None:
     """Probe lists that do not match lintro's entry shape are rejected."""
-    json_path = workspace / "osv-results.json"
-    json_path.write_text(
-        json.dumps(
-            {
-                "results": [
-                    {
-                        "tool": "osv_scanner",
-                        "issues_count": 0,
-                        "success": True,
-                        "metadata": {"suppressions": entries},
-                    },
-                ],
-            },
-        ),
-        encoding="utf-8",
+    json_path = _write_result(
+        workspace=workspace,
+        result={
+            "issues_count": 0,
+            "success": True,
+            "metadata": {"suppressions": entries},
+        },
     )
 
     output = formatter.format_comment(str(json_path))
@@ -313,9 +396,9 @@ def test_vulnerability_table_renders_issue_rows(
 ) -> None:
     """Reported issues render as table rows with the lockfile path."""
     json_path = _install(
-        fixtures_dir,
-        "security/osv-results-with-vuln.json",
-        workspace / "osv-results.json",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-with-vuln.json",
+        dest=workspace / "osv-results.json",
     )
 
     output = formatter.format_comment(str(json_path))
@@ -324,6 +407,28 @@ def test_vulnerability_table_renders_issue_rows(
         "### 🚨 Vulnerability Report:",
         "| GHSA-xxxx-yyyy-zzzz in example-crate | `Cargo.lock` |",
     )
+
+
+def test_main_prints_markdown_on_success(
+    formatter: ModuleType,
+    fixtures_dir: Path,
+    workspace: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """The CLI writes the comment body to stdout and returns normally."""
+    json_path = _install(
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-metadata-suppressions.json",
+        dest=workspace / "osv-results.json",
+    )
+    monkeypatch.setattr("sys.argv", ["format-security-comment.py", str(json_path)])
+
+    formatter.main()
+
+    captured = capsys.readouterr()
+    assert_that(captured.out).contains("### 🔍 Checks Performed:", STALE_ROW)
+    assert_that(captured.err).is_empty()
 
 
 def test_main_exits_nonzero_when_status_unavailable(
@@ -335,14 +440,14 @@ def test_main_exits_nonzero_when_status_unavailable(
 ) -> None:
     """The CLI exit code surfaces the loud failure to run-lintro-audit.sh."""
     json_path = _install(
-        fixtures_dir,
-        "security/osv-results-no-suppressions-meta.json",
-        workspace / "osv-results.json",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-results-no-suppressions-meta.json",
+        dest=workspace / "osv-results.json",
     )
     _install(
-        fixtures_dir,
-        "security/osv-scanner-active-stale-expired.toml",
-        workspace / ".osv-scanner.toml",
+        fixtures_dir=fixtures_dir,
+        relative="security/osv-scanner-active-stale-expired.toml",
+        dest=workspace / ".osv-scanner.toml",
     )
     monkeypatch.setattr("sys.argv", ["format-security-comment.py", str(json_path)])
 

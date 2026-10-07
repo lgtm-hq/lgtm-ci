@@ -43,7 +43,7 @@ teardown() {
 	local json_file="${BATS_TEST_TMPDIR}/osv-results.json"
 	install_fixture "security/osv-results-metadata-suppressions.json" "$json_file"
 
-	run python3 "${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py" "$json_file"
+	run bash -c "cd '${BATS_TEST_TMPDIR}' && python3 '${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py' osv-results.json"
 	assert_success
 	assert_output --partial "GHSA-stale-2222"
 	assert_output --partial "Stale — safe to remove"
@@ -55,7 +55,7 @@ teardown() {
 	local json_file="${BATS_TEST_TMPDIR}/osv-results.json"
 	install_fixture "security/osv-results-legacy-ai-metadata.json" "$json_file"
 
-	run python3 "${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py" "$json_file"
+	run bash -c "cd '${BATS_TEST_TMPDIR}' && python3 '${PROJECT_ROOT}/scripts/ci/security/format-security-comment.py' osv-results.json"
 	assert_success
 	assert_output --partial "Stale — safe to remove"
 	assert_output --partial "legacy 'ai_metadata'"

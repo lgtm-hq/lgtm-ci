@@ -8,10 +8,7 @@
           "message": "GHSA-xxxx-yyyy-zzzz in example-crate",
           "file": "Cargo.lock"
         }
-      ],
-      "metadata": {
-        "suppressions": []
-      }
+      ]
     }
   ]
 }

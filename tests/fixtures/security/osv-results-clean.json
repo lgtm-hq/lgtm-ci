@@ -3,10 +3,7 @@
     {
       "tool": "osv_scanner",
       "issues_count": 0,
-      "success": true,
-      "metadata": {
-        "suppressions": []
-      }
+      "success": true
     }
   ]
 }

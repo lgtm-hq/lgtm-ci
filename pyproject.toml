@@ -38,6 +38,8 @@ dev = [
   "mypy>=1.19.1",
 ]
 # pytest suite for the standalone scripts under scripts/ci (tests/python).
+# Separate from `dev` so CI installs only this; locally use
+# `uv sync --extra dev --extra test`.
 test = ["pytest>=8.4.0", "assertpy>=1.1"]
 
 [tool.pytest.ini_options]

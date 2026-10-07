@@ -65,7 +65,8 @@ def _read_suppressions_from_toml() -> list[dict[str, object]]:
     """Read suppression entries from .osv-scanner.toml.
 
     Returns:
-        Entries with a non-empty string ``id`` whose ``ignoreUntil`` is either
+        Entries with a non-empty string ``id`` (as lintro's
+        ``parse_suppressions`` accepts them) whose ``ignoreUntil`` is either
         absent or a date. Returns an empty list when the file is missing,
         unreadable, or ``tomllib`` is unavailable.
     """
@@ -88,7 +89,7 @@ def _read_suppressions_from_toml() -> list[dict[str, object]]:
             for entry in data.get("IgnoredVulns", [])
             if isinstance(entry, dict)
             and isinstance(entry.get("id"), str)
-            and entry["id"].strip()
+            and entry["id"]
             and _valid_ignore_until(entry)
         ]
     except (tomllib.TOMLDecodeError, OSError) as e:
@@ -368,9 +369,9 @@ def _add_toml_suppression_table(
         toml_suppressions: Entries from :func:`_read_suppressions_from_toml`.
     """
     sections.append(
-        "_Status unavailable: these entries carry no `ignoreUntil` date, so "
-        "lintro's probe does not classify them. Listing `.osv-scanner.toml` "
-        "as written._",
+        "_Status unavailable: these entries carry no plain-date `ignoreUntil` "
+        "(missing or a datetime), so lintro's probe does not classify them. "
+        "Listing `.osv-scanner.toml` as written._",
     )
     sections.append("")
     sections.append("| ID | Expires | Reason |")
@@ -395,27 +396,48 @@ def _report_probe_metadata_missing(eligible: list[dict[str, object]]) -> None:
         f"'{LEGACY_PROBE_METADATA_KEY}.{SUPPRESSIONS_KEY}', but "
         f".osv-scanner.toml declares {len(eligible)} probe-eligible "
         f"suppression(s): {ids}. lintro's probe scan was skipped, disabled "
-        "(check_suppressions=false), or timed out; refusing to report static "
-        "TOML entries as suppression status.",
+        "(check_suppressions=false), failed, or timed out; refusing to report "
+        "static TOML entries as suppression status. Next steps: check the "
+        "lintro log for '[osv-scanner] Probe scan', confirm check_suppressions "
+        "is not disabled, and confirm lintro-image is py-lintro >= 0.94.",
         file=sys.stderr,
     )
 
 
+def _scan_failed(osv_result: dict[str, Any]) -> bool:
+    """Return whether the main osv-scanner scan itself failed.
+
+    Mirrors the scanner-error branch of :func:`_add_vulnerability_sections`:
+    lintro returns ``success=False`` without probe metadata on a timeout,
+    version-check failure, or network failure, so the missing key is a
+    consequence of the scan failure and not a separate defect.
+
+    Args:
+        osv_result: The ``osv_scanner`` result object.
+
+    Returns:
+        ``True`` when the scan failed without reporting any issue.
+    """
+    return osv_result.get("success") is False and not osv_result.get("issues_count")
+
+
 def _add_suppression_sections(
     sections: list[str],
+    osv_result: dict[str, Any],
     probe_suppressions: list[dict[str, Any]] | None,
 ) -> bool:
     """Append the suppressed-vulnerabilities section.
 
     Args:
         sections: Section list to append to.
+        osv_result: The ``osv_scanner`` result object.
         probe_suppressions: Classified suppressions from the probe metadata,
             or ``None`` when the result carried none.
 
     Returns:
         ``False`` when the probe metadata is malformed, or missing although
-        the TOML declares probe-eligible entries (diagnostic printed to
-        stderr), else ``True``.
+        the TOML declares probe-eligible entries and the scan itself
+        succeeded (diagnostic printed to stderr), else ``True``.
     """
     sections.append("### 🔇 Suppressed Vulnerabilities:")
     toml_suppressions = _read_suppressions_from_toml()
@@ -423,6 +445,14 @@ def _add_suppression_sections(
     unclassified = [e for e in toml_suppressions if not _is_probe_eligible(e)]
 
     if probe_suppressions is None:
+        if eligible and _scan_failed(osv_result):
+            # The scanner-error section above carries the diagnostic; keep
+            # it in the comment rather than failing the formatter too.
+            sections.append(
+                "_Suppression status unavailable: the scan failed, so "
+                "lintro's probe did not run._",
+            )
+            return True
         if eligible:
             _report_probe_metadata_missing(eligible)
             return False
@@ -476,7 +506,11 @@ def format_comment(json_path: str) -> str | None:
 
     _add_vulnerability_sections(sections, osv_result)
     sections.append("")
-    if not _add_suppression_sections(sections, _probe_suppressions(osv_result)):
+    if not _add_suppression_sections(
+        sections=sections,
+        osv_result=osv_result,
+        probe_suppressions=_probe_suppressions(osv_result),
+    ):
         return None
     return "\n".join(sections)
 
