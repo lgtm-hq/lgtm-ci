@@ -24,12 +24,11 @@ concurrency:
 jobs:
   quality:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       contents: read
       packages: read
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "🛠️ Lintro Code Quality"
       egress-policy: block
       egress-preset: quality
@@ -42,33 +41,31 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       contents: read
       pull-requests: write
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
 
   test:
     # Coverage mode: single python-version + coverage: true (contract:
     # "Compat vs coverage contract"). For a compat matrix instead, pass
     # python-versions: "3.11,3.12,3.13" with coverage/publish disabled.
-    # Dependencies install with `uv sync --frozen` from the committed
-    # uv.lock (#1021). Only if an extra you install pulls a PRIVATE git
+    # Releases that include #1021 install with `uv sync --frozen` from the
+    # committed uv.lock. Only if an extra you install pulls a PRIVATE git
     # dependency, forward a token explicitly at job level, next to `with:`
     # (never `secrets: inherit`). Requires a pin that includes #1021:
     #   secrets:
     #     GIT_DEPS_TOKEN: ${{ secrets.PRIVATE_DEPS_TOKEN }}
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       # actions: read — the aggregate job's artifact-availability wait (#803)
       actions: read
       contents: read
       pull-requests: write
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "Python Tests"
       python-version: "3.12"
       coverage: true

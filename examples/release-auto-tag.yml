@@ -31,13 +31,12 @@ concurrency:
 jobs:
   auto-tag:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-auto-tag.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       contents: write
       actions: read
       issues: write
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
       tag-prefix: v
       create-release: true
