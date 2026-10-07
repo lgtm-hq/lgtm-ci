@@ -8,6 +8,7 @@ loaded by path through :mod:`importlib` rather than imported as packages.
 from __future__ import annotations
 
 import importlib.util
+import shutil
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -55,3 +56,40 @@ def fixtures_dir() -> Path:
 def load_script() -> Callable[[str], ModuleType]:
     """Return the script loader so test modules need no conftest import."""
     return load_script_module
+
+
+@pytest.fixture(scope="session")
+def formatter() -> ModuleType:
+    """Load ``format-security-comment.py`` once per session."""
+    return load_script_module("scripts/ci/security/format-security-comment.py")
+
+
+@pytest.fixture
+def workspace(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
+    """Return an empty working directory and make it the cwd.
+
+    The security scripts read ``.osv-scanner.toml`` relative to the cwd,
+    which in CI is the audited working directory.
+    """
+    monkeypatch.chdir(tmp_path)
+    return tmp_path
+
+
+@pytest.fixture
+# pytest injects the `workspace` fixture by parameter name; the shadowing is
+# the mechanism, not a mistake.
+def install_fixture(
+    workspace: Path,
+) -> Callable[[str, str], Path]:  # pylint: disable=redefined-outer-name
+    """Return a copier from ``tests/fixtures`` into the workspace.
+
+    The returned callable takes the fixture path relative to
+    ``tests/fixtures`` and the destination name inside the workspace.
+    """
+
+    def _install(relative: str, dest_name: str) -> Path:
+        dest = workspace / dest_name
+        shutil.copyfile(src=FIXTURES_DIR / relative, dst=dest)
+        return dest
+
+    return _install

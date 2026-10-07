@@ -49,6 +49,12 @@ addopts = "-ra"
 [tool.lintro]
 config_file = ".lintro-config.yaml"
 
+[tool.pylint.typecheck]
+# assertpy lives only in the `test` extra; the quality job lints inside the
+# pinned py-lintro container without syncing project extras, so pylint cannot
+# resolve the import there (E0401). pytest itself ships in the container.
+ignored-modules = ["assertpy"]
+
 [tool.lintro.pylint]
 # Ratchet for pylint's duplicate-code checker (R0801). The baseline is zero:
 # shared code among the standalone scripts under scripts/ci must live in
