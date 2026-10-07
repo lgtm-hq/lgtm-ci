@@ -365,7 +365,7 @@ def test_workflow_level_block_governs_complete_snippet(
     target = "examples/ci.yml" if layout.startswith("permissions:") else "docs/guide.md"
     (repo / target).write_text(layout, encoding="utf-8")
 
-    assert_that(run_validator(repo, target.split("/")[0])).is_equal_to(0)
+    assert_that(run_validator(repo, target.partition("/")[0])).is_equal_to(0)
 
 
 def test_indented_fence_complete_snippet_cannot_use_marker(
