@@ -97,6 +97,9 @@ _shallow_checkout_of_tag() {
 
 @test "python-dist preflight: shallow checkout without origin/main fetches the default branch and passes" {
 	_init_repo_on_main "1.2.3"
+	# An extra tag on the remote that the preflight fetch must leave behind.
+	git tag -m "other release" v0.0.1
+	git push -q origin v0.0.1
 	_shallow_checkout_of_tag "v1.2.3"
 	export GITHUB_REF_NAME="v1.2.3"
 	export GITHUB_REF="refs/tags/v1.2.3"
@@ -106,11 +109,53 @@ _shallow_checkout_of_tag() {
 	assert_success
 	assert_output --partial "refs/remotes/origin/main is missing (shallow checkout); fetching refs/heads/main from origin"
 	assert_output --partial "Tag commit is on main"
-	# The fetch brought only the default branch and no tags.
+	# The fetch brought only the default branch: no tags, still shallow.
 	run git show-ref --verify --quiet refs/remotes/origin/main
 	assert_success
+	run git show-ref --verify --quiet refs/tags/v0.0.1
+	assert_failure
 	run git rev-parse --is-shallow-repository
 	assert_output "true"
+}
+
+@test "python-dist preflight: shallow checkout with a default-branch missing on the remote points at default-branch" {
+	_init_repo_on_main "1.2.3"
+	_shallow_checkout_of_tag "v1.2.3"
+	export GITHUB_REF_NAME="v1.2.3"
+	export GITHUB_REF="refs/tags/v1.2.3"
+
+	run env \
+		STEP=preflight \
+		WORKING_DIRECTORY=. \
+		VERIFY_TAG_VERSION=false \
+		ENSURE_TAG_ON_DEFAULT_BRANCH=true \
+		DEFAULT_BRANCH=nope \
+		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+		GITHUB_REF="$GITHUB_REF" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_failure
+	assert_output --partial "Could not fetch refs/heads/nope from origin"
+	assert_output --partial "set default-branch"
+}
+
+@test "python-dist preflight: rejects a default-branch that is not a valid branch name" {
+	_init_repo_on_main "1.2.3"
+	export GITHUB_REF_NAME="v1.2.3"
+	export GITHUB_REF="refs/tags/v1.2.3"
+
+	run env \
+		STEP=preflight \
+		WORKING_DIRECTORY=. \
+		VERIFY_TAG_VERSION=false \
+		ENSURE_TAG_ON_DEFAULT_BRANCH=true \
+		DEFAULT_BRANCH='*' \
+		GITHUB_REF_NAME="$GITHUB_REF_NAME" \
+		GITHUB_REF="$GITHUB_REF" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/python-dist.sh"
+
+	assert_failure
+	assert_output --partial "Invalid default-branch: *"
 }
 
 @test "python-dist preflight: shallow checkout passes when the default branch has advanced past the tag" {
@@ -165,7 +210,7 @@ _shallow_checkout_of_tag() {
 	_run_preflight true true
 
 	assert_failure
-	assert_output --partial "Cannot fetch main from origin for the tag-on-default-branch check"
+	assert_output --partial "Could not fetch refs/heads/main from origin for the tag-on-default-branch check"
 	assert_output --partial "persist-credentials: false"
 	assert_output --partial "fetch-depth: 0"
 	assert_output --partial "persist-credentials: true"

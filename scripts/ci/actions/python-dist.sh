@@ -86,6 +86,11 @@ preflight)
 	fi
 
 	if [[ "$ENSURE_TAG_ON_DEFAULT_BRANCH" == "true" ]]; then
+		# DEFAULT_BRANCH goes into a refspec below; reject globs, colons and
+		# other non-branch names before building anything from it.
+		if ! git check-ref-format --branch "$DEFAULT_BRANCH" >/dev/null 2>&1; then
+			die "Invalid default-branch: ${DEFAULT_BRANCH}"
+		fi
 		default_ref="refs/remotes/origin/${DEFAULT_BRANCH}"
 		if ! git show-ref --verify --quiet "$default_ref"; then
 			# The reusable workflow checks out full history, so the ref exists
@@ -93,16 +98,19 @@ preflight)
 			# is documented for an ordinary shallow checkout, which has no
 			# origin/<default> ref: fetch only that branch through the remote
 			# actions/checkout configured. No --depth: in a shallow repository
-			# a plain single-ref fetch stops at the existing shallow boundary,
-			# so it pulls exactly the commits between the tag and the branch
-			# tip; a --depth=1 fetch would hide the tag commit whenever the
-			# default branch has advanced past it and fail the ancestry check
-			# for a tag that is on the branch. GIT_TERMINAL_PROMPT=0 turns a
-			# missing credential into a prompt failure instead of a hang.
+			# a plain single-ref fetch stops at commits already present (the
+			# tagged commit), so for an on-branch tag it pulls only tag..tip
+			# and the ancestry check has what it needs; an off-branch tag pulls
+			# the branch's full history and still fails the check correctly. A
+			# --depth=1 fetch would hide the tag commit whenever the default
+			# branch has advanced past it and fail the check for a tag that is
+			# on the branch. GIT_TERMINAL_PROMPT=0 makes a missing credential
+			# fail instead of waiting on a terminal prompt (askpass helpers and
+			# SSH agents on self-hosted runners are left as configured).
 			log_info "Default branch ref ${default_ref} is missing (shallow checkout); fetching refs/heads/${DEFAULT_BRANCH} from origin"
 			if ! GIT_TERMINAL_PROMPT=0 git fetch --no-tags origin \
 				"+refs/heads/${DEFAULT_BRANCH}:${default_ref}"; then
-				die "Cannot fetch ${DEFAULT_BRANCH} from origin for the tag-on-default-branch check: the checkout has no ${default_ref} and the remote refused the fetch (typically a shallow actions/checkout with persist-credentials: false). Use actions/checkout with fetch-depth: 0 (full history, no fetch needed) or persist-credentials: true (lets this step fetch the branch); if ${DEFAULT_BRANCH} is not the repository default branch, set default-branch."
+				die "Could not fetch refs/heads/${DEFAULT_BRANCH} from origin for the tag-on-default-branch check (the checkout has no ${default_ref}). If ${DEFAULT_BRANCH} is not the repository default branch, set default-branch. Otherwise the remote rejected the fetch, typically a private repository on a shallow actions/checkout with persist-credentials: false: use fetch-depth: 0 (full history, no fetch needed) or persist-credentials: true (this step then fetches with the checkout's credentials)."
 			fi
 		fi
 		ref="${GITHUB_REF:-refs/tags/${tag}}"
