@@ -63,8 +63,14 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-test-shell.yml"
 	assert_success
 	run grep -F 'pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*' "$WORKFLOW"
 	assert_success
-	# Default single-job path keeps unsuffixed (prefix-only) names.
-	run grep -F '          name: ${{ inputs.artifact-prefix }}-test-results' "$WORKFLOW"
+	# Default single-job path keeps unsuffixed (prefix-only) names: exact,
+	# job-scoped line matches, so the sharded superstring cannot satisfy them.
+	run awk '
+		/^  test:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
+		in_job && $0 == "          name: ${{ inputs.artifact-prefix }}-test-results" { found = 1 }
+		END { exit !found }
+	' "$WORKFLOW"
 	assert_success
 	run awk '
 		/^  test:/ { in_job = 1 }

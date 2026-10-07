@@ -322,9 +322,10 @@ calls) silently kept only the second call's coverage: the run stayed green and
 the summary comment reported whichever leg finished last. They now take the
 same `artifact-prefix` input as `reusable-test-e2e-matrix.yml`
 (`[A-Za-z0-9_.]+`, validated by `scripts/ci/actions/validate-artifact-prefix.sh`
-in a job every upload depends on), and every upload name, download glob,
-the availability wait from #803 and the summary-comment handoff are built
-from it:
+before any upload uses it: in an upstream job, or as the first step of the
+uploading job on `reusable-test-shell.yml`'s single-job path), and every
+coverage and result upload name, every download glob, the availability wait
+from #803 and the summary-comment handoff are built from it:
 
 <!-- markdownlint-disable MD013 -->
 
@@ -351,7 +352,8 @@ jobs:
   backend:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
     permissions:
-      actions: read # the aggregate job's artifact-availability wait (#803)
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
     with:
@@ -374,7 +376,11 @@ jobs:
 
 The Node variants keep `coverage-artifact-name` as an escape hatch for a name
 outside the scheme; empty (the default) resolves to `<artifact-prefix>-coverage`
-at both the upload and the summary publisher. `pages-coverage-artifact-name`
+at both the upload and the summary publisher, so an explicitly empty value no
+longer suppresses the rich coverage comment (use `rich-coverage-comment: false`
+or `coverage: false` for that). Two calls that both keep the default prefix
+still share names: isolation is only as good as the prefixes the caller
+passes. `pages-coverage-artifact-name`
 is not derived from the prefix (its default is a published Pages contract, see
 above) and stays a per-call input of its own.
 

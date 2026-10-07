@@ -48,7 +48,9 @@ on:
           comment. Empty (the default) resolves to <artifact-prefix>-coverage,
           so a caller running this workflow more than once in a single run
           isolates it by artifact-prefix alone; set it only to pick a name
-          outside that scheme.
+          outside that scheme. An explicitly empty value no longer suppresses
+          the rich coverage comment (#1091): use rich-coverage-comment or
+          coverage: false for that.
         required: false
         type: string
         default: ""

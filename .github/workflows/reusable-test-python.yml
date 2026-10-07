@@ -716,8 +716,10 @@ jobs:
             scripts/ci/
       # Single-version calls (empty `python-versions`) gate on the test job
       # result alone and skip the download: a cost optimisation only, since
-      # the glob below is namespaced by artifact-prefix (#1091) and can no
-      # longer pick up another call's summaries.
+      # the glob below is namespaced by artifact-prefix (#1091). That isolates
+      # calls that were given distinct prefixes; two calls that both keep the
+      # default still share names, and the availability wait keeps the newest
+      # artifact per name, so it cannot detect that case.
       # Bounded availability wait, then download (#803): the artifact listing
       # is eventually consistent, so a one-shot download can miss a leg whose
       # upload already succeeded. Only under-counts and 404s on a listed id are
