@@ -27,7 +27,8 @@
 #
 #   EXPECTED_COUNT  Positive integer: artifacts the matrix must have produced.
 #   PATTERN         Shell glob matched against artifact names, e.g.
-#                   "python-results-*".
+#                   "<artifact-prefix>-results-*" ("python-results-*" with
+#                   the default prefix, #1091).
 #
 # Environment:
 #   GITHUB_REPOSITORY   (required) owner/repo

@@ -32,8 +32,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   upload name, download glob, the #803 availability wait and the
   summary-comment coverage handoff are built from it; the defaults are the
   language words (`python`, `node`, `node_custom`, `rust`, `shell`) so a
-  single-call consumer keeps today's names. See "Calling a language test
-  reusable twice in one run" in `docs/reusable-workflows.md` (#1091).
+  single-call consumer keeps today's names. The Pages consumers
+  `reusable-test-python-publish.yml` and `reusable-test-node-publish.yml`
+  (and `merge-node-coverage.sh`, via `ARTIFACT_PREFIX`) take the same input
+  and must be passed the same value as the test call. See "Calling a language
+  test reusable twice in one run" in `docs/reusable-workflows.md` (#1091).
 
 ### Changed
 

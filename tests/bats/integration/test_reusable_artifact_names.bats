@@ -777,6 +777,48 @@ _lang_job_validates_prefix() {
 	done
 }
 
+# Validation only helps if a rejected prefix also stops the artifact sites that
+# run under always(). The shell workflow is the one with such sites outside a
+# prepare-dependent job: its aggregate job must list shard-setup and require
+# its success (the E2E merge-job rule), and the single-job uploads must
+# require the validator step's success rather than uploading under a value the
+# validator refused.
+@test "reusable-test-shell: a rejected prefix blocks the always()-gated artifact sites" {
+	run awk '
+		/^  aggregate:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  aggregate:$/ { exit }
+		in_job && /^    needs: / && /shard-setup/ && /test-sharded/ { needs_setup = 1 }
+		in_job && /^    if: / { in_if = 1 }
+		in_job && in_if && /always\(\)/ { always = 1 }
+		in_job && in_if && /needs\.shard-setup\.result == .success./ { gated = 1 }
+		in_job && in_if && /^    [a-z]/ && !/^    if: / { in_if = 0 }
+		END { exit !(needs_setup && always && gated) }
+	' "${WORKFLOW_DIR}/reusable-test-shell.yml"
+	assert_success
+	local step
+	for step in "Upload test results" "Upload coverage report"; do
+		run awk -v step="      - name: ${step}" '
+			/^  test:$/ { in_job = 1 }
+			in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  test:$/ { exit }
+			in_job && $0 == step { in_step = 1; next }
+			in_step && /^      - name: / { exit }
+			in_step && /steps\.artifact-prefix\.outcome == .success./ { gated = 1 }
+			END { exit !gated }
+		' "${WORKFLOW_DIR}/reusable-test-shell.yml"
+		assert_success
+	done
+	# The id those conditions refer to is the validator step itself.
+	run awk '
+		/^  test:$/ { in_job = 1 }
+		in_job && /^  [a-zA-Z0-9_-]+:$/ && !/^  test:$/ { exit }
+		in_job && /^      - name: Validate artifact prefix$/ { in_step = 1; next }
+		in_step && /^      - name: / { in_step = 0 }
+		in_step && /^        id: artifact-prefix$/ { has_id = 1 }
+		END { exit !has_id }
+	' "${WORKFLOW_DIR}/reusable-test-shell.yml"
+	assert_success
+}
+
 # Every producer and every consumer, or the input is incomplete (#728/#752):
 # a flat upload would collide again, and an unprefixed download glob would
 # collect the other call's artifacts. The Pages HTML bundle is the one
@@ -939,6 +981,50 @@ _lang_job_validates_prefix() {
 	assert_failure
 	run env ARTIFACT_PREFIX="py312" bash "$PREFIX_VALIDATOR"
 	assert_success
+}
+
+# The *-publish workflows are consumers in a separate caller job: they must
+# take the same input, validate it before the download, and download the
+# prefixed name/glob, or a non-default prefix on the producer strands the
+# Pages publish on a 404 (#1091).
+@test "reusable-test-*-publish: the publish consumers accept and apply the prefix" {
+	local entry wf prefix key expected value
+	for entry in \
+		"reusable-test-python-publish.yml|python|name|\${{ inputs.artifact-prefix }}-coverage" \
+		"reusable-test-node-publish.yml|node|pattern|\${{ inputs.artifact-prefix }}-coverage-*"; do
+		IFS='|' read -r wf prefix key expected <<<"$entry"
+		run awk '/^      artifact-prefix:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' \
+			"${WORKFLOW_DIR}/${wf}"
+		assert_success
+		assert_output --partial "default: \"${prefix}\""
+		run _lang_job_validates_prefix "$wf" publish
+		assert_success
+		value="$(_lang_with_value "$wf" publish "Download coverage" "$key")"
+		[ "$value" = "$expected" ] || {
+			echo "${wf}: Download coverage ${key} is ${value}, expected ${expected}" >&2
+			return 1
+		}
+		# The validator precedes the download in the same job.
+		run awk '
+			/^  publish:$/ { in_job = 1 }
+			in_job && /validate-artifact-prefix\.sh$/ { v = NR }
+			in_job && /^      - name: Download coverage$/ { d = NR }
+			END { exit !(v && d && v < d) }
+		' "${WORKFLOW_DIR}/${wf}"
+		assert_success
+	done
+	# The Node merge script receives the prefix the glob was built from.
+	run awk '
+		/^      - name: Merge coverage report$/ { in_step = 1; next }
+		in_step && /^      - name: / { exit }
+		in_step && /^          ARTIFACT_PREFIX: \$\{\{ inputs\.artifact-prefix \}\}$/ { ok = 1 }
+		END { exit !ok }
+	' "${WORKFLOW_DIR}/reusable-test-node-publish.yml"
+	assert_success
+	run grep -nE "name: python-coverage$|pattern: node-coverage-\*$" \
+		"${WORKFLOW_DIR}/reusable-test-python-publish.yml" \
+		"${WORKFLOW_DIR}/reusable-test-node-publish.yml"
+	assert_failure
 }
 
 # The coverage publish path and both coverage uploads in the Python workflow

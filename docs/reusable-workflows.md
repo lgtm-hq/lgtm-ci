@@ -350,6 +350,10 @@ prefix:
 jobs:
   backend:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
+    permissions:
+      actions: read # the aggregate job's artifact-availability wait (#803)
+      contents: read
+      pull-requests: write
     with:
       working-directory: backend
       coverage: true
@@ -357,6 +361,10 @@ jobs:
       artifact-prefix: backend # backend-coverage, backend-results-3.12
   worker:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
     with:
       working-directory: worker
       coverage: true
@@ -369,6 +377,12 @@ outside the scheme; empty (the default) resolves to `<artifact-prefix>-coverage`
 at both the upload and the summary publisher. `pages-coverage-artifact-name`
 is not derived from the prefix (its default is a published Pages contract, see
 above) and stays a per-call input of its own.
+
+`reusable-test-python-publish.yml` and `reusable-test-node-publish.yml` are
+consumers of these artifacts in a separate caller job (they download
+`<artifact-prefix>-coverage` and `<artifact-prefix>-coverage-*`). They take
+the same `artifact-prefix` input with the same defaults; a caller that sets it
+on the test call must pass the same value to the matching publish call.
 
 `tests/bats/integration/test_reusable_artifact_names.bats` asserts, per step
 block, that every upload name and download glob in these workflows is built

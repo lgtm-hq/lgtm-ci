@@ -356,8 +356,11 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             scripts/ci/
-      # Runs before any upload in this job uses the prefix (#1091).
+      # Runs before any upload in this job uses the prefix (#1091); the
+      # uploads below are always()-gated, so they also require this step's
+      # success rather than uploading under a rejected prefix.
       - name: Validate artifact prefix
+        id: artifact-prefix
         shell: bash
         env:
           ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
@@ -430,7 +433,7 @@ jobs:
       # threshold step above own the job verdict.
       - name: Upload test results
         id: upload-results
-        if: always()
+        if: always() && steps.artifact-prefix.outcome == 'success'
         continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -454,7 +457,9 @@ jobs:
       # Debug convenience only, same reasoning as the TAP upload above.
       - name: Upload coverage report
         id: upload-coverage-report
-        if: ${{ always() && inputs.upload-coverage && inputs.coverage }}
+        if: >-
+          always() && inputs.upload-coverage && inputs.coverage
+          && steps.artifact-prefix.outcome == 'success'
         continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -712,11 +717,17 @@ jobs:
 
   aggregate:
     name: ${{ inputs.job-name }}
-    needs: test-sharded
+    # shard-setup is listed so a rejected artifact-prefix (#1091) blocks this
+    # job: always() alone would run it after the validator failed and glob
+    # with the very value it refused, like the E2E merge job before #739.
+    # The test-sharded dependency stays loose so results still aggregate (and
+    # the required check still fails closed) when a shard fails.
+    needs: [shard-setup, test-sharded]
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 10
     if: >-
       always()
+      && needs.shard-setup.result == 'success'
       && inputs.coverage
       && inputs.coverage-shards > 1
       && (
