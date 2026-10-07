@@ -138,12 +138,16 @@ _job_run_commands() {
 	refute_output --partial "upload-artifact/merge"
 }
 
-@test "reusable-test-python: the coverage upload uses the flat python-coverage name" {
-	# Positive half: the name downstream consumers actually download
-	# (reusable-test-python-publish.yml, py-lintro's Pages staging) is the
-	# literal `python-coverage`, not a runtime-parameterised expression.
-	run grep -Eq '^ +name: python-coverage$' "$WORKFLOW"
+@test "reusable-test-python: the coverage upload uses the unsuffixed <artifact-prefix>-coverage name" {
+	# Positive half: one coverage artifact per call, with no version suffix.
+	# Since #1091 the name is namespaced by the call's artifact-prefix (default
+	# `python`, so downstream consumers that download `python-coverage` are
+	# unchanged); the per-call expression is asserted in
+	# test_reusable_artifact_names.bats.
+	run grep -Eq '^ +name: \$\{\{ inputs\.artifact-prefix \}\}-coverage$' "$WORKFLOW"
 	assert_success
+	run grep -Eq '^ +name: python-coverage$' "$WORKFLOW"
+	assert_failure
 }
 
 @test "reusable-test-python: no per-version coverage artifact name survives" {
@@ -181,7 +185,7 @@ _job_run_commands() {
 		in_aggregate && /EXPECTED_COUNT: \$\{\{ needs\.prepare\.outputs\.matrix-count \}\}/ { count = 1 }
 		in_aggregate && /MATRIX_KEY: python-version$/ { key = 1 }
 		in_aggregate && /DOWNLOAD_DIR: python-results$/ { dir = 1 }
-		in_aggregate && /\x27python-results-\*\x27/ { pattern = 1 }
+		in_aggregate && /"\$\{ARTIFACT_PREFIX\}-results-\*"/ { pattern = 1 }
 		in_aggregate && /actions\/download-artifact@/ { dl = 1 }
 		END { exit !(wait && agg && wait < agg && token && count && key && dir && pattern && !dl) }
 	' "$WORKFLOW"

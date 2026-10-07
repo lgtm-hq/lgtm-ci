@@ -38,7 +38,10 @@ jobs:
 **Inputs:** `python-version` (default '3.12'), `test-path` (default
 'tests'), `coverage` (default false), `coverage-format` (xml/json/lcov,
 default 'json'), `coverage-threshold` (default 0), `upload-coverage`
-(default false).
+(default false), `artifact-prefix` (default 'python'; artifacts upload as
+`<artifact-prefix>-coverage` and `<artifact-prefix>-results-<version>`, so a
+caller running this workflow twice in one run gives each call its own prefix —
+see [Calling a language test reusable twice in one run](../reusable-workflows.md#calling-a-language-test-reusable-twice-in-one-run-1091)).
 
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.
@@ -59,8 +62,12 @@ executed — never inferred from lockfiles, see the
 (json/lcov/html, default 'json'), `coverage-threshold` (default 0),
 `upload-coverage` (default false), `pre-test-command` (after install, before
 tests), `post-test-command` (right after vitest, before parsing; non-zero
-fails the job — the fixture uses it for a clean-tree assertion), plus the
-Pages coverage HTML inputs (see
+fails the job — the fixture uses it for a clean-tree assertion),
+`artifact-prefix` (default 'node'; every artifact this call uploads is
+`<artifact-prefix>-…`, and `coverage-artifact-name` defaults to
+`<artifact-prefix>-coverage` — see
+[Calling a language test reusable twice in one run](../reusable-workflows.md#calling-a-language-test-reusable-twice-in-one-run-1091)),
+plus the Pages coverage HTML inputs (see
 [reusable-workflows.md](../reusable-workflows.md#pages-coverage-html-inputs-reusable-test-node)).
 `vitest` itself must be a devDependency; the workflow never installs it.
 
@@ -75,7 +82,9 @@ coverage.
 
 **Inputs:** `test-command` (**required**, runs in `working-directory`),
 `job-name` (default `Node.js Tests`), `node-version`, `node-versions`,
-`package-manager`, `pre-test-command`, and the same Pages coverage HTML
+`package-manager`, `pre-test-command`, `artifact-prefix` (default
+'node_custom', so its `<artifact-prefix>-coverage` payload never collides with
+the Vitest workflow's `node-coverage`), and the same Pages coverage HTML
 inputs as the Vitest workflow.
 
 **Outputs:** `passed`, `pages-coverage-artifact-name`,
@@ -90,11 +99,12 @@ keeps today's single job named `job-name`. When `coverage: true` and
 plus Cobertura XML (max per-line hits) and enforces `coverage-threshold`.
 kcov v43 cannot merge bash coverage itself, so do not pass `kcov --merge`.
 Shard TAP/coverage artifacts are named
-`shell-test-results-<comment-marker>-shard-*` and
-`shell-coverage-<comment-marker>-shard-*` so two invocations in one
-run do not mix results (set a distinct `comment-marker` per call, the
-same isolation used for PR comments). This repo's `ci.yml` opts in
-with `coverage-shards: 4`.
+`<artifact-prefix>-test-results-<comment-marker>-shard-*` and
+`<artifact-prefix>-coverage-<comment-marker>-shard-*`, and the single-job
+path uploads `<artifact-prefix>-test-results` and `<artifact-prefix>-coverage`,
+so two invocations in one run do not mix results: give each call its own
+`artifact-prefix` (default `shell`; the `comment-marker` keeps isolating the
+PR comments). This repo's `ci.yml` opts in with `coverage-shards: 4`.
 
 ```yaml
 jobs:
@@ -119,9 +129,10 @@ jobs:
 `tests/bats`), `coverage` (default false), `coverage-threshold` (default
 0), `coverage-shards` (default 1), `upload-coverage` (default false),
 `parallel` (default 1; ignored under kcov), `comment-marker` (default
-`shell-test-results`; must be unique per invocation in the same run so
-shard artifacts do not mix), plus standard `tooling-ref` / egress /
-`job-name` / `draft-pr-skip` inputs.
+`shell-test-results`; unique per invocation in the same run so the PR
+comments do not mix), `artifact-prefix` (default `shell`; unique per
+invocation in the same run so artifacts do not mix), plus standard
+`tooling-ref` / egress / `job-name` / `draft-pr-skip` inputs.
 
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.
@@ -278,7 +289,11 @@ tests (`coverage: false` for fast nextest-only, `coverage: true` for a
 single instrumented `llvm-cov nextest` run). `reusable-test-rust-build.yml`
 is a low-noise build-only alternative safe to run without PR context. See
 [rust-testing.md](../rust-testing.md) and
-[reusable-workflows.md](../reusable-workflows.md#rust).
+[reusable-workflows.md](../reusable-workflows.md#rust). `reusable-rust-test.yml`
+takes `artifact-prefix` (default `rust`; `<artifact-prefix>-coverage-lcov`,
+`<artifact-prefix>-results-<toolchain>`) like the other language test
+reusables — see
+[Calling a language test reusable twice in one run](../reusable-workflows.md#calling-a-language-test-reusable-twice-in-one-run-1091).
 
 ## Coverage
 

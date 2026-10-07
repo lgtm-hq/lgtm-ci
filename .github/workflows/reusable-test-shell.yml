@@ -68,6 +68,18 @@ on:
         required: false
         type: string
         default: "shell-test-results"
+      artifact-prefix:
+        description: >-
+          Namespace for this call's artifacts (<prefix>-test-results,
+          <prefix>-coverage, and the sharded
+          <prefix>-test-results-<comment-marker>-shard-N /
+          <prefix>-coverage-<comment-marker>-shard-N); give a second call in
+          the same run its own prefix so the two calls' TAP and coverage
+          artifacts do not overwrite each other (#1091). Must match
+          [A-Za-z0-9_.]+ ('-' separates prefix from the rest of the name)
+        required: false
+        type: string
+        default: "shell"
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -344,6 +356,15 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             scripts/ci/
+      # Runs before any upload in this job uses the prefix (#1091); the
+      # uploads below are always()-gated, so they also require this step's
+      # success rather than uploading under a rejected prefix.
+      - name: Validate artifact prefix
+        id: artifact-prefix
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
       - name: Install BATS and helpers
         shell: bash
         env:
@@ -412,18 +433,21 @@ jobs:
       # threshold step above own the job verdict.
       - name: Upload test results
         id: upload-results
-        if: always()
+        if: always() && steps.artifact-prefix.outcome == 'success'
         continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shell-test-results
+          # Namespaced by artifact-prefix so two calls in one run keep their
+          # own TAP output (#1091).
+          name: ${{ inputs.artifact-prefix }}-test-results
           path: |
             ${{ inputs.working-directory }}/bats-output.tap
           retention-days: 7
           if-no-files-found: ignore
-          # A caller may run this workflow twice in one run; the later
-          # attempt's TAP output is authoritative.
+          # overwrite only covers a rerun of this same call replacing its
+          # earlier attempt. Isolation between calls comes from
+          # artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
       - name: Warn on failed test results upload
         if: always() && steps.upload-results.outcome == 'failure'
@@ -433,18 +457,23 @@ jobs:
       # Debug convenience only, same reasoning as the TAP upload above.
       - name: Upload coverage report
         id: upload-coverage-report
-        if: ${{ always() && inputs.upload-coverage && inputs.coverage }}
+        if: >-
+          always() && inputs.upload-coverage && inputs.coverage
+          && steps.artifact-prefix.outcome == 'success'
         continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shell-coverage
+          # Namespaced by artifact-prefix so two calls in one run keep their
+          # own coverage (#1091).
+          name: ${{ inputs.artifact-prefix }}-coverage
           path: |
             ${{ inputs.working-directory }}/coverage-report
           retention-days: 7
           if-no-files-found: ignore
-          # A caller may run this workflow twice in one run; the later
-          # attempt's coverage is authoritative.
+          # overwrite only covers a rerun of this same call replacing its
+          # earlier attempt. Isolation between calls comes from
+          # artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
       - name: Warn on failed coverage report upload
         if: always() && steps.upload-coverage-report.outcome == 'failure'
@@ -519,6 +548,13 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             scripts/ci/
+      # The shard and aggregate jobs depend on this one, so an invalid
+      # prefix fails before any upload or download glob uses it (#1091).
+      - name: Validate artifact prefix
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
       - name: Generate coverage shard matrix
         id: matrix
         shell: bash
@@ -633,11 +669,14 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shell-test-results-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}
+          # artifact-prefix replaces the language word (#1091); the
+          # comment-marker and shard coordinates stay as the leg suffix.
+          name: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}
           path: |
             ${{ inputs.working-directory }}/bats-output.tap
           retention-days: 7
           if-no-files-found: ignore
+          # overwrite only, for a rerun of this same shard (#728/#752).
           overwrite: true
       - name: Warn on failed test results upload
         if: always() && steps.upload-results.outcome == 'failure'
@@ -651,11 +690,14 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shell-coverage-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}
+          # artifact-prefix replaces the language word (#1091); the
+          # comment-marker and shard coordinates stay as the leg suffix.
+          name: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-${{ matrix.shard }}
           path: |
             ${{ inputs.working-directory }}/coverage-report
           retention-days: 7
           if-no-files-found: ignore
+          # overwrite only, for a rerun of this same shard (#728/#752).
           overwrite: true
       - name: Warn on failed coverage report upload
         if: always() && steps.upload-coverage-report.outcome == 'failure'
@@ -675,11 +717,17 @@ jobs:
 
   aggregate:
     name: ${{ inputs.job-name }}
-    needs: test-sharded
+    # shard-setup is listed so a rejected artifact-prefix (#1091) blocks this
+    # job: always() alone would run it after the validator failed and glob
+    # with the very value it refused, like the E2E merge job before #739.
+    # The test-sharded dependency stays loose so results still aggregate (and
+    # the required check still fails closed) when a shard fails.
+    needs: [shard-setup, test-sharded]
     runs-on: ${{ inputs.runner-image }}
     timeout-minutes: 10
     if: >-
       always()
+      && needs.shard-setup.result == 'success'
       && inputs.coverage
       && inputs.coverage-shards > 1
       && (
@@ -768,20 +816,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_COUNT: ${{ inputs.coverage-shards }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
           COMMENT_MARKER: ${{ inputs.comment-marker }}
           # A shard that never uploaded will not appear; do not spend the
           # full budget on it when the shard job already failed.
           WAIT_BUDGET_SECONDS: ${{ needs.test-sharded.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
-          "$EXPECTED_COUNT" "shell-test-results-${COMMENT_MARKER}-shard-*"
+          "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-test-results-${COMMENT_MARKER}-shard-*"
       - name: Download shard TAP artifacts
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: shell-test-results-${{ inputs.comment-marker }}-shard-*
+          pattern: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-taps
           merge-multiple: false
       # The coverage artifacts upload after the TAP ones, so a complete TAP
@@ -794,20 +843,21 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EXPECTED_COUNT: ${{ inputs.coverage-shards }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
           COMMENT_MARKER: ${{ inputs.comment-marker }}
           # A shard that never uploaded will not appear; do not spend the
           # full budget on it when the shard job already failed.
           WAIT_BUDGET_SECONDS: ${{ needs.test-sharded.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
-          "$EXPECTED_COUNT" "shell-coverage-${COMMENT_MARKER}-shard-*"
+          "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-coverage-${COMMENT_MARKER}-shard-*"
       - name: Download shard coverage artifacts
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          pattern: shell-coverage-${{ inputs.comment-marker }}-shard-*
+          pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-coverage
           merge-multiple: false
       - name: Aggregate shard TAP results
@@ -843,10 +893,13 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: shell-coverage
+          # Same name the single-job path uploads, namespaced by
+          # artifact-prefix (#1091); the two paths never run in one call.
+          name: ${{ inputs.artifact-prefix }}-coverage
           path: ${{ runner.temp }}/merged-cobertura.xml
           retention-days: 7
           if-no-files-found: ignore
+          # overwrite only, for a rerun of this same call (#728/#752).
           overwrite: true
       - name: Warn on failed merged coverage upload
         if: always() && steps.upload-merged-coverage.outcome == 'failure'

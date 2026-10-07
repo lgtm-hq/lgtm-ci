@@ -24,7 +24,7 @@
 #              exit 124 on expiry. Kept below the coverage-run step timeout (45).
 #   SHARD_ARTIFACTS_DIR - Directory of downloaded shard TAP artifacts
 #              (aggregate-results). Expected layout:
-#              shell-test-results-<comment-marker>-shard-*/bats-output.tap
+#              <artifact-prefix>-test-results-<comment-marker>-shard-*/bats-output.tap
 #   EXPECTED_SHARDS - Optional positive integer (aggregate-results). When
 #              set, fail unless that many bats-output.tap files were found.
 #   SHARD_COVERAGE_DIR - Directory of downloaded shard coverage artifacts

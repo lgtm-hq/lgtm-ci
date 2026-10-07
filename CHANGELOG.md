@@ -24,7 +24,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   HTTP 404 on a listed artifact id; over-counts, names outside the matrix and
   unrelated errors still fail at once (#803).
 
+- `artifact-prefix` input on `reusable-test-python.yml`,
+  `reusable-test-node.yml`, `reusable-test-node-custom.yml`,
+  `reusable-rust-test.yml` and `reusable-test-shell.yml`, with the
+  `reusable-test-e2e-matrix.yml` contract (`[A-Za-z0-9_.]+`, validated by
+  `validate-artifact-prefix.sh` before any upload uses it: in an upstream
+  job, or as the first step of the uploading job on
+  `reusable-test-shell.yml`'s single-job path). Every coverage and result
+  upload name, every download glob, the #803 availability wait and the
+  summary-comment coverage handoff are built from it; the defaults are the
+  language words (`python`, `node`, `node_custom`, `rust`, `shell`) so a
+  single-call consumer keeps today's names. `pages-coverage-artifact-name`
+  is deliberately not derived from the prefix (its default is a published
+  Pages contract) and stays a per-call input. The Pages consumers
+  `reusable-test-python-publish.yml` and `reusable-test-node-publish.yml`
+  (and `merge-node-coverage.sh`, via `ARTIFACT_PREFIX`) take the same input
+  and must be passed the same value as the test call. See "Calling a language
+  test reusable twice in one run" in `docs/reusable-workflows.md` (#1091).
+
 ### Changed
+
+- **Callers that invoke one language test reusable twice in one run must
+  pass a distinct `artifact-prefix` per call.** Before #1091 the second call
+  overwrote the first call's `<lang>-coverage` artifact (and its
+  `<lang>-results-<version>` summary when the versions matched) while the run
+  stayed green; the uploads were flat names with `overwrite: true`. With
+  distinct prefixes both calls keep their coverage and result summaries and
+  each summary comment reads its own call's coverage. `overwrite: true`
+  remains on every upload, but only as a rerun safeguard for the same call.
+  `coverage-artifact-name` on the Node variants now defaults to empty, which
+  resolves to `<artifact-prefix>-coverage`, so an explicitly empty value no
+  longer suppresses the rich coverage comment (use `coverage: false`);
+  `reusable-test-node-custom.yml`'s
+  default coverage payload is therefore `node_custom-coverage` (was
+  `node-custom-coverage`, `-` being the reserved separator) (#1091).
 
 - **Callers of `reusable-test-python.yml`, `reusable-test-node.yml`,
   `reusable-rust-test.yml` and `reusable-test-shell.yml` must grant

@@ -30,15 +30,29 @@ on:
         required: false
         type: boolean
         default: false
+      artifact-prefix:
+        description: >-
+          Namespace for this call's artifacts (<prefix>-coverage); give a
+          second call in the same run its own prefix so the two calls'
+          coverage payloads do not overwrite each other (#1091). Defaults to
+          node_custom rather than node so a caller that also runs
+          reusable-test-node.yml in the same run does not collide with it
+          ('-' is the reserved separator, hence the underscore). Must match
+          [A-Za-z0-9_.]+
+        required: false
+        type: string
+        default: "node_custom"
       coverage-artifact-name:
         description: >-
           Artifact name for the coverage payload handed to the test-summary
-          comment. Defaults to node-custom-coverage rather than node-coverage so
-          a caller that also runs reusable-test-node.yml in the same run does
-          not collide on one artifact name.
+          comment. Empty (the default) resolves to <artifact-prefix>-coverage,
+          so a caller running this workflow more than once in a single run
+          isolates it by artifact-prefix alone; set it only to pick a name
+          outside that scheme. An explicitly empty value no longer suppresses
+          the rich coverage comment (#1091): use coverage: false for that.
         required: false
         type: string
-        default: "node-custom-coverage"
+        default: ""
       pages-coverage-artifact-name:
         description: >-
           Artifact name for flat Node HTML coverage upload. The default matches
@@ -350,6 +364,13 @@ jobs:
           PLATFORM: Node.js custom
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
+      # Every job below depends on prepare, so an invalid prefix fails before
+      # any upload uses it (#1091).
+      - name: Validate artifact prefix
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
       - name: Generate Node.js matrix
         id: matrix
         shell: bash
@@ -518,12 +539,17 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: ${{ inputs.coverage-artifact-name }}
+          # Explicit coverage-artifact-name, else <artifact-prefix>-coverage;
+          # the publish job below resolves the identical expression (#1091).
+          name: >-
+            ${{ inputs.coverage-artifact-name != '' && inputs.coverage-artifact-name
+            || format('{0}-coverage', inputs.artifact-prefix) }}
           path: node-coverage-staged/
           retention-days: 7
           if-no-files-found: ignore
-          # A caller may run this workflow twice in one run; the later
-          # attempt's coverage is authoritative.
+          # overwrite only covers a rerun of this same call replacing its
+          # earlier attempt. Isolation between calls comes from
+          # artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
       - name: Warn on failed summary coverage upload
         if: always() && steps.upload-summary-coverage.outcome == 'failure'
@@ -796,8 +822,11 @@ jobs:
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
       coverage-enabled: ${{ inputs.coverage }}
       rich-coverage-comment: ${{ inputs.coverage }}
+      # Same resolution as the test job's upload (#1091): explicit
+      # coverage-artifact-name, else <artifact-prefix>-coverage.
       coverage-artifact-name: >-
-        ${{ inputs.coverage && inputs.coverage-artifact-name || '' }}
+        ${{ inputs.coverage && (inputs.coverage-artifact-name != '' && inputs.coverage-artifact-name
+        || format('{0}-coverage', inputs.artifact-prefix)) || '' }}
       coverage-file: >-
         ${{ inputs.working-directory == '.' && inputs.coverage-summary-file ||
         format('{0}/{1}', inputs.working-directory, inputs.coverage-summary-file) }}

@@ -93,6 +93,16 @@ on:
         required: false
         type: string
         default: "rust-test-results"
+      artifact-prefix:
+        description: >-
+          Namespace for this call's artifacts (<prefix>-coverage-lcov,
+          <prefix>-results-<toolchain>); give a second call in the same run
+          its own prefix so the two calls' coverage and result summaries do
+          not overwrite each other (#1091). Must match [A-Za-z0-9_.]+ ('-'
+          separates prefix from the rest of the name)
+        required: false
+        type: string
+        default: "rust"
       job-name:
         description: "GitHub check name for the Rust test job"
         required: false
@@ -370,6 +380,13 @@ jobs:
           PLATFORM: Rust
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
+      # Every job below depends on prepare, so an invalid prefix fails before
+      # any upload or download glob uses it (#1091).
+      - name: Validate artifact prefix
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
       - name: Generate Rust toolchain matrix
         id: matrix
         shell: bash
@@ -526,11 +543,14 @@ jobs:
         continue-on-error: true
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rust-coverage-lcov
+          # Namespaced by artifact-prefix so two calls in one run keep their
+          # own LCOV (#1091); the publish job downloads this same name.
+          name: ${{ inputs.artifact-prefix }}-coverage-lcov
           path: ${{ inputs.working-directory }}/rust-coverage.lcov
           if-no-files-found: ignore
-          # A caller may run this workflow twice in one run; the later
-          # attempt's coverage is authoritative.
+          # overwrite only covers a rerun of this same call replacing its
+          # earlier attempt. Isolation between calls comes from
+          # artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
       - name: Warn on failed summary LCOV upload
         if: always() && steps.upload-summary-lcov.outcome == 'failure'
@@ -571,13 +591,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: rust-results-${{ matrix.rust-toolchain }}
+          # Namespaced by artifact-prefix so two calls in one run keep their
+          # own summaries (#1091); the toolchain suffix separates matrix legs.
+          name: ${{ inputs.artifact-prefix }}-results-${{ matrix.rust-toolchain }}
           path: rust-result-${{ matrix.rust-toolchain }}/summary.json
           retention-days: 7
           if-no-files-found: error
           # The aggregate job's verdict reads this summary, so no
-          # continue-on-error — overwrite only, so a retried call's summary
-          # wins over the earlier attempt's.
+          # continue-on-error — overwrite only, so a rerun of this same
+          # call's leg replaces its earlier attempt. Isolation between calls
+          # comes from artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
       - name: Generate Rust coverage HTML
         if: >-
@@ -738,8 +761,11 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
       # Single-version calls (empty `rust-toolchains`) gate on the test job
-      # result alone: another call in the same run may upload summaries
-      # under the same artifact names, so a glob download would miscount.
+      # result alone and skip the download: a cost optimisation only, since
+      # the glob below is namespaced by artifact-prefix (#1091). That isolates
+      # calls that were given distinct prefixes; two calls that both keep the
+      # default still share names, and the availability wait keeps the newest
+      # artifact per name, so it cannot detect that case.
       # Bounded availability wait, then download (#803): the artifact listing
       # is eventually consistent, so a one-shot download can miss a leg whose
       # upload already succeeded. Only under-counts and 404s on a listed id are
@@ -753,13 +779,14 @@ jobs:
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
           MATRIX_KEY: rust-toolchain
           EXPECTED_COUNT: ${{ needs.prepare.outputs.matrix-count }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
           # A leg that was cancelled or crashed before uploading never shows
           # up; the aggregate still fails closed, so do not spend the full
           # budget waiting for it.
           WAIT_BUDGET_SECONDS: ${{ needs.test.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
-          "$EXPECTED_COUNT" 'rust-results-*'
+          "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-results-*"
       - name: Aggregate matrix test summaries
         id: aggregate
         if: inputs.rust-toolchains != ''
@@ -829,7 +856,10 @@ jobs:
         (needs.aggregate.outputs.passed == 'true' && 'success' || 'failure') ||
         needs.test.result }}
       rich-coverage-comment: ${{ inputs.coverage }}
-      coverage-artifact-name: ${{ inputs.coverage && 'rust-coverage-lcov' || '' }}
+      # Same name the test job uploaded (#1091): the rich coverage comment
+      # must read this call's LCOV, not a sibling call's.
+      coverage-artifact-name: >-
+        ${{ inputs.coverage && format('{0}-coverage-lcov', inputs.artifact-prefix) || '' }}
       coverage-file: rust-coverage.lcov
       coverage-format: lcov
       tooling-ref: ${{ inputs.tooling-ref }}

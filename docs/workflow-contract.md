@@ -362,11 +362,13 @@ does not reintroduce matrix merging (#756). Artifact names and the
 produce `merged-coverage.lcov`.
 
 Node test reusables upload the coverage payload from
-`{working-directory}/{coverage-summary-file}` under `coverage-artifact-name`,
-which defaults to `node-coverage` on `reusable-test-node` and
-`node-custom-coverage` on `reusable-test-node-custom` so the two cannot collide
-in one run (see
-[reusable-workflows.md](reusable-workflows.md#artifact-names)).
+`{working-directory}/{coverage-summary-file}` under `coverage-artifact-name`.
+Since #1091 that input defaults to empty and resolves to
+`<artifact-prefix>-coverage` at both the upload and the publisher, so the
+effective defaults are `node-coverage` on `reusable-test-node` and
+`node_custom-coverage` on `reusable-test-node-custom` (the prefixes default
+to `node` and `node_custom`), and the two cannot collide in one run (see
+[reusable-workflows.md](reusable-workflows.md#calling-a-language-test-reusable-twice-in-one-run-1091)).
 `publish-test-summary` must pass the same path (including the `working-directory`
 prefix when it is not `.`) as `coverage-file` to
 `reusable-publish-test-summary.yml` so `download-artifact` resolves the summary

@@ -289,7 +289,7 @@ pull-requests: write"
 	run _assert_docs_match_union \
 		"${PROJECT_ROOT}/.github/workflows/reusable-test-python.yml" \
 		"reusable-test-python.yml" \
-		2 \
+		4 \
 		"${PROJECT_ROOT}/docs/reusable-workflows.md" \
 		"${PROJECT_ROOT}/examples/ci-python.yml"
 	assert_success

@@ -6,7 +6,6 @@ actions/deploy-pages.sh
 actions/generate-coverage-badge.sh
 actions/generate-lintro-comment.sh
 actions/generate-sbom.sh
-actions/merge-node-coverage.sh
 actions/run-command.sh
 actions/run-pytest.sh
 actions/run-tests.sh

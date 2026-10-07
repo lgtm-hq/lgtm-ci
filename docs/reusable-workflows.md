@@ -299,8 +299,8 @@ disambiguate further:
 | ---------------------------------- | --------------------------- | ---------------------------- |
 | `reusable-link-check.yml`          | `link-report-artifact-name` | `lychee-report`              |
 | `reusable-site-quality.yml`        | `link-report-artifact-name` | `site-lychee-report`         |
-| `reusable-test-node.yml`           | `coverage-artifact-name`    | `node-coverage`              |
-| `reusable-test-node-custom.yml`    | `coverage-artifact-name`    | `node-custom-coverage`       |
+| `reusable-test-node.yml`           | `coverage-artifact-name`    | `<artifact-prefix>-coverage` |
+| `reusable-test-node-custom.yml`    | `coverage-artifact-name`    | `<artifact-prefix>-coverage` |
 | `reusable-test-e2e-playwright.yml` | `report-artifact-name`      | `playwright-report-<run_id>` |
 | `reusable-test-e2e.yml`            | `report-artifact-name`      | `e2e-report-<run_id>`        |
 | `reusable-coverage.yml`            | `coverage-artifact-name`    | `coverage-report`            |
@@ -311,6 +311,92 @@ disambiguate further:
 `reusable-test-node.yml` and `reusable-test-node-custom.yml`, because that name
 is baked into consumers' Pages bundles. A caller that enables
 `upload-pages-coverage-html` on both in one run must override one of them.
+
+### Calling a language test reusable twice in one run (#1091)
+
+`overwrite: true` is a rerun safeguard for one logical producer, never a
+substitute for namespace isolation (#728, #752). Before #1091 the language
+test reusables uploaded flat names, so a caller invoking one of them twice in
+a run (two packages, two coverage formats, two Python versions as separate
+calls) silently kept only the second call's coverage: the run stayed green and
+the summary comment reported whichever leg finished last. They now take the
+same `artifact-prefix` input as `reusable-test-e2e-matrix.yml`
+(`[A-Za-z0-9_.]+`, validated by `scripts/ci/actions/validate-artifact-prefix.sh`
+before any upload uses it: in an upstream job, or as the first step of the
+uploading job on `reusable-test-shell.yml`'s single-job path), and every
+coverage and result upload name, every download glob, the availability wait
+from #803 and the summary-comment handoff are built from it:
+
+<!-- markdownlint-disable MD013 -->
+
+| Workflow                        | Default prefix | Artifacts (`<p>` = prefix)                                                                          |
+| ------------------------------- | -------------- | --------------------------------------------------------------------------------------------------- |
+| `reusable-test-python.yml`      | `python`       | `<p>-coverage`, `<p>-results-<version>`                                                             |
+| `reusable-test-node.yml`        | `node`         | `<p>-coverage`, `<p>-coverage-<version>`, `<p>-results-<version>`, `<p>-build-<version>`            |
+| `reusable-test-node-custom.yml` | `node_custom`  | `<p>-coverage`                                                                                      |
+| `reusable-rust-test.yml`        | `rust`         | `<p>-coverage-lcov`, `<p>-results-<toolchain>`                                                      |
+| `reusable-test-shell.yml`       | `shell`        | `<p>-test-results`, `<p>-coverage`; sharded: `<p>-{test-results,coverage}-<comment-marker>-shard-N` |
+
+<!-- markdownlint-enable MD013 -->
+
+The defaults are the language words, so a caller that invokes a reusable once
+keeps today's artifact names byte-for-byte. The one rename is
+`reusable-test-node-custom.yml`: its default coverage payload is now
+`node_custom-coverage` (was `node-custom-coverage`), because `-` is the
+reserved separator between the prefix and the rest of the name. A caller that
+invokes the same reusable twice in one run must give the second call its own
+prefix:
+
+```yaml
+jobs:
+  backend:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
+    permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
+      contents: read
+      pull-requests: write
+    with:
+      working-directory: backend
+      coverage: true
+      upload-coverage: true
+      artifact-prefix: backend # backend-coverage, backend-results-3.12
+  worker:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha>
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    with:
+      working-directory: worker
+      coverage: true
+      upload-coverage: true
+      artifact-prefix: worker # worker-coverage, worker-results-3.12
+```
+
+The Node variants keep `coverage-artifact-name` as an escape hatch for a name
+outside the scheme; empty (the default) resolves to `<artifact-prefix>-coverage`
+at both the upload and the summary publisher, so an explicitly empty value no
+longer suppresses the rich coverage comment (use `coverage: false` for that).
+Two calls that both keep the default prefix
+still share names: isolation is only as good as the prefixes the caller
+passes. `pages-coverage-artifact-name`
+is not derived from the prefix (its default is a published Pages contract, see
+above) and stays a per-call input of its own.
+
+`reusable-test-python-publish.yml` and `reusable-test-node-publish.yml` are
+consumers of these artifacts in a separate caller job
+(`reusable-test-python-publish.yml` downloads `<artifact-prefix>-coverage`;
+`reusable-test-node-publish.yml` downloads `<artifact-prefix>-coverage-*`). They
+take
+the same `artifact-prefix` input with the same defaults; a caller that sets it
+on the test call must pass the same value to the matching publish call.
+
+`tests/bats/integration/test_reusable_artifact_names.bats` asserts, per step
+block, that every upload name and download glob in these workflows is built
+from the input, that an upstream job validates it, that the default prefix
+reproduces the pre-#1091 names, and that two distinct prefixes are mutually
+invisible to each other's download globs.
 
 ## Quality And Validation
 
@@ -569,8 +655,10 @@ one-shot download then fails the aggregate with
 The aggregate job therefore runs `scripts/ci/actions/wait-for-artifacts.sh`
 before aggregating. It polls
 `GET /repos/{owner}/{repo}/actions/runs/{run_id}/artifacts` until the count of
-artifacts matching the matrix pattern reaches the matrix size (from the
-`prepare` job's `matrix-count` output), backing off 2/4/8/16/30 s within a 90 s
+artifacts matching the matrix pattern (`<artifact-prefix>-results-*`, see
+[Calling a language test reusable twice in one run](#calling-a-language-test-reusable-twice-in-one-run-1091))
+reaches the matrix size (from the `prepare` job's `matrix-count` output),
+backing off 2/4/8/16/30 s within a 90 s
 budget, then downloads each listed artifact over the REST zip endpoint and
 checks it against the listing's sha256 `digest` before extracting. Every API
 call runs under coreutils `timeout` (30 s) so a stalled request cannot burn
@@ -600,8 +688,9 @@ expecting `coverage-shards` TAP artifacts, as a `continue-on-error` pre-check
 ahead of its existing best-effort downloads — once for the TAP artifacts and
 once for the coverage artifacts, which upload later. The strict shard count in
 `run-bats-tests.sh` stays the verdict there; the wait's log names the shard a
-permanent under-count is missing. The artifact pattern embeds `comment-marker`,
-so keep the marker free of glob characters (`*`, `?`, `[`).
+permanent under-count is missing. The artifact pattern is
+`<artifact-prefix>-test-results-<comment-marker>-shard-*`, so keep the marker
+free of glob characters (`*`, `?`, `[`); the prefix is validated.
 
 This is why all four workflows request `actions: read` on the aggregate job:
 `GITHUB_TOKEN` cannot read the artifact listing without it, and a reusable

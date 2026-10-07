@@ -71,6 +71,16 @@ on:
         required: false
         type: string
         default: "python-test-results"
+      artifact-prefix:
+        description: >-
+          Namespace for this call's artifacts (<prefix>-coverage,
+          <prefix>-results-<version>); give a second call in the same run
+          its own prefix so the two calls' coverage and result summaries do
+          not overwrite each other (#1091). Must match [A-Za-z0-9_.]+ ('-'
+          separates prefix from the rest of the name)
+        required: false
+        type: string
+        default: "python"
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -364,6 +374,13 @@ jobs:
           PLATFORM: Python
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
+      # Every job below depends on prepare, so an invalid prefix fails before
+      # any upload or download glob uses it (#1091).
+      - name: Validate artifact prefix
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
       - name: Generate Python matrix
         id: matrix
         shell: bash
@@ -556,13 +573,16 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: python-results-${{ matrix.python-version }}
+          # Namespaced by artifact-prefix so two calls in one run keep their
+          # own summaries (#1091); the version suffix separates matrix legs.
+          name: ${{ inputs.artifact-prefix }}-results-${{ matrix.python-version }}
           path: python-result-${{ matrix.python-version }}/summary.json
           retention-days: 7
           if-no-files-found: error
           # The aggregate job's verdict reads this summary, so no
-          # continue-on-error — overwrite only, so a retried call's summary
-          # wins over the earlier attempt's.
+          # continue-on-error — overwrite only, so a rerun of this same
+          # call's leg replaces its earlier attempt. Isolation between calls
+          # comes from artifact-prefix, never from overwrite (#728/#752).
           overwrite: true
       - name: Upload coverage report
         if: >-
@@ -573,19 +593,21 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          # Always the flat name: this step needs `coverage: true`, and the
+          # No version suffix: this step needs `coverage: true`, and the
           # compat/coverage contract (#345) rejects that with a non-empty
-          # `python-versions`, so the matrix never reaches here and there are
-          # no per-version coverage artifacts to disambiguate (#756).
-          name: python-coverage
+          # `python-versions`, so one call produces exactly one coverage
+          # artifact (#756). Two calls in one run are kept apart by
+          # artifact-prefix (#1091); the publish job downloads this name.
+          name: ${{ inputs.artifact-prefix }}-coverage
           path: |
             ${{ inputs.working-directory }}/${{ steps.run.outputs.coverage-file }}
             ${{ inputs.working-directory }}/pytest-results.json
           retention-days: 7
           if-no-files-found: ignore
           # Feeds the coverage publish path, so no continue-on-error —
-          # overwrite only, so a retried call's coverage wins over the
-          # earlier attempt's.
+          # overwrite only, so a rerun of this same call replaces its earlier
+          # attempt. Isolation between calls comes from artifact-prefix,
+          # never from overwrite (#728/#752).
           overwrite: true
       - name: Fail on pytest errors
         if: steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'
@@ -693,8 +715,11 @@ jobs:
           sparse-checkout-extra: |
             scripts/ci/
       # Single-version calls (empty `python-versions`) gate on the test job
-      # result alone: another call in the same run may upload summaries
-      # under the same artifact names, so a glob download would miscount.
+      # result alone and skip the download: a cost optimisation only, since
+      # the glob below is namespaced by artifact-prefix (#1091). That isolates
+      # calls that were given distinct prefixes; two calls that both keep the
+      # default still share names, and the availability wait keeps the newest
+      # artifact per name, so it cannot detect that case.
       # Bounded availability wait, then download (#803): the artifact listing
       # is eventually consistent, so a one-shot download can miss a leg whose
       # upload already succeeded. Only under-counts and 404s on a listed id are
@@ -708,13 +733,14 @@ jobs:
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
           MATRIX_KEY: python-version
           EXPECTED_COUNT: ${{ needs.prepare.outputs.matrix-count }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
           # A leg that was cancelled or crashed before uploading never shows
           # up; the aggregate still fails closed, so do not spend the full
           # budget waiting for it.
           WAIT_BUDGET_SECONDS: ${{ needs.test.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
-          "$EXPECTED_COUNT" 'python-results-*'
+          "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-results-*"
       - name: Aggregate matrix test summaries
         id: aggregate
         if: inputs.python-versions != ''
@@ -786,8 +812,11 @@ jobs:
         (needs.aggregate.outputs.passed == 'true' && 'success' || 'failure') ||
         needs.test.result }}
       rich-coverage-comment: ${{ inputs.coverage }}
+      # Same name the test job uploaded (#1091): the rich coverage comment
+      # must read this call's coverage, not a sibling call's.
       coverage-artifact-name: >-
-        ${{ inputs.coverage && inputs.upload-coverage && 'python-coverage' || '' }}
+        ${{ inputs.coverage && inputs.upload-coverage
+        && format('{0}-coverage', inputs.artifact-prefix) || '' }}
       coverage-file: >-
         ${{ inputs.coverage-format == 'xml' && 'coverage.xml' ||
         (inputs.coverage-format == 'lcov' && 'coverage.lcov' || 'coverage.json') }}
