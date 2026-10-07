@@ -88,7 +88,22 @@ preflight)
 	if [[ "$ENSURE_TAG_ON_DEFAULT_BRANCH" == "true" ]]; then
 		default_ref="refs/remotes/origin/${DEFAULT_BRANCH}"
 		if ! git show-ref --verify --quiet "$default_ref"; then
-			die "Default branch ref ${default_ref} is unavailable; check out full history before running tag preflight"
+			# The reusable workflow checks out full history, so the ref exists
+			# and no network call happens there (#1031). The direct composite
+			# is documented for an ordinary shallow checkout, which has no
+			# origin/<default> ref: fetch only that branch through the remote
+			# actions/checkout configured. No --depth: in a shallow repository
+			# a plain single-ref fetch stops at the existing shallow boundary,
+			# so it pulls exactly the commits between the tag and the branch
+			# tip; a --depth=1 fetch would hide the tag commit whenever the
+			# default branch has advanced past it and fail the ancestry check
+			# for a tag that is on the branch. GIT_TERMINAL_PROMPT=0 turns a
+			# missing credential into a prompt failure instead of a hang.
+			log_info "Default branch ref ${default_ref} is missing (shallow checkout); fetching refs/heads/${DEFAULT_BRANCH} from origin"
+			if ! GIT_TERMINAL_PROMPT=0 git fetch --no-tags origin \
+				"+refs/heads/${DEFAULT_BRANCH}:${default_ref}"; then
+				die "Cannot fetch ${DEFAULT_BRANCH} from origin for the tag-on-default-branch check: the checkout has no ${default_ref} and the remote refused the fetch (typically a shallow actions/checkout with persist-credentials: false). Use actions/checkout with fetch-depth: 0 (full history, no fetch needed) or persist-credentials: true (lets this step fetch the branch); if ${DEFAULT_BRANCH} is not the repository default branch, set default-branch."
+			fi
 		fi
 		ref="${GITHUB_REF:-refs/tags/${tag}}"
 		tag_commit=$(git rev-parse "${ref}^{}")

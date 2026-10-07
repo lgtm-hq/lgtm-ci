@@ -11,12 +11,31 @@ production tag-push layout and
 Build Python sdist/wheel and validate with twine. Does not upload to PyPI.
 
 ```yaml
+- uses: actions/checkout@<sha> # default shallow checkout keeps credentials
 - uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@main
   with:
     validate: "true"
 ```
 
 **Outputs:** `version`, `package-name`.
+
+**Prerequisite for `ensure-tag-on-default-branch` (default `true`):** the
+check compares the tagged commit against `refs/remotes/origin/<default-branch>`.
+A default `actions/checkout` on a tag is shallow (depth 1) and has no such ref,
+so the preflight fetches that one branch, without tags, through the remote the
+checkout configured. That fetch needs the checkout's credentials, which
+`actions/checkout` keeps by default (`persist-credentials: true`). Pick one:
+
+- `fetch-depth: 0` on `actions/checkout`: the ref already exists and no fetch
+  runs. This is what the reusable workflow does, with
+  `persist-credentials: false`.
+- `persist-credentials: true` (the `actions/checkout` default) on a shallow
+  checkout: the preflight fetches `refs/heads/<default-branch>` itself.
+
+A shallow checkout with `persist-credentials: false` fails the preflight with a
+message naming both options. Set `ensure-tag-on-default-branch: "false"` to skip
+the check. `default-branch` (default `main`) must name the branch the tag is
+expected on.
 
 ## prepare-pypi-upload
 
