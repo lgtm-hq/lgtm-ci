@@ -156,3 +156,13 @@ _run_policy() {
 	assert_failure
 	assert_output --partial "invalid RUNNER_OS"
 }
+
+@test "action metadata: no action.yml embeds an expression in an input description" {
+	# GitHub validates action.yml as a template: a `${{ runner.* }}` inside a
+	# description fails the whole action with "Unrecognized named-value:
+	# 'runner'" before any step runs. Every reusable-build-rust-binaries leg
+	# failed at Validate runner policy this way (#1076).
+	run bash -c "grep -rn 'description:.*\\\${{' '${PROJECT_ROOT}/.github/actions' --include=action.yml"
+	assert_failure
+	assert_output ""
+}
