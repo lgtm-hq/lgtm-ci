@@ -430,9 +430,11 @@ resolve_candidate_merge_base() {
 # consumer-breaking change (#1134).
 #
 # Line-based, for the two-space indentation yamllint enforces on the fixture:
-# comments and blank lines are skipped, a trailing comment is stripped, and
-# each job's `uses:` and `with:` keys are collected in either order and
-# emitted when the job ends.
+# comments and blank lines are skipped, a trailing comment and quotes are
+# stripped, and each job's `uses:` and `with:` keys are collected in either
+# order and emitted when the job ends. A flow-style `with: {...}` on an
+# lgtm-ci call cannot be read line by line, so it is emitted as
+# `<reusable>#<unparsed>` and reference_verdict fails closed on it.
 lgtm_ci_passed_inputs() {
 	local file="${1:?file required}"
 	awk '
@@ -443,11 +445,12 @@ lgtm_ci_passed_inputs() {
 		}
 		function flush(i) {
 			if (wf != "") for (i = 1; i <= n; i++) print wf "#" keys[i]
-			wf = ""; n = 0; inwith = 0
+			if (wf != "" && flow) print wf "#<unparsed>"
+			wf = ""; n = 0; inwith = 0; flow = 0
 		}
 		/^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-		{ line = strip($0) }
-		line ~ /^[^ ]/ { flush(); injobs = (line ~ /^["\047]?jobs["\047]?:$/); next }
+		{ line = strip($0); gsub(/["\047]/, "", line) }
+		line ~ /^[^ ]/ { flush(); injobs = (line ~ /^jobs:$/); next }
 		!injobs { next }
 		line ~ /^  [^ ]/ { flush(); next }
 		line ~ /^    uses:/ {
@@ -463,6 +466,7 @@ lgtm_ci_passed_inputs() {
 			next
 		}
 		line ~ /^    with:$/ { inwith = 1; next }
+		line ~ /^    with:[[:space:]]*[{]/ { flow = 1; inwith = 0; next }
 		line ~ /^    [^ ]/ { inwith = 0; next }
 		inwith && line ~ /^      [A-Za-z0-9_-]+:/ {
 			k = line
@@ -488,7 +492,8 @@ lgtm_ci_reusable_inputs() {
 	if out="$(lgtm_ci_api -X GET -H "Accept: application/vnd.github.raw+json" \
 		"repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" 2>"$errf")"; then
 		# Only `on.workflow_call.inputs` (a `workflow_dispatch` input of the
-		# same name does not make a call valid); comments are tolerated.
+		# same name does not make a call valid); comments and quoted keys are
+		# tolerated, a flow-style `inputs: {...}` is not.
 		LGTM_CI_INPUTS[$key]=" $(awk '
 			function strip(s) {
 				sub(/[[:space:]]+#.*$/, "", s)
@@ -496,20 +501,20 @@ lgtm_ci_reusable_inputs() {
 				return s
 			}
 			/^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
-			{ line = strip($0) }
-			line ~ /^[^ ]/ { inon = (line ~ /^["\047]?on["\047]?:$/); incall = 0; ininputs = 0; next }
+			{ line = strip($0); gsub(/["\047]/, "", line) }
+			line ~ /^[^ ]/ { inon = (line ~ /^on:$/); incall = 0; ininputs = 0; next }
 			!inon { next }
 			line ~ /^  [^ ]/ { incall = (line ~ /^  workflow_call:$/); if (incall) found = 1; ininputs = 0; next }
 			!incall { next }
-			line ~ /^    [^ ]/ { ininputs = (line ~ /^    inputs:$/); next }
+			line ~ /^    [^ ]/ { ininputs = (line ~ /^    inputs:$/); if (line ~ /^    inputs:[[:space:]]*[{]/) flow = 1; next }
 			ininputs && line ~ /^      [A-Za-z0-9_-]+:/ { k = line; sub(/^      /, "", k); sub(/:.*/, "", k); printf "%s ", k }
-			END { if (!found) printf "<unparsed>" }
+			END { if (!found || flow) printf "<unparsed>" }
 		' <<<"$out")"
-		# A file that exists but shows no block-style `on.workflow_call` would
-		# read as "no inputs" and turn every passed input into a false
+		# A file that exists but shows no block-style `on.workflow_call` inputs
+		# would read as "no inputs" and turn every passed input into a false
 		# removal; refuse instead of guessing.
 		if [[ "${LGTM_CI_INPUTS[$key]}" == *"<unparsed>"* ]]; then
-			log_error "cannot find on.workflow_call in ${GITHUB_REPOSITORY}/${path} at ${ref}"
+			log_error "cannot read block-style on.workflow_call inputs in ${GITHUB_REPOSITORY}/${path} at ${ref}"
 			rm -f "$errf"
 			return 1
 		fi
@@ -561,6 +566,10 @@ reference_verdict() {
 		lgtm_ci_passed_inputs "$file"
 	)
 	for item in "${items[@]}"; do
+		if [[ "$item" == *"#<unparsed>" ]]; then
+			log_error "${file##*/}: flow-style with: on the call to ${item%%#*} cannot be checked; write it in block style"
+			return 1
+		fi
 		lgtm_ci_item_state "$item" "$sha" || return 1
 		[[ "$REPLY" == "absent" ]] || continue
 		resolve_candidate_merge_base "$sha" || return 1

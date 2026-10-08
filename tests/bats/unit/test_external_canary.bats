@@ -1259,5 +1259,46 @@ EOF
 		>"$MOCK_REUSABLES/default/reusable-vuln-suppression-check.yml"
 	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'"
 	assert_failure
-	assert_output --partial "cannot find on.workflow_call in lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml at ${CANDIDATE}"
+	assert_output --partial "cannot read block-style on.workflow_call inputs in lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml at ${CANDIDATE}"
+}
+
+@test "external-canary: quoted keys are read on both sides" {
+	cat >"$MOCK_FIXTURE_DIR/vuln-suppression.yml" <<EOF
+"on":
+  workflow_dispatch:
+"jobs":
+  check:
+    "uses": 'lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@${OLD_PIN}'
+    "with":
+      "job-name": test
+EOF
+	run call_fn lgtm_ci_passed_inputs "$MOCK_FIXTURE_DIR/vuln-suppression.yml"
+	assert_output ".github/workflows/reusable-vuln-suppression-check.yml#job-name"
+	mkdir -p "$MOCK_REUSABLES/default"
+	printf '"on":\n  "workflow_call":\n    "inputs":\n      "job-name":\n        type: string\n' \
+		>"$MOCK_REUSABLES/default/reusable-vuln-suppression-check.yml"
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "dispatch"
+}
+
+@test "external-canary: flow-style with: or inputs: fails closed instead of reading as empty" {
+	cat >"$MOCK_FIXTURE_DIR/vuln-suppression.yml" <<EOF
+"on":
+  workflow_dispatch:
+jobs:
+  check:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@${OLD_PIN}
+    with: {job-name: test}
+EOF
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'"
+	assert_failure
+	assert_output --partial "vuln-suppression.yml: flow-style with: on the call to .github/workflows/reusable-vuln-suppression-check.yml cannot be checked"
+	_add_scoped_caller
+	mkdir -p "$MOCK_REUSABLES/default"
+	printf 'on:\n  workflow_call:\n    inputs: {job-name: {type: string}}\n' \
+		>"$MOCK_REUSABLES/default/reusable-vuln-suppression-check.yml"
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'"
+	assert_failure
+	assert_output --partial "cannot read block-style on.workflow_call inputs in"
 }
