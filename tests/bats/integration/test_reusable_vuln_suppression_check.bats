@@ -129,8 +129,25 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-vuln-suppression-check.yml"
 }
 
 @test "reusable-vuln-suppression-check: serializes cleanup runs per repository" {
-	run grep -A2 '^    concurrency:$' "$WORKFLOW"
+	run grep -A3 '^    concurrency:$' "$WORKFLOW"
 	assert_success
-	assert_output --partial 'group: vuln-suppression-cleanup-${{ github.repository }}'
+	assert_output --partial 'vuln-suppression-cleanup-${{ github.repository }}${{ inputs.concurrency-scope'
 	assert_output --partial 'cancel-in-progress: false'
+}
+
+# Empty scope keeps the per-repository group exactly; a scope is appended
+# after a `-` separator that appears only when the scope is set (#1134).
+@test "reusable-vuln-suppression-check: concurrency-scope suffixes the group and defaults to per-repository" {
+	run awk '/^      concurrency-scope:$/{show=1;next} show&&/^      [a-z]/ {exit} show{print}' "$WORKFLOW"
+	assert_success
+	assert_output --partial 'required: false'
+	assert_output --partial 'type: string'
+	assert_output --partial 'default: ""'
+	run grep -A3 '^    concurrency:$' "$WORKFLOW"
+	assert_line "        vuln-suppression-cleanup-\${{ github.repository }}\${{ inputs.concurrency-scope != '' && '-' || '' }}\${{ inputs.concurrency-scope }}"
+	local eval="${PROJECT_ROOT}/tests/helpers/gha_expr.py"
+	run python3 "$eval" --value "inputs.concurrency-scope != '' && '-' || ''" "inputs.concurrency-scope="
+	assert_output "false"
+	run python3 "$eval" --value "inputs.concurrency-scope != '' && '-' || ''" "inputs.concurrency-scope=refs/heads/canary/abc"
+	assert_output "true"
 }

@@ -37,8 +37,9 @@
 # A negative-by-design workflow with a `<name>-probe.yml` is dispatched only by
 # that probe, which asserts the designed failure and is green when it holds.
 #
-# Before dispatch every lgtm-ci path a dispatchable fixture workflow references
-# is looked up at the candidate (#1128): missing there but present at the
+# Before dispatch every lgtm-ci path a dispatchable fixture workflow references,
+# and every input it passes to an lgtm-ci reusable (#1134), is looked up at
+# the candidate (#1128): missing there but present at the
 # merge base with main fails the canary for any role, informational and
 # manual workflows included (`removed_by_candidate`); missing at both but
 # present on main is listed `not_applicable` (landed after the candidate

@@ -91,6 +91,7 @@ EOF
 	export MOCK_CALLS="${BATS_TEST_TMPDIR}/gh-calls.log"
 	export MOCK_POSTED_TREE="${BATS_TEST_TMPDIR}/posted-tree.json"
 	export MOCK_ABSENT="${BATS_TEST_TMPDIR}/absent.txt"
+	export MOCK_REUSABLES="${BATS_TEST_TMPDIR}/reusables"
 	export MOCK_MERGE_BASE="2222222222222222222222222222222222222222"
 	: >"$MOCK_ABSENT"
 	: >"$MOCK_CALLS"
@@ -110,6 +111,9 @@ teardown() {
 # MOCK_DELETE_FAIL, MOCK_CONTENTS_FAIL, MOCK_COMPARE_FAIL.
 # lgtm-ci contents lookups answer 404 for every "<ref> <path>" line of
 # $MOCK_ABSENT and 200 otherwise; the compare API answers $MOCK_MERGE_BASE.
+# Raw reusable reads serve $MOCK_REUSABLES/<ref>/<file>, else
+# $MOCK_REUSABLES/default/<file>, else a reusable with no inputs;
+# MOCK_RAW_FAIL injects an HTTP 502.
 install_mock_gh() {
 	local bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$bin"
@@ -119,6 +123,27 @@ set -euo pipefail
 echo "$*" >>"$MOCK_CALLS"
 args="$*"
 case "$args" in
+*"Accept: application/vnd.github.raw+json repos/lgtm-hq/lgtm-ci/contents/"*"?ref="*)
+	if [[ "${MOCK_RAW_FAIL:-}" == "1" ]]; then
+		echo "gh: HTTP 502" >&2
+		exit 1
+	fi
+	path="${args##*/contents/}"
+	ref="${path#*\?ref=}"
+	ref="${ref%% *}"
+	path="${path%%\?*}"
+	if grep -qxF "${ref} ${path}" "$MOCK_ABSENT" 2>/dev/null; then
+		echo "gh: Not Found (HTTP 404)" >&2
+		exit 1
+	fi
+	for dir in "$MOCK_REUSABLES/$ref" "$MOCK_REUSABLES/default"; do
+		if [[ -f "$dir/$(basename "$path")" ]]; then
+			cat "$dir/$(basename "$path")"
+			exit 0
+		fi
+	done
+	printf 'on:\n  workflow_call:\n    inputs: {}\n'
+	;;
 *"repos/lgtm-hq/lgtm-ci/contents/"*"?ref="*" --silent")
 	if [[ "${MOCK_CONTENTS_FAIL:-}" == "1" ]]; then
 		echo "gh: HTTP 502" >&2
@@ -1055,4 +1080,116 @@ EOF
 	ROWS="$rows" run bash "$CANARY_EVAL" "failed_gates <<<\"\$ROWS\""
 	assert_success
 	assert_output "$(printf 'verify-negative.yml\tremoved_by_candidate\nrelease-version-pr.yml\tremoved_by_candidate')"
+}
+
+# --- passed inputs against the candidate (#1134) -----------------------------
+
+# A fixture job passing `concurrency-scope` to the vuln-suppression reusable.
+_add_scoped_caller() {
+	cat >"$MOCK_FIXTURE_DIR/vuln-suppression.yml" <<EOF
+name: fixture-vuln-suppression
+"on":
+  workflow_dispatch:
+jobs:
+  check:
+    # yamllint disable-line rule:line-length
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@${OLD_PIN}
+    permissions:
+      contents: write
+    with:
+      job-name: "Vuln"
+      # Per canary ref, so concurrent canaries never supersede each other.
+      concurrency-scope: \${{ github.ref }}
+    secrets:
+      GH_TOKEN: \${{ secrets.GITHUB_TOKEN }}
+EOF
+}
+
+# Write the vuln-suppression reusable at <ref> declaring the given inputs.
+_reusable_at() {
+	local ref="$1" name
+	shift
+	mkdir -p "$MOCK_REUSABLES/$ref"
+	{
+		printf 'on:\n  workflow_call:\n    inputs:\n'
+		for name in "$@"; do printf '      %s:\n        type: string\n' "$name"; done
+		printf '    secrets:\n      GH_TOKEN:\n        required: true\n'
+	} >"$MOCK_REUSABLES/$ref/reusable-vuln-suppression-check.yml"
+}
+
+@test "external-canary: lgtm_ci_passed_inputs lists with: keys of lgtm-ci reusable calls only" {
+	_add_scoped_caller
+	cat >>"$MOCK_FIXTURE_DIR/vuln-suppression.yml" <<EOF
+  local:
+    uses: ./.github/workflows/negative-probe.yml
+    with:
+      negative: x.yml
+  steps-job:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@${OLD_PIN}
+        with:
+          python-version: "3.12"
+EOF
+	run call_fn lgtm_ci_passed_inputs "$MOCK_FIXTURE_DIR/vuln-suppression.yml"
+	assert_success
+	assert_output "$(printf '.github/workflows/reusable-vuln-suppression-check.yml#concurrency-scope\n.github/workflows/reusable-vuln-suppression-check.yml#job-name')"
+}
+
+@test "external-canary: inputs the candidate declares are dispatched without a compare" {
+	_add_scoped_caller
+	_reusable_at default job-name concurrency-scope
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "dispatch"
+	run grep -F "/compare/" "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: an input that landed on main after the candidate branched is not_applicable" {
+	_add_scoped_caller
+	_reusable_at "$CANDIDATE" job-name
+	_reusable_at "$MOCK_MERGE_BASE" job-name
+	_reusable_at main job-name concurrency-scope
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "$(printf 'not_applicable\t.github/workflows/reusable-vuln-suppression-check.yml#concurrency-scope')"
+	# In main: listed, not dispatched, rebase suggested.
+	run_row python.yml completed success 11 >"$MOCK_RUNS_DIR/runs.1"
+	run_row verify-negative.yml completed failure 12 >>"$MOCK_RUNS_DIR/runs.1"
+	run env CANARY_EXPECTED_GATES="python vuln-suppression" bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "| \`vuln-suppression.yml\` | gate | \`success\` | \`not_applicable\` | ➖ not applicable | — |"
+	assert_output --partial "references \`.github/workflows/reusable-vuln-suppression-check.yml#concurrency-scope\`, which landed on lgtm-ci \`main\`"
+	run grep -F "actions/workflows/vuln-suppression.yml/dispatches" "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: an input the candidate removes fails the canary as removed_by_candidate" {
+	_add_scoped_caller
+	_reusable_at "$CANDIDATE" concurrency-scope
+	_reusable_at "$MOCK_MERGE_BASE" job-name concurrency-scope
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "$(printf 'removed_by_candidate\t.github/workflows/reusable-vuln-suppression-check.yml#job-name')"
+	run_row python.yml completed success 11 >"$MOCK_RUNS_DIR/runs.1"
+	run_row verify-negative.yml completed failure 12 >>"$MOCK_RUNS_DIR/runs.1"
+	run env CANARY_EXPECTED_GATES="python vuln-suppression" bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "::error title=external canary::gate vuln-suppression.yml concluded 'removed_by_candidate'"
+}
+
+@test "external-canary: an input passed to a reusable missing everywhere is dispatched so the run reports it" {
+	_add_scoped_caller
+	_reusable_at default job-name
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "dispatch"
+}
+
+@test "external-canary: a failed reusable read fails closed" {
+	_add_scoped_caller
+	run env MOCK_RAW_FAIL=1 bash "$CANARY_EVAL" "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'"
+	assert_failure
+	assert_output --partial "cannot read lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml at ${CANDIDATE}: gh: HTTP 502"
 }

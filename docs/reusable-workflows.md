@@ -2410,6 +2410,7 @@ the job so a human re-evaluates each one.
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
 | `runner-image`           | `ubuntu-24.04`          | Linux runners only (install script)        |
+| `concurrency-scope`      | empty                   | Suffix for the cleanup group (see below)   |
 
 The cleanup commit is created through the GitHub API
 (`scripts/ci/git/create-signed-commit.sh`, reset mode on the default branch
@@ -2427,7 +2428,12 @@ Cleanup runs are serialized per repository by a job-level `concurrency` group,
 so a later run sees an earlier run's open cleanup PR instead of opening a
 duplicate. This group never cancels a running cleanup (a caller's own
 `cancel-in-progress: true` group still can); if several runs queue, GitHub
-keeps only the newest pending one, which scans the latest suppressions. A PR
+keeps only the newest pending one, which scans the latest suppressions.
+`concurrency-scope` suffixes the group (`vuln-suppression-cleanup-<repo>-<scope>`)
+for a caller that dispatches from many throwaway refs at once and needs every
+run to conclude rather than be superseded, such as the external fixture
+(`concurrency-scope: ${{ github.ref }}`, #1134); leave it empty in a real
+repository so cleanup PRs stay serialized. A PR
 opened with `GITHUB_TOKEN` starts no workflows, so repositories that require
 status checks on the cleanup PR should pass a GitHub App token instead.
 

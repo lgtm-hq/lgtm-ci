@@ -2777,7 +2777,12 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
 3. looks up every lgtm-ci path each dispatchable fixture workflow
    references (`.github/workflows/<file>.yml`, `.github/actions/<name>`;
    push-only `starter-python.yml` is not checked) at the candidate through
-   the contents API, deciding presence from the HTTP status (#1128). A path missing at the
+   the contents API, deciding presence from the HTTP status (#1128), and
+   every `with:` input it passes to an lgtm-ci reusable against that
+   reusable's `workflow_call` inputs at the same refs (#1134): GitHub refuses
+   a run that passes an undeclared input, so a new input the fixture adopts
+   (such as `concurrency-scope`) would otherwise fail every older candidate,
+   and a removed input is a consumer-breaking change. A path or input missing at the
    candidate is looked up at the candidate's merge base with `main`
    (compare API): present there means the candidate deletes or renames a
    public interface, reported `removed_by_candidate`, which fails the canary

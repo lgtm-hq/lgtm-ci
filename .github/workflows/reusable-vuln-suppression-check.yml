@@ -100,6 +100,16 @@ on:
         required: false
         type: number
         default: 10
+      concurrency-scope:
+        description: >-
+          Optional suffix for the cleanup concurrency group. Empty (default)
+          serializes cleanup runs per repository. Set it only when runs on
+          different refs must not supersede each other's queued run and none
+          of them can open a cleanup PR concurrently with another, e.g. a test
+          fixture dispatching from throwaway branches (`github.ref`, #1134).
+        required: false
+        type: string
+        default: ""
 
     secrets:
       GH_TOKEN:
@@ -232,10 +242,16 @@ jobs:
     # previous run's open cleanup PR instead of racing it into a duplicate.
     # A running cleanup is never cancelled. GitHub keeps only the newest
     # pending run per group, so an older queued run can be superseded; that
-    # is harmless because the newer run scans the latest suppressions.
+    # is harmless because the newer run scans the latest suppressions. A
+    # caller that dispatches from many refs at once and needs each run to
+    # conclude (the external fixture, #1134) scopes the group per ref with
+    # `concurrency-scope`; empty keeps the per-repository group unchanged.
+    # yamllint disable rule:line-length
     concurrency:
-      group: vuln-suppression-cleanup-${{ github.repository }}
+      group: >-
+        vuln-suppression-cleanup-${{ github.repository }}${{ inputs.concurrency-scope != '' && '-' || '' }}${{ inputs.concurrency-scope }}
       cancel-in-progress: false
+    # yamllint enable rule:line-length
 
     steps:
       - name: Harden runner
