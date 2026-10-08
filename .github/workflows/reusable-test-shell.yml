@@ -1019,8 +1019,8 @@ jobs:
         run: |
           echo "::error::One or more coverage shards failed; the required check fails instead of skipping."
           exit 1
-
   # lgtm-ci-readonly:omit:begin
+
   publish-test-summary:
     needs: [test, aggregate]
     if: >-

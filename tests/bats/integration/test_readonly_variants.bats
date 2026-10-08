@@ -316,17 +316,37 @@ sys.exit(1 if errors else 0)
 	assert_output --partial "must start in column 0"
 }
 
-@test "sync-readonly-variants: a region omitted at the end leaves no trailing blank line" {
+@test "sync-readonly-variants: a blank line left at the end of the variant fails" {
 	local dir="${BATS_TEST_TMPDIR}/wf"
 	mkdir -p "$dir"
 	_write_facade "$dir"
-	# A blank line before the final omit region, as in reusable-test-shell.yml.
+	# A blank line before the final omit region, outside it.
 	sed -i.bak 's/^  # lgtm-ci-readonly:omit:begin$/\n&/' "${dir}/reusable-demo.yml"
 	rm -f "${dir}/reusable-demo.yml.bak"
 	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_failure
+	assert_output --partial "variant would end in a blank line"
+	[[ ! -f "${dir}/reusable-demo-run.yml" ]]
+}
+
+@test "sync-readonly-variants: kept block scalars are copied verbatim, blank lines included" {
+	require_python_yaml
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	# A keep-chomping scalar whose trailing blank line sits just before the
+	# omitted publish job; the blank line belongs to the kept value.
+	sed -i.bak 's/^      - run: echo test$/      - run: |+\n          echo test\n\n          echo after/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
 	assert_success
-	run tail -n 1 "${dir}/reusable-demo-run.yml"
-	assert_output "      - run: echo test"
+	run "$PY" -c '
+import sys, yaml
+a, b = (yaml.safe_load(open(p))["jobs"]["test"]["steps"][0]["run"] for p in sys.argv[1:3])
+assert a == b, (a, b)
+print(repr(b))
+' "${dir}/reusable-demo.yml" "${dir}/reusable-demo-run.yml"
+	assert_success
 }
 
 @test "sync-readonly-variants: rejects unknown arguments" {
