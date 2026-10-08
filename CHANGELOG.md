@@ -19,6 +19,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.76.2] - 2026-10-08
+
+### Changed
+
+- **workflows**: generated read-only reusable-rust-test-run (#1081) (#1141) (00a4db8)
+- **workflows**: generated read-only reusable-test-shell-run (#1081) (#1140) (5242357)
+
+### Fixed
+
+- **canary**: per-ref vuln-suppression concurrency for the fixture; check passed inputs
+  (#1139) (b69f3e5)
+
 ## [0.76.1] - 2026-10-08
 
 ### Changed
@@ -2706,7 +2718,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.2...HEAD
+[0.76.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.1...v0.76.2
 [0.76.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.0...v0.76.1
 [0.76.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.3...v0.76.0
 [0.75.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.2...v0.75.3
