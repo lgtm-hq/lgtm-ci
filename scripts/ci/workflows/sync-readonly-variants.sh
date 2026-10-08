@@ -67,13 +67,16 @@ $GENERATED_MARK from
 # Results stay in this call's artifacts (results.v1, #1080); see
 # docs/reusable-workflows.md "Read-only variants" to publish them separately.
 EOF
+	# Markers match whole lines only (indentation aside), so prose that
+	# mentions a marker is copied, not treated as one.
 	awk -v omit_begin="$OMIT_BEGIN" -v omit_end="$OMIT_END" -v facade="$facade_name" '
+		function is_marker(line, mark) { sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line); return line == mark }
 		!started { if ($0 == "---") { started = 1; print } ; next }
-		index($0, omit_begin) {
+		is_marker($0, omit_begin) {
 			if (omitting) { printf "%s:%d: nested %s\n", facade, NR, omit_begin > "/dev/stderr"; bad = 1 }
 			omitting = 1; next
 		}
-		index($0, omit_end) {
+		is_marker($0, omit_end) {
 			if (!omitting) { printf "%s:%d: %s without begin\n", facade, NR, omit_end > "/dev/stderr"; bad = 1 }
 			omitting = 0; next
 		}
@@ -115,8 +118,30 @@ for facade in "$WORKFLOWS_DIR"/reusable-*.yml; do
 		status=1
 		continue
 	fi
-	expected+=("$variant_name")
 	variant="$WORKFLOWS_DIR/$variant_name"
+	# Never write over a hand-maintained workflow (the facade itself included)
+	# or let two facades claim one variant: a mistaken marker must fail, not
+	# replace a public entry point with a generated copy.
+	if [[ "$variant_name" == "$(basename "$facade")" ]]; then
+		echo "$(basename "$facade"): variant name is the facade itself" >&2
+		status=1
+		continue
+	fi
+	if [[ -f "$variant" ]] && ! grep -qF "$GENERATED_MARK" "$variant"; then
+		echo "$(basename "$facade"): $variant_name exists and is not generated; refusing to overwrite it" >&2
+		status=1
+		continue
+	fi
+	duplicate=0
+	for want in "${expected[@]+"${expected[@]}"}"; do
+		[[ "$want" == "$variant_name" ]] && duplicate=1
+	done
+	if ((duplicate)); then
+		echo "$(basename "$facade"): $variant_name is already the variant of another facade" >&2
+		status=1
+		continue
+	fi
+	expected+=("$variant_name")
 
 	updated="$(mktemp)"
 	if ! render_variant "$facade" >"$updated"; then

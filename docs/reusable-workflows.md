@@ -275,10 +275,13 @@ jobs:
 
   test-summary:
     needs: test
+    # tests-total is empty when the variant skipped its jobs (a draft PR
+    # under the default draft-pr-skip): there are no results to render.
     if: >-
       !cancelled()
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
+      && needs.test.outputs.tests-total != ''
     permissions:
       contents: read
       pull-requests: write
@@ -297,7 +300,8 @@ comment job passes: `coverage-enabled: true`, `rich-coverage-comment: true`,
 (`<artifact-prefix>-coverage`), `coverage-file` (`coverage-summary-file`
 under `working-directory`) and `coverage-format: istanbul`. Set
 `results-expected-count` to the number of Node versions so a missing leg
-fails the comment job.
+fails the comment job. A variant caller with no comment job can set
+`publish-test-summary: false` to skip uploading the staged coverage payload.
 
 The measured permission, secret and job inventory of the five reusables
 that issue #1081 covers, and the split chosen for each, is in

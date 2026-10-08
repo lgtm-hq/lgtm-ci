@@ -33,7 +33,7 @@ the `secrets:` the jobs read, and the inputs that decide which jobs run.
 | `reusable-rust-test.yml` | `prepare`, `test` | `contents: read` | no |
 | | `aggregate` | `actions: read`, `contents: read` | no |
 | | `publish-test-summary` (calls `reusable-publish-test-summary.yml`) | `contents: read`, `pull-requests: write` | PR comment |
-| `reusable-docker-multiplatform.yml` | `build-per-platform` | `contents: read`, `packages: write`, `security-events: write` | registry push by digest when `push` |
+| `reusable-docker-multiplatform.yml` | `build-per-platform` | `contents: read`, `packages: write`, `security-events: write` | registry push by digest when `push`; with `push: false` and `scan`, a code-scanning SARIF upload (`upload-sarif`), so a read-only validate entry must drop or move that step too |
 | | `verify-per-platform`, `health-check-per-platform` | `contents: read`, `packages: read` | no |
 | | `merge` | `contents: read`, `packages: write`, `id-token: write`, `attestations: write` | manifest, tags, signature, attestation |
 | | `summary-validate` | `contents: read` | no |

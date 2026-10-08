@@ -246,6 +246,52 @@ sys.exit(1 if errors else 0)
 	assert_output "0"
 }
 
+@test "sync-readonly-variants: never overwrites the facade or a hand-maintained workflow" {
+	local dir="${BATS_TEST_TMPDIR}/wf" before
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	sed -i.bak 's/^# lgtm-ci-readonly-variant: .*/# lgtm-ci-readonly-variant: reusable-demo.yml/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	before="$(cat "${dir}/reusable-demo.yml")"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_failure
+	assert_output --partial "variant name is the facade itself"
+	[[ "$(cat "${dir}/reusable-demo.yml")" == "$before" ]]
+
+	sed -i.bak 's/^# lgtm-ci-readonly-variant: .*/# lgtm-ci-readonly-variant: reusable-other.yml/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	printf -- '---\nname: Other\n' >"${dir}/reusable-other.yml"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_failure
+	assert_output --partial "reusable-other.yml exists and is not generated"
+	run cat "${dir}/reusable-other.yml"
+	assert_output "$(printf -- '---\nname: Other')"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC" --check
+	assert_failure
+}
+
+@test "sync-readonly-variants: two facades cannot claim one variant" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	sed 's/^name: Demo$/name: Demo Two/' "${dir}/reusable-demo.yml" >"${dir}/reusable-demo-two.yml"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_failure
+	assert_output --partial "reusable-demo-run.yml is already the variant of another facade"
+}
+
+@test "sync-readonly-variants: prose that mentions a marker is not a marker" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	sed -i.bak 's/^    steps:$/    # wrap regions in # lgtm-ci-readonly:omit:end pairs\n    steps:/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_success
+	run grep -c "wrap regions in" "${dir}/reusable-demo-run.yml"
+	assert_output "1"
+}
+
 @test "sync-readonly-variants: rejects unknown arguments" {
 	run bash "$SYNC" --write
 	[[ "$status" -eq 2 ]]
