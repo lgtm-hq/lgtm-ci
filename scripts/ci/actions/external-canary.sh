@@ -726,7 +726,7 @@ main() {
 	# candidate (#1128), then split into dispatch targets and pre-filled rows.
 	local -a discovered=() to_dispatch=() dispatched=() extra_rows=()
 	local -A ref_state=() ref_paths=()
-	local file gate state paths negative
+	local file gate state paths negative probe key
 	while IFS= read -r file; do
 		[[ -n "$file" ]] || continue
 		discovered+=("$file")
@@ -743,16 +743,17 @@ main() {
 		paths="${ref_paths[$file]}"
 		# A probe stands or falls with the negative it dispatches.
 		negative="${file%-probe.yml}.yml"
+		probe="${file%.yml}-probe.yml"
 		if [[ "$file" == *-probe.yml && -n "${ref_state[$negative]:-}" && "${ref_state[$negative]}" != "dispatch" && "$state" == "dispatch" ]]; then
 			state="${ref_state[$negative]}"
 			paths="${ref_paths[$negative]}"
 		fi
 		if [[ "$state" != "dispatch" ]]; then
 			extra_rows+=("$(printf '%s\t%s\t\t%s' "$file" "$state" "$paths")")
-		elif ! is_gate "$file" && [[ "${ref_state[${file%.yml}-probe.yml]:-}" == "dispatch" ]]; then
+		elif ! is_gate "$file" && [[ "${ref_state[$probe]:-}" == "dispatch" ]]; then
 			# Only a probe that is itself dispatched stands in for its negative;
 			# otherwise the negative is dispatched directly.
-			extra_rows+=("$(printf '%s\tvia_probe\t\t%s' "$file" "${file%.yml}-probe.yml")")
+			extra_rows+=("$(printf '%s\tvia_probe\t\t%s' "$file" "$probe")")
 		elif should_dispatch "$file"; then
 			to_dispatch+=("$file")
 		else
@@ -764,7 +765,8 @@ main() {
 		_write_summary "> ⚠️ No fixture workflow was dispatched against this candidate (see the not_applicable rows); nothing was exercised."
 	fi
 	for gate in $CANARY_EXPECTED_GATES; do
-		[[ -n "${ref_state[${gate}.yml]:-}" ]] ||
+		key="${gate}.yml"
+		[[ -n "${ref_state[$key]:-}" ]] ||
 			extra_rows+=("$(printf '%s\tnot_dispatchable\t\t' "${gate}.yml")")
 	done
 
