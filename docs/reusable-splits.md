@@ -63,6 +63,20 @@ boundary of these three families is already a separate reusable,
 `reusable-publish-test-summary.yml`, which a caller of the variant can call
 from its own job.
 
+### Docker multi-platform and release recover: required-check scan
+
+Before composing a facade, every required status-check context in lgtm-hq
+was read on 2026-10-09 (98 contexts: org rulesets, repository rulesets and
+classic branch protection of every repository). None names a job of
+`reusable-docker-multiplatform.yml` or `reusable-release-recover.yml`. The
+only Docker contexts are podex's `… / Docker build / Build and Push`, from
+the separate `reusable-docker-build.yml` path, and two inline py-lintro jobs.
+Organisation callers reach the multi-platform path only through
+`reusable-docker.yml` (Rustume, podex, py-lintro, winnow); py-lintro calls
+`reusable-release-recover.yml` from a dispatch-only workflow. So these two
+families compose internal reusables, and their nested check names change
+(listed in the catalog and the migration notes).
+
 ## Split per family
 
 <!-- markdownlint-disable MD013 -- wide plan table -->
@@ -72,7 +86,7 @@ from its own job.
 | Node tests | test (read) / PR comment (`pull-requests: write`) | `reusable-test-node-run.yml` (generated): `actions: read`, `contents: read` | unchanged | done (#1135) |
 | Shell tests | same | `reusable-test-shell-run.yml` (generated): `actions: read`, `contents: read` | unchanged | done (#1140) |
 | Rust tests | same | `reusable-rust-test-run.yml` (generated): `actions: read`, `contents: read` | unchanged | this change |
-| Docker multi-platform | build and validate (read) / registry push, manifest, signing, attestation, code scanning (write) | planned: a validate entry with no write scope | composes the internal reusables only if no required check depends on its nested names; otherwise generated like the test families | planned |
+| Docker multi-platform | build and validate (read) / registry push, manifest, signing, attestation, code scanning (write) | `reusable-docker-multiplatform-validate.yml`: `contents: read`; SARIF kept as an artifact | composes `-validate` (`push: false`), an `upload-scan-results` job (`security-events: write`) and the internal `-publish` (`push: true`); nested check names gain a segment | this change |
 | Release recover | resolve, dry run (read) / resume per channel (write, secret) / record (`issues: write`) | planned: a plan entry that resolves and reports | same rule as Docker | planned |
 
 <!-- markdownlint-enable MD013 -->

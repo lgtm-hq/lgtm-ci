@@ -316,6 +316,30 @@ single toolchain) add `coverage-enabled: true`, `rich-coverage-comment: true`,
 use `results-artifact-pattern: <artifact-prefix>-results` and
 `results-expected-count: "1"`.
 
+Docker multi-platform takes the other route (no required check depends on
+its nested names): `reusable-docker-multiplatform.yml` became a facade that
+calls `reusable-docker-multiplatform-validate.yml` for `push: false` and the
+internal `reusable-docker-multiplatform-publish.yml` for `push: true`. The
+validate file is the read-only entry point (`contents: read`): it builds
+each platform without pushing and keeps the Trivy SARIF as the artifact
+`trivy-sarif-<slug>`; the facade uploads that SARIF to code scanning from its
+own job. Calling the facade adds one segment to the per-platform check names
+(`… / Validate / Docker build per platform (linux/amd64)`).
+
+```yaml
+jobs:
+  docker-validate:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker-multiplatform-validate.yml@<sha>
+    permissions:
+      contents: read
+    with:
+      matrix: >-
+        [{"platform":"linux/amd64","slug":"linux-amd64","runner":"ubuntu-24.04","qemu":false},
+        {"platform":"linux/arm64","slug":"linux-arm64","runner":"ubuntu-24.04-arm","qemu":false}]
+      validate-on-pr: true
+      scan: true
+```
+
 The measured permission, secret and job inventory of the five reusables
 that issue #1081 covers, and the split chosen for each, is in
 [reusable-splits.md](reusable-splits.md).

@@ -11,8 +11,10 @@ provenance/SBOM attestations and optional Trivy scanning. Since #381 it is
 a thin orchestrator: a `classify` job resolves the strategy and delegates
 to `reusable-docker-build.yml` (single-platform / QEMU path) or
 `reusable-docker-multiplatform.yml` (runner-map matrix + manifest merge +
-signing); `reusable-docker-smoke-test.yml` validates an already published
-image by digest. Existing callers keep working unchanged — see the
+signing; since #1081 a facade over the read-only
+`reusable-docker-multiplatform-validate.yml` and the internal
+`reusable-docker-multiplatform-publish.yml`); `reusable-docker-smoke-test.yml`
+validates an already published image by digest. Existing callers keep working unchanged — see the
 [migration path](../workflow-contract.md#docker-workflow-family-and-migration-path).
 Callers only pin the workflow — no vendored `scripts/ci` tree required;
 registry logins use the shared `docker-auth` composite resolved from the

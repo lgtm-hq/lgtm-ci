@@ -53,13 +53,13 @@ Full documentation: [docs/README.md](docs/README.md).
 
 | Area | Index | Support tiers | Highlights |
 | ---- | ----- | ------------- | ---------- |
-| Reusable workflows (65) | [docs/workflows/](docs/workflows/README.md) | 9 stable · 48 preview · 7 internal · 1 deprecated | Quality lint, per-language tests, Docker, Pages, release automation, security audit |
+| Reusable workflows (67) | [docs/workflows/](docs/workflows/README.md) | 10 stable · 48 preview · 8 internal · 1 deprecated | Quality lint, per-language tests, Docker, Pages, release automation, security audit |
 | Composite actions (50) | [docs/actions/](docs/actions/README.md) | 4 stable · 43 preview · 3 internal · 0 deprecated | Setup, security/egress, testing, coverage, publishing, release, PR comments |
 | Shell libraries | [docs/libraries/](docs/libraries/README.md) | — | Logging, GitHub Actions helpers, installers, release/changelog, coverage parsing |
 
 Stable entry points, each green from the external consumer fixture:
 
-- Reusable workflows: [`reusable-coverage`](docs/catalog.md#reusable-coverage), [`reusable-release-version-pr`](docs/catalog.md#reusable-release-version-pr), [`reusable-rust-test`](docs/catalog.md#reusable-rust-test), [`reusable-sbom-release-upload`](docs/catalog.md#reusable-sbom-release-upload), [`reusable-test-e2e-playwright`](docs/catalog.md#reusable-test-e2e-playwright), [`reusable-test-node`](docs/catalog.md#reusable-test-node), [`reusable-test-node-run`](docs/catalog.md#reusable-test-node-run), [`reusable-test-python`](docs/catalog.md#reusable-test-python), [`reusable-test-shell-run`](docs/catalog.md#reusable-test-shell-run)
+- Reusable workflows: [`reusable-coverage`](docs/catalog.md#reusable-coverage), [`reusable-release-version-pr`](docs/catalog.md#reusable-release-version-pr), [`reusable-rust-test`](docs/catalog.md#reusable-rust-test), [`reusable-rust-test-run`](docs/catalog.md#reusable-rust-test-run), [`reusable-sbom-release-upload`](docs/catalog.md#reusable-sbom-release-upload), [`reusable-test-e2e-playwright`](docs/catalog.md#reusable-test-e2e-playwright), [`reusable-test-node`](docs/catalog.md#reusable-test-node), [`reusable-test-node-run`](docs/catalog.md#reusable-test-node-run), [`reusable-test-python`](docs/catalog.md#reusable-test-python), [`reusable-test-shell-run`](docs/catalog.md#reusable-test-shell-run)
 - Composite actions: [`run-lighthouse`](docs/catalog.md#run-lighthouse), [`run-playwright`](docs/catalog.md#run-playwright), [`run-pytest`](docs/catalog.md#run-pytest), [`run-vitest`](docs/catalog.md#run-vitest)
 
 <!-- markdownlint-enable MD013 -->

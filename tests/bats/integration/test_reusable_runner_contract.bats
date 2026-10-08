@@ -310,6 +310,8 @@ YAML
 	cp "${PROJECT_ROOT}/.github/workflows/reusable-docker.yml" "${workflows_dir}/"
 	cp "${PROJECT_ROOT}/.github/workflows/reusable-docker-build.yml" "${workflows_dir}/"
 	cp "${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml" "${workflows_dir}/"
+	cp "${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-validate.yml" "${workflows_dir}/"
+	cp "${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-publish.yml" "${workflows_dir}/"
 	cp "${PROJECT_ROOT}/.github/workflows/reusable-docker-smoke-test.yml" "${workflows_dir}/"
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
