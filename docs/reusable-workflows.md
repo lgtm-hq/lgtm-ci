@@ -306,6 +306,16 @@ under `working-directory`) and `coverage-format: istanbul`. Set
 fails the comment job. A variant caller with no comment job can set
 `publish-test-summary: false` to skip uploading the staged coverage payload.
 
+For Rust, use `results-artifact-pattern: <artifact-prefix>-results-*` and
+`tests-total-excludes-skipped: true`, which the Rust facade always sets so
+totals and the pass rate exclude skipped tests. Set `results-expected-count`
+to the number of toolchains. For the rich coverage comment (`coverage: true`,
+single toolchain) add `coverage-enabled: true`, `rich-coverage-comment: true`,
+`coverage-threshold`, `coverage-artifact-name: <artifact-prefix>-coverage-lcov`,
+`coverage-file: rust-coverage.lcov` and `coverage-format: lcov`. For shell,
+use `results-artifact-pattern: <artifact-prefix>-results` and
+`results-expected-count: "1"`.
+
 The measured permission, secret and job inventory of the five reusables
 that issue #1081 covers, and the split chosen for each, is in
 [reusable-splits.md](reusable-splits.md).

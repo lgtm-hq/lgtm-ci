@@ -351,6 +351,7 @@ Shell Test Workflow (read-only)
 **Limitations:**
 
 - The sharded check only appears with `coverage: true` and `coverage-shards` above 1; GitHub expands the listed template per leg, e.g. `Shell Tests (shard 1/4)`
+- Fixture proves the single-job `coverage: false` path only; the kcov coverage and sharded paths are exercised by lgtm-ci's own CI through the facade, not by the external fixture
 
 ### Reusable workflows: preview
 
@@ -823,12 +824,14 @@ Rust Test Workflow (read-only)
 
 - Grant the caller job `actions: read` and `contents: read`; the aggregate job's artifact-availability wait needs `actions: read` (#803)
 - Same inputs, outputs and artifacts as `reusable-rust-test.yml` without `comment-marker`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
-- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write` and `results-artifact-pattern: <artifact-prefix>-results-*`
+- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `results-artifact-pattern: <artifact-prefix>-results-*` and `tests-total-excludes-skipped: true` (as the facade does); see docs/reusable-workflows.md "Read-only variants" for the LCOV coverage inputs
 - Every other prerequisite of `reusable-rust-test` applies unchanged: `.config/nextest.toml` with a `ci` profile, digest-verified nextest / llvm-cov installs, egress block mode, distinct `artifact-prefix` per sibling call
 
 **Limitations:**
 
 - No bundled fallback nextest profile (#1086 item 3 not done)
+- A cached `~/.cargo/bin` at the pinned version is reused without re-verifying its digest; the cache is scoped to the consumer repository and ref (#1096)
+- Fixture proves a `coverage: false` call only; coverage and Pages coverage upload are untested through the variant
 - Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
 
 #### `reusable-sbom`
@@ -992,7 +995,7 @@ Rust Build Only Workflow
 Shell Test Workflow
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet; lgtm-ci's own BATS suite is its only caller
+> **Preview.** No external-fixture run of the facade itself (only its publish job differs from the stable `reusable-test-shell-run`, whose jobs the fixture proves); input or check-name changes here also change that stable variant and need a migration note
 
 - **Path:** [`.github/workflows/reusable-test-shell.yml`](../.github/workflows/reusable-test-shell.yml)
 - **Tier:** preview

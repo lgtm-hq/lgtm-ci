@@ -28,9 +28,8 @@
 # Gate workflows (the canary fails when any does not succeed):
 #   actions-direct build-python-direct coverage-lcov egress node-bun node-npm
 #   node-pnpm perms playwright python python-private-dep readonly-node
-#   readonly-shell retry rust
-#   rust-build-siblings rust-release-build siblings verify-fresh-install
-#   vuln-suppression
+#   readonly-shell retry rust rust-build-siblings rust-release-build siblings
+#   verify-fresh-install vuln-suppression
 # Informational workflows (reported against their expected conclusion, never fail the canary):
 #   app-token-probe perms-negative perms-negative-node perms-negative-probe
 #   perms-negative-rust perms-negative-shell playwright-negative
