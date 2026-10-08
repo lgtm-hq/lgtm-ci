@@ -23,15 +23,24 @@
 #      scripts/pin.sh), refuses any lgtm-ci reference that is not then pinned
 #      to the candidate, and commits the result through the git data API as
 #      branch `canary/<sha>` — never touching the fixture's base branch,
-#   3. dispatches every gate and informational fixture workflow that declares
-#      `workflow_dispatch` on that branch (manual ones only when asked),
-#   4. polls the fixture's run list until each dispatched workflow has a
+#   3. checks every lgtm-ci path each workflow references against the
+#      candidate (`reference_verdict`, #1128): a path missing at the candidate
+#      but present at its merge base with lgtm-ci main means the candidate
+#      removes or renames a public interface (`removed_by_candidate`, fails
+#      the canary for any role); a path missing at both but present on main
+#      landed after the candidate branched (`not_applicable`: listed, not
+#      dispatched, rebase suggested). Lookup errors fail closed,
+#   4. dispatches every gate and informational fixture workflow that declares
+#      `workflow_dispatch` on that branch (manual ones only when asked); a
+#      negative-by-design workflow with a `<name>-probe.yml` companion is
+#      reached only through that probe (`via_probe`),
+#   5. polls the fixture's run list until each dispatched workflow has a
 #      completed run (bounded by CANARY_TIMEOUT_SECONDS),
-#   5. writes a markdown table (workflow, role, expected, conclusion,
+#   6. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
-#   6. deletes the canary branch it created (also on failure), and
-#   7. exits non-zero when any GATE workflow did not succeed, unless the
-#      owner-only override label (CANARY_OVERRIDE_LABEL) is on the pull
+#   7. deletes the canary branch it created (also on failure), and
+#   8. exits non-zero when any GATE workflow did not succeed or any workflow
+#      is `removed_by_candidate`, unless the owner-only override label (CANARY_OVERRIDE_LABEL) is on the pull
 #      request, in which case the failure is reported as a warning.
 #
 # Roles (`classify_workflow`, contract-tested against the workflow header):
@@ -40,8 +49,16 @@
 #                  exposes for dispatch is reported `not_dispatchable` and
 #                  fails the canary (fail closed). Unknown workflows are gates.
 #   informational  reported against an expected conclusion (`success` for the
-#                  App-token / SBOM paths, `failure` / `startup_failure` for
-#                  the negative-by-design probes); never fails the canary.
+#                  App-token / SBOM paths and the negative probes, `failure` /
+#                  `startup_failure` for the negative-by-design workflows);
+#                  never fails the canary. A negative-by-design run is red on
+#                  the fixture's Actions page, and a job calling a reusable
+#                  cannot take `continue-on-error`, so each negative has a
+#                  `<name>-probe.yml` that dispatches it, asserts the designed
+#                  failure (run conclusion and job evidence), deletes the red
+#                  run after a pass and is itself green. When the probe exists
+#                  the canary dispatches only the probe and lists the negative
+#                  as `via_probe`; without one it dispatches the negative.
 #   manual         the three reusable-release-version-pr callers: they share
 #                  one fixture concurrency group, so concurrent dispatch
 #                  cancels one of them, and each success opens a version PR in
@@ -54,7 +71,9 @@
 #                            read/write on the fixture only (workflow files
 #                            cannot be written without the Workflows scope)
 #   LGTM_CI_TOKEN            token for the lgtm-ci repository (github.token):
-#                            resolves <ref>, lists the PR's files; defaults to GH_TOKEN
+#                            resolves <ref>, lists the PR's files, reads the
+#                            referenced paths and the merge base; defaults to GH_TOKEN
+#   LGTM_CI_MAIN_BRANCH      lgtm-ci branch for the merge-base comparison (default main)
 #   GITHUB_REPOSITORY        lgtm-ci repository (default lgtm-hq/lgtm-ci)
 #   EVENT_NAME               github.event_name (default workflow_dispatch)
 #   EVENT_ACTION             github.event.action (pull_request: opened, labeled, ...)
@@ -91,6 +110,7 @@ source "$SCRIPT_DIR/../lib/log.sh"
 FIXTURE_REPO="${FIXTURE_REPO:-TurboCoder13/lgtm-ci-consumer-fixture}"
 FIXTURE_BASE_BRANCH="${FIXTURE_BASE_BRANCH:-main}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-lgtm-hq/lgtm-ci}"
+LGTM_CI_MAIN_BRANCH="${LGTM_CI_MAIN_BRANCH:-main}"
 EVENT_NAME="${EVENT_NAME:-workflow_dispatch}"
 EVENT_ACTION="${EVENT_ACTION:-}"
 EVENT_LABEL="${EVENT_LABEL:-}"
@@ -120,6 +140,9 @@ PIN_RE='lgtm-hq/lgtm-ci/\.github/(workflows/[A-Za-z0-9._-]+\.yml|actions/[A-Za-z
 CANARY_BRANCH_CREATED=0
 CANARY_BRANCH=""
 CANARY_WORKDIR=""
+# reference_verdict caches: "<ref>:<path>" -> present|absent, and the merge base.
+declare -A LGTM_CI_PATH_STATE=()
+CANDIDATE_MERGE_BASE=""
 
 # ---------------------------------------------------------------------------
 # Classification
@@ -144,7 +167,12 @@ classify_workflow() {
 	app-token-probe.yml | sbom-release-upload.yml)
 		printf 'informational\tsuccess\n'
 		;;
-	# Negative-by-design probes: a green run here is the finding.
+	# Probes of the negative-by-design workflows: each dispatches its
+	# negative, asserts the designed failure and is green when it holds.
+	perms-negative-probe.yml | playwright-negative-probe.yml | verify-negative-probe.yml)
+		printf 'informational\tsuccess\n'
+		;;
+	# Negative-by-design workflows: a green run here is the finding.
 	verify-negative.yml | playwright-negative.yml)
 		printf 'informational\tfailure\n'
 		;;
@@ -338,6 +366,93 @@ discover_dispatchable() {
 	done
 }
 
+# Print the distinct lgtm-ci paths (`.github/workflows/<f>.yml`,
+# `.github/actions/<name>`) referenced from `uses:` lines of one workflow file.
+lgtm_ci_references() {
+	local file="${1:?file required}"
+	{ grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$file" || true; } |
+		{ grep -oE "${PIN_RE}" || true; } |
+		sed -E 's#^lgtm-hq/lgtm-ci/##; s#@$##' | sort -u
+}
+
+# Set REPLY to `present` or `absent` for one lgtm-ci path at <ref> (contents
+# API, cached per run). Any error other than a 404 fails, so a lookup outage
+# never reads as "absent". Runs in the caller's shell so the cache survives.
+lgtm_ci_path_state() {
+	local path="${1:?path required}" ref="${2:?ref required}" errf key
+	key="${2}:${1}"
+	if [[ -n "${LGTM_CI_PATH_STATE[$key]:-}" ]]; then
+		REPLY="${LGTM_CI_PATH_STATE[$key]}"
+		return 0
+	fi
+	errf="$(mktemp)"
+	if lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" --jq .type >/dev/null 2>"$errf"; then
+		LGTM_CI_PATH_STATE[$key]=present
+	elif grep -q 'HTTP 404' "$errf"; then
+		LGTM_CI_PATH_STATE[$key]=absent
+	else
+		log_error "cannot read ${GITHUB_REPOSITORY}/${path} at ${ref}: $(tr '\n' ' ' <"$errf")"
+		rm -f "$errf"
+		return 1
+	fi
+	rm -f "$errf"
+	REPLY="${LGTM_CI_PATH_STATE[$key]}"
+}
+
+# Set CANDIDATE_MERGE_BASE to the merge base of <sha> with
+# LGTM_CI_MAIN_BRANCH (compare API), once per run.
+resolve_candidate_merge_base() {
+	local sha="${1:?sha required}" base
+	[[ -z "$CANDIDATE_MERGE_BASE" ]] || return 0
+	base="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/compare/${LGTM_CI_MAIN_BRANCH}...${sha}" \
+		--jq .merge_base_commit.sha)" || {
+		log_error "cannot compare ${LGTM_CI_MAIN_BRANCH}...${sha} on ${GITHUB_REPOSITORY}"
+		return 1
+	}
+	[[ "$base" =~ ^[0-9a-f]{40}$ ]] || {
+		log_error "merge base of ${sha} is '${base}', not a full SHA"
+		return 1
+	}
+	CANDIDATE_MERGE_BASE="$base"
+}
+
+# Pre-dispatch verdict for one re-pinned workflow file (#1128). Sets REPLY to
+#   dispatch                          every referenced path exists at <sha>
+#                                     (or is missing everywhere: the run reports it)
+#   removed_by_candidate<TAB><paths>  missing at <sha>, present at its merge
+#                                     base with main: the candidate deletes or
+#                                     renames a public interface
+#   not_applicable<TAB><paths>        missing at <sha> and at the merge base,
+#                                     present on main: it landed after the
+#                                     candidate branched
+# Returns non-zero when any lookup fails (fail closed).
+reference_verdict() {
+	local file="${1:?file required}" sha="${2:?sha required}" path
+	local -a paths=() removed=() later=()
+	while IFS= read -r path; do
+		[[ -z "$path" ]] || paths+=("$path")
+	done < <(lgtm_ci_references "$file")
+	for path in "${paths[@]}"; do
+		lgtm_ci_path_state "$path" "$sha" || return 1
+		[[ "$REPLY" == "absent" ]] || continue
+		resolve_candidate_merge_base "$sha" || return 1
+		lgtm_ci_path_state "$path" "$CANDIDATE_MERGE_BASE" || return 1
+		if [[ "$REPLY" == "present" ]]; then
+			removed+=("$path")
+			continue
+		fi
+		lgtm_ci_path_state "$path" "$LGTM_CI_MAIN_BRANCH" || return 1
+		[[ "$REPLY" == "absent" ]] || later+=("$path")
+	done
+	if ((${#removed[@]})); then
+		REPLY="removed_by_candidate"$'\t'"${removed[*]}"
+	elif ((${#later[@]})); then
+		REPLY="not_applicable"$'\t'"${later[*]}"
+	else
+		REPLY="dispatch"
+	fi
+}
+
 # Build the git tree payload for the re-pinned workflow files.
 # stdout: JSON {"base_tree": <sha>, "tree": [{path, mode, type, content}...]}
 build_tree_payload() {
@@ -469,11 +584,17 @@ poll_runs() {
 }
 
 # Verdict for one row: "pass" when the conclusion equals the expected one,
-# "skipped" for a manual workflow that was not dispatched, else "fail".
+# "skipped" for a manual workflow that was not dispatched, "probed" for a
+# negative reached through its probe, "not_applicable" for a workflow whose
+# lgtm-ci reference post-dates the candidate, else "fail".
 verdict_for() {
 	local file="${1:?}" conclusion="${2:?}"
 	if [[ "$conclusion" == "not_dispatched" ]]; then
 		printf 'skipped\n'
+	elif [[ "$conclusion" == "via_probe" ]]; then
+		printf 'probed\n'
+	elif [[ "$conclusion" == "not_applicable" ]]; then
+		printf 'not_applicable\n'
 	elif [[ "$conclusion" == "$(workflow_expected "$file")" ]]; then
 		printf 'pass\n'
 	else
@@ -481,16 +602,22 @@ verdict_for() {
 	fi
 }
 
-# Render the markdown table for result rows (stdin, poll_runs format).
+# Render the markdown table for result rows (stdin, poll_runs format; for
+# via_probe / not_applicable / removed_by_candidate rows the fourth field is
+# the probe or the lgtm-ci paths concerned), then one note per not_applicable
+# or removed_by_candidate row.
 render_summary() {
 	local sha="${1:?sha required}" branch="${2:-}" file conclusion url name role expected verdict mark link
+	local -a notes=()
 	echo "## External consumer canary"
 	echo
 	echo "Fixture: \`${FIXTURE_REPO}\` at branch \`${branch:-canary/${sha}}\`, every lgtm-ci reference pinned to \`${sha}\`."
 	echo
 	echo "| Workflow | Role | Expected | Conclusion | Verdict | Run |"
 	echo "|---|---|---|---|---|---|"
-	while IFS=$'\t' read -r file conclusion url name; do
+	# Tab is IFS whitespace, so consecutive tabs would collapse an empty run
+	# URL; split on a non-whitespace separator instead.
+	while IFS=$'\x1f' read -r file conclusion url name; do
 		[[ -n "$file" ]] || continue
 		role="$(workflow_role "$file")"
 		expected="$(workflow_expected "$file")"
@@ -498,8 +625,16 @@ render_summary() {
 		case "$verdict" in
 		pass) mark="✅ pass" ;;
 		skipped) mark="➖ not dispatched" ;;
+		probed) mark="↪ via \`${name}\`" ;;
+		not_applicable)
+			mark="➖ not applicable"
+			notes+=("> ℹ️ \`${file}\` references \`${name// /\`, \`}\`, which landed on lgtm-ci \`${LGTM_CI_MAIN_BRANCH}\` after this candidate branched; it was not dispatched. Rebase onto \`${LGTM_CI_MAIN_BRANCH}\` to exercise it.")
+			;;
 		*)
-			if [[ "$role" == "gate" ]]; then
+			if [[ "$conclusion" == "removed_by_candidate" ]]; then
+				mark="❌ **removed by candidate**"
+				notes+=("> ❌ \`${file}\` references \`${name// /\`, \`}\`, present at the candidate's merge base with \`${LGTM_CI_MAIN_BRANCH}\` but missing at the candidate: this change deletes or renames a public interface an external consumer calls.")
+			elif [[ "$role" == "gate" ]]; then
 				mark="❌ **gate failed**"
 			else
 				mark="⚠️ unexpected"
@@ -509,17 +644,27 @@ render_summary() {
 		link="—"
 		[[ -z "$url" ]] || link="[run](${url})"
 		echo "| \`${file}\` | ${role} | \`${expected}\` | \`${conclusion}\` | ${mark} | ${link} |"
-	done
+	done < <(tr '\t' '\037')
+	if ((${#notes[@]})); then
+		echo
+		printf '%s\n' "${notes[@]}"
+	fi
 }
 
-# Print the gate workflows whose conclusion is not the expected one (stdin:
-# result rows). Exit 0 either way; the caller counts the lines.
+# Print the workflows that fail the canary (stdin: result rows): every
+# `removed_by_candidate` row whatever its role, and every gate whose verdict
+# is neither pass nor not_applicable. Exit 0 either way; the caller counts the lines.
 failed_gates() {
-	local file conclusion _rest
+	local file conclusion _rest verdict
 	while IFS=$'\t' read -r file conclusion _rest; do
 		[[ -n "$file" ]] || continue
+		if [[ "$conclusion" == "removed_by_candidate" ]]; then
+			printf '%s\t%s\n' "$file" "$conclusion"
+			continue
+		fi
 		is_gate "$file" || continue
-		[[ "$(verdict_for "$file" "$conclusion")" == "pass" ]] || printf '%s\t%s\n' "$file" "$conclusion"
+		verdict="$(verdict_for "$file" "$conclusion")"
+		[[ "$verdict" == "pass" || "$verdict" == "not_applicable" ]] || printf '%s\t%s\n' "$file" "$conclusion"
 	done
 }
 
@@ -575,25 +720,45 @@ main() {
 
 	create_canary_branch "$sha" "$CANARY_WORKDIR" >/dev/null
 
-	# Discover, then split into dispatch targets and pre-filled rows.
-	local -a to_dispatch=() dispatched=() extra_rows=()
-	local file gate seen
+	# Discover, classify every workflow's lgtm-ci references against the
+	# candidate (#1128), then split into dispatch targets and pre-filled rows.
+	local -a discovered=() to_dispatch=() dispatched=() extra_rows=()
+	local -A ref_state=() ref_paths=()
+	local file gate state paths negative
 	while IFS= read -r file; do
 		[[ -n "$file" ]] || continue
-		if should_dispatch "$file"; then
+		discovered+=("$file")
+		reference_verdict "$CANARY_WORKDIR/$file" "$sha" ||
+			die "cannot check the lgtm-ci references of ${file} against the candidate; refusing to dispatch"
+		IFS=$'\t' read -r state paths <<<"$REPLY"
+		ref_state[$file]="$state"
+		ref_paths[$file]="$paths"
+	done < <(discover_dispatchable "$CANARY_WORKDIR")
+	((${#discovered[@]})) || die "no fixture workflow declares workflow_dispatch"
+
+	for file in "${discovered[@]}"; do
+		state="${ref_state[$file]}"
+		paths="${ref_paths[$file]}"
+		# A probe stands or falls with the negative it dispatches.
+		negative="${file%-probe.yml}.yml"
+		if [[ "$file" == *-probe.yml && -n "${ref_state[$negative]:-}" && "${ref_state[$negative]}" != "dispatch" && "$state" == "dispatch" ]]; then
+			state="${ref_state[$negative]}"
+			paths="${ref_paths[$negative]}"
+		fi
+		if [[ "$state" != "dispatch" ]]; then
+			extra_rows+=("$(printf '%s\t%s\t\t%s' "$file" "$state" "$paths")")
+		elif ! is_gate "$file" && [[ -n "${ref_state[${file%.yml}-probe.yml]:-}" ]]; then
+			extra_rows+=("$(printf '%s\tvia_probe\t\t%s' "$file" "${file%.yml}-probe.yml")")
+		elif should_dispatch "$file"; then
 			to_dispatch+=("$file")
 		else
 			extra_rows+=("$(printf '%s\tnot_dispatched\t\t' "$file")")
 		fi
-	done < <(discover_dispatchable "$CANARY_WORKDIR")
-	for gate in $CANARY_EXPECTED_GATES; do
-		seen=0
-		for file in "${to_dispatch[@]}"; do
-			[[ "$file" == "${gate}.yml" ]] && seen=1
-		done
-		((seen)) || extra_rows+=("$(printf '%s\tnot_dispatchable\t\t' "${gate}.yml")")
 	done
-	((${#to_dispatch[@]})) || die "no fixture workflow declares workflow_dispatch"
+	for gate in $CANARY_EXPECTED_GATES; do
+		[[ -n "${ref_state[${gate}.yml]:-}" ]] ||
+			extra_rows+=("$(printf '%s\tnot_dispatchable\t\t' "${gate}.yml")")
+	done
 
 	since="$(since_timestamp)"
 	for file in "${to_dispatch[@]}"; do
