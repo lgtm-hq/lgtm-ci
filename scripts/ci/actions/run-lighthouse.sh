@@ -61,10 +61,10 @@ manifest_lighthouse_report() {
 	local dir="$1" marker="${2:-}" manifest="$1/manifest.json" path reps
 	[[ -f "$manifest" ]] || return 0
 	[[ -z "$marker" || "$manifest" -nt "$marker" ]] || return 0
-	path=$(jq -r '([.[] | select(.isRepresentativeRun == true)][0] // .[0]).jsonPath // empty' \
+	path=$(jq -r '[.[] | select(.isRepresentativeRun == true)][0].jsonPath // empty' \
 		"$manifest" 2>/dev/null) || path=""
 	if [[ -z "$path" ]]; then
-		log_warn "manifest.json names no report; falling back to the newest report file"
+		log_warn "manifest.json names no representative run; falling back to the newest report file"
 		return 0
 	fi
 	if [[ "$path" == /* ]]; then

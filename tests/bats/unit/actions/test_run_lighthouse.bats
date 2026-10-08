@@ -324,6 +324,18 @@ EOF
 	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "false"
 }
 
+@test "run-lighthouse parse: a manifest without a representative run falls back to the newest report with a warning (#1088)" {
+	out="${WORK_DIR}/out"
+	_lhci_report "$out" aaa-first 0.10 1 1 1
+	sleep 1
+	_lhci_report "$out" zzz-newest 0.86 1 1 1
+	_lhci_manifest "$out" none aaa-first zzz-newest
+	run env STEP=parse RESULTS_PATH="" OUTPUT_DIR="$out" THRESHOLD_SEO=50 bash "$SCRIPT"
+	assert_success
+	assert_output --partial "names no representative run"
+	assert_equal "$(grep '^performance=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "86"
+}
+
 @test "run-lighthouse parse: a relative jsonPath keeps its subdirectory (#1088)" {
 	out="${WORK_DIR}/out"
 	_lhci_report "$out/nested" rep 0.86 1 1 1
