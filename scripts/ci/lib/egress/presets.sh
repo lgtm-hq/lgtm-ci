@@ -48,7 +48,8 @@ egress_preset_names() {
 		ai-review \
 		rust-release \
 		release-recover \
-		release-version-pr
+		release-version-pr \
+		external-canary
 }
 
 egress_preset_endpoints() {
@@ -419,6 +420,15 @@ egress_preset_endpoints() {
 			crates.io:443 \
 			static.crates.io:443 \
 			index.crates.io:443
+		;;
+	external-canary)
+		# .github/workflows/external-consumer-canary.yml (#1074): the canary
+		# only talks to the GitHub API (fixture branch, dispatches, run polling)
+		# and clones its own scripts over github.com. Nothing else, so a
+		# compromised candidate cannot use the canary job as an egress path.
+		printf '%s\n' \
+			github.com:443 \
+			api.github.com:443
 		;;
 	*)
 		echo "unknown egress preset: $preset" >&2

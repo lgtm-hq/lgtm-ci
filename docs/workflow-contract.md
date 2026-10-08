@@ -2707,6 +2707,128 @@ jobs:
         registry.npmjs.org:443
 ```
 
+## External verification
+
+Every structural defect in lgtm-ci's history was found by a consumer after
+release, never by the repository's own tests (#279, #294, #412/#420, #935, #995):
+BATS asserts YAML shape and shell behaviour, but cannot observe
+GitHub's action-path resolution, the harden-runner pre/post hooks,
+cross-repository context or permission validation. Internal lgtm-hq callers
+mask these because they share the owner and pass `tooling-ref`.
+
+### The fixture
+
+[`TurboCoder13/lgtm-ci-consumer-fixture`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture)
+is a public repository outside the `lgtm-hq` org that consumes lgtm-ci only
+through `uses: lgtm-hq/lgtm-ci/.github/workflows/<file>.yml@<sha>` and the
+direct `lgtm-hq/lgtm-ci/.github/actions/<name>@<sha>` form, pinned to one
+exact SHA in every workflow file, with **no `tooling-ref`** and **no copied
+lgtm-ci files** (its `scripts/check-no-vendoring.sh` enforces that). Its
+`scripts/pin.sh <sha>` rewrites every pin; the README records every
+before/after run. What each workflow proves:
+
+<!-- markdownlint-disable MD013 -- evidence table -->
+
+| Fixture workflow | Proves | Role |
+| --- | --- | --- |
+| `python.yml`, `retry.yml`, `perms.yml` | Python reusable at an exact SHA with no `tooling-ref` (#995); documented-minimum caller permissions parse (#735/#736); two-leg matrix drives the artifact-availability wait (#803); frozen `uv sync` (#1021) | gate |
+| `node-bun.yml`, `node-npm.yml`, `node-pnpm.yml` | Each package manager installs only its own toolchain and leaves every lockfile untouched (#1077) | gate |
+| `rust.yml`, `verify-fresh-install.yml`, `vuln-suppression.yml` | cargo-nextest, cargo-llvm-cov and osv-scanner install from digest-verified archives under block-mode egress (#1096) | gate |
+| `siblings.yml`, `rust-build-siblings.yml` | Sibling calls in one run get namespaced artifacts (`artifact-prefix`, #752/#1091) and namespaced concurrency groups (#1076) | gate |
+| `egress.yml` | `egress-preset` reaches harden-runner's pre hook; a host present only in the selected preset is allowed, the control preset and the replace list deny it (#913) | gate |
+| `actions-direct.yml`, `build-python-direct.yml` | Direct composite path with no lgtm-ci checkout: nested `uses:` resolve (#1075), default-branch preflight on a shallow tag checkout (#1087) | gate |
+| `coverage-lcov.yml`, `playwright.yml` | Line-only LCOV through `reusable-coverage` (#1078); Playwright report artifact holds HTML + JSON + JUnit (#804) | gate |
+| `python-private-dep.yml` | Private git dependency in an uninstalled group does not break a frozen install (#1021) | gate |
+| `rust-release-build.yml` | Default `reusable-build-rust-binaries` matrix builds and runs a Windows binary (#1076) | gate |
+| `release-version-pr.yml`, `release-benign-hook.yml`, `app-token-probe.yml`, `sbom-release-upload.yml` | Release paths with the fixture's single-repo GitHub App: scoped token reach (#849), version PR with a well-behaved hook, SBOM assets attached to a release (#935). They open a PR or create a release in the fixture, so they report but never gate | informational, expected `success` |
+| `release-tamper-hook.yml`, `verify-negative.yml`, `playwright-negative.yml` | Negative-by-design: a hook that rewrites tooling is stopped (#849); a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804) | informational, expected `failure` |
+| `perms-negative.yml` | An under-permissioned caller is rejected at parse time | informational, expected `startup_failure` |
+
+<!-- markdownlint-enable MD013 -->
+
+`starter-python.yml` (the verbatim `examples/ci-python.yml`) runs on the
+fixture's own pushes and has no `workflow_dispatch`, so the canary does not
+dispatch it.
+
+### The canary
+
+`.github/workflows/external-consumer-canary.yml` runs the whole fixture
+against one lgtm-ci candidate from inside lgtm-ci. Because GitHub forbids
+expressions in `uses:`, the fixture cannot take the candidate as an input;
+`scripts/ci/actions/external-canary.sh` instead:
+
+1. resolves the candidate ref to a full SHA;
+2. reads every fixture workflow from the fixture's `main`, rewrites each
+   lgtm-ci pin to the candidate (the same pattern as the fixture's
+   `scripts/pin.sh`) and commits the result through the git data API as the
+   branch `canary/<sha>`. The fixture's `main` is never written;
+3. dispatches every fixture workflow that declares `workflow_dispatch` on
+   that branch (the fixture's `push` triggers are limited to `main`, so
+   creating the branch starts nothing by itself);
+4. polls the fixture's run list until each workflow has a completed run,
+   bounded at 25 minutes;
+5. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
+   the job summary, deletes the branch on every exit path, and fails when any
+   **gate** workflow did not succeed. Informational rows are compared with
+   their expected conclusion and flagged `unexpected`, but never fail the
+   run. A fixture workflow the script has never seen is a gate (fail closed).
+
+When it runs:
+
+- **Every pull request** starts the single canary job (`opened`,
+  `synchronize`, `reopened`, `ready_for_review`, `labeled`) so the check
+  always reports. The job lists the PR's changed files through the API (not
+  an `on.pull_request.paths` filter, which would leave the check unreported
+  and deadlock a required check) and runs the fixture set only when the PR
+  touches `.github/workflows/**`, `.github/actions/**`, `scripts/ci/**`,
+  `schemas/**` or `examples/**`. Otherwise it exits green with the summary
+  line `Skipped: no adoption-relevant changes`.
+- **Label `needs-external-canary`** forces the full set on any PR, whatever
+  it touches; every later push to the labelled PR re-runs it at the new head.
+- **Fork PRs skip**: they cannot read the secret. Re-run from a same-repo
+  branch with the force label when a fork PR needs the evidence.
+- **Dispatch it** from the Actions tab with `ref` set to any commit, branch or
+  tag (empty means the commit the workflow was dispatched on, e.g. `main`).
+  Dispatch always runs the full set.
+
+**Override (owner only).** The label `canary-informational` makes a run whose
+gate failed report success: each failed gate becomes a `::warning` annotation
+and the summary says why the run is green. It exists for the observation
+period, when a fixture defect or a GitHub incident must not block unrelated
+work; applying it is the owner's call, and the table still shows the red
+rows so the failure stays visible. Remove the label once the cause is fixed.
+
+**Status.** The canary is **not** a required check yet and the ruleset is
+untouched. It is promoted to required after an observation period on real
+PRs and after `EXTERNAL_FIXTURE_TOKEN` is replaced by a GitHub App installed
+on the fixture only (follow-up issue); the App removes the personal-token
+expiry and ties the credential to the fixture instead of a person. Until
+then a red canary is a signal to read, not a merge block. One full run
+dispatches roughly 25 fixture workflows (one on a Windows runner), and the
+release-path workflows open and leave a version PR in the fixture that is
+closed by hand.
+
+### Token scope and rotation
+
+The only secret is `EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access
+token owned by the fixture owner and stored as a repository secret on
+`lgtm-hq/lgtm-ci`. It is scoped to the single repository
+`TurboCoder13/lgtm-ci-consumer-fixture` with **Actions: read and write**
+(dispatch and poll) and **Contents: read and write** (create and delete the
+`canary/<sha>` branch; the script refuses any other ref). It has no access
+to any lgtm-hq repository; the candidate ref is resolved with the job's own
+`github.token`. The workflow passes it as one named env value to one step;
+there is no `secrets: inherit`, and the hardened job can reach only
+`github.com:443` and `api.github.com:443` (preset `external-canary`), so a
+compromised candidate cannot exfiltrate it.
+
+Rotation: fine-grained tokens expire; generate a new one with the same two
+permissions on the same single repository, update the secret, and run the
+canary once by dispatch. A read-only API listing of the fixture's workflows
+from a job is enough to confirm the new token before relying on it. If the
+token is lost, revoke it in the owner's token settings; nothing else is
+affected because it grants nothing outside the fixture.
+
 ## Related docs
 
 - [release-security-policy.md](release-security-policy.md) — mandatory evidence,

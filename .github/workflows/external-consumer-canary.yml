@@ -1,120 +1,61 @@
+# SPDX-License-Identifier: MIT
+# For license details, see the repository root LICENSE file.
+#
+# External consumer canary (#1074). Pins every workflow of the external
+# fixture TurboCoder13/lgtm-ci-consumer-fixture to one lgtm-ci candidate SHA
+# on a throwaway fixture branch `canary/<sha>`, dispatches each workflow that
+# declares workflow_dispatch, waits for the verdicts (25 minute bound), writes
+# the table to the job summary and deletes the branch. The fixture's main is
+# never written. Shell logic lives in scripts/ci/actions/external-canary.sh.
+#
+# Triggers: every pull_request (always-run / fast-skip: the single job always
+# starts and reports; it runs the fixture set only when the PR touches
+# .github/workflows/**, .github/actions/**, scripts/ci/**, schemas/** or
+# examples/**, decided from the PR's file list rather than a `paths:` filter,
+# otherwise it exits green with a "skipped" summary) and workflow_dispatch
+# (input `ref`, default: the dispatched commit, always the full set).
+#
+# Labels: `needs-external-canary` forces the full set on any PR;
+# `canary-informational` (owner-only) reports gate failures as warnings.
+# Fork PRs skip (they cannot read the secret).
+#
+# Not a required check yet: promotion follows an observation period and the
+# replacement of the PAT by a GitHub App (follow-up issue). Contract:
+# docs/workflow-contract.md "External verification".
+#
+# Gate workflows (the canary fails when any does not succeed):
+#   actions-direct build-python-direct coverage-lcov egress node-bun node-npm
+#   node-pnpm perms playwright python python-private-dep retry rust
+#   rust-build-siblings rust-release-build siblings verify-fresh-install
+#   vuln-suppression
+# Informational workflows (reported against their expected conclusion, never fail the canary):
+#   app-token-probe perms-negative playwright-negative release-benign-hook
+#   release-tamper-hook release-version-pr sbom-release-upload verify-negative
+#
+# The only secret is EXTERNAL_FIXTURE_TOKEN (fine-grained PAT scoped to the
+# fixture: Actions read/write, Contents read/write). No `secrets: inherit`.
 ---
-name: Reusable Vulnerability Suppression Check Workflow
+name: External Consumer Canary
 
-on:
-  workflow_call:
+'on':
+  workflow_dispatch:
     inputs:
-      job-name:
-        description: "GitHub check run name for the suppression check job"
-        required: false
-        type: string
-        default: "Check Vulnerability Suppressions"
-      osv-version:
+      ref:
         description: >-
-          osv-scanner release version to install. Empty uses the pin in
-          scripts/ci/versions.env, whose committed sha256 the install verifies.
-          A different version has no committed digest, so it is refused unless
-          a caller-supplied install-script exports the matching
-          OSV_SCANNER_SHA256_<PLATFORM> (#1096).
+          lgtm-ci commit SHA (or branch/tag) to pin the fixture to.
+          Empty: the commit this workflow was dispatched on.
         required: false
-        type: string
-        default: ""
-      config-path:
-        description: "Path to suppression TOML relative to repository root"
-        required: false
-        type: string
-        default: ".osv-scanner.toml"
-      check-script:
-        description: >-
-          Path to suppression check script (repo checkout or tooling checkout).
-          Defaults to tooling check-vuln-suppressions.sh.
-        required: false
-        type: string
-        default: ".lgtm-ci-tooling/scripts/ci/security/check-vuln-suppressions.sh"
-      install-script:
-        description: >-
-          Path to osv-scanner install script (repo checkout or tooling checkout).
-          Defaults to tooling install-osv-scanner.sh.
-        required: false
-        type: string
-        default: ".lgtm-ci-tooling/scripts/ci/security/install-osv-scanner.sh"
-      workflow-file:
-        description: >-
-          Caller workflow filename for auto-PR footer link (e.g.
-          vuln-suppression-check.yml)
-        required: false
-        type: string
-        default: ""
-      cleanup-pr-labels:
-        description: >-
-          Comma-separated labels for auto-created cleanup PRs. Added after the
-          PR is created; a label missing in the repository only warns. Empty
-          disables labelling.
-        required: false
-        type: string
-        default: "security,dependencies,automation"
-      tooling-ref:
-        description: >-
-          Optional lgtm-ci tooling override; unset tracks the workflow pin
-          (job.workflow_sha), set emits a deprecation warning (#995).
-        required: false
-        type: string
-        default: ""
-      egress-policy:
-        description: "harden-runner egress policy (audit or block)"
-        required: false
-        type: string
-        default: "block"
-      allowed-endpoints:
-        description: >-
-          Extra or replacement host:port list (whitespace-separated) for
-          harden-runner. replace mode: a non-empty list is used alone;
-          append mode: merged with egress-preset. Composed at job start, so
-          it is enforced (#913).
-        required: false
-        type: string
-        default: ""
-      allowed-endpoints-mode:
-        description: >-
-          append (default): egress-preset plus allowed-endpoints; replace:
-          non-empty allowed-endpoints is used instead of egress-preset
-        required: false
-        type: string
-        default: "append"
+        default: ''
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, labeled]
 
-      egress-preset:
-        description: >-
-          Named baseline allowlist from scripts/ci/lib/egress/presets.sh
-          (default osv-scanner). Selected at job start inside every harden-runner
-          step, so it is enforced (#913).
-        required: false
-        type: string
-        default: "osv-scanner"
-      runner-image:
-        description: "GitHub-hosted Linux runner image label (install script downloads linux_* binaries)"
-        required: false
-        type: string
-        default: "ubuntu-24.04"
-      timeout-minutes:
-        description: "Job timeout in minutes for the suppression check job"
-        required: false
-        type: number
-        default: 10
+permissions: {}
 
-    secrets:
-      GH_TOKEN:
-        description: >-
-          GitHub token with contents:write and pull-requests:write (typically
-          secrets.GITHUB_TOKEN). Used for the API-created, GitHub-signed cleanup
-          commit, the cleanup branch, and the cleanup PR.
-        required: true
+concurrency:
+  group: external-consumer-canary-${{ github.event.pull_request.head.sha || github.sha }}
+  cancel-in-progress: false
 
 env:
-  # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
-  # scripts/ci/egress/sync-workflow-presets.sh — do not edit by hand. Every
-  # harden-runner step below indexes this map by expression: the
-  # step-security pre hook installs the agent before any step runs, so the
-  # allowlist must be composed from literals and inputs only (#412/#420/#913).
   # lgtm-ci-egress-presets:begin
   LGTM_CI_EGRESS_PRESETS: >-
     {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
@@ -221,88 +162,42 @@ env:
   # lgtm-ci-egress-presets:end
 
 jobs:
-  vuln-suppression-check:
-    name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+  canary:
+    name: "🐤 External Consumer Canary"
+    # Always runs so the check always reports; the script decides full vs skip.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
     permissions:
-      contents: write
-      pull-requests: write
-    # One cleanup run per repository at a time: the next run then sees the
-    # previous run's open cleanup PR instead of racing it into a duplicate.
-    # A running cleanup is never cancelled. GitHub keeps only the newest
-    # pending run per group, so an older queued run can be superseded; that
-    # is harmless because the newer run scans the latest suppressions.
-    concurrency:
-      group: vuln-suppression-cleanup-${{ github.repository }}
-      cancel-in-progress: false
-
+      # Resolve the candidate ref to a SHA and read the canary script.
+      contents: read
+      # List the pull request's changed files for the run/skip decision.
+      pull-requests: read
     steps:
       - name: Harden runner
-        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
-          egress-policy: ${{ inputs.egress-policy }}
-          # Composed from inputs and the literal map in env only: harden-runner's
-          # pre hook runs before any step, so nothing computed later can reach it.
+          egress-policy: block
+          # Literal map in env only: harden-runner's pre hook runs before any
+          # step, so the allowlist cannot come from anything computed later.
           allowed-endpoints: >-
-            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
-            && inputs.allowed-endpoints
-            || format('{0} {1}',
-            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'osv-scanner'],
-            inputs.allowed-endpoints) }}
-      - name: Fail on unknown egress-preset
-        # harden-runner's pre hook already ran with whatever the selector
-        # resolved; an unknown name yields an empty baseline, which would
-        # surface later as an opaque network error. Fail here by name (#913).
-        if: >-
-          inputs.egress-policy != 'audit'
-          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
-          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'osv-scanner'] == null
-        shell: bash
-        env:
-          EGRESS_PRESET: ${{ inputs.egress-preset }}
-        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
-      - name: Checkout repository
-        # Pinned to SHA for supply chain security
+            ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['external-canary'] }}
+
+      - name: Checkout canary scripts
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          token: ${{ secrets.GH_TOKEN }}
-          # The cleanup commit goes through the GitHub API; git never pushes.
+          sparse-checkout: scripts/ci
           persist-credentials: false
-      - name: Checkout lgtm-ci tooling
-        # yamllint disable-line rule:line-length
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-          path: .lgtm-ci-tooling
-          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
-          sparse-checkout: |
-            .github/actions/checkout-and-harden
-          sparse-checkout-cone-mode: true
-          persist-credentials: false
-      - name: Checkout and harden
-        id: egress
-        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
-        with:
-          tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
-          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-          tooling-ref-override: ${{ inputs.tooling-ref }}
-          sparse-checkout-extra: |
-            scripts/ci/
-      - name: Install osv-scanner
-        shell: bash
+
+      - name: Run external consumer canary
         env:
-          OSV_VERSION: ${{ inputs.osv-version }}
-          INSTALL_SCRIPT: ${{ inputs.install-script }}
-        run: bash "$GITHUB_WORKSPACE/$INSTALL_SCRIPT" "$OSV_VERSION"
-      - name: Check suppression staleness
-        shell: bash
-        env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          CONFIG_PATH: ${{ inputs.config-path }}
-          WORKFLOW_FILE: ${{ inputs.workflow-file }}
-          CLEANUP_PR_LABELS: ${{ inputs.cleanup-pr-labels }}
-          CHECK_SCRIPT: ${{ inputs.check-script }}
-        run: bash "$GITHUB_WORKSPACE/$CHECK_SCRIPT"
+          GH_TOKEN: ${{ secrets.EXTERNAL_FIXTURE_TOKEN }}
+          LGTM_CI_TOKEN: ${{ github.token }}
+          CANDIDATE_REF: >-
+            ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+          CANARY_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
+          PR_HEAD_REPO_FORK: ${{ github.event.pull_request.head.repo.fork }}
+        run: bash scripts/ci/actions/external-canary.sh "$CANDIDATE_REF"
