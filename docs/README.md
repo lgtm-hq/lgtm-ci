@@ -25,6 +25,7 @@ straight to a component index below.
 | [python-release-publish.md](python-release-publish.md) | Production tag-push layout, PyPI trusted publishing, Homebrew tap dispatch |
 | [release-security-policy.md](release-security-policy.md) | Org-wide release policy: mandatory evidence per artifact class, build-then-publish ordering, blocking failures, partial states, recovery tiers, backfills |
 | [rust-testing.md](rust-testing.md) | Nextest config, fast-tests-vs-coverage, Rust workspace layouts |
+| [migration/v0.76.md](migration/v0.76.md) | Upgrading from v0.75.x: every caller-visible change in v0.76.0 and the edit to make |
 | [release-changelog.md](release-changelog.md) | Keep a Changelog migration for `reusable-release-version-pr.yml` |
 | [org-rulesets.md](org-rulesets.md) | Org ruleset registry, required check-name contract, sync tooling |
 
