@@ -354,7 +354,8 @@ build_tree_payload() {
 }
 
 # Create branch canary/<sha> on the fixture with every workflow re-pinned.
-# Fetches the base branch's workflow files into <workdir>, rewrites them,
+# Fetches the base branch's workflow files (direct .yml children of
+# .github/workflows/ only) into <workdir>, rewrites them,
 # and commits via the git data API. Sets CANARY_BRANCH_CREATED=1 once the
 # ref exists. Prints the new commit SHA.
 create_canary_branch() {
@@ -376,7 +377,7 @@ create_canary_branch() {
 			"repos/${FIXTURE_REPO}/contents/${path}?ref=${base_sha}" >"$workdir/$(basename "$path")"
 		rewrite_pins "$workdir/$(basename "$path")" "$sha"
 	done < <(fixture_api -X GET "repos/${FIXTURE_REPO}/git/trees/${base_tree}?recursive=1" \
-		--jq '.tree[] | select(.type == "blob" and (.path | startswith(".github/workflows/")) and (.path | endswith(".yml"))) | .path')
+		--jq '.tree[] | select(.type == "blob" and (.path | test("^\\.github/workflows/[^/]+\\.yml$"))) | .path')
 
 	local count
 	count="$(find "$workdir" -maxdepth 1 -name '*.yml' | wc -l | tr -d ' ')"

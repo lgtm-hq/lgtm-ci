@@ -121,6 +121,9 @@ case "$args" in
 	echo "treetreetreetreetreetreetreetreetreetree"
 	;;
 *"git/trees/treetree"*"recursive=1"*)
+	# The script applies its own --jq on the real API; the mock answers what
+	# that jq yields for a flat workflows directory. The main test asserts
+	# the jq restricts the listing to direct .yml children.
 	for f in "$MOCK_FIXTURE_DIR"/*.yml; do echo ".github/workflows/$(basename "$f")"; done
 	;;
 *"/contents/.github/workflows/"*)
@@ -386,6 +389,10 @@ call_fn() {
 	assert_success
 	run grep -E -- "-X (POST|PATCH|PUT|DELETE) [^ ]*(heads/main|git/refs/heads/main)" "$MOCK_CALLS"
 	refute_output
+
+	# The tree listing selects direct .yml children of .github/workflows only.
+	run grep -F 'workflows/[^/]+' "$MOCK_CALLS"
+	assert_success
 
 	# The posted tree carries the re-pinned files (candidate in, old pin out).
 	run jq -r '.base_tree' "$MOCK_POSTED_TREE"
