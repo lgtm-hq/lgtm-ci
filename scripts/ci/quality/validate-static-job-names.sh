@@ -22,6 +22,7 @@ fi
 # Draft-PR skip pattern (always runs on non-PR events; callers document the
 # check is not required on drafts):
 #   reusable-test-node.yml:test-vitest
+#   reusable-test-node-run.yml:test-vitest (generated read-only variant, #1081)
 #   reusable-site-quality.yml:site-build-link
 #   reusable-site-quality.yml:site-test
 #   reusable-test-python.yml:test
@@ -49,7 +50,7 @@ fi
 # 'failure'` reproduces plain needs: semantics while letting skipped
 # upstream jobs through; the job never skips on its own inputs.
 #   reusable-release-multi-ecosystem.yml:version-pr
-STATIC_JOB_NAME_EXCEPTIONS="${STATIC_JOB_NAME_EXCEPTIONS-reusable-dependency-review.yml:dependency-review reusable-required-check.yml:gate reusable-test-e2e.yml:test reusable-test-e2e-playwright.yml:test reusable-test-rust-build.yml:build reusable-test-node.yml:test-vitest reusable-site-quality.yml:site-build-link reusable-site-quality.yml:site-test reusable-test-python.yml:test reusable-test-node-custom.yml:test reusable-test-shell.yml:test reusable-test-shell.yml:test-sharded reusable-test-shell.yml:aggregate reusable-rust-test.yml:test reusable-sbom.yml:sbom reusable-sbom.yml:release-assets reusable-release-multi-ecosystem.yml:version-pr}"
+STATIC_JOB_NAME_EXCEPTIONS="${STATIC_JOB_NAME_EXCEPTIONS-reusable-dependency-review.yml:dependency-review reusable-required-check.yml:gate reusable-test-e2e.yml:test reusable-test-e2e-playwright.yml:test reusable-test-rust-build.yml:build reusable-test-node.yml:test-vitest reusable-test-node-run.yml:test-vitest reusable-site-quality.yml:site-build-link reusable-site-quality.yml:site-test reusable-test-python.yml:test reusable-test-node-custom.yml:test reusable-test-shell.yml:test reusable-test-shell.yml:test-sharded reusable-test-shell.yml:aggregate reusable-rust-test.yml:test reusable-sbom.yml:sbom reusable-sbom.yml:release-assets reusable-release-multi-ecosystem.yml:version-pr}"
 
 violations=0
 

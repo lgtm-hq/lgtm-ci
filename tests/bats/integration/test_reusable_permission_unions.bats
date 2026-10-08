@@ -134,6 +134,18 @@ pull-requests: write"
 	assert_output "contents: read"
 }
 
+# Read-only variants (#1081): the facade's jobs without the publish job, so a
+# caller that only runs tests grants read scopes only. The facade's own union
+# is unchanged (pinned by the matrix test-workflow test below); only callers
+# that switch to the variant shed the write scope.
+@test "reusable-test-node-run: caller permission union is pinned" {
+	run _permission_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node-run.yml"
+	assert_success
+	assert_output "actions: read
+contents: read"
+}
+
 # The two workflows the publishing jobs moved into. Pinning their unions too
 # keeps the accounting closed: every scope #770 removed from a producer above
 # must reappear here, in a workflow a caller invokes only when it publishes.
@@ -233,6 +245,15 @@ pages: write"
 		"${PROJECT_ROOT}/.github/workflows/reusable-coverage.yml" \
 		"reusable-coverage.yml" \
 		2 \
+		"${PROJECT_ROOT}/docs/reusable-workflows.md"
+	assert_success
+}
+
+@test "docs: reusable-test-node-run caller snippets grant exactly the union" {
+	run _assert_docs_match_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node-run.yml" \
+		"reusable-test-node-run.yml" \
+		1 \
 		"${PROJECT_ROOT}/docs/reusable-workflows.md"
 	assert_success
 }

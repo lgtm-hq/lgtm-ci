@@ -53,7 +53,7 @@ Full documentation: [docs/README.md](docs/README.md).
 
 | Area | Index | Support tiers | Highlights |
 | ---- | ----- | ------------- | ---------- |
-| Reusable workflows (62) | [docs/workflows/](docs/workflows/README.md) | 7 stable · 47 preview · 7 internal · 1 deprecated | Quality lint, per-language tests, Docker, Pages, release automation, security audit |
+| Reusable workflows (63) | [docs/workflows/](docs/workflows/README.md) | 7 stable · 48 preview · 7 internal · 1 deprecated | Quality lint, per-language tests, Docker, Pages, release automation, security audit |
 | Composite actions (50) | [docs/actions/](docs/actions/README.md) | 4 stable · 43 preview · 3 internal · 0 deprecated | Setup, security/egress, testing, coverage, publishing, release, PR comments |
 | Shell libraries | [docs/libraries/](docs/libraries/README.md) | — | Logging, GitHub Actions helpers, installers, release/changelog, coverage parsing |
 
