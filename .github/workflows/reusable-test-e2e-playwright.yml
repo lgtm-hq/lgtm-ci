@@ -91,6 +91,14 @@ on:
         required: false
         type: string
         default: "npm"
+      results-artifact-name:
+        description: >-
+          Artifact name for the results.v1 document (#1080) this run writes.
+          Empty resolves to playwright-results-<run_id>. Override when a
+          caller runs this workflow more than once in a single run.
+        required: false
+        type: string
+        default: ""
       publish-test-summary:
         description: >-
           Publish or update the test summary comment on the pull request for
@@ -353,6 +361,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -416,6 +425,8 @@ jobs:
           WEB_SERVER: ${{ inputs.web-server }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
         continue-on-error: true
+      # Native JSON report -> results/playwright/default/results.json
+      # (results.v1, #1080); every tests-* output is read back from it.
       - name: Parse results
         id: parse
         if: always()
@@ -424,21 +435,35 @@ jobs:
           STEP: parse
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
           REPORT_PATH: ${{ inputs.working-directory }}/playwright-results.json
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
       - name: Generate summary
         if: always()
         shell: bash
         env:
           STEP: summary
-          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
-          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
-          TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
-          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
+          RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
           BROWSERS: ${{ inputs.browsers }}
           PROJECT: ${{ inputs.project }}
           GREP: ${{ inputs.grep }}
-          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-playwright-tests.sh
+      # The results.v1 document the summary comment and required-check
+      # verdicts read (#1080). Not gated by upload-report: the HTML report is
+      # a debug convenience, the document is the contract.
+      - name: Upload results
+        if: always() && steps.parse.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: >-
+            ${{ inputs.results-artifact-name != '' && inputs.results-artifact-name
+            || format('playwright-results-{0}', github.run_id) }}
+          path: results/playwright/default/results.json
+          retention-days: 7
+          if-no-files-found: error
+          # run_id is stable across a rerun of the same run; the later attempt
+          # is authoritative.
+          overwrite: true
       - name: Evaluate report upload gate
         id: upload-gate
         if: always()
@@ -514,8 +539,10 @@ jobs:
     with:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
-      tests-passed: ${{ needs.test.outputs.tests-passed }}
-      tests-failed: ${{ needs.test.outputs.tests-failed }}
-      tests-total: ${{ needs.test.outputs.tests-total }}
+      # The comment is rendered from this run's results.v1 artifact (#1080).
+      results-artifact-pattern: >-
+        ${{ inputs.results-artifact-name != '' && inputs.results-artifact-name
+        || format('playwright-results-{0}', github.run_id) }}
+      results-expected-count: "1"
       job-result: ${{ needs.test.outputs.passed == 'true' && 'success' || 'failure' }}
       tooling-ref: ${{ inputs.tooling-ref }}

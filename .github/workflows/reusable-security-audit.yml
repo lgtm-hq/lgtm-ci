@@ -47,6 +47,14 @@ on:
         required: false
         type: boolean
         default: true
+      results-artifact-name:
+        description: >-
+          Artifact name for the results.v1 document (#1080) the audit writes
+          (findings under counts.failed). Override when a caller runs this
+          workflow more than once in a single run.
+        required: false
+        type: string
+        default: "security-audit-results"
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -287,6 +295,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f # v4.6.0
@@ -303,7 +312,21 @@ jobs:
           WORKSPACE: ${{ github.workspace }}/${{ inputs.working-directory }}
           COMMENT_FILE: ${{ inputs.comment-file }}
           AUDIT_SCRIPT: ${{ inputs.audit-script }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash "$GITHUB_WORKSPACE/$AUDIT_SCRIPT"
+      # results/security-audit/default/results.json (results.v1, #1080):
+      # the audit verdict in the same shape every test runner uses.
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.results-artifact-name }}
+          path: ${{ inputs.working-directory }}/results/security-audit/default/results.json
+          retention-days: 7
+          # Absent only when the audit script stopped before scanning (image
+          # pull failure); the explicit fail step below owns that verdict.
+          if-no-files-found: warn
+          overwrite: true
       # Convenience payload for the PR comment, never the audit verdict — the
       # "Fail on vulnerabilities" step below owns that, and the publisher
       # already warns instead of failing when the artifact is missing.

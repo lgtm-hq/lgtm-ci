@@ -32,6 +32,22 @@ on:
         required: false
         type: string
         default: ""
+      results-artifact-pattern:
+        description: >-
+          Artifact name or glob of the results.v1 documents (#1080) to render
+          the summary from, e.g. <artifact-prefix>-results-*. When set, the
+          tests-passed / tests-failed / tests-total / coverage-percent inputs
+          are ignored and the comment is rendered from results.json alone.
+        required: false
+        type: string
+        default: ""
+      results-expected-count:
+        description: >-
+          Number of results.v1 legs results-artifact-pattern must yield
+          (empty: any non-zero number)
+        required: false
+        type: string
+        default: ""
       coverage-enabled:
         description: >-
           Whether coverage was requested for this run. When false (default),
@@ -301,6 +317,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/generate-coverage-comment
+            schemas/
             scripts/ci/
       - name: Validate rich coverage inputs
         if: >-
@@ -335,6 +352,19 @@ jobs:
           threshold-branches: "0"
           threshold-functions: "0"
           test-suite-name: ${{ inputs.test-suite-name }}
+      # results.v1 documents (#1080): the only test data the totals summary
+      # reads when results-artifact-pattern is set. A missing or malformed
+      # document fails this job instead of posting an empty comment.
+      - name: Download results documents
+        if: >-
+          inputs.results-artifact-pattern != '' && inputs.prebuilt-test-summary-file == '' && (
+          !inputs.rich-coverage-comment || inputs.coverage-artifact-name == '' ||
+          steps.download-coverage.conclusion != 'success')
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ${{ inputs.results-artifact-pattern }}
+          path: results-download
+          merge-multiple: false
       - name: Generate test run summary
         id: generate-test-summary
         if: >-
@@ -343,6 +373,8 @@ jobs:
           steps.download-coverage.conclusion != 'success')
         shell: bash
         env:
+          RESULTS_DIR: ${{ inputs.results-artifact-pattern != '' && 'results-download' || '' }}
+          EXPECTED_COUNT: ${{ inputs.results-expected-count }}
           TEST_SUITE_NAME: ${{ inputs.test-suite-name }}
           TESTS_PASSED: ${{ inputs.tests-passed }}
           TESTS_FAILED: ${{ inputs.tests-failed }}
@@ -355,7 +387,7 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
           GITHUB_SERVER_URL: ${{ github.server_url }}
           COMMENT_OUTPUT: test-summary.md
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-test-summary.sh
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/render-test-summary.sh
       - name: Detect PR number
         id: pr
         shell: bash

@@ -75,28 +75,31 @@ _job_run_commands() {
 	_job_block "$1" | grep -E "^[[:space:]]*(run:|bash )"
 }
 
-@test "reusable-test-python: aggregate summary steps run only for a non-empty python-versions" {
+@test "reusable-test-python: aggregate steps run for single- and multi-version calls alike" {
 	# Read off the `if:` expressions themselves, not any line that happens to
-	# mention the input. The job-level gate must not require the input (#1058:
-	# single-version calls still get a failing check); the download and
-	# aggregate steps must, so the matrix-only path stays matrix-only.
+	# mention the input. Neither the job-level gate (#1058: single-version
+	# calls still get a failing check) nor the download/aggregate steps may
+	# require the input: since #1080 the aggregate reads this call's results.v1
+	# documents for every call and the public outputs are derived from them.
 	run _job_if_expressions aggregate
 	assert_success
 	[[ "${lines[0]}" == *"always()"* ]] || fail "aggregate job if must start with always()"
 	[[ "${lines[0]}" != *"inputs.python-versions"* ]] ||
 		fail "aggregate job must run for single-version calls too"
-	# Structural: read each step's own step-level `if:` (any position within
-	# the step, not a fixed line window after its name).
 	local step cond
-	for step in "Wait for and download matrix test summaries" "Aggregate matrix test summaries"; do
+	for step in "Wait for and download matrix results" "Aggregate matrix results"; do
 		cond="$(_job_block aggregate | awk -v name="$step" '
 			$0 == "      - name: " name { in_step = 1; next }
 			in_step && (/^      - / || /^    [a-zA-Z0-9_-]+:/) { exit }
 			in_step && /^        if: / { sub(/^        if: /, ""); print; exit }
 		')"
-		[[ "$cond" == "inputs.python-versions != ''" ]] ||
-			fail "step '${step}' must be gated on inputs.python-versions != '' (got: '${cond}')"
+		[[ -z "$cond" ]] ||
+			fail "step '${step}' must run unconditionally (got: '${cond}')"
 	done
+	# The single-version branch downloads an exact name, the matrix branch the
+	# prefix glob (#752).
+	run grep -F "format('{0}-results-{1}', inputs.artifact-prefix, inputs.python-version || '3.12')" "$WORKFLOW"
+	assert_success
 }
 
 @test "reusable-test-python: prepare runs the compat/coverage contract validator" {
@@ -183,9 +186,9 @@ _job_run_commands() {
 		in_aggregate && /aggregate-results\.sh/ { agg = NR }
 		in_aggregate && /GH_TOKEN: \$\{\{ github\.token \}\}/ { token = 1 }
 		in_aggregate && /EXPECTED_COUNT: \$\{\{ needs\.prepare\.outputs\.matrix-count \}\}/ { count = 1 }
-		in_aggregate && /MATRIX_KEY: python-version$/ { key = 1 }
+		in_aggregate && /MATRIX_KEY: .*'python-version'/ { key = 1 }
 		in_aggregate && /DOWNLOAD_DIR: python-results$/ { dir = 1 }
-		in_aggregate && /"\$\{ARTIFACT_PREFIX\}-results-\*"/ { pattern = 1 }
+		in_aggregate && /format\(.\{0\}-results-\*., inputs\.artifact-prefix\)/ { pattern = 1 }
 		in_aggregate && /actions\/download-artifact@/ { dl = 1 }
 		END { exit !(wait && agg && wait < agg && token && count && key && dir && pattern && !dl) }
 	' "$WORKFLOW"

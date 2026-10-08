@@ -721,11 +721,16 @@ _lang_wait_globs() {
 		in_job && /^  [a-zA-Z0-9_-]+:$/ { exit }
 		in_job && /^      - name: / { wired = 0 }
 		in_job && /ARTIFACT_PREFIX: \$\{\{ inputs\.artifact-prefix \}\}$/ { wired = 1 }
+		# #1080: the pattern lives in the step env; its multi-version branch
+		# is the prefixed glob (the single-version branch is an exact name,
+		# asserted separately).
+		in_job && /format\(.\{0\}-results-\*., inputs\.artifact-prefix\)/ { pattern_env = 1 }
 		in_job && /wait-for-artifacts\.sh$/ { want = 1; next }
 		want {
 			line = $0
 			sub(/^ *"\$EXPECTED_COUNT" /, "", line)
 			gsub(/"/, "", line)
+			if (line == "$RESULTS_PATTERN" && pattern_env) line = "${ARTIFACT_PREFIX}-results-*"
 			print (wired ? "wired" : "unwired") "\t" line
 			want = 0
 		}
@@ -938,6 +943,22 @@ _lang_job_validates_prefix() {
 	run _lang_wait_globs reusable-test-python.yml aggregate
 	assert_output --partial $'wired\t${ARTIFACT_PREFIX}-results-*'
 	[ "$(_lang_render '${ARTIFACT_PREFIX}-results-*' python)" = "python-results-*" ]
+}
+
+# A single-version call downloads its exact results artifact name (#1080):
+# with the default prefix two single-version siblings on different versions
+# stay invisible to each other, as they were before the aggregate always ran.
+@test "python/rust: single-version calls download their results by exact name" {
+	local entry wf single
+	for entry in "reusable-test-python.yml|inputs.python-version || '3.12'" \
+		"reusable-rust-test.yml|inputs.rust-toolchain || 'stable'"; do
+		wf="${entry%%|*}"
+		single="${entry#*|}"
+		run grep -F "format('{0}-results-{1}', inputs.artifact-prefix, ${single})" "${WORKFLOW_DIR}/${wf}"
+		assert_success
+		# aggregate wait and summary publisher resolve the same name
+		[ "$(grep -cF "format('{0}-results-{1}', inputs.artifact-prefix, ${single})" "${WORKFLOW_DIR}/${wf}")" -eq 2 ]
+	done
 }
 
 # Two calls with distinct prefixes must not see each other's artifacts: each

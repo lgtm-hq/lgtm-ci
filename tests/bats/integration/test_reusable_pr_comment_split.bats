@@ -208,7 +208,9 @@ _aggregate_requires_prepare_success() {
 @test "reusable-publish-test-summary: uses generate-test-summary or coverage composite" {
 	run test -f "${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
 	assert_success
-	run grep -q 'generate-test-summary\.sh' \
+	# #1080: the totals summary is rendered from results.v1 documents by
+	# render-test-summary.sh, which delegates the markdown to generate-test-summary.sh.
+	run grep -q 'render-test-summary\.sh' \
 		"${PROJECT_ROOT}/.github/workflows/reusable-publish-test-summary.yml"
 	assert_success
 	run grep -q 'generate-coverage-comment' \

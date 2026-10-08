@@ -2435,6 +2435,146 @@ comma-separated overrides are normalized). On failure, `error_message` from
 amannn (or the optional `max-length` check) is posted via `post-pr-comment`;
 stale failure comments are cleared on success.
 
+## Results contract (`schemas/results.v1.json`, #1080)
+
+Every test, coverage and audit runner emits one normalized document per leg,
+and every publisher reads only those documents. Nothing about test counts
+travels through `needs.*.outputs` any more; the public workflow outputs are
+derived from the same documents, so existing callers see identical values.
+
+### The document
+
+`schemas/results.v1.json` (JSON Schema 2020-12) describes `results.json`:
+
+```json
+{
+  "tool": "pytest",
+  "status": "passed",
+  "counts": { "passed": 10, "failed": 0, "skipped": 1, "total": 11 },
+  "duration_ms": 5250,
+  "coverage": { "lines": 85.5, "branches": 70.25 },
+  "artifacts": [{ "kind": "report", "path": "python/pytest-results.json" }],
+  "source": { "runner": "run-pytest", "version": "<lgtm-ci sha>" },
+  "matrix": { "key": "python-version", "value": "3.12" },
+  "exit_code": 0
+}
+```
+
+- `tool`, `status`, `counts`, `duration_ms`, `artifacts`, `source` are required;
+  `coverage`, `matrix`, `exit_code` are optional. Unknown properties are rejected.
+- `status` is one of `passed`, `failed`, `no-tests`, `error`. `error` means the
+  native report was missing or unparseable; `failed` means a failed count or a
+  non-zero runner exit; `no-tests` means a clean run with nothing counted. An
+  audit leg reports its findings under `counts.failed` and a clean scan as
+  `passed`.
+- `coverage` is present only when coverage was collected. A metric the format
+  does not measure (branches in line-only LCOV, functions in Cobertura) is
+  omitted, never written as `0`.
+- **Versioning:** v1 may gain optional properties; it never removes or
+  retypes one. A breaking change is a new `results.v2.json` next to v1.
+
+### Layout and artifact names
+
+Each runner writes `results/<runner>/<matrix-key>/results.json` in its job
+workspace and uploads that file under the artifact names the typed-name
+convention already assigned (#752 / #1091). No existing name changed; the
+file replaces the untyped `summary.json` that `<prefix>-results-<version>`
+used to carry.
+
+<!-- markdownlint-disable MD013 MD060 -- wide reference table -->
+
+| Reusable                         | Runner / `tool`               | Document on disk                                     | Artifact                                          |
+| -------------------------------- | ----------------------------- | ---------------------------------------------------- | ------------------------------------------------- |
+| `reusable-test-python.yml`       | `run-pytest` / `pytest`       | `results/pytest/<python-version>/results.json`       | `<prefix>-results-<python-version>`               |
+| `reusable-test-node.yml`         | `run-vitest` / `vitest`       | `results/vitest/<node-version>/results.json`         | `<prefix>-results-<node-version>`                 |
+| `reusable-rust-test.yml`         | `run-rust-nextest` / `cargo-nextest` | `<wd>/results/nextest/<rust-toolchain>/results.json` | `<prefix>-results-<rust-toolchain>`        |
+| `reusable-test-shell.yml`        | `run-bats-tests` / `bats`     | `<wd>/results/bats/default/results.json`             | `<prefix>-results` (new; single and sharded path) |
+| `reusable-test-e2e-playwright.yml` | `run-playwright-tests` / `playwright` | `results/playwright/default/results.json`    | `results-artifact-name` (new; default `playwright-results-<run_id>`) |
+| `reusable-security-audit.yml`    | `run-lintro-audit` / `osv-scanner` | `<wd>/results/security-audit/default/results.json` | `results-artifact-name` (new; default `security-audit-results`) |
+| `reusable-coverage.yml`          | `collect-coverage` / `coverage` | `results/coverage/default/results.json`            | `<coverage-artifact-name>-results` (new)          |
+
+<!-- markdownlint-enable MD013 MD060 -->
+
+Inside the artifact the file is `results.json` at the root (upload-artifact
+strips the common parent). Downloading `<prefix>-results-*` with
+`merge-multiple: false` therefore yields `<name>/results.json` per leg, which is
+what the aggregate and the publishers glob with `**/results.json`.
+
+### Parsers and renderers
+
+- `scripts/ci/lib/testing/parse/*.sh` stay the native parsers; each gains a
+  pure `*_results_v1` wrapper (native file → document on stdout):
+  `pytest_results_v1`, `vitest_results_v1`, `playwright_results_v1`,
+  `junit_results_v1` (nextest), `tap_results_v1` (bats), `osv_results_v1`.
+  `scripts/ci/lib/testing/results.sh` holds the builder (`results_v1_build`),
+  the validator (`results_v1_validate`), `results_v1_github_outputs` (the
+  `tests-*` / `coverage-percent` / `status` step outputs, read back from the
+  document) and `results_v1_set_status` / `results_v1_set_coverage` for gates
+  that run after the parser (`scripts/ci/actions/results-update.sh`).
+- `scripts/ci/actions/render-test-summary.sh` (document(s) → PR comment),
+  `render-step-summary.sh` (document → job step summary) and
+  `render-pages-results.sh` (document(s) → `index.html` + `results.json` for a
+  Pages site) read nothing but documents. The comment body still comes from
+  `generate-test-summary.sh`, so a comment rendered from `results.json` is
+  byte-identical to one rendered from the old job outputs for the same counts
+  (`tests/bats/unit/actions/test_results_renderers.bats` asserts this). The
+  one visible difference is the **Skipped** row: it now reports the real
+  count where the old output chain hard-coded `0`.
+- `aggregate-results.sh` validates every leg before summing, fails on a leg
+  count that disagrees with the matrix, reports `status` (`error` > `failed`
+  > `no-tests` > `passed`) and `passed` (every leg `passed`), and can write
+  the merged document (`AGGREGATE_OUTPUT`) for the publishers. A single leg's
+  coverage literal is passed through verbatim; several legs are averaged to
+  two decimals, as before.
+
+### Who reads what
+
+- **Aggregate jobs** (`python` / `rust` / `node`): always download this call's
+  documents, by exact name for a single version
+  (`<prefix>-results-<version>`, so two single-version siblings on different
+  versions stay invisible to each other) or by `<prefix>-results-*` with the
+  by-name matrix check for a multi-version call (#803). The workflow-level
+  `tests-passed` / `tests-failed` / `tests-total` / `coverage-percent` /
+  `passed` outputs are the aggregate's, for a single version and a matrix
+  alike. The shell reusable's two paths (single job, sharded aggregate) each
+  write and upload the document themselves.
+- **`reusable-publish-test-summary.yml`**: new inputs
+  `results-artifact-pattern` and `results-expected-count`. When the pattern
+  is set the job downloads the documents and renders the totals comment from
+  them; a missing, miscounted or malformed document fails the job rather than
+  posting an empty comment. Without the pattern the `tests-*` /
+  `coverage-percent` inputs render as before (direct callers are unaffected).
+  The rich coverage path (`rich-coverage-comment`) is unchanged.
+- **`reusable-required-check.yml`**: optional `results-artifact-pattern` /
+  `results-expected-count`. When set, the gate downloads the documents and
+  fails unless every one validates and reports `status: passed`, on top of
+  the `upstream-result` / `passed-output` checks.
+- **`reusable-coverage.yml`**: `coverage-percent` output and the fallback
+  totals comment come from the document the coverage job writes.
+
+### Conformance
+
+`tests/bats/unit/lib/testing/test_results_contract.bats` runs every parser
+fixture under `tests/fixtures/{pytest,vitest,playwright,junit,rust,security}`
+through its wrapper and the schema, plus negative fixtures under
+`tests/fixtures/results/`. The validator is a small jq interpreter of the
+schema file itself (`type`, `properties`, `required`, `additionalProperties`,
+`enum`, `minimum` / `maximum`, `minLength`, `pattern`, `items`, local `$ref`);
+any other keyword in the schema is a hard error, so the schema cannot grow a
+construct that silently validates nothing. This was chosen over pinning a
+JSON Schema CLI under the `versions.env` digest pattern (#1113): the contract
+is one flat object, jq is already on every runner and in every tooling
+checkout, and a pinned validator would have added a download plus two digests
+to every test job for a check that takes ten lines of jq. Should v2 need
+`oneOf` or formats, pin a validator then.
+
+A consumer can validate its own run with the same library:
+
+```bash
+source .lgtm-ci-tooling/scripts/ci/lib/testing/results.sh
+results_v1_validate results-download/python-results-3.12/results.json
+```
+
 ## Fork PR summaries and reports
 
 PR summaries and reports are skipped automatically on fork PRs (`head.repo.fork == true`).

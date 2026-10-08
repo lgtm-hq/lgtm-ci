@@ -268,7 +268,8 @@ jobs:
       contents: read
 
     outputs:
-      coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
+      # Read back from the results.v1 document this job writes (#1080).
+      coverage-percent: ${{ steps.results.outputs.coverage-percent }}
       merged-coverage-file: ${{ steps.collect.outputs.merged-coverage-file }}
       merged-format: ${{ steps.collect.outputs.merged-format }}
       badge-url: ${{ steps.badge.outputs.badge-url }}
@@ -326,6 +327,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Warn on deprecated publish-pages
         shell: bash
@@ -363,6 +365,29 @@ jobs:
         with:
           coverage-percent: ${{ steps.collect.outputs.coverage-percent }}
           threshold: ${{ inputs.threshold }}
+      # results/coverage/default/results.json (results.v1, #1080): the merged
+      # percentages and the threshold verdict, no test counts.
+      - name: Write results
+        id: results
+        if: always() && steps.collect.outcome == 'success'
+        shell: bash
+        env:
+          COVERAGE_PERCENT: ${{ steps.collect.outputs.coverage-percent }}
+          COVERAGE_BRANCHES: ${{ steps.collect.outputs.branches-coverage }}
+          COVERAGE_FUNCTIONS: ${{ steps.collect.outputs.functions-coverage }}
+          THRESHOLD_PASSED: ${{ steps.threshold.outputs.passed }}
+          MERGED_COVERAGE_FILE: ${{ steps.collect.outputs.merged-coverage-file }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-coverage-results.sh
+      - name: Upload results
+        if: always() && steps.results.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.coverage-artifact-name }}-results
+          path: results/coverage/default/results.json
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
       - name: Generate badge
         id: badge
         if: inputs.generate-badge
@@ -402,7 +427,10 @@ jobs:
     with:
       test-suite-name: ${{ inputs.comment-title }}
       comment-marker: ${{ inputs.comment-marker }}
-      coverage-percent: ${{ needs.coverage.outputs.coverage-percent }}
+      # Fallback totals summary (rich comment unavailable) renders from the
+      # results.v1 artifact this call wrote (#1080).
+      results-artifact-pattern: ${{ inputs.coverage-artifact-name }}-results
+      results-expected-count: "1"
       coverage-enabled: true
       coverage-threshold: ${{ inputs.threshold }}
       job-result: ${{ needs.coverage.outputs.passed == 'true' && 'success' || 'failure' }}

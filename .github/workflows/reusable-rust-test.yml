@@ -172,30 +172,24 @@ on:
         default: ""
 
     outputs:
+      # Every value below is read from this call's results.v1 documents by
+      # the aggregate job (#1080): the same numbers the matrix legs wrote,
+      # for a single toolchain and a matrix alike.
       tests-passed:
         description: "Number of tests passed"
-        value: >-
-          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.tests-passed ||
-          jobs.test.outputs.tests-passed }}
+        value: ${{ jobs.aggregate.outputs.tests-passed }}
       tests-failed:
         description: "Number of tests failed"
-        value: ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.tests-failed ||
-          jobs.test.outputs.tests-failed }}
+        value: ${{ jobs.aggregate.outputs.tests-failed }}
       tests-total:
-        description: "Total number of tests executed (passed + failed)"
-        value: >-
-          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.tests-total ||
-          jobs.test.outputs.tests-total }}
+        description: "Total number of tests"
+        value: ${{ jobs.aggregate.outputs.tests-total }}
       coverage-percent:
-        description: "Line coverage percentage when coverage mode ran"
-        value: >-
-          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.coverage-percent ||
-          jobs.test.outputs.coverage-percent }}
+        description: "Coverage percentage"
+        value: ${{ jobs.aggregate.outputs.coverage-percent }}
       passed:
-        description: "Whether the Rust test job passed"
-        value: >-
-          ${{ inputs.rust-toolchains != '' && jobs.aggregate.outputs.passed ||
-          jobs.test.outputs.passed }}
+        description: "Whether all tests passed"
+        value: ${{ jobs.aggregate.outputs.passed }}
       pages-coverage-artifact-name:
         description: "Resolved flat HTML coverage artifact name"
         value: ${{ jobs.test.outputs.pages-coverage-artifact-name }}
@@ -381,6 +375,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       - name: Validate compat/coverage contract
         shell: bash
@@ -493,6 +488,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Setup Rust
         uses: ./.lgtm-ci-tooling/.github/actions/setup-rust
@@ -532,6 +528,8 @@ jobs:
           EXTRA_ARGS: ${{ inputs.extra-args }}
         run: bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/actions/run-caller-script.sh"
         continue-on-error: true
+      # JUnit (+ LCOV) -> results/nextest/<toolchain>/results.json (results.v1,
+      # #1080); every tests-* / coverage-percent output is read back from it.
       - name: Parse test results
         id: parse
         if: always()
@@ -541,6 +539,12 @@ jobs:
           JUNIT_FILE: target/nextest/ci/junit.xml
           LCOV_FILE: rust-coverage.lcov
           COVERAGE_ENABLED: ${{ inputs.coverage }}
+          EXIT_CODE: >-
+            ${{ (!inputs.coverage && steps.run-nextest.outcome == 'success')
+            || (inputs.coverage && steps.run-coverage.outcome == 'success') && '0' || '1' }}
+          MATRIX_KEY: rust-toolchain
+          MATRIX_VALUE: ${{ matrix.rust-toolchain }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: >-
           bash "$GITHUB_WORKSPACE/.lgtm-ci-tooling/scripts/ci/testing/rust/parse-rust-test-results.sh"
       # Convenience payload for the test-summary comment, never the test
@@ -581,28 +585,6 @@ jobs:
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
-      - name: Write matrix test summary
-        if: always()
-        shell: bash
-        env:
-          MATRIX_KEY: rust-toolchain
-          MATRIX_VALUE: ${{ matrix.rust-toolchain }}
-          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
-          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
-          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
-          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
-          PASSED: >-
-            ${{
-              (
-                (!inputs.coverage && steps.run-nextest.outcome == 'success')
-                || (inputs.coverage && steps.run-coverage.outcome == 'success')
-              )
-              && (
-                steps.coverage-gate.outcome == 'success'
-                || steps.coverage-gate.outcome == 'skipped'
-              )
-            }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
       - name: Upload matrix test summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -610,7 +592,7 @@ jobs:
           # Namespaced by artifact-prefix so two calls in one run keep their
           # own summaries (#1091); the toolchain suffix separates matrix legs.
           name: ${{ inputs.artifact-prefix }}-results-${{ matrix.rust-toolchain }}
-          path: rust-result-${{ matrix.rust-toolchain }}/summary.json
+          path: ${{ inputs.working-directory }}/results/nextest/${{ matrix.rust-toolchain }}/results.json
           retention-days: 7
           if-no-files-found: error
           # The aggregate job's verdict reads this summary, so no
@@ -710,9 +692,7 @@ jobs:
       tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
       tests-total: ${{ steps.aggregate.outputs.tests-total }}
       coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
-      passed: >-
-        ${{ needs.test.result == 'success'
-        && (inputs.rust-toolchains == '' || steps.aggregate.outputs.passed == 'true') }}
+      passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
 
     steps:
       - name: Harden runner
@@ -775,6 +755,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       # Single-version calls (empty `rust-toolchains`) gate on the test job
       # result alone and skip the download: a cost optimisation only, since
@@ -786,26 +767,29 @@ jobs:
       # is eventually consistent, so a one-shot download can miss a leg whose
       # upload already succeeded. Only under-counts and 404s on a listed id are
       # retried; an over-count fails at once as sibling contamination (#752).
-      - name: Wait for and download matrix test summaries
-        if: inputs.rust-toolchains != ''
+      - name: Wait for and download matrix results
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           DOWNLOAD_DIR: rust-results
-          MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
-          MATRIX_KEY: rust-toolchain
+          # By-name matrix check only for a multi-version call; a single
+          # version downloads its exact artifact name (#752).
+          MATRIX_JSON: ${{ inputs.rust-toolchains != '' && needs.prepare.outputs.matrix || '' }}
+          MATRIX_KEY: ${{ inputs.rust-toolchains != '' && 'rust-toolchain' || '' }}
           EXPECTED_COUNT: ${{ needs.prepare.outputs.matrix-count }}
           ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+          RESULTS_PATTERN: >-
+            ${{ inputs.rust-toolchains != '' && format('{0}-results-*', inputs.artifact-prefix)
+            || format('{0}-results-{1}', inputs.artifact-prefix, inputs.rust-toolchain || 'stable') }}
           # A leg that was cancelled or crashed before uploading never shows
           # up; the aggregate still fails closed, so do not spend the full
           # budget waiting for it.
           WAIT_BUDGET_SECONDS: ${{ needs.test.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
-          "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-results-*"
-      - name: Aggregate matrix test summaries
+          "$EXPECTED_COUNT" "$RESULTS_PATTERN"
+      - name: Aggregate matrix results
         id: aggregate
-        if: inputs.rust-toolchains != ''
         shell: bash
         env:
           RESULTS_DIR: rust-results
@@ -816,16 +800,14 @@ jobs:
         # failing matrix leg must fail the job, not just set `passed=false`.
         if: >-
           always()
-          && (
-            needs.test.result != 'success'
-            || (inputs.rust-toolchains != '' && steps.aggregate.outputs.passed != 'true')
-          )
+          && (needs.test.result != 'success' || steps.aggregate.outputs.passed != 'true')
         shell: bash
         run: |
           echo "::error::A matrix test leg failed or its results could not be aggregated; failing the check."
           exit 1
   publish-test-summary:
     needs:
+      - prepare
       - test
       - aggregate
     if: >-
@@ -853,24 +835,16 @@ jobs:
     with:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
-      tests-passed: >-
-        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.tests-passed ||
-        needs.test.outputs.tests-passed }}
-      tests-failed: >-
-        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.tests-failed ||
-        needs.test.outputs.tests-failed }}
-      tests-total: >-
-        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.tests-total ||
-        needs.test.outputs.tests-total }}
-      coverage-percent: >-
-        ${{ inputs.rust-toolchains != '' && needs.aggregate.outputs.coverage-percent ||
-        needs.test.outputs.coverage-percent }}
+      # The comment is rendered from this call's results.v1 artifacts, the
+      # same ones the aggregate verdict read (#1080): single toolchain by
+      # exact name, matrix by prefix glob.
+      results-artifact-pattern: >-
+        ${{ inputs.rust-toolchains != '' && format('{0}-results-*', inputs.artifact-prefix)
+        || format('{0}-results-{1}', inputs.artifact-prefix, inputs.rust-toolchain || 'stable') }}
+      results-expected-count: ${{ needs.prepare.outputs.matrix-count }}
       coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
-      job-result: >-
-        ${{ inputs.rust-toolchains != '' &&
-        (needs.aggregate.outputs.passed == 'true' && 'success' || 'failure') ||
-        needs.test.result }}
+      job-result: ${{ needs.aggregate.outputs.passed == 'true' && 'success' || 'failure' }}
       rich-coverage-comment: ${{ inputs.coverage }}
       # Same name the test job uploaded (#1091): the rich coverage comment
       # must read this call's LCOV, not a sibling call's.
