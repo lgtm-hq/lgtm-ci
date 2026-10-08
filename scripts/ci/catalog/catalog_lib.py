@@ -312,7 +312,11 @@ def workflow_facts(
                 overrides=passed,
                 seen=seen | {name},
             )
-            check_names.extend(f"{label} / {name}" for name in inner.check_names)
+            for inner_name in inner.check_names:
+                check_names.append(f"{label} / {inner_name}")
+            # The nested jobs run on their own runners, chosen by the values
+            # this job passes; the caller still needs to know them.
+            runners.update(inner.runners)
             continue
         check_names.append(label)
         runner = resolve_expressions(text=str(job.get("runs-on", "")), values=values)

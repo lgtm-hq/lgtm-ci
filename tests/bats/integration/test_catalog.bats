@@ -23,7 +23,13 @@ setup() {
 			break
 		fi
 	done
-	[[ -n "${PY}" ]] || skip "no python3 with PyYAML (install the dev extra)"
+	if [[ -z "${PY}" ]]; then
+		# Skipping in CI would hide the whole contract suite.
+		if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+			fail "no python3 with PyYAML in CI"
+		fi
+		skip "no python3 with PyYAML (install the dev extra)"
+	fi
 }
 
 _git() {
@@ -31,16 +37,14 @@ _git() {
 		-c commit.gpgsign=false -c tag.gpgsign=false "${@:2}"
 }
 
-# Build the fixture. Its catalog cites the repository's first commit as the
-# stable entry's evidence, so ancestry holds at HEAD.
+# Build the fixture on branch `main`. Its catalog cites the commit that added
+# the workflow and actions as the stable entry's evidence, so ancestry holds
+# for both `main` and HEAD and no file changed after the evidence.
 _fixture_root() {
 	local root="${BATS_TEST_TMPDIR}/repo"
 	mkdir -p "${root}/.github/workflows" "${root}/.github/actions/demo-action" \
 		"${root}/.github/actions/detect-changes" "${root}/catalog" "${root}/docs"
-	git init -q "${root}"
-	_git "${root}" commit -q --allow-empty -m base
-	local base
-	base="$(git -C "${root}" rev-parse HEAD)"
+	git init -q -b main "${root}"
 	cat >"${root}/.github/workflows/reusable-demo.yml" <<'YAML'
 ---
 name: Reusable Demo Workflow
@@ -85,6 +89,10 @@ runs:
     - run: echo detect
       shell: bash
 YAML
+	_git "${root}" add -A
+	_git "${root}" commit -q -m "workflows and actions"
+	local base
+	base="$(git -C "${root}" rev-parse HEAD)"
 	cat >"${root}/catalog/catalog.yml" <<YAML
 ---
 schema-version: 1
@@ -169,18 +177,10 @@ PY
 	assert_output --partial "OK: generated catalog docs are current"
 }
 
-@test "catalog: every public workflow and action in the repository has an entry" {
-	local count expected
-	count="$(grep -c '^  - id: ' "${PROJECT_ROOT}/catalog/catalog.yml")"
-	expected="$(($(find "${PROJECT_ROOT}/.github/workflows" -maxdepth 1 -name 'reusable-*.yml' | wc -l) + \
-		$(find "${PROJECT_ROOT}/.github/actions" -mindepth 2 -maxdepth 2 -name action.yml | wc -l)))"
-	assert_equal "${count}" "${expected}"
-}
-
 @test "catalog: fixture baseline passes with ancestry checked" {
 	local root
 	root="$(_fixture_root)"
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_success
 	assert_output --partial "NOTICE: 3 entries: 1 stable, 1 preview, 1 internal, 0 deprecated"
 }
@@ -189,7 +189,7 @@ PY
 	local root
 	root="$(_fixture_root)"
 	cp "${root}/.github/workflows/reusable-demo.yml" "${root}/.github/workflows/reusable-extra.yml"
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "reusable-extra: .github/workflows/reusable-extra.yml has no catalog entry"
 }
@@ -200,7 +200,7 @@ PY
 	_edit_catalog "${root}" '
 ghost = dict(entries["demo-action"], id="ghost-action")
 data["entries"] += [ghost, dict(entries["demo-action"])]'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "ghost-action: no composite-action file for this entry"
 	assert_output --partial "demo-action: listed 2 times"
@@ -210,7 +210,7 @@ data["entries"] += [ghost, dict(entries["demo-action"])]'
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'data["entries"].reverse()'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "entries: must be sorted by kind"
 }
@@ -219,7 +219,7 @@ data["entries"] += [ghost, dict(entries["demo-action"])]'
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'entries["reusable-demo"]["permissions"] = {"contents": "read"}'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "reusable-demo: \`permissions\` must equal the workflow's caller union {contents: read, pull-requests: write}"
 }
@@ -228,7 +228,7 @@ data["entries"] += [ghost, dict(entries["demo-action"])]'
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'entries["reusable-demo"]["permissions"]["issues"] = "write"'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "catalog has {contents: read, issues: write, pull-requests: write}"
 }
@@ -237,7 +237,7 @@ data["entries"] += [ghost, dict(entries["demo-action"])]'
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'entries["detect-changes"]["permissions"] = {"contents": "read"}'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "detect-changes: \`permissions\` must include \`pull-requests: read\`"
 }
@@ -246,7 +246,7 @@ data["entries"] += [ghost, dict(entries["demo-action"])]'
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'entries["demo-action"]["permissions"] = {"contents": "admin"}'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "demo-action: invalid permission \`contents: admin\`"
 }
@@ -255,7 +255,7 @@ data["entries"] += [ghost, dict(entries["demo-action"])]'
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'del entries["reusable-demo"]["evidence"]'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "reusable-demo: tier \`stable\` requires \`evidence\`"
 }
@@ -265,7 +265,7 @@ data["entries"] += [ghost, dict(entries["demo-action"])]'
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" '
 entries["reusable-demo"]["evidence"]["run"] = "https://github.com/someone-else/repo/actions/runs/1"'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "\`evidence.run\` must be https://github.com/example/consumer-fixture/actions/runs/<id>"
 }
@@ -274,20 +274,20 @@ entries["reusable-demo"]["evidence"]["run"] = "https://github.com/someone-else/r
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'entries["reusable-demo"]["evidence"]["last-green"] = "abc1234"'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "\`evidence.last-green\` must be a full 40-character lgtm-ci commit SHA"
 }
 
-@test "catalog: evidence from a side branch (a squash-merged PR head) is not an ancestor" {
-	local root side
+@test "catalog: evidence newer than the checked-out commit fails" {
+	local root newer
 	root="$(_fixture_root)"
-	_git "${root}" checkout -q -b pr-head
-	_git "${root}" commit -q --allow-empty -m "pr head"
-	side="$(git -C "${root}" rev-parse HEAD)"
-	_git "${root}" checkout -q -
-	_edit_catalog "${root}" "entries['reusable-demo']['evidence']['last-green'] = '${side}'"
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	_git "${root}" branch older
+	_git "${root}" commit -q --allow-empty -m "later main commit"
+	newer="$(git -C "${root}" rev-parse HEAD)"
+	_git "${root}" checkout -q older
+	_edit_catalog "${root}" "entries['reusable-demo']['evidence']['last-green'] = '${newer}'"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "is not an ancestor of HEAD"
 }
@@ -297,11 +297,11 @@ entries["reusable-demo"]["evidence"]["run"] = "https://github.com/someone-else/r
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" '
 entries["reusable-demo"]["evidence"]["last-green"] = "0123456789abcdef0123456789abcdef01234567"'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "is not in the local history"
 	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
-	run "${PY}" "${VALIDATE}" --repo-root "${root}" --skip-ancestry
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main --skip-ancestry
 	assert_success
 	assert_output --partial "NOTICE: --skip-ancestry"
 }
@@ -312,7 +312,7 @@ entries["reusable-demo"]["evidence"]["last-green"] = "0123456789abcdef0123456789
 	_edit_catalog "${root}" '
 del entries["demo-action"]["reason"]
 entries["reusable-demo"]["reason"] = "why"'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "demo-action: tier \`preview\` requires a one-line \`reason\`"
 	assert_output --partial "reusable-demo: \`reason\` is for non-stable entries"
@@ -325,7 +325,7 @@ entries["reusable-demo"]["reason"] = "why"'
 entries["demo-action"]["tier"] = "deprecated"
 entries["demo-action"]["replacement"] = "nope"
 entries["detect-changes"]["replacement"] = "demo-action"'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "demo-action: deprecated entries need a \`replacement\`"
 	assert_output --partial "detect-changes: \`replacement\` is only valid on deprecated entries"
@@ -338,7 +338,7 @@ entries["detect-changes"]["replacement"] = "demo-action"'
 entries["demo-action"]["tier"] = "beta"
 entries["detect-changes"]["check-names"] = ["x"]
 entries["reusable-demo"]["package-managers"] = ["yarn"]'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "demo-action: \`kind\` must be one of"
 	assert_output --partial "detect-changes: unknown key \`check-names\` for a composite-action"
@@ -349,7 +349,7 @@ entries["reusable-demo"]["package-managers"] = ["yarn"]'
 	local root
 	root="$(_fixture_root)"
 	sed -i.bak 's/default: "Demo Tests"/default: "Demo Suite"/' "${root}/.github/workflows/reusable-demo.yml"
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "reusable-demo: \`check-names\` must match the workflow's job names ('Demo Suite')"
 }
@@ -358,7 +358,7 @@ entries["reusable-demo"]["package-managers"] = ["yarn"]'
 	local root
 	root="$(_fixture_root)"
 	_edit_catalog "${root}" 'entries["reusable-demo"]["runners"] = ["macos-15"]'
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "reusable-demo: \`runners\` must include the default runner(s) ubuntu-24.04"
 }
@@ -370,7 +370,7 @@ entries["reusable-demo"]["package-managers"] = ["yarn"]'
 	run "${PY}" "${RENDER}" --check --repo-root "${root}"
 	assert_failure
 	assert_output --partial "ERROR: docs/catalog.md is out of date with catalog/catalog.yml"
-	run "${PY}" "${VALIDATE}" --repo-root "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "docs/catalog.md: out of date with the catalog"
 	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
@@ -433,4 +433,149 @@ entries["detect-changes"]["replacement"] = "demo-action"'
 	assert_output --partial "> [!CAUTION]
 > **Deprecated.** Used by the demo only
 > Migrate to [\`demo-action\`](#demo-action)."
+}
+
+@test "catalog: evidence on the PR branch but not on main fails (squash-merge safety)" {
+	local root head
+	root="$(_fixture_root)"
+	_git "${root}" checkout -q -b pr-branch
+	_git "${root}" commit -q --allow-empty -m "pr commit"
+	head="$(git -C "${root}" rev-parse HEAD)"
+	_edit_catalog "${root}" "entries['reusable-demo']['evidence']['last-green'] = '${head}'"
+	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "is not an ancestor of main"
+}
+
+@test "catalog: a missing main ref fails instead of passing silently" {
+	local root
+	root="$(_fixture_root)"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref origin/main
+	assert_failure
+	assert_output --partial "\`origin/main\` is not a local commit"
+}
+
+@test "catalog: a stable workflow changed after its evidence commit gets a notice" {
+	local root
+	root="$(_fixture_root)"
+	printf '# touched\n' >>"${root}/.github/workflows/reusable-demo.yml"
+	_git "${root}" commit -q -am "change the workflow"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+	assert_output --partial "NOTICE: reusable-demo: evidence at"
+	assert_output --partial "predates 1 change(s) to .github/workflows/reusable-demo.yml"
+}
+
+@test "catalog: an entry with the wrong kind is reported, not a traceback" {
+	local root
+	root="$(_fixture_root)"
+	_edit_catalog "${root}" '
+wrong = dict(entries["reusable-demo"], id="demo-action")
+data["entries"].insert(1, wrong)'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "demo-action: no reusable-workflow file for this entry"
+	refute_output --partial "Traceback"
+}
+
+@test "catalog: missing README markers are reported by validate, not a traceback" {
+	local root
+	root="$(_fixture_root)"
+	printf '# Demo\n' >"${root}/README.md"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "generated docs: cannot render"
+	refute_output --partial "Traceback"
+}
+
+# A wrapper that calls reusable-demo with a `with:` override exercises the
+# name shapes the derivation resolves: `x != '' && x || 'lit'`, `x || 'lit'`,
+# duplicate collapse, nested `<job> / <nested job>` and nested runners.
+_add_wrapper() {
+	local root="$1" runners="$2"
+	cat >"${root}/.github/workflows/reusable-demo-wrapper.yml" <<'YAML'
+---
+name: Reusable Demo Wrapper
+on:
+  workflow_call:
+    inputs:
+      title:
+        type: string
+        default: ""
+      label:
+        type: string
+        default: "Wrapped"
+jobs:
+  gate:
+    name: ${{ inputs.title != '' && inputs.title || 'Fallback Gate' }}
+    runs-on: macos-15
+    steps:
+      - run: echo gate
+  gate-again:
+    name: ${{ inputs.title || 'Fallback Gate' }}
+    runs-on: macos-15
+    steps:
+      - run: echo gate
+  call:
+    name: Call
+    uses: ./.github/workflows/reusable-demo.yml
+    with:
+      job-name: ${{ inputs.label }}
+      runner-image: ubuntu-22.04
+YAML
+	_edit_catalog "${root}" "
+data['entries'].insert(1, {
+    'id': 'reusable-demo-wrapper', 'kind': 'reusable-workflow', 'tier': 'preview',
+    'reason': 'Wrapper', 'permissions': {'contents': 'read', 'pull-requests': 'write'},
+    'runners': ${runners}, 'package-managers': [], 'prerequisites': [],
+    'limitations': [], 'check-names': ['Fallback Gate', 'Call / Wrapped'],
+})"
+	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
+}
+
+@test "catalog: nested calls, fallback shapes and duplicates derive the exact check names" {
+	local root
+	root="$(_fixture_root)"
+	_add_wrapper "${root}" "['macos-15', 'ubuntu-22.04']"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+}
+
+@test "catalog: runners of a nested call count toward the caller's runners" {
+	local root
+	root="$(_fixture_root)"
+	_add_wrapper "${root}" "['macos-15']"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "reusable-demo-wrapper: \`runners\` must include the default runner(s) ubuntu-22.04"
+}
+
+@test "catalog: duplicate README markers fail render --check" {
+	local root
+	root="$(_fixture_root)"
+	cat "${root}/README.md" "${root}/README.md" >"${root}/README.twice"
+	mv "${root}/README.twice" "${root}/README.md"
+	run "${PY}" "${RENDER}" --check --repo-root "${root}"
+	assert_failure
+	assert_output --partial "catalog-index markers appear more than once"
+}
+
+@test "catalog: a workflow with invalid YAML is reported against its entry" {
+	local root
+	root="$(_fixture_root)"
+	printf 'jobs: [unclosed\n' >"${root}/.github/workflows/reusable-demo.yml"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "reusable-demo: cannot"
+	refute_output --partial "Traceback"
+}
+
+@test "catalog: a .yaml spelling of an entry point fails coverage" {
+	local root
+	root="$(_fixture_root)"
+	cp "${root}/.github/workflows/reusable-demo.yml" "${root}/.github/workflows/reusable-alt.yaml"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "use the .yml spelling"
 }

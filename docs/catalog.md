@@ -21,9 +21,21 @@ which calls lgtm-ci from outside the org at an exact commit with no
 
 Permissions are the block the **calling job** must grant. For a reusable
 workflow it is the union GitHub validates before any job runs (see
-[Caller snippets and permissions](README.md#caller-snippets-and-permissions));
-check names are the callee job names, which GitHub shows as
-`<caller job> / <name>`.
+[Caller snippets and permissions](README.md#caller-snippets-and-permissions))
+and the validator requires the catalog to equal it. For a composite action it
+is maintained by hand; only the scopes the permissions validator derives
+(`detect-changes`) are machine-checked.
+
+Check names are the callee job names, which GitHub shows as
+`<caller job> / <name>` with matrix values appended. A job that calls a
+nested reusable is listed as `<job> / <nested job>`; when that job is skipped
+by its `if:`, GitHub reports a single check named `<caller job> / <job>`.
+
+Evidence names the lgtm-ci commit the fixture run was pinned to. The
+validator requires that commit to be on lgtm-ci's `main` and in the history
+of the commit being checked; the fixture branch the run happened on does not
+matter. Evidence is a point-in-time claim: when an entry's file changes after
+its evidence commit, the validator prints a notice until the run is refreshed.
 
 ## Summary
 
@@ -130,7 +142,7 @@ Release Version PR
 
 - **Path:** [`.github/workflows/reusable-release-version-pr.yml`](../.github/workflows/reusable-release-version-pr.yml)
 - **Tier:** stable
-- **Evidence:** [`release-version-pr.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37577339479) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `b272bf2b`
+- **Evidence:** [`release-version-pr.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756143865) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
 - **Permissions:** `actions: read`, `contents: write`, `issues: write`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
@@ -147,7 +159,7 @@ Release Version PR
 **Limitations:**
 
 - Proven with `ecosystems: python` only; the other ecosystems have no fixture run
-- Hook paths were proven at #1097 heads (`release-benign-hook.yml` green, `release-tamper-hook.yml` failing before any mutation) and the tamper probe after merge at `26f42909`; they are not re-run at every pin
+- Stable covers calls without `version-update-script`. The hook path FAILS at `ea934b16` (fixture `release-benign-hook.yml`, run 37756136378): the hook job's `git add` exits 1 when the consumer's `.gitignore` lists `.lgtm-ci-tooling`. It was last green at the #1097 head `2339aa8a`
 - `uv` is absent on ubuntu-24.04, so `uv.lock` is rewritten by the tomlkit fallback (`[WARN] uv not found`)
 - Skips when a version PR is already open; close it before dispatching again
 - Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
@@ -186,7 +198,7 @@ SBOM Release Upload
 
 - **Path:** [`.github/workflows/reusable-sbom-release-upload.yml`](../.github/workflows/reusable-sbom-release-upload.yml)
 - **Tier:** stable
-- **Evidence:** [`sbom-release-upload.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37449477752) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `7362363d`
+- **Evidence:** [`sbom-release-upload.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756163922) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
 - **Permissions:** `contents: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
@@ -330,13 +342,14 @@ Python Distribution Build Workflow
 Rust Binary Build Workflow
 
 > [!WARNING]
-> **Preview.** Fixture-green from `rust-release-build.yml` at the #1119 head `475206c9` only; no run at a `main` commit yet
+> **Preview.** Green from the fixture's dispatch-only `rust-release-build.yml` (Linux and windows-latest legs) but outside the initial stable set
 
 - **Path:** [`.github/workflows/reusable-build-rust-binaries.yml`](../.github/workflows/reusable-build-rust-binaries.yml)
 - **Tier:** preview
+- **Evidence:** [`rust-release-build.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756155710) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`
 - **Runners:** `ubuntu-24.04`
-- **Package managers:** —
+- **Package managers:** `cargo`
 - **Check names:** `Rust binaries (${{ matrix.target }})`
 
 #### `reusable-codeql`
@@ -728,7 +741,7 @@ Rust Build Workflow
 - **Path:** [`.github/workflows/reusable-rust-build.yml`](../.github/workflows/reusable-rust-build.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`
-- **Runners:** —
+- **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `build / Rust Build`
 
@@ -900,6 +913,10 @@ Shell Test Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Shell Tests`, `Coverage shard matrix`, `Shell Tests (shard ${{ matrix.shard }}/1)`, `publish-test-summary / Publish test summary`
+
+**Limitations:**
+
+- The sharded check name only appears with `coverage: true` and `coverage-shards` above 1, and carries the caller's shard total (`Shell Tests (shard 1/4)`); the listed name shows the default
 
 #### `reusable-validate`
 

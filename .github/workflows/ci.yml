@@ -78,9 +78,14 @@ jobs:
     with:
       job-name: "📚 Support Catalog"
       script: scripts/ci/catalog/validate.py
-      # Stable evidence commits must be ancestors of HEAD (#1079); the
-      # checkout is shallow, so fetch the history the check walks.
-      setup-commands: git fetch --quiet --no-tags --unshallow origin
+      # Stable evidence commits must be on origin/main and in HEAD's history
+      # (#1079). The checkout is shallow and has no origin/main ref, so fetch
+      # main and the full history; --unshallow errors on a complete clone.
+      setup-commands: >-
+        main=+refs/heads/main:refs/remotes/origin/main;
+        if [ "$(git rev-parse --is-shallow-repository)" = true ];
+        then git fetch --quiet --no-tags --unshallow origin "$main";
+        else git fetch --quiet --no-tags origin "$main"; fi
       publish-validation-report: true
       comment-marker: support-catalog
     permissions:

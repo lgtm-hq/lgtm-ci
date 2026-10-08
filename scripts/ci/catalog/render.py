@@ -105,9 +105,21 @@ DOC_INTRO = (
 DOC_PERMISSIONS_NOTE = (
     "Permissions are the block the **calling job** must grant. For a reusable",
     "workflow it is the union GitHub validates before any job runs (see",
-    "[Caller snippets and permissions](README.md#caller-snippets-and-permissions));",
-    "check names are the callee job names, which GitHub shows as",
-    "`<caller job> / <name>`.",
+    "[Caller snippets and permissions](README.md#caller-snippets-and-permissions))",
+    "and the validator requires the catalog to equal it. For a composite action it",
+    "is maintained by hand; only the scopes the permissions validator derives",
+    "(`detect-changes`) are machine-checked.",
+    "",
+    "Check names are the callee job names, which GitHub shows as",
+    "`<caller job> / <name>` with matrix values appended. A job that calls a",
+    "nested reusable is listed as `<job> / <nested job>`; when that job is skipped",
+    "by its `if:`, GitHub reports a single check named `<caller job> / <job>`.",
+    "",
+    "Evidence names the lgtm-ci commit the fixture run was pinned to. The",
+    "validator requires that commit to be on lgtm-ci's `main` and in the history",
+    "of the commit being checked; the fixture branch the run happened on does not",
+    "matter. Evidence is a point-in-time claim: when an entry's file changes after",
+    "its evidence commit, the validator prints a notice until the run is refreshed.",
 )
 INDEX_OUTRO = (
     "Everything else is `preview`, `internal` or `deprecated`; tiers, evidence,",
@@ -497,6 +509,9 @@ def replace_index(
     if start < 0 or end < start:
         message = "catalog-index markers missing or out of order"
         raise ValueError(f"{README_RELPATH}: {message}")
+    if readme.count(INDEX_BEGIN) > 1 or readme.count(INDEX_END) > 1:
+        message = "catalog-index markers appear more than once"
+        raise ValueError(f"{README_RELPATH}: {message}")
     return readme[:start] + block + readme[end + len(INDEX_END) :]
 
 
@@ -620,7 +635,7 @@ def main(
         for output in expected_outputs(repo_root=repo_root):
             (repo_root / output.path).write_text(output.content, encoding="utf-8")
             print(f"wrote {output.path}")
-    except (OSError, ValueError, KeyError) as exc:
+    except (OSError, ValueError, KeyError, catalog_lib.yaml.YAMLError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     return 0

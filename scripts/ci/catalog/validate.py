@@ -19,14 +19,17 @@ Checks, each reported with the entry it concerns:
    shows up as a catalog diff; ``runners`` include every default runner.
 5. Evidence: ``stable`` requires ``evidence`` with the fixture workflow, the
    40-character lgtm-ci commit the run was pinned to, and the run URL in the
-   fixture repository. That commit must be an ancestor of ``HEAD``; shallow
-   clones need ``git fetch --unshallow`` first (or ``--skip-ancestry`` for a
-   structural check only).
+   fixture repository. That commit must be an ancestor of both the default
+   branch (``--main-ref``, default ``origin/main``) and ``HEAD``, so a
+   squash-merged PR head never counts; shallow clones need
+   ``git fetch --unshallow`` first (or ``--skip-ancestry`` for a structural
+   check only). A stable entry whose file changed after its evidence commit
+   gets a NOTICE: evidence is a point-in-time claim.
 6. Generated docs: ``docs/catalog.md`` and the README index match
    ``scripts/ci/catalog/render.py`` output.
 
 Usage:
-    validate.py [--repo-root DIR] [--skip-ancestry]
+    validate.py [--repo-root DIR] [--main-ref REF] [--skip-ancestry]
 """
 
 # pylint: disable=invalid-name  # CLI script; the path is the contract
@@ -297,10 +300,14 @@ def check_workflow_facts(
         workflows_dir: ``.github/workflows`` of the checkout.
     """
     where = entry["id"]
-    facts = catalog_lib.workflow_facts(
-        workflows_dir=workflows_dir,
-        name=f"{where}.yml",
-    )
+    try:
+        facts = catalog_lib.workflow_facts(
+            workflows_dir=workflows_dir,
+            name=f"{where}.yml",
+        )
+    except (OSError, catalog_lib.yaml.YAMLError) as exc:
+        report.error(where, f"cannot derive check names ({exc})")
+        return
     if list(facts.check_names) != entry["check-names"]:
         derived = ", ".join(repr(name) for name in facts.check_names)
         report.error(
@@ -313,61 +320,145 @@ def check_workflow_facts(
         report.error(where, f"`runners` must include the default runner(s) {missing}")
 
 
-def is_ancestor(
-    repo_root: Path,
-    commit: str,
-) -> bool | None:
-    """Return whether ``commit`` is an ancestor of (or equal to) ``HEAD``.
+@dataclass(frozen=True)
+class History:
+    """Git history the evidence rules are checked against.
 
-    Args:
+    Attributes:
         repo_root: Git work tree.
-        commit: Full commit SHA.
-
-    Returns:
-        True or False, or None when the commit is not in the local history.
+        main_ref: Ref of the default branch evidence must be on.
+        skip: Do not consult git at all (structural check only).
     """
-    git = ["git", "-C", str(repo_root)]
-    present = subprocess.run(
-        [*git, "cat-file", "-e", f"{commit}^{{commit}}"],
-        capture_output=True,
-        check=False,
-    )
-    if present.returncode != 0:
-        return None
-    result = subprocess.run(
-        [*git, "merge-base", "--is-ancestor", commit, "HEAD"],
-        capture_output=True,
-        check=False,
-    )
-    return result.returncode == 0
+
+    repo_root: Path
+    main_ref: str
+    skip: bool
+
+    def git(
+        self,
+        *args: str,
+    ) -> subprocess.CompletedProcess[str]:
+        """Run a read-only git command in the work tree.
+
+        Args:
+            *args: Git arguments.
+
+        Returns:
+            The completed process (never raises on a non-zero exit).
+        """
+        return subprocess.run(
+            ["git", "-C", str(self.repo_root), *args],
+            capture_output=True,
+            check=False,
+            text=True,
+        )
+
+    def has_commit(
+        self,
+        rev: str,
+    ) -> bool:
+        """Return whether ``rev`` names a commit in the local history.
+
+        Args:
+            rev: Commit SHA or ref.
+
+        Returns:
+            True when git can resolve it to a commit.
+        """
+        return self.git("cat-file", "-e", f"{rev}^{{commit}}").returncode == 0
+
+    def is_ancestor(
+        self,
+        commit: str,
+        rev: str,
+    ) -> bool:
+        """Return whether ``commit`` is an ancestor of (or equal to) ``rev``.
+
+        Args:
+            commit: Full commit SHA.
+            rev: Descendant candidate.
+
+        Returns:
+            True when ``commit`` is in ``rev``'s history.
+
+        Raises:
+            RuntimeError: When git cannot answer (exit status other than 0
+                or 1), for example a history cut short by a shallow fetch.
+        """
+        result = self.git("merge-base", "--is-ancestor", commit, rev)
+        if result.returncode not in (0, 1):
+            raise RuntimeError(result.stderr.strip() or f"exit {result.returncode}")
+        return result.returncode == 0
+
+    def changes_since(
+        self,
+        commit: str,
+        path: Path,
+    ) -> list[str]:
+        """List commits after ``commit`` on ``HEAD`` that touched ``path``.
+
+        Args:
+            commit: Evidence commit.
+            path: Repository-relative file.
+
+        Returns:
+            Short SHAs, newest first.
+        """
+        log = self.git("log", "--format=%h", f"{commit}..HEAD", "--", path.as_posix())
+        return log.stdout.split() if log.returncode == 0 else []
 
 
 def check_ancestry(
     report: Report,
-    where: str,
+    entry: dict[str, Any],
     commit: str,
-    repo_root: Path,
+    history: History,
 ) -> None:
-    """Require an evidence commit to be in ``HEAD``'s history.
+    """Require an evidence commit on the default branch and in ``HEAD``.
+
+    A PR head that was squash-merged is an ancestor of the PR branch but not
+    of the default branch, so it would turn red the moment the PR lands.
 
     Args:
         report: Findings sink.
-        where: Entry id.
+        entry: Catalog entry with evidence.
         commit: Full evidence commit SHA.
-        repo_root: Git work tree.
+        history: Git history to check against.
     """
-    ancestor = is_ancestor(repo_root=repo_root, commit=commit)
-    if ancestor is None:
+    where = entry["id"]
+    if not history.has_commit(rev=history.main_ref):
+        report.error(
+            where,
+            f"cannot check evidence: `{history.main_ref}` is not a local commit; "
+            "fetch it or pass --main-ref / --skip-ancestry",
+        )
+        return
+    if not history.has_commit(rev=commit):
         report.error(
             where,
             f"evidence commit {commit[:12]} is not in the local history; fetch it "
             "(git fetch --unshallow origin) or pass --skip-ancestry",
         )
-    elif not ancestor:
-        report.error(
-            where,
-            f"evidence commit {commit[:12]} is not an ancestor of HEAD; a PR head "
-            "that was squash-merged does not count",
+        return
+    for rev in (history.main_ref, "HEAD"):
+        try:
+            ancestor = history.is_ancestor(commit=commit, rev=rev)
+        except RuntimeError as exc:
+            report.error(where, f"git cannot compare {commit[:12]} with {rev} ({exc})")
+            return
+        if not ancestor:
+            report.error(
+                where,
+                f"evidence commit {commit[:12]} is not an ancestor of {rev}; "
+                "evidence must come from a commit on the default branch",
+            )
+            return
+    path = catalog_lib.entry_path(kind=Kind(entry["kind"]), entry_id=where)
+    newer = history.changes_since(commit=commit, path=path)
+    if newer:
+        report.notices.append(
+            f"{where}: evidence at {commit[:8]} predates {len(newer)} change(s) to "
+            f"{path} ({', '.join(newer[:3])}); re-run the fixture and refresh it",
         )
 
 
@@ -375,8 +466,7 @@ def check_evidence(
     report: Report,
     entry: dict[str, Any],
     fixture_repository: str,
-    repo_root: Path,
-    skip_ancestry: bool,
+    history: History,
 ) -> None:
     """Validate an entry's evidence block.
 
@@ -384,8 +474,7 @@ def check_evidence(
         report: Findings sink.
         entry: Catalog entry (schema-checked).
         fixture_repository: ``owner/name`` of the fixture.
-        repo_root: Git work tree.
-        skip_ancestry: Do not consult git history.
+        history: Git history to check ancestry against.
     """
     where = entry["id"]
     evidence = entry.get("evidence")
@@ -414,8 +503,8 @@ def check_evidence(
             "`evidence.last-green` must be a full 40-character lgtm-ci commit SHA",
         )
         return
-    if not skip_ancestry:
-        check_ancestry(report=report, where=where, commit=commit, repo_root=repo_root)
+    if not history.skip:
+        check_ancestry(report=report, entry=entry, commit=commit, history=history)
 
 
 def check_coverage(
@@ -444,6 +533,15 @@ def check_coverage(
     for (_kind, entry_id), count in sorted(seen.items()):
         if count > 1:
             report.error(entry_id, f"listed {count} times; list each entry point once")
+    workflows = repo_root / catalog_lib.WORKFLOWS_RELDIR
+    actions = repo_root / catalog_lib.ACTIONS_RELDIR
+    odd = [*workflows.glob("reusable-*.yaml"), *actions.glob("*/action.yaml")]
+    for path in sorted(odd):
+        relative = path.relative_to(repo_root)
+        report.error(
+            str(relative),
+            "use the .yml spelling; the catalog only covers .yml",
+        )
     rank = {kind.value: index for index, kind in enumerate(Kind)}
     keys = []
     for entry in entries:
@@ -485,13 +583,13 @@ def check_top_level(
 
 def validate(
     repo_root: Path,
-    skip_ancestry: bool,
+    history: History,
 ) -> Report:
     """Run every check.
 
     Args:
         repo_root: Repository root.
-        skip_ancestry: Do not consult git history for evidence commits.
+        history: Git history evidence commits are checked against.
 
     Returns:
         The findings.
@@ -512,10 +610,11 @@ def validate(
     validator = catalog_lib.load_permissions_validator()
     workflows_dir = repo_root / catalog_lib.WORKFLOWS_RELDIR
     ids = {str(e.get("id")) for e in entries}
-    points = {ep.id for ep in catalog_lib.discover_entry_points(repo_root=repo_root)}
+    discovered = catalog_lib.discover_entry_points(repo_root=repo_root)
+    points = {(ep.kind.value, ep.id) for ep in discovered}
     for entry in entries:
         valid = check_schema(report=report, entry=entry, ids=ids)
-        if not valid or entry["id"] not in points:
+        if not valid or (entry["kind"], entry["id"]) not in points:
             continue
         check_permissions(
             report=report,
@@ -533,13 +632,17 @@ def validate(
             report=report,
             entry=entry,
             fixture_repository=fixture_repository,
-            repo_root=repo_root,
-            skip_ancestry=skip_ancestry,
+            history=history,
         )
     if report.errors:
         report.notices.append("generated docs not compared: fix the catalog first")
         return report
-    for path in render.stale_outputs(repo_root=repo_root):
+    try:
+        stale = render.stale_outputs(repo_root=repo_root)
+    except (OSError, ValueError, KeyError, catalog_lib.yaml.YAMLError) as exc:
+        report.error("generated docs", f"cannot render ({exc})")
+        return report
+    for path in stale:
         report.error(str(path), f"out of date with the catalog; {REGENERATE}")
     counts = ", ".join(
         f"{sum(e['tier'] == tier.value for e in entries)} {tier.value}" for tier in Tier
@@ -569,7 +672,12 @@ def parse_args(
     parser.add_argument(
         "--skip-ancestry",
         action="store_true",
-        help="Do not require evidence commits to be ancestors of HEAD",
+        help="Do not check evidence commits against git history",
+    )
+    parser.add_argument(
+        "--main-ref",
+        default="origin/main",
+        help="Default-branch ref evidence must be on (default: origin/main)",
     )
     return parser.parse_args(argv)
 
@@ -586,12 +694,15 @@ def main(
         Process exit code: 0 when the catalog is consistent.
     """
     args = parse_args(argv=argv)
-    report = validate(
-        repo_root=args.repo_root.resolve(),
-        skip_ancestry=args.skip_ancestry,
+    repo_root: Path = args.repo_root.resolve()
+    history = History(
+        repo_root=repo_root,
+        main_ref=args.main_ref,
+        skip=args.skip_ancestry,
     )
+    report = validate(repo_root=repo_root, history=history)
     if args.skip_ancestry:
-        print("NOTICE: --skip-ancestry: evidence commits were not checked against HEAD")
+        print("NOTICE: --skip-ancestry: evidence commits were not checked against git")
     for notice in report.notices:
         print(f"NOTICE: {notice}")
     if report.errors:

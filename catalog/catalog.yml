@@ -7,7 +7,7 @@
 #
 # Field rules (enforced by the validator):
 #   tier         stable | preview | internal | deprecated
-#   reason       one line; required unless tier is stable
+#   reason       one line; required for non-stable tiers, rejected on stable
 #   evidence     required for stable: fixture workflow file, the lgtm-ci commit the
 #                run was pinned to (an ancestor of this commit) and the green run URL
 #   permissions  workflows: exactly the caller-facing union printed by
@@ -86,14 +86,18 @@ entries:
   - id: reusable-build-rust-binaries
     kind: reusable-workflow
     tier: preview
-    reason: "Fixture-green from `rust-release-build.yml` at the #1119 head `475206c9` only; no run
-              at a `main` commit yet"
+    reason: "Green from the fixture's dispatch-only `rust-release-build.yml` (Linux and
+              windows-latest legs) but outside the initial stable set"
+    evidence:
+      fixture: rust-release-build.yml
+      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756155710
     permissions:
       attestations: write
       contents: read
       id-token: write
     runners: [ubuntu-24.04]
-    package-managers: []
+    package-managers: [cargo]
     prerequisites: []
     limitations: []
     check-names:
@@ -648,8 +652,8 @@ entries:
     tier: stable
     evidence:
       fixture: release-version-pr.yml
-      last-green: b272bf2bb9f16a14ba87e8dc7a48431b1c0ae221
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37577339479
+      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756143865
     permissions:
       actions: read
       contents: write
@@ -671,9 +675,10 @@ entries:
           checkout; its edits reach the version PR through a scope-checked diff artifact (#849)"
     limitations:
       - "Proven with `ecosystems: python` only; the other ecosystems have no fixture run"
-      - "Hook paths were proven at #1097 heads (`release-benign-hook.yml` green,
-          `release-tamper-hook.yml` failing before any mutation) and the tamper probe after merge at
-          `26f42909`; they are not re-run at every pin"
+      - "Stable covers calls without `version-update-script`. The hook path FAILS at `ea934b16`
+          (fixture `release-benign-hook.yml`, run 37756136378): the hook job's `git add` exits 1 when
+          the consumer's `.gitignore` lists `.lgtm-ci-tooling`. It was last green at the #1097 head
+          `2339aa8a`"
       - "`uv` is absent on ubuntu-24.04, so `uv.lock` is rewritten by the tomlkit fallback (`[WARN]
           uv not found`)"
       - "Skips when a version PR is already open; close it before dispatching again"
@@ -705,7 +710,7 @@ entries:
               job name"
     permissions:
       contents: read
-    runners: []
+    runners: [ubuntu-24.04]
     package-managers: []
     prerequisites: []
     limitations: []
@@ -775,8 +780,8 @@ entries:
     tier: stable
     evidence:
       fixture: sbom-release-upload.yml
-      last-green: 7362363da2b064b754533eff380455ddc25b1387
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37449477752
+      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756163922
     permissions:
       contents: write
     runners: [ubuntu-24.04]
@@ -1072,7 +1077,10 @@ entries:
     runners: [ubuntu-24.04]
     package-managers: []
     prerequisites: []
-    limitations: []
+    limitations:
+      - "The sharded check name only appears with `coverage: true` and `coverage-shards` above 1,
+          and carries the caller's shard total (`Shell Tests (shard 1/4)`); the listed name shows the
+          default"
     check-names:
       - "Shell Tests"
       - "Coverage shard matrix"
