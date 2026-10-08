@@ -462,15 +462,17 @@ _convert() {
 	assert_output ""
 }
 
+# env -u BASH_ENV: kcov instruments nested bash through BASH_ENV and its
+# injected script trips `set -u` before the test body runs (#856).
 @test "conformance: a one-line JUnit report keeps its root on the prolog line and still parses under set -euo pipefail" {
 	printf '<?xml version="1.0"?><testsuites tests="2" failures="0" time="0.5"><testsuite name="s" tests="2" failures="0"><testcase name="a"/><testcase name="b"/></testsuite></testsuites>\n' \
 		>"${BATS_TEST_TMPDIR}/one-line.xml"
-	run bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/one-line.xml"
+	run env -u BASH_ENV bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/one-line.xml"
 	assert_success
 	assert_output '["passed",2,500]'
 	# A report without a time attribute leaves duration at 0 instead of
 	# killing the strict shell.
-	run bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -r .duration_ms' _ "$FIXTURES_DIR/rust/junit-two-tests.xml"
+	run env -u BASH_ENV bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -r .duration_ms' _ "$FIXTURES_DIR/rust/junit-two-tests.xml"
 	assert_success
 	assert_output "0"
 }
@@ -502,7 +504,7 @@ _convert() {
 		printf '</testsuite>\n</testsuites>\n'
 	} >"${BATS_TEST_TMPDIR}/big.xml"
 	[[ "$(wc -c <"${BATS_TEST_TMPDIR}/big.xml")" -gt 65536 ]]
-	run bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/big.xml"
+	run env -u BASH_ENV bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/big.xml"
 	assert_success
 	assert_output '["passed",2000,12500]'
 }
