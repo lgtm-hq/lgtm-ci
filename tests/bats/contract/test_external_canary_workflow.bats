@@ -108,6 +108,13 @@ _header_list() {
 	assert_success
 	run grep -F "PR_HEAD_REPO_FORK: \${{ github.event.pull_request.head.repo.fork }}" "$WORKFLOW"
 	assert_success
+	run grep -F "EVENT_ACTION: \${{ github.event.action }}" "$WORKFLOW"
+	assert_success
+	run grep -F "EVENT_LABEL: \${{ github.event.label.name }}" "$WORKFLOW"
+	assert_success
+	# The concurrency key is the candidate, on dispatch too.
+	run grep -F "group: external-consumer-canary-\${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}" "$WORKFLOW"
+	assert_success
 	# The two labels the script honours are named in the header.
 	run grep -F "needs-external-canary" "$WORKFLOW"
 	assert_success
@@ -115,27 +122,34 @@ _header_list() {
 	assert_success
 }
 
-@test "external-canary workflow: header gate list matches the script's classification" {
+@test "external-canary workflow: header gate list equals the script's expected-gate list" {
+	local listed expected
+	listed="$(_header_list "Gate workflows (")"
+	expected="$(bash -c "unset CANARY_EXPECTED_GATES; source '$SCRIPT'; printf '%s\n' \$CANARY_EXPECTED_GATES | sort")"
+	[[ -n "$listed" && -n "$expected" ]]
+	run diff <(printf '%s\n' "$expected") <(printf '%s\n' "$listed")
+	assert_output ""
 	local name
 	while IFS= read -r name; do
-		[[ -n "$name" ]] || continue
 		run bash -c "source '$SCRIPT'; classify_workflow '${name}.yml'"
 		assert_output "$(printf 'gate\tsuccess')"
-	done < <(_header_list "Gate workflows (")
-	run _header_list "Gate workflows ("
-	assert_success
-	[[ "$(wc -l <<<"$output" | tr -d ' ')" -ge 15 ]]
+	done <<<"$listed"
 }
 
-@test "external-canary workflow: header informational list matches the script's classification" {
-	local name expected listed
+@test "external-canary workflow: header informational and manual lists match the script's classification" {
+	local name listed expected
 	while IFS= read -r name; do
 		[[ -n "$name" ]] || continue
 		run bash -c "source '$SCRIPT'; classify_workflow '${name}.yml' | cut -f1"
 		assert_output "informational"
 	done < <(_header_list "Informational workflows (")
-	# Every informational arm of the script is listed in the header.
-	listed="$(_header_list "Informational workflows (")"
+	while IFS= read -r name; do
+		[[ -n "$name" ]] || continue
+		run bash -c "source '$SCRIPT'; classify_workflow '${name}.yml' | cut -f1"
+		assert_output "manual"
+	done < <(_header_list "Manual workflows (")
+	# Every non-gate arm of the script is listed in one of the two headers.
+	listed="$( (_header_list "Informational workflows ("; _header_list "Manual workflows (") | sort)"
 	expected="$(sed -nE 's/^\t([a-z0-9-]+\.yml( \| [a-z0-9-]+\.yml)*)\)$/\1/p' "$SCRIPT" | tr ' ' '\n' | grep -v '^|$' | sed 's/\.yml$//' | sort)"
 	[[ -n "$expected" ]]
 	run diff <(printf '%s\n' "$expected") <(printf '%s\n' "$listed")

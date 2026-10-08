@@ -2740,15 +2740,20 @@ before/after run. What each workflow proves:
 | `coverage-lcov.yml`, `playwright.yml` | Line-only LCOV through `reusable-coverage` (#1078); Playwright report artifact holds HTML + JSON + JUnit (#804) | gate |
 | `python-private-dep.yml` | Private git dependency in an uninstalled group does not break a frozen install (#1021) | gate |
 | `rust-release-build.yml` | Default `reusable-build-rust-binaries` matrix builds and runs a Windows binary (#1076) | gate |
-| `release-version-pr.yml`, `release-benign-hook.yml`, `app-token-probe.yml`, `sbom-release-upload.yml` | Release paths with the fixture's single-repo GitHub App: scoped token reach (#849), version PR with a well-behaved hook, SBOM assets attached to a release (#935). They open a PR or create a release in the fixture, so they report but never gate | informational, expected `success` |
-| `release-tamper-hook.yml`, `verify-negative.yml`, `playwright-negative.yml` | Negative-by-design: a hook that rewrites tooling is stopped (#849); a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804) | informational, expected `failure` |
+| `app-token-probe.yml`, `sbom-release-upload.yml` | Scoped App-token reach (#849); SBOM assets attached to a disposable prerelease that the run deletes again (#935) | informational, expected `success` |
+| `verify-negative.yml`, `playwright-negative.yml` | Negative-by-design: a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804) | informational, expected `failure` |
 | `perms-negative.yml` | An under-permissioned caller is rejected at parse time | informational, expected `startup_failure` |
+| `release-version-pr.yml`, `release-benign-hook.yml`, `release-tamper-hook.yml` | `reusable-release-version-pr` from outside the org with the fixture's single-repo App: version PR, well-behaved hook, tampering hook stopped (#849). The three share one fixture concurrency group (concurrent dispatch cancels one) and every success opens a version PR a human closes, so the canary lists them as `not_dispatched` and runs them only with `CANARY_INCLUDE_MANUAL=true` | manual |
 
 <!-- markdownlint-enable MD013 -->
 
 `starter-python.yml` (the verbatim `examples/ci-python.yml`) runs on the
 fixture's own pushes and has no `workflow_dispatch`, so the canary does not
-dispatch it.
+dispatch it. `build-python-direct.yml` enforces the on-default-branch
+preflight only on the fixture's `main` and tags: a canary branch commit is
+by construction not on `main`, so on `canary/<sha>` the probe proves the
+direct build path and the shallow-checkout handling, and the on-main check
+is proven by the fixture's own pushes.
 
 ### The canary
 
@@ -2760,18 +2765,24 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
 1. resolves the candidate ref to a full SHA;
 2. reads every fixture workflow from the fixture's `main`, rewrites each
    lgtm-ci pin to the candidate (the same pattern as the fixture's
-   `scripts/pin.sh`) and commits the result through the git data API as the
+   `scripts/pin.sh`), refuses any lgtm-ci reference that is not then pinned
+   to the candidate, and commits the result through the git data API as the
    branch `canary/<sha>`. The fixture's `main` is never written;
-3. dispatches every fixture workflow that declares `workflow_dispatch` on
-   that branch (the fixture's `push` triggers are limited to `main`, so
-   creating the branch starts nothing by itself);
-4. polls the fixture's run list until each workflow has a completed run,
-   bounded at 25 minutes;
+3. dispatches every gate and informational fixture workflow that declares
+   `workflow_dispatch` on that branch (the fixture's `push` triggers are
+   limited to `main`, so creating the branch starts nothing by itself);
+   manual workflows are listed as `not_dispatched`;
+4. polls the fixture's run list until each dispatched workflow has a
+   completed run, bounded at 25 minutes; a workflow whose dispatch was
+   rejected is reported `dispatch_failed` at once instead of waiting;
 5. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
-   the job summary, deletes the branch on every exit path, and fails when any
-   **gate** workflow did not succeed. Informational rows are compared with
-   their expected conclusion and flagged `unexpected`, but never fail the
-   run. A fixture workflow the script has never seen is a gate (fail closed).
+   the job summary, deletes the branch it created on every exit path, and
+   fails when any **gate** workflow did not succeed. Informational rows are
+   compared with their expected conclusion and flagged `unexpected`, but
+   never fail the run. The gate set is a fixed list in the script: a gate the
+   fixture no longer exposes for dispatch is reported `not_dispatchable` and
+   fails the canary, and a fixture workflow the script has never seen is a
+   gate (fail closed).
 
 When it runs:
 
@@ -2785,18 +2796,22 @@ When it runs:
   line `Skipped: no adoption-relevant changes`.
 - **Label `needs-external-canary`** forces the full set on any PR, whatever
   it touches; every later push to the labelled PR re-runs it at the new head.
+  A `labeled` event for any other label is skipped, so adding an unrelated
+  label does not re-run the fixture set.
 - **Fork PRs skip**: they cannot read the secret. Re-run from a same-repo
   branch with the force label when a fork PR needs the evidence.
 - **Dispatch it** from the Actions tab with `ref` set to any commit, branch or
   tag (empty means the commit the workflow was dispatched on, e.g. `main`).
   Dispatch always runs the full set.
 
-**Override (owner only).** The label `canary-informational` makes a run whose
-gate failed report success: each failed gate becomes a `::warning` annotation
-and the summary says why the run is green. It exists for the observation
-period, when a fixture defect or a GitHub incident must not block unrelated
-work; applying it is the owner's call, and the table still shows the red
-rows so the failure stays visible. Remove the label once the cause is fixed.
+**Override (owner only, by convention).** The label `canary-informational`
+makes a run whose gate failed report success: each failed gate becomes a
+`::warning` annotation and the summary says why the run is green. It exists
+for the observation period, when a fixture defect or a GitHub incident must
+not block unrelated work. GitHub lets anyone with triage access apply a
+label, so "owner only" is a convention, not an enforced rule; the table
+still shows the red rows so the failure stays visible. Remove the label once
+the cause is fixed.
 
 **Status.** The canary is **not** a required check yet and the ruleset is
 untouched. It is promoted to required after an observation period on real
@@ -2814,15 +2829,26 @@ The only secret is `EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access
 token owned by the fixture owner and stored as a repository secret on
 `lgtm-hq/lgtm-ci`. It is scoped to the single repository
 `TurboCoder13/lgtm-ci-consumer-fixture` with **Actions: read and write**
-(dispatch and poll) and **Contents: read and write** (create and delete the
-`canary/<sha>` branch; the script refuses any other ref). It has no access
-to any lgtm-hq repository; the candidate ref is resolved with the job's own
-`github.token`. The workflow passes it as one named env value to one step;
-there is no `secrets: inherit`, and the hardened job can reach only
-`github.com:443` and `api.github.com:443` (preset `external-canary`), so a
-compromised candidate cannot exfiltrate it.
+(dispatch and poll), **Contents: read and write** (create and delete the
+`canary/<sha>` branch) and **Workflows: read and write** (GitHub refuses to
+write anything under `.github/workflows/` without it, through the git data
+API too; a token without it fails at "create tree" with HTTP 403). It has no
+access to any lgtm-hq repository; the candidate ref and the PR file list are
+read with the job's own `github.token`. The workflow passes it as one named
+env value to one step, there is no `secrets: inherit`, and the hardened job
+can reach only `github.com:443` and `api.github.com:443` (preset
+`external-canary`).
 
-Rotation: fine-grained tokens expire; generate a new one with the same two
+What that does **not** protect against: on `pull_request` the job runs the
+workflow and the script from the PR head, so a same-repository author with
+push access can read the token or point it at the fixture's `main`. The
+token's reach is the fixture only, which exists to be written by candidates,
+and fork PRs never see the secret. Treat the PAT as a fixture credential, not
+an lgtm-ci one; the GitHub App that replaces it (follow-up) issues
+short-lived installation tokens, and a fixture ruleset on `main` is the
+owner's lever against a hostile candidate.
+
+Rotation: fine-grained tokens expire; generate a new one with the same three
 permissions on the same single repository, update the secret, and run the
 canary once by dispatch. A read-only API listing of the fixture's workflows
 from a job is enough to confirm the new token before relying on it. If the

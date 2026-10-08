@@ -12,40 +12,53 @@
 # candidate as a dispatch input. This script therefore:
 #
 #   0. decides whether to run at all (`decide_run_mode`): workflow_dispatch
-#      and the force label always run the full set; a pull request runs it
-#      only when it touches an adoption-relevant path (workflows, actions,
-#      scripts/ci, schemas, examples); otherwise it exits 0 with a
-#      "skipped" summary so the check always reports (no `paths:` filter),
+#      always runs the full set; a pull request runs it when it carries the
+#      force label or touches an adoption-relevant path (workflows, actions,
+#      scripts/ci, schemas, examples); fork PRs, unrelated `labeled` events
+#      and PRs without relevant changes exit 0 with a "skipped" summary so
+#      the check always reports (no `paths:` filter),
 #   1. resolves <ref> to a full lgtm-ci SHA (via the lgtm-ci API, LGTM_CI_TOKEN),
 #   2. reads every fixture workflow file from the fixture's base branch,
 #      rewrites each lgtm-ci pin to the candidate (same regex as the fixture's
-#      scripts/pin.sh) and commits the result through the git data API as
+#      scripts/pin.sh), refuses any lgtm-ci reference that is not then pinned
+#      to the candidate, and commits the result through the git data API as
 #      branch `canary/<sha>` — never touching the fixture's base branch,
-#   3. dispatches every fixture workflow that declares `workflow_dispatch`
-#      on that branch,
+#   3. dispatches every gate and informational fixture workflow that declares
+#      `workflow_dispatch` on that branch (manual ones only when asked),
 #   4. polls the fixture's run list until each dispatched workflow has a
 #      completed run (bounded by CANARY_TIMEOUT_SECONDS),
 #   5. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
-#   6. deletes the canary branch (also on failure), and
+#   6. deletes the canary branch it created (also on failure), and
 #   7. exits non-zero when any GATE workflow did not succeed, unless the
 #      owner-only override label (CANARY_OVERRIDE_LABEL) is on the pull
 #      request, in which case the failure is reported as a warning.
 #
-# Gate vs informational: every dispatchable fixture workflow is a gate unless
-# `classify_workflow` lists it as informational. Informational workflows are
-# the release/App-token paths (they mutate the fixture: open a version PR,
-# create and delete a prerelease) and the negative-by-design probes (expected
-# `failure` / `startup_failure`); their verdict is reported but never fails
-# the canary. A workflow this script has never seen is a gate (fail closed).
+# Roles (`classify_workflow`, contract-tested against the workflow header):
+#   gate           must conclude `success`; the expected set is
+#                  CANARY_EXPECTED_GATES, and a gate the fixture no longer
+#                  exposes for dispatch is reported `not_dispatchable` and
+#                  fails the canary (fail closed). Unknown workflows are gates.
+#   informational  reported against an expected conclusion (`success` for the
+#                  App-token / SBOM paths, `failure` / `startup_failure` for
+#                  the negative-by-design probes); never fails the canary.
+#   manual         the three reusable-release-version-pr callers: they share
+#                  one fixture concurrency group, so concurrent dispatch
+#                  cancels one of them, and each success opens a version PR in
+#                  the fixture that a human closes. Not dispatched unless
+#                  CANARY_INCLUDE_MANUAL=true; reported `not_dispatched`.
 #
 # Environment:
 #   GH_TOKEN                 fixture token (EXTERNAL_FIXTURE_TOKEN): Actions
-#                            read/write + Contents read/write on the fixture only
+#                            read/write, Contents read/write, Workflows
+#                            read/write on the fixture only (workflow files
+#                            cannot be written without the Workflows scope)
 #   LGTM_CI_TOKEN            token for the lgtm-ci repository (github.token):
 #                            resolves <ref>, lists the PR's files; defaults to GH_TOKEN
 #   GITHUB_REPOSITORY        lgtm-ci repository (default lgtm-hq/lgtm-ci)
 #   EVENT_NAME               github.event_name (default workflow_dispatch)
+#   EVENT_ACTION             github.event.action (pull_request: opened, labeled, ...)
+#   EVENT_LABEL              github.event.label.name on `labeled` events
 #   PR_NUMBER                pull request number (pull_request events)
 #   PR_LABELS                comma-separated label names of the pull request
 #   PR_HEAD_REPO_FORK        "true" when the PR head is a fork (secret unavailable)
@@ -54,10 +67,16 @@
 #                            (default canary-informational)
 #   CANARY_RELEVANT_PATHS    space-separated path prefixes that make a PR
 #                            adoption-relevant (default: see below)
+#   CANARY_EXPECTED_GATES    space-separated gate workflow names (no .yml) that
+#                            must be dispatchable (default: see below)
+#   CANARY_INCLUDE_MANUAL    "true" also dispatches the manual release workflows
 #   FIXTURE_REPO             default TurboCoder13/lgtm-ci-consumer-fixture
 #   FIXTURE_BASE_BRANCH      default main (read only; never written)
 #   CANARY_TIMEOUT_SECONDS   poll bound, default 1500 (25 minutes)
 #   CANARY_POLL_SECONDS      poll interval, default 30
+#   CANARY_SINCE_SLACK_SECONDS  clock slack subtracted from the run-list
+#                            `created>=` filter, default 120
+#   CANARY_WRITE_RETRY_SECONDS  pause before the single retry of a failed write, default 10
 #   CANARY_KEEP_BRANCH       "true" keeps canary/<sha> for inspection
 #   CANARY_SOURCE_URL        lgtm-ci run/PR URL recorded in the branch commit
 #   GITHUB_STEP_SUMMARY      summary file (optional)
@@ -73,14 +92,22 @@ FIXTURE_REPO="${FIXTURE_REPO:-TurboCoder13/lgtm-ci-consumer-fixture}"
 FIXTURE_BASE_BRANCH="${FIXTURE_BASE_BRANCH:-main}"
 GITHUB_REPOSITORY="${GITHUB_REPOSITORY:-lgtm-hq/lgtm-ci}"
 EVENT_NAME="${EVENT_NAME:-workflow_dispatch}"
+EVENT_ACTION="${EVENT_ACTION:-}"
+EVENT_LABEL="${EVENT_LABEL:-}"
 PR_NUMBER="${PR_NUMBER:-}"
 PR_LABELS="${PR_LABELS:-}"
 PR_HEAD_REPO_FORK="${PR_HEAD_REPO_FORK:-false}"
 CANARY_FORCE_LABEL="${CANARY_FORCE_LABEL:-needs-external-canary}"
 CANARY_OVERRIDE_LABEL="${CANARY_OVERRIDE_LABEL:-canary-informational}"
 CANARY_RELEVANT_PATHS="${CANARY_RELEVANT_PATHS:-.github/workflows/ .github/actions/ scripts/ci/ schemas/ examples/}"
+# Keep in sync with the "Gate workflows" header of
+# .github/workflows/external-consumer-canary.yml (contract-tested).
+CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov egress node-bun node-npm node-pnpm perms playwright python python-private-dep retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
+CANARY_INCLUDE_MANUAL="${CANARY_INCLUDE_MANUAL:-false}"
 CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
+CANARY_SINCE_SLACK_SECONDS="${CANARY_SINCE_SLACK_SECONDS:-120}"
+CANARY_WRITE_RETRY_SECONDS="${CANARY_WRITE_RETRY_SECONDS:-10}"
 CANARY_KEEP_BRANCH="${CANARY_KEEP_BRANCH:-false}"
 CANARY_SOURCE_URL="${CANARY_SOURCE_URL:-}"
 
@@ -88,24 +115,37 @@ CANARY_SOURCE_URL="${CANARY_SOURCE_URL:-}"
 # composite action reference, followed by a 40-hex pin.
 PIN_RE='lgtm-hq/lgtm-ci/\.github/(workflows/[A-Za-z0-9._-]+\.yml|actions/[A-Za-z0-9._-]+)@'
 
+# Set by create_canary_branch once the ref exists; the EXIT trap deletes only
+# a branch this invocation created.
+CANARY_BRANCH_CREATED=0
+CANARY_BRANCH=""
+CANARY_WORKDIR=""
+
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
 
 # Print "<role>\t<expected conclusion>" for one fixture workflow file name.
-# role is `gate` or `informational`. Keep in sync with the header comment of
-# .github/workflows/external-consumer-canary.yml (contract-tested).
+# role is `gate`, `informational` or `manual`. Keep in sync with the header
+# comment of .github/workflows/external-consumer-canary.yml (contract-tested).
 classify_workflow() {
 	local name="${1:?workflow file name required}"
 	name="${name##*/}"
 	case "$name" in
-	# Release / App-token paths: mutate the fixture (open a version PR,
-	# create a prerelease) or need the fixture's GitHub App; informational.
-	release-version-pr.yml | release-benign-hook.yml | app-token-probe.yml | sbom-release-upload.yml)
+	# reusable-release-version-pr callers: one shared fixture concurrency
+	# group and a version PR per success; dispatched only on request.
+	release-version-pr.yml | release-benign-hook.yml)
+		printf 'manual\tsuccess\n'
+		;;
+	release-tamper-hook.yml)
+		printf 'manual\tfailure\n'
+		;;
+	# App-token reach and SBOM release upload: self-cleaning release paths.
+	app-token-probe.yml | sbom-release-upload.yml)
 		printf 'informational\tsuccess\n'
 		;;
 	# Negative-by-design probes: a green run here is the finding.
-	release-tamper-hook.yml | verify-negative.yml | playwright-negative.yml)
+	verify-negative.yml | playwright-negative.yml)
 		printf 'informational\tfailure\n'
 		;;
 	# Under-permissioned caller: GitHub rejects the run at parse time.
@@ -118,8 +158,23 @@ classify_workflow() {
 	esac
 }
 
+workflow_role() {
+	classify_workflow "$1" | cut -f1
+}
+
+workflow_expected() {
+	classify_workflow "$1" | cut -f2
+}
+
 is_gate() {
-	[[ "$(classify_workflow "$1" | cut -f1)" == "gate" ]]
+	[[ "$(workflow_role "$1")" == "gate" ]]
+}
+
+# True when the workflow should be dispatched in this run.
+should_dispatch() {
+	local role
+	role="$(workflow_role "$1")"
+	[[ "$role" != "manual" ]] || [[ "$CANARY_INCLUDE_MANUAL" == "true" ]]
 }
 
 # ---------------------------------------------------------------------------
@@ -150,35 +205,42 @@ is_adoption_relevant() {
 	return 1
 }
 
-# Changed file names of the pull request, one per line.
+# Changed file names of the pull request, one per line. Fails loudly: a
+# listing error must never read as "no relevant changes".
 pr_changed_files() {
 	[[ -n "$PR_NUMBER" ]] || die "PR_NUMBER is required for pull_request events"
 	lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files?per_page=100" \
 		--paginate --jq '.[].filename'
 }
 
-# Print "<mode>\t<reason>" where mode is `full` or `skip`.
+# Print "<mode>\t<reason>" where mode is `full` or `skip`. Exits non-zero
+# when the decision cannot be made (API failure), so the job fails closed.
 decide_run_mode() {
 	if [[ "$EVENT_NAME" != "pull_request" ]]; then
 		printf 'full\t%s\n' "${EVENT_NAME} always runs the full fixture set"
+		return 0
+	fi
+	if [[ "$PR_HEAD_REPO_FORK" == "true" ]]; then
+		printf 'skip\t%s\n' "fork pull request: EXTERNAL_FIXTURE_TOKEN is not available; re-run from a same-repository branch"
+		return 0
+	fi
+	if [[ "$EVENT_ACTION" == "labeled" && "$EVENT_LABEL" != "$CANARY_FORCE_LABEL" && "$EVENT_LABEL" != "$CANARY_OVERRIDE_LABEL" ]]; then
+		printf 'skip\t%s\n' "label '${EVENT_LABEL}' is not a canary label; this head was already decided on push"
 		return 0
 	fi
 	if has_label "$CANARY_FORCE_LABEL"; then
 		printf 'full\t%s\n' "label ${CANARY_FORCE_LABEL} forces a full run"
 		return 0
 	fi
-	if [[ "$PR_HEAD_REPO_FORK" == "true" ]]; then
-		printf 'skip\t%s\n' "fork pull request: EXTERNAL_FIXTURE_TOKEN is not available; label ${CANARY_FORCE_LABEL} on a same-repo branch to run it"
-		return 0
-	fi
-	local path
+	local files path
+	files="$(pr_changed_files)" || die "cannot list the files of pull request #${PR_NUMBER}; refusing to skip"
 	while IFS= read -r path; do
 		[[ -n "$path" ]] || continue
 		if is_adoption_relevant "$path"; then
 			printf 'full\t%s\n' "pull request touches ${path}"
 			return 0
 		fi
-	done < <(pr_changed_files)
+	done <<<"$files"
 	printf 'skip\t%s\n' "no adoption-relevant changes (none of: ${CANARY_RELEVANT_PATHS})"
 }
 
@@ -196,6 +258,32 @@ _require_env() {
 # gh api against the fixture repository (GH_TOKEN = fixture token).
 fixture_api() {
 	gh api "$@"
+}
+
+# A write to the fixture (git data API, dispatch) with one bounded retry and
+# a named error, so a transient failure does not abort the canary silently
+# and a hard failure says which step died. stdout is the API answer only;
+# stderr is captured separately so a gh notice cannot leak into a SHA.
+#   fixture_write <step name> <gh api args...>
+fixture_write() {
+	local step="${1:?step name required}" out errf
+	shift
+	errf="$(mktemp)"
+	if out="$(fixture_api "$@" 2>"$errf")"; then
+		rm -f "$errf"
+		printf '%s\n' "$out"
+		return 0
+	fi
+	log_warn "${step}: $(tr '\n' ' ' <"$errf"); retrying in ${CANARY_WRITE_RETRY_SECONDS}s"
+	sleep "$CANARY_WRITE_RETRY_SECONDS"
+	if out="$(fixture_api "$@" 2>"$errf")"; then
+		rm -f "$errf"
+		printf '%s\n' "$out"
+		return 0
+	fi
+	log_error "${step} failed on ${FIXTURE_REPO}: $(tr '\n' ' ' <"$errf")"
+	rm -f "$errf"
+	return 1
 }
 
 # Resolve a ref on the lgtm-ci repository to a full SHA. A 40-hex argument is
@@ -217,20 +305,33 @@ canary_branch_name() {
 	printf 'canary/%s\n' "${1:?sha required}"
 }
 
-# Rewrite every lgtm-ci pin in one workflow file to the candidate SHA.
+# ISO-8601 UTC timestamp CANARY_SINCE_SLACK_SECONDS in the past (GNU or BSD date).
+since_timestamp() {
+	local epoch
+	epoch=$(($(date +%s) - CANARY_SINCE_SLACK_SECONDS))
+	date -u -d "@${epoch}" +%Y-%m-%dT%H:%M:%SZ 2>/dev/null ||
+		date -u -r "$epoch" +%Y-%m-%dT%H:%M:%SZ
+}
+
+# Rewrite every lgtm-ci pin in one workflow file to the candidate SHA, then
+# refuse any lgtm-ci reference that is not pinned to it (a tag or branch pin
+# would otherwise run old code and report green).
 rewrite_pins() {
-	local file="${1:?file required}" sha="${2:?sha required}"
+	local file="${1:?file required}" sha="${2:?sha required}" stale
 	[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "not a full SHA: $sha"
 	sed -E "s#(${PIN_RE})[0-9a-f]{40}#\1${sha}#g" "$file" >"$file.tmp"
 	mv "$file.tmp" "$file"
+	stale="$(grep -oE "${PIN_RE}[^[:space:]\"']+" "$file" | grep -v "@${sha}\$" || true)"
+	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci reference not pinned to the candidate: ${stale//$'\n'/, }"
 }
 
-# Print the file names (basenames) under <dir> that declare workflow_dispatch.
+# Print the file names (basenames) under <dir> that declare workflow_dispatch
+# (block key, list item, or inline flow sequence under `on:`).
 discover_dispatchable() {
 	local dir="${1:?dir required}" file
 	for file in "$dir"/*.yml; do
 		[[ -f "$file" ]] || continue
-		grep -qE '^[[:space:]]+workflow_dispatch:' "$file" || continue
+		grep -qE '^[[:space:]]+workflow_dispatch:|^[[:space:]]+-[[:space:]]+workflow_dispatch[[:space:]]*$|^["'"'"']?on["'"'"']?:[[:space:]]*\[[^]]*\bworkflow_dispatch\b' "$file" || continue
 		basename "$file"
 	done
 }
@@ -252,10 +353,11 @@ build_tree_payload() {
 
 # Create branch canary/<sha> on the fixture with every workflow re-pinned.
 # Fetches the base branch's workflow files into <workdir>, rewrites them,
-# and commits via the git data API. Prints the new commit SHA.
+# and commits via the git data API. Sets CANARY_BRANCH_CREATED=1 once the
+# ref exists. Prints the new commit SHA.
 create_canary_branch() {
 	local sha="${1:?sha required}" workdir="${2:?workdir required}"
-	local branch base_sha base_tree path commit_sha tree_sha message
+	local branch base_sha base_tree path commit_sha tree_sha message payload
 
 	branch="$(canary_branch_name "$sha")"
 	[[ "$branch" != "$FIXTURE_BASE_BRANCH" && "$branch" == canary/* ]] ||
@@ -279,17 +381,22 @@ create_canary_branch() {
 	[[ "$count" -gt 0 ]] || die "no workflow files found on ${FIXTURE_REPO}@${FIXTURE_BASE_BRANCH}"
 	log_info "re-pinned ${count} fixture workflow files to ${sha}"
 
-	tree_sha="$(build_tree_payload "$base_tree" "$workdir" |
-		fixture_api -X POST "repos/${FIXTURE_REPO}/git/trees" --input - --jq .sha)"
+	payload="$workdir/.tree-payload.json"
+	build_tree_payload "$base_tree" "$workdir" >"$payload"
+	tree_sha="$(fixture_write "create tree" -X POST "repos/${FIXTURE_REPO}/git/trees" --input "$payload" --jq .sha)" ||
+		die "cannot create the canary tree (the token needs Contents and Workflows read/write on ${FIXTURE_REPO})"
 
 	message="canary: pin every lgtm-ci reference to ${sha}"
 	[[ -z "$CANARY_SOURCE_URL" ]] || message+=$'\n\n'"Source: ${CANARY_SOURCE_URL}"
-	commit_sha="$(jq -n --arg m "$message" --arg t "$tree_sha" --arg p "$base_sha" \
-		'{message: $m, tree: $t, parents: [$p]}' |
-		fixture_api -X POST "repos/${FIXTURE_REPO}/git/commits" --input - --jq .sha)"
+	jq -n --arg m "$message" --arg t "$tree_sha" --arg p "$base_sha" \
+		'{message: $m, tree: $t, parents: [$p]}' >"$workdir/.commit-payload.json"
+	commit_sha="$(fixture_write "create commit" -X POST "repos/${FIXTURE_REPO}/git/commits" \
+		--input "$workdir/.commit-payload.json" --jq .sha)" || die "cannot create the canary commit"
 
-	fixture_api -X POST "repos/${FIXTURE_REPO}/git/refs" \
-		-f ref="refs/heads/${branch}" -f sha="$commit_sha" --jq .ref >/dev/null
+	fixture_write "create branch ${branch}" -X POST "repos/${FIXTURE_REPO}/git/refs" \
+		-f ref="refs/heads/${branch}" -f sha="$commit_sha" --jq .ref >/dev/null ||
+		die "cannot create ${FIXTURE_REPO}@${branch} (another canary for this SHA may hold it; it is left untouched)"
+	CANARY_BRANCH_CREATED=1
 	log_info "created ${FIXTURE_REPO}@${branch} (${commit_sha})"
 	printf '%s\n' "$commit_sha"
 }
@@ -307,7 +414,7 @@ delete_canary_branch() {
 # Dispatch one workflow file on the canary branch.
 dispatch_workflow() {
 	local file="${1:?workflow file required}" branch="${2:?branch required}"
-	fixture_api -X POST "repos/${FIXTURE_REPO}/actions/workflows/${file}/dispatches" -f ref="$branch"
+	fixture_write "dispatch ${file}" -X POST "repos/${FIXTURE_REPO}/actions/workflows/${file}/dispatches" -f ref="$branch" >/dev/null
 }
 
 # Poll the fixture's workflow_dispatch runs on <branch> created at or after
@@ -315,18 +422,23 @@ dispatch_workflow() {
 # run or the bound is reached. Prints one TSV row per workflow:
 #   <file>\t<conclusion>\t<run url>\t<run name>
 # conclusion is the run's conclusion, `timeout` when still running at the
-# bound, or `missing` when no run ever appeared.
+# bound, or `missing` when no run ever appeared. A failed list fetch keeps
+# the previous snapshot.
 poll_runs() {
 	local branch="${1:?branch required}" since="${2:?since required}"
 	shift 2
-	local files=("$@") deadline runs pending file row
-	((${#files[@]})) || die "poll_runs: no workflows to poll"
+	local files=("$@") deadline runs="" fresh pending file row
+	((${#files[@]})) || return 0
 
 	deadline=$((SECONDS + CANARY_TIMEOUT_SECONDS))
 	while :; do
-		runs="$(fixture_api -X GET \
+		if fresh="$(fixture_api -X GET \
 			"repos/${FIXTURE_REPO}/actions/runs?branch=${branch}&event=workflow_dispatch&created=%3E%3D${since}&per_page=100" \
-			--jq '.workflow_runs[] | [(.path | sub("^\\.github/workflows/"; "")), .status, (.conclusion // ""), .html_url, .name] | @tsv')" || runs=""
+			--jq '.workflow_runs[] | [(.path | sub("^\\.github/workflows/"; "")), .status, (.conclusion // ""), .html_url, .name] | @tsv')"; then
+			runs="$fresh"
+		else
+			log_warn "run list fetch failed; keeping the previous snapshot"
+		fi
 		pending=0
 		for file in "${files[@]}"; do
 			row="$(awk -F'\t' -v f="$file" '$1 == f { print; exit }' <<<"$runs")"
@@ -353,14 +465,20 @@ poll_runs() {
 	done
 }
 
-# Verdict for one row: "pass" when the conclusion equals the expected one.
+# Verdict for one row: "pass" when the conclusion equals the expected one,
+# "skipped" for a manual workflow that was not dispatched, else "fail".
 verdict_for() {
-	local file="${1:?}" conclusion="${2:?}" expected
-	expected="$(classify_workflow "$file" | cut -f2)"
-	[[ "$conclusion" == "$expected" ]] && printf 'pass\n' || printf 'fail\n'
+	local file="${1:?}" conclusion="${2:?}"
+	if [[ "$conclusion" == "not_dispatched" ]]; then
+		printf 'skipped\n'
+	elif [[ "$conclusion" == "$(workflow_expected "$file")" ]]; then
+		printf 'pass\n'
+	else
+		printf 'fail\n'
+	fi
 }
 
-# Render the markdown table for a poll_runs result (stdin).
+# Render the markdown table for result rows (stdin, poll_runs format).
 render_summary() {
 	local sha="${1:?sha required}" branch="${2:-}" file conclusion url name role expected verdict mark link
 	echo "## External consumer canary"
@@ -371,16 +489,20 @@ render_summary() {
 	echo "|---|---|---|---|---|---|"
 	while IFS=$'\t' read -r file conclusion url name; do
 		[[ -n "$file" ]] || continue
-		role="$(classify_workflow "$file" | cut -f1)"
-		expected="$(classify_workflow "$file" | cut -f2)"
+		role="$(workflow_role "$file")"
+		expected="$(workflow_expected "$file")"
 		verdict="$(verdict_for "$file" "$conclusion")"
-		if [[ "$verdict" == "pass" ]]; then
-			mark="✅ pass"
-		elif [[ "$role" == "gate" ]]; then
-			mark="❌ **gate failed**"
-		else
-			mark="⚠️ unexpected"
-		fi
+		case "$verdict" in
+		pass) mark="✅ pass" ;;
+		skipped) mark="➖ not dispatched" ;;
+		*)
+			if [[ "$role" == "gate" ]]; then
+				mark="❌ **gate failed**"
+			else
+				mark="⚠️ unexpected"
+			fi
+			;;
+		esac
 		link="—"
 		[[ -z "$url" ]] || link="[run](${url})"
 		echo "| \`${file}\` | ${role} | \`${expected}\` | \`${conclusion}\` | ${mark} | ${link} |"
@@ -388,7 +510,7 @@ render_summary() {
 }
 
 # Print the gate workflows whose conclusion is not the expected one (stdin:
-# poll_runs rows). Exit 0 either way; the caller counts the lines.
+# result rows). Exit 0 either way; the caller counts the lines.
 failed_gates() {
 	local file conclusion _rest
 	while IFS=$'\t' read -r file conclusion _rest; do
@@ -408,6 +530,14 @@ _write_summary() {
 	printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"
 }
 
+# EXIT trap: remove the work dir and the branch this run created.
+_cleanup() {
+	[[ -z "$CANARY_WORKDIR" ]] || rm -rf "$CANARY_WORKDIR"
+	if [[ "$CANARY_BRANCH_CREATED" == 1 && "$CANARY_KEEP_BRANCH" != "true" ]]; then
+		delete_canary_branch "$CANARY_BRANCH"
+	fi
+}
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -417,8 +547,12 @@ main() {
 	[[ -n "$ref" ]] || die "usage: $0 <lgtm-ci ref or sha>"
 	command -v jq >/dev/null || die "jq is required"
 
-	local mode reason
-	IFS=$'\t' read -r mode reason < <(decide_run_mode)
+	# The decision runs in the main shell so a failure (API error) aborts
+	# instead of reading as an empty, skipped result.
+	local decision mode reason
+	decision="$(decide_run_mode)" || die "run/skip decision failed; refusing to skip"
+	IFS=$'\t' read -r mode reason <<<"$decision"
+	[[ "$mode" == "full" || "$mode" == "skip" ]] || die "run/skip decision returned '${mode}'; refusing to skip"
 	if [[ "$mode" == "skip" ]]; then
 		log_info "skipped: ${reason}"
 		_write_summary "## External consumer canary" "" "Skipped: ${reason}."
@@ -429,45 +563,60 @@ main() {
 	log_info "running the full fixture set: ${reason}"
 	_require_env GH_TOKEN
 
-	local sha branch workdir since results table failures
+	local sha since results table failures
 	sha="$(resolve_candidate_sha "$ref")"
-	branch="$(canary_branch_name "$sha")"
-	workdir="$(mktemp -d)"
+	CANARY_BRANCH="$(canary_branch_name "$sha")"
+	CANARY_WORKDIR="$(mktemp -d)"
 	log_info "candidate ${GITHUB_REPOSITORY}@${sha}"
+	trap _cleanup EXIT
 
-	# Delete the branch on every exit path unless asked to keep it.
-	# shellcheck disable=SC2064
-	trap "rm -rf '$workdir'; [[ '$CANARY_KEEP_BRANCH' == 'true' ]] || delete_canary_branch '$branch'" EXIT
+	create_canary_branch "$sha" "$CANARY_WORKDIR" >/dev/null
 
-	create_canary_branch "$sha" "$workdir" >/dev/null
-
-	local -a files=()
+	# Discover, then split into dispatch targets and pre-filled rows.
+	local -a to_dispatch=() dispatched=() extra_rows=()
+	local file gate seen
 	while IFS= read -r file; do
 		[[ -n "$file" ]] || continue
-		files+=("$file")
-	done < <(discover_dispatchable "$workdir")
-	((${#files[@]})) || die "no fixture workflow declares workflow_dispatch"
-
-	since="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-	local file
-	for file in "${files[@]}"; do
-		if dispatch_workflow "$file" "$branch"; then
-			log_info "dispatched ${file} on ${branch}"
+		if should_dispatch "$file"; then
+			to_dispatch+=("$file")
 		else
-			log_error "dispatch failed for ${file}"
+			extra_rows+=("$(printf '%s\tnot_dispatched\t\t' "$file")")
+		fi
+	done < <(discover_dispatchable "$CANARY_WORKDIR")
+	for gate in $CANARY_EXPECTED_GATES; do
+		seen=0
+		for file in "${to_dispatch[@]}"; do
+			[[ "$file" == "${gate}.yml" ]] && seen=1
+		done
+		((seen)) || extra_rows+=("$(printf '%s\tnot_dispatchable\t\t' "${gate}.yml")")
+	done
+	((${#to_dispatch[@]})) || die "no fixture workflow declares workflow_dispatch"
+
+	since="$(since_timestamp)"
+	for file in "${to_dispatch[@]}"; do
+		if dispatch_workflow "$file" "$CANARY_BRANCH"; then
+			log_info "dispatched ${file} on ${CANARY_BRANCH}"
+			dispatched+=("$file")
+		else
+			extra_rows+=("$(printf '%s\tdispatch_failed\t\t' "$file")")
 		fi
 	done
 
-	results="$(poll_runs "$branch" "$since" "${files[@]}")"
-	table="$(render_summary "$sha" "$branch" <<<"$results")"
+	results="$(
+		if ((${#dispatched[@]})); then poll_runs "$CANARY_BRANCH" "$since" "${dispatched[@]}"; fi
+		if ((${#extra_rows[@]})); then printf '%s\n' "${extra_rows[@]}"; fi
+	)"
+	results="$(sort <<<"$results")"
+	table="$(render_summary "$sha" "$CANARY_BRANCH" <<<"$results")"
 	printf '%s\n' "$table"
 	_write_summary "$table"
 
 	failures="$(failed_gates <<<"$results")"
-	_write_output "mode=full" "branch=${branch}" \
+	_write_output "mode=full" "branch=${CANARY_BRANCH}" \
 		"gate-failures=$(grep -c . <<<"$failures" || true)" \
 		"table<<LGTM_CI_CANARY_EOF" "$table" "LGTM_CI_CANARY_EOF"
 
+	local conclusion
 	if [[ -n "$failures" ]]; then
 		if has_label "$CANARY_OVERRIDE_LABEL"; then
 			while IFS=$'\t' read -r file conclusion; do
@@ -481,7 +630,7 @@ main() {
 		done <<<"$failures"
 		return 1
 	fi
-	log_success "every gate workflow passed on ${FIXTURE_REPO}@${branch}"
+	log_success "every gate workflow passed on ${FIXTURE_REPO}@${CANARY_BRANCH}"
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

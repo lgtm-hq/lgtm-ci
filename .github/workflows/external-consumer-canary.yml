@@ -3,21 +3,23 @@
 #
 # External consumer canary (#1074). Pins every workflow of the external
 # fixture TurboCoder13/lgtm-ci-consumer-fixture to one lgtm-ci candidate SHA
-# on a throwaway fixture branch `canary/<sha>`, dispatches each workflow that
-# declares workflow_dispatch, waits for the verdicts (25 minute bound), writes
-# the table to the job summary and deletes the branch. The fixture's main is
-# never written. Shell logic lives in scripts/ci/actions/external-canary.sh.
+# on a throwaway fixture branch `canary/<sha>`, dispatches the gate and
+# informational workflows there, waits for the verdicts (25 minute bound),
+# writes the table to the job summary and deletes the branch it created. The
+# fixture's main is never written. Shell logic lives in
+# scripts/ci/actions/external-canary.sh.
 #
 # Triggers: every pull_request (always-run / fast-skip: the single job always
 # starts and reports; it runs the fixture set only when the PR touches
 # .github/workflows/**, .github/actions/**, scripts/ci/**, schemas/** or
 # examples/**, decided from the PR's file list rather than a `paths:` filter,
-# otherwise it exits green with a "skipped" summary) and workflow_dispatch
+# otherwise it exits green with a "skipped" summary; a `labeled` event for a
+# label other than the two below is skipped too) and workflow_dispatch
 # (input `ref`, default: the dispatched commit, always the full set).
 #
 # Labels: `needs-external-canary` forces the full set on any PR;
-# `canary-informational` (owner-only) reports gate failures as warnings.
-# Fork PRs skip (they cannot read the secret).
+# `canary-informational` (owner-only by convention) reports gate failures as
+# warnings. Fork PRs skip (they cannot read the secret).
 #
 # Not a required check yet: promotion follows an observation period and the
 # replacement of the PAT by a GitHub App (follow-up issue). Contract:
@@ -29,11 +31,16 @@
 #   rust-build-siblings rust-release-build siblings verify-fresh-install
 #   vuln-suppression
 # Informational workflows (reported against their expected conclusion, never fail the canary):
-#   app-token-probe perms-negative playwright-negative release-benign-hook
-#   release-tamper-hook release-version-pr sbom-release-upload verify-negative
+#   app-token-probe perms-negative playwright-negative sbom-release-upload
+#   verify-negative
+# Manual workflows (shared fixture concurrency group and a version PR per run; dispatched only on request):
+#   release-benign-hook release-tamper-hook release-version-pr
 #
 # The only secret is EXTERNAL_FIXTURE_TOKEN (fine-grained PAT scoped to the
-# fixture: Actions read/write, Contents read/write). No `secrets: inherit`.
+# fixture: Actions read/write, Contents read/write, Workflows read/write).
+# No `secrets: inherit`. On pull_request the script runs from the PR head, so
+# a same-repository author with push access can read the token; its reach is
+# the fixture only (see the contract section).
 ---
 name: External Consumer Canary
 
@@ -52,7 +59,7 @@ name: External Consumer Canary
 permissions: {}
 
 concurrency:
-  group: external-consumer-canary-${{ github.event.pull_request.head.sha || github.sha }}
+  group: external-consumer-canary-${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
   cancel-in-progress: false
 
 env:
@@ -197,6 +204,8 @@ jobs:
             ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
           CANARY_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT_NAME: ${{ github.event_name }}
+          EVENT_ACTION: ${{ github.event.action }}
+          EVENT_LABEL: ${{ github.event.label.name }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           PR_HEAD_REPO_FORK: ${{ github.event.pull_request.head.repo.fork }}
