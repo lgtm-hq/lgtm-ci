@@ -321,7 +321,9 @@ rewrite_pins() {
 	[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "not a full SHA: $sha"
 	sed -E "s#(${PIN_RE})[0-9a-f]{40}#\1${sha}#g" "$file" >"$file.tmp"
 	mv "$file.tmp" "$file"
-	stale="$(grep -oE "${PIN_RE}[^[:space:]\"']+" "$file" | grep -v "@${sha}\$" || true)"
+	# Only `uses:` lines count: header comments quote the pattern with a
+	# `@<sha>` placeholder.
+	stale="$(grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$file" | grep -oE "${PIN_RE}[^[:space:]\"']+" | grep -v "@${sha}\$" || true)"
 	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci reference not pinned to the candidate: ${stale//$'\n'/, }"
 }
 

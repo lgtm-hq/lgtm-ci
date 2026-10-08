@@ -305,6 +305,16 @@ call_fn() {
 	assert_output --partial "wf.yml: lgtm-ci reference not pinned to the candidate: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@v0.75.3"
 }
 
+@test "external-canary: rewrite_pins ignores lgtm-ci references quoted in comments" {
+	printf '# Calls `uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@<sha>` with\n# Re-pin with: scripts/pin.sh <sha>\njobs:\n  a:\n    steps:\n      - uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@%s\n' "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_success
+	run grep -c "@${CANDIDATE}" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_output "1"
+	run grep -F "build-python-package@<sha>" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
+}
+
 @test "external-canary: discover_dispatchable finds block, list and inline workflow_dispatch forms only" {
 	printf 'name: list\n"on":\n  - push\n  - workflow_dispatch\n' >"$MOCK_FIXTURE_DIR/list-form.yml"
 	printf 'name: inline\non: [push, workflow_dispatch]\n' >"$MOCK_FIXTURE_DIR/inline-form.yml"
