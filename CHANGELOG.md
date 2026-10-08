@@ -19,6 +19,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.76.1] - 2026-10-08
+
+### Changed
+
+- **workflows**: generated read-only reusable-test-node-run (#1081) (#1135) (bdb2807)
+- **harness**: canary not_applicable / removed_by_candidate and negative probes (#1132)
+  (3ed3852)
+
+### Fixed
+
+- **workflows**: regenerate reusable-test-node-run after the #1130 preset change (#1137)
+  (16aa956)
+- **egress**: allow apt mirror and CfT host in playwright preset (#1130) (249fc90)
+- **actions**: read run-lighthouse report from LHCI's manifest (#1131) (0e86657)
+
 ## [0.76.0] - 2026-10-08
 
 ### Added
@@ -2691,7 +2706,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.1...HEAD
+[0.76.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.0...v0.76.1
 [0.76.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.3...v0.76.0
 [0.75.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.2...v0.75.3
 [0.75.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.1...v0.75.2
