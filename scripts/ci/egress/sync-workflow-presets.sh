@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Write the rendered egress preset map into every reusable workflow (or check it)
+# Purpose: Write the rendered egress preset map into every workflow that carries it (or check it)
 #
 # Usage:
 #   bash scripts/ci/egress/sync-workflow-presets.sh           # rewrite in place
@@ -53,10 +53,13 @@ trap 'rm -f "$rendered"' EXIT
 status=0
 missing=()
 drifted=()
-for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
+# Every reusable must carry the map. A caller workflow that hardens its own
+# jobs (external-consumer-canary.yml, #1074) opts in by carrying the markers;
+# callers without them are simply not synced.
+for workflow in "$WORKFLOWS_DIR"/*.yml; do
 	name="$(basename "$workflow")"
 	if ! grep -qF "$BEGIN_MARK" "$workflow" || ! grep -qF "$END_MARK" "$workflow"; then
-		missing+=("$name")
+		[[ "$name" == reusable-*.yml ]] && missing+=("$name")
 		continue
 	fi
 
