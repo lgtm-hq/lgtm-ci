@@ -131,14 +131,8 @@ jobs:
       pull-requests: write
 
   notify-failure:
-    needs:
-      - quality
-      - shell-tests
-      - python-tests
-      - caller-permissions
-      - support-catalog
-      - deprecation-gate
-      - doc-pins
+    # yamllint disable-line rule:line-length
+    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins]
     if: failure() && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:

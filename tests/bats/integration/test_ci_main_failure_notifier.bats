@@ -12,7 +12,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/ci.yml"
 }
 
 @test "ci.yml: notify-failure depends on main jobs" {
-	run grep -F "needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog]" "$WORKFLOW"
+	run grep -F "needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog, deprecation-gate, doc-pins]" "$WORKFLOW"
 	assert_success
 }
 
