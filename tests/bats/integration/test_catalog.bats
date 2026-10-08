@@ -612,6 +612,11 @@ jobs:
     runs-on: [self-hosted, linux]
     steps:
       - run: echo gate
+  docs:
+    name: Check matrix.md for ${{ inputs.shards }}
+    runs-on: ubuntu-24.04
+    steps:
+      - run: echo gate
   legs:
     name: Leg ${{ matrix.leg }}/${{ inputs.shards }}
     runs-on: ubuntu-24.04
@@ -626,7 +631,7 @@ data['entries'].insert(1, {
     'id': 'reusable-flags', 'kind': 'reusable-workflow', 'tier': 'preview',
     'reason': 'Flags', 'permissions': {}, 'runners': ['ubuntu-24.04'],
     'package-managers': [], 'prerequisites': [], 'limitations': [],
-    'check-names': ['Lenient', 'Leg \${{ matrix.leg }}/\${{ inputs.shards }}'],
+    'check-names': ['Lenient', 'Check matrix.md for 1', 'Leg \${{ matrix.leg }}/\${{ inputs.shards }}'],
 })"
 	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
 	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main

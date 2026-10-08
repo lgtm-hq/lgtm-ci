@@ -255,7 +255,7 @@ def is_truthy(
     Returns:
         GitHub's truthiness of the value.
     """
-    return value not in (None, False, 0, "") or value is True
+    return value not in (None, False, 0, "")
 
 
 def resolve_expressions(
@@ -406,7 +406,8 @@ def job_label(
         The display name.
     """
     name = str(job.get("name", job_id))
-    if "matrix." in name:
+    expressions = (match.group("expr") for match in EXPRESSION.finditer(name))
+    if any("matrix." in expr for expr in expressions):
         return name
     return resolve_expressions(text=name, values=values)
 
