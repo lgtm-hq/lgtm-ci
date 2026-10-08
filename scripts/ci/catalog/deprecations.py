@@ -222,8 +222,9 @@ def judge_removal(
         return
     # Under a whole-entry deprecation the registry records only the entry
     # key, so any consumer still calling the entry blocks each of its items.
-    lookup = whole if whole in base.deprecated else key
-    users = users_of(key=lookup, consumers=consumers)
+    users = users_of(key=key, consumers=consumers)
+    if whole in base.deprecated and whole != key:
+        users += [u for u in users_of(key=whole, consumers=consumers) if u not in users]
     if users:
         verdict.errors.append(
             f"{key}: still used by known consumer(s) {', '.join(users)}; migrate "
@@ -248,17 +249,17 @@ def judge_required(
 
     Args:
         verdict: Findings sink.
-        key: ``<entry>:required:<input>``.
+        key: ``<entry>:required:<input>`` or ``<entry>:required-secret:<name>``.
         base: Snapshot at the base revision.
     """
     tier = base.tiers.get(entry_of(key), "")
     if tier in (Tier.PREVIEW.value, Tier.INTERNAL.value):
-        verdict.notices.append(f"{key}: input made required on a {tier} entry")
+        verdict.notices.append(f"{key}: made required on a {tier} entry")
         return
     verdict.errors.append(
-        f"{key}: a {tier} entry gains a required input, which fails every caller "
-        "that does not pass it; give it a default, or add an exception naming "
-        "the approving issue",
+        f"{key}: a {tier} entry gains a required input or secret, which fails "
+        "every caller that does not pass it; make it optional, or add an "
+        "exception naming the approving issue",
     )
 
 
@@ -506,7 +507,9 @@ def parse_args(
             default=None,
             help="Date to measure evidence from (default: today, UTC)",
         )
-    if not any(arg in COMMANDS for arg in argv):
+    # The subcommand comes first; a flag value such as `--base-ref scan` must
+    # not count as one.
+    if not argv or argv[0] not in COMMANDS:
         argv = ["gate", *argv]
     return parser.parse_args(argv)
 
@@ -546,7 +549,10 @@ def main(
             max_age_days=args.max_age_days,
             today=today,
         )
-    except (OSError, ValueError, KeyError, catalog_lib.yaml.YAMLError) as exc:
+    except (OSError, ValueError, KeyError, RuntimeError) as exc:
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 1
+    except catalog_lib.yaml.YAMLError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 1
     for notice in verdict.notices:

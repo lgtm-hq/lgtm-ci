@@ -288,7 +288,9 @@ def test_doc_pins_accept_only_commits_and_placeholders(
             f"uses: {base}0123456",
             f"uses: {base}<main>",
             f"uses: {base}<commit-sha>",
+            f"uses: {base}0123456789abcdef0123456789abcdef01234567main",
+            f"uses: {base}<sha>extra",
         ],
     )
     flagged = [line for line, _ in module.floating_refs(text=text)]
-    assert_that(flagged).is_equal_to([4, 5, 6, 7, 8])
+    assert_that(flagged).is_equal_to([4, 5, 6, 7, 8, 10, 11])

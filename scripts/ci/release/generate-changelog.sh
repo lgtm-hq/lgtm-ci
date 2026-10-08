@@ -68,8 +68,10 @@ if [[ "$CATALOG_RELEASE_NOTES" == "true" && -n "$FROM_REF" ]]; then
 	CATALOG_NOTES=$("${PYTHON:-python3}" "$CATALOG_DIR/release_notes.py" \
 		--repo-root . --base "$FROM_REF" --head "$TO_REF")
 	if [[ -n "$CATALOG_NOTES" ]]; then
-		CHANGELOG_HEADING=$(printf '%s\n' "$CHANGELOG" | head -n 1)
-		CHANGELOG_SECTIONS=$(printf '%s\n' "$CHANGELOG" | tail -n +2)
+		# Parameter expansion, not head/tail: an early-closing pipe would
+		# SIGPIPE under pipefail on a large changelog.
+		CHANGELOG_HEADING="${CHANGELOG%%$'\n'*}"
+		CHANGELOG_SECTIONS="${CHANGELOG#*$'\n'}"
 		MERGED=$(merge_changelog_sections "$CHANGELOG_SECTIONS" "$CATALOG_NOTES")
 		CHANGELOG="${CHANGELOG_HEADING}"$'\n\n'"${MERGED}"
 		log_info "Merged support-catalog changes since '$FROM_REF'"

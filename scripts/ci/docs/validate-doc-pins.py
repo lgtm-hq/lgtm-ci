@@ -31,7 +31,9 @@ REFERENCE = re.compile(
     r"lgtm-hq/lgtm-ci/\.github/(?:workflows|actions)/[\w./-]+@(?P<ref>[^\s\"'`)\]]+)",
 )
 # A full SHA, a SHA placeholder (`<sha>`, `<commit-sha>`) or an expression.
-ALLOWED_REF = re.compile(r"^(?:[0-9a-f]{40}|<[\w-]*sha>|\$\{\{|\\\$\{\{)")
+# The SHA and placeholder must be the whole ref; an expression only has to
+# start it (the captured ref stops at the first space, e.g. `${{`).
+ALLOWED_REF = re.compile(r"^(?:[0-9a-f]{40}|<[\w-]*sha>)$|^\\?\$\{\{")
 SCANNED = ("README.md", "SECURITY.md", "docs/**/*.md", "examples/**/*")
 TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".json", ".toml"})
 

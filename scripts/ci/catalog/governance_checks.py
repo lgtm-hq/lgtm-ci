@@ -52,7 +52,9 @@ CONSUMER_KEYS = frozenset(
     },
 )
 EXCEPTION_KEYS = frozenset({"removal", "issue", "reason"})
-REMOVAL_KEY = re.compile(r"^[\w.-]+:(?:entry|(?:input|output|secret|required):[\w-]+)$")
+REMOVAL_KEY = re.compile(
+    r"^[\w.-]+:(?:entry|(?:input|output|secret|required|required-secret):[\w-]+)$",
+)
 REFRESH = "refresh with scripts/ci/catalog/check-deprecations.sh scan --write"
 
 
@@ -412,7 +414,7 @@ def check_exceptions(
             state = "unknown" if key in row else "missing required"
             report.error(where, f"{state} key `{key}`")
         if not REMOVAL_KEY.fullmatch(removal):
-            kinds = "input|output|secret|required"
+            kinds = "input|output|secret|required|required-secret"
             report.error(
                 where,
                 f"`removal` must be <entry>:entry or <entry>:<{kinds}>:<name>",

@@ -486,17 +486,19 @@ def interface_holder(
 def required_inputs(
     kind: Kind,
     document: Any,
+    section: str = "inputs",
 ) -> set[str]:
-    """Return the inputs a caller must pass.
+    """Return the inputs (or secrets) a caller must pass.
 
     Args:
         kind: Entry kind.
         document: Parsed workflow or ``action.yml``.
+        section: ``inputs`` or ``secrets``.
 
     Returns:
-        Names of inputs with ``required: true`` and no default.
+        Names declared with ``required: true`` and no default.
     """
-    inputs = interface_holder(kind=kind, document=document).get("inputs")
+    inputs = interface_holder(kind=kind, document=document).get(section)
     required = set()
     for name, spec in inputs.items() if isinstance(inputs, dict) else []:
         if not isinstance(spec, dict) or "default" in spec:
@@ -678,12 +680,24 @@ def read_at(
 
     Returns:
         File text, or None when it does not exist there.
+
+    Raises:
+        RuntimeError: When the revision is unknown or git cannot read a file
+            that exists, so a broken read never passes for a missing file.
     """
     if ref is None:
         path = repo_root / relpath
         return path.read_text(encoding="utf-8") if path.is_file() else None
-    shown = git(repo_root, "show", f"{ref}:{relpath.as_posix()}")
-    return shown.stdout if shown.returncode == 0 else None
+    spec = f"{ref}:{relpath.as_posix()}"
+    if git(repo_root, "cat-file", "-e", spec).returncode != 0:
+        if git(repo_root, "cat-file", "-e", f"{ref}^{{commit}}").returncode != 0:
+            raise RuntimeError(f"cannot read {spec}: `{ref}` is not a local commit")
+        return None
+    shown = git(repo_root, "show", spec)
+    if shown.returncode != 0:
+        # The blob exists, so any failure here must not read as "absent".
+        raise RuntimeError(f"git show {spec} failed: {shown.stderr.strip()}")
+    return shown.stdout
 
 
 def entry_surface_at(
@@ -699,8 +713,9 @@ def entry_surface_at(
         entry: Catalog entry.
 
     Returns:
-        ``(removal keys, <entry>:required:<input> keys)``, or None when the
-        file does not exist at that revision.
+        ``(removal keys, <entry>:required:<input> and
+        <entry>:required-secret:<secret> keys)``, or None when the file does
+        not exist at that revision.
     """
     entry_id = str(entry["id"])
     kind = Kind(entry["kind"])
@@ -714,8 +729,11 @@ def entry_surface_at(
     document = yaml.safe_load(source)
     surface = interface(kind=kind, document=document)
     keys = removal_keys(entry_id=entry_id, surface=surface)
-    names = required_inputs(kind=kind, document=document)
-    return keys, {f"{entry_id}:required:{name}" for name in names}
+    inputs = required_inputs(kind=kind, document=document)
+    secrets = required_inputs(kind=kind, document=document, section="secrets")
+    required = {f"{entry_id}:required:{name}" for name in inputs}
+    required |= {f"{entry_id}:required-secret:{name}" for name in secrets}
+    return keys, required
 
 
 def snapshot(

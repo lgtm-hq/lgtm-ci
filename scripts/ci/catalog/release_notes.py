@@ -240,7 +240,10 @@ def main(
             head=catalog_at(repo_root=repo_root, ref=args.head),
             removed=removed,
         )
-    except (KeyError, TypeError, ValueError, catalog_lib.yaml.YAMLError) as exc:
+    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        print(f"ERROR: catalog diff {args.base}..{args.head}: {exc}", file=sys.stderr)
+        return 1
+    except catalog_lib.yaml.YAMLError as exc:
         print(f"ERROR: catalog diff {args.base}..{args.head}: {exc}", file=sys.stderr)
         return 1
     if text:

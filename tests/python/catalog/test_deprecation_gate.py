@@ -14,6 +14,7 @@ import textwrap
 from pathlib import Path
 from types import ModuleType
 
+import pytest
 from assertpy import assert_that
 from governance_helpers import (  # pylint: disable=import-error
     TODAY,
@@ -305,6 +306,73 @@ def test_gate_rejects_removing_a_stable_secret(
     )
     verdict = run_gate(deprecations, repo)
     assert_that(verdict.errors[0]).starts_with("reusable-demo:secret:TOKEN:")
+
+
+def test_gate_rejects_making_a_stable_secret_required(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """A secret that becomes required breaks callers that do not pass it."""
+    edit(
+        repo,
+        ".github/workflows/reusable-demo.yml",
+        "    outputs:\n",
+        "    secrets:\n      TOKEN:\n        required: false\n    outputs:\n",
+    )
+    git(repo, "commit", "-qam", "secret")
+    edit(
+        repo,
+        ".github/workflows/reusable-demo.yml",
+        "      TOKEN:\n        required: false\n",
+        "      TOKEN:\n        required: true\n",
+    )
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors).is_length(1)
+    assert_that(verdict.errors[0]).starts_with("reusable-demo:required-secret:TOKEN:")
+
+
+def test_gate_counts_item_usage_under_a_whole_entry_deprecation(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """Item keys in `deprecated-in-use` block even when `uses` lacks the entry."""
+    edit(
+        repo,
+        ".github/workflows/reusable-legacy.yml",
+        "on:\n  workflow_call:\n",
+        "on:\n  workflow_call:\n    inputs:\n      dir:\n        type: string\n",
+    )
+    git(repo, "commit", "-qam", "legacy input")
+    edit(
+        repo,
+        ".github/workflows/reusable-legacy.yml",
+        "    inputs:\n      dir:\n        type: string\n",
+        "",
+    )
+    set_consumers(
+        repo,
+        [{"repository": "o/a", "deprecated-in-use": ["reusable-legacy:input:dir"]}],
+    )
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors).is_length(1)
+    assert_that(verdict.errors[0]).contains("reusable-legacy:input:dir", "o/a")
+
+
+@pytest.mark.parametrize(
+    ("argv", "command"),
+    [
+        ([], "gate"),
+        (["--base-ref", "scan"], "gate"),
+        (["report"], "report"),
+    ],
+)
+def test_only_the_first_argument_selects_the_subcommand(
+    deprecations: ModuleType,
+    argv: list[str],
+    command: str,
+) -> None:
+    """A flag value that happens to name a subcommand is not one."""
+    assert_that(deprecations.parse_args(argv=argv).command).is_equal_to(command)
 
 
 def test_gate_fails_on_an_unknown_base_ref(

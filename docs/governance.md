@@ -172,9 +172,10 @@ passes only when one of these holds:
 Everything else fails: removing a never-deprecated item from a `stable` or
 `deprecated` entry, removing a deprecated item a consumer still uses, relying
 on evidence older than 14 days (or dated in the future), or deleting the
-catalog. Making an existing input of a `stable` or `deprecated` entry required
-fails too, because every caller that does not pass it breaks; the exception
-key is `<entry>:required:<name>`. Changing an input's `type` is not checked;
+catalog. Making an existing input or secret of a `stable` or `deprecated`
+entry required fails too, because every caller that does not pass it breaks;
+the exception key is `<entry>:required:<name>` (input) or
+`<entry>:required-secret:<name>` (secret). Changing an input's `type` is not checked;
 review it as a breaking change.
 
 A removal takes two PRs:

@@ -20,6 +20,39 @@ from governance_helpers import (  # pylint: disable=import-error
 )
 
 
+def test_scan_file_fails_closed_on_invalid_yaml(
+    consumer_scan: ModuleType,
+) -> None:
+    """Unparseable YAML must fail the rescan, not record empty usage."""
+    with pytest.raises(RuntimeError, match="not valid YAML"):
+        consumer_scan.scan_file(
+            usage=consumer_scan.Usage(),
+            path=".github/workflows/ci.yml",
+            text="jobs: [unclosed\n",
+        )
+
+
+def test_refresh_rows_keeps_old_rows_and_drops_failed_new_ones(
+    consumer_scan: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A failed read keeps known evidence and never writes a half-built row."""
+
+    def broken(repository: str) -> None:
+        raise RuntimeError(f"{repository}: not valid YAML")
+
+    monkeypatch.setattr(consumer_scan, "scan_repository", broken)
+    known = {"repository": "o/a", "last-verified": "2026-10-01", "uses": ["x"]}
+    rows, failed = consumer_scan.refresh_rows(
+        rows=[known, {"repository": "o/new", "tracking-issues": []}],
+        repositories=[],
+        head=None,
+        today=TODAY,
+    )
+    assert_that(failed).is_equal_to(2)
+    assert_that(rows).is_equal_to([known])
+
+
 def test_scan_records_secrets_case_and_whole_output_reads(
     consumer_scan: ModuleType,
 ) -> None:

@@ -233,8 +233,10 @@ def scan_file(
     """
     try:
         document = catalog_lib.yaml.safe_load(text)
-    except catalog_lib.yaml.YAMLError:
-        return
+    except catalog_lib.yaml.YAMLError as exc:
+        # Skipping the file would under-report usage and still mark the row
+        # verified; fail the repository's rescan instead, keeping its old row.
+        raise RuntimeError(f"{path}: not valid YAML ({exc})") from exc
     if not isinstance(document, dict):
         return
     if ACTION_FILE.search(path):
@@ -396,7 +398,10 @@ def refresh_rows(
         except RuntimeError as exc:
             print(f"ERROR: {repository}: cannot read ({exc})", file=sys.stderr)
             failed += 1
-            refreshed.append(row)
+            # A repository added by --repository has no evidence yet; keep
+            # only rows that already had some.
+            if "last-verified" in row:
+                refreshed.append(row)
             continue
         new = refreshed_row(
             row=row,
