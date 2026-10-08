@@ -316,6 +316,19 @@ sys.exit(1 if errors else 0)
 	assert_output --partial "must start in column 0"
 }
 
+@test "sync-readonly-variants: a region omitted at the end leaves no trailing blank line" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	# A blank line before the final omit region, as in reusable-test-shell.yml.
+	sed -i.bak 's/^  # lgtm-ci-readonly:omit:begin$/\n&/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_success
+	run tail -n 1 "${dir}/reusable-demo-run.yml"
+	assert_output "      - run: echo test"
+}
+
 @test "sync-readonly-variants: rejects unknown arguments" {
 	run bash "$SYNC" --write
 	[[ "$status" -eq 2 ]]
