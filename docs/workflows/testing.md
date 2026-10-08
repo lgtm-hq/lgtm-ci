@@ -86,6 +86,11 @@ plus the Pages coverage HTML inputs (see
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.
 
+**Read-only variant:** `reusable-test-node-run.yml` runs the same jobs
+without the PR comment job. Its caller grants `actions: read` and
+`contents: read` only (#1081, see
+[Read-only variants](../reusable-workflows.md#read-only-variants)).
+
 ### reusable-test-node-custom.yml
 
 Node testing via a caller-provided shell command (after dependency

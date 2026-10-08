@@ -31,9 +31,9 @@
 #   rust-build-siblings rust-release-build siblings verify-fresh-install
 #   vuln-suppression
 # Informational workflows (reported against their expected conclusion, never fail the canary):
-#   app-token-probe perms-negative perms-negative-probe playwright-negative
-#   playwright-negative-probe sbom-release-upload verify-negative
-#   verify-negative-probe
+#   app-token-probe perms-negative perms-negative-node perms-negative-probe
+#   playwright-negative playwright-negative-probe sbom-release-upload
+#   verify-negative verify-negative-probe
 # A negative-by-design workflow with a `<name>-probe.yml` is dispatched only by
 # that probe, which asserts the designed failure and is green when it holds.
 #

@@ -286,8 +286,10 @@ call_fn() {
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tfailure')"
 	done
-	run call_fn classify_workflow perms-negative.yml
-	assert_output "$(printf 'informational\tstartup_failure')"
+	for wf in perms-negative.yml perms-negative-node.yml; do
+		run call_fn classify_workflow "$wf"
+		assert_output "$(printf 'informational\tstartup_failure')"
+	done
 }
 
 @test "external-canary: version-PR callers are manual and not dispatched by default" {

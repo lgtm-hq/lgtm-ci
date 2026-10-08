@@ -176,8 +176,9 @@ classify_workflow() {
 	verify-negative.yml | playwright-negative.yml)
 		printf 'informational\tfailure\n'
 		;;
-	# Under-permissioned caller: GitHub rejects the run at parse time.
-	perms-negative.yml)
+	# Under-permissioned callers: GitHub rejects the run at parse time, before
+	# any job (and so any publish step) starts (#735, #1081).
+	perms-negative.yml | perms-negative-node.yml)
 		printf 'informational\tstartup_failure\n'
 		;;
 	*)
