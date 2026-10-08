@@ -26,9 +26,15 @@ parse_junit_xml() {
 	fi
 
 	# Extract from testsuite or testsuites root element
-	# Skip XML prolog, DOCTYPE, and comments to find actual root element
+	# Skip XML prolog, DOCTYPE, and comments to find actual root element.
+	# One awk process reads the file: the former `grep -v | grep -v | grep -m1`
+	# pipeline SIGPIPE'd its writers on large reports once grep -m1 exited
+	# (#1080). Leftmost-longest match, so <testsuites wins over <testsuite.
 	local root_element
-	root_element=$(grep -v '^[[:space:]]*<?' "$file" | grep -v '^[[:space:]]*<!' | grep -m1 -o '<testsuites\|<testsuite')
+	root_element=$(awk '
+		/^[[:space:]]*<[?!]/ { next }
+		match($0, /<testsuites?/) { print substr($0, RSTART, RLENGTH); exit }
+	' "$file")
 
 	if [[ "$root_element" == "<testsuites" ]]; then
 		# First try to extract from the <testsuites> root element itself
@@ -119,12 +125,20 @@ junit_results_v1() {
 		parse_junit_xml "$file" || true
 		# Root element time="<seconds>" when the producer reports one. The
 		# prolog and doctype are stripped in place (a one-line report keeps
-		# its root on the prolog line), and a report without a time attribute
-		# must leave duration at 0 under set -euo pipefail, hence || true.
-		local root_time
-		root_time=$(sed -e 's/<?[^>]*?>//g' -e 's/<![^>]*>//g' "$file" | tr '\n' ' ' |
-			grep -o '<testsuites\?[^>]*' | head -n 1 |
-			sed -n 's/.*[[:space:]]time="\([0-9.]*\)".*/\1/p' || true)
+		# its root on the prolog line). The root tag is picked with a bash
+		# regex rather than `grep | head`: an early-closing reader makes the
+		# writer hit SIGPIPE, which errexit/pipefail turn into a failure and
+		# GNU grep reports as "write error: Broken pipe" (#1080).
+		local content root_tag root_time=""
+		content=$(sed -e 's/<?[^>]*?>//g' -e 's/<![^>]*>//g' "$file" | tr '\n' ' ')
+		local root_re='<testsuites?[[:space:]][^>]*'
+		local time_re='[[:space:]]time="([0-9.]+)"'
+		if [[ "$content" =~ $root_re ]]; then
+			root_tag="${BASH_REMATCH[0]}"
+			if [[ "$root_tag" =~ $time_re ]]; then
+				root_time="${BASH_REMATCH[1]}"
+			fi
+		fi
 		if [[ -n "$root_time" ]]; then
 			TESTS_DURATION_MS=$(awk -v t="$root_time" 'BEGIN { printf "%d", (t * 1000) + 0.5 }')
 		fi

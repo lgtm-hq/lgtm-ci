@@ -504,7 +504,9 @@ _convert() {
 		printf '</testsuite>\n</testsuites>\n'
 	} >"${BATS_TEST_TMPDIR}/big.xml"
 	[[ "$(wc -c <"${BATS_TEST_TMPDIR}/big.xml")" -gt 65536 ]]
-	run env -u BASH_ENV bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/big.xml"
+	# stderr is captured too: a SIGPIPE'd writer used to leak
+	# "grep: write error: Broken pipe" here while the document stayed right.
+	run env -u BASH_ENV bash -euo pipefail -c 'trap "" PIPE; source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" 2>&1 | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/big.xml"
 	assert_success
 	assert_output '["passed",2000,12500]'
 }
