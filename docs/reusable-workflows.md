@@ -239,6 +239,7 @@ read-only variant next to each facade:
 | Facade | Read-only variant | Variant union | Dropped |
 | --- | --- | --- | --- |
 | `reusable-test-node.yml` | `reusable-test-node-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job, `comment-marker` input |
+| `reusable-test-shell.yml` | `reusable-test-shell-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job and input (`comment-marker` stays: it also names the shard artifacts) |
 
 <!-- markdownlint-enable MD013 -->
 

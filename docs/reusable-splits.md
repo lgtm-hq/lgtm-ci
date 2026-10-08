@@ -69,8 +69,8 @@ from its own job.
 
 | Family | Boundary | Read-only entry point | Facade | Status |
 | --- | --- | --- | --- | --- |
-| Node tests | test (read) / PR comment (`pull-requests: write`) | `reusable-test-node-run.yml` (generated): `actions: read`, `contents: read` | unchanged | this change |
-| Shell tests | same | `reusable-test-shell-run.yml` (generated) | unchanged | planned |
+| Node tests | test (read) / PR comment (`pull-requests: write`) | `reusable-test-node-run.yml` (generated): `actions: read`, `contents: read` | unchanged | done (#1135) |
+| Shell tests | same | `reusable-test-shell-run.yml` (generated): `actions: read`, `contents: read` | unchanged | this change |
 | Rust tests | same | `reusable-rust-test-run.yml` (generated) | unchanged | planned |
 | Docker multi-platform | build and validate (read) / registry push, manifest, signing, attestation, code scanning (write) | planned: a validate entry with no write scope | composes the internal reusables only if no required check depends on its nested names; otherwise generated like the test families | planned |
 | Release recover | resolve, dry run (read) / resume per channel (write, secret) / record (`issues: write`) | planned: a plan entry that resolves and reports | same rule as Docker | planned |
