@@ -221,8 +221,8 @@ env:
     "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
     objects.githubusercontent.com:443 raw.githubusercontent.com:443
     pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
-    playwright.azureedge.net:443 playwright-akamai.azureedge.net:443 archive.ubuntu.com:80
-    security.ubuntu.com:80",
+    playwright.azureedge.net:443 playwright-akamai.azureedge.net:443 storage.googleapis.com:443
+    archive.ubuntu.com:80 azure.archive.ubuntu.com:80 security.ubuntu.com:80",
     "pypi":"github.com:443 api.github.com:443 codeload.github.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
     files.pythonhosted.org:443 test.pypi.org:443 upload.pypi.org:443 upload.test.pypi.org:443",
