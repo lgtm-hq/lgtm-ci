@@ -240,6 +240,7 @@ read-only variant next to each facade:
 | --- | --- | --- | --- |
 | `reusable-test-node.yml` | `reusable-test-node-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job, `comment-marker` input |
 | `reusable-test-shell.yml` | `reusable-test-shell-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job and input (`comment-marker` stays: it also names the shard artifacts) |
+| `reusable-rust-test.yml` | `reusable-rust-test-run.yml` | `actions: read`, `contents: read` | `publish-test-summary` job, `comment-marker` input |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -254,14 +255,15 @@ under the variant, because that would add a segment to every check name and
 break the org rulesets that require them
 ([org-rulesets.md](org-rulesets.md)).
 
-To move a call to the variant, change the `uses:` file name and remove
-`pull-requests: write` and `comment-marker`. With the variant,
-`publish-test-summary` only stages the coverage payload the comment would
-use, and a `node-versions` matrix no longer requires it to be `false`. To
-keep the comment, call `reusable-publish-test-summary.yml` from a
-separate job. That job reads the same `<artifact-prefix>-results-*` results.v1
-artifacts (#1080), so the write scope stays in a job that runs no project
-code:
+To move a call to the variant, change the `uses:` file name, remove
+`pull-requests: write`, and remove every input in the table's Dropped column:
+`comment-marker` for Node and Rust, `publish-test-summary` for shell, where
+`comment-marker` stays because it names the shard artifacts. In the Node and
+Rust variants, `publish-test-summary` only stages the coverage payload the
+comment would use, and a version matrix no longer requires it to be `false`.
+To keep the comment, call `reusable-publish-test-summary.yml` from a separate
+job. That job reads the same results.v1 artifacts (#1080), so the write scope
+stays in a job that runs no project code. For Node:
 
 ```yaml
 jobs:
@@ -303,6 +305,16 @@ under `working-directory`) and `coverage-format: istanbul`. Set
 `results-expected-count` to the number of Node versions so a missing leg
 fails the comment job. A variant caller with no comment job can set
 `publish-test-summary: false` to skip uploading the staged coverage payload.
+
+For Rust, use `results-artifact-pattern: <artifact-prefix>-results-*` and
+`tests-total-excludes-skipped: true`, which the Rust facade always sets so
+totals and the pass rate exclude skipped tests. Set `results-expected-count`
+to the number of toolchains. For the rich coverage comment (`coverage: true`,
+single toolchain) add `coverage-enabled: true`, `rich-coverage-comment: true`,
+`coverage-threshold`, `coverage-artifact-name: <artifact-prefix>-coverage-lcov`,
+`coverage-file: rust-coverage.lcov` and `coverage-format: lcov`. For shell,
+use `results-artifact-pattern: <artifact-prefix>-results` and
+`results-expected-count: "1"`.
 
 The measured permission, secret and job inventory of the five reusables
 that issue #1081 covers, and the split chosen for each, is in

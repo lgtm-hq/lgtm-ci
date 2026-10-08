@@ -42,7 +42,7 @@ its evidence commit, the validator prints a notice until the run is refreshed.
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 8 | 48 | 7 | 1 | 64 |
+| Reusable workflows | 9 | 48 | 7 | 1 | 65 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -57,6 +57,7 @@ its evidence commit, the validator prints a notice until the run is refreshed.
 | [`reusable-test-node`](#reusable-test-node) | `stable` | Node.js Vitest Test Workflow |
 | [`reusable-test-node-run`](#reusable-test-node-run) | `stable` | Node.js Vitest Test Workflow (read-only) |
 | [`reusable-test-python`](#reusable-test-python) | `stable` | Python Test Workflow |
+| [`reusable-test-shell-run`](#reusable-test-shell-run) | `stable` | Shell Test Workflow (read-only) |
 | [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure) | `preview` | Auto Re-run on Infra Failure |
 | [`reusable-build-artifact`](#reusable-build-artifact) | `preview` | Build Artifact Workflow |
 | [`reusable-build-python-dist`](#reusable-build-python-dist) | `preview` | Python Distribution Build Workflow |
@@ -89,6 +90,7 @@ its evidence commit, the validator prints a notice until the run is refreshed.
 | [`reusable-release-recover`](#reusable-release-recover) | `preview` | Release Recovery |
 | [`reusable-required-check`](#reusable-required-check) | `preview` | Required Check Gate |
 | [`reusable-rust-build`](#reusable-rust-build) | `preview` | Rust Build Workflow |
+| [`reusable-rust-test-run`](#reusable-rust-test-run) | `preview` | Rust Test Workflow (read-only) |
 | [`reusable-sbom`](#reusable-sbom) | `preview` | SBOM Workflow |
 | [`reusable-scorecards`](#reusable-scorecards) | `preview` | OpenSSF Scorecard |
 | [`reusable-security-audit`](#reusable-security-audit) | `preview` | Security Audit Workflow |
@@ -101,7 +103,6 @@ its evidence commit, the validator prints a notice until the run is refreshed.
 | [`reusable-test-python-publish`](#reusable-test-python-publish) | `preview` | Python Test Publish Workflow |
 | [`reusable-test-rust-build`](#reusable-test-rust-build) | `preview` | Rust Build Only Workflow |
 | [`reusable-test-shell`](#reusable-test-shell) | `preview` | Shell Test Workflow |
-| [`reusable-test-shell-run`](#reusable-test-shell-run) | `preview` | Shell Test Workflow (read-only) |
 | [`reusable-validate`](#reusable-validate) | `preview` | Validation Script |
 | [`reusable-validate-action-pinning`](#reusable-validate-action-pinning) | `preview` | Validate Action Pinning |
 | [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check) | `preview` | Vulnerability Suppression Check Workflow |
@@ -189,6 +190,7 @@ Rust Test Workflow
 - cargo-nextest and cargo-llvm-cov are installed from releases verified against committed sha256 digests (#1096)
 - Egress is enforced in block mode; hosts outside the selected `egress-preset` go in `allowed-endpoints` with `allowed-endpoints-mode: append` (#913, fixture `egress.yml`)
 - Sibling calls in one run need distinct `artifact-prefix` values (#1091, fixture `siblings.yml`)
+- Callers that do not need the PR comment can call `reusable-rust-test-run` instead and grant read scopes only (#1081)
 
 **Limitations:**
 
@@ -326,6 +328,30 @@ Python Test Workflow
 - `gh run rerun --job` on a reusable-call job re-runs every job of the caller run; convergence onto the same artifact names is proven (fixture `retry.yml`, `scripts/rerun-sibling.sh`), an isolated sibling re-run is not
 - The PR test-summary comment path was last exercised from the fixture on `pull_request` before the current pin; push runs skip it
 - Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
+
+#### `reusable-test-shell-run`
+
+Shell Test Workflow (read-only)
+
+- **Path:** [`.github/workflows/reusable-test-shell-run.yml`](../.github/workflows/reusable-test-shell-run.yml)
+- **Tier:** stable
+- **Evidence:** [`readonly-shell.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37854613092) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `52423571`
+- **Permissions:** `actions: read`, `contents: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Shell Tests`, `Coverage shard matrix`, `${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results` (single and sharded path)
+
+**Prerequisites:**
+
+- Grant the caller job `actions: read` and `contents: read`; the sharded aggregate's artifact-availability wait needs `actions: read` (#803)
+- Same inputs, outputs and artifacts as `reusable-test-shell.yml` without `publish-test-summary`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
+- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `comment-marker` and `results-artifact-pattern: <artifact-prefix>-results`
+
+**Limitations:**
+
+- The sharded check only appears with `coverage: true` and `coverage-shards` above 1; GitHub expands the listed template per leg, e.g. `Shell Tests (shard 1/4)`
+- Fixture proves the single-job `coverage: false` path only; the kcov coverage and sharded paths are exercised by lgtm-ci's own CI through the facade, not by the external fixture
 
 ### Reusable workflows: preview
 
@@ -779,6 +805,35 @@ Rust Build Workflow
 - **Package managers:** —
 - **Check names:** `build / Rust Build`
 
+#### `reusable-rust-test-run`
+
+Rust Test Workflow (read-only)
+
+> [!WARNING]
+> **Preview.** Read-only variant of `reusable-rust-test.yml` generated by #1081; promoted to stable once the fixture's `readonly-rust.yml` runs green from the fixture's main
+
+- **Path:** [`.github/workflows/reusable-rust-test-run.yml`](../.github/workflows/reusable-rust-test-run.yml)
+- **Tier:** preview
+- **Permissions:** `actions: read`, `contents: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** `cargo`
+- **Check names:** `Prepare Rust Matrix`, `Rust Tests`, `Aggregate Rust Results`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<rust-toolchain>`
+
+**Prerequisites:**
+
+- Grant the caller job `actions: read` and `contents: read`; the aggregate job's artifact-availability wait needs `actions: read` (#803)
+- Same inputs, outputs and artifacts as `reusable-rust-test.yml` without `comment-marker`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
+- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `results-artifact-pattern: <artifact-prefix>-results-*` and `tests-total-excludes-skipped: true` (as the facade does); see docs/reusable-workflows.md "Read-only variants" for the LCOV coverage inputs
+- Every other prerequisite of `reusable-rust-test` applies unchanged: `.config/nextest.toml` with a `ci` profile, digest-verified nextest / llvm-cov installs, egress block mode, distinct `artifact-prefix` per sibling call
+
+**Limitations:**
+
+- No bundled fallback nextest profile (#1086 item 3 not done)
+- A cached `~/.cargo/bin` at the pinned version is reused without re-verifying its digest; the cache is scoped to the consumer repository and ref (#1096)
+- Fixture proves a `coverage: false` call only; coverage and Pages coverage upload are untested through the variant
+- Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
+
 #### `reusable-sbom`
 
 SBOM Workflow
@@ -940,7 +995,7 @@ Rust Build Only Workflow
 Shell Test Workflow
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet; lgtm-ci's own BATS suite is its only caller
+> **Preview.** No external-fixture run of the facade itself (only its publish job differs from the stable `reusable-test-shell-run`, whose jobs the fixture proves); input or check-name changes here also change that stable variant and need a migration note
 
 - **Path:** [`.github/workflows/reusable-test-shell.yml`](../.github/workflows/reusable-test-shell.yml)
 - **Tier:** preview
@@ -953,31 +1008,6 @@ Shell Test Workflow
 **Prerequisites:**
 
 - Callers that do not need the PR comment can call `reusable-test-shell-run` instead and grant read scopes only (#1081)
-
-**Limitations:**
-
-- The sharded check only appears with `coverage: true` and `coverage-shards` above 1; GitHub expands the listed template per leg, e.g. `Shell Tests (shard 1/4)`
-
-#### `reusable-test-shell-run`
-
-Shell Test Workflow (read-only)
-
-> [!WARNING]
-> **Preview.** Read-only variant of `reusable-test-shell.yml` generated by #1081; promoted to stable once the fixture's `readonly-shell.yml` runs green from the fixture's main
-
-- **Path:** [`.github/workflows/reusable-test-shell-run.yml`](../.github/workflows/reusable-test-shell-run.yml)
-- **Tier:** preview
-- **Permissions:** `actions: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
-- **Package managers:** —
-- **Check names:** `Shell Tests`, `Coverage shard matrix`, `${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})`
-- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results` (single and sharded path)
-
-**Prerequisites:**
-
-- Grant the caller job `actions: read` and `contents: read`; the sharded aggregate's artifact-availability wait needs `actions: read` (#803)
-- Same inputs, outputs and artifacts as `reusable-test-shell.yml` without `publish-test-summary`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
-- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `comment-marker` and `results-artifact-pattern: <artifact-prefix>-results`
 
 **Limitations:**
 
