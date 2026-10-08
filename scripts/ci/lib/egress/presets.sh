@@ -135,9 +135,20 @@ egress_preset_endpoints() {
 			cdn.playwright.dev:443 \
 			playwright.azureedge.net:443 \
 			playwright-akamai.azureedge.net:443 \
+			storage.googleapis.com:443 \
 			archive.ubuntu.com:80 \
+			azure.archive.ubuntu.com:80 \
 			security.ubuntu.com:80
-		# archive.ubuntu.com/security.ubuntu.com use :80 for apt HTTP mirrors in CI images.
+		# archive.ubuntu.com/security.ubuntu.com use :80 for apt HTTP mirrors in CI images;
+		# GitHub-hosted runners resolve apt to azure.archive.ubuntu.com, which
+		# `playwright install --with-deps` needs for browser system packages (#1103).
+		# cdn.playwright.dev redirects Chrome-for-Testing builds to
+		# storage.googleapis.com/chrome-for-testing-public/... (path-style), so the
+		# bucket-scoped host form used for sigstore-tuf-root cannot match; the whole
+		# GCS host is the narrowest entry a host-level allowlist can express.
+		# Accepted risk: it reaches any GCS bucket, so job code (e.g. a package
+		# postinstall) could write to one it controls. Callers without Chromium
+		# can drop it with allowed-endpoints in replace mode.
 		;;
 	pypi)
 		# PyPI / TestPyPI (python dist, wait-for-package).
