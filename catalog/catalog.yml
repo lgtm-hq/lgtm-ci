@@ -2031,6 +2031,7 @@ deprecations:
       - reusable-required-check
       - reusable-rust-build
       - reusable-rust-test
+      - reusable-rust-test-run
       - reusable-sbom
       - reusable-sbom-release-upload
       - reusable-security-audit
@@ -2041,10 +2042,12 @@ deprecations:
       - reusable-test-node
       - reusable-test-node-custom
       - reusable-test-node-publish
+      - reusable-test-node-run
       - reusable-test-python
       - reusable-test-python-publish
       - reusable-test-rust-build
       - reusable-test-shell
+      - reusable-test-shell-run
       - reusable-validate
       - reusable-validate-action-pinning
       - reusable-vuln-suppression-check

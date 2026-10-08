@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   recorded exception; time alone never counts.
 - `catalog/catalog.yml` `deprecations` records (since, issue, replacement,
   entries) for every deprecated input, output and entry point: `tooling-ref`
-  on 56 reusables, the #770 publish inputs and outputs, `node-version-matrix`
+  on 59 reusables, the #770 publish inputs and outputs, `node-version-matrix`
   and `reusable-publish-npm`. The catalog validator requires a record for
   every input or output whose description says it is deprecated or inert, and
   `docs/catalog.md` lists them under Deprecations.
