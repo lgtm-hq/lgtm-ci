@@ -386,7 +386,9 @@ lgtm_ci_path_state() {
 		return 0
 	fi
 	errf="$(mktemp)"
-	if lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" --jq .type >/dev/null 2>"$errf"; then
+	# Presence is the HTTP status alone: an action path is a directory, which
+	# the contents API answers with an array, not an object.
+	if lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" --silent 2>"$errf"; then
 		LGTM_CI_PATH_STATE[$key]=present
 	elif grep -q 'HTTP 404' "$errf"; then
 		LGTM_CI_PATH_STATE[$key]=absent
@@ -747,7 +749,9 @@ main() {
 		fi
 		if [[ "$state" != "dispatch" ]]; then
 			extra_rows+=("$(printf '%s\t%s\t\t%s' "$file" "$state" "$paths")")
-		elif ! is_gate "$file" && [[ -n "${ref_state[${file%.yml}-probe.yml]:-}" ]]; then
+		elif ! is_gate "$file" && [[ "${ref_state[${file%.yml}-probe.yml]:-}" == "dispatch" ]]; then
+			# Only a probe that is itself dispatched stands in for its negative;
+			# otherwise the negative is dispatched directly.
 			extra_rows+=("$(printf '%s\tvia_probe\t\t%s' "$file" "${file%.yml}-probe.yml")")
 		elif should_dispatch "$file"; then
 			to_dispatch+=("$file")
@@ -755,6 +759,10 @@ main() {
 			extra_rows+=("$(printf '%s\tnot_dispatched\t\t' "$file")")
 		fi
 	done
+	if ((${#to_dispatch[@]} == 0)); then
+		echo "::warning title=external canary::no fixture workflow was dispatched against ${sha}; nothing was exercised"
+		_write_summary "> ⚠️ No fixture workflow was dispatched against this candidate (see the not_applicable rows); nothing was exercised."
+	fi
 	for gate in $CANARY_EXPECTED_GATES; do
 		[[ -n "${ref_state[${gate}.yml]:-}" ]] ||
 			extra_rows+=("$(printf '%s\tnot_dispatchable\t\t' "${gate}.yml")")
@@ -788,13 +796,13 @@ main() {
 	if [[ -n "$failures" ]]; then
 		if has_label "$CANARY_OVERRIDE_LABEL"; then
 			while IFS=$'\t' read -r file conclusion; do
-				echo "::warning title=external canary::gate ${file} concluded '${conclusion}' (reported as success: label ${CANARY_OVERRIDE_LABEL})"
+				echo "::warning title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}' (reported as success: label ${CANARY_OVERRIDE_LABEL})"
 			done <<<"$failures"
 			_write_summary "" "> ⚠️ Gate failures above are reported as success because the pull request carries the owner-only label \`${CANARY_OVERRIDE_LABEL}\`."
 			return 0
 		fi
 		while IFS=$'\t' read -r file conclusion; do
-			echo "::error title=external canary::gate ${file} concluded '${conclusion}'"
+			echo "::error title=external canary::$(workflow_role "$file") ${file} concluded '${conclusion}'"
 		done <<<"$failures"
 		return 1
 	fi

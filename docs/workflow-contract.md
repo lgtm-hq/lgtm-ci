@@ -2773,9 +2773,10 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    `scripts/pin.sh`), refuses any lgtm-ci reference that is not then pinned
    to the candidate, and commits the result through the git data API as the
    branch `canary/<sha>`. The fixture's `main` is never written;
-3. looks up every lgtm-ci path each fixture workflow references
-   (`.github/workflows/<file>.yml`, `.github/actions/<name>`) at the
-   candidate through the contents API (#1128). A path missing at the
+3. looks up every lgtm-ci path each dispatchable fixture workflow
+   references (`.github/workflows/<file>.yml`, `.github/actions/<name>`;
+   push-only `starter-python.yml` is not checked) at the candidate through
+   the contents API, deciding presence from the HTTP status (#1128). A path missing at the
    candidate is looked up at the candidate's merge base with `main`
    (compare API): present there means the candidate deletes or renames a
    public interface, reported `removed_by_candidate`, which fails the canary
@@ -2794,7 +2795,9 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    cannot take `continue-on-error`, and a parse-time rejection cannot be
    caught inside its own run, so the assertion has to live in a second
    workflow. A probe inherits a `not_applicable` or `removed_by_candidate`
-   verdict from its negative;
+   verdict from its negative, and a negative whose probe is not dispatched
+   is dispatched directly. A run that dispatches nothing at all (every
+   workflow `not_applicable`) warns that nothing was exercised;
 5. polls the fixture's run list until each dispatched workflow has a
    completed run, bounded at 25 minutes; a workflow whose dispatch was
    rejected is reported `dispatch_failed` at once instead of waiting;

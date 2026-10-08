@@ -119,7 +119,7 @@ set -euo pipefail
 echo "$*" >>"$MOCK_CALLS"
 args="$*"
 case "$args" in
-*"repos/lgtm-hq/lgtm-ci/contents/"*"?ref="*" --jq .type")
+*"repos/lgtm-hq/lgtm-ci/contents/"*"?ref="*" --silent")
 	if [[ "${MOCK_CONTENTS_FAIL:-}" == "1" ]]; then
 		echo "gh: HTTP 502" >&2
 		exit 1
@@ -132,7 +132,6 @@ case "$args" in
 		echo "gh: Not Found (HTTP 404)" >&2
 		exit 1
 	fi
-	echo file
 	;;
 *"repos/lgtm-hq/lgtm-ci/compare/main..."*" --jq .merge_base_commit.sha")
 	if [[ "${MOCK_COMPARE_FAIL:-}" == "1" ]]; then
@@ -875,7 +874,48 @@ EOF
 	assert_success
 	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
 	assert_success
-	refute_output --partial "via_probe"
+	run grep -F "via_probe" "$GITHUB_STEP_SUMMARY"
+	refute_output
+}
+
+@test "external-canary: a negative whose probe is not dispatched is dispatched directly" {
+	# The probe references an lgtm-ci path that landed after the candidate.
+	_add_probe
+	printf '      - uses: lgtm-hq/lgtm-ci/.github/actions/brand-new@%s\n' "$OLD_PIN" >>"$MOCK_FIXTURE_DIR/verify-negative-probe.yml"
+	printf '%s .github/actions/brand-new\n%s .github/actions/brand-new\n' "$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	all_green_snapshot
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
+	assert_success
+	run grep -F "actions/workflows/verify-negative-probe.yml/dispatches" "$MOCK_CALLS"
+	refute_output
+	run grep -F "| \`verify-negative.yml\` | informational | \`failure\` | \`failure\` | ✅ pass |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run grep -F "| \`verify-negative-probe.yml\` | informational | \`success\` | \`not_applicable\` |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "external-canary: a run that dispatches nothing warns instead of passing silently" {
+	printf '%s .github/actions/run-pytest\n%s .github/actions/run-pytest\n%s .github/workflows/reusable-rust-test.yml\n%s .github/workflows/reusable-rust-test.yml\n' \
+		"$CANDIDATE" "$MOCK_MERGE_BASE" "$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "::warning title=external canary::no fixture workflow was dispatched against ${CANDIDATE}"
+	run grep -c -- "/dispatches" "$MOCK_CALLS"
+	assert_output "0"
+	run grep -F "nothing was exercised" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "external-canary: presence is decided by HTTP status, so action directories count as present" {
+	run call_fn "lgtm_ci_path_state .github/actions/run-pytest '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "present"
+	run grep -F "contents/.github/actions/run-pytest?ref=${CANDIDATE} --silent" "$MOCK_CALLS"
+	assert_success
+	run grep -F -- "--jq" "$MOCK_CALLS"
+	refute_output
 }
 
 # --- reference check against the candidate (#1128) --------------------------
@@ -965,7 +1005,8 @@ EOF
 	run grep -F "Rebase onto \`main\`" "$GITHUB_STEP_SUMMARY"
 	assert_success
 	# Not reported not_dispatchable either: the fixture still exposes it.
-	refute_output --partial "not_dispatchable"
+	run grep -F "not_dispatchable" "$GITHUB_STEP_SUMMARY"
+	refute_output
 	run grep -F "gate-failures=0" "$GITHUB_OUTPUT"
 	assert_success
 }
@@ -976,7 +1017,7 @@ EOF
 	run_row python.yml completed success 11 >"$MOCK_RUNS_DIR/runs.1"
 	run bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
-	assert_output --partial "::error title=external canary::gate verify-negative.yml concluded 'removed_by_candidate'"
+	assert_output --partial "::error title=external canary::informational verify-negative.yml concluded 'removed_by_candidate'"
 	assert_output --partial "| \`verify-negative.yml\` | informational | \`failure\` | \`removed_by_candidate\` | ❌ **removed by candidate** | — |"
 	assert_output --partial "this change deletes or renames a public interface"
 	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
@@ -988,7 +1029,7 @@ EOF
 	run env EVENT_NAME=pull_request EVENT_ACTION=synchronize PR_NUMBER=42 PR_LABELS="needs-external-canary,canary-informational" \
 		bash "$SCRIPT" "$CANDIDATE"
 	assert_success
-	assert_output --partial "::warning title=external canary::gate verify-negative.yml concluded 'removed_by_candidate'"
+	assert_output --partial "::warning title=external canary::informational verify-negative.yml concluded 'removed_by_candidate'"
 }
 
 @test "external-canary: a probe inherits the not_applicable verdict of the negative it dispatches" {
