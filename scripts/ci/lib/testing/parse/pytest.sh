@@ -68,3 +68,75 @@ parse_pytest_coverage() {
 
 # Export functions
 export -f parse_pytest_json parse_pytest_coverage
+
+# Coverage metrics for results.v1 from the file pytest wrote (coverage.py
+# JSON, Cobertura XML or LCOV, per COVERAGE_FORMAT).
+# Usage: pytest_coverage_metrics "coverage.json"
+# Sets: COVERAGE_LINES, COVERAGE_BRANCHES, COVERAGE_FUNCTIONS; a metric the
+#       file does not measure is left empty so the contract omits it.
+pytest_coverage_metrics() {
+	local file="${1:-}"
+	COVERAGE_LINES=""
+	COVERAGE_BRANCHES=""
+	COVERAGE_FUNCTIONS=""
+	[[ -f "$file" ]] || return 1
+
+	if jq -e '.totals.percent_covered' "$file" >/dev/null 2>&1; then
+		# coverage.py JSON: percent_covered_branches exists only with --branch.
+		COVERAGE_LINES=$(jq -r '.totals.percent_covered' "$file")
+		COVERAGE_BRANCHES=$(jq -r '.totals.percent_covered_branches // empty' "$file")
+		return 0
+	fi
+	if declare -f extract_coverage_details >/dev/null 2>&1; then
+		extract_coverage_details "$file" || return 1
+		# Cobertura carries line-rate/branch-rate only; extract_coverage_details
+		# leaves functions at its 0 default, which the contract must not
+		# report as a measured 0%.
+		if declare -f detect_coverage_format >/dev/null 2>&1 &&
+			[[ "$(detect_coverage_format "$file")" == "cobertura" ]]; then
+			COVERAGE_FUNCTIONS=""
+		fi
+		return 0
+	fi
+	return 1
+}
+
+# Native pytest-json-report (plus optional coverage file) to results.v1 on stdout.
+# Usage: pytest_results_v1 "pytest-results.json" ["coverage.json"]
+# Reads: EXIT_CODE, MATRIX_KEY, MATRIX_VALUE, RESULTS_ARTIFACTS,
+#        RESULTS_SOURCE_VERSION, RESULTS_RUNNER (default run-pytest)
+pytest_results_v1() {
+	local report="${1:-}"
+	local coverage_file="${2:-}"
+	local parse_status="ok"
+
+	TESTS_PASSED=0
+	TESTS_FAILED=0
+	TESTS_SKIPPED=0
+	TESTS_TOTAL=0
+	TESTS_DURATION_MS=0
+	if [[ ! -f "$report" ]]; then
+		parse_status="missing"
+	elif ! jq -e 'true' "$report" >/dev/null 2>&1; then
+		parse_status="invalid"
+	else
+		parse_pytest_json "$report" || true
+		# pytest reports seconds; the contract wants whole milliseconds (half-up).
+		TESTS_DURATION_MS=$(jq -r '
+			(try (.duration | tonumber) catch 0)
+			| if . > 0 then (. * 1000 + 0.5 | floor) else 0 end
+		' "$report" 2>/dev/null || echo "0")
+	fi
+
+	COVERAGE_LINES=""
+	COVERAGE_BRANCHES=""
+	COVERAGE_FUNCTIONS=""
+	if [[ -n "$coverage_file" && -f "$coverage_file" ]]; then
+		pytest_coverage_metrics "$coverage_file" || true
+	fi
+
+	RESULTS_TOOL="pytest" RESULTS_RUNNER="${RESULTS_RUNNER:-run-pytest}" \
+		RESULTS_PARSE_STATUS="$parse_status" results_v1_build
+}
+
+export -f pytest_coverage_metrics pytest_results_v1

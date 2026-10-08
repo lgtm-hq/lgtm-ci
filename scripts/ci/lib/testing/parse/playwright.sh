@@ -85,3 +85,28 @@ parse_playwright_json() {
 # Export functions
 export -f _playwright_reset_counts
 export -f parse_playwright_json
+
+# Native Playwright JSON reporter output to results.v1 on stdout.
+# Usage: playwright_results_v1 "playwright-results.json"
+# Reads: EXIT_CODE, MATRIX_KEY, MATRIX_VALUE, RESULTS_ARTIFACTS,
+#        RESULTS_SOURCE_VERSION, RESULTS_RUNNER (default run-playwright-tests)
+playwright_results_v1() {
+	local report="${1:-}"
+	local parse_status="ok"
+	local rc=0
+
+	parse_playwright_json "$report" || rc=$?
+	case "$rc" in
+	0) ;;
+	1) parse_status="missing" ;;
+	*) parse_status="invalid" ;;
+	esac
+
+	COVERAGE_LINES=""
+	COVERAGE_BRANCHES=""
+	COVERAGE_FUNCTIONS=""
+	RESULTS_TOOL="playwright" RESULTS_RUNNER="${RESULTS_RUNNER:-run-playwright-tests}" \
+		RESULTS_PARSE_STATUS="$parse_status" results_v1_build
+}
+
+export -f playwright_results_v1

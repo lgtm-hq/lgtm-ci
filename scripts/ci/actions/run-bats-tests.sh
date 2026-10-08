@@ -36,6 +36,9 @@
 #              cobertura.xml.
 #   MERGED_COVERAGE_FILE - Destination for merge-coverage XML.
 #   COVERAGE_PERCENT - Coverage percentage (for check-threshold step)
+#   EXIT_CODE - bats exit code (parse-results / aggregate-results; feeds results.v1 status)
+#   RESULTS_OUTPUT - results.v1 path (parse-results / aggregate-results;
+#                    default results/bats/<MATRIX_VALUE|default>/results.json)
 #   COVERAGE_THRESHOLD - Minimum coverage threshold (for check-threshold step)
 
 set -euo pipefail
@@ -45,6 +48,39 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 : "${STEP:=run-tests}"
 : "${GITHUB_OUTPUT:=/dev/null}"
 : "${GITHUB_STEP_SUMMARY:=/dev/null}"
+
+# results.v1 contract (#1080): parse-results / aggregate-results write the
+# document and derive their outputs from it.
+_RUN_BATS_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
+# shellcheck source=../lib/testing/results.sh
+source "$_RUN_BATS_SCRIPT_DIR/../lib/testing/results.sh"
+# shellcheck source=../lib/testing/parse/tap.sh
+source "$_RUN_BATS_SCRIPT_DIR/../lib/testing/parse/tap.sh"
+
+# Wall-clock duration of a run, kept next to its TAP so the sharded
+# aggregate can sum it (bats itself reports none in TAP).
+write_bats_duration() {
+	local start="$1" end="$2"
+	printf '%s\n' "$(((end - start) * 1000))" >bats-duration-ms.txt
+}
+
+# Sum every bats-duration-ms.txt under a directory (0 when none).
+sum_bats_durations() {
+	find "$1" -type f -name 'bats-duration-ms.txt' -exec cat {} + 2>/dev/null |
+		awk '{ s += $1 } END { printf "%d\n", s }'
+}
+
+# Write the results.v1 document for a TAP set and publish the public
+# outputs from it. Usage: write_bats_results <output-path> <tap-file>...
+write_bats_results() {
+	local output="$1"
+	shift
+	mkdir -p "$(dirname "$output")"
+	RESULTS_TOOL=bats RESULTS_RUNNER=run-bats-tests tap_results_v1 "$@" >"$output"
+	results_v1_validate "$output"
+	results_v1_github_outputs "$output"
+	echo "results-json=$output" >>"$GITHUB_OUTPUT"
+}
 
 # #856 Part 3: fixture `::error::` / `::warning::` / `::notice::` lines must
 # not become real job annotations. Wrap BATS stdout/stderr in a
@@ -222,10 +258,12 @@ if [[ "$STEP" == "run-tests" ]]; then
 
 	# Run tests
 	echo "Running: bats ${BATS_ARGS[*]} $TEST_PATH"
+	run_start_ts="$(date +%s)"
 	begin_bats_output_guard
 	bats "${BATS_ARGS[@]}" "$TEST_PATH" 2>&1 | tee bats-output.tap
 	TEST_EXIT_CODE=${PIPESTATUS[0]}
 	end_bats_output_guard
+	write_bats_duration "$run_start_ts" "$(date +%s)"
 
 	# Store raw output for parsing
 	echo "exit-code=$TEST_EXIT_CODE" >>"$GITHUB_OUTPUT"
@@ -376,6 +414,7 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	end_ts="$(date +%s)"
 	elapsed=$((end_ts - start_ts))
 	echo "coverage-finish suite elapsed=${elapsed}s exit=${KCOV_EXIT}"
+	write_bats_duration "$start_ts" "$end_ts"
 
 	# GNU timeout exits 124 when the command times out.
 	if [[ "$KCOV_EXIT" -eq 124 ]]; then
@@ -398,30 +437,26 @@ fi
 # Step: parse-results - Parse TAP output from test run
 # =============================================================================
 if [[ "$STEP" == "parse-results" ]]; then
-	# Parse TAP output
+	# TAP -> results.v1 (#1080); the outputs below come from the document.
+	# A "# skip" directive counts as skipped (bats prints it as ok), so
+	# tests-passed excludes skipped tests and tests-skipped reports them.
+	: "${RESULTS_OUTPUT:=$(results_v1_path bats "${MATRIX_VALUE:-default}")}"
 	TESTS_RAN="false"
-	TOTAL=0
-	PASSED=0
-	FAILED=0
-
+	TESTS_DURATION_MS="$(sum_bats_durations .)"
 	if [[ -f bats-output.tap ]]; then
-		# Use -E for extended regex (POSIX-compatible)
-		# Assign separately to avoid || echo writing to GITHUB_OUTPUT
-		TOTAL=$(grep -Ec "^(ok|not ok)" bats-output.tap 2>/dev/null) || TOTAL=0
-		PASSED=$(grep -c "^ok " bats-output.tap 2>/dev/null) || PASSED=0
-		FAILED=$(grep -c "^not ok" bats-output.tap 2>/dev/null) || FAILED=0
-		# Mark tests as ran if TAP file exists and has content
-		if [[ "$TOTAL" -gt 0 ]]; then
-			TESTS_RAN="true"
-		fi
+		RESULTS_ARTIFACTS=$'tap=bats-output.tap\n' \
+			EXIT_CODE="${EXIT_CODE:-}" TESTS_DURATION_MS="$TESTS_DURATION_MS" \
+			write_bats_results "$RESULTS_OUTPUT" bats-output.tap
+	else
+		EXIT_CODE="${EXIT_CODE:-}" write_bats_results "$RESULTS_OUTPUT"
 	fi
-
-	{
-		echo "tests-total=$TOTAL"
-		echo "tests-passed=$PASSED"
-		echo "tests-failed=$FAILED"
-		echo "tests-ran=$TESTS_RAN"
-	} >>"$GITHUB_OUTPUT"
+	IFS=$'\t' read -r TOTAL PASSED FAILED < <(
+		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$RESULTS_OUTPUT"
+	)
+	if [[ "$TOTAL" -gt 0 ]]; then
+		TESTS_RAN="true"
+	fi
+	echo "tests-ran=$TESTS_RAN" >>"$GITHUB_OUTPUT"
 
 	{
 		echo "### Test Results"
@@ -549,20 +584,14 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 	fi
 
 	TESTS_RAN="false"
-	TOTAL=0
-	PASSED=0
-	FAILED=0
 	TAP_COUNT=0
+	TAP_FILES=()
 
 	while IFS= read -r tap_file; do
 		TAP_COUNT=$((TAP_COUNT + 1))
-		file_total=$(grep -Ec "^(ok|not ok)" "$tap_file" 2>/dev/null) || file_total=0
-		file_passed=$(grep -c "^ok " "$tap_file" 2>/dev/null) || file_passed=0
-		file_failed=$(grep -c "^not ok" "$tap_file" 2>/dev/null) || file_failed=0
-		TOTAL=$((TOTAL + file_total))
-		PASSED=$((PASSED + file_passed))
-		FAILED=$((FAILED + file_failed))
-		echo "aggregate-tap file=${tap_file} total=${file_total} passed=${file_passed} failed=${file_failed}"
+		TAP_FILES+=("$tap_file")
+		parse_tap_file "$tap_file" || true
+		echo "aggregate-tap file=${tap_file} total=${TESTS_TOTAL} passed=${TESTS_PASSED} failed=${TESTS_FAILED} skipped=${TESTS_SKIPPED}"
 	done < <(find "$SHARD_ARTIFACTS_DIR" -type f -name 'bats-output.tap' | LC_ALL=C sort)
 
 	if [[ -n "${EXPECTED_SHARDS:-}" ]]; then
@@ -576,16 +605,23 @@ if [[ "$STEP" == "aggregate-results" ]]; then
 		fi
 	fi
 
+	# Shard TAPs -> one results.v1 document (#1080); outputs come from it.
+	: "${RESULTS_OUTPUT:=$(results_v1_path bats "${MATRIX_VALUE:-default}")}"
+	TESTS_DURATION_MS="$(sum_bats_durations "$SHARD_ARTIFACTS_DIR")"
+	if [[ "${#TAP_FILES[@]}" -gt 0 ]]; then
+		RESULTS_ARTIFACTS="$(printf 'tap=%s\n' "${TAP_FILES[@]}")" \
+		EXIT_CODE="${EXIT_CODE:-}" TESTS_DURATION_MS="$TESTS_DURATION_MS" \
+			write_bats_results "$RESULTS_OUTPUT" "${TAP_FILES[@]}"
+	else
+		EXIT_CODE="${EXIT_CODE:-}" write_bats_results "$RESULTS_OUTPUT"
+	fi
+	IFS=$'\t' read -r TOTAL PASSED FAILED < <(
+		jq -r '[.counts.total, .counts.passed, .counts.failed] | @tsv' "$RESULTS_OUTPUT"
+	)
 	if [[ "$TOTAL" -gt 0 ]]; then
 		TESTS_RAN="true"
 	fi
-
-	{
-		echo "tests-total=$TOTAL"
-		echo "tests-passed=$PASSED"
-		echo "tests-failed=$FAILED"
-		echo "tests-ran=$TESTS_RAN"
-	} >>"$GITHUB_OUTPUT"
+	echo "tests-ran=$TESTS_RAN" >>"$GITHUB_OUTPUT"
 
 	{
 		echo "### Test Results"

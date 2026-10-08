@@ -25,6 +25,9 @@
 #   EXIT_CODE - Playwright process exit code for upload-gate / summary
 #   TESTS_PASSED / TESTS_FAILED / TESTS_SKIPPED / TESTS_TOTAL - summary inputs
 #   REPORT_PATH - JSON results path for parse (default: playwright-results.json)
+#   MATRIX_KEY / MATRIX_VALUE - matrix coordinate recorded in results.v1
+#   RESULTS_OUTPUT - results.v1 path (default results/playwright/<matrix-value|default>/results.json)
+#   RESULTS_FILE - summary step: results.v1 document to render
 
 set -euo pipefail
 
@@ -317,6 +320,10 @@ run)
 parse)
 	: "${REPORT_PATH:=playwright-results.json}"
 	: "${WORKING_DIRECTORY:=.}"
+	: "${EXIT_CODE:=}"
+	: "${MATRIX_KEY:=}"
+	: "${MATRIX_VALUE:=}"
+	: "${RESULTS_OUTPUT:=$(results_v1_path playwright "${MATRIX_VALUE:-default}")}"
 
 	working_directory="$(trim "$WORKING_DIRECTORY")"
 	if [[ -z "$working_directory" ]]; then
@@ -328,63 +335,58 @@ parse)
 		json_file="${working_directory}/${json_file}"
 	fi
 
+	# Native JSON reporter -> results.v1 (#1080). Every public output below
+	# is read back from that document, never from parser state.
+	artifacts=""
 	if [[ -f "$json_file" ]]; then
-		if parse_playwright_json "$json_file"; then
-			log_info "Test results: $(format_test_summary)"
-		else
-			log_warn "Results file is not valid JSON; reporting zero tests: $json_file"
-		fi
-		set_github_output "tests-passed" "$TESTS_PASSED"
-		set_github_output "tests-failed" "$TESTS_FAILED"
-		set_github_output "tests-skipped" "$TESTS_SKIPPED"
-		set_github_output "tests-total" "$TESTS_TOTAL"
+		artifacts+="report=${json_file}"$'\n'
 	else
 		log_warn "Results file not found: $json_file"
-		set_github_output "tests-passed" "0"
-		set_github_output "tests-failed" "0"
-		set_github_output "tests-skipped" "0"
-		set_github_output "tests-total" "0"
 	fi
+	report_dir="$(dirname "$json_file")"
+	if [[ -f "${report_dir}/playwright-results.xml" ]]; then
+		artifacts+="junit=${report_dir}/playwright-results.xml"$'\n'
+	fi
+	if [[ -d "${report_dir}/playwright-report" ]]; then
+		artifacts+="html-report=${report_dir}/playwright-report"$'\n'
+	fi
+
+	mkdir -p "$(dirname "$RESULTS_OUTPUT")"
+	RESULTS_ARTIFACTS="$artifacts" playwright_results_v1 "$json_file" >"$RESULTS_OUTPUT"
+	results_v1_validate "$RESULTS_OUTPUT"
+	results_v1_github_outputs "$RESULTS_OUTPUT"
+	set_github_output "results-json" "$RESULTS_OUTPUT"
+
+	if [[ "$(jq -r .status "$RESULTS_OUTPUT")" == "error" && -f "$json_file" ]]; then
+		log_warn "Results file is not valid JSON; reporting zero tests: $json_file"
+	else
+		log_info "Test results: $(format_test_summary)"
+	fi
+	log_info "results.v1 written: ${RESULTS_OUTPUT}"
 	;;
 
 summary)
-	: "${TESTS_PASSED:=0}"
-	: "${TESTS_FAILED:=0}"
-	: "${TESTS_SKIPPED:=0}"
-	: "${TESTS_TOTAL:=0}"
 	: "${BROWSERS:=chromium}"
-	: "${EXIT_CODE:=0}"
 	: "${PROJECT:=}"
 	: "${GREP:=}"
-
-	add_github_summary "## Playwright E2E Results"
-	add_github_summary ""
-
-	if [[ "$EXIT_CODE" -eq 0 ]]; then
-		add_github_summary "**Status:** :white_check_mark: Passed"
-	else
-		add_github_summary "**Status:** :x: Failed"
+	# Pure renderer over the contract document. The legacy TESTS_* /
+	# EXIT_CODE inputs are still accepted: without RESULTS_FILE they are
+	# folded into a temporary document first.
+	: "${RESULTS_FILE:=}"
+	if [[ -z "$RESULTS_FILE" || ! -f "$RESULTS_FILE" ]]; then
+		RESULTS_FILE="$(mktemp)"
+		RESULTS_TOOL=playwright RESULTS_RUNNER=run-playwright-tests \
+			EXIT_CODE="${EXIT_CODE:-0}" results_v1_build >"$RESULTS_FILE"
 	fi
-	add_github_summary ""
-
-	if [[ "$TESTS_TOTAL" -gt 0 ]]; then
-		add_github_summary "| Metric | Value |"
-		add_github_summary "|--------|-------|"
-		add_github_summary "| Browsers | $BROWSERS |"
-		if [[ -n "$(trim "${PROJECT:-}")" ]]; then
-			add_github_summary "| Project | $PROJECT |"
-		fi
-		if [[ -n "$(trim "${GREP:-}")" ]]; then
-			add_github_summary "| Grep | $GREP |"
-		fi
-		add_github_summary "| Passed | $TESTS_PASSED |"
-		add_github_summary "| Failed | $TESTS_FAILED |"
-		add_github_summary "| Skipped | $TESTS_SKIPPED |"
-		add_github_summary "| Total | $TESTS_TOTAL |"
-	else
-		add_github_summary "> No tests were found."
+	extra_rows="Browsers|${BROWSERS}"
+	if [[ -n "$(trim "${PROJECT:-}")" ]]; then
+		extra_rows+=$'\n'"Project|${PROJECT}"
 	fi
-	add_github_summary ""
+	if [[ -n "$(trim "${GREP:-}")" ]]; then
+		extra_rows+=$'\n'"Grep|${GREP}"
+	fi
+	TITLE="Playwright E2E Results" RESULTS_FILE="$RESULTS_FILE" EXTRA_ROWS="$extra_rows" \
+		bash "$SCRIPT_DIR/render-step-summary.sh"
 	;;
 
 upload-gate)

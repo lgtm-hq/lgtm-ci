@@ -16,6 +16,11 @@ _LGTM_CI_TESTING_PARSE_DIR="$(cd "$(dirname "${BASH_SOURCE:-$0}")" && pwd)"
 # shellcheck source=./parse/common.sh
 source "$_LGTM_CI_TESTING_PARSE_DIR/parse/common.sh"
 
+# results.v1 contract builder (#1080): every parser's *_results_v1 wrapper
+# hands its counts to results_v1_build.
+# shellcheck source=./results.sh
+source "$_LGTM_CI_TESTING_PARSE_DIR/results.sh"
+
 # shellcheck source=./parse/pytest.sh
 source "$_LGTM_CI_TESTING_PARSE_DIR/parse/pytest.sh"
 
@@ -30,3 +35,9 @@ source "$_LGTM_CI_TESTING_PARSE_DIR/parse/junit.sh"
 
 # shellcheck source=./parse/lighthouse.sh
 source "$_LGTM_CI_TESTING_PARSE_DIR/parse/lighthouse.sh"
+
+# shellcheck source=./parse/tap.sh
+source "$_LGTM_CI_TESTING_PARSE_DIR/parse/tap.sh"
+
+# shellcheck source=./parse/osv.sh
+source "$_LGTM_CI_TESTING_PARSE_DIR/parse/osv.sh"

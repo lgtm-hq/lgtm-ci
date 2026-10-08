@@ -97,3 +97,45 @@ parse_junit_xml() {
 
 # Export functions
 export -f parse_junit_xml
+
+# JUnit XML (plus optional LCOV coverage) to results.v1 on stdout.
+# Usage: junit_results_v1 "results.xml" ["coverage.lcov"]
+# Reads: RESULTS_TOOL (default junit; nextest callers pass cargo-nextest),
+#        RESULTS_RUNNER (default run-junit), EXIT_CODE, MATRIX_KEY,
+#        MATRIX_VALUE, RESULTS_ARTIFACTS, RESULTS_SOURCE_VERSION
+junit_results_v1() {
+	local file="${1:-}"
+	local coverage_file="${2:-}"
+	local parse_status="ok"
+
+	TESTS_DURATION_MS=0
+	if [[ ! -f "$file" ]]; then
+		parse_status="missing"
+		parse_junit_xml "$file" || true
+	elif ! grep -q '<testsuite' "$file"; then
+		parse_status="invalid"
+		parse_junit_xml "/nonexistent/junit.xml" || true
+	else
+		parse_junit_xml "$file" || true
+		# Root element time="<seconds>" when the producer reports one.
+		local root_time
+		root_time=$(grep -v '^[[:space:]]*<?' "$file" | grep -v '^[[:space:]]*<!' |
+			grep -m1 -o '<testsuites\?[^>]*' | sed -n 's/.*[[:space:]]time="\([0-9.]*\)".*/\1/p')
+		if [[ -n "$root_time" ]]; then
+			TESTS_DURATION_MS=$(awk -v t="$root_time" 'BEGIN { printf "%d", (t * 1000) + 0.5 }')
+		fi
+	fi
+
+	COVERAGE_LINES=""
+	COVERAGE_BRANCHES=""
+	COVERAGE_FUNCTIONS=""
+	if [[ -n "$coverage_file" && -f "$coverage_file" ]] &&
+		declare -f extract_coverage_details >/dev/null 2>&1; then
+		extract_coverage_details "$coverage_file" || true
+	fi
+
+	RESULTS_TOOL="${RESULTS_TOOL:-junit}" RESULTS_RUNNER="${RESULTS_RUNNER:-run-junit}" \
+		RESULTS_PARSE_STATUS="$parse_status" results_v1_build
+}
+
+export -f junit_results_v1
