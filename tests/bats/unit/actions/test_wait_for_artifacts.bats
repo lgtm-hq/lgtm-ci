@@ -184,14 +184,15 @@ _require_zip_tools() {
 	command -v unzip >/dev/null 2>&1 || skip "unzip command not available"
 }
 
-# Build a real zip holding summary.json for the given leg, echo its path.
+# Build a real zip holding a results.v1 results.json (#1080) for the given
+# leg (its name recorded as matrix.value), echo its path.
 _zip_for() {
 	local name="$1" dir zip
 	dir="${BATS_TEST_TMPDIR}/zips/${name}"
 	zip="${BATS_TEST_TMPDIR}/zips/${name}.zip"
 	mkdir -p "$dir"
-	printf '{"passed":"true","leg":"%s"}\n' "$name" >"${dir}/summary.json"
-	(cd "$dir" && zip -q "$zip" summary.json)
+	printf '{"tool":"pytest","status":"passed","counts":{"passed":1,"failed":0,"skipped":0,"total":1},"duration_ms":1,"artifacts":[],"source":{"runner":"run-pytest","version":"t"},"matrix":{"key":"leg","value":"%s"}}\n' "$name" >"${dir}/results.json"
+	(cd "$dir" && zip -q "$zip" results.json)
 	printf '%s' "$zip"
 }
 
@@ -557,10 +558,10 @@ EOF
 	run_wait 2 'python-results-*'
 	assert_success
 	assert_output --partial "Downloaded 2 artifact(s) to ${DOWNLOAD_DIR} in 2 request(s)"
-	[[ -f "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
-	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/summary.json" ]]
-	run grep -o '"leg":"[^"]*"' "${DOWNLOAD_DIR}/python-results-3.14/summary.json"
-	assert_output '"leg":"python-results-3.14"'
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/results.json" ]]
+	run jq -r .matrix.value "${DOWNLOAD_DIR}/python-results-3.14/results.json"
+	assert_output 'python-results-3.14'
 	run cat "$GH_CALLS"
 	assert_output --partial "api -X GET repos/lgtm-hq/py-lintro/actions/artifacts/1/zip"
 	assert_output --partial "api -X GET repos/lgtm-hq/py-lintro/actions/artifacts/2/zip"
@@ -577,7 +578,7 @@ EOF
 	run_wait 2 'python-results-*'
 	assert_success
 	# The download tree must be exactly what aggregate-results.sh globs: one
-	# summary.json per leg, two legs for a two-entry matrix.
+	# results.json per leg, two legs for a two-entry matrix.
 	run env RESULTS_DIR="$DOWNLOAD_DIR" \
 		MATRIX_JSON='{"include":[{"python-version":"3.11"},{"python-version":"3.14"}]}' \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
@@ -597,7 +598,7 @@ EOF
 	assert_success
 	assert_output --partial "Artifact python-results-3.14 (id 8646450237) is listed but not yet downloadable (HTTP 404); retrying in 2s"
 	assert_output --partial "Downloaded 2 artifact(s) to ${DOWNLOAD_DIR} in 3 request(s)"
-	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/summary.json" ]]
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/results.json" ]]
 	run cat "$SLEEP_CALLS"
 	assert_output "2"
 	[[ "$(_count_calls "$GH_CALLS" "artifacts/8646450237/zip")" == "2" ]]
@@ -678,7 +679,7 @@ EOF
 	assert_output --partial "::error::Artifact python-results-3.11 (id 1) downloaded but is not a valid zip; not retrying"
 	[[ ! -s "$SLEEP_CALLS" ]]
 	[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "1" ]]
-	[[ ! -f "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+	[[ ! -f "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
 }
 
 # =============================================================================
@@ -775,8 +776,8 @@ EOF
 	assert_success
 	assert_output --partial "Found 2/2 artifacts matching 'python-results-*' on poll 2"
 	assert_output --partial "Downloaded 2 artifact(s)"
-	[[ -f "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
-	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/summary.json" ]]
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.14/results.json" ]]
 	[[ "$(cat "$SLEEP_CALLS")" == $'2\n2' ]] || fail "unexpected backoff: $(cat "$SLEEP_CALLS")"
 }
 
@@ -875,7 +876,7 @@ _sha256_of() {
 	run_wait 1 'python-results-*'
 	assert_success
 	assert_output --partial "Downloaded python-results-3.11 (id 1) to ${DOWNLOAD_DIR}/python-results-3.11 (digest verified)"
-	[[ -f "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+	[[ -f "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
 }
 
 @test "wait-for-artifacts: a download whose digest differs from the listing is an integrity failure, not retried" {
@@ -891,7 +892,7 @@ _sha256_of() {
 	assert_output --partial "not retrying"
 	[[ ! -s "$SLEEP_CALLS" ]]
 	[[ "$(_count_calls "$GH_CALLS" "artifacts/1/zip")" == "1" ]]
-	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
 }
 
 @test "wait-for-artifacts: scratch files are removed on every exit path" {
@@ -917,7 +918,7 @@ _sha256_of() {
 	python3 -I -c 'import sys, zipfile
 with zipfile.ZipFile(sys.argv[1], "w") as z:
     z.writestr("../escape.json", "{}")
-    z.writestr("summary.json", "{}")' "$evil"
+    z.writestr("results.json", "{}")' "$evil"
 	_list_sequence "$(_listing 1:python-results-3.11)"
 	_download_sequence 1 "zip:${evil}"
 	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
@@ -928,7 +929,7 @@ with zipfile.ZipFile(sys.argv[1], "w") as z:
 	# `../escape.json` relative to DOWNLOAD_DIR/python-results-3.11 lands in
 	# DOWNLOAD_DIR itself; nothing may have been extracted at all.
 	[[ ! -e "${DOWNLOAD_DIR}/escape.json" ]]
-	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
 	[[ ! -s "$SLEEP_CALLS" ]]
 }
 
@@ -988,8 +989,8 @@ EOF
 	local dir="${BATS_TEST_TMPDIR}/symlinked" zip="${BATS_TEST_TMPDIR}/symlinked.zip"
 	mkdir -p "$dir"
 	ln -s /etc/passwd "${dir}/link"
-	printf '{}' >"${dir}/summary.json"
-	(cd "$dir" && zip -qy "$zip" link summary.json)
+	printf '{}' >"${dir}/results.json"
+	(cd "$dir" && zip -qy "$zip" link results.json)
 	_list_sequence "$(_listing 1:python-results-3.11)"
 	_download_sequence 1 "zip:${zip}"
 	export DOWNLOAD_DIR="${BATS_TEST_TMPDIR}/python-results"
@@ -997,6 +998,6 @@ EOF
 	run_wait 1 'python-results-*'
 	assert_failure
 	assert_output --partial "::error::Artifact python-results-3.11 (id 1) contains symlink entries; not retrying"
-	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/summary.json" ]]
+	[[ ! -e "${DOWNLOAD_DIR}/python-results-3.11/results.json" ]]
 	[[ ! -s "$SLEEP_CALLS" ]]
 }
