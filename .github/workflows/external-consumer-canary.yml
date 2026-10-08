@@ -31,8 +31,18 @@
 #   rust-build-siblings rust-release-build siblings verify-fresh-install
 #   vuln-suppression
 # Informational workflows (reported against their expected conclusion, never fail the canary):
-#   app-token-probe perms-negative playwright-negative sbom-release-upload
-#   verify-negative
+#   app-token-probe perms-negative perms-negative-probe playwright-negative
+#   playwright-negative-probe sbom-release-upload verify-negative
+#   verify-negative-probe
+# A negative-by-design workflow with a `<name>-probe.yml` is dispatched only by
+# that probe, which asserts the designed failure and is green when it holds.
+#
+# Before dispatch every lgtm-ci path a dispatchable fixture workflow references
+# is looked up at the candidate (#1128): missing there but present at the
+# merge base with main fails the canary for any role, informational and
+# manual workflows included (`removed_by_candidate`); missing at both but
+# present on main is listed `not_applicable` (landed after the candidate
+# branched).
 # Manual workflows (shared fixture concurrency group and a version PR per run; dispatched only on request):
 #   release-benign-hook release-tamper-hook release-version-pr
 #

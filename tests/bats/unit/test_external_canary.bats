@@ -90,6 +90,9 @@ EOF
 	mkdir -p "$MOCK_RUNS_DIR"
 	export MOCK_CALLS="${BATS_TEST_TMPDIR}/gh-calls.log"
 	export MOCK_POSTED_TREE="${BATS_TEST_TMPDIR}/posted-tree.json"
+	export MOCK_ABSENT="${BATS_TEST_TMPDIR}/absent.txt"
+	export MOCK_MERGE_BASE="2222222222222222222222222222222222222222"
+	: >"$MOCK_ABSENT"
 	: >"$MOCK_CALLS"
 	install_mock_gh
 	_write_canary_eval
@@ -104,7 +107,9 @@ teardown() {
 # in order from $MOCK_RUNS_DIR/runs.<n>; the last one repeats. Failure
 # injection: MOCK_PR_FILES_FAIL, MOCK_TREE_FAIL_FIRST, MOCK_TREE_FAIL_ALWAYS,
 # MOCK_REF_FAIL, MOCK_DISPATCH_FAIL=<file>, MOCK_RUNS_FAIL_AT=<n>,
-# MOCK_DELETE_FAIL.
+# MOCK_DELETE_FAIL, MOCK_CONTENTS_FAIL, MOCK_COMPARE_FAIL.
+# lgtm-ci contents lookups answer 404 for every "<ref> <path>" line of
+# $MOCK_ABSENT and 200 otherwise; the compare API answers $MOCK_MERGE_BASE.
 install_mock_gh() {
 	local bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$bin"
@@ -114,6 +119,27 @@ set -euo pipefail
 echo "$*" >>"$MOCK_CALLS"
 args="$*"
 case "$args" in
+*"repos/lgtm-hq/lgtm-ci/contents/"*"?ref="*" --silent")
+	if [[ "${MOCK_CONTENTS_FAIL:-}" == "1" ]]; then
+		echo "gh: HTTP 502" >&2
+		exit 1
+	fi
+	path="${args##*/contents/}"
+	ref="${path#*\?ref=}"
+	ref="${ref%% *}"
+	path="${path%%\?*}"
+	if grep -qxF "${ref} ${path}" "$MOCK_ABSENT" 2>/dev/null; then
+		echo "gh: Not Found (HTTP 404)" >&2
+		exit 1
+	fi
+	;;
+*"repos/lgtm-hq/lgtm-ci/compare/main..."*" --jq .merge_base_commit.sha")
+	if [[ "${MOCK_COMPARE_FAIL:-}" == "1" ]]; then
+		echo "gh: HTTP 500" >&2
+		exit 1
+	fi
+	echo "$MOCK_MERGE_BASE"
+	;;
 *"repos/lgtm-hq/lgtm-ci/commits/"*)
 	echo "$CANDIDATE"
 	;;
@@ -245,15 +271,16 @@ call_fn() {
 	assert_output "18"
 }
 
-@test "external-canary: App-token and SBOM paths are informational expecting success" {
+@test "external-canary: App-token, SBOM and negative-probe paths are informational expecting success" {
 	local wf
-	for wf in app-token-probe.yml sbom-release-upload.yml; do
+	for wf in app-token-probe.yml sbom-release-upload.yml perms-negative-probe.yml \
+		playwright-negative-probe.yml verify-negative-probe.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tsuccess')"
 	done
 }
 
-@test "external-canary: negative-by-design probes are informational expecting failure" {
+@test "external-canary: negative-by-design workflows are informational expecting failure" {
 	local wf
 	for wf in verify-negative.yml playwright-negative.yml; do
 		run call_fn classify_workflow "$wf"
@@ -794,4 +821,236 @@ call_fn() {
 	run env MOCK_DELETE_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
 	assert_success
 	assert_output --partial "could not delete owner/fixture@canary/${CANDIDATE}"
+}
+
+# --- negative probes ---------------------------------------------------------
+
+# Adds verify-negative-probe.yml (no lgtm-ci reference) to the fake fixture.
+_add_probe() {
+	cat >"$MOCK_FIXTURE_DIR/verify-negative-probe.yml" <<EOF
+name: fixture-verify-negative-probe
+"on":
+  workflow_dispatch:
+jobs:
+  probe:
+    uses: ./.github/workflows/negative-probe.yml
+EOF
+}
+
+@test "external-canary: a negative with a probe is reached only through the probe" {
+	_add_probe
+	{
+		run_row python.yml completed success 11
+		run_row verify-negative-probe.yml completed success 13
+	} >"$MOCK_RUNS_DIR/runs.1"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -F "actions/workflows/verify-negative-probe.yml/dispatches" "$MOCK_CALLS"
+	assert_success
+	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
+	refute_output
+	run grep -F "| \`verify-negative.yml\` | informational | \`failure\` | \`via_probe\` | ↪ via \`verify-negative-probe.yml\` | — |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run grep -F "| \`verify-negative-probe.yml\` | informational | \`success\` | \`success\` | ✅ pass |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run grep -F "gate-failures=0" "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "external-canary: a red probe (negative passed unexpectedly) is reported, not a gate failure" {
+	_add_probe
+	{
+		run_row python.yml completed success 11
+		run_row verify-negative-probe.yml completed failure 13
+	} >"$MOCK_RUNS_DIR/runs.1"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "| \`verify-negative-probe.yml\` | informational | \`success\` | \`failure\` | ⚠️ unexpected |"
+}
+
+@test "external-canary: a negative without a probe is still dispatched directly" {
+	all_green_snapshot
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
+	assert_success
+	run grep -F "via_probe" "$GITHUB_STEP_SUMMARY"
+	refute_output
+}
+
+@test "external-canary: a negative whose probe is not dispatched is dispatched directly" {
+	# The probe references an lgtm-ci path that landed after the candidate.
+	_add_probe
+	printf '      - uses: lgtm-hq/lgtm-ci/.github/actions/brand-new@%s\n' "$OLD_PIN" >>"$MOCK_FIXTURE_DIR/verify-negative-probe.yml"
+	printf '%s .github/actions/brand-new\n%s .github/actions/brand-new\n' "$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	all_green_snapshot
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
+	assert_success
+	run grep -F "actions/workflows/verify-negative-probe.yml/dispatches" "$MOCK_CALLS"
+	refute_output
+	run grep -F "| \`verify-negative.yml\` | informational | \`failure\` | \`failure\` | ✅ pass |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run grep -F "| \`verify-negative-probe.yml\` | informational | \`success\` | \`not_applicable\` |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "external-canary: a run that dispatches nothing warns instead of passing silently" {
+	printf '%s .github/actions/run-pytest\n%s .github/actions/run-pytest\n%s .github/workflows/reusable-rust-test.yml\n%s .github/workflows/reusable-rust-test.yml\n' \
+		"$CANDIDATE" "$MOCK_MERGE_BASE" "$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "::warning title=external canary::no fixture workflow was dispatched against ${CANDIDATE}"
+	run grep -c -- "/dispatches" "$MOCK_CALLS"
+	assert_output "0"
+	run grep -F "nothing was exercised" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "external-canary: presence is decided by HTTP status, so action directories count as present" {
+	run call_fn "lgtm_ci_path_state .github/actions/run-pytest '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "present"
+	run grep -F "contents/.github/actions/run-pytest?ref=${CANDIDATE} --silent" "$MOCK_CALLS"
+	assert_success
+	run grep -F -- "--jq" "$MOCK_CALLS"
+	refute_output
+}
+
+# --- reference check against the candidate (#1128) --------------------------
+
+@test "external-canary: lgtm_ci_references lists distinct workflow and action paths from uses: lines" {
+	printf '# uses: lgtm-hq/lgtm-ci/.github/workflows/commented.yml@%s\njobs:\n  a:\n    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@%s\n  b:\n    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@%s\n  c:\n    steps:\n      - uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@%s\n      - uses: actions/checkout@%s\n' \
+		"$CANDIDATE" "$CANDIDATE" "$CANDIDATE" "$CANDIDATE" "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn lgtm_ci_references "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
+	assert_output "$(printf '.github/actions/run-pytest\n.github/workflows/reusable-test-python.yml')"
+	printf 'jobs:\n  a:\n    runs-on: ubuntu-24.04\n' >"$BATS_TEST_TMPDIR/none.yml"
+	run call_fn lgtm_ci_references "$BATS_TEST_TMPDIR/none.yml"
+	assert_success
+	assert_output ""
+}
+
+@test "external-canary: reference_verdict dispatches when every reference exists at the candidate, without a compare" {
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/python.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "dispatch"
+	run grep -F "/compare/" "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: a reusable that landed on main after the candidate branched is not_applicable" {
+	printf '%s .github/workflows/reusable-rust-test.yml\n%s .github/workflows/reusable-rust-test.yml\n' \
+		"$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/verify-negative.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "$(printf 'not_applicable\t.github/workflows/reusable-rust-test.yml')"
+	run grep -F "repos/lgtm-hq/lgtm-ci/compare/main...${CANDIDATE} --jq .merge_base_commit.sha" "$MOCK_CALLS"
+	assert_success
+	run grep -F "contents/.github/workflows/reusable-rust-test.yml?ref=main" "$MOCK_CALLS"
+	assert_success
+}
+
+@test "external-canary: a reusable present at the merge base but gone at the candidate is removed_by_candidate" {
+	printf '%s .github/actions/run-pytest\n' "$CANDIDATE" >"$MOCK_ABSENT"
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/python.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "$(printf 'removed_by_candidate\t.github/actions/run-pytest')"
+	# main is not consulted: the merge base already proves the removal.
+	run grep -F "contents/.github/actions/run-pytest?ref=main" "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: a reference missing everywhere is dispatched so the run reports it" {
+	printf '%s .github/workflows/reusable-rust-test.yml\n%s .github/workflows/reusable-rust-test.yml\nmain .github/workflows/reusable-rust-test.yml\n' \
+		"$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/verify-negative.yml' '$CANDIDATE'; echo \"\$REPLY\""
+	assert_success
+	assert_output "dispatch"
+}
+
+@test "external-canary: reference lookups fail closed" {
+	run env MOCK_CONTENTS_FAIL=1 bash "$CANARY_EVAL" "reference_verdict '$MOCK_FIXTURE_DIR/python.yml' '$CANDIDATE'"
+	assert_failure
+	assert_output --partial "cannot read lgtm-hq/lgtm-ci/.github/"
+	printf '%s .github/actions/run-pytest\n' "$CANDIDATE" >"$MOCK_ABSENT"
+	run env MOCK_COMPARE_FAIL=1 bash "$CANARY_EVAL" "reference_verdict '$MOCK_FIXTURE_DIR/python.yml' '$CANDIDATE'"
+	assert_failure
+	assert_output --partial "cannot compare main...${CANDIDATE}"
+	run env MOCK_MERGE_BASE=null bash "$CANARY_EVAL" "reference_verdict '$MOCK_FIXTURE_DIR/python.yml' '$CANDIDATE'"
+	assert_failure
+	assert_output --partial "not a full SHA"
+	# In main: no dispatch at all, and the branch it created is cleaned up.
+	run env MOCK_CONTENTS_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "cannot check the lgtm-ci references of"
+	run grep -c -- "/dispatches" "$MOCK_CALLS"
+	assert_output "0"
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/canary/${CANDIDATE}" "$MOCK_CALLS"
+	assert_success
+}
+
+@test "external-canary: main lists a not_applicable gate without dispatching it or failing" {
+	printf '%s .github/actions/run-pytest\n%s .github/actions/run-pytest\n' "$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	run_row verify-negative.yml completed failure 12 >"$MOCK_RUNS_DIR/runs.1"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -F "actions/workflows/python.yml/dispatches" "$MOCK_CALLS"
+	refute_output
+	run grep -F "| \`python.yml\` | gate | \`success\` | \`not_applicable\` | ➖ not applicable | — |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run grep -F "references \`.github/actions/run-pytest\`, which landed on lgtm-ci \`main\` after this candidate branched" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run grep -F "Rebase onto \`main\`" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	# Not reported not_dispatchable either: the fixture still exposes it.
+	run grep -F "not_dispatchable" "$GITHUB_STEP_SUMMARY"
+	refute_output
+	run grep -F "gate-failures=0" "$GITHUB_OUTPUT"
+	assert_success
+}
+
+@test "external-canary: main fails when the candidate removes a reusable, whatever the workflow's role" {
+	# verify-negative.yml is informational; removing its reusable still fails.
+	printf '%s .github/workflows/reusable-rust-test.yml\n' "$CANDIDATE" >"$MOCK_ABSENT"
+	run_row python.yml completed success 11 >"$MOCK_RUNS_DIR/runs.1"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "::error title=external canary::informational verify-negative.yml concluded 'removed_by_candidate'"
+	assert_output --partial "| \`verify-negative.yml\` | informational | \`failure\` | \`removed_by_candidate\` | ❌ **removed by candidate** | — |"
+	assert_output --partial "this change deletes or renames a public interface"
+	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
+	refute_output
+	run grep -F "gate-failures=1" "$GITHUB_OUTPUT"
+	assert_success
+	# The override label still applies.
+	: >"$GITHUB_OUTPUT"
+	run env EVENT_NAME=pull_request EVENT_ACTION=synchronize PR_NUMBER=42 PR_LABELS="needs-external-canary,canary-informational" \
+		bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "::warning title=external canary::informational verify-negative.yml concluded 'removed_by_candidate'"
+}
+
+@test "external-canary: a probe inherits the not_applicable verdict of the negative it dispatches" {
+	_add_probe
+	printf '%s .github/workflows/reusable-rust-test.yml\n%s .github/workflows/reusable-rust-test.yml\n' \
+		"$CANDIDATE" "$MOCK_MERGE_BASE" >"$MOCK_ABSENT"
+	run_row python.yml completed success 11 >"$MOCK_RUNS_DIR/runs.1"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run grep -E "actions/workflows/verify-negative(-probe)?.yml/dispatches" "$MOCK_CALLS"
+	refute_output
+	run grep -F "| \`verify-negative-probe.yml\` | informational | \`success\` | \`not_applicable\` | ➖ not applicable | — |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+	run grep -F "| \`verify-negative.yml\` | informational | \`failure\` | \`not_applicable\` | ➖ not applicable | — |" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "external-canary: failed_gates counts removed_by_candidate for any role and skips not_applicable gates" {
+	local rows
+	rows="$(printf 'python.yml\tnot_applicable\t\tp\nverify-negative.yml\tremoved_by_candidate\t\tp\nrelease-version-pr.yml\tremoved_by_candidate\t\tp\nverify-negative.yml\tvia_probe\t\tq\n')"
+	ROWS="$rows" run bash "$CANARY_EVAL" "failed_gates <<<\"\$ROWS\""
+	assert_success
+	assert_output "$(printf 'verify-negative.yml\tremoved_by_candidate\nrelease-version-pr.yml\tremoved_by_candidate')"
 }

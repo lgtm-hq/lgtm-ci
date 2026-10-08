@@ -2745,8 +2745,9 @@ before/after run. What each workflow proves:
 | `python-private-dep.yml` | Private git dependency in an uninstalled group does not break a frozen install (#1021) | gate |
 | `rust-release-build.yml` | Default `reusable-build-rust-binaries` matrix builds and runs a Windows binary (#1076) | gate |
 | `app-token-probe.yml`, `sbom-release-upload.yml` | Scoped App-token reach (#849); SBOM assets attached to a disposable prerelease that the run deletes again (#935) | informational, expected `success` |
-| `verify-negative.yml`, `playwright-negative.yml` | Negative-by-design: a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804) | informational, expected `failure` |
-| `perms-negative.yml` | An under-permissioned caller is rejected at parse time | informational, expected `startup_failure` |
+| `verify-negative.yml`, `playwright-negative.yml` | Negative-by-design: a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804) | informational, expected `failure`; dispatched by its probe |
+| `perms-negative.yml` | An under-permissioned caller is rejected at parse time | informational, expected `startup_failure`; dispatched by its probe |
+| `verify-negative-probe.yml`, `playwright-negative-probe.yml`, `perms-negative-probe.yml` | Each dispatches its negative on the same ref and asserts the designed failure: run conclusion plus job evidence (the `digest mismatch` annotation in both digest jobs; the failing e2e job next to a green report-verdict job; zero jobs for the parse-time rejection). Green exactly when the negative failed as designed; after a pass it deletes the red negative run, keeping its jobs and annotations in the probe's summary and `negative-evidence` artifact | informational, expected `success` |
 | `release-version-pr.yml`, `release-benign-hook.yml`, `release-tamper-hook.yml` | `reusable-release-version-pr` from outside the org with the fixture's single-repo App: version PR, well-behaved hook, tampering hook stopped (#849). The three share one fixture concurrency group (concurrent dispatch cancels one) and every success opens a version PR a human closes, so the canary lists them as `not_dispatched` and runs them only with `CANARY_INCLUDE_MANUAL=true` | manual |
 
 <!-- markdownlint-enable MD013 -->
@@ -2772,16 +2773,38 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    `scripts/pin.sh`), refuses any lgtm-ci reference that is not then pinned
    to the candidate, and commits the result through the git data API as the
    branch `canary/<sha>`. The fixture's `main` is never written;
-3. dispatches every gate and informational fixture workflow that declares
+3. looks up every lgtm-ci path each dispatchable fixture workflow
+   references (`.github/workflows/<file>.yml`, `.github/actions/<name>`;
+   push-only `starter-python.yml` is not checked) at the candidate through
+   the contents API, deciding presence from the HTTP status (#1128). A path missing at the
+   candidate is looked up at the candidate's merge base with `main`
+   (compare API): present there means the candidate deletes or renames a
+   public interface, reported `removed_by_candidate`, which fails the canary
+   whatever the workflow's role; missing there too but present on `main`
+   means it landed after the candidate branched, reported `not_applicable`
+   (not dispatched, not a failure, the summary suggests a rebase). A path
+   missing everywhere is dispatched as usual and the run reports it. A
+   failed lookup fails the canary before any dispatch;
+4. dispatches every gate and informational fixture workflow that declares
    `workflow_dispatch` on that branch (the fixture's `push` triggers are
    limited to `main`, so creating the branch starts nothing by itself);
-   manual workflows are listed as `not_dispatched`;
-4. polls the fixture's run list until each dispatched workflow has a
+   manual workflows are listed as `not_dispatched`. A negative-by-design
+   workflow with a `<name>-probe.yml` is not dispatched directly: its row
+   reads `via_probe` and the probe carries the verdict. A run that fails by
+   design is red on the fixture's Actions page, a job calling a reusable
+   cannot take `continue-on-error`, and a parse-time rejection cannot be
+   caught inside its own run, so the assertion has to live in a second
+   workflow. A probe inherits a `not_applicable` or `removed_by_candidate`
+   verdict from its negative, and a negative whose probe is not dispatched
+   is dispatched directly. A run that dispatches nothing at all (every
+   workflow `not_applicable`) warns that nothing was exercised;
+5. polls the fixture's run list until each dispatched workflow has a
    completed run, bounded at 25 minutes; a workflow whose dispatch was
    rejected is reported `dispatch_failed` at once instead of waiting;
-5. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
+6. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
    the job summary, deletes the branch it created on every exit path, and
-   fails when any **gate** workflow did not succeed. Informational rows are
+   fails when any **gate** workflow did not succeed (a `not_applicable` gate
+   is not a failure) or any workflow is `removed_by_candidate`. Informational rows are
    compared with their expected conclusion and flagged `unexpected`, but
    never fail the run. The gate set is a fixed list in the script: a gate the
    fixture no longer exposes for dispatch is reported `not_dispatchable` and
