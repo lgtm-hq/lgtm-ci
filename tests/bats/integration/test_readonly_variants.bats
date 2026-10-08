@@ -239,6 +239,7 @@ sys.exit(1 if errors else 0)
 	printf '# lgtm-ci-readonly-variant: reusable-demo-run.yml\n' >>"${dir}/reusable-demo.yml"
 	rm -f "${dir}/reusable-demo.yml.bak"
 	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_success
 	run env WORKFLOWS_DIR="$dir" bash "$SYNC" --check
 	assert_failure
 	assert_output --partial "generated variant carries # lgtm-ci-readonly-variant:"
@@ -290,6 +291,29 @@ sys.exit(1 if errors else 0)
 	assert_success
 	run grep -c "wrap regions in" "${dir}/reusable-demo-run.yml"
 	assert_output "1"
+}
+
+@test "sync-readonly-variants: renames a one-character name" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	sed -i.bak 's/^name: Demo$/name: D/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_success
+	run grep -x "name: D (read-only)" "${dir}/reusable-demo-run.yml"
+	assert_success
+}
+
+@test "sync-readonly-variants: an indented variant marker fails instead of skipping" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	sed -i.bak 's/^# lgtm-ci-readonly-variant:/  # lgtm-ci-readonly-variant:/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_failure
+	assert_output --partial "must start in column 0"
 }
 
 @test "sync-readonly-variants: rejects unknown arguments" {

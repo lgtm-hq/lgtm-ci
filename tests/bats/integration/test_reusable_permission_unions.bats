@@ -249,6 +249,15 @@ pages: write"
 	assert_success
 }
 
+@test "docs: reusable-test-node-run caller snippets grant exactly the union" {
+	run _assert_docs_match_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-node-run.yml" \
+		"reusable-test-node-run.yml" \
+		1 \
+		"${PROJECT_ROOT}/docs/reusable-workflows.md"
+	assert_success
+}
+
 @test "docs: reusable-test-e2e-matrix caller snippets grant exactly the union" {
 	run _assert_docs_match_union \
 		"${PROJECT_ROOT}/.github/workflows/reusable-test-e2e-matrix.yml" \

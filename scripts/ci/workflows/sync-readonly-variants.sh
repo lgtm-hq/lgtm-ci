@@ -83,7 +83,7 @@ EOF
 		omitting { next }
 		/^name: / && !renamed {
 			renamed = 1
-			if ($0 ~ /^name: [^"\047#|>][^#]*[^ #]$/) { print $0 " (read-only)"; next }
+			if ($0 ~ /^name: [^"\047#|> ]([^#]*[^ #])?$/) { print $0 " (read-only)"; next }
 			if ($0 ~ /^name: "[^"#]*"$/) { sub(/"$/, " (read-only)\""); print; next }
 			printf "%s:%d: cannot rename this name: form; use a plain or double-quoted scalar\n", facade, NR > "/dev/stderr"
 			bad = 1; next
@@ -112,7 +112,15 @@ for facade in "$WORKFLOWS_DIR"/reusable-*.yml; do
 		continue
 	fi
 	variant_name="$(sed -n "s/^${VARIANT_MARK} *//p" "$facade" | head -n 1)"
-	[[ -n "$variant_name" ]] || continue
+	if [[ -z "$variant_name" ]]; then
+		# The marker must start in column 0; an indented one would otherwise
+		# skip generation silently.
+		if grep -q "^[[:space:]]\{1,\}${VARIANT_MARK}" "$facade"; then
+			echo "$(basename "$facade"): ${VARIANT_MARK} must start in column 0" >&2
+			status=1
+		fi
+		continue
+	fi
 	if [[ ! "$variant_name" =~ ^reusable-[A-Za-z0-9._-]+\.yml$ ]]; then
 		echo "$(basename "$facade"): invalid variant name '$variant_name'" >&2
 		status=1

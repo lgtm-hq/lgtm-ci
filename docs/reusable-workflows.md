@@ -265,10 +265,10 @@ code:
 ```yaml
 jobs:
   test:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node-run.yml@<sha>
     permissions:
       actions: read
       contents: read
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-node-run.yml@<sha>
     with:
       package-manager: bun
       artifact-prefix: node
@@ -282,10 +282,10 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
       && needs.test.outputs.tests-total != ''
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-test-summary.yml@<sha>
     permissions:
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-test-summary.yml@<sha>
     with:
       test-suite-name: Node.js Tests
       comment-marker: node-test-results
