@@ -341,6 +341,7 @@ entries["reusable-demo"]["package-managers"] = ["yarn"]'
 	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "demo-action: \`kind\` must be one of"
+	assert_output --partial "and \`tier\` one of stable, preview, internal, deprecated"
 	assert_output --partial "detect-changes: unknown key \`check-names\` for a composite-action"
 	assert_output --partial "reusable-demo: unknown package manager \`yarn\`"
 }
@@ -588,4 +589,46 @@ data['entries'].insert(1, {
 	assert_failure
 	assert_output --partial "reusable-demo: cannot"
 	refute_output --partial "Traceback"
+}
+
+@test "catalog: a false boolean default falls through || like GitHub, matrix names stay templates" {
+	local root
+	root="$(_fixture_root)"
+	cat >"${root}/.github/workflows/reusable-flags.yml" <<'YAML'
+---
+name: Reusable Flags
+on:
+  workflow_call:
+    inputs:
+      strict:
+        type: boolean
+        default: false
+      shards:
+        type: number
+        default: 1
+jobs:
+  gate:
+    name: ${{ inputs.strict || 'Lenient' }}
+    runs-on: [self-hosted, linux]
+    steps:
+      - run: echo gate
+  legs:
+    name: Leg ${{ matrix.leg }}/${{ inputs.shards }}
+    runs-on: ubuntu-24.04
+    strategy:
+      matrix:
+        leg: [1, 2]
+    steps:
+      - run: echo leg
+YAML
+	_edit_catalog "${root}" "
+data['entries'].insert(1, {
+    'id': 'reusable-flags', 'kind': 'reusable-workflow', 'tier': 'preview',
+    'reason': 'Flags', 'permissions': {}, 'runners': ['ubuntu-24.04'],
+    'package-managers': [], 'prerequisites': [], 'limitations': [],
+    'check-names': ['Lenient', 'Leg \${{ matrix.leg }}/\${{ inputs.shards }}'],
+})"
+	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
 }

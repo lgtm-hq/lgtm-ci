@@ -256,26 +256,24 @@ def check_permissions(
     """
     where = entry["id"]
     declared: dict[str, str] = entry["permissions"]
-    for scope, level in sorted(declared.items()):
-        if scope not in validator.ALL_SCOPES or level not in ("read", "write"):
-            report.error(where, f"invalid permission `{scope}: {level}`")
+    invalid = [
+        f"{scope}: {level}"
+        for scope, level in sorted(declared.items())
+        if scope not in validator.ALL_SCOPES or level not in ("read", "write")
+    ]
+    for pair in invalid:
+        report.error(where, f"invalid permission `{pair}`")
+    if invalid:
+        # Comparing against the union would only repeat the same mistake.
+        return
     if Kind(entry["kind"]) is Kind.REUSABLE_WORKFLOW:
-        try:
-            union = validator.workflow_union(
-                name=f"{where}.yml",
-                workflows_dir=workflows_dir,
-            )
-        except ValueError as exc:
-            report.error(where, f"cannot compute the permission union ({exc})")
-            return
-        if union != declared:
-            expected = validator.format_scopes(union or {})
-            actual = validator.format_scopes(declared)
-            report.error(
-                where,
-                f"`permissions` must equal the workflow's caller union "
-                f"{{{expected}}}; catalog has {{{actual}}}",
-            )
+        check_workflow_union(
+            report=report,
+            where=where,
+            declared=declared,
+            workflows_dir=workflows_dir,
+            validator=validator,
+        )
         return
     needed: dict[str, str] = validator.ACTION_REQUIREMENTS.get(where, {})
     rank = validator.LEVEL_RANK
@@ -285,6 +283,40 @@ def check_permissions(
                 where,
                 f"`permissions` must include `{scope}: {level}` (derived)",
             )
+
+
+def check_workflow_union(
+    report: Report,
+    where: str,
+    declared: dict[str, str],
+    workflows_dir: Path,
+    validator: Any,
+) -> None:
+    """Require a workflow entry's permissions to equal its caller union.
+
+    Args:
+        report: Findings sink.
+        where: Entry id (the workflow file stem).
+        declared: The entry's permissions.
+        workflows_dir: ``.github/workflows`` of the checkout.
+        validator: The loaded caller-permissions validator module.
+    """
+    try:
+        union = validator.workflow_union(
+            name=f"{where}.yml",
+            workflows_dir=workflows_dir,
+        )
+    except ValueError as exc:
+        report.error(where, f"cannot compute the permission union ({exc})")
+        return
+    if union != declared:
+        expected = validator.format_scopes(union or {})
+        actual = validator.format_scopes(declared)
+        report.error(
+            where,
+            f"`permissions` must equal the workflow's caller union "
+            f"{{{expected}}}; catalog has {{{actual}}}",
+        )
 
 
 def check_workflow_facts(
@@ -491,13 +523,13 @@ def check_evidence(
             "`evidence` must have exactly `fixture`, `last-green` and `run`",
         )
         return
-    if not FIXTURE_FILE.match(str(evidence["fixture"])):
+    if not FIXTURE_FILE.fullmatch(str(evidence["fixture"])):
         report.error(where, "`evidence.fixture` must be a workflow file name")
     runs = f"https://github.com/{fixture_repository}/actions/runs/"
-    if not re.match(rf"^{re.escape(runs)}\d+$", str(evidence["run"])):
+    if not re.fullmatch(rf"{re.escape(runs)}\d+", str(evidence["run"])):
         report.error(where, f"`evidence.run` must be {runs}<id>")
     commit = str(evidence["last-green"])
-    if not FULL_SHA.match(commit):
+    if not FULL_SHA.fullmatch(commit):
         report.error(
             where,
             "`evidence.last-green` must be a full 40-character lgtm-ci commit SHA",
@@ -595,7 +627,7 @@ def check_top_level(
         report.error(CATALOG, f"`schema-version` must be {SCHEMA_VERSION}")
     fixture_repository = catalog.get("fixture-repository")
     entries = catalog.get("entries")
-    if not isinstance(fixture_repository, str) or not REPOSITORY.match(
+    if not isinstance(fixture_repository, str) or not REPOSITORY.fullmatch(
         fixture_repository,
     ):
         report.error(CATALOG, "`fixture-repository` must be owner/name")

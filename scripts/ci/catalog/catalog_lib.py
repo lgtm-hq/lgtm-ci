@@ -241,9 +241,26 @@ def render_default(
     return str(value)
 
 
+def is_truthy(
+    value: Any,
+) -> bool:
+    """Return whether GitHub's expression engine treats a value as true.
+
+    ``||`` yields its right side for ``false``, ``0``, ``''`` and ``null``;
+    the rendered string ``"false"`` would be truthy in Python.
+
+    Args:
+        value: Raw input value (YAML-typed default or passed value).
+
+    Returns:
+        GitHub's truthiness of the value.
+    """
+    return value not in (None, False, 0, "") or value is True
+
+
 def resolve_expressions(
     text: str,
-    values: dict[str, str],
+    values: dict[str, Any],
 ) -> str:
     """Substitute ``${{ inputs.* }}`` references with known values.
 
@@ -264,10 +281,13 @@ def resolve_expressions(
         expr = match.group("expr")
         plain = INPUT_REF.match(expr)
         if plain is not None and plain.group("name") in values:
-            return values[plain.group("name")]
+            return render_default(values[plain.group("name")])
         fallback = INPUT_OR_LITERAL.match(expr) or INPUT_GUARDED_OR_LITERAL.match(expr)
         if fallback is not None and fallback.group("name") in values:
-            return values[fallback.group("name")] or fallback.group("literal")
+            value = values[fallback.group("name")]
+            if is_truthy(value):
+                return render_default(value)
+            return fallback.group("literal")
         return match.group(0)
 
     return EXPRESSION.sub(substitute, text)
@@ -275,8 +295,8 @@ def resolve_expressions(
 
 def input_values(
     document: dict[Any, Any],
-    overrides: dict[str, str] | None,
-) -> dict[str, str]:
+    overrides: dict[str, Any] | None,
+) -> dict[str, Any]:
     """Return the effective value of every input that has one.
 
     An input without a default (a required job-name) has no value a caller
@@ -290,7 +310,7 @@ def input_values(
         Input name to effective value.
     """
     values = {
-        key: render_default(spec["default"])
+        key: spec["default"]
         for key, spec in workflow_call_inputs(document).items()
         if isinstance(spec, dict) and "default" in spec
     }
@@ -300,8 +320,8 @@ def input_values(
 
 def passed_values(
     job: dict[str, Any],
-    values: dict[str, str],
-) -> dict[str, str]:
+    values: dict[str, Any],
+) -> dict[str, Any]:
     """Return the ``with:`` values a job passes to a nested reusable.
 
     Args:
@@ -311,10 +331,12 @@ def passed_values(
     Returns:
         Input name to the value after resolving the caller's expressions.
     """
-    return {
-        key: resolve_expressions(text=render_default(value), values=values)
-        for key, value in (job.get("with") or {}).items()
-    }
+    passed: dict[str, Any] = {}
+    for key, value in (job.get("with") or {}).items():
+        if isinstance(value, str):
+            value = resolve_expressions(text=value, values=values)
+        passed[key] = value
+    return passed
 
 
 def load_workflow(
@@ -345,7 +367,7 @@ def load_workflow(
 
 def job_runner(
     job: dict[str, Any],
-    values: dict[str, str],
+    values: dict[str, Any],
 ) -> str | None:
     """Return a job's runner label when it resolves to a literal.
 
@@ -356,14 +378,43 @@ def job_runner(
     Returns:
         The label, or None for matrix or otherwise dynamic runners.
     """
-    runner = resolve_expressions(text=str(job.get("runs-on", "")), values=values)
+    raw = job.get("runs-on", "")
+    if not isinstance(raw, str):
+        # A label list or runner group is not a single default label.
+        return None
+    runner = resolve_expressions(text=raw, values=values)
     return runner if runner and "${{" not in runner else None
+
+
+def job_label(
+    job_id: str,
+    job: dict[str, Any],
+    values: dict[str, Any],
+) -> str:
+    """Return a job's display name with input defaults applied.
+
+    A name that GitHub expands per matrix leg is a template, so it is kept
+    verbatim: substituting defaults there would document a value such as
+    `(shard 1/1)` that the job's own `if:` never lets run.
+
+    Args:
+        job_id: Job key.
+        job: Job mapping.
+        values: Effective input values.
+
+    Returns:
+        The display name.
+    """
+    name = str(job.get("name", job_id))
+    if "matrix." in name:
+        return name
+    return resolve_expressions(text=name, values=values)
 
 
 def workflow_facts(
     workflows_dir: Path,
     name: str,
-    overrides: dict[str, str] | None = None,
+    overrides: dict[str, Any] | None = None,
     seen: frozenset[str] = frozenset(),
 ) -> WorkflowFacts:
     """Derive a reusable workflow's check names and default runners.
@@ -388,7 +439,7 @@ def workflow_facts(
     check_names: list[str] = []
     runners: set[str] = set()
     for job_id, job in jobs.items():
-        label = resolve_expressions(text=str(job.get("name", job_id)), values=values)
+        label = job_label(job_id=job_id, job=job, values=values)
         nested = LOCAL_WORKFLOW_USES.match(str(job.get("uses", "")))
         if nested is not None and nested.group("name") not in seen:
             inner = workflow_facts(

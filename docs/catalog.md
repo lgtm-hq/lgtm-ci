@@ -610,7 +610,7 @@ Publish Quality Summary Workflow
 Rust Release Publish Workflow
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet; tag-triggered release; builds on `reusable-build-rust-binaries.yml`, itself unproven on `main`
+> **Preview.** No external-fixture run yet; tag-triggered release; builds on `reusable-build-rust-binaries.yml` (preview, fixture-green at `ea934b16`)
 
 - **Path:** [`.github/workflows/reusable-publish-rust-release.yml`](../.github/workflows/reusable-publish-rust-release.yml)
 - **Tier:** preview
@@ -913,11 +913,11 @@ Shell Test Workflow
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
-- **Check names:** `Shell Tests`, `Coverage shard matrix`, `Shell Tests (shard ${{ matrix.shard }}/1)`, `publish-test-summary / Publish test summary`
+- **Check names:** `Shell Tests`, `Coverage shard matrix`, `${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})`, `publish-test-summary / Publish test summary`
 
 **Limitations:**
 
-- The sharded check name only appears with `coverage: true` and `coverage-shards` above 1, and carries the caller's shard total (`Shell Tests (shard 1/4)`); the listed name shows the default
+- The sharded check only appears with `coverage: true` and `coverage-shards` above 1; GitHub expands the listed template per leg, e.g. `Shell Tests (shard 1/4)`
 
 #### `reusable-validate`
 
