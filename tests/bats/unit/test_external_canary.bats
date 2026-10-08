@@ -255,7 +255,7 @@ call_fn() {
 	for wf in python.yml node-bun.yml node-npm.yml node-pnpm.yml rust.yml siblings.yml retry.yml \
 		egress.yml perms.yml actions-direct.yml coverage-lcov.yml playwright.yml \
 		build-python-direct.yml vuln-suppression.yml rust-build-siblings.yml \
-		python-private-dep.yml verify-fresh-install.yml rust-release-build.yml readonly.yml; do
+		python-private-dep.yml verify-fresh-install.yml rust-release-build.yml readonly-node.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_success
 		assert_output "$(printf 'gate\tsuccess')"
