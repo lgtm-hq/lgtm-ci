@@ -18,6 +18,7 @@
 #   check-names  workflows: callee job names with input defaults applied, in job
 #                order; GitHub prefixes the caller job name and appends matrix values
 #   replacement  deprecated only: id of the entry to migrate to
+#   results      optional: the results.v1 document the entry uploads (#1080)
 ---
 schema-version: 1
 fixture-repository: TurboCoder13/lgtm-ci-consumer-fixture
@@ -123,8 +124,10 @@ entries:
     tier: stable
     evidence:
       fixture: coverage-lcov.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806694
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062463
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact
+              `<coverage-artifact-name>-results`"
     permissions:
       contents: read
       pull-requests: write
@@ -548,8 +551,8 @@ entries:
               skipped on push"
     evidence:
       fixture: starter-python.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806764
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770063208
     permissions:
       contents: read
       packages: read
@@ -722,8 +725,10 @@ entries:
     tier: stable
     evidence:
       fixture: rust.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806844
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062859
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact
+              `<prefix>-results-<rust-toolchain>`"
     permissions:
       actions: read
       contents: read
@@ -820,6 +825,8 @@ entries:
     tier: preview
     reason: "Fixture-green at the #1109 head `ae41597c` only (`security-audit.yml`); no run at a
               `main` commit yet"
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact
+              `results-artifact-name` (default `security-audit-results`)"
     permissions:
       contents: read
       packages: read
@@ -894,8 +901,10 @@ entries:
     tier: stable
     evidence:
       fixture: playwright.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806681
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062637
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact
+              `results-artifact-name` (default `playwright-results-<run_id>`)"
     permissions:
       contents: read
       pull-requests: write
@@ -924,8 +933,10 @@ entries:
     tier: stable
     evidence:
       fixture: node-bun.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806719
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062303
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact
+              `<prefix>-results-<node-version>`"
     permissions:
       actions: read
       contents: read
@@ -997,8 +1008,10 @@ entries:
     tier: stable
     evidence:
       fixture: python.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806801
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062309
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact
+              `<prefix>-results-<python-version>`"
     permissions:
       actions: read
       contents: read
@@ -1055,8 +1068,8 @@ entries:
               `concurrency-scope`) but outside the initial stable set"
     evidence:
       fixture: rust-build-siblings.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806433
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061949
     permissions:
       contents: read
     runners: [ubuntu-24.04]
@@ -1070,6 +1083,8 @@ entries:
     kind: reusable-workflow
     tier: preview
     reason: "No external-fixture run yet; lgtm-ci's own BATS suite is its only caller"
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results`
+              (single and sharded path)"
     permissions:
       actions: read
       contents: read
@@ -1135,8 +1150,8 @@ entries:
               mutation path has no external run"
     evidence:
       fixture: vuln-suppression.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806367
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061794
     permissions:
       contents: write
       pull-requests: write
@@ -1179,8 +1194,8 @@ entries:
               the initial stable set; tag preflight needs `fetch-depth: 0` (#1087)"
     evidence:
       fixture: build-python-direct.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805198
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061099
     permissions:
       contents: read
     runners: []
@@ -1490,8 +1505,8 @@ entries:
     tier: stable
     evidence:
       fixture: actions-direct.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
     permissions:
       contents: read
     runners: [ubuntu-24.04]
@@ -1511,8 +1526,8 @@ entries:
     tier: stable
     evidence:
       fixture: actions-direct.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
     permissions:
       contents: read
     runners: [ubuntu-24.04]
@@ -1532,8 +1547,8 @@ entries:
     tier: stable
     evidence:
       fixture: actions-direct.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
     permissions:
       contents: read
     runners: [ubuntu-24.04]
@@ -1576,8 +1591,8 @@ entries:
     tier: stable
     evidence:
       fixture: actions-direct.yml
-      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
-      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
     permissions:
       contents: read
     runners: [ubuntu-24.04]

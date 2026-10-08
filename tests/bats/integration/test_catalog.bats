@@ -632,3 +632,18 @@ data['entries'].insert(1, {
 	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_success
 }
+
+@test "catalog: an optional results field must be one line and is rendered" {
+	local root
+	root="$(_fixture_root)"
+	_edit_catalog "${root}" 'entries["reusable-demo"]["results"] = "results.v1 in artifact demo-results"'
+	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+	run cat "${root}/docs/catalog.md"
+	assert_output --partial "- **Results:** results.v1 in artifact demo-results"
+	_edit_catalog "${root}" 'entries["reusable-demo"]["results"] = "two\nlines"'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "reusable-demo: \`results\` must be a one-line string"
+}

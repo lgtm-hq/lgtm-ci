@@ -120,11 +120,12 @@ Coverage Workflow
 
 - **Path:** [`.github/workflows/reusable-coverage.yml`](../.github/workflows/reusable-coverage.yml)
 - **Tier:** stable
-- **Evidence:** [`coverage-lcov.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806694) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`coverage-lcov.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062463) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Coverage`, `Publish test summary / Publish test summary`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<coverage-artifact-name>-results`
 
 **Prerequisites:**
 
@@ -171,11 +172,12 @@ Rust Test Workflow
 
 - **Path:** [`.github/workflows/reusable-rust-test.yml`](../.github/workflows/reusable-rust-test.yml)
 - **Tier:** stable
-- **Evidence:** [`rust.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806844) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`rust.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062859) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `cargo`
 - **Check names:** `Prepare Rust Matrix`, `Rust Tests`, `Aggregate Rust Results`, `publish-test-summary / Publish test summary`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<rust-toolchain>`
 
 **Prerequisites:**
 
@@ -222,11 +224,12 @@ Playwright E2E Test Workflow
 
 - **Path:** [`.github/workflows/reusable-test-e2e-playwright.yml`](../.github/workflows/reusable-test-e2e-playwright.yml)
 - **Tier:** stable
-- **Evidence:** [`playwright.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806681) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`playwright.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062637) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `bun`
 - **Check names:** `${{ inputs.job-name }}`, `publish-test-summary / Publish test summary`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `results-artifact-name` (default `playwright-results-<run_id>`)
 
 **Prerequisites:**
 
@@ -246,11 +249,12 @@ Node.js Vitest Test Workflow
 
 - **Path:** [`.github/workflows/reusable-test-node.yml`](../.github/workflows/reusable-test-node.yml)
 - **Tier:** stable
-- **Evidence:** [`node-bun.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806719) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`node-bun.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062303) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Pages coverage upload status`, `Aggregate Node.js Results`, `publish-test-summary / Publish test summary`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<node-version>`
 
 **Prerequisites:**
 
@@ -273,11 +277,12 @@ Python Test Workflow
 
 - **Path:** [`.github/workflows/reusable-test-python.yml`](../.github/workflows/reusable-test-python.yml)
 - **Tier:** stable
-- **Evidence:** [`python.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806801) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`python.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062309) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `actions: read`, `contents: read`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `uv`
 - **Check names:** `Prepare Python Matrix`, `Python Tests`, `Aggregate Python Results`, `publish-test-summary / Publish test summary`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<python-version>`
 
 **Prerequisites:**
 
@@ -670,7 +675,7 @@ Quality Lint Workflow
 
 - **Path:** [`.github/workflows/reusable-quality-lint.yml`](../.github/workflows/reusable-quality-lint.yml)
 - **Tier:** preview
-- **Evidence:** [`starter-python.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806764) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`starter-python.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770063208) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`, `packages: read`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
@@ -787,6 +792,7 @@ Security Audit Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Security Audit`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `results-artifact-name` (default `security-audit-results`)
 
 #### `reusable-semantic-pr-title`
 
@@ -895,7 +901,7 @@ Rust Build Only Workflow
 
 - **Path:** [`.github/workflows/reusable-test-rust-build.yml`](../.github/workflows/reusable-test-rust-build.yml)
 - **Tier:** preview
-- **Evidence:** [`rust-build-siblings.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806433) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`rust-build-siblings.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061949) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `cargo`
@@ -914,6 +920,7 @@ Shell Test Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Shell Tests`, `Coverage shard matrix`, `${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})`, `publish-test-summary / Publish test summary`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results` (single and sharded path)
 
 **Limitations:**
 
@@ -956,7 +963,7 @@ Vulnerability Suppression Check Workflow
 
 - **Path:** [`.github/workflows/reusable-vuln-suppression-check.yml`](../.github/workflows/reusable-vuln-suppression-check.yml)
 - **Tier:** preview
-- **Evidence:** [`vuln-suppression.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750806367) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`vuln-suppression.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061794) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: write`, `pull-requests: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
@@ -1142,7 +1149,7 @@ Run Lighthouse CI audits with configurable thresholds
 
 - **Path:** [`.github/actions/run-lighthouse/action.yml`](../.github/actions/run-lighthouse/action.yml)
 - **Tier:** stable
-- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `npm`, `bun`, `pnpm`
@@ -1164,7 +1171,7 @@ Run E2E tests using Playwright
 
 - **Path:** [`.github/actions/run-playwright/action.yml`](../.github/actions/run-playwright/action.yml)
 - **Tier:** stable
-- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `npm`, `bun`, `pnpm`
@@ -1186,7 +1193,7 @@ Run Python tests using pytest with coverage support
 
 - **Path:** [`.github/actions/run-pytest/action.yml`](../.github/actions/run-pytest/action.yml)
 - **Tier:** stable
-- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `uv`
@@ -1208,7 +1215,7 @@ Run JavaScript/TypeScript tests using vitest with coverage support
 
 - **Path:** [`.github/actions/run-vitest/action.yml`](../.github/actions/run-vitest/action.yml)
 - **Tier:** stable
-- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805168) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`actions-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `npm`, `bun`, `pnpm`
@@ -1261,7 +1268,7 @@ Preflight tag checks, validate metadata, build sdist/wheel, and twine-check dist
 
 - **Path:** [`.github/actions/build-python-package/action.yml`](../.github/actions/build-python-package/action.yml)
 - **Tier:** preview
-- **Evidence:** [`build-python-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37750805198) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `ea934b16`
+- **Evidence:** [`build-python-direct.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061099) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5185136b`
 - **Permissions:** `contents: read`
 - **Runners:** —
 - **Package managers:** `uv`

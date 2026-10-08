@@ -289,6 +289,8 @@ def fact_lines(
     ]
     if kind is Kind.REUSABLE_WORKFLOW:
         facts.append(f"- **Check names:** {code_list(entry['check-names'])}")
+    if entry.get("results"):
+        facts.append(f"- **Results:** {entry['results']}")
     return facts + [""]
 
 

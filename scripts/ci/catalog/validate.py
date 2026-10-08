@@ -68,7 +68,7 @@ REQUIRED_KEYS = frozenset(
         "limitations",
     },
 )
-OPTIONAL_KEYS = frozenset({"reason", "replacement", "evidence"})
+OPTIONAL_KEYS = frozenset({"reason", "replacement", "evidence", "results"})
 WORKFLOW_ONLY_KEYS = frozenset({"check-names"})
 LIST_KEYS = (
     "runners",
@@ -187,6 +187,8 @@ def check_field_types(
         tier: The entry's tier.
     """
     where = str(entry["id"])
+    if "results" in entry and not is_one_line(entry["results"]):
+        report.error(where, "`results` must be a one-line string")
     if not isinstance(entry.get("permissions"), dict):
         report.error(where, "`permissions` must be a mapping of scope to read|write")
     for key in LIST_KEYS:
