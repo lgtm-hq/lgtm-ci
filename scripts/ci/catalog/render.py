@@ -86,7 +86,8 @@ TIER_MEANING = {
     ),
     Tier.DEPRECATED: (
         "Kept as a migration shim with a warning; use the named replacement. "
-        "Removal follows the governance process (#1082)."
+        "Removed only once every known consumer has migrated "
+        "([governance](governance.md#deprecation-lifecycle))."
     ),
 }
 BANNERS = {
@@ -117,11 +118,22 @@ DOC_PERMISSIONS_NOTE = (
     "of the commit being checked; the fixture branch the run happened on does not",
     "matter. Evidence is a point-in-time claim: when an entry's file changes after",
     "its evidence commit, the validator prints a notice until the run is refreshed.",
+    "",
+    "Pin an exact release commit SHA with a `# vX.Y.Z` comment; floating refs and",
+    "the deprecation and removal rules are in [docs/governance.md](governance.md).",
+)
+DEPRECATIONS_INTRO = (
+    "Every deprecated input, output and entry point. Each keeps working as a",
+    "shim that warns when used, and is removed only once no",
+    "[known consumer](governance.md#known-consumers) still uses it, or an",
+    "exception naming the approving issue is recorded",
+    "([removal gate](governance.md#removal-gate)).",
 )
 INDEX_OUTRO = (
     "Everything else is `preview`, `internal` or `deprecated`; tiers, evidence,",
-    "permissions and prerequisites for every entry are in",
-    "[docs/catalog.md](docs/catalog.md).",
+    "permissions, prerequisites and deprecations for every entry are in",
+    "[docs/catalog.md](docs/catalog.md). What each tier promises, how to pin and",
+    "when a deprecated input may be removed: [docs/governance.md](docs/governance.md).",
 )
 
 
@@ -259,12 +271,14 @@ def banner_lines(
 def fact_lines(
     entry: dict[str, Any],
     fixture_repository: str,
+    deprecations: list[dict[str, Any]],
 ) -> list[str]:
     """Return the bulleted facts of one entry.
 
     Args:
         entry: Catalog entry.
         fixture_repository: ``owner/name`` of the external fixture.
+        deprecations: Deprecation records naming this entry.
 
     Returns:
         Bullet lines followed by a blank line.
@@ -291,6 +305,12 @@ def fact_lines(
         facts.append(f"- **Check names:** {code_list(entry['check-names'])}")
     if entry.get("results"):
         facts.append(f"- **Results:** {entry['results']}")
+    if deprecations:
+        retired = ", ".join(
+            f"[{retired_label(record=r)}](#{deprecation_anchor(record_id=r['id'])})"
+            for r in deprecations
+        )
+        facts.append(f"- **Deprecated:** {retired}")
     return facts + [""]
 
 
@@ -298,6 +318,7 @@ def render_entry(
     repo_root: Path,
     entry: dict[str, Any],
     fixture_repository: str,
+    deprecations: list[dict[str, Any]],
 ) -> list[str]:
     """Render one entry's section of ``docs/catalog.md``.
 
@@ -305,6 +326,7 @@ def render_entry(
         repo_root: Repository root.
         entry: Catalog entry.
         fixture_repository: ``owner/name`` of the external fixture.
+        deprecations: Deprecation records naming this entry.
 
     Returns:
         Markdown lines, ending with a blank line.
@@ -312,7 +334,11 @@ def render_entry(
     summary = entry_summary(repo_root=repo_root, entry=entry)
     lines = [f"#### `{entry['id']}`", "", summary, ""]
     lines += banner_lines(entry=entry)
-    lines += fact_lines(entry=entry, fixture_repository=fixture_repository)
+    lines += fact_lines(
+        entry=entry,
+        fixture_repository=fixture_repository,
+        deprecations=deprecations,
+    )
     sections = (
         ("prerequisites", "Prerequisites"),
         ("limitations", "Limitations"),
@@ -323,6 +349,83 @@ def render_entry(
             lines += [f"- {item}" for item in entry[key]]
             lines.append("")
     return lines
+
+
+def deprecation_anchor(
+    record_id: str,
+) -> str:
+    """Return the ``docs/catalog.md`` anchor of a deprecation record.
+
+    Args:
+        record_id: Record id.
+
+    Returns:
+        Anchor without the leading ``#``; prefixed so it never collides with
+        an entry id.
+    """
+    return f"deprecation-{record_id}"
+
+
+def retired_label(
+    record: dict[str, Any],
+) -> str:
+    """Describe what a deprecation record retires.
+
+    Args:
+        record: Deprecation record.
+
+    Returns:
+        ``input `name```, ``output `name``` or ``entry point``.
+    """
+    if record["kind"] == catalog_lib.DeprecationKind.ENTRY:
+        return "entry point"
+    return f"{record['kind']} `{record['name']}`"
+
+
+def deprecation_section(
+    records: list[dict[str, Any]],
+) -> list[str]:
+    """Render the deprecations section of ``docs/catalog.md``.
+
+    Args:
+        records: The catalog's ``deprecations`` list.
+
+    Returns:
+        Markdown lines; empty when nothing is deprecated.
+    """
+    if not records:
+        return []
+    lines = ["## Deprecations", "", *DEPRECATIONS_INTRO, ""]
+    for record in records:
+        entries = ", ".join(f"[`{e}`](#{e})" for e in record["entries"])
+        lines += [
+            f"### Deprecation `{record['id']}`",
+            "",
+            f"- **Retires:** {retired_label(record=record)}",
+            f"- **Deprecated since:** v{record['since']} (#{record['issue']})",
+            f"- **Replacement:** {record['replacement']}",
+            f"- **Entries ({len(record['entries'])}):** {entries}",
+            "",
+        ]
+    return lines
+
+
+def deprecations_by_entry(
+    records: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    """Index deprecation records by the entries they name.
+
+    Args:
+        records: The catalog's ``deprecations`` list.
+
+    Returns:
+        Entry id to its records, in record order.
+    """
+    index: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        for entry_id in record["entries"]:
+            index.setdefault(entry_id, []).append(record)
+    return index
 
 
 def summary_table(
@@ -353,6 +456,7 @@ def kind_section(
     entries: list[dict[str, Any]],
     kind: Kind,
     fixture_repository: str,
+    deprecations: dict[str, list[dict[str, Any]]],
 ) -> list[str]:
     """Render one kind's index table and entry sections.
 
@@ -361,6 +465,7 @@ def kind_section(
         entries: All catalog entries.
         kind: Kind to render.
         fixture_repository: ``owner/name`` of the external fixture.
+        deprecations: Entry id to the deprecation records naming it.
 
     Returns:
         Markdown lines.
@@ -387,6 +492,7 @@ def kind_section(
                 repo_root=repo_root,
                 entry=entry,
                 fixture_repository=fixture_repository,
+                deprecations=deprecations.get(entry["id"], []),
             )
     return lines
 
@@ -405,6 +511,7 @@ def render_doc(
         File content.
     """
     entries: list[dict[str, Any]] = catalog["entries"]
+    records: list[dict[str, Any]] = catalog.get("deprecations", [])
     fixture = catalog["fixture-repository"]
     fixture_link = f"[`{fixture}`](https://github.com/{fixture})"
     lines = [
@@ -436,7 +543,9 @@ def render_doc(
             entries=entries,
             kind=kind,
             fixture_repository=fixture,
+            deprecations=deprecations_by_entry(records=records),
         )
+    lines += deprecation_section(records=records)
     return "\n".join(lines).rstrip("\n") + "\n"
 
 

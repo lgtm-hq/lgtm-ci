@@ -35,7 +35,7 @@ jobs:
     permissions:
       contents: read
       packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality-lint
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha> # vX.Y.Z
 ```
 
 Reusable workflows share a standard contract (`tooling-ref`,
@@ -65,8 +65,9 @@ Stable entry points, each green from the external consumer fixture:
 <!-- markdownlint-enable MD013 -->
 
 Everything else is `preview`, `internal` or `deprecated`; tiers, evidence,
-permissions and prerequisites for every entry are in
-[docs/catalog.md](docs/catalog.md).
+permissions, prerequisites and deprecations for every entry are in
+[docs/catalog.md](docs/catalog.md). What each tier promises, how to pin and
+when a deprecated input may be removed: [docs/governance.md](docs/governance.md).
 <!-- END catalog-index -->
 
 Caller starter examples live in [examples/](examples/README.md).
@@ -75,11 +76,16 @@ Caller starter examples live in [examples/](examples/README.md).
 
 lgtm-ci uses [semantic versioning](https://semver.org/) with
 [conventional commits](https://www.conventionalcommits.org/) for automated
-releases. Pin `@v1` (floating major), `@v1.2.3`, or — for production — the
-release commit SHA with a `# vX.Y.Z` comment. Releases are automated and
-PR-gated via the two-stage model (`reusable-release-version-pr.yml` opens
-the release PR; `reusable-release-auto-tag.yml` tags on merge). See
+releases. Pin the release commit SHA with a `# vX.Y.Z` comment; the floating
+`@v0` tag moves to every release, breaking ones included, and is for trying
+lgtm-ci out only. Releases are automated and PR-gated via the two-stage
+model (`reusable-release-version-pr.yml` opens the release PR;
+`reusable-release-auto-tag.yml` tags on merge). See
 [docs/getting-started.md](docs/getting-started.md#pinning).
+
+What each support tier promises, how deprecated inputs are retired, and the
+known-consumer evidence a removal needs are in
+[docs/governance.md](docs/governance.md).
 
 Upgrading from v0.75.x? v0.76.0 changes what callers must grant and pass;
 follow [docs/migration/v0.76.md](docs/migration/v0.76.md) before moving the pin.

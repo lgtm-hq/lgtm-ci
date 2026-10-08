@@ -10,7 +10,7 @@ combine with [security actions](security.md) (`secure-checkout`,
 Configure common CI environment variables and PATH.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@<sha> # vX.Y.Z
   with:
     bin-dir: "${{ github.workspace }}/.local/bin" # optional
     add-to-path: "/custom/path1, /custom/path2" # optional
@@ -26,7 +26,7 @@ Configure common CI environment variables and PATH.
 Setup Python with [uv](https://github.com/astral-sh/uv).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@<sha> # vX.Y.Z
   with:
     python-version: "3.12" # optional, default: 3.12
     cache: "true" # optional, default: true
@@ -46,7 +46,7 @@ Auto-installs dependencies from `pyproject.toml`, `uv.lock`, or
 Setup Node.js with [bun](https://bun.sh).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/setup-node@<sha> # vX.Y.Z
   with:
     node-version: "22" # optional, default: 22
     cache: "true" # optional, default: true
@@ -66,7 +66,7 @@ the bun cache directory and `node_modules`.
 Setup Rust toolchain with cargo caching.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/setup-rust@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/setup-rust@<sha> # vX.Y.Z
   with:
     toolchain: "stable" # optional, default: stable
     components: "clippy, rustfmt" # optional
@@ -86,7 +86,7 @@ directory. Uses
 Setup Ruby with Bundler and gem caching.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/setup-ruby@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/setup-ruby@<sha> # vX.Y.Z
   with:
     ruby-version: "3.3" # optional, default: 3.3
     bundler-version: "latest" # optional

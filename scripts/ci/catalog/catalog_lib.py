@@ -2,8 +2,10 @@
 """Shared model for the support-tier catalog (``catalog/catalog.yml``, #1079).
 
 ``validate.py`` checks the catalog against the repository and ``render.py``
-generates ``docs/catalog.md`` and the README index from it. Both import this
-module from their own directory. The caller-facing permission union is not
+generates ``docs/catalog.md`` and the README index from it; ``deprecations.py``
+(#1082) gates removals on the known-consumer registry and ``release_notes.py``
+turns a catalog diff into changelog bullets. All import this module from their
+own directory. The caller-facing permission union is not
 recomputed here: it comes from ``scripts/ci/docs/validate-caller-permissions.py``
 (#735/#736), loaded by path because its filename is hyphenated.
 
@@ -35,6 +37,8 @@ except ImportError:  # pragma: no cover - exercised only on a bare interpreter
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CATALOG_RELPATH = Path("catalog") / "catalog.yml"
+CONSUMERS_RELPATH = Path("catalog") / "consumers.yml"
+EXCEPTIONS_RELPATH = Path("catalog") / "deprecation-exceptions.yml"
 WORKFLOWS_RELDIR = Path(".github") / "workflows"
 ACTIONS_RELDIR = Path(".github") / "actions"
 PERMISSIONS_VALIDATOR = Path("scripts/ci/docs/validate-caller-permissions.py")
@@ -410,6 +414,116 @@ def job_label(
     if any("matrix." in expr for expr in expressions):
         return name
     return resolve_expressions(text=name, values=values)
+
+
+class DeprecationKind(StrEnum):
+    """What a deprecation record retires (#1082)."""
+
+    INPUT = auto()
+    OUTPUT = auto()
+    ENTRY = auto()
+
+
+# A description that says an input or output is deprecated or inert must be
+# backed by a deprecation record, so the removal gate knows about it.
+DEPRECATION_MARKER = re.compile(
+    r"\b(?:deprecated|deprecate|deprecates|deprecation|deprecating|inert)\b",
+    re.IGNORECASE,
+)
+
+
+def removal_key(
+    entry_id: str,
+    kind: DeprecationKind,
+    name: str = "",
+) -> str:
+    """Return the key that names one removable interface item.
+
+    The same spelling is used by deprecation records, the consumer registry's
+    ``deprecated-in-use`` lists, exceptions and the removal gate's messages.
+
+    Args:
+        entry_id: Catalog entry id.
+        kind: Input, output or the whole entry.
+        name: Input or output name; empty for the whole entry.
+
+    Returns:
+        ``<entry>:input:<name>``, ``<entry>:output:<name>`` or ``<entry>:entry``.
+    """
+    if kind is DeprecationKind.ENTRY:
+        return f"{entry_id}:entry"
+    return f"{entry_id}:{kind.value}:{name}"
+
+
+def interface(
+    kind: Kind,
+    document: Any,
+) -> dict[DeprecationKind, dict[str, str]]:
+    """Return the inputs and outputs an entry point exposes, with descriptions.
+
+    Args:
+        kind: Entry kind.
+        document: Parsed workflow or ``action.yml``.
+
+    Returns:
+        Input and output name to one-line description.
+    """
+    if not isinstance(document, dict):
+        document = {}
+    if kind is Kind.REUSABLE_WORKFLOW:
+        triggers = document.get("on", document.get(True)) or {}
+        call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
+        holder = call if isinstance(call, dict) else {}
+    else:
+        holder = document
+    result: dict[DeprecationKind, dict[str, str]] = {}
+    for deprecation_kind, key in (
+        (DeprecationKind.INPUT, "inputs"),
+        (DeprecationKind.OUTPUT, "outputs"),
+    ):
+        items = holder.get(key)
+        result[deprecation_kind] = {
+            str(name): " ".join(str((spec or {}).get("description", "")).split())
+            for name, spec in (items.items() if isinstance(items, dict) else [])
+            if isinstance(spec, dict) or spec is None
+        }
+    return result
+
+
+def removal_keys(
+    entry_id: str,
+    surface: dict[DeprecationKind, dict[str, str]],
+) -> set[str]:
+    """Return every removal key an entry point currently exposes.
+
+    Args:
+        entry_id: Catalog entry id.
+        surface: ``interface()`` result for the entry.
+
+    Returns:
+        The entry key plus one key per input and output.
+    """
+    keys = {removal_key(entry_id=entry_id, kind=DeprecationKind.ENTRY)}
+    for kind, names in surface.items():
+        keys.update(removal_key(entry_id=entry_id, kind=kind, name=n) for n in names)
+    return keys
+
+
+def deprecation_keys(
+    record: dict[str, Any],
+) -> set[str]:
+    """Return the removal keys a deprecation record covers.
+
+    Args:
+        record: Entry of the catalog's ``deprecations`` list (schema-checked).
+
+    Returns:
+        One key per listed entry.
+    """
+    kind = DeprecationKind(record["kind"])
+    name = str(record.get("name", ""))
+    entries = [str(entry_id) for entry_id in record["entries"]]
+    return {removal_key(entry_id=e, kind=kind, name=name) for e in entries}
 
 
 def workflow_facts(

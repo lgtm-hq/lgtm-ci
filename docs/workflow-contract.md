@@ -34,6 +34,19 @@ Where applicable, workflows accept:
 [Action-only reusables](#action-only-reusables) for workflows where the input
 pins the `checkout-and-harden` composite only (not `scripts/ci/`).
 
+## Deprecated inputs and removal
+
+An input, output or workflow that is being retired keeps parsing and warns:
+an inert input emits `::warning title=Deprecated input::` when set to a
+non-default value, an output stays declared with an empty value, and a
+deprecated workflow wraps its replacement. Every such item has a record in
+the `deprecations` list of `catalog/catalog.yml`, listed with its replacement
+in [catalog.md](catalog.md#deprecations). It is removed only once no
+[known consumer](governance.md#known-consumers) still uses it, which the
+`🧭 Deprecation Gate` CI job checks; time since the deprecation does not
+count. The full lifecycle and the pinning rules are in
+[governance.md](governance.md).
+
 ## Egress allowlists
 
 Every reusable job starts with a direct, SHA-pinned

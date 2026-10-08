@@ -30,8 +30,9 @@ inputs:
     default: "lgtm-hq/lgtm-ci"
   tooling-ref-override:
     description: >-
-      The caller's raw `inputs.tooling-ref`. Non-empty emits a deprecation
-      warning; the value itself is already folded into `tooling-ref`.
+      The caller's raw `inputs.tooling-ref`, passed through only so a
+      non-empty value is warned about (#995); the value itself is already
+      folded into `tooling-ref`.
     required: false
     default: ""
   sparse-checkout-extra:

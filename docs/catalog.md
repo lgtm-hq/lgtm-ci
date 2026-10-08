@@ -18,7 +18,7 @@ which calls lgtm-ci from outside the org at an exact commit with no
 | `stable` | Green from the external consumer fixture at a commit on `main`; the run is linked. Inputs, outputs, permissions and check names change only with a documented migration. |
 | `preview` | Shipped and maintained, but not yet proven from outside the org (or only partly). May change without a migration path. |
 | `internal` | Exists for lgtm-ci's own workflows or lgtm-hq infrastructure. Not supported for other callers. |
-| `deprecated` | Kept as a migration shim with a warning; use the named replacement. Removal follows the governance process (#1082). |
+| `deprecated` | Kept as a migration shim with a warning; use the named replacement. Removed only once every known consumer has migrated ([governance](governance.md#deprecation-lifecycle)). |
 
 Permissions are the block the **calling job** must grant. For a reusable
 workflow it is the union GitHub validates before any job runs (see
@@ -37,6 +37,9 @@ validator requires that commit to be on lgtm-ci's `main` and in the history
 of the commit being checked; the fixture branch the run happened on does not
 matter. Evidence is a point-in-time claim: when an entry's file changes after
 its evidence commit, the validator prints a notice until the run is refreshed.
+
+Pin an exact release commit SHA with a `# vX.Y.Z` comment; floating refs and
+the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 ## Summary
 
@@ -129,6 +132,7 @@ Coverage Workflow
 - **Package managers:** —
 - **Check names:** `Coverage`, `Publish test summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<coverage-artifact-name>-results`
+- **Deprecated:** [output `pages-url`](#deprecation-coverage-pages-url), [input `publish-pages`](#deprecation-coverage-publish-pages), [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -152,6 +156,7 @@ Release Version PR
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Prepare version update hook`, `Run version update hook`, `Create Version PR`, `Report release automation failure`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -181,6 +186,7 @@ Rust Test Workflow
 - **Package managers:** `cargo`
 - **Check names:** `Prepare Rust Matrix`, `Rust Tests`, `Aggregate Rust Results`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<rust-toolchain>`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -210,6 +216,7 @@ SBOM Release Upload
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Upload SBOM release assets`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -234,6 +241,7 @@ Playwright E2E Test Workflow
 - **Package managers:** `bun`
 - **Check names:** `${{ inputs.job-name }}`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `results-artifact-name` (default `playwright-results-<run_id>`)
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -259,6 +267,7 @@ Node.js Vitest Test Workflow
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Pages coverage upload status`, `Aggregate Node.js Results`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<node-version>`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -313,6 +322,7 @@ Python Test Workflow
 - **Package managers:** `uv`
 - **Check names:** `Prepare Python Matrix`, `Python Tests`, `Aggregate Python Results`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<python-version>`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -368,6 +378,7 @@ Auto Re-run on Infra Failure
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Re-run failed jobs on infra failure`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-build-artifact`
 
@@ -382,6 +393,7 @@ Build Artifact Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Prepare Build Matrix`, `Build`
+- **Deprecated:** [input `node-version-matrix`](#deprecation-build-artifact-node-version-matrix), [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-build-python-dist`
 
@@ -396,6 +408,7 @@ Python Distribution Build Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `uv`
 - **Check names:** `Build Python distribution`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-build-rust-binaries`
 
@@ -411,6 +424,7 @@ Rust Binary Build Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `cargo`
 - **Check names:** `Rust binaries (${{ matrix.target }})`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-codeql`
 
@@ -425,6 +439,7 @@ CodeQL
 - **Runners:** `ubuntu-latest`
 - **Package managers:** —
 - **Check names:** `Setup CodeQL matrix`, `CodeQL`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-dependency-review`
 
@@ -453,6 +468,7 @@ Deploy to GitHub Pages
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Deploy to GitHub Pages`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-deploy-site-with-reports`
 
@@ -467,6 +483,7 @@ Deploy Site With Reports Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Build site and bundle reports`, `Deploy to GitHub Pages`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-docker`
 
@@ -481,6 +498,7 @@ Docker Build and Push
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Classify Platforms`, `Docker build / Build and Push`, `Docker build / Vulnerability Scan`, `Docker multi-platform / Docker build per platform`, `Docker multi-platform / Docker verify per platform`, `Docker multi-platform / Docker health check per platform`, `Docker multi-platform / Merge Manifests`, `Docker multi-platform / Validation Summary`, `Docker multi-platform / Vulnerability Scan`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-docker-build`
 
@@ -495,6 +513,7 @@ Docker Build (single-platform)
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Build and Push`, `Vulnerability Scan`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-docker-multiplatform`
 
@@ -509,6 +528,7 @@ Docker Build (multi-platform)
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Docker build per platform`, `Docker verify per platform`, `Docker health check per platform`, `Merge Manifests`, `Validation Summary`, `Vulnerability Scan`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-docker-smoke-test`
 
@@ -523,6 +543,7 @@ Docker Smoke Test
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Docker Smoke Test`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-github-release`
 
@@ -537,6 +558,7 @@ GitHub Release Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Create GitHub Release`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-link-check`
 
@@ -551,6 +573,7 @@ Link Check
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Link Check`, `Publish link-check report / Publish link-check report`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-pr-auto-assign`
 
@@ -565,6 +588,7 @@ PR Auto Assign
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `PR Auto Assign`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-pr-labeler`
 
@@ -593,6 +617,7 @@ Publish Artifact Preview Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish artifact preview`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-artifact-report`
 
@@ -607,6 +632,7 @@ Publish Artifact Report Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish artifact report`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-file-breakdown`
 
@@ -621,6 +647,7 @@ Publish File Breakdown Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish file breakdown`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-gem`
 
@@ -635,6 +662,7 @@ RubyGems Publishing Workflow
 - **Runners:** `ubuntu-latest`
 - **Package managers:** —
 - **Check names:** `Publish to RubyGems`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-npm-set`
 
@@ -649,6 +677,7 @@ npm Package-Set Publishing
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish npm package set`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-quality-summary`
 
@@ -663,6 +692,7 @@ Publish Quality Summary Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish quality summary`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-rust-release`
 
@@ -677,6 +707,7 @@ Rust Release Publish Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Verify release tag`, `Build release binaries / Rust binaries (${{ matrix.target }})`, `Create GitHub release`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-security-audit-comment`
 
@@ -691,6 +722,7 @@ Publish Security Audit Comment Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish security audit comment`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-test-results-pages`
 
@@ -705,6 +737,7 @@ Publish Test Results To Pages
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish Test Results`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-publish-test-summary`
 
@@ -719,6 +752,7 @@ Publish Test Summary Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish test summary`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-quality-lint`
 
@@ -734,6 +768,7 @@ Quality Lint Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `🛠️ Lintro Code Quality`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-release-auto-tag`
 
@@ -748,6 +783,7 @@ Release Auto Tag
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Create Release`, `Report release automation failure`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-release-multi-ecosystem`
 
@@ -762,6 +798,7 @@ Release Multi-Ecosystem Version PR
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Prepare version update hook`, `Run version update hook`, `Create Version PR`, `Report release automation failure`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-release-recover`
 
@@ -790,6 +827,7 @@ Required Check Gate
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `${{ inputs.job-name }}`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-rust-build`
 
@@ -804,6 +842,7 @@ Rust Build Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `build / Rust Build`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-rust-test-run`
 
@@ -847,6 +886,7 @@ SBOM Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Validate SBOM inputs`, `SBOM & Supply Chain`
+- **Deprecated:** [input `upload-release-assets`](#deprecation-sbom-upload-release-assets), [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-scorecards`
 
@@ -876,6 +916,7 @@ Security Audit Workflow
 - **Package managers:** —
 - **Check names:** `Security Audit`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `results-artifact-name` (default `security-audit-results`)
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-semantic-pr-title`
 
@@ -904,6 +945,7 @@ Documentation Site Quality Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Build and check documentation site`, `Test documentation site`, `publish-test-summary / Publish test summary`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-e2e`
 
@@ -918,6 +960,7 @@ E2E Test Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `E2E Tests`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-e2e-matrix`
 
@@ -932,6 +975,7 @@ E2E Matrix Test Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Setup Matrix`, `E2E tests`, `Merge Reports`
+- **Deprecated:** [input `pages-target-dir`](#deprecation-e2e-matrix-pages-target-dir), [input `publish-allowed-endpoints`](#deprecation-e2e-matrix-publish-allowed-endpoints), [input `publish-egress-preset`](#deprecation-e2e-matrix-publish-egress-preset), [input `publish-results`](#deprecation-e2e-matrix-publish-results), [output `report-url`](#deprecation-e2e-matrix-report-url), [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-node-custom`
 
@@ -946,6 +990,7 @@ Node.js Custom Test Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `bun`, `npm`, `pnpm`
 - **Check names:** `Prepare Node Matrix`, `Node.js Tests`, `Aggregate Node.js Results`, `Pages coverage upload status`, `publish-test-summary / Publish test summary`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-node-publish`
 
@@ -960,6 +1005,7 @@ Node.js Test Publish Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish Results`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-python-publish`
 
@@ -974,6 +1020,7 @@ Python Test Publish Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Publish Results`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-rust-build`
 
@@ -989,6 +1036,7 @@ Rust Build Only Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `cargo`
 - **Check names:** `Rust Build`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-test-shell`
 
@@ -1004,6 +1052,7 @@ Shell Test Workflow
 - **Package managers:** —
 - **Check names:** `Shell Tests`, `Coverage shard matrix`, `${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})`, `publish-test-summary / Publish test summary`
 - **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results` (single and sharded path)
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 **Prerequisites:**
 
@@ -1026,6 +1075,7 @@ Validation Script
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Validation`, `Publish validation report / Publish validation report`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-validate-action-pinning`
 
@@ -1040,6 +1090,7 @@ Validate Action Pinning
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Validate Action Pinning`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-vuln-suppression-check`
 
@@ -1055,6 +1106,7 @@ Vulnerability Suppression Check Workflow
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Check Vulnerability Suppressions`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 ### Reusable workflows: internal
 
@@ -1071,6 +1123,7 @@ AI Review
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `uv`
 - **Check names:** `AI Review`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-ghcr-cleanup`
 
@@ -1085,6 +1138,7 @@ GHCR Cleanup
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Clean Untagged Images`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-main-failure-notifier`
 
@@ -1099,6 +1153,7 @@ Main Failure Notifier
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Report main workflow failure`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-prune-build-staging-tags`
 
@@ -1113,6 +1168,7 @@ Prune Build Staging Tags
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Prune Build Staging Tags`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-registry-health-check`
 
@@ -1127,6 +1183,7 @@ Registry Health Check
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Registry Health Check`, `Open Registry Health Issue`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-release-failure-notifier`
 
@@ -1141,6 +1198,7 @@ Release Failure Notifier
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Report release tag publish outcome`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-validate-lintro-version`
 
@@ -1172,6 +1230,7 @@ npm Publishing Workflow (deprecated)
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
 - **Check names:** `Deprecation notice`, `Publish to npm (deprecated wrapper) / Publish to npm (deprecated wrapper)`
+- **Deprecated:** [entry point](#deprecation-publish-npm), [input `tooling-ref`](#deprecation-tooling-ref)
 
 ## Composite actions
 
@@ -1920,3 +1979,88 @@ Enforce tiered egress policy (strict, hardened, permissive) before harden-runner
 - **Permissions:** `contents: read`
 - **Runners:** —
 - **Package managers:** —
+
+## Deprecations
+
+Every deprecated input, output and entry point. Each keeps working as a
+shim that warns when used, and is removed only once no
+[known consumer](governance.md#known-consumers) still uses it, or an
+exception naming the approving issue is recorded
+([removal gate](governance.md#removal-gate)).
+
+### Deprecation `build-artifact-node-version-matrix`
+
+- **Retires:** input `node-version-matrix`
+- **Deprecated since:** v0.61.0 (#760)
+- **Replacement:** Pass `matrix` (a JSON array of objects) instead; `node-version` covers a single version
+- **Entries (1):** [`reusable-build-artifact`](#reusable-build-artifact)
+
+### Deprecation `coverage-pages-url`
+
+- **Retires:** output `pages-url`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Read the `pages-url` output of `reusable-publish-test-results-pages`
+- **Entries (1):** [`reusable-coverage`](#reusable-coverage)
+
+### Deprecation `coverage-publish-pages`
+
+- **Retires:** input `publish-pages`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Call `reusable-publish-test-results-pages` from its own caller job
+- **Entries (1):** [`reusable-coverage`](#reusable-coverage)
+
+### Deprecation `e2e-matrix-pages-target-dir`
+
+- **Retires:** input `pages-target-dir`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Pass it as `pages-target-dir` to `reusable-publish-test-results-pages`
+- **Entries (1):** [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix)
+
+### Deprecation `e2e-matrix-publish-allowed-endpoints`
+
+- **Retires:** input `publish-allowed-endpoints`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Pass `allowed-endpoints` to `reusable-publish-test-results-pages`
+- **Entries (1):** [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix)
+
+### Deprecation `e2e-matrix-publish-egress-preset`
+
+- **Retires:** input `publish-egress-preset`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Pass `egress-preset` to `reusable-publish-test-results-pages`
+- **Entries (1):** [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix)
+
+### Deprecation `e2e-matrix-publish-results`
+
+- **Retires:** input `publish-results`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Call `reusable-publish-test-results-pages` from its own caller job
+- **Entries (1):** [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix)
+
+### Deprecation `e2e-matrix-report-url`
+
+- **Retires:** output `report-url`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Read the `pages-url` output of `reusable-publish-test-results-pages`
+- **Entries (1):** [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix)
+
+### Deprecation `publish-npm`
+
+- **Retires:** entry point
+- **Deprecated since:** v0.72.0 (#965)
+- **Replacement:** Call `reusable-publish-npm-set` with a one-package set
+- **Entries (1):** [`reusable-publish-npm`](#reusable-publish-npm)
+
+### Deprecation `sbom-upload-release-assets`
+
+- **Retires:** input `upload-release-assets`
+- **Deprecated since:** v0.62.0 (#770)
+- **Replacement:** Call `reusable-sbom-release-upload` from its own caller job
+- **Entries (1):** [`reusable-sbom`](#reusable-sbom)
+
+### Deprecation `tooling-ref`
+
+- **Retires:** input `tooling-ref`
+- **Deprecated since:** v0.75.3 (#995)
+- **Replacement:** Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`)
+- **Entries (56):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm`](#reusable-publish-npm), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)

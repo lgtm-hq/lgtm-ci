@@ -134,7 +134,7 @@ assets via `gh release create`
 jobs:
   github-release:
     needs: publish
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@main
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-github-release.yml@<sha> # vX.Y.Z
     permissions:
       contents: write
     with:

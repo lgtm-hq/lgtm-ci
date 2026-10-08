@@ -9,7 +9,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Deprecation governance: `docs/governance.md`** (#1082). What each support
+  tier promises, exact-SHA pinning (`v0` is convenience-only), the
+  announce → inert shim with `::warning` → removal lifecycle, and the rule
+  that a removal needs evidence that every known consumer has migrated, or a
+  recorded exception; time alone never counts.
+- `catalog/catalog.yml` `deprecations` records (since, issue, replacement,
+  entries) for every deprecated input, output and entry point: `tooling-ref`
+  on 56 reusables, the #770 publish inputs and outputs, `node-version-matrix`
+  and `reusable-publish-npm`. The catalog validator requires a record for
+  every input or output whose description says it is deprecated or inert, and
+  `docs/catalog.md` lists them under Deprecations.
+- `catalog/consumers.yml`, the known-consumer registry (repository, tracking
+  issues, last verified, pins, entries used, deprecated items still used),
+  refreshed by `scripts/ci/catalog/check-deprecations.sh scan --write`, and
+  `catalog/deprecation-exceptions.yml` for approved removals.
+- `🧭 Deprecation Gate` CI job (`check-deprecations.sh`): fails a PR that
+  removes an input, output or entry point while a known consumer still uses
+  it, relies on consumer evidence older than 14 days, or removes a
+  never-deprecated item from a `stable` entry, unless an exception names the
+  approving issue.
+- `📌 Doc Pins` CI job (`scripts/ci/docs/validate-doc-pins.py`): every
+  lgtm-ci reference in the README, docs and examples is a commit SHA or a
+  `<sha>` placeholder.
+- `catalog-release-notes` input on `reusable-release-version-pr.yml` (default
+  `false`; lgtm-ci sets it): merges the catalog diff since the previous
+  release (tier changes, deprecations, removals) into the generated
+  CHANGELOG section.
+- `warn-deprecated-workflow-input.sh` takes an optional `ISSUE` so new shims
+  cite their own deprecation (default `770`, unchanged output).
+
 ### Changed
+
+- Docs and the README pin lgtm-ci by `@<sha> # vX.Y.Z` everywhere; the
+  `@main`, `@v1` and short-SHA examples are gone (#1082).
 
 ### Deprecated
 

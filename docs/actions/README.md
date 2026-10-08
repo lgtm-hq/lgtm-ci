@@ -110,12 +110,12 @@ jobs:
 
 ## Pinning versions
 
-For production workflows, pin to a specific commit SHA:
+Pin to the full commit SHA of a release, with its version as a comment:
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@abc1234
+- uses: lgtm-hq/lgtm-ci/.github/actions/setup-python@<sha> # vX.Y.Z
 ```
 
-Or a release tag when available (`@v1`, `@v1.2.3`). See
-[getting-started.md](../getting-started.md#pinning) for the full
-versioning model.
+Tags (`@vX.Y.Z`, the floating `@v0`) and `@main` are not pins. See
+[governance.md](../governance.md#pinning) for the rules and
+[getting-started.md](../getting-started.md#pinning) for the versioning model.

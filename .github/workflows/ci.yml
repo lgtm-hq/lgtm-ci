@@ -92,6 +92,34 @@ jobs:
       contents: read
       pull-requests: write
 
+  deprecation-gate:
+    uses: ./.github/workflows/reusable-validate.yml
+    with:
+      job-name: "🧭 Deprecation Gate"
+      script: scripts/ci/catalog/check-deprecations.sh
+      # The gate compares the PR with origin/main (#1082): removed inputs,
+      # outputs and entry points need known-consumer evidence or an
+      # exception. Only the main tip is needed, not the history.
+      setup-commands: >-
+        git fetch --quiet --no-tags --depth=1 origin
+        +refs/heads/main:refs/remotes/origin/main
+      publish-validation-report: true
+      comment-marker: deprecation-gate
+    permissions:
+      contents: read
+      pull-requests: write
+
+  doc-pins:
+    uses: ./.github/workflows/reusable-validate.yml
+    with:
+      job-name: "📌 Doc Pins"
+      script: scripts/ci/docs/validate-doc-pins.py
+      publish-validation-report: true
+      comment-marker: doc-pins
+    permissions:
+      contents: read
+      pull-requests: write
+
   file-breakdown:
     if: >-
       github.event_name == 'pull_request'
@@ -102,7 +130,14 @@ jobs:
       pull-requests: write
 
   notify-failure:
-    needs: [quality, shell-tests, python-tests, caller-permissions, support-catalog]
+    needs:
+      - quality
+      - shell-tests
+      - python-tests
+      - caller-permissions
+      - support-catalog
+      - deprecation-gate
+      - doc-pins
     if: failure() && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:

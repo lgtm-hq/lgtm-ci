@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@v1
+      - uses: lgtm-hq/lgtm-ci/.github/actions/setup-env@<sha> # vX.Y.Z
         with:
           python-version: "3.13"
           node-version: "22"
@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: read
       packages: read # pull ghcr.io/lgtm-hq/py-lintro in reusable-quality-lint
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@v1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha> # vX.Y.Z
 
   publish-quality-summary:
     needs: quality
@@ -43,7 +43,7 @@ jobs:
     permissions:
       contents: read
       pull-requests: write
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@v1
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@<sha> # vX.Y.Z
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
 ```
@@ -80,12 +80,15 @@ and the [function reference](libraries/reference.md).
 
 | Ref | Example | Use |
 | --- | ------- | --- |
-| `@v1` | `uses: .../setup-env@v1` | Floating major version — all v1.x.x updates |
-| `@v1.2.3` | `uses: .../setup-env@v1.2.3` | Pinned exact version |
-| `@<commit-sha>` | `uses: .../setup-env@4aaefe6...` | Production pin, paired with a `# vX.Y.Z` comment |
-| `@main` | `uses: .../setup-env@main` | Latest, not for production |
+| `@<commit-sha>` | `uses: .../setup-env@2134b70042dc...  # v0.76.0` | **The pin.** Full SHA of a release commit with its version as a comment |
+| `@vX.Y.Z` | `uses: .../setup-env@v0.76.0` | Names a release, but a tag can be moved; resolve it and pin the SHA |
+| `@v0` | `uses: .../setup-env@v0` | Floating; moves to every release, breaking ones included. Trying things out only |
+| `@main` | `uses: .../setup-env@main` | Unreleased code. Never |
 
 <!-- markdownlint-enable MD013 -->
+
+The rules behind this table, and how deprecated inputs are retired, are in
+[governance.md](governance.md#pinning).
 
 Releases are automated and PR-gated: pushes to `main` with releasable
 commits (`feat:`, `fix:`, etc.) open a release PR; merging it tags the
