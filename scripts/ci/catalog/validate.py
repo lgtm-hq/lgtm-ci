@@ -112,7 +112,7 @@ CONSUMER_KEYS = frozenset(
     },
 )
 EXCEPTION_KEYS = frozenset({"removal", "issue", "reason"})
-REMOVAL_KEY = re.compile(r"^[\w.-]+:(?:entry|(?:input|output):[\w-]+)$")
+REMOVAL_KEY = re.compile(r"^[\w.-]+:(?:entry|(?:input|output|secret|required):[\w-]+)$")
 REFRESH = "refresh with scripts/ci/catalog/check-deprecations.sh scan --write"
 
 
@@ -725,7 +725,7 @@ def check_deprecation_shape(
         report.error(where, f"`kind` must be one of {kinds}")
         return False
     if kind is DeprecationKind.ENTRY and "name" in record:
-        report.error(where, "`name` is only valid on input and output deprecations")
+        report.error(where, "`name` is only for an input, output or secret")
     if kind is not DeprecationKind.ENTRY and not is_one_line(record.get("name")):
         report.error(where, f"a {kind.value} deprecation needs the `name` it retires")
     if not VERSION.fullmatch(str(record.get("since", ""))):
@@ -947,8 +947,8 @@ def check_consumer(
     stale += [k for k in row.get("deprecated-in-use", []) if k not in covered]
     if stale:
         report.notices.append(
-            f"{where}: names {', '.join(stale)}, which the catalog no longer "
-            f"deprecates or lists; {REFRESH}",
+            f"{where}: still uses {', '.join(stale)}, which lgtm-ci no longer "
+            f"lists or deprecates (removed); its next pin bump breaks, or {REFRESH}",
         )
 
 
@@ -1010,7 +1010,7 @@ def check_exceptions(
             state = "unknown" if key in row else "missing required"
             report.error(where, f"{state} key `{key}`")
         if not REMOVAL_KEY.fullmatch(removal):
-            kinds = "input|output"
+            kinds = "input|output|secret|required"
             report.error(
                 where,
                 f"`removal` must be <entry>:entry or <entry>:<{kinds}>:<name>",

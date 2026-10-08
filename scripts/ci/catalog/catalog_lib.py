@@ -421,6 +421,7 @@ class DeprecationKind(StrEnum):
 
     INPUT = auto()
     OUTPUT = auto()
+    SECRET = auto()
     ENTRY = auto()
 
 
@@ -448,38 +449,78 @@ def removal_key(
         name: Input or output name; empty for the whole entry.
 
     Returns:
-        ``<entry>:input:<name>``, ``<entry>:output:<name>`` or ``<entry>:entry``.
+        ``<entry>:<input|output|secret>:<name>`` or ``<entry>:entry``.
     """
     if kind is DeprecationKind.ENTRY:
         return f"{entry_id}:entry"
     return f"{entry_id}:{kind.value}:{name}"
 
 
-def interface(
+def interface_holder(
     kind: Kind,
     document: Any,
-) -> dict[DeprecationKind, dict[str, str]]:
-    """Return the inputs and outputs an entry point exposes, with descriptions.
+) -> dict[str, Any]:
+    """Return the mapping that declares an entry point's interface.
 
     Args:
         kind: Entry kind.
         document: Parsed workflow or ``action.yml``.
 
     Returns:
-        Input and output name to one-line description.
+        ``on.workflow_call`` for a workflow, the document for an action.
     """
     if not isinstance(document, dict):
-        document = {}
-    if kind is Kind.REUSABLE_WORKFLOW:
-        triggers = document.get("on", document.get(True)) or {}
-        call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
-        holder = call if isinstance(call, dict) else {}
-    else:
-        holder = document
+        return {}
+    if kind is Kind.COMPOSITE_ACTION:
+        return document
+    triggers = document.get("on", document.get(True)) or {}
+    call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
+    return call if isinstance(call, dict) else {}
+
+
+def required_inputs(
+    kind: Kind,
+    document: Any,
+) -> set[str]:
+    """Return the inputs a caller must pass.
+
+    Args:
+        kind: Entry kind.
+        document: Parsed workflow or ``action.yml``.
+
+    Returns:
+        Names of inputs with ``required: true`` and no default.
+    """
+    inputs = interface_holder(kind=kind, document=document).get("inputs")
+    required = set()
+    for name, spec in inputs.items() if isinstance(inputs, dict) else []:
+        if not isinstance(spec, dict) or "default" in spec:
+            continue
+        if spec.get("required") is True:
+            required.add(str(name))
+    return required
+
+
+def interface(
+    kind: Kind,
+    document: Any,
+) -> dict[DeprecationKind, dict[str, str]]:
+    """Return the inputs, outputs and secrets an entry point exposes.
+
+    Args:
+        kind: Entry kind.
+        document: Parsed workflow or ``action.yml``.
+
+    Returns:
+        Kind to item name to one-line description. Composite actions have
+        no secrets.
+    """
+    holder = interface_holder(kind=kind, document=document)
     result: dict[DeprecationKind, dict[str, str]] = {}
     for deprecation_kind, key in (
         (DeprecationKind.INPUT, "inputs"),
         (DeprecationKind.OUTPUT, "outputs"),
+        (DeprecationKind.SECRET, "secrets"),
     ):
         items = holder.get(key)
         result[deprecation_kind] = {

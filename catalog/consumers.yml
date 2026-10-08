@@ -18,7 +18,8 @@
 #                      40-character SHA is a floating ref and gets a NOTICE
 #   uses               catalog entry ids it calls
 #   deprecated-in-use  removal keys (<entry>:input:<name>, <entry>:output:<name>,
-#                      <entry>:entry) of deprecated items it still uses
+#                      <entry>:entry) of deprecated or already removed
+#                      items it still uses
 ---
 schema-version: 1
 consumers:
@@ -466,6 +467,7 @@ consumers:
       - "reusable-publish-security-audit-comment:input:tooling-ref"
       - "reusable-quality-lint:input:tooling-ref"
       - "reusable-sbom:input:tooling-ref"
+      - "reusable-scorecards:input:tooling-ref"
       - "reusable-security-audit:input:tooling-ref"
       - "reusable-test-node-custom:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"

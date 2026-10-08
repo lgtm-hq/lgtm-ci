@@ -15,7 +15,9 @@
 #   CATALOG_RELEASE_NOTES - true to merge the support-catalog diff between
 #     FROM_REF and TO_REF (tier changes, deprecations, removals; #1082) into
 #     the generated sections. Needs catalog/catalog.yml at both refs and a
-#     python3 with PyYAML; a failure fails the script (default: false)
+#     Python with PyYAML; a failure fails the script (default: false)
+#   PYTHON - Interpreter for CATALOG_RELEASE_NOTES (default: python3, which has
+#     PyYAML on GitHub-hosted Ubuntu runners)
 
 set -euo pipefail
 
@@ -63,7 +65,7 @@ CHANGELOG=$(generate_changelog "$FROM_REF" "$TO_REF" "$VERSION" "$FORMAT")
 # Changelog sections as the commit bullets, so the release section says which
 # entries changed tier and which inputs were deprecated or removed.
 if [[ "$CATALOG_RELEASE_NOTES" == "true" && -n "$FROM_REF" ]]; then
-	CATALOG_NOTES=$(python3 "$CATALOG_DIR/release_notes.py" \
+	CATALOG_NOTES=$("${PYTHON:-python3}" "$CATALOG_DIR/release_notes.py" \
 		--repo-root . --base "$FROM_REF" --head "$TO_REF")
 	if [[ -n "$CATALOG_NOTES" ]]; then
 		CHANGELOG_HEADING=$(printf '%s\n' "$CHANGELOG" | head -n 1)

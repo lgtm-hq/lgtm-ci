@@ -25,10 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   refreshed by `scripts/ci/catalog/check-deprecations.sh scan --write`, and
   `catalog/deprecation-exceptions.yml` for approved removals.
 - `🧭 Deprecation Gate` CI job (`check-deprecations.sh`): fails a PR that
-  removes an input, output or entry point while a known consumer still uses
-  it, relies on consumer evidence older than 14 days, or removes a
-  never-deprecated item from a `stable` entry, unless an exception names the
-  approving issue.
+  removes an input, output, secret or entry point while a known consumer
+  still uses it, relies on consumer evidence older than 14 days, removes a
+  never-deprecated item from a `stable` entry, or makes an existing `stable`
+  input required, unless an exception added in that PR names the approving
+  issue. The evidence is the registry on `main`; a PR cannot drop consumers
+  or freshen their dates.
 - `📌 Doc Pins` CI job (`scripts/ci/docs/validate-doc-pins.py`): every
   lgtm-ci reference in the README, docs and examples is a commit SHA or a
   `<sha>` placeholder.

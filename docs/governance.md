@@ -130,7 +130,7 @@ scan below).
 | `last-verified` | Date of the scan that produced the row |
 | `pins` | lgtm-ci refs its default branch uses; anything but a full SHA is a floating ref and the validator prints a notice |
 | `uses` | Catalog entries it calls |
-| `deprecated-in-use` | Removal keys of deprecated items it still uses: `<entry>:input:<name>` for an input it passes, `<entry>:output:<name>` for an output it reads, `<entry>:entry` for a deprecated entry point it calls |
+| `deprecated-in-use` | Removal keys of deprecated (or already removed) items it still uses: `<entry>:input:<name>` for an input it passes, `<entry>:output:<name>` for an output it reads, `<entry>:secret:<name>` for a secret it passes (all of them with `secrets: inherit`), `<entry>:entry` for a deprecated entry point it calls |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -139,19 +139,28 @@ each repository's default branch with `gh` (workflow files and composite
 `action.yml` files), finds every `lgtm-hq/lgtm-ci/...@<ref>` call and
 rewrites the row with today's date. It needs a token that can read the
 consumers; run it locally with your own `gh` login. Only `repository` and
-`tracking-issues` are kept from the old row.
+`tracking-issues` are kept from the old row. A key stays in the row while the
+consumer uses it, also after lgtm-ci has removed it: that is a consumer whose
+next pin bump breaks, and the validator prints a notice for it.
+
+The gate trusts the registry on `main`. A PR can add consumers and usage, but
+the gate unions its registry with the one on `main`: rows and usage a PR
+drops are kept, and a row's `last-verified` is the one on `main`. A refresh
+that clears a consumer therefore lands in its own PR first.
 
 ## Removal gate
 
 The CI job `🧭 Deprecation Gate` runs `scripts/ci/catalog/check-deprecations.sh`,
-which compares the catalog and every entry point's inputs and outputs at
-`origin/main` with the PR and lists what the PR removes. Each removal passes
-only when one of these holds:
+which compares the catalog and every entry point's inputs, outputs and
+secrets with the commit the PR was built on (the merge commit's first parent;
+`origin/main` when run locally) and lists what the PR removes. Each removal
+passes only when one of these holds:
 
-- an entry in
+- the PR adds an entry to
   [`catalog/deprecation-exceptions.yml`](../catalog/deprecation-exceptions.yml)
-  names it, with the `issue` that approved the removal and a one-line
-  `reason`; exceptions stay in the file as the audit trail;
+  that names it, with the `issue` that approved the removal and a one-line
+  `reason`. Exceptions stay in the file as the audit trail, and one already
+  on `main` approves nothing new;
 - it was deprecated on `main` (a `deprecations` record covered it), no
   registry row lists it under `deprecated-in-use` (for an entry point: no row
   `uses` it), and every row was verified within the last 14 days, so the
@@ -161,15 +170,22 @@ only when one of these holds:
   known consumers of the entry so the author can decide to deprecate anyway.
 
 Everything else fails: removing a never-deprecated item from a `stable` or
-`deprecated` entry, removing a deprecated item a consumer still uses, or
-relying on stale evidence. A removal PR therefore:
+`deprecated` entry, removing a deprecated item a consumer still uses, relying
+on evidence older than 14 days (or dated in the future), or deleting the
+catalog. Making an existing input of a `stable` or `deprecated` entry required
+fails too, because every caller that does not pass it breaks; the exception
+key is `<entry>:required:<name>`. Changing an input's `type` is not checked;
+review it as a breaking change.
 
-1. deletes the input, output or file;
-2. drops the entry from the record's `entries` (and the record when it is
-   empty), since the validator requires every listed entry to still expose
-   the item;
-3. refreshes the registry (`scan --write`) in the same PR;
-4. carries `!` in the PR title and a migration-guide entry.
+A removal takes two PRs:
+
+1. **Refresh** the registry (`scan --write`) and merge it, so `main` shows
+   that no known consumer still uses the item.
+2. **Remove** it within 14 days of that refresh: delete the input, output,
+   secret or file; drop the entry from the record's `entries` (and the record
+   when it is empty), since the validator requires every listed entry to
+   still expose the item; put `!` in the PR title and add a migration-guide
+   entry.
 
 The output names each removal with the key an exception would use, for
 example:
@@ -187,7 +203,8 @@ lgtm-ci's own version PR sets `catalog-release-notes: true` on
 catalog diff since the previous release into the new `CHANGELOG.md` section
 as `**catalog**` bullets: entries added (`Added`), tier changes (`Changed`),
 newly deprecated items with their replacement (`Deprecated`), and removed
-entries and deprecated items (`Removed`).
+entries and every removed input, output and secret, marked as deprecated
+first or not (`Removed`).
 
 ## Commands
 

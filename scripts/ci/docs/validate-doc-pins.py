@@ -10,8 +10,8 @@ not pins, and examples get copied verbatim, so the docs must not show them.
 
 Every ``lgtm-hq/lgtm-ci/.github/{workflows,actions}/...@<ref>`` in
 ``README.md``, ``SECURITY.md``, ``docs/**/*.md`` and ``examples/**`` must
-use a 40-character SHA, a placeholder in angle brackets (``<sha>``) or a
-``${{ }}`` expression. ``CHANGELOG.md`` is history and is not scanned.
+use a 40-character SHA, a SHA placeholder (``<sha>``, ``<commit-sha>``) or
+a ``${{ }}`` expression. ``CHANGELOG.md`` is history and is not scanned.
 
 Usage:
     validate-doc-pins.py [--repo-root DIR]
@@ -30,7 +30,8 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 REFERENCE = re.compile(
     r"lgtm-hq/lgtm-ci/\.github/(?:workflows|actions)/[\w./-]+@(?P<ref>[^\s\"'`)\]]+)",
 )
-ALLOWED_REF = re.compile(r"^(?:[0-9a-f]{40}|<[\w-]+>|\$\{\{|\\\$\{\{)")
+# A full SHA, a SHA placeholder (`<sha>`, `<commit-sha>`) or an expression.
+ALLOWED_REF = re.compile(r"^(?:[0-9a-f]{40}|<[\w-]*sha>|\$\{\{|\\\$\{\{)")
 SCANNED = ("README.md", "SECURITY.md", "docs/**/*.md", "examples/**/*")
 TEXT_SUFFIXES = frozenset({".md", ".yml", ".yaml", ".json", ".toml"})
 

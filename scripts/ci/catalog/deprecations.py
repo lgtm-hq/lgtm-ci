@@ -21,8 +21,13 @@ registry) and ``catalog/deprecation-exceptions.yml``:
 
 ``gate`` (default; what CI runs)
     Compare the catalog and entry-point files at ``--base-ref`` with the
-    work tree and list every input, output and entry point the change
-    removes. A removal fails unless an exception names it, or:
+    work tree and list every input, output, secret and entry point the
+    change removes, and every input it makes required. The evidence is the
+    base registry merged with the work tree's: a change can add consumers
+    and usage but never drop them or move ``last-verified`` forward, so a
+    refresh that clears a consumer lands on the default branch first. Only
+    exceptions the change itself adds count. A removal fails unless such an
+    exception names it, or:
 
     * it was deprecated at the base (a ``deprecations`` record covered it),
       no registry consumer still uses it, and every consumer row was
@@ -31,10 +36,12 @@ registry) and ``catalog/deprecation-exceptions.yml``:
     * its entry was ``preview`` or ``internal`` and the item was never
       deprecated: those tiers may change without a migration (a NOTICE lists
       registry consumers of the entry). Removing a never-deprecated item
-      from a ``stable`` or ``deprecated`` entry always fails.
+      from a ``stable`` or ``deprecated`` entry always fails, and so does
+      making an optional input of such an entry required.
 
 Usage:
     deprecations.py gate [--base-ref REF] [--max-age-days N] [--today DATE]
+    (CI passes the merge commit's first parent, HEAD^1)
     deprecations.py report
     deprecations.py scan [--write] [--repository OWNER/NAME ...] [--today DATE]
 """
@@ -45,9 +52,11 @@ from __future__ import annotations
 
 import argparse
 import datetime as dt
+import json
 import re
 import subprocess
 import sys
+import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -64,12 +73,15 @@ from catalog_lib import (  # noqa: E402  # pylint: disable=wrong-import-position
 LGTM_CI_USES = re.compile(
     r"^lgtm-hq/lgtm-ci/\.github/(?:workflows/(?P<workflow>[\w.-]+)\.ya?ml"
     r"|actions/(?P<action>[\w.-]+))@(?P<ref>\S+)$",
+    # GitHub resolves owner and repository names case-insensitively.
+    re.IGNORECASE,
 )
 WORKFLOW_FILE = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 ACTION_FILE = re.compile(r"(?:^|/)action\.ya?ml$")
 DEFAULT_MAX_AGE_DAYS = 14
 COMMANDS = frozenset({"gate", "report", "scan"})
 REGISTRY_HEADER_END = "---\n"
+EVERY = "*"
 
 
 @dataclass
@@ -95,11 +107,14 @@ class Snapshot:
         tiers: Entry id to tier.
         keys: Every removal key the entry points expose.
         deprecated: Removal keys covered by a deprecation record.
+        required: ``<entry>:required:<input>`` for every input a caller
+            must pass.
     """
 
     tiers: dict[str, str]
     keys: set[str]
     deprecated: set[str]
+    required: set[str]
 
 
 def git(
@@ -170,6 +185,7 @@ def snapshot(
         raise ValueError(f"{catalog_lib.CATALOG_RELPATH} at {ref or 'work tree'}")
     tiers: dict[str, str] = {}
     keys: set[str] = set()
+    required: set[str] = set()
     for entry in entries:
         entry_id = str(entry["id"])
         kind = Kind(entry["kind"])
@@ -185,16 +201,19 @@ def snapshot(
         document = catalog_lib.yaml.safe_load(source)
         surface = catalog_lib.interface(kind=kind, document=document)
         keys |= catalog_lib.removal_keys(entry_id=entry_id, surface=surface)
+        names = catalog_lib.required_inputs(kind=kind, document=document)
+        required |= {f"{entry_id}:required:{name}" for name in names}
     deprecated: set[str] = set()
     for record in catalog.get("deprecations") or []:
         deprecated |= catalog_lib.deprecation_keys(record=record)
-    return Snapshot(tiers=tiers, keys=keys, deprecated=deprecated)
+    return Snapshot(tiers=tiers, keys=keys, deprecated=deprecated, required=required)
 
 
 def load_rows(
     repo_root: Path,
     relpath: Path,
     list_key: str,
+    ref: str | None = None,
 ) -> list[dict[str, Any]]:
     """Load the list from the registry or the exceptions file.
 
@@ -202,15 +221,43 @@ def load_rows(
         repo_root: Repository root.
         relpath: File to read.
         list_key: Top-level key holding the list.
+        ref: Revision, or None for the work tree.
 
     Returns:
         The rows; empty when the file or the key is missing.
     """
-    path = repo_root / relpath
-    if not path.is_file():
-        return []
-    rows = catalog_lib.load_catalog(path=path).get(list_key)
-    return rows if isinstance(rows, list) else []
+    text = read_at(repo_root=repo_root, ref=ref, relpath=relpath)
+    data = catalog_lib.yaml.safe_load(text) if text else None
+    rows = data.get(list_key) if isinstance(data, dict) else None
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def merged_consumers(
+    base: list[dict[str, Any]],
+    head: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Combine the base and work-tree registries so a change cannot erase evidence.
+
+    Rows dropped by the change are kept, usage lists are unioned and a row
+    already on the base keeps the base ``last-verified``. A refresh that
+    clears a consumer therefore takes effect once it is on the base.
+
+    Args:
+        base: Registry rows at the base revision.
+        head: Registry rows in the work tree.
+
+    Returns:
+        Merged rows.
+    """
+    merged = {str(row.get("repository")): dict(row) for row in head}
+    for row in base:
+        repository = str(row.get("repository"))
+        current = merged.setdefault(repository, dict(row))
+        for key in ("pins", "uses", "deprecated-in-use"):
+            values = set(current.get(key) or []) | set(row.get(key) or [])
+            current[key] = sorted(values)
+        current["last-verified"] = row.get("last-verified")
+    return list(merged.values())
 
 
 def entry_of(
@@ -343,7 +390,10 @@ def judge_removal(
             "warns), or add an exception naming the approving issue",
         )
         return
-    users = users_of(key=key, consumers=consumers)
+    # Under a whole-entry deprecation the registry records only the entry
+    # key, so any consumer still calling the entry blocks each of its items.
+    lookup = whole if whole in base.deprecated else key
+    users = users_of(key=lookup, consumers=consumers)
     if users:
         verdict.errors.append(
             f"{key}: still used by known consumer(s) {', '.join(users)}; migrate "
@@ -357,6 +407,29 @@ def judge_removal(
         )
         return
     verdict.notices.append(f"{key}: removal allowed; no known consumer uses it")
+
+
+def judge_required(
+    verdict: Verdict,
+    key: str,
+    base: Snapshot,
+) -> None:
+    """Decide one input that the change makes required.
+
+    Args:
+        verdict: Findings sink.
+        key: ``<entry>:required:<input>``.
+        base: Snapshot at the base revision.
+    """
+    tier = base.tiers.get(entry_of(key), "")
+    if tier in (Tier.PREVIEW.value, Tier.INTERNAL.value):
+        verdict.notices.append(f"{key}: input made required on a {tier} entry")
+        return
+    verdict.errors.append(
+        f"{key}: a {tier} entry gains a required input, which fails every caller "
+        "that does not pass it; give it a default, or add an exception naming "
+        "the approving issue",
+    )
 
 
 def gate(
@@ -384,31 +457,45 @@ def gate(
         return verdict
     base = snapshot(repo_root=repo_root, ref=base_ref)
     head = snapshot(repo_root=repo_root, ref=None)
-    if base is None or head is None:
-        verdict.notices.append(
-            "no catalog at one side of the comparison; nothing to gate",
-        )
+    if base is None:
+        verdict.notices.append(f"no catalog at {base_ref}; nothing to gate")
         return verdict
-    consumers = load_rows(
-        repo_root=repo_root,
-        relpath=catalog_lib.CONSUMERS_RELPATH,
-        list_key="consumers",
-    )
-    exceptions = {
-        str(row.get("removal")): row
-        for row in load_rows(
+    if head is None:
+        verdict.errors.append(f"{catalog_lib.CATALOG_RELPATH} was deleted")
+        return verdict
+    consumers = merged_consumers(
+        base=load_rows(
             repo_root=repo_root,
-            relpath=catalog_lib.EXCEPTIONS_RELPATH,
-            list_key="exceptions",
-        )
-    }
+            relpath=catalog_lib.CONSUMERS_RELPATH,
+            list_key="consumers",
+            ref=base_ref,
+        ),
+        head=load_rows(
+            repo_root=repo_root,
+            relpath=catalog_lib.CONSUMERS_RELPATH,
+            list_key="consumers",
+        ),
+    )
+    exceptions = new_exceptions(repo_root=repo_root, base_ref=base_ref)
     cutoff = today - dt.timedelta(days=max_age_days)
-    stale = [
-        str(row.get("repository"))
-        for row in consumers
-        if (verified_on(row=row) or dt.date.min) < cutoff
-    ]
+    stale = []
+    for row in consumers:
+        verified = verified_on(row=row) or dt.date.min
+        # A date in the future is as untrustworthy as an old one.
+        if verified < cutoff or verified > today:
+            stale.append(str(row.get("repository")))
     removed = removed_keys(base=base, head=head)
+    # Inputs made required on entries that already existed at the base.
+    tightened = []
+    for key in sorted(head.required - base.required):
+        if f"{entry_of(key)}:entry" in base.keys:
+            tightened.append(key)
+    for key in tightened:
+        if key in exceptions:
+            issue = exceptions[key].get("issue")
+            verdict.notices.append(f"{key}: approved by exception (#{issue})")
+            continue
+        judge_required(verdict=verdict, key=key, base=base)
     for key in removed:
         if key in exceptions:
             issue = exceptions[key].get("issue")
@@ -424,6 +511,37 @@ def gate(
     summary = f"{len(removed)} removal(s) against {base_ref}"
     verdict.notices.append(f"{summary}; {len(consumers)} known consumer(s)")
     return verdict
+
+
+def new_exceptions(
+    repo_root: Path,
+    base_ref: str,
+) -> dict[str, dict[str, Any]]:
+    """Return the exceptions the change adds.
+
+    Exceptions already on the base are the audit trail of earlier removals;
+    counting them would silently approve the same key if it were re-added
+    and removed again.
+
+    Args:
+        repo_root: Repository root.
+        base_ref: Base revision.
+
+    Returns:
+        Removal key to exception row.
+    """
+    rows = {}
+    for ref in (base_ref, None):
+        rows[ref] = {
+            str(row.get("removal")): row
+            for row in load_rows(
+                repo_root=repo_root,
+                relpath=catalog_lib.EXCEPTIONS_RELPATH,
+                list_key="exceptions",
+                ref=ref,
+            )
+        }
+    return {key: row for key, row in rows[None].items() if key not in rows[base_ref]}
 
 
 def deprecation_report(
@@ -497,23 +615,23 @@ def consumer_files(
         Path to file text on the default branch.
     """
     branch = gh("api", f"repos/{repository}", "--jq", ".default_branch").strip()
-    listing = gh(
-        "api",
-        f"repos/{repository}/git/trees/{branch}?recursive=1",
-        "--jq",
-        '.tree[] | select(.type == "blob") | .path',
-    )
+    ref = urllib.parse.quote(branch, safe="")
+    tree = json.loads(gh("api", f"repos/{repository}/git/trees/{ref}?recursive=1"))
+    if tree.get("truncated"):
+        # A partial listing would under-report usage and let a removal pass.
+        raise RuntimeError("the git tree listing is truncated")
     paths = [
-        path
-        for path in listing.splitlines()
-        if WORKFLOW_FILE.search(path) or ACTION_FILE.search(path)
+        str(item["path"])
+        for item in tree.get("tree", [])
+        if item.get("type") == "blob"
+        and (WORKFLOW_FILE.search(item["path"]) or ACTION_FILE.search(item["path"]))
     ]
     return {
         path: gh(
             "api",
             "-H",
             "Accept: application/vnd.github.raw",
-            f"repos/{repository}/contents/{path}?ref={branch}",
+            f"repos/{repository}/contents/{urllib.parse.quote(path)}?ref={ref}",
         )
         for path in paths
     }
@@ -524,6 +642,7 @@ def record_call(
     uses: str,
     passed: Any,
     reads: list[str],
+    secrets: Any = None,
 ) -> None:
     """Record one ``uses:`` of an lgtm-ci entry point.
 
@@ -531,7 +650,8 @@ def record_call(
         usage: Accumulator for the repository.
         uses: The ``uses:`` value.
         passed: The ``with:`` mapping.
-        reads: Output names the file reads from this call.
+        reads: Output names the file reads from this call; ``*`` for all.
+        secrets: The job's ``secrets:`` mapping, or ``inherit`` (all).
     """
     match = LGTM_CI_USES.match(uses.strip())
     if match is None:
@@ -558,6 +678,15 @@ def record_call(
                 name=name,
             ),
         )
+    names = [EVERY] if secrets == "inherit" else list(secrets or {})
+    for name in names if isinstance(secrets, (dict, str)) else []:
+        usage.keys.add(
+            catalog_lib.removal_key(
+                entry_id=entry_id,
+                kind=DeprecationKind.SECRET,
+                name=str(name),
+            ),
+        )
 
 
 def outputs_read(
@@ -573,12 +702,20 @@ def outputs_read(
         ident: Job or step id; None when the step has no id.
 
     Returns:
-        Output names.
+        Output names; ``*`` when the whole ``outputs`` object is read.
     """
     if not ident:
         return []
-    pattern = rf"\b{context}\.{re.escape(str(ident))}\.outputs\.([\w-]+)"
-    return sorted(set(re.findall(pattern, text)))
+    name = re.escape(str(ident))
+    owner = rf"(?:\.{name}\b|\[\s*['\"]{name}['\"]\s*\])"
+    output = r"(?:\.([\w-]+)|\[\s*['\"]([\w-]+)['\"]\s*\])"
+    pattern = rf"\b{context}{owner}\s*(?:\.outputs|\[\s*['\"]outputs['\"]\s*\])"
+    found = re.findall(pattern + rf"\s*{output}", text)
+    names = {dotted or quoted for dotted, quoted in found}
+    # `toJSON(needs.x.outputs)` and the like read every output at once.
+    if re.search(pattern + r"(?!\s*[.\[\w])", text):
+        names.add(EVERY)
+    return sorted(names)
 
 
 def scan_steps(
@@ -635,6 +772,7 @@ def scan_file(
                 uses=job["uses"],
                 passed=job.get("with"),
                 reads=outputs_read(text=text, context="needs", ident=job_id),
+                secrets=job.get("secrets"),
             )
         scan_steps(usage=usage, steps=job.get("steps"), text=text)
 
@@ -660,26 +798,47 @@ def refreshed_row(
     row: dict[str, Any],
     usage: Usage,
     deprecated: set[str],
+    live: set[str],
     today: dt.date,
 ) -> dict[str, Any]:
     """Return a registry row rebuilt from a scan.
+
+    A key is kept when the catalog deprecates it or its whole entry, or when
+    lgtm-ci no longer exposes it at all: a removal PR drops the record before
+    it refreshes the registry, and that usage is exactly what the gate needs.
 
     Args:
         row: Current row (keeps its repository and tracking issues).
         usage: Scan result.
         deprecated: Removal keys the catalog deprecates.
+        live: Removal keys the work tree still exposes.
         today: Verification date.
 
     Returns:
         The new row.
     """
+    keys = set()
+    for key in usage.keys:
+        if not key.endswith(f":{EVERY}"):
+            keys.add(key)
+            continue
+        # `secrets: inherit` or a whole-`outputs` read uses every such item.
+        prefix = key[: -len(EVERY)]
+        keys |= {k for k in live | deprecated if k.startswith(prefix)}
+    kept = {
+        key
+        for key in keys
+        if key in deprecated
+        or catalog_lib.removal_key(entry_of(key), DeprecationKind.ENTRY) in deprecated
+        or key not in live
+    }
     return {
         "repository": row["repository"],
         "tracking-issues": list(row.get("tracking-issues") or []),
         "last-verified": today.isoformat(),
         "pins": sorted(usage.pins),
         "uses": sorted(usage.entries),
-        "deprecated-in-use": sorted(usage.keys & deprecated),
+        "deprecated-in-use": sorted(kept),
     }
 
 
@@ -758,6 +917,7 @@ def scan(
     rows.sort(key=lambda row: str(row["repository"]).lower())
     head = snapshot(repo_root=repo_root, ref=None)
     deprecated = head.deprecated if head else set()
+    live = head.keys if head else set()
     failed = 0
     refreshed = []
     for row in rows:
@@ -772,7 +932,13 @@ def scan(
             failed += 1
             refreshed.append(row)
             continue
-        new = refreshed_row(row=row, usage=usage, deprecated=deprecated, today=today)
+        new = refreshed_row(
+            row=row,
+            usage=usage,
+            deprecated=deprecated,
+            live=live,
+            today=today,
+        )
         print(
             f"{repository}: {len(new['uses'])} entr(y/ies), "
             f"pins {flow_list(new['pins'])}, "

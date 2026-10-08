@@ -97,12 +97,13 @@ jobs:
     with:
       job-name: "🧭 Deprecation Gate"
       script: scripts/ci/catalog/check-deprecations.sh
-      # The gate compares the PR with origin/main (#1082): removed inputs,
-      # outputs and entry points need known-consumer evidence or an
-      # exception. Only the main tip is needed, not the history.
+      # The gate compares the checkout with its first parent, HEAD^1 (#1082):
+      # for a PR that is the main commit its merge commit was built on.
+      # Removed inputs, outputs, secrets and entry points need known-consumer
+      # evidence or an exception. The checkout is shallow; fetch one parent.
       setup-commands: >-
-        git fetch --quiet --no-tags --depth=1 origin
-        +refs/heads/main:refs/remotes/origin/main
+        if [ "$(git rev-parse --is-shallow-repository)" = true ];
+        then git fetch --quiet --no-tags --depth=2 origin "$(git rev-parse HEAD)"; fi
       publish-validation-report: true
       comment-marker: deprecation-gate
     permissions:

@@ -20,6 +20,7 @@ import datetime as dt
 import os
 import shutil
 import subprocess
+import sys
 import textwrap
 from collections.abc import Callable
 from pathlib import Path
@@ -454,6 +455,210 @@ def test_gate_blocks_deleting_a_deprecated_entry_still_called(
     assert_that(verdict.errors[0]).starts_with("reusable-legacy:entry:")
 
 
+def commit_consumers(
+    root: Path,
+    rows: list[dict[str, Any]],
+) -> None:
+    """Put a registry on ``main`` so later work-tree edits are a change.
+
+    Args:
+        root: Repository root.
+        rows: Registry rows.
+    """
+    set_consumers(root, rows)
+    git(root, "commit", "-qam", "registry")
+
+
+def test_gate_ignores_a_registry_edit_that_erases_a_consumer(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """Evidence on the base cannot be dropped by the change being judged."""
+    commit_consumers(
+        repo,
+        [{"repository": "o/a", "deprecated-in-use": ["reusable-demo:input:old"]}],
+    )
+    drop_old_input(repo)
+    set_consumers(repo, [{"repository": "o/a"}])
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors).is_length(1)
+    assert_that(verdict.errors[0]).contains("o/a")
+
+
+def test_gate_ignores_a_deleted_registry_row(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """Deleting a consumer's row does not delete the consumer."""
+    commit_consumers(
+        repo,
+        [{"repository": "o/a", "deprecated-in-use": ["reusable-demo:input:old"]}],
+    )
+    drop_old_input(repo)
+    set_consumers(repo, [])
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors[0]).contains("o/a")
+
+
+def test_gate_keeps_the_base_verification_date(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """A change cannot freshen evidence by editing `last-verified`."""
+    commit_consumers(repo, [{"repository": "o/a", "last-verified": "2026-09-01"}])
+    drop_old_input(repo)
+    set_consumers(repo, [{"repository": "o/a"}])
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors[0]).contains("stale", "o/a")
+
+
+def test_gate_treats_a_future_date_as_stale(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """`last-verified` after today is not evidence."""
+    drop_old_input(repo)
+    set_consumers(repo, [{"repository": "o/a", "last-verified": "2027-01-01"}])
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors[0]).contains("stale", "o/a")
+
+
+def test_gate_ignores_exceptions_already_on_the_base(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """An old exception is audit trail, not approval for a new removal."""
+    (repo / "catalog" / "deprecation-exceptions.yml").write_text(
+        textwrap.dedent(
+            """\
+            ---
+            schema-version: 1
+            exceptions:
+              - removal: reusable-demo:input:keep
+                issue: 42
+                reason: "Approved long ago"
+            """,
+        ),
+        encoding="utf-8",
+    )
+    git(repo, "commit", "-qam", "old exception")
+    edit(
+        repo,
+        ".github/workflows/reusable-demo.yml",
+        """      keep:
+        description: "Still supported"
+        type: string
+        default: ""
+""",
+        "",
+    )
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors).is_length(1)
+    assert_that(verdict.errors[0]).contains("reusable-demo:input:keep")
+
+
+def test_gate_fails_when_the_catalog_is_deleted(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """Deleting the catalog must not read as "nothing to gate"."""
+    (repo / "catalog" / "catalog.yml").unlink()
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors[0]).contains("deleted")
+
+
+def test_gate_rejects_making_a_stable_input_required(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """A new required input fails every caller that does not pass it."""
+    edit(
+        repo,
+        ".github/workflows/reusable-demo.yml",
+        """      keep:
+        description: "Still supported"
+        type: string
+        default: ""
+""",
+        """      keep:
+        description: "Still supported"
+        type: string
+        required: true
+""",
+    )
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors).is_length(1)
+    assert_that(verdict.errors[0]).starts_with("reusable-demo:required:keep:")
+
+
+def test_gate_rejects_removing_a_stable_secret(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """Callers passing a removed secret fail at startup, so secrets count."""
+    edit(
+        repo,
+        ".github/workflows/reusable-demo.yml",
+        "    outputs:\n",
+        "    secrets:\n      TOKEN:\n        required: false\n    outputs:\n",
+    )
+    git(repo, "commit", "-qam", "secret")
+    edit(
+        repo,
+        ".github/workflows/reusable-demo.yml",
+        "    secrets:\n      TOKEN:\n        required: false\n",
+        "",
+    )
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors[0]).starts_with("reusable-demo:secret:TOKEN:")
+
+
+def test_scan_records_secrets_case_and_whole_output_reads(
+    deprecations: ModuleType,
+) -> None:
+    """Secrets passed or inherited, any owner casing, and `toJSON(outputs)`."""
+    text = textwrap.dedent(
+        """\
+        jobs:
+          a:
+            uses: LGTM-HQ/lgtm-ci/.github/workflows/reusable-demo.yml@abc
+            secrets:
+              TOKEN: ${{ secrets.X }}
+          b:
+            uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-legacy.yml@abc
+            secrets: inherit
+          c:
+            needs: [a]
+            runs-on: ubuntu-24.04
+            steps:
+              - run: echo '${{ toJSON(needs.a.outputs) }}'
+        """,
+    )
+    usage = deprecations.Usage()
+    deprecations.scan_file(usage=usage, path=".github/workflows/ci.yml", text=text)
+    assert_that(usage.keys).contains(
+        "reusable-demo:secret:TOKEN",
+        "reusable-demo:output:*",
+        "reusable-legacy:secret:*",
+    )
+    row = deprecations.refreshed_row(
+        row={"repository": "o/a"},
+        usage=usage,
+        deprecated={"reusable-demo:output:out", "reusable-legacy:secret:OLD"},
+        live={
+            "reusable-demo:entry",
+            "reusable-demo:output:out",
+            "reusable-demo:secret:TOKEN",
+            "reusable-legacy:entry",
+            "reusable-legacy:secret:OLD",
+        },
+        today=TODAY,
+    )
+    assert_that(row["deprecated-in-use"]).is_equal_to(
+        ["reusable-demo:output:out", "reusable-legacy:secret:OLD"],
+    )
+
+
 def test_gate_fails_on_an_unknown_base_ref(
     deprecations: ModuleType,
     repo: Path,
@@ -541,6 +746,7 @@ def test_refreshed_row_keeps_only_deprecated_keys(
         row={"repository": "o/a", "tracking-issues": [7]},
         usage=usage,
         deprecated={"reusable-demo:input:old"},
+        live={"reusable-demo:entry", "reusable-demo:input:keep"},
         today=TODAY,
     )
     assert_that(row).is_equal_to(
@@ -553,6 +759,109 @@ def test_refreshed_row_keeps_only_deprecated_keys(
             "deprecated-in-use": ["reusable-demo:input:old"],
         },
     )
+
+
+def test_refreshed_row_keeps_usage_of_items_already_removed(
+    deprecations: ModuleType,
+) -> None:
+    """A removal PR drops the record before refreshing; the usage must stay."""
+    usage = deprecations.Usage(
+        entries={"reusable-demo", "reusable-legacy"},
+        keys={
+            "reusable-demo:entry",
+            "reusable-demo:input:gone",
+            "reusable-legacy:entry",
+            "reusable-legacy:input:dir",
+        },
+    )
+    row = deprecations.refreshed_row(
+        row={"repository": "o/a"},
+        usage=usage,
+        deprecated={"reusable-legacy:entry"},
+        live={
+            "reusable-demo:entry",
+            "reusable-legacy:entry",
+            "reusable-legacy:input:dir",
+        },
+        today=TODAY,
+    )
+    assert_that(row["deprecated-in-use"]).is_equal_to(
+        [
+            "reusable-demo:input:gone",
+            "reusable-legacy:entry",
+            "reusable-legacy:input:dir",
+        ],
+    )
+
+
+def test_gate_blocks_removal_recorded_after_its_record_was_dropped(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """The refreshed row of a removal PR still names the removed input."""
+    drop_old_input(repo)
+    usage = deprecations.Usage(
+        entries={"reusable-demo"},
+        keys={"reusable-demo:entry", "reusable-demo:input:old"},
+    )
+    head = deprecations.snapshot(repo_root=repo, ref=None)
+    row = deprecations.refreshed_row(
+        row={"repository": "o/a"},
+        usage=usage,
+        deprecated=head.deprecated,
+        live=head.keys,
+        today=TODAY,
+    )
+    set_consumers(repo, [row])
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors).is_length(1)
+    assert_that(verdict.errors[0]).contains("reusable-demo:input:old", "o/a")
+
+
+def test_gate_blocks_partial_removal_from_a_deprecated_entry_in_use(
+    deprecations: ModuleType,
+    repo: Path,
+) -> None:
+    """A wholly deprecated entry's inputs stay while anyone calls the entry."""
+    edit(
+        repo,
+        ".github/workflows/reusable-legacy.yml",
+        "on:\n  workflow_call:\n",
+        "on:\n  workflow_call:\n    inputs:\n      dir:\n        type: string\n",
+    )
+    git(repo, "commit", "-qam", "legacy input")
+    edit(
+        repo,
+        ".github/workflows/reusable-legacy.yml",
+        "    inputs:\n      dir:\n        type: string\n",
+        "",
+    )
+    set_consumers(
+        repo,
+        [{"repository": "o/a", "uses": ["reusable-legacy"]}],
+    )
+    verdict = run_gate(deprecations, repo)
+    assert_that(verdict.errors).is_length(1)
+    assert_that(verdict.errors[0]).starts_with("reusable-legacy:input:dir:")
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "needs.cov.outputs.pages-url",
+        "needs.cov.outputs['pages-url']",
+        'needs["cov"].outputs.pages-url',
+        "needs['cov']['outputs']['pages-url']",
+    ],
+)
+def test_outputs_read_understands_bracket_access(
+    deprecations: ModuleType,
+    expression: str,
+) -> None:
+    """Dotted, bracketed and mixed property access all count as a read."""
+    text = f"run: echo ${{{{ {expression} }}}}"
+    found = deprecations.outputs_read(text=text, context="needs", ident="cov")
+    assert_that(found).is_equal_to(["pages-url"])
 
 
 def test_write_registry_round_trips_through_the_validator(
@@ -796,7 +1105,11 @@ def test_release_notes_report_tier_changes_and_deprecations(
             },
         ],
     }
-    text = release_notes.render(base=base, head=head)
+    text = release_notes.render(
+        base=base,
+        head=head,
+        removed=["b:input:x", "a:output:old", "gone:entry"],
+    )
     assert_that(text).is_equal_to(
         textwrap.dedent(
             """\
@@ -815,7 +1128,8 @@ def test_release_notes_report_tier_changes_and_deprecations(
             ### Removed
 
             - **catalog**: `gone` removed (was `deprecated`)
-            - **catalog**: deprecated input `x` removed from `b` (#5)""",
+            - **catalog**: input `x` removed from `b`; deprecated (#5)
+            - **catalog**: output `old` removed from `a`; not deprecated first""",
         ),
     )
 
@@ -838,6 +1152,7 @@ def test_generate_changelog_merges_catalog_notes(
     env = {
         **os.environ,
         "CATALOG_RELEASE_NOTES": "true",
+        "PYTHON": sys.executable,
         "VERSION": "1.1.0",
         "GITHUB_OUTPUT": str(repo.parent / "github-output"),
     }
@@ -870,7 +1185,9 @@ def test_doc_pins_accept_only_commits_and_placeholders(
             f"uses: {base}v0",
             f"uses: {base}v1.2.3",
             f"uses: {base}0123456",
+            f"uses: {base}<main>",
+            f"uses: {base}<commit-sha>",
         ],
     )
     flagged = [line for line, _ in module.floating_refs(text=text)]
-    assert_that(flagged).is_equal_to([4, 5, 6, 7])
+    assert_that(flagged).is_equal_to([4, 5, 6, 7, 8])

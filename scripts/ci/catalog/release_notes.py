@@ -4,8 +4,10 @@
 
 ``generate-changelog.sh`` calls this when ``CATALOG_RELEASE_NOTES`` is true
 (lgtm-ci's own version PR, #1082), so every release lists what changed for
-callers in ``catalog/catalog.yml``: entries added or removed, tier changes,
-and inputs, outputs and entry points newly deprecated or removed. The output
+callers: entries added or removed and tier changes (``catalog/catalog.yml``),
+items newly deprecated (its ``deprecations`` records), and every input,
+output and secret removed from an entry point, deprecated first or not
+(the same interface diff the removal gate checks). The output
 uses Keep a Changelog section headings and is merged into the generated
 release section; it is empty when the catalog did not change, or when either
 revision has no catalog.
@@ -27,6 +29,7 @@ from typing import Any
 # catalog_lib lives next to this script.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_lib  # noqa: E402  # pylint: disable=wrong-import-position
+import deprecations  # noqa: E402  # pylint: disable=wrong-import-position
 
 SCOPE = "**catalog**"
 SECTIONS = ("Added", "Changed", "Deprecated", "Removed")
@@ -125,7 +128,7 @@ def deprecation_notes(
     head: dict[str, Any],
     notes: dict[str, list[str]],
 ) -> None:
-    """Add bullets for deprecations started and items removed.
+    """Add bullets for deprecations started.
 
     Args:
         base: Catalog at the previous release.
@@ -134,7 +137,6 @@ def deprecation_notes(
     """
     old = {r["id"]: r for r in base.get("deprecations") or []}
     new = {r["id"]: r for r in head.get("deprecations") or []}
-    head_ids = {e["id"] for e in head.get("entries") or []}
     for record_id in sorted(new):
         record = new[record_id]
         before = set(old.get(record_id, {}).get("entries", []))
@@ -147,30 +149,53 @@ def deprecation_notes(
         notes["Deprecated"].append(
             f"- {SCOPE}: {what} (#{record['issue']}): {record['replacement']}",
         )
-    for record_id in sorted(old):
-        record = old[record_id]
-        if record["kind"] == catalog_lib.DeprecationKind.ENTRY:
-            # A removed entry point is already listed by entry_notes.
-            continue
-        kept = set(new.get(record_id, {}).get("entries", []))
-        # Entries removed whole are listed by entry_notes.
-        dropped = [e for e in record["entries"] if e not in kept and e in head_ids]
-        if dropped:
-            notes["Removed"].append(
-                f"- {SCOPE}: deprecated {retired(record=record)} removed from "
-                f"{code_list(values=sorted(dropped))} (#{record['issue']})",
-            )
+
+
+def removal_notes(
+    base: dict[str, Any],
+    removed: list[str],
+    notes: dict[str, list[str]],
+) -> None:
+    """Add a bullet per input, output or secret removed, grouped by name.
+
+    Args:
+        base: Catalog at the previous release (for the deprecation issue).
+        removed: Removal keys from ``deprecations.removed_keys``; entry keys
+            are skipped because ``entry_notes`` lists removed entries.
+        notes: Section name to bullets, extended in place.
+    """
+    issues: dict[str, int] = {}
+    for record in base.get("deprecations") or []:
+        for key in catalog_lib.deprecation_keys(record=record):
+            issues[key] = record["issue"]
+    groups: dict[tuple[str, str], list[str]] = {}
+    for key in removed:
+        entry_id, kind, *rest = key.split(":")
+        if kind != catalog_lib.DeprecationKind.ENTRY:
+            groups.setdefault((kind, rest[0]), []).append(entry_id)
+    for (kind, name), entries in sorted(groups.items()):
+        keys = [f"{entry_id}:{kind}:{name}" for entry_id in entries]
+        cited = sorted({issues[key] for key in keys if key in issues})
+        state = "not deprecated first"
+        if cited:
+            state = f"deprecated (#{', #'.join(map(str, cited))})"
+        notes["Removed"].append(
+            f"- {SCOPE}: {kind} `{name}` removed from "
+            f"{code_list(values=sorted(entries))}; {state}",
+        )
 
 
 def render(
     base: dict[str, Any] | None,
     head: dict[str, Any] | None,
+    removed: list[str] | None = None,
 ) -> str:
     """Render the Keep a Changelog sections for a catalog diff.
 
     Args:
         base: Catalog at the previous release.
         head: Catalog at the new release.
+        removed: Removal keys between the two releases.
 
     Returns:
         Markdown, or an empty string when there is nothing to report.
@@ -179,6 +204,7 @@ def render(
         return ""
     notes = entry_notes(base=base, head=head)
     deprecation_notes(base=base, head=head, notes=notes)
+    removal_notes(base=base, removed=removed or [], notes=notes)
     blocks = []
     for section, bullets in notes.items():
         if bullets:
@@ -204,11 +230,17 @@ def main(
     args = parser.parse_args(argv)
     repo_root: Path = args.repo_root.resolve()
     try:
+        before = deprecations.snapshot(repo_root=repo_root, ref=args.base)
+        after = deprecations.snapshot(repo_root=repo_root, ref=args.head)
+        removed = []
+        if before is not None and after is not None:
+            removed = deprecations.removed_keys(base=before, head=after)
         text = render(
             base=catalog_at(repo_root=repo_root, ref=args.base),
             head=catalog_at(repo_root=repo_root, ref=args.head),
+            removed=removed,
         )
-    except (KeyError, TypeError, catalog_lib.yaml.YAMLError) as exc:
+    except (KeyError, TypeError, ValueError, catalog_lib.yaml.YAMLError) as exc:
         print(f"ERROR: catalog diff {args.base}..{args.head}: {exc}", file=sys.stderr)
         return 1
     if text:

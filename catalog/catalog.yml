@@ -23,8 +23,8 @@
 # `deprecations` (after the entries, #1082) lists every deprecated input, output
 # and entry point; docs/governance.md describes the lifecycle. Each record has:
 #   id           kebab-case slug, unique; records sorted by id
-#   kind         input | output | entry
-#   name         the input or output retired (not on `entry`)
+#   kind         input | output | secret | entry
+#   name         the input, output or secret retired (not on `entry`)
 #   entries      sorted catalog ids that still expose it; drop an id in the PR
 #                that removes the item, which is what the removal gate checks
 #   since        X.Y.Z release that first marked it deprecated
