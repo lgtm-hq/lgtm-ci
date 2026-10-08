@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/lgtm-hq/lgtm-ci/schemas/results.v1.json",
+  "title": "lgtm-ci results contract v1",
+  "description": "One normalized result document per runner leg. Every test, coverage and audit runner writes results/<runner>/<matrix-key>/results.json in this shape; renderers (PR comment, step summary, Pages) and required-check verdicts read only this document. v1 may add optional properties; it never removes or retypes one (docs/workflow-contract.md, Results contract).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["tool", "status", "counts", "duration_ms", "artifacts", "source"],
+  "properties": {
+    "tool": {
+      "description": "Native tool that produced the counts (pytest, vitest, playwright, cargo-nextest, bats, osv-scanner, ...)",
+      "type": "string",
+      "minLength": 1
+    },
+    "status": {
+      "description": "Leg verdict as seen by the runner. passed: exit 0 and no failed count; failed: a failed count or a non-zero exit; no-tests: exit 0 and nothing ran; error: the native report was missing or unparseable.",
+      "type": "string",
+      "enum": ["passed", "failed", "no-tests", "error"]
+    },
+    "counts": {
+      "description": "Test (or finding) counts. Audits report findings under failed and total.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["passed", "failed", "skipped", "total"],
+      "properties": {
+        "passed": { "type": "integer", "minimum": 0 },
+        "failed": { "type": "integer", "minimum": 0 },
+        "skipped": { "type": "integer", "minimum": 0 },
+        "total": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "duration_ms": {
+      "description": "Wall-clock duration of the run in whole milliseconds; 0 when the runner does not report one.",
+      "type": "integer",
+      "minimum": 0
+    },
+    "coverage": {
+      "description": "Present only when coverage was collected for this leg. Percentages 0-100. A metric the format does not measure (branches in line-only LCOV) is omitted, never 0.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["lines"],
+      "properties": {
+        "lines": { "type": "number", "minimum": 0, "maximum": 100 },
+        "branches": { "type": "number", "minimum": 0, "maximum": 100 },
+        "functions": { "type": "number", "minimum": 0, "maximum": 100 }
+      }
+    },
+    "artifacts": {
+      "description": "Files the runner left behind, relative to the job workspace. kind is a short lowercase label (report, coverage, html-report, junit, tap, comment, log).",
+      "type": "array",
+      "items": { "$ref": "#/$defs/artifact" }
+    },
+    "source": {
+      "description": "Which lgtm-ci runner wrote the document and at which tooling revision.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["runner", "version"],
+      "properties": {
+        "runner": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "matrix": {
+      "description": "Matrix coordinate of this leg; key is the matrix field (python-version) and value its value (3.12). Single-leg runners use key \"matrix\" and value \"default\".",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "value"],
+      "properties": {
+        "key": { "type": "string", "minLength": 1 },
+        "value": { "type": "string", "minLength": 1 }
+      }
+    },
+    "exit_code": {
+      "description": "Native tool exit code when the runner captured one.",
+      "type": "integer",
+      "minimum": 0
+    }
+  },
+  "$defs": {
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "path"],
+      "properties": {
+        "kind": { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "path": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
