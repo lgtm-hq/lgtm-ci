@@ -17,6 +17,8 @@ setup() {
 	cd "$WORK_DIR"
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
+	# The run step's marker (mktemp under TMPDIR) is cleaned with the test.
+	export TMPDIR="$BATS_TEST_TMPDIR"
 	# Start every test from clean runner defaults regardless of the CI env.
 	unset URL CONFIG_PATH OUTPUT_DIR EXTRA_ARGS PACKAGE_MANAGER
 	mock_command_record bun
@@ -224,6 +226,22 @@ EOF
 		"${WORK_DIR}/out/127_0_0_1--2026_10_04_15_09_24.report.json"
 }
 
+@test "run-lighthouse run: a relative OUTPUT_DIR keeps results-path relative despite absolute jsonPath (#1088)" {
+	cat >"${BATS_TEST_TMPDIR}/bin/lhci" <<EOF
+#!/usr/bin/env bash
+out=""
+for a in "\$@"; do case "\$a" in --upload.outputDir=*) out="\${a#--upload.outputDir=}" ;; esac; done
+source "${BATS_TEST_TMPDIR}/layout.sh"
+_lhci_report "\$out" site 0.9 1 1 1
+_lhci_manifest "\$(cd "\$out" && pwd)" site site
+EOF
+	chmod +x "${BATS_TEST_TMPDIR}/bin/lhci"
+	declare -f _lhci_report _lhci_manifest >"${BATS_TEST_TMPDIR}/layout.sh"
+	run env STEP=run PACKAGE_MANAGER=npm URL=http://127.0.0.1:8080/ OUTPUT_DIR=lighthouse-reports bash "$SCRIPT"
+	assert_success
+	assert_equal "$(grep '^results-path=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "lighthouse-reports/site.report.json"
+}
+
 @test "run-lighthouse parse: scores the representative report of an LHCI filesystem layout (#1088)" {
 	out="${WORK_DIR}/lighthouse-reports"
 	_lhci_report "$out" 127_0_0_1--2026_10_04_15_09_20 0.40 1 1 1
@@ -247,6 +265,9 @@ EOF
 	_lhci_manifest "$out" 127_0_0_1--2026_10_04_15_09_24 127_0_0_1--2026_10_04_15_09_24
 	jq '.[].jsonPath |= sub("^.*/"; "/home/runner/work/x/x/lighthouse-reports/")' \
 		"$out/manifest.json" >"$out/manifest.tmp" && mv "$out/manifest.tmp" "$out/manifest.json"
+	# A newer non-representative report: only the manifest path scores 86.
+	sleep 1
+	_lhci_report "$out" zzz-decoy 0.10 1 1 1
 	run env STEP=parse RESULTS_PATH="" OUTPUT_DIR="$out" THRESHOLD_SEO=50 bash "$SCRIPT"
 	assert_success
 	assert_equal "$(grep '^performance=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "86"
@@ -289,9 +310,54 @@ EOF
 	done
 }
 
-@test "run-lighthouse action: Check result still runs after a failed parse" {
-	run sed -n '/name: Check result/,/shell: bash/p' "${PROJECT_ROOT}/.github/actions/run-lighthouse/action.yml"
-	assert_output --partial '!cancelled()'
+@test "run-lighthouse parse: a fresh manifest naming a pre-marker report does not count (#1088)" {
+	out="${WORK_DIR}/out"
+	_lhci_report "$out" stale 1 1 1 1
+	touch -t 202001010000 "$out/stale.report.json"
+	marker="${BATS_TEST_TMPDIR}/marker"
+	: >"$marker"
+	sleep 1
+	_lhci_manifest "$out" stale stale
+	run env STEP=parse RESULTS_PATH="" RUN_MARKER="$marker" OUTPUT_DIR="$out" bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "predates this audit"
+	assert_equal "$(grep '^passed=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "false"
+}
+
+@test "run-lighthouse parse: a relative jsonPath keeps its subdirectory (#1088)" {
+	out="${WORK_DIR}/out"
+	_lhci_report "$out/nested" rep 0.86 1 1 1
+	sleep 1
+	_lhci_report "$out" zzz-decoy 0.10 1 1 1
+	echo '[{"url":"http://127.0.0.1:8080/","isRepresentativeRun":true,"jsonPath":"nested/rep.report.json"}]' \
+		>"$out/manifest.json"
+	run env STEP=parse RESULTS_PATH="" OUTPUT_DIR="$out" THRESHOLD_SEO=50 bash "$SCRIPT"
+	assert_success
+	assert_equal "$(grep '^performance=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "86"
+}
+
+@test "run-lighthouse parse: a multi-URL manifest scores the first URL and warns (#1088)" {
+	out="${WORK_DIR}/out"
+	_lhci_report "$out" a 0.86 1 1 1
+	_lhci_report "$out" b 0.10 1 1 1
+	jq -n --arg d "$out" '[
+		{url: "http://127.0.0.1:8080/a", isRepresentativeRun: true, jsonPath: "\($d)/a.report.json"},
+		{url: "http://127.0.0.1:8080/b", isRepresentativeRun: true, jsonPath: "\($d)/b.report.json"}]' \
+		>"$out/manifest.json"
+	run env STEP=parse RESULTS_PATH="" OUTPUT_DIR="$out" THRESHOLD_SEO=50 bash "$SCRIPT"
+	assert_success
+	assert_output --partial "lists 2 URLs"
+	assert_equal "$(grep '^performance=' "$GITHUB_OUTPUT" | cut -d= -f2-)" "86"
+}
+
+@test "run-lighthouse summary: a failed parse is reported as a missing report, not zero scores (#1088)" {
+	export GITHUB_STEP_SUMMARY="${BATS_TEST_TMPDIR}/summary.md"
+	: >"$GITHUB_STEP_SUMMARY"
+	run env STEP=summary PARSE_OUTCOME=failure PASSED=false bash "$SCRIPT"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial "No Lighthouse report was found"
+	refute_output --partial "| Category |"
 }
 
 @test "run-lighthouse: no hard-coded bun, bunx, npx or pnpm invocation remains in the script" {

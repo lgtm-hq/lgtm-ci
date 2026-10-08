@@ -18,6 +18,7 @@
 #   THRESHOLD_BEST_PRACTICES - Minimum best practices score (default: 80)
 #   THRESHOLD_SEO - Minimum SEO score (default: 80)
 #   EXTRA_ARGS - Additional arguments to pass to LHCI
+#   PARSE_OUTCOME - Outcome of the parse step (summary step; default: success)
 #
 # @lhci/cli is a consumer prerequisite: either already on PATH, or installed
 # in the project tree (resolved from the current directory) by the selected
@@ -48,23 +49,38 @@ run_lhci() {
 
 # Report of the representative run listed in LHCI's manifest.json, or nothing.
 # With several runs per URL (collect.numberOfRuns > 1) the representative
-# (median) run is the one LHCI asserts on; the newest file is not. jsonPath is
-# absolute in LHCI's layout; a relative one, or an absolute one from a
-# directory that has since moved, is looked up by name inside the directory.
-# A manifest older than the marker belongs to an earlier audit and is ignored.
+# (median) run is the one LHCI asserts on; the newest file is not. LHCI writes
+# the reports flat next to the manifest with an absolute jsonPath, which goes
+# stale once the directory moves, so an absolute path is looked up by name
+# inside the directory (keeping the result in the same form as OUTPUT_DIR); a
+# relative one is taken relative to the directory. Only the first URL's
+# representative run is scored; a multi-URL manifest gets a warning.
+# A manifest, or the report it names, older than the marker belongs to an
+# earlier audit and is ignored.
 manifest_lighthouse_report() {
-	local dir="$1" marker="${2:-}" manifest="$1/manifest.json" path
+	local dir="$1" marker="${2:-}" manifest="$1/manifest.json" path reps
 	[[ -f "$manifest" ]] || return 0
 	[[ -z "$marker" || "$manifest" -nt "$marker" ]] || return 0
 	path=$(jq -r '([.[] | select(.isRepresentativeRun == true)][0] // .[0]).jsonPath // empty' \
-		"$manifest" 2>/dev/null) || return 0
-	[[ -n "$path" ]] || return 0
-	if [[ "$path" != /* || ! -f "$path" ]]; then
+		"$manifest" 2>/dev/null) || path=""
+	if [[ -z "$path" ]]; then
+		log_warn "manifest.json names no report; falling back to the newest report file"
+		return 0
+	fi
+	if [[ "$path" == /* ]]; then
 		path="$dir/$(basename "$path")"
+	else
+		path="$dir/$path"
 	fi
-	if [[ -f "$path" ]]; then
-		printf '%s\n' "$path"
+	if [[ ! -f "$path" ]] || [[ -n "$marker" && ! "$path" -nt "$marker" ]]; then
+		log_warn "manifest.json names ${path}, which is missing or predates this audit; falling back to the newest report file"
+		return 0
 	fi
+	reps=$(jq '[.[] | select(.isRepresentativeRun == true)] | length' "$manifest" 2>/dev/null || echo 0)
+	if [[ "$reps" -gt 1 ]]; then
+		log_warn "manifest.json lists ${reps} URLs; only the first URL's representative run is scored"
+	fi
+	printf '%s\n' "$path"
 }
 
 # Lighthouse report (LHR JSON) under a filesystem-upload directory.
@@ -234,8 +250,17 @@ summary)
 	: "${THRESHOLD_BEST_PRACTICES:=80}"
 	: "${THRESHOLD_SEO:=80}"
 
+	: "${PARSE_OUTCOME:=success}"
+
 	add_github_summary "## Lighthouse CI Results"
 	add_github_summary ""
+
+	# Parse failed (no report): say so instead of tabling four zero scores.
+	if [[ "$PARSE_OUTCOME" != "success" ]]; then
+		add_github_summary "**Status:** :x: No Lighthouse report was found, so nothing was scored"
+		add_github_summary ""
+		exit 0
+	fi
 
 	if [[ "$PASSED" == "true" ]]; then
 		add_github_summary "**Status:** :white_check_mark: All scores meet thresholds"
