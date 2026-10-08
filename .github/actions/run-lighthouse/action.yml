@@ -208,16 +208,19 @@ runs:
     - name: Check result
       # Thresholds below target, no fresh report, or a non-zero lhci exit
       # (e.g. a failed assertion in the consumer's lighthouserc) all fail.
+      # A missing report already failed Parse results with its own error;
+      # this step still runs then so a non-zero lhci exit is reported too.
       if: >-
-        steps.parse.outputs.passed == 'false'
-        || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0')
+        !cancelled()
+        && (steps.parse.outputs.passed == 'false'
+        || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'))
       shell: bash
       env:
         FAILED_CATS: ${{ steps.parse.outputs.failed-categories }}
         LHCI_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         PASSED: ${{ steps.parse.outputs.passed }}
       run: |
-        if [[ "$PASSED" == "false" ]]; then
+        if [[ "$PASSED" == "false" && -n "$FAILED_CATS" ]]; then
           echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
         fi
         if [[ -n "$LHCI_EXIT_CODE" && "$LHCI_EXIT_CODE" != "0" ]]; then

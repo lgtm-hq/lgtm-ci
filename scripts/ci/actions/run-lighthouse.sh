@@ -46,14 +46,41 @@ run_lhci() {
 	fi
 }
 
-# Newest Lighthouse report (LHR JSON) under a filesystem-upload directory.
-# `lhci autorun --upload.target=filesystem` writes `<slug>.report.json` next to
-# a manifest.json; older layouts used `lhr-*.json`. Both are accepted. With a
-# marker file as the second argument only reports written after it count, so
-# a report left over from an earlier audit in the same directory is never
-# mistaken for this run's result.
+# Report of the representative run listed in LHCI's manifest.json, or nothing.
+# With several runs per URL (collect.numberOfRuns > 1) the representative
+# (median) run is the one LHCI asserts on; the newest file is not. jsonPath is
+# absolute in LHCI's layout; a relative one, or an absolute one from a
+# directory that has since moved, is looked up by name inside the directory.
+# A manifest older than the marker belongs to an earlier audit and is ignored.
+manifest_lighthouse_report() {
+	local dir="$1" marker="${2:-}" manifest="$1/manifest.json" path
+	[[ -f "$manifest" ]] || return 0
+	[[ -z "$marker" || "$manifest" -nt "$marker" ]] || return 0
+	path=$(jq -r '([.[] | select(.isRepresentativeRun == true)][0] // .[0]).jsonPath // empty' \
+		"$manifest" 2>/dev/null) || return 0
+	[[ -n "$path" ]] || return 0
+	if [[ "$path" != /* || ! -f "$path" ]]; then
+		path="$dir/$(basename "$path")"
+	fi
+	if [[ -f "$path" ]]; then
+		printf '%s\n' "$path"
+	fi
+}
+
+# Lighthouse report (LHR JSON) under a filesystem-upload directory.
+# `lhci autorun --upload.target=filesystem` writes `<slug>.report.json` files
+# and a manifest.json naming the representative run; that report wins. Without
+# a usable manifest the newest `*.report.json` (or legacy `lhr-*.json`) is
+# taken. With a marker file as the second argument only reports written after
+# it count, so a report left over from an earlier audit in the same directory
+# is never mistaken for this run's result.
 find_lighthouse_report() {
 	local dir="$1" marker="${2:-}" newest="" f
+	newest=$(manifest_lighthouse_report "$dir" "$marker")
+	if [[ -n "$newest" ]]; then
+		printf '%s\n' "$newest"
+		return 0
+	fi
 	local -a find_args=("$dir" -type f \( -name "*.report.json" -o -name "lhr-*.json" \))
 	if [[ -n "$marker" ]]; then
 		find_args+=(-newer "$marker")
@@ -162,14 +189,16 @@ parse)
 		fi
 	fi
 
+	# A missing report is its own failure, not a threshold miss: fail here
+	# with an annotation instead of reporting four zero scores.
 	if [[ -z "$RESULTS_PATH" ]] || [[ ! -f "$RESULTS_PATH" ]]; then
-		log_warn "No Lighthouse results found"
 		set_github_output "performance" "0"
 		set_github_output "accessibility" "0"
 		set_github_output "best-practices" "0"
 		set_github_output "seo" "0"
 		set_github_output "passed" "false"
-		exit 0
+		echo "::error title=No Lighthouse report::No Lighthouse results found in ${OUTPUT_DIR} (expected manifest.json and *.report.json from lhci's filesystem upload target)" >&2
+		exit 1
 	fi
 
 	# Parse the results

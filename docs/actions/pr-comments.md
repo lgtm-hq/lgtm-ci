@@ -45,7 +45,10 @@ prerequisite — a devDependency of the project in `working-directory`
 (default `.`) resolved through the selected manager, or an `lhci` already on
 `PATH`; nothing is installed (#1077). `output-dir` and `config-path` are
 relative to `working-directory`. Chrome flags tuned for CI; filesystem
-upload (no external services).
+upload (no external services). Scores come from the representative run named
+in LHCI's `manifest.json` (falling back to the newest `*.report.json`); when
+the audit wrote no report the action fails with `No Lighthouse report` instead
+of reporting zero scores (#1088).
 
 ## generate-lighthouse-comment
 
