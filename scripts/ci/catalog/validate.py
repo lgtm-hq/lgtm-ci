@@ -25,7 +25,16 @@ Checks, each reported with the entry it concerns:
    ``git fetch --unshallow`` first (or ``--skip-ancestry`` for a structural
    check only). A stable entry whose file changed after its evidence commit
    gets a NOTICE: evidence is a point-in-time claim.
-6. Generated docs: ``docs/catalog.md`` and the README index match
+6. Deprecations (#1082): every ``deprecations`` record names entries that
+   expose the input or output (or, for ``kind: entry``, are tier
+   ``deprecated``), whose description says so; every input or output whose
+   description says it is deprecated or inert, and every deprecated entry, is
+   covered by a record.
+7. Known consumers: ``catalog/consumers.yml`` and
+   ``catalog/deprecation-exceptions.yml`` are well formed. Registry rows that
+   name entries or deprecations the catalog no longer has, or pin a floating
+   ref, get a NOTICE; ``check-deprecations.sh scan --write`` refreshes them.
+8. Generated docs: ``docs/catalog.md`` and the README index match
    ``scripts/ci/catalog/render.py`` output.
 
 Usage:
@@ -40,7 +49,7 @@ import argparse
 import re
 import subprocess
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
@@ -49,13 +58,24 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_lib  # noqa: E402  # pylint: disable=wrong-import-position
 import render  # noqa: E402  # pylint: disable=wrong-import-position
 from catalog_lib import (  # noqa: E402  # pylint: disable=wrong-import-position
+    CATALOG,
+    FULL_SHA,
+    REPOSITORY,
+    SCHEMA_VERSION,
     Kind,
+    Report,
     Tier,
+    is_one_line,
+)
+from governance_checks import (  # noqa: E402  # pylint: disable=wrong-import-position
+    check_consumers,
+    check_deprecations,
+    check_exceptions,
 )
 
-SCHEMA_VERSION = 1
-CATALOG = str(catalog_lib.CATALOG_RELPATH)
-TOP_LEVEL_KEYS = frozenset({"schema-version", "fixture-repository", "entries"})
+TOP_LEVEL_KEYS = frozenset(
+    {"schema-version", "fixture-repository", "entries", "deprecations"},
+)
 REQUIRED_KEYS = frozenset(
     {
         "id",
@@ -80,49 +100,7 @@ LIST_KEYS = (
 EVIDENCE_KEYS = frozenset({"fixture", "last-green", "run"})
 PACKAGE_MANAGERS = frozenset({"bun", "bundler", "cargo", "npm", "pnpm", "uv"})
 FIXTURE_FILE = re.compile(r"^[\w.-]+\.ya?ml$")
-FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
-REPOSITORY = re.compile(r"^[\w.-]+/[\w.-]+$")
 REGENERATE = "regenerate with python3 scripts/ci/catalog/render.py --write"
-
-
-@dataclass
-class Report:
-    """Accumulated validation findings.
-
-    Attributes:
-        errors: Messages that fail the run.
-        notices: Informational messages.
-    """
-
-    errors: list[str] = field(default_factory=list)
-    notices: list[str] = field(default_factory=list)
-
-    def error(
-        self,
-        where: str,
-        message: str,
-    ) -> None:
-        """Record a failure.
-
-        Args:
-            where: Entry id or file the message concerns.
-            message: What is wrong.
-        """
-        self.errors.append(f"{where}: {message}")
-
-
-def is_one_line(
-    value: Any,
-) -> bool:
-    """Return whether a value is a non-empty single-line string.
-
-    Args:
-        value: Value to test.
-
-    Returns:
-        True for a non-blank string without newlines.
-    """
-    return isinstance(value, str) and bool(value.strip()) and "\n" not in value
 
 
 def entry_keys(
@@ -671,6 +649,19 @@ def validate(
         repo_root=repo_root,
         history=history,
     )
+    covered = check_deprecations(
+        report=report,
+        catalog=catalog,
+        entries=entries,
+        repo_root=repo_root,
+    )
+    check_consumers(
+        report=report,
+        repo_root=repo_root,
+        ids={str(e.get("id")) for e in entries},
+        covered=covered,
+    )
+    check_exceptions(report=report, repo_root=repo_root)
     if report.errors:
         report.notices.append("generated docs not compared: fix the catalog first")
         return report
@@ -678,7 +669,9 @@ def validate(
     counts = ", ".join(
         f"{sum(e['tier'] == tier.value for e in entries)} {tier.value}" for tier in Tier
     )
-    report.notices.append(f"{len(entries)} entries: {counts}")
+    report.notices.append(
+        f"{len(entries)} entries: {counts}; {len(covered)} deprecated item(s)",
+    )
     return report
 
 

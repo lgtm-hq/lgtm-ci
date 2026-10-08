@@ -10,7 +10,7 @@ Create or update PR summaries and reports with upsert behavior using unique
 markers.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/post-pr-comment@<sha> # vX.Y.Z
   with:
     marker: "lighthouse-results" # unique identifier for this comment
     body: |
@@ -29,7 +29,7 @@ delete-on-empty behavior.
 Run Lighthouse CI audits with configurable score thresholds.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/run-lighthouse@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-lighthouse@<sha> # vX.Y.Z
   with:
     package-manager: npm # required: 'bun', 'npm', 'pnpm'
     url: "http://localhost:3000"
@@ -56,7 +56,7 @@ summary says so, instead of reporting zero scores (#1088).
 Generate a formatted PR comment from Lighthouse CI results.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/generate-lighthouse-comment@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-lighthouse-comment@<sha> # vX.Y.Z
   with:
     results-path: "lighthouse-results/"
     report-url: "https://example.github.io/lighthouse/"
@@ -71,7 +71,7 @@ etc., `passed`.
 Generate a formatted PR comment from Playwright test results.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/generate-playwright-comment@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-playwright-comment@<sha> # vX.Y.Z
   with:
     results-path: "playwright-report/results.json"
     report-url: "https://example.github.io/playwright/"
@@ -86,7 +86,7 @@ Generate a formatted PR comment from Playwright test results.
 Generate a formatted PR comment from code coverage results.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-comment@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-comment@<sha> # vX.Y.Z
   with:
     coverage-file: "coverage/coverage-summary.json"
     format: "auto" # 'istanbul', 'coverage-py', 'lcov', or 'auto'

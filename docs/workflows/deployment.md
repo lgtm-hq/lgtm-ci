@@ -25,7 +25,7 @@ for caller examples (push, PR validation, health checks).
 ```yaml
 jobs:
   docker:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@main
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
       packages: write

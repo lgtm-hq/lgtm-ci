@@ -268,6 +268,7 @@ dev = [
 test = [
     { name = "assertpy" },
     { name = "pytest" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -278,6 +279,7 @@ requires-dist = [
     { name = "lintro", marker = "extra == 'dev'", specifier = "==0.171.3" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.4.0" },
+    { name = "pyyaml", marker = "extra == 'test'", specifier = ">=6.0.2" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.14.0" },
     { name = "tomli-w", marker = "extra == 'dev'", specifier = ">=1.0.0" },
     { name = "yamllint", marker = "extra == 'dev'", specifier = ">=1.37.1" },

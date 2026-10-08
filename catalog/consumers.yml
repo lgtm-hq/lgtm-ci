@@ -1,0 +1,598 @@
+# SPDX-License-Identifier: MIT
+# Known-consumer registry (#1082, docs/governance.md#known-consumers).
+#
+# Every repository outside lgtm-ci that calls its reusable workflows or
+# composite actions and that lgtm-ci commits to keeping working. The removal
+# gate reads this file: an input, output or entry point leaves lgtm-ci only
+# once no consumer listed here uses it (or an exception in
+# deprecation-exceptions.yml approves it).
+#
+# Rows are refreshed from each repository's default branch, never edited by
+# hand except to add or drop a repository or a tracking issue:
+#   scripts/ci/catalog/check-deprecations.sh scan --write
+#
+#   repository         owner/name
+#   tracking-issues    open lgtm-ci issues migrating this consumer (may be empty)
+#   last-verified      date of the scan that produced the row
+#   pins               lgtm-ci refs the default branch uses; anything but a
+#                      40-character SHA is a floating ref and gets a NOTICE
+#   uses               catalog entry ids it calls
+#   deprecated-in-use  removal keys (<entry>:input:<name>, <entry>:output:<name>,
+#                      <entry>:entry) of deprecated or already removed
+#                      items it still uses
+---
+schema-version: 1
+consumers:
+  - repository: lgtm-hq/.github
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-pr-auto-assign"
+      - "reusable-quality-lint"
+      - "reusable-validate"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-validate:input:tooling-ref"
+
+  - repository: lgtm-hq/agent-infra
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-build-python-dist"
+      - "reusable-github-release"
+      - "reusable-quality-lint"
+      - "reusable-release-auto-tag"
+      - "reusable-release-version-pr"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-python"
+      - "reusable-validate-action-pinning"
+    deprecated-in-use:
+      - "reusable-build-python-dist:input:tooling-ref"
+      - "reusable-github-release:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-auto-tag:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-test-python:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+
+  - repository: lgtm-hq/ai-skills
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-link-check"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-quality-lint"
+      - "reusable-release-auto-tag"
+      - "reusable-release-version-pr"
+      - "reusable-sbom"
+      - "reusable-scorecards"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-python"
+      - "reusable-validate"
+      - "reusable-validate-lintro-version"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-link-check:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-auto-tag:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-sbom:input:tooling-ref"
+      - "reusable-test-python:input:tooling-ref"
+      - "reusable-validate:input:tooling-ref"
+
+  - repository: lgtm-hq/hass-turbo-themes
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-release-auto-tag"
+      - "reusable-release-version-pr"
+      - "reusable-sbom"
+      - "reusable-scorecards"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-validate-action-pinning"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-auto-tag:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-sbom:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+
+  - repository: lgtm-hq/holy-grail
+    tracking-issues: [1052]
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-build-artifact"
+      - "reusable-codeql"
+      - "reusable-pr-auto-assign"
+      - "reusable-publish-quality-summary"
+      - "reusable-quality-lint"
+      - "reusable-release-version-pr"
+      - "reusable-semantic-pr-title"
+      - "reusable-validate-action-pinning"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-build-artifact:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+
+  - repository: lgtm-hq/homebrew-tap
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-pr-auto-assign"
+      - "reusable-publish-quality-summary"
+      - "reusable-quality-lint"
+      - "reusable-test-shell"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-test-shell:input:tooling-ref"
+
+  - repository: lgtm-hq/lintro-pre-commit
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "b2254c69f9117457b3232fabf1d2ae640a5f6a08"
+    uses:
+      - "reusable-ai-review"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+
+  - repository: lgtm-hq/lintro-review-corpus
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "22bb159287eb23a812d533090615525eccb839ac"
+    uses:
+      - "reusable-ai-review"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+
+  - repository: lgtm-hq/plugin-engine-lab
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+
+  - repository: lgtm-hq/podex
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-auto-rerun-on-infra-failure"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-docker"
+      - "reusable-ghcr-cleanup"
+      - "reusable-main-failure-notifier"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-release-auto-tag"
+      - "reusable-release-version-pr"
+      - "reusable-required-check"
+      - "reusable-sbom"
+      - "reusable-scorecards"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-node-custom"
+      - "reusable-test-python"
+      - "reusable-test-shell"
+      - "reusable-validate-action-pinning"
+      - "reusable-vuln-suppression-check"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-auto-rerun-on-infra-failure:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-docker:input:tooling-ref"
+      - "reusable-ghcr-cleanup:input:tooling-ref"
+      - "reusable-main-failure-notifier:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-auto-tag:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-required-check:input:tooling-ref"
+      - "reusable-sbom:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-test-node-custom:input:tooling-ref"
+      - "reusable-test-python:input:tooling-ref"
+      - "reusable-test-shell:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+      - "reusable-vuln-suppression-check:input:tooling-ref"
+
+  - repository: lgtm-hq/podex-ops
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "a62235f19f6eccade11bf4840967c3d5daa9c9b1"
+      - "ee8484ca71db3a2c2c33da6128bbf2330fcd7c88"
+    uses:
+      - "detect-changes"
+      - "reusable-ai-review"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-validate-action-pinning"
+      - "secure-checkout"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+
+  - repository: lgtm-hq/py-lintro
+    tracking-issues: [1054]
+    last-verified: "2026-10-08"
+    pins:
+      - "22bb159287eb23a812d533090615525eccb839ac"
+    uses:
+      - "create-signed-commit"
+      - "detect-changes"
+      - "generate-sbom"
+      - "post-pr-comment"
+      - "prepare-pypi-upload"
+      - "reusable-auto-rerun-on-infra-failure"
+      - "reusable-build-python-dist"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-deploy-site-with-reports"
+      - "reusable-docker"
+      - "reusable-ghcr-cleanup"
+      - "reusable-github-release"
+      - "reusable-main-failure-notifier"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-npm-set"
+      - "reusable-publish-quality-summary"
+      - "reusable-quality-lint"
+      - "reusable-release-auto-tag"
+      - "reusable-release-failure-notifier"
+      - "reusable-release-recover"
+      - "reusable-release-version-pr"
+      - "reusable-required-check"
+      - "reusable-sbom"
+      - "reusable-scorecards"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-python"
+      - "reusable-test-shell"
+      - "reusable-validate-action-pinning"
+      - "reusable-vuln-suppression-check"
+      - "scan-vulnerabilities"
+      - "secure-checkout"
+      - "setup-node"
+      - "setup-python"
+      - "trigger-homebrew-update"
+    deprecated-in-use:
+      - "reusable-auto-rerun-on-infra-failure:input:tooling-ref"
+      - "reusable-build-python-dist:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-deploy-site-with-reports:input:tooling-ref"
+      - "reusable-docker:input:tooling-ref"
+      - "reusable-ghcr-cleanup:input:tooling-ref"
+      - "reusable-github-release:input:tooling-ref"
+      - "reusable-main-failure-notifier:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-npm-set:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-auto-tag:input:tooling-ref"
+      - "reusable-release-failure-notifier:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-required-check:input:tooling-ref"
+      - "reusable-sbom:input:tooling-ref"
+      - "reusable-test-python:input:tooling-ref"
+      - "reusable-test-shell:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+      - "reusable-vuln-suppression-check:input:tooling-ref"
+
+  - repository: lgtm-hq/Rustume
+    tracking-issues: [1053]
+    last-verified: "2026-10-08"
+    pins:
+      - "d32388495d571a0ee13383bacc732765bf4e9e7d"
+    uses:
+      - "create-github-release"
+      - "reusable-ai-review"
+      - "reusable-auto-rerun-on-infra-failure"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-deploy-site-with-reports"
+      - "reusable-docker"
+      - "reusable-ghcr-cleanup"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-release-auto-tag"
+      - "reusable-release-version-pr"
+      - "reusable-rust-test"
+      - "reusable-scorecards"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-site-quality"
+      - "reusable-test-e2e-playwright"
+      - "reusable-test-node"
+      - "reusable-test-rust-build"
+      - "reusable-test-shell"
+      - "reusable-validate-action-pinning"
+      - "reusable-vuln-suppression-check"
+      - "secure-checkout"
+      - "setup-rust"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-auto-rerun-on-infra-failure:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-deploy-site-with-reports:input:tooling-ref"
+      - "reusable-docker:input:tooling-ref"
+      - "reusable-ghcr-cleanup:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-auto-tag:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-rust-test:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-site-quality:input:tooling-ref"
+      - "reusable-test-e2e-playwright:input:tooling-ref"
+      - "reusable-test-node:input:tooling-ref"
+      - "reusable-test-rust-build:input:tooling-ref"
+      - "reusable-test-shell:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+      - "reusable-vuln-suppression-check:input:tooling-ref"
+
+  - repository: lgtm-hq/rustume-ops
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "a62235f19f6eccade11bf4840967c3d5daa9c9b1"
+      - "ed9de8ae2b2d7cbbac0a61e607849ab12321fced"
+    uses:
+      - "detect-changes"
+      - "reusable-ai-review"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-required-check"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-shell"
+      - "reusable-validate-action-pinning"
+      - "secure-checkout"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-required-check:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-test-shell:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+
+  - repository: lgtm-hq/spotify-curator
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "443a687caa93b3afa306a066aae8d8a2b4e60c3c"
+      - "b2254c69f9117457b3232fabf1d2ae640a5f6a08"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-sbom"
+      - "reusable-scorecards"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-node-custom"
+      - "reusable-validate-action-pinning"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-sbom:input:tooling-ref"
+      - "reusable-scorecards:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-test-node-custom:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+
+  - repository: lgtm-hq/turbo-themes
+    tracking-issues: [1051]
+    last-verified: "2026-10-08"
+    pins:
+      - "d32388495d571a0ee13383bacc732765bf4e9e7d"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-build-artifact"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-deploy-site-with-reports"
+      - "reusable-pr-auto-assign"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-sbom"
+      - "reusable-scorecards"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-e2e-playwright"
+      - "reusable-validate-action-pinning"
+      - "reusable-vuln-suppression-check"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-build-artifact:input:node-version-matrix"
+      - "reusable-build-artifact:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-deploy-site-with-reports:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-sbom:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-test-e2e-playwright:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+      - "reusable-vuln-suppression-check:input:tooling-ref"
+
+  - repository: lgtm-hq/ui-framework
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+    uses:
+      - "reusable-ai-review"
+      - "reusable-quality-lint"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+
+  - repository: lgtm-hq/winnow
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "f8f58587e4c324f6f0c9b3b4f59cfc93aa7d5d0f"
+    uses:
+      - "prepare-pypi-upload"
+      - "reusable-ai-review"
+      - "reusable-build-python-dist"
+      - "reusable-codeql"
+      - "reusable-dependency-review"
+      - "reusable-docker"
+      - "reusable-ghcr-cleanup"
+      - "reusable-github-release"
+      - "reusable-pr-auto-assign"
+      - "reusable-pr-labeler"
+      - "reusable-publish-quality-summary"
+      - "reusable-publish-security-audit-comment"
+      - "reusable-quality-lint"
+      - "reusable-release-auto-tag"
+      - "reusable-release-version-pr"
+      - "reusable-sbom"
+      - "reusable-scorecards"
+      - "reusable-security-audit"
+      - "reusable-semantic-pr-title"
+      - "reusable-test-python"
+      - "reusable-test-python-publish"
+      - "reusable-validate-action-pinning"
+      - "reusable-validate-lintro-version"
+      - "trigger-homebrew-update"
+    deprecated-in-use:
+      - "reusable-ai-review:input:tooling-ref"
+      - "reusable-build-python-dist:input:tooling-ref"
+      - "reusable-codeql:input:tooling-ref"
+      - "reusable-docker:input:tooling-ref"
+      - "reusable-ghcr-cleanup:input:tooling-ref"
+      - "reusable-github-release:input:tooling-ref"
+      - "reusable-pr-auto-assign:input:tooling-ref"
+      - "reusable-publish-quality-summary:input:tooling-ref"
+      - "reusable-publish-security-audit-comment:input:tooling-ref"
+      - "reusable-quality-lint:input:tooling-ref"
+      - "reusable-release-auto-tag:input:tooling-ref"
+      - "reusable-release-version-pr:input:tooling-ref"
+      - "reusable-sbom:input:tooling-ref"
+      - "reusable-security-audit:input:tooling-ref"
+      - "reusable-test-python-publish:input:tooling-ref"
+      - "reusable-test-python:input:tooling-ref"
+      - "reusable-validate-action-pinning:input:tooling-ref"
+
+  - repository: TurboCoder13/lgtm-ci-consumer-fixture
+    tracking-issues: []
+    last-verified: "2026-10-08"
+    pins:
+      - "2134b70042dc51eb5484f7bdedf329680f66f8ea"
+    uses:
+      - "build-python-package"
+      - "reusable-build-rust-binaries"
+      - "reusable-coverage"
+      - "reusable-publish-quality-summary"
+      - "reusable-quality-lint"
+      - "reusable-release-version-pr"
+      - "reusable-required-check"
+      - "reusable-rust-test"
+      - "reusable-sbom-release-upload"
+      - "reusable-test-e2e-playwright"
+      - "reusable-test-node"
+      - "reusable-test-python"
+      - "reusable-test-rust-build"
+      - "reusable-vuln-suppression-check"
+      - "run-lighthouse"
+      - "run-playwright"
+      - "run-pytest"
+      - "run-vitest"
+    deprecated-in-use: []

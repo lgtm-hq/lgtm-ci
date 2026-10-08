@@ -26,7 +26,7 @@ today; a missing report still warns. See workflow-contract.md
 ```yaml
 jobs:
   test:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@main
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-python.yml@<sha> # vX.Y.Z
     permissions:
       # actions: read — the aggregate job's artifact-availability wait (#803)
       actions: read
@@ -126,7 +126,7 @@ PR comments). This repo's `ci.yml` opts in with `coverage-shards: 4`.
 ```yaml
 jobs:
   shell:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@main
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-shell.yml@<sha> # vX.Y.Z
     permissions:
       # actions: read — the aggregate job's artifact-availability wait (#803)
       actions: read
@@ -164,7 +164,7 @@ caller grants `actions: read` and `contents: read` only (#1081, see
 ```yaml
 jobs:
   e2e:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e.yml@main
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
     with:
@@ -195,7 +195,7 @@ to keep them on every run).
 ```yaml
 jobs:
   e2e-smoke:
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-playwright.yml@main
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-test-e2e-playwright.yml@<sha> # vX.Y.Z
     permissions:
       contents: read
       pull-requests: write
@@ -383,7 +383,7 @@ registry and [workflow-contract.md](../workflow-contract.md#org-ruleset-check-na
 lintro-code-quality:
   needs: dogfooding-lint
   if: always()
-  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@main
+  uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-required-check.yml@<sha> # vX.Y.Z
   permissions:
     contents: read
   with:

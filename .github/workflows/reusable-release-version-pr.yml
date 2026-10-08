@@ -79,6 +79,15 @@ name: "Reusable: Release Version PR"
         required: false
         type: string
         default: ""
+      catalog-release-notes:
+        description: >-
+          Merge the catalog/catalog.yml diff since the previous release (tier
+          changes, deprecations, removals) into the generated CHANGELOG
+          section (#1082). Only for repositories that keep an lgtm-ci support
+          catalog; lgtm-ci itself sets it.
+        required: false
+        type: boolean
+        default: false
       skip-patterns:
         description: >-
           Comma-separated commit title patterns that skip version PR creation.
@@ -503,6 +512,7 @@ jobs:
         env:
           FORMAT: full
           TAG_PREFIX: ${{ inputs.tag-prefix }}
+          CATALOG_RELEASE_NOTES: ${{ inputs.catalog-release-notes }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
       - name: Update CHANGELOG.md
@@ -689,6 +699,7 @@ jobs:
         env:
           FORMAT: full
           TAG_PREFIX: ${{ inputs.tag-prefix }}
+          CATALOG_RELEASE_NOTES: ${{ inputs.catalog-release-notes }}
         run: >-
           .lgtm-ci-tooling/scripts/ci/release/generate-changelog.sh
       - name: Update CHANGELOG.md

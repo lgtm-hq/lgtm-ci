@@ -1,0 +1,19 @@
+# SPDX-License-Identifier: MIT
+# Approved exceptions to the deprecation removal gate (#1082, docs/governance.md).
+#
+# The gate (scripts/ci/catalog/check-deprecations.sh gate) fails a PR that
+# removes an input, output or entry point while a known consumer still uses it,
+# or that removes a `stable` item that never went through a deprecation release.
+# Time since the deprecation is never enough on its own. An entry here lets one
+# named removal through anyway, and must cite the issue where the removal was
+# approved and say why.
+#
+#   removal  <entry>:entry, <entry>:input:<name> or <entry>:output:<name>,
+#            exactly as the gate prints it
+#   issue    number of the lgtm-ci issue that approved the removal
+#   reason   one line: who is still affected and why the removal goes ahead
+#
+# Entries stay after the removal ships; they are the audit trail.
+---
+schema-version: 1
+exceptions: []

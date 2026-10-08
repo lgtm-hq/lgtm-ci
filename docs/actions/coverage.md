@@ -9,7 +9,7 @@ workflow-level equivalent.
 Aggregate coverage from multiple sources and formats.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/collect-coverage@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/collect-coverage@<sha> # vX.Y.Z
   with:
     coverage-files: "coverage/*.json" # glob or comma-separated
     input-format: "auto" # 'auto', 'istanbul', 'coverage-py', 'lcov'
@@ -40,7 +40,7 @@ to 0% with a `::warning::` annotation.
 Check if coverage meets a minimum threshold.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/check-coverage-threshold@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/check-coverage-threshold@<sha> # vX.Y.Z
   with:
     coverage-percent: "85.5"
     threshold: "80"
@@ -55,7 +55,7 @@ GitHub annotation on failure.
 Generate a coverage badge SVG/JSON for README display.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-badge@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-coverage-badge@<sha> # vX.Y.Z
   with:
     coverage-file: "coverage.json" # or use coverage-percent
     format: "svg" # 'svg', 'json', 'shields'
@@ -72,7 +72,7 @@ Publish test results and coverage to GitHub Pages via official OIDC deploy
 actions.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-test-results@<sha> # vX.Y.Z
   with:
     results-path: "test-results/" # optional
     coverage-path: "coverage/" # optional

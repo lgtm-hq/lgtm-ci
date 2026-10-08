@@ -19,6 +19,20 @@
 #                order; GitHub prefixes the caller job name and appends matrix values
 #   replacement  deprecated only: id of the entry to migrate to
 #   results      optional: the results.v1 document the entry uploads (#1080)
+#
+# `deprecations` (after the entries, #1082) lists every deprecated input, output
+# and entry point; docs/governance.md describes the lifecycle. Each record has:
+#   id           kebab-case slug, unique; records sorted by id
+#   kind         input | output | secret | entry
+#   name         the input, output or secret retired (not on `entry`)
+#   entries      sorted catalog ids that still expose it; drop an id in the PR
+#                that removes the item, which is what the removal gate checks
+#   since        X.Y.Z release that first marked it deprecated
+#   issue        lgtm-ci issue tracking the deprecation
+#   replacement  one-line migration instruction
+# The validator requires the item's description to say it is deprecated, and
+# every input or output whose description says "deprecated" or "inert" (and
+# every `deprecated`-tier entry) to be covered by a record.
 ---
 schema-version: 1
 fixture-repository: TurboCoder13/lgtm-ci-consumer-fixture
@@ -1888,3 +1902,152 @@ entries:
     package-managers: []
     prerequisites: []
     limitations: []
+
+# Deprecated inputs, outputs and entry points (#1082). One record per retired
+# item; the removal gate keys on `<entry>:<kind>:<name>`. Keep sorted by id.
+deprecations:
+  - id: build-artifact-node-version-matrix
+    kind: input
+    name: node-version-matrix
+    since: "0.61.0"
+    issue: 760
+    replacement: "Pass `matrix` (a JSON array of objects) instead; `node-version` covers a single version"
+    entries: [reusable-build-artifact]
+
+  - id: coverage-pages-url
+    kind: output
+    name: pages-url
+    since: "0.62.0"
+    issue: 770
+    replacement: "Read the `pages-url` output of `reusable-publish-test-results-pages`"
+    entries: [reusable-coverage]
+
+  - id: coverage-publish-pages
+    kind: input
+    name: publish-pages
+    since: "0.62.0"
+    issue: 770
+    replacement: "Call `reusable-publish-test-results-pages` from its own caller job"
+    entries: [reusable-coverage]
+
+  - id: e2e-matrix-pages-target-dir
+    kind: input
+    name: pages-target-dir
+    since: "0.62.0"
+    issue: 770
+    replacement: "Pass it as `pages-target-dir` to `reusable-publish-test-results-pages`"
+    entries: [reusable-test-e2e-matrix]
+
+  - id: e2e-matrix-publish-allowed-endpoints
+    kind: input
+    name: publish-allowed-endpoints
+    since: "0.62.0"
+    issue: 770
+    replacement: "Pass `allowed-endpoints` to `reusable-publish-test-results-pages`"
+    entries: [reusable-test-e2e-matrix]
+
+  - id: e2e-matrix-publish-egress-preset
+    kind: input
+    name: publish-egress-preset
+    since: "0.62.0"
+    issue: 770
+    replacement: "Pass `egress-preset` to `reusable-publish-test-results-pages`"
+    entries: [reusable-test-e2e-matrix]
+
+  - id: e2e-matrix-publish-results
+    kind: input
+    name: publish-results
+    since: "0.62.0"
+    issue: 770
+    replacement: "Call `reusable-publish-test-results-pages` from its own caller job"
+    entries: [reusable-test-e2e-matrix]
+
+  - id: e2e-matrix-report-url
+    kind: output
+    name: report-url
+    since: "0.62.0"
+    issue: 770
+    replacement: "Read the `pages-url` output of `reusable-publish-test-results-pages`"
+    entries: [reusable-test-e2e-matrix]
+
+  - id: publish-npm
+    kind: entry
+    since: "0.72.0"
+    issue: 965
+    replacement: "Call `reusable-publish-npm-set` with a one-package set"
+    entries: [reusable-publish-npm]
+
+  - id: sbom-upload-release-assets
+    kind: input
+    name: upload-release-assets
+    since: "0.62.0"
+    issue: 770
+    replacement: "Call `reusable-sbom-release-upload` from its own caller job"
+    entries: [reusable-sbom]
+
+  - id: tooling-ref
+    kind: input
+    name: tooling-ref
+    since: "0.75.3"
+    issue: 995
+    replacement: "Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`)"
+    entries:
+      - reusable-ai-review
+      - reusable-auto-rerun-on-infra-failure
+      - reusable-build-artifact
+      - reusable-build-python-dist
+      - reusable-build-rust-binaries
+      - reusable-codeql
+      - reusable-coverage
+      - reusable-deploy-pages
+      - reusable-deploy-site-with-reports
+      - reusable-docker
+      - reusable-docker-build
+      - reusable-docker-multiplatform
+      - reusable-docker-smoke-test
+      - reusable-ghcr-cleanup
+      - reusable-github-release
+      - reusable-link-check
+      - reusable-main-failure-notifier
+      - reusable-pr-auto-assign
+      - reusable-prune-build-staging-tags
+      - reusable-publish-artifact-preview
+      - reusable-publish-artifact-report
+      - reusable-publish-file-breakdown
+      - reusable-publish-gem
+      - reusable-publish-npm
+      - reusable-publish-npm-set
+      - reusable-publish-quality-summary
+      - reusable-publish-rust-release
+      - reusable-publish-security-audit-comment
+      - reusable-publish-test-results-pages
+      - reusable-publish-test-summary
+      - reusable-quality-lint
+      - reusable-registry-health-check
+      - reusable-release-auto-tag
+      - reusable-release-failure-notifier
+      - reusable-release-multi-ecosystem
+      - reusable-release-version-pr
+      - reusable-required-check
+      - reusable-rust-build
+      - reusable-rust-test
+      - reusable-rust-test-run
+      - reusable-sbom
+      - reusable-sbom-release-upload
+      - reusable-security-audit
+      - reusable-site-quality
+      - reusable-test-e2e
+      - reusable-test-e2e-matrix
+      - reusable-test-e2e-playwright
+      - reusable-test-node
+      - reusable-test-node-custom
+      - reusable-test-node-publish
+      - reusable-test-node-run
+      - reusable-test-python
+      - reusable-test-python-publish
+      - reusable-test-rust-build
+      - reusable-test-shell
+      - reusable-test-shell-run
+      - reusable-validate
+      - reusable-validate-action-pinning
+      - reusable-vuln-suppression-check

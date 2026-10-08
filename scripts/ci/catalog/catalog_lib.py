@@ -2,8 +2,10 @@
 """Shared model for the support-tier catalog (``catalog/catalog.yml``, #1079).
 
 ``validate.py`` checks the catalog against the repository and ``render.py``
-generates ``docs/catalog.md`` and the README index from it. Both import this
-module from their own directory. The caller-facing permission union is not
+generates ``docs/catalog.md`` and the README index from it; ``deprecations.py``
+(#1082) gates removals on the known-consumer registry and ``release_notes.py``
+turns a catalog diff into changelog bullets. All import this module from their
+own directory. The caller-facing permission union is not
 recomputed here: it comes from ``scripts/ci/docs/validate-caller-permissions.py``
 (#735/#736), loaded by path because its filename is hyphenated.
 
@@ -17,8 +19,9 @@ from __future__ import annotations
 import argparse
 import importlib
 import re
+import subprocess
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum, auto
 from pathlib import Path
 from types import ModuleType
@@ -35,6 +38,12 @@ except ImportError:  # pragma: no cover - exercised only on a bare interpreter
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
 CATALOG_RELPATH = Path("catalog") / "catalog.yml"
+CONSUMERS_RELPATH = Path("catalog") / "consumers.yml"
+CATALOG = str(CATALOG_RELPATH)
+SCHEMA_VERSION = 1
+FULL_SHA = re.compile(r"^[0-9a-f]{40}$")
+REPOSITORY = re.compile(r"^[\w.-]+/[\w.-]+$")
+EXCEPTIONS_RELPATH = Path("catalog") / "deprecation-exceptions.yml"
 WORKFLOWS_RELDIR = Path(".github") / "workflows"
 ACTIONS_RELDIR = Path(".github") / "actions"
 PERMISSIONS_VALIDATOR = Path("scripts/ci/docs/validate-caller-permissions.py")
@@ -412,6 +421,159 @@ def job_label(
     return resolve_expressions(text=name, values=values)
 
 
+class DeprecationKind(StrEnum):
+    """What a deprecation record retires (#1082)."""
+
+    INPUT = auto()
+    OUTPUT = auto()
+    SECRET = auto()
+    ENTRY = auto()
+
+
+# A description that says an input or output is deprecated or inert must be
+# backed by a deprecation record, so the removal gate knows about it.
+DEPRECATION_MARKER = re.compile(
+    r"\b(?:deprecated|deprecate|deprecates|deprecation|deprecating|inert)\b",
+    re.IGNORECASE,
+)
+
+
+def removal_key(
+    entry_id: str,
+    kind: DeprecationKind,
+    name: str = "",
+) -> str:
+    """Return the key that names one removable interface item.
+
+    The same spelling is used by deprecation records, the consumer registry's
+    ``deprecated-in-use`` lists, exceptions and the removal gate's messages.
+
+    Args:
+        entry_id: Catalog entry id.
+        kind: Input, output or the whole entry.
+        name: Input or output name; empty for the whole entry.
+
+    Returns:
+        ``<entry>:<input|output|secret>:<name>`` or ``<entry>:entry``.
+    """
+    if kind is DeprecationKind.ENTRY:
+        return f"{entry_id}:entry"
+    return f"{entry_id}:{kind.value}:{name}"
+
+
+def interface_holder(
+    kind: Kind,
+    document: Any,
+) -> dict[str, Any]:
+    """Return the mapping that declares an entry point's interface.
+
+    Args:
+        kind: Entry kind.
+        document: Parsed workflow or ``action.yml``.
+
+    Returns:
+        ``on.workflow_call`` for a workflow, the document for an action.
+    """
+    if not isinstance(document, dict):
+        return {}
+    if kind is Kind.COMPOSITE_ACTION:
+        return document
+    triggers = document.get("on", document.get(True)) or {}
+    call = triggers.get("workflow_call") if isinstance(triggers, dict) else None
+    return call if isinstance(call, dict) else {}
+
+
+def required_inputs(
+    kind: Kind,
+    document: Any,
+    section: str = "inputs",
+) -> set[str]:
+    """Return the inputs (or secrets) a caller must pass.
+
+    Args:
+        kind: Entry kind.
+        document: Parsed workflow or ``action.yml``.
+        section: ``inputs`` or ``secrets``.
+
+    Returns:
+        Names declared with ``required: true`` and no default.
+    """
+    inputs = interface_holder(kind=kind, document=document).get(section)
+    required = set()
+    for name, spec in inputs.items() if isinstance(inputs, dict) else []:
+        if not isinstance(spec, dict) or "default" in spec:
+            continue
+        if spec.get("required") is True:
+            required.add(str(name))
+    return required
+
+
+def interface(
+    kind: Kind,
+    document: Any,
+) -> dict[DeprecationKind, dict[str, str]]:
+    """Return the inputs, outputs and secrets an entry point exposes.
+
+    Args:
+        kind: Entry kind.
+        document: Parsed workflow or ``action.yml``.
+
+    Returns:
+        Kind to item name to one-line description. Composite actions have
+        no secrets.
+    """
+    holder = interface_holder(kind=kind, document=document)
+    result: dict[DeprecationKind, dict[str, str]] = {}
+    for deprecation_kind, key in (
+        (DeprecationKind.INPUT, "inputs"),
+        (DeprecationKind.OUTPUT, "outputs"),
+        (DeprecationKind.SECRET, "secrets"),
+    ):
+        items = holder.get(key)
+        result[deprecation_kind] = {
+            str(name): " ".join(str((spec or {}).get("description", "")).split())
+            for name, spec in (items.items() if isinstance(items, dict) else [])
+            if isinstance(spec, dict) or spec is None
+        }
+    return result
+
+
+def removal_keys(
+    entry_id: str,
+    surface: dict[DeprecationKind, dict[str, str]],
+) -> set[str]:
+    """Return every removal key an entry point currently exposes.
+
+    Args:
+        entry_id: Catalog entry id.
+        surface: ``interface()`` result for the entry.
+
+    Returns:
+        The entry key plus one key per input and output.
+    """
+    keys = {removal_key(entry_id=entry_id, kind=DeprecationKind.ENTRY)}
+    for kind, names in surface.items():
+        keys.update(removal_key(entry_id=entry_id, kind=kind, name=n) for n in names)
+    return keys
+
+
+def deprecation_keys(
+    record: dict[str, Any],
+) -> set[str]:
+    """Return the removal keys a deprecation record covers.
+
+    Args:
+        record: Entry of the catalog's ``deprecations`` list (schema-checked).
+
+    Returns:
+        One key per listed entry.
+    """
+    kind = DeprecationKind(record["kind"])
+    name = str(record.get("name", ""))
+    entries = [str(entry_id) for entry_id in record["entries"]]
+    return {removal_key(entry_id=e, kind=kind, name=name) for e in entries}
+
+
 def workflow_facts(
     workflows_dir: Path,
     name: str,
@@ -463,3 +625,228 @@ def workflow_facts(
         check_names=tuple(dict.fromkeys(check_names)),
         runners=tuple(sorted(runners)),
     )
+
+
+@dataclass(frozen=True)
+class Snapshot:
+    """The catalog and entry-point interfaces at one revision.
+
+    Attributes:
+        tiers: Entry id to tier.
+        keys: Every removal key the entry points expose.
+        deprecated: Removal keys covered by a deprecation record.
+        required: ``<entry>:required:<input>`` for every input a caller
+            must pass.
+    """
+
+    tiers: dict[str, str]
+    keys: set[str]
+    deprecated: set[str]
+    required: set[str]
+
+
+def git(
+    repo_root: Path,
+    *args: str,
+) -> subprocess.CompletedProcess[str]:
+    """Run a read-only git command.
+
+    Args:
+        repo_root: Work tree.
+        *args: Git arguments.
+
+    Returns:
+        The completed process (never raises on a non-zero exit).
+    """
+    return subprocess.run(
+        ["git", "-C", str(repo_root), *args],
+        capture_output=True,
+        check=False,
+        text=True,
+    )
+
+
+def read_at(
+    repo_root: Path,
+    ref: str | None,
+    relpath: Path,
+) -> str | None:
+    """Read a file from the work tree or from a git revision.
+
+    Args:
+        repo_root: Repository root.
+        ref: Revision, or None for the work tree.
+        relpath: Repository-relative path.
+
+    Returns:
+        File text, or None when it does not exist there.
+
+    Raises:
+        RuntimeError: When the revision is unknown or git cannot read a file
+            that exists, so a broken read never passes for a missing file.
+    """
+    if ref is None:
+        path = repo_root / relpath
+        return path.read_text(encoding="utf-8") if path.is_file() else None
+    spec = f"{ref}:{relpath.as_posix()}"
+    if git(repo_root, "cat-file", "-e", spec).returncode != 0:
+        if git(repo_root, "cat-file", "-e", f"{ref}^{{commit}}").returncode != 0:
+            raise RuntimeError(f"cannot read {spec}: `{ref}` is not a local commit")
+        return None
+    shown = git(repo_root, "show", spec)
+    if shown.returncode != 0:
+        # The blob exists, so any failure here must not read as "absent".
+        raise RuntimeError(f"git show {spec} failed: {shown.stderr.strip()}")
+    return shown.stdout
+
+
+def entry_surface_at(
+    repo_root: Path,
+    ref: str | None,
+    entry: dict[str, Any],
+) -> tuple[set[str], set[str]] | None:
+    """Return one entry point's removal keys and required-input keys.
+
+    Args:
+        repo_root: Repository root.
+        ref: Revision, or None for the work tree.
+        entry: Catalog entry.
+
+    Returns:
+        ``(removal keys, <entry>:required:<input> and
+        <entry>:required-secret:<secret> keys)``, or None when the file does
+        not exist at that revision.
+    """
+    entry_id = str(entry["id"])
+    kind = Kind(entry["kind"])
+    source = read_at(
+        repo_root=repo_root,
+        ref=ref,
+        relpath=entry_path(kind=kind, entry_id=entry_id),
+    )
+    if source is None:
+        return None
+    document = yaml.safe_load(source)
+    surface = interface(kind=kind, document=document)
+    keys = removal_keys(entry_id=entry_id, surface=surface)
+    inputs = required_inputs(kind=kind, document=document)
+    secrets = required_inputs(kind=kind, document=document, section="secrets")
+    required = {f"{entry_id}:required:{name}" for name in inputs}
+    required |= {f"{entry_id}:required-secret:{name}" for name in secrets}
+    return keys, required
+
+
+def snapshot(
+    repo_root: Path,
+    ref: str | None,
+) -> Snapshot | None:
+    """Load the catalog and every entry point's interface at a revision.
+
+    Args:
+        repo_root: Repository root.
+        ref: Revision, or None for the work tree.
+
+    Returns:
+        The snapshot, or None when the revision has no catalog.
+
+    Raises:
+        ValueError: When the catalog is not a mapping with an entry list.
+    """
+    text = read_at(repo_root=repo_root, ref=ref, relpath=CATALOG_RELPATH)
+    if text is None:
+        return None
+    catalog = yaml.safe_load(text)
+    entries = catalog.get("entries") if isinstance(catalog, dict) else None
+    if not isinstance(entries, list):
+        raise ValueError(f"{CATALOG_RELPATH} at {ref or 'work tree'}")
+    tiers: dict[str, str] = {}
+    keys: set[str] = set()
+    required: set[str] = set()
+    for entry in entries:
+        tiers[str(entry["id"])] = str(entry["tier"])
+        found = entry_surface_at(repo_root=repo_root, ref=ref, entry=entry)
+        # A deleted file is a removal even while its catalog row lingers.
+        if found is not None:
+            keys |= found[0]
+            required |= found[1]
+    deprecated: set[str] = set()
+    for record in catalog.get("deprecations") or []:
+        deprecated |= deprecation_keys(record=record)
+    return Snapshot(tiers=tiers, keys=keys, deprecated=deprecated, required=required)
+
+
+def load_rows(
+    repo_root: Path,
+    relpath: Path,
+    list_key: str,
+    ref: str | None = None,
+) -> list[dict[str, Any]]:
+    """Load the list from the registry or the exceptions file.
+
+    Args:
+        repo_root: Repository root.
+        relpath: File to read.
+        list_key: Top-level key holding the list.
+        ref: Revision, or None for the work tree.
+
+    Returns:
+        The rows; empty when the file or the key is missing.
+    """
+    text = read_at(repo_root=repo_root, ref=ref, relpath=relpath)
+    data = yaml.safe_load(text) if text else None
+    rows = data.get(list_key) if isinstance(data, dict) else None
+    return [r for r in rows if isinstance(r, dict)] if isinstance(rows, list) else []
+
+
+def entry_of(
+    key: str,
+) -> str:
+    """Return the entry id a removal key belongs to.
+
+    Args:
+        key: Removal key.
+
+    Returns:
+        The part before the first colon.
+    """
+    return key.split(":", maxsplit=1)[0]
+
+
+@dataclass
+class Report:
+    """Accumulated validation findings.
+
+    Attributes:
+        errors: Messages that fail the run.
+        notices: Informational messages.
+    """
+
+    errors: list[str] = field(default_factory=list)
+    notices: list[str] = field(default_factory=list)
+
+    def error(
+        self,
+        where: str,
+        message: str,
+    ) -> None:
+        """Record a failure.
+
+        Args:
+            where: Entry id or file the message concerns.
+            message: What is wrong.
+        """
+        self.errors.append(f"{where}: {message}")
+
+
+def is_one_line(
+    value: Any,
+) -> bool:
+    """Return whether a value is a non-empty single-line string.
+
+    Args:
+        value: Value to test.
+
+    Returns:
+        True for a non-blank string without newlines.
+    """
+    return isinstance(value, str) and bool(value.strip()) and "\n" not in value

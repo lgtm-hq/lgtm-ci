@@ -15,7 +15,7 @@ GitHub Packages publishing such as GHCR.
 Calculate the next semantic version based on conventional commits.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/calculate-version@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/calculate-version@<sha> # vX.Y.Z
   with:
     max-bump: "minor" # optional, clamp max bump type
 ```
@@ -28,7 +28,7 @@ Calculate the next semantic version based on conventional commits.
 Generate a changelog from conventional commits.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/generate-changelog@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-changelog@<sha> # vX.Y.Z
   with:
     version: "1.2.0" # optional
     format: "full" # full, simple, or with-type
@@ -41,7 +41,7 @@ Generate a changelog from conventional commits.
 Create an annotated git tag for a release.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/create-release-tag@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/create-release-tag@<sha> # vX.Y.Z
   with:
     version: "1.2.0"
     push: "true" # push tag to origin
@@ -54,7 +54,7 @@ Create an annotated git tag for a release.
 Create a GitHub release with changelog and optional assets.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/create-github-release@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/create-github-release@<sha> # vX.Y.Z
   with:
     tag: "v1.2.0"
     draft: "false"
@@ -81,7 +81,7 @@ made on a temporary branch and the target is moved to it in one step. The
 default branch is never reset.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/create-signed-commit@<sha> # vX.Y.Z
   with:
     token: ${{ steps.app-token.outputs.token }}
     branch: renovate/foo

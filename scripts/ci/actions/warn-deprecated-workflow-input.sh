@@ -25,6 +25,10 @@
 #                 or 'behavior-change' when it still works but does less than it
 #                 used to. Calling a still-functional input "deprecated" would be
 #                 a lie the caller has no way to check.
+#   ISSUE         (optional) Issue number cited in the notice (default 770, the
+#                 deprecation that introduced this helper). New shims pass
+#                 the issue of their own deprecation record (#1082,
+#                 docs/governance.md#deprecation-lifecycle).
 
 set -euo pipefail
 
@@ -33,17 +37,18 @@ set -euo pipefail
 : "${INPUT_VALUE:=}"
 : "${DEFAULT_VALUE:=}"
 : "${NOTICE_KIND:=deprecated}"
+: "${ISSUE:=770}"
 
 case "$NOTICE_KIND" in
 deprecated)
 	title="Deprecated input"
-	lede="'${INPUT_NAME}' is deprecated and no longer has any effect (#770)."
-	summary_lede="This input is accepted for backwards compatibility but **no longer has any effect** (#770)."
+	lede="'${INPUT_NAME}' is deprecated and no longer has any effect (#${ISSUE})."
+	summary_lede="This input is accepted for backwards compatibility but **no longer has any effect** (#${ISSUE})."
 	;;
 behavior-change)
 	title="Behavior change"
-	lede="'${INPUT_NAME}: ${INPUT_VALUE}' does less than it used to (#770)."
-	summary_lede="This input still works, but **part of what it used to do has moved** (#770)."
+	lede="'${INPUT_NAME}: ${INPUT_VALUE}' does less than it used to (#${ISSUE})."
+	summary_lede="This input still works, but **part of what it used to do has moved** (#${ISSUE})."
 	;;
 *)
 	echo "::error::NOTICE_KIND must be 'deprecated' or 'behavior-change' (got '${NOTICE_KIND}')" >&2

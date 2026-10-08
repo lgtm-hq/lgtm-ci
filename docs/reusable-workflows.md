@@ -1016,6 +1016,14 @@ covers the registries the ecosystem bumps reach (PyPI for `ecosystems: python`
 / kind `pep621`, rustup and crates.io for `ecosystems: rust`), so selecting an
 ecosystem needs no `allowed-endpoints` (#1093).
 
+`catalog-release-notes: true` (default `false`) merges the
+`catalog/catalog.yml` diff since the previous stable tag into the generated
+section: entries added or removed, tier changes, and inputs, outputs and entry
+points newly deprecated or removed, each as a `**catalog**` bullet under
+`Added`, `Changed`, `Deprecated` or `Removed` (#1082). It is meant for
+repositories that keep an lgtm-ci support catalog; lgtm-ci's own version PR
+sets it. Nothing is added when either release has no catalog.
+
 When release automation fails on the default branch, the follow-up
 `report-release-failure` job runs two steps in order: it first writes release
 trigger context to the job step summary, then creates or updates a deduplicated

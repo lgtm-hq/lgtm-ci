@@ -19,6 +19,8 @@ straight to a component index below.
 | --- | ------ |
 | [getting-started.md](getting-started.md) | Installation, versioning/pinning model, first caller |
 | [onboarding.md](onboarding.md) | Task-ordered consumer setup: starter examples, secrets, egress audit→block, SHA pinning |
+| [catalog.md](catalog.md) | Support tier, evidence, permissions, check names and deprecations of every workflow and action (generated) |
+| [governance.md](governance.md) | Tier promises, exact-SHA pinning, deprecation lifecycle, known-consumer registry, removal gate |
 | [workflow-contract.md](workflow-contract.md) | Standard inputs, permissions by mode, egress presets, action pinning policy, org ruleset check names |
 | [reusable-workflows.md](reusable-workflows.md) | Full per-workflow inputs/outputs/examples |
 | [pages-publishing.md](pages-publishing.md) | GitHub Pages Model A vs Model B, multi-publisher limits |

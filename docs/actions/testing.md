@@ -83,7 +83,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@…
-      - uses: lgtm-hq/lgtm-ci/.github/actions/run-quality@main
+      - uses: lgtm-hq/lgtm-ci/.github/actions/run-quality@<sha> # vX.Y.Z
         with:
           lintro-image: ghcr.io/lgtm-hq/py-lintro@sha256:...
           tools: "" # optional, comma-separated (empty = all)
@@ -99,7 +99,7 @@ Generic test runner that auto-detects and delegates to language-specific
 runners.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/run-tests@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-tests@<sha> # vX.Y.Z
   with:
     runner: "auto" # 'pytest', 'vitest', 'playwright', or 'auto'
     package-manager: npm # 'bun', 'npm', 'pnpm'; required when vitest/playwright run
@@ -119,7 +119,7 @@ dependencies itself.
 Run Python tests with pytest and optional coverage.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-pytest@<sha> # vX.Y.Z
   with:
     python-version: "3.12" # optional
     test-path: "tests" # optional
@@ -136,7 +136,7 @@ Run Python tests with pytest and optional coverage.
 Run JavaScript/TypeScript tests with vitest and optional coverage.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/run-vitest@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-vitest@<sha> # vX.Y.Z
   with:
     package-manager: npm # required: 'bun', 'npm', 'pnpm'
     node-version: "22" # optional
@@ -157,7 +157,7 @@ Renovate-managed pin used only when `package-manager: bun`.
 Run E2E tests using Playwright with browser automation.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/run-playwright@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/run-playwright@<sha> # vX.Y.Z
   with:
     package-manager: pnpm # required: 'bun', 'npm', 'pnpm'
     node-version: "22" # optional
@@ -176,7 +176,7 @@ selected manager, the package never is (#1077).
 Merge multiple Playwright reports from sharded or matrix test runs.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/merge-playwright-reports@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/merge-playwright-reports@<sha> # vX.Y.Z
   with:
     input-dir: "playwright-reports" # default
     output-dir: "merged-report" # default

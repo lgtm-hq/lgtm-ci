@@ -94,7 +94,7 @@ Do not nest step-security inside a local composite (GitHub skips nested
 Security-hardened repository checkout.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/secure-checkout@<sha> # vX.Y.Z
   with:
     persist-credentials: "false" # default: false (secure)
     fetch-depth: "1" # default: 1 (shallow clone)
@@ -107,7 +107,7 @@ Security-hardened repository checkout.
 Network egress configuration and reporting scaffolding.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/egress-audit@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/egress-audit@<sha> # vX.Y.Z
   with:
     mode: "audit" # 'audit', 'report', or 'block'
     report-format: "summary" # 'summary', 'json', or 'none'
@@ -123,7 +123,7 @@ Enforces a tiered egress policy (`strict`, `hardened`, `permissive`) before
 current leg.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/validate-runner-policy@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/validate-runner-policy@<sha> # vX.Y.Z
   with:
     tier: "strict"
     egress-policy: "block"
@@ -141,7 +141,7 @@ Ensures GitHub Actions references use SHA pins with Renovate version
 comments.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/validate-action-pinning@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/validate-action-pinning@<sha> # vX.Y.Z
   with:
     enforce: "true" # optional, default: true
     allow-tag-exceptions: "" # optional, comma-separated action names
@@ -159,7 +159,7 @@ Used by `reusable-validate-action-pinning.yml`. See
 Generate an SBOM using [Syft](https://github.com/anchore/syft).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/generate-sbom@<sha> # vX.Y.Z
   with:
     target: "." # optional, default: current directory
     target-type: "dir" # 'dir', 'image', or 'file'
@@ -184,7 +184,7 @@ cannot drift apart.
 Scan for vulnerabilities using [Grype](https://github.com/anchore/grype).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/scan-vulnerabilities@<sha> # vX.Y.Z
   with:
     target: "sbom.cdx.json" # SBOM file, image, or directory
     target-type: "sbom" # 'sbom', 'image', or 'dir'
@@ -201,7 +201,7 @@ Create build attestations via
 [actions/attest-build-provenance](https://github.com/actions/attest-build-provenance).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/attest-build@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/attest-build@<sha> # vX.Y.Z
   with:
     subject-path: "dist/myapp.tar.gz"
     subject-name: "myapp" # optional
@@ -216,7 +216,7 @@ Create build attestations via
 Verify build attestations using `gh attestation verify`.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/verify-attestation@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/verify-attestation@<sha> # vX.Y.Z
   with:
     target: "dist/myapp.tar.gz"
     target-type: "file" # 'file' or 'image'
@@ -229,7 +229,7 @@ Verify build attestations using `gh attestation verify`.
 Sign release artifacts with Sigstore/Cosign keyless signing.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/sign-artifact@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/sign-artifact@<sha> # vX.Y.Z
   with:
     files: "dist/*.tar.gz"
     upload-signatures: "true"
@@ -258,7 +258,7 @@ one artifact never re-signs the ones that already succeeded. Tune with
 Verify Sigstore/Cosign signatures.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/verify-signature@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/verify-signature@<sha> # vX.Y.Z
   with:
     file: "dist/myapp.tar.gz"
     signature: "dist/myapp.tar.gz.sig"

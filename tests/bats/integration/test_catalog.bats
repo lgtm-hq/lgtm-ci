@@ -130,6 +130,9 @@ entries:
     prerequisites: []
     limitations: []
 YAML
+	# The known-consumer registry and the exceptions file are required (#1082).
+	printf -- '---\nschema-version: 1\nconsumers: []\n' >"${root}/catalog/consumers.yml"
+	printf -- '---\nschema-version: 1\nexceptions: []\n' >"${root}/catalog/deprecation-exceptions.yml"
 	cat >"${root}/README.md" <<'MD'
 # Demo
 

@@ -15,7 +15,7 @@ Build Python sdist/wheel and validate with twine. Does not upload to PyPI.
   with:
     fetch-depth: 0 # or a shallow checkout with persist-credentials: true, see below
     persist-credentials: false
-- uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/build-python-package@<sha> # vX.Y.Z
   with:
     validate: "true"
 ```
@@ -54,7 +54,7 @@ defined in the **caller** repository workflow.
 ```yaml
 - name: Prepare PyPI upload
   id: prepare
-  uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@main
+  uses: lgtm-hq/lgtm-ci/.github/actions/prepare-pypi-upload@<sha> # vX.Y.Z
   with:
     artifact-name: python-dist
     tooling-ref: "<sha>"
@@ -97,7 +97,7 @@ registry verification. See
 Build and publish Ruby gems to RubyGems using OIDC trusted publishing.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/publish-gem@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/publish-gem@<sha> # vX.Y.Z
   with:
     gemspec: "" # optional, auto-detected
     dry-run: "false" # optional, build only
@@ -112,7 +112,7 @@ Dispatch a Homebrew formula update to a tap repository via
 `repository_dispatch`. Use after PyPI and GitHub Release jobs complete.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/trigger-homebrew-update@<sha> # vX.Y.Z
   with:
     formula: winnow
     version: "1.2.3"
@@ -130,7 +130,7 @@ schema and examples.
 Validate package metadata before publishing.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/validate-package@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/validate-package@<sha> # vX.Y.Z
   with:
     type: "pypi" # 'pypi', 'npm', or 'gem'
 ```
@@ -142,7 +142,7 @@ Validate package metadata before publishing.
 Wait for a package to become available on a registry.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/wait-for-package@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/wait-for-package@<sha> # vX.Y.Z
   with:
     registry: "pypi" # 'pypi', 'npm', or 'gem'
     package: "my-package"
@@ -159,7 +159,7 @@ Build and push Docker images with multi-platform support. Prefer
 complete workflow; this composite is the underlying build step.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/build-docker@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/build-docker@<sha> # vX.Y.Z
   with:
     context: "."
     platforms: "linux/amd64,linux/arm64"
@@ -177,7 +177,7 @@ semver/SHA/branch tag generation, GHA cache integration. Requires
 Login to GHCR or Docker Hub based on the `registry` input.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/docker-login@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/docker-login@<sha> # vX.Y.Z
   with:
     registry: "ghcr.io" # or docker.io
     dockerhub-username: "" # required when registry is docker.io
@@ -211,7 +211,7 @@ GHCR login uses `github.actor` + `github.token` (no extra secrets).
 Prepare and upload content for GitHub Pages deployment using OIDC.
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/deploy-pages@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/deploy-pages@<sha> # vX.Y.Z
   with:
     source-path: "dist"
     build-command: "bun run build"
@@ -227,7 +227,7 @@ Download HTML report artifacts from other workflow runs into a site tree
 before Pages deployment (Model B).
 
 ```yaml
-- uses: lgtm-hq/lgtm-ci/.github/actions/bundle-workflow-artifacts@main
+- uses: lgtm-hq/lgtm-ci/.github/actions/bundle-workflow-artifacts@<sha> # vX.Y.Z
   with:
     commit-sha: ${{ github.sha }}
     site-root: apps/site/dist
