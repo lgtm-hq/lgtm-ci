@@ -116,7 +116,7 @@ _convert() {
 	jq '.properties.tool.oneOf = [{"type": "string"}]' "$SCHEMA" >"${BATS_TEST_TMPDIR}/schema.json"
 	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_validate "$FIXTURES_DIR/results/valid-minimal.json" "$1"' _ "${BATS_TEST_TMPDIR}/schema.json"
 	assert_failure 2
-	assert_output --partial "unsupported schema keyword(s) at \$.tool: oneOf"
+	assert_output --partial "unsupported schema keyword(s): oneOf"
 }
 
 @test "results_v1_validate: resolves local \$ref definitions (artifact items)" {
@@ -418,4 +418,91 @@ _convert() {
 	assert_success
 	run jq -r .status "${BATS_TEST_TMPDIR}/doc.json"
 	assert_output "error"
+}
+
+@test "results_v1_build: a count that is not a non-negative integer is status error, never sanitised to passed" {
+	run bash -c '
+		source "$LIB_DIR/testing/results.sh"
+		export RESULTS_TOOL=t RESULTS_RUNNER=r EXIT_CODE=0
+		TESTS_PASSED=1 TESTS_FAILED=-1 TESTS_TOTAL=1 results_v1_build | jq -r .status
+		TESTS_PASSED=1.5 TESTS_TOTAL=1 results_v1_build | jq -r .status
+		TESTS_PASSED=one TESTS_TOTAL=1 results_v1_build | jq -r .status
+	'
+	assert_success
+	assert_line --index 0 "error"
+	assert_line --index 1 "error"
+	assert_line --index 2 "error"
+}
+
+@test "conformance: a pytest report with a negative count is status error" {
+	printf '{"summary": {"passed": 1, "failed": -1, "total": 1}}' >"${BATS_TEST_TMPDIR}/bad.json"
+	run _convert pytest_results_v1 "${BATS_TEST_TMPDIR}/bad.json"
+	assert_success
+	run jq -r .status "${BATS_TEST_TMPDIR}/doc.json"
+	assert_output "error"
+}
+
+@test "results_v1_validate: schema preflight rejects an unsupported keyword under an absent optional property" {
+	jq '.properties.coverage.oneOf = [{"type": "object"}]' "$SCHEMA" >"${BATS_TEST_TMPDIR}/schema.json"
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_validate "$FIXTURES_DIR/results/valid-minimal.json" "$1"' _ "${BATS_TEST_TMPDIR}/schema.json"
+	assert_failure 2
+	assert_output --partial "unsupported schema keyword(s): oneOf"
+}
+
+@test "results_v1_validate: schema preflight rejects a \$ref carrying sibling constraints" {
+	jq '.properties.artifacts.items.minLength = 1' "$SCHEMA" >"${BATS_TEST_TMPDIR}/schema.json"
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_validate "$FIXTURES_DIR/results/valid-minimal.json" "$1"' _ "${BATS_TEST_TMPDIR}/schema.json"
+	assert_failure 2
+	assert_output --partial "sibling keyword(s) is not supported: minLength"
+}
+
+@test "results_v1_validate: the shipped schema passes its own preflight" {
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_schema_preflight "$SCHEMA"'
+	assert_success
+	assert_output ""
+}
+
+@test "conformance: a one-line JUnit report keeps its root on the prolog line and still parses under set -euo pipefail" {
+	printf '<?xml version="1.0"?><testsuites tests="2" failures="0" time="0.5"><testsuite name="s" tests="2" failures="0"><testcase name="a"/><testcase name="b"/></testsuite></testsuites>\n' \
+		>"${BATS_TEST_TMPDIR}/one-line.xml"
+	run bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/one-line.xml"
+	assert_success
+	assert_output '["passed",2,500]'
+	# A report without a time attribute leaves duration at 0 instead of
+	# killing the strict shell.
+	run bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -r .duration_ms' _ "$FIXTURES_DIR/rust/junit-two-tests.xml"
+	assert_success
+	assert_output "0"
+}
+
+@test "results_v1_validate: a file holding two concatenated documents is a hard error" {
+	cat "$FIXTURES_DIR/results/valid-minimal.json" "$FIXTURES_DIR/results/valid-minimal.json" >"${BATS_TEST_TMPDIR}/two.json"
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_validate "$1"' _ "${BATS_TEST_TMPDIR}/two.json"
+	assert_failure 2
+	assert_output --partial "expected exactly one JSON document"
+}
+
+@test "results_v1_validate: schema preflight rejects a non-boolean additionalProperties and a non-local \$ref" {
+	jq '.properties.coverage.additionalProperties = {"type": "number"}' "$SCHEMA" >"${BATS_TEST_TMPDIR}/schema.json"
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_validate "$FIXTURES_DIR/results/valid-minimal.json" "$1"' _ "${BATS_TEST_TMPDIR}/schema.json"
+	assert_failure 2
+	assert_output --partial "additionalProperties must be a boolean"
+	jq '.properties.artifacts.items = {"$ref": "https://example.invalid/artifact.json"}' "$SCHEMA" >"${BATS_TEST_TMPDIR}/schema2.json"
+	run bash -c 'source "$LIB_DIR/testing/results.sh"; results_v1_validate "$FIXTURES_DIR/results/valid-minimal.json" "$1"' _ "${BATS_TEST_TMPDIR}/schema2.json"
+	assert_failure 2
+	assert_output --partial "only local #/\$defs/<name> references are supported"
+}
+
+@test "conformance: a JUnit report past the pipe buffer (> 64 KiB) parses under set -euo pipefail" {
+	{
+		printf '<?xml version="1.0" encoding="UTF-8"?>\n<testsuites name="nextest-run" tests="2000" failures="0" errors="0" time="12.5">\n<testsuite name="big" tests="2000" failures="0" errors="0" skipped="0">\n'
+		for i in $(seq 1 2000); do
+			printf '<testcase name="module::path::test_case_number_%d" classname="crate::module" time="0.001"/>\n' "$i"
+		done
+		printf '</testsuite>\n</testsuites>\n'
+	} >"${BATS_TEST_TMPDIR}/big.xml"
+	[[ "$(wc -c <"${BATS_TEST_TMPDIR}/big.xml")" -gt 65536 ]]
+	run bash -euo pipefail -c 'source "$LIB_DIR/testing.sh"; junit_results_v1 "$1" | jq -c "[.status, .counts.total, .duration_ms]"' _ "${BATS_TEST_TMPDIR}/big.xml"
+	assert_success
+	assert_output '["passed",2000,12500]'
 }

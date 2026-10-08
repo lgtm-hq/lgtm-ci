@@ -11,12 +11,16 @@
 #   RESULTS_DIR       (required) Directory containing per-leg results.json files.
 #   MATRIX_JSON       (optional) Matrix JSON to validate the leg count against.
 #   AGGREGATE_OUTPUT  (optional) Path to write the aggregated results.v1 document.
+#   TESTS_TOTAL_EXCLUDES_SKIPPED  (optional) "true": the tests-total output is
+#                     passed + failed (the Rust reusable's historical meaning);
+#                     counts.total in the document stays inclusive.
 #
 # Outputs (GITHUB_OUTPUT): tests-passed, tests-failed, tests-skipped,
 #   tests-total, coverage-percent, status, passed.
 #   coverage-percent is the single leg's value verbatim, or the mean of the
 #   legs that report coverage formatted to two decimals; empty without
-#   coverage. passed is true only when every leg's status is "passed".
+#   coverage. passed is true when no leg is failed or error (a no-tests leg
+#   is not a failure, as before the contract).
 
 set -euo pipefail
 
@@ -39,12 +43,18 @@ from __future__ import annotations
 import json
 import os
 import sys
+from decimal import Decimal
 from pathlib import Path
 
 
 def load(path: Path) -> dict:
     """Load a results.v1 document keeping float literals verbatim."""
     return json.loads(path.read_text(encoding="utf-8"), parse_float=str)
+
+
+def as_int(value: object) -> int:
+    """Integral JSON number (1, 1.0, 1e0 all validate as integer) to int."""
+    return int(Decimal(str(value)))
 
 
 results_dir = Path(sys.argv[1])
@@ -71,11 +81,14 @@ if matrix_json:
         raise SystemExit(1)
 
 docs = [load(leg) for leg in legs]
-passed = sum(int(d["counts"]["passed"]) for d in docs)
-failed = sum(int(d["counts"]["failed"]) for d in docs)
-skipped = sum(int(d["counts"]["skipped"]) for d in docs)
-total = sum(int(d["counts"]["total"]) for d in docs)
-duration = sum(int(d["duration_ms"]) for d in docs)
+passed = sum(as_int(d["counts"]["passed"]) for d in docs)
+failed = sum(as_int(d["counts"]["failed"]) for d in docs)
+skipped = sum(as_int(d["counts"]["skipped"]) for d in docs)
+total = sum(as_int(d["counts"]["total"]) for d in docs)
+duration = sum(as_int(d["duration_ms"]) for d in docs)
+total_output = total
+if os.environ.get("TESTS_TOTAL_EXCLUDES_SKIPPED", "") == "true":
+    total_output = passed + failed
 coverage_raw = [d["coverage"]["lines"] for d in docs if "coverage" in d]
 statuses = [d["status"] for d in docs]
 
@@ -90,21 +103,26 @@ elif coverage_raw:
     coverage_percent = f"{mean:.2f}"
     coverage_value = coverage_percent
 
+# Precedence error > failed > no-tests > passed: one empty leg is not a
+# passing matrix, so no-tests wins over passed as well.
 if any(s == "error" for s in statuses):
     status = "error"
 elif any(s == "failed" for s in statuses):
     status = "failed"
-elif all(s == "no-tests" for s in statuses):
+elif any(s == "no-tests" for s in statuses):
     status = "no-tests"
 else:
     status = "passed"
-all_passed = all(s == "passed" for s in statuses)
+# `passed` keeps the pre-contract meaning (no leg failed): a no-tests leg
+# (vitest passWithNoTests, nextest --no-tests=pass) is not a failure, while
+# the aggregate `status` still says no-tests.
+all_passed = all(s in ("passed", "no-tests") for s in statuses)
 
 with Path(github_output).open("a", encoding="utf-8") as output:
     output.write(f"tests-passed={passed}\n")
     output.write(f"tests-failed={failed}\n")
     output.write(f"tests-skipped={skipped}\n")
-    output.write(f"tests-total={total}\n")
+    output.write(f"tests-total={total_output}\n")
     output.write(f"coverage-percent={coverage_percent}\n")
     output.write(f"status={status}\n")
     output.write(f"passed={str(all_passed).lower()}\n")

@@ -244,3 +244,92 @@ EOF
 	run jq -r .status results/coverage/default/results.json
 	assert_output "failed"
 }
+
+@test "render-step-summary: a failed or error document never renders Passed, even with exit_code 0" {
+	_leg legs/a 3 0 0 - failed
+	jq '.exit_code = 0' legs/a/results.json >legs/a/r.json
+	run env RESULTS_FILE=legs/a/r.json TITLE=t bash "$ACTIONS/render-step-summary.sh"
+	assert_success
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_line "**Status:** :x: Failed"
+	: >"$GITHUB_STEP_SUMMARY"
+	_leg legs/b 0 0 0 - error
+	run env RESULTS_FILE=legs/b/results.json TITLE=t bash "$ACTIONS/render-step-summary.sh"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_line "**Status:** :x: Failed"
+}
+
+@test "render-test-summary: without a job result the document status decides the verdict" {
+	_leg legs/a 3 0 0 - failed
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x COMMENT_OUTPUT=out.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md 'Status: ❌ FAILED'
+	# An explicit job result still wins (coverage-threshold wording, etc.).
+	run env RESULTS_FILE=legs/a/results.json TEST_SUITE_NAME=x JOB_RESULT=success COMMENT_OUTPUT=out2.md \
+		bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out2.md 'Status: ✅ PASSED'
+}
+
+@test "render-test-summary: TESTS_TOTAL_EXCLUDES_SKIPPED renders the Rust total as passed + failed" {
+	_leg legs/a 5 2 3 - failed
+	run env RESULTS_FILE=legs/a/results.json TESTS_TOTAL_EXCLUDES_SKIPPED=true TEST_SUITE_NAME=x \
+		JOB_RESULT=failure COMMENT_OUTPUT=out.md bash "$ACTIONS/render-test-summary.sh"
+	assert_success
+	assert_file_contains_literal out.md '| **Total Tests** | 7 |'
+	assert_file_contains_literal out.md '| **Pass Rate** | 71% |'
+}
+
+# =============================================================================
+# assert-required-check.sh with RESULTS_DIR (#1080)
+# =============================================================================
+
+@test "assert-required-check: RESULTS_DIR passes when every leg is passed or no-tests" {
+	_leg legs/a 3 0 0 - passed
+	_leg legs/b 0 0 0 - no-tests
+	run env UPSTREAM_RESULT=success RESULTS_DIR=legs EXPECTED_COUNT=2 bash "$ACTIONS/assert-required-check.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "status=passed"
+}
+
+@test "assert-required-check: RESULTS_DIR fails on a failed leg, an error leg, an invalid document, a count mismatch" {
+	_leg legs/a 3 0 0 - passed
+	_leg legs/b 2 1 0 - failed
+	run env UPSTREAM_RESULT=success RESULTS_DIR=legs bash "$ACTIONS/assert-required-check.sh"
+	assert_failure
+	assert_output --partial "reports status failed"
+
+	rm -rf legs
+	_leg legs/a 0 0 0 - error
+	run env UPSTREAM_RESULT=success RESULTS_DIR=legs bash "$ACTIONS/assert-required-check.sh"
+	assert_failure
+	assert_output --partial "reports status error"
+
+	rm -rf legs
+	mkdir -p legs/a
+	echo '{"tool": "x"}' >legs/a/results.json
+	run env UPSTREAM_RESULT=success RESULTS_DIR=legs bash "$ACTIONS/assert-required-check.sh"
+	assert_failure
+	assert_output --partial "does not conform to results.v1"
+
+	rm -rf legs
+	_leg legs/a 3 0 0 - passed
+	run env UPSTREAM_RESULT=success RESULTS_DIR=legs EXPECTED_COUNT=2 bash "$ACTIONS/assert-required-check.sh"
+	assert_failure
+	assert_output --partial "Expected 2 results.json legs"
+	run env UPSTREAM_RESULT=success RESULTS_DIR=legs EXPECTED_COUNT=two bash "$ACTIONS/assert-required-check.sh"
+	assert_failure
+	assert_output --partial "EXPECTED_COUNT must be a non-negative integer"
+	assert_file_contains "$GITHUB_OUTPUT" "status=failed"
+}
+
+@test "assert-required-check: an empty RESULTS_DIR or a missing directory fails closed" {
+	mkdir -p legs
+	run env UPSTREAM_RESULT=success RESULTS_DIR=legs bash "$ACTIONS/assert-required-check.sh"
+	assert_failure
+	assert_output --partial "No results.json found"
+	run env UPSTREAM_RESULT=success RESULTS_DIR=absent bash "$ACTIONS/assert-required-check.sh"
+	assert_failure
+	assert_output --partial "results directory not found"
+}

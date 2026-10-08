@@ -442,7 +442,12 @@ if [[ "$STEP" == "parse-results" ]]; then
 	# tests-passed excludes skipped tests and tests-skipped reports them.
 	: "${RESULTS_OUTPUT:=$(results_v1_path bats "${MATRIX_VALUE:-default}")}"
 	TESTS_RAN="false"
-	TESTS_DURATION_MS="$(sum_bats_durations .)"
+	# The run step wrote this next to the TAP; never scan the tree for it.
+	TESTS_DURATION_MS=0
+	if [[ -f bats-duration-ms.txt ]]; then
+		TESTS_DURATION_MS="$(tr -dc '0-9' <bats-duration-ms.txt)"
+		: "${TESTS_DURATION_MS:=0}"
+	fi
 	if [[ -f bats-output.tap ]]; then
 		RESULTS_ARTIFACTS=$'tap=bats-output.tap\n' \
 			EXIT_CODE="${EXIT_CODE:-}" TESTS_DURATION_MS="$TESTS_DURATION_MS" \

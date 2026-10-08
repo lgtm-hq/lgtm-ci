@@ -33,7 +33,8 @@ on:
         description: >-
           Artifact name or glob of results.v1 documents (#1080) to verify:
           every results.json must validate against schemas/results.v1.json
-          and report status "passed". Empty skips the document check.
+          and report status "passed" or "no-tests" (an empty leg is not a
+          failure, like the passed output). Empty skips the document check.
         required: false
         type: string
         default: ""

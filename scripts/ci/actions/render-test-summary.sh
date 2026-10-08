@@ -15,6 +15,8 @@
 #                       with neither set the legacy TESTS_* / COVERAGE_PERCENT
 #                       environment is rendered as before
 #   EXPECTED_COUNT      (optional) Number of legs RESULTS_DIR must contain
+#   TESTS_TOTAL_EXCLUDES_SKIPPED  "true": Total Tests / pass rate use
+#                       passed + failed (the Rust reusable's historical total)
 #   TEST_SUITE_NAME, COVERAGE_ENABLED, COVERAGE_THRESHOLD, JOB_RESULT,
 #   COMMENT_OUTPUT, GITHUB_*  Passed through to generate-test-summary.sh
 
@@ -55,12 +57,27 @@ else
 	results_v1_validate "$RESULTS_FILE"
 fi
 
-IFS=$'\t' read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL COVERAGE_PERCENT < <(
+IFS=$'\t' read -r TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL COVERAGE_PERCENT RESULTS_STATUS < <(
 	jq -r '[.counts.passed, .counts.failed, .counts.skipped, .counts.total,
-		(.coverage.lines // "-")] | @tsv' "$RESULTS_FILE"
+		(.coverage.lines // "-"), .status] | @tsv' "$RESULTS_FILE"
 )
 # "-" marks an absent coverage: bash collapses adjacent tab separators.
 [[ "$COVERAGE_PERCENT" == "-" ]] && COVERAGE_PERCENT=""
+# Rust has always reported passed + failed as its total (pass rate without
+# skipped tests); counts.total in the document stays inclusive.
+if [[ "${TESTS_TOTAL_EXCLUDES_SKIPPED:-}" == "true" ]]; then
+	TESTS_TOTAL=$((TESTS_PASSED + TESTS_FAILED))
+fi
+# The document status is authoritative when the caller gave no job result:
+# a failed or error leg must not render as PASSED because its failed count
+# happens to be zero.
+if [[ -z "${JOB_RESULT:-}" || "${JOB_RESULT}" == "unknown" ]]; then
+	case "$RESULTS_STATUS" in
+	passed) JOB_RESULT="success" ;;
+	failed | error) JOB_RESULT="failure" ;;
+	esac
+	export JOB_RESULT
+fi
 export TESTS_PASSED TESTS_FAILED TESTS_SKIPPED TESTS_TOTAL COVERAGE_PERCENT
 
 exec bash "$SCRIPT_DIR/generate-test-summary.sh"

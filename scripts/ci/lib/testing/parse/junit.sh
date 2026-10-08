@@ -117,10 +117,14 @@ junit_results_v1() {
 		parse_junit_xml "/nonexistent/junit.xml" || true
 	else
 		parse_junit_xml "$file" || true
-		# Root element time="<seconds>" when the producer reports one.
+		# Root element time="<seconds>" when the producer reports one. The
+		# prolog and doctype are stripped in place (a one-line report keeps
+		# its root on the prolog line), and a report without a time attribute
+		# must leave duration at 0 under set -euo pipefail, hence || true.
 		local root_time
-		root_time=$(grep -v '^[[:space:]]*<?' "$file" | grep -v '^[[:space:]]*<!' |
-			grep -m1 -o '<testsuites\?[^>]*' | sed -n 's/.*[[:space:]]time="\([0-9.]*\)".*/\1/p')
+		root_time=$(sed -e 's/<?[^>]*?>//g' -e 's/<![^>]*>//g' "$file" | tr '\n' ' ' |
+			grep -o '<testsuites\?[^>]*' | head -n 1 |
+			sed -n 's/.*[[:space:]]time="\([0-9.]*\)".*/\1/p' || true)
 		if [[ -n "$root_time" ]]; then
 			TESTS_DURATION_MS=$(awk -v t="$root_time" 'BEGIN { printf "%d", (t * 1000) + 0.5 }')
 		fi

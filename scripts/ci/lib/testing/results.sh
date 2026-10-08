@@ -28,7 +28,9 @@
 #   MATRIX_KEY, MATRIX_VALUE  matrix coordinate (optional; both or neither)
 #
 # Status rule (documented in docs/workflow-contract.md, Results contract):
-#   error     RESULTS_PARSE_STATUS is missing or invalid
+#   error     RESULTS_PARSE_STATUS is missing or invalid, or a count is not a
+#             non-negative integer (a native report with failed: -1 is not a
+#             passing one)
 #   failed    TESTS_FAILED > 0, or EXIT_CODE set and non-zero
 #   no-tests  TESTS_TOTAL == 0
 #   passed    otherwise
@@ -78,6 +80,13 @@ _results_v1_status() {
 		return 0
 		;;
 	esac
+	local count
+	for count in "${TESTS_PASSED:-0}" "${TESTS_FAILED:-0}" "${TESTS_SKIPPED:-0}" "${TESTS_TOTAL:-0}"; do
+		if [[ ! "$count" =~ ^[0-9]+$ ]]; then
+			echo "error"
+			return 0
+		fi
+	done
 	if [[ -n "${RESULTS_STATUS:-}" ]]; then
 		echo "$RESULTS_STATUS"
 		return 0
@@ -281,6 +290,53 @@ def validate($schema; $v; $path; $root):
 JQ
 export _RESULTS_V1_JQ_VALIDATOR
 
+# jq program: preflight the whole schema file, independent of any instance,
+# so an unsupported keyword under an optional property the instance omits
+# (or a $ref carrying sibling constraints, which this interpreter would
+# drop) is a hard error rather than a silently weaker check.
+# shellcheck disable=SC2016 # jq program, not shell expansion
+read -r -d '' _RESULTS_V1_JQ_PREFLIGHT <<'JQ' || true
+def known_keywords:
+  ["$schema","$id","$defs","title","description","type","properties",
+   "required","additionalProperties","enum","minimum","maximum","minLength",
+   "pattern","items","$ref"];
+def schema_nodes:
+  .. | objects | select(has("type") or has("$ref") or has("properties") or has("items") or has("enum"));
+(
+  [schema_nodes | (keys - known_keywords)[]] | unique
+  | if length > 0 then "unsupported schema keyword(s): \(join(", "))" else empty end
+),
+(
+  [schema_nodes | select(has("$ref")) | (keys - ["$ref","description"])[]] | unique
+  | if length > 0 then "$ref with sibling keyword(s) is not supported: \(join(", "))" else empty end
+),
+(
+  [schema_nodes | select(has("$ref")) | .["$ref"] | select(test("^#/[$]defs/[A-Za-z0-9_-]+$") | not)] | unique
+  | if length > 0 then "only local #/$defs/<name> references are supported: \(join(", "))" else empty end
+),
+(
+  [schema_nodes | select(has("additionalProperties")) | .additionalProperties | select(type != "boolean")] | length
+  | if . > 0 then "additionalProperties must be a boolean (a schema value would be ignored)" else empty end
+)
+JQ
+export _RESULTS_V1_JQ_PREFLIGHT
+
+# Fail when the schema uses anything the interpreter does not implement.
+# Usage: results_v1_schema_preflight <schema>
+results_v1_schema_preflight() {
+	local schema="${1:?schema is required}"
+	local problems
+	if ! problems="$(jq -r "$_RESULTS_V1_JQ_PREFLIGHT" "$schema" 2>&1)"; then
+		echo "results_v1: schema preflight failed on ${schema}: ${problems}" >&2
+		return 2
+	fi
+	if [[ -n "$problems" ]]; then
+		echo "results_v1: schema ${schema}: ${problems}" >&2
+		return 2
+	fi
+	return 0
+}
+
 # Validate a results document against the schema.
 # Usage: results_v1_validate <file> [schema]
 # Returns 0 when valid; 1 with one "<file>: <message>" line per violation on
@@ -299,6 +355,12 @@ results_v1_validate() {
 		echo "results_v1: not valid JSON: ${file}" >&2
 		return 2
 	fi
+	# jq would validate each value of a concatenated stream separately.
+	if [[ "$(jq -s 'length' "$file" 2>/dev/null)" != "1" ]]; then
+		echo "results_v1: expected exactly one JSON document: ${file}" >&2
+		return 2
+	fi
+	results_v1_schema_preflight "$schema" || return 2
 	local errors
 	if ! errors="$(jq -r --slurpfile schema_doc "$schema" \
 		'$schema_doc[0] as $schema | '"$_RESULTS_V1_JQ_VALIDATOR"' | .[]' "$file" 2>&1)"; then
@@ -402,7 +464,7 @@ results_v1_github_outputs() {
 }
 
 # Export functions
-export -f results_v1_path results_v1_schema results_v1_build results_v1_validate
+export -f results_v1_path results_v1_schema results_v1_schema_preflight results_v1_build results_v1_validate
 export -f results_v1_write results_v1_github_outputs results_v1_set_status results_v1_set_coverage
 export -f _results_v1_rewrite
 export -f _results_v1_status _results_v1_num_or_null _results_v1_uint

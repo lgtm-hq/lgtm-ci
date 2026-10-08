@@ -48,6 +48,13 @@ on:
         required: false
         type: string
         default: ""
+      tests-total-excludes-skipped:
+        description: >-
+          Render the Total Tests row and pass rate from passed + failed
+          instead of counts.total (Rust has always excluded skipped tests)
+        required: false
+        type: boolean
+        default: false
       coverage-enabled:
         description: >-
           Whether coverage was requested for this run. When false (default),
@@ -375,6 +382,7 @@ jobs:
         env:
           RESULTS_DIR: ${{ inputs.results-artifact-pattern != '' && 'results-download' || '' }}
           EXPECTED_COUNT: ${{ inputs.results-expected-count }}
+          TESTS_TOTAL_EXCLUDES_SKIPPED: ${{ inputs.tests-total-excludes-skipped }}
           TEST_SUITE_NAME: ${{ inputs.test-suite-name }}
           TESTS_PASSED: ${{ inputs.tests-passed }}
           TESTS_FAILED: ${{ inputs.tests-failed }}

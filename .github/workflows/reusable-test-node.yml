@@ -634,6 +634,15 @@ jobs:
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
+      # A gate that fails after the parser wrote the document must reach the
+      # document too, or the uploaded artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && (steps.coverage-gate.outcome == 'failure' || steps.post-test.outcome == 'failure')
+        shell: bash
+        env:
+          RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
+          STATUS: failed
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload matrix test summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -72,3 +72,23 @@ setup() {
 		bash "$SCRIPT"
 	assert_failure
 }
+
+# #1080: the script runs under set -euo pipefail; a large report or a
+# one-line report must still leave a valid results.v1 document behind.
+@test "parse-rust-test-results writes a valid results.v1 document for a large one-line report" {
+	local junit="${BATS_TEST_TMPDIR}/junit.xml"
+	{
+		printf '<?xml version="1.0"?><testsuites tests="1500" failures="0" errors="0" skipped="0" time="3.25"><testsuite name="s" tests="1500" failures="0" errors="0" skipped="0">'
+		for i in $(seq 1 1500); do
+			printf '<testcase name="crate::module::very_descriptive_test_name_number_%d" classname="crate::module" time="0.002"/>' "$i"
+		done
+		printf '</testsuite></testsuites>'
+	} >"$junit"
+	[[ "$(wc -c <"$junit")" -gt 65536 ]]
+	run env JUNIT_FILE="$junit" COVERAGE_ENABLED=false RESULTS_OUTPUT="${BATS_TEST_TMPDIR}/results.json" \
+		bash "${PROJECT_ROOT}/scripts/ci/testing/rust/parse-rust-test-results.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-passed=1500"
+	run jq -c '[.status, .counts.total, .duration_ms]' "${BATS_TEST_TMPDIR}/results.json"
+	assert_output '["passed",1500,3250]'
+}

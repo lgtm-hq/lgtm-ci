@@ -119,7 +119,7 @@ EOF
 	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
 }
 
-@test "aggregate-results: no-tests legs are not passed" {
+@test "aggregate-results: a no-tests leg is status no-tests but not a failed verdict" {
 	_write_leg python-results pytest python-version "3.12" 0 0 0 0 - no-tests
 
 	run env RESULTS_DIR=python-results \
@@ -127,7 +127,7 @@ EOF
 
 	assert_success
 	assert_file_contains "$GITHUB_OUTPUT" "status=no-tests"
-	assert_file_contains "$GITHUB_OUTPUT" "passed=false"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
 }
 
 @test "aggregate-results: validates leg count against matrix json" {
@@ -205,4 +205,46 @@ EOF
 
 	assert_failure
 	assert_output --partial "RESULTS_DIR is required"
+}
+
+@test "aggregate-results: one no-tests leg beside passed legs is no-tests, not passed" {
+	_write_leg python-results pytest python-version "3.12" 5 0 0 5 - passed
+	_write_leg python-results pytest python-version "3.13" 0 0 0 0 - no-tests
+
+	run env RESULTS_DIR=python-results AGGREGATE_OUTPUT=out/results.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "status=no-tests"
+	assert_file_contains "$GITHUB_OUTPUT" "passed=true"
+	run jq -r .status out/results.json
+	assert_output "no-tests"
+}
+
+@test "aggregate-results: integral JSON numbers written as 1.0 or 1e0 still sum" {
+	mkdir -p python-results/a/results/pytest/3.12
+	cat >python-results/a/results/pytest/3.12/results.json <<'EOF'
+{"tool": "pytest", "status": "passed",
+ "counts": {"passed": 2.0, "failed": 0, "skipped": 1e0, "total": 3.0},
+ "duration_ms": 10.0, "artifacts": [], "source": {"runner": "run-pytest", "version": "abc"}}
+EOF
+	run env RESULTS_DIR=python-results \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-passed=2"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-skipped=1"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-total=3"
+}
+
+@test "aggregate-results: TESTS_TOTAL_EXCLUDES_SKIPPED keeps the Rust total as passed + failed" {
+	_write_leg rust-results nextest rust-toolchain "stable" 5 2 3 10 - failed
+
+	run env RESULTS_DIR=rust-results TESTS_TOTAL_EXCLUDES_SKIPPED=true AGGREGATE_OUTPUT=out/results.json \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/aggregate-results.sh"
+	assert_success
+	assert_file_contains "$GITHUB_OUTPUT" "tests-total=7"
+	assert_file_contains "$GITHUB_OUTPUT" "tests-skipped=3"
+	# The document keeps the inclusive total.
+	run jq -r .counts.total out/results.json
+	assert_output "10"
 }

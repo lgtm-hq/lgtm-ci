@@ -2522,10 +2522,26 @@ what the aggregate and the publishers glob with `**/results.json`.
   count where the old output chain hard-coded `0`.
 - `aggregate-results.sh` validates every leg before summing, fails on a leg
   count that disagrees with the matrix, reports `status` (`error` > `failed`
-  > `no-tests` > `passed`) and `passed` (every leg `passed`), and can write
-  the merged document (`AGGREGATE_OUTPUT`) for the publishers. A single leg's
-  coverage literal is passed through verbatim; several legs are averaged to
-  two decimals, as before.
+  > `no-tests` > `passed`; one empty leg is not a passing matrix) and
+  `passed` (every leg `passed`), and can write the merged document
+  (`AGGREGATE_OUTPUT`) for the publishers. A single leg's coverage literal is
+  passed through verbatim; several legs are averaged to two decimals, as
+  before.
+- A gate that fails after the parser ran (coverage threshold, Node's
+  `post-test-command`) is recorded into the document by
+  `results-update.sh` before the upload, so the artifact never carries a
+  `passed` the job did not earn.
+- `passed` (aggregate output, `reusable-required-check` document gate) keeps
+  its pre-contract meaning: no leg failed. A `no-tests` leg (vitest
+  `passWithNoTests`, nextest `--no-tests=pass`) is not a failure, while the
+  aggregate `status` still reports `no-tests`.
+- The shell reusable's `tests-passed` no longer counts `# skip` directives
+  (bats prints them as `ok`); they are reported under `tests-skipped`.
+- Rust's public `tests-total` output and comment total have always been
+  `passed + failed` (skipped tests excluded from the pass rate). That stays:
+  the rust aggregate runs with `TESTS_TOTAL_EXCLUDES_SKIPPED=true` and its
+  publisher call sets `tests-total-excludes-skipped: true`, while
+  `counts.total` in the document is the inclusive count.
 
 ### Who reads what
 
@@ -2559,9 +2575,10 @@ fixture under `tests/fixtures/{pytest,vitest,playwright,junit,rust,security}`
 through its wrapper and the schema, plus negative fixtures under
 `tests/fixtures/results/`. The validator is a small jq interpreter of the
 schema file itself (`type`, `properties`, `required`, `additionalProperties`,
-`enum`, `minimum` / `maximum`, `minLength`, `pattern`, `items`, local `$ref`);
-any other keyword in the schema is a hard error, so the schema cannot grow a
-construct that silently validates nothing. This was chosen over pinning a
+`enum`, `minimum` / `maximum`, `minLength`, `pattern`, `items`, local `$ref`
+without siblings); the whole schema file is preflighted before every
+validation, so any other keyword anywhere in it is a hard error and the
+schema cannot grow a construct that silently validates nothing. This was chosen over pinning a
 JSON Schema CLI under the `versions.env` digest pattern (#1113): the contract
 is one flat object, jq is already on every runner and in every tooling
 checkout, and a pinned validator would have added a download plus two digests

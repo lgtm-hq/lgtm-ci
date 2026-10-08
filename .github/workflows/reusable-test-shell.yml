@@ -447,6 +447,7 @@ jobs:
           COVERAGE_LINES: ${{ steps.coverage.outputs.coverage-percent }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/results-update.sh"
       - name: Check coverage threshold
+        id: coverage-gate
         if: inputs.coverage && inputs.coverage-threshold > 0
         shell: bash
         env:
@@ -454,6 +455,16 @@ jobs:
           COVERAGE_PERCENT: ${{ steps.coverage.outputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      # A failed threshold must reach the document before it is uploaded, or
+      # the artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && steps.coverage-gate.outcome == 'failure'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RESULTS_FILE: ${{ steps.results.outputs.results-json }}
+          STATUS: failed
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/results-update.sh"
       # The results.v1 document the summary comment and required-check
       # verdicts read (#1080); same name on the sharded path, where the
       # aggregate job uploads it instead (the two paths never run in one call).
@@ -931,6 +942,24 @@ jobs:
           RESULTS_FILE: ${{ steps.results.outputs.results-json }}
           COVERAGE_LINES: ${{ steps.merge.outputs.coverage-percent }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
+      - name: Check coverage threshold
+        id: coverage-gate
+        if: always() && inputs.coverage-threshold > 0 && steps.merge.outcome == 'success'
+        shell: bash
+        env:
+          STEP: check-threshold
+          COVERAGE_PERCENT: ${{ steps.merge.outputs.coverage-percent }}
+          COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      # A failed threshold must reach the document before it is uploaded, or
+      # the artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && steps.coverage-gate.outcome == 'failure'
+        shell: bash
+        env:
+          RESULTS_FILE: ${{ steps.results.outputs.results-json }}
+          STATUS: failed
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload results
         if: always() && steps.results.outcome == 'success'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -942,14 +971,6 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           overwrite: true
-      - name: Check coverage threshold
-        if: always() && inputs.coverage-threshold > 0 && steps.merge.outcome == 'success'
-        shell: bash
-        env:
-          STEP: check-threshold
-          COVERAGE_PERCENT: ${{ steps.merge.outputs.coverage-percent }}
-          COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
       - name: Upload merged coverage report
         id: upload-merged-coverage
         if: always() && inputs.upload-coverage && steps.merge.outcome == 'success'

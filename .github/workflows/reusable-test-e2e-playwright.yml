@@ -94,8 +94,10 @@ on:
       results-artifact-name:
         description: >-
           Artifact name for the results.v1 document (#1080) this run writes.
-          Empty resolves to playwright-results-<run_id>. Override when a
-          caller runs this workflow more than once in a single run.
+          Empty resolves to <report-artifact-name>-results when
+          report-artifact-name is set (so sibling calls that already keep
+          their reports apart keep their results apart too), else
+          playwright-results-<run_id>.
         required: false
         type: string
         default: ""
@@ -457,7 +459,8 @@ jobs:
         with:
           name: >-
             ${{ inputs.results-artifact-name != '' && inputs.results-artifact-name
-            || format('playwright-results-{0}', github.run_id) }}
+            || (inputs.report-artifact-name != '' && format('{0}-results', inputs.report-artifact-name)
+            || format('playwright-results-{0}', github.run_id)) }}
           path: results/playwright/default/results.json
           retention-days: 7
           if-no-files-found: error
@@ -542,7 +545,8 @@ jobs:
       # The comment is rendered from this run's results.v1 artifact (#1080).
       results-artifact-pattern: >-
         ${{ inputs.results-artifact-name != '' && inputs.results-artifact-name
-        || format('playwright-results-{0}', github.run_id) }}
+        || (inputs.report-artifact-name != '' && format('{0}-results', inputs.report-artifact-name)
+        || format('playwright-results-{0}', github.run_id)) }}
       results-expected-count: "1"
       job-result: ${{ needs.test.outputs.passed == 'true' && 'success' || 'failure' }}
       tooling-ref: ${{ inputs.tooling-ref }}

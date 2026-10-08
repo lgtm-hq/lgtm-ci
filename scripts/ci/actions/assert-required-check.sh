@@ -6,8 +6,10 @@
 #   PASSED_OUTPUT / STATUS_OUTPUT   legacy job-output gate
 #   RESULTS_DIR                     results.v1 documents (#1080): every
 #                                   <...>/results.json under it must validate
-#                                   and carry status "passed"; EXPECTED_COUNT
-#                                   pins how many legs must be present.
+#                                   and carry status "passed" or "no-tests"
+#                                   (an empty leg is not a failure, matching
+#                                   the passed output); EXPECTED_COUNT pins
+#                                   how many legs must be present.
 
 set -euo pipefail
 
@@ -60,6 +62,11 @@ if [[ -n "${RESULTS_DIR:-}" ]]; then
 	while IFS= read -r leg; do legs+=("$leg"); done < <(
 		find "${RESULTS_DIR}" -type f -name 'results.json' | LC_ALL=C sort
 	)
+	if [[ -n "${EXPECTED_COUNT:-}" && ! "${EXPECTED_COUNT}" =~ ^[0-9]+$ ]]; then
+		echo "::error::EXPECTED_COUNT must be a non-negative integer (got '${EXPECTED_COUNT}')"
+		write_gate_outputs 1 failed
+		exit 1
+	fi
 	if [[ -n "${EXPECTED_COUNT:-}" && "${#legs[@]}" -ne "${EXPECTED_COUNT}" ]]; then
 		echo "::error::Expected ${EXPECTED_COUNT} results.json legs under ${RESULTS_DIR}, found ${#legs[@]}"
 		write_gate_outputs 1 failed
@@ -77,7 +84,7 @@ if [[ -n "${RESULTS_DIR:-}" ]]; then
 			exit 1
 		fi
 		leg_status="$(jq -r .status "$leg")"
-		if [[ "$leg_status" != "passed" ]]; then
+		if [[ "$leg_status" != "passed" && "$leg_status" != "no-tests" ]]; then
 			echo "::error::${leg} reports status ${leg_status} ($(jq -c .counts "$leg"))"
 			write_gate_outputs 1 failed
 			exit 1

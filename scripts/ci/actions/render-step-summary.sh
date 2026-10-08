@@ -37,18 +37,15 @@ IFS=$'\t' read -r passed failed skipped total status exit_code coverage < <(
 [[ "$exit_code" == "-" ]] && exit_code=""
 [[ "$coverage" == "-" ]] && coverage=""
 
-# The runner's exit code is the verdict when it was recorded; otherwise the
-# contract status stands in for it.
-if [[ -n "$exit_code" ]]; then
-	if [[ "$exit_code" == "0" ]]; then
-		status_icon=":white_check_mark: Passed"
-	else
-		status_icon=":x: Failed"
-	fi
-elif [[ "$status" == "passed" || "$status" == "no-tests" ]]; then
-	status_icon=":white_check_mark: Passed"
-else
+# The document status is authoritative (a later gate or a missing report
+# can fail a leg whose runner exited 0); a recorded non-zero exit code also
+# fails it.
+if [[ "$status" == "failed" || "$status" == "error" ]]; then
 	status_icon=":x: Failed"
+elif [[ -n "$exit_code" && "$exit_code" != "0" ]]; then
+	status_icon=":x: Failed"
+else
+	status_icon=":white_check_mark: Passed"
 fi
 
 add_github_summary "## ${TITLE}"

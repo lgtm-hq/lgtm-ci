@@ -1059,3 +1059,48 @@ _lang_job_validates_prefix() {
 	[[ "$publish" == *"format('{0}-coverage', inputs.artifact-prefix)"* ]]
 	[[ "$publish" != *"'python-coverage'"* ]]
 }
+
+# A coverage threshold (or post-test command) that fails after the parser
+# wrote the document must reach the uploaded results.json (#1080): every
+# language reusable records the gate verdict through results-update.sh
+# before its results upload, and the sharded shell aggregate uploads after
+# its threshold check.
+@test "language test reusables: gate verdicts reach the results document before upload" {
+	local entry wf job
+	for entry in "reusable-test-python.yml:test" "reusable-test-node.yml:test-vitest" \
+		"reusable-rust-test.yml:test" "reusable-test-shell.yml:test" "reusable-test-shell.yml:aggregate"; do
+		wf="${entry%%:*}"
+		job="${entry##*:}"
+		run awk -v job="  ${job}:" '
+			$0 == job { in_job = 1; next }
+			in_job && /^  [a-zA-Z0-9_-]+:$/ { exit }
+			in_job && /name: Check coverage threshold/ { gate = NR }
+			in_job && /name: Record gate verdict in results/ { record = NR }
+			in_job && /results-update\.sh/ && record && NR > record { script = 1 }
+			in_job && /name: Upload (matrix test summary|results)$/ { upload = NR }
+			END { exit !(gate && record && script && upload && gate < record && record < upload) }
+		' "${WORKFLOW_DIR}/${wf}"
+		assert_success
+	done
+}
+
+# Every job that runs a script sourcing results.sh validates against
+# schemas/results.v1.json, so its tooling checkout must list schemas/ (#1080).
+@test "workflows running results.v1 scripts check out schemas/" {
+	local wf
+	while IFS= read -r wf; do
+		run grep -c '^            schemas/$' "$wf"
+		[ "${output:-0}" -ge 1 ] || {
+			echo "${wf}: runs a results.v1 script but its sparse-checkout-extra lacks schemas/" >&2
+			return 1
+		}
+	done < <(grep -l -E 'run-vitest\.sh|run-pytest\.sh|run-playwright-tests\.sh|run-bats-tests\.sh|parse-rust-test-results\.sh|run-lintro-audit\.sh|aggregate-results\.sh|render-test-summary\.sh|assert-required-check\.sh|results-update\.sh|write-coverage-results\.sh' "${WORKFLOW_DIR}"/*.yml)
+}
+
+# Two sibling Playwright calls that already keep their reports apart through
+# report-artifact-name must keep their results.v1 documents apart too (#752).
+@test "reusable-test-e2e-playwright: results name follows report-artifact-name for sibling calls" {
+	local wf="${WORKFLOW_DIR}/reusable-test-e2e-playwright.yml"
+	run grep -c "inputs.report-artifact-name != '' && format('{0}-results', inputs.report-artifact-name)" "$wf"
+	assert_output "2"
+}

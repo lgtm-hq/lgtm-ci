@@ -589,6 +589,16 @@ jobs:
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
+      # A gate that fails after the parser wrote the document must reach the
+      # document too, or the uploaded artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && (steps.coverage-gate.outcome == 'failure')
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
+          STATUS: failed
+        run: bash "$GITHUB_WORKSPACE"/.lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload matrix test summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -798,6 +808,10 @@ jobs:
         env:
           RESULTS_DIR: rust-results
           MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
+          # The public tests-total output has always been passed + failed
+          # for Rust (skipped excluded from the pass rate); counts.total in
+          # the document stays inclusive.
+          TESTS_TOTAL_EXCLUDES_SKIPPED: "true"
         run: bash .lgtm-ci-tooling/scripts/ci/actions/aggregate-results.sh
       - name: Fail if any matrix leg failed
         # Fail closed (#1058): rulesets require this context directly, so a
@@ -846,6 +860,8 @@ jobs:
         ${{ inputs.rust-toolchains != '' && format('{0}-results-*', inputs.artifact-prefix)
         || format('{0}-results-{1}', inputs.artifact-prefix, inputs.rust-toolchain || 'stable') }}
       results-expected-count: ${{ needs.prepare.outputs.matrix-count }}
+      # Rust pass rates have always excluded skipped tests from the total.
+      tests-total-excludes-skipped: true
       coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.aggregate.outputs.passed == 'true' && 'success' || 'failure' }}
