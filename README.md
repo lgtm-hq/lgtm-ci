@@ -81,6 +81,9 @@ PR-gated via the two-stage model (`reusable-release-version-pr.yml` opens
 the release PR; `reusable-release-auto-tag.yml` tags on merge). See
 [docs/getting-started.md](docs/getting-started.md#pinning).
 
+Upgrading from v0.75.x? v0.76.0 changes what callers must grant and pass;
+follow [docs/migration/v0.76.md](docs/migration/v0.76.md) before moving the pin.
+
 ## 🔨 Development
 
 CI runs **lintro inside the pinned `ghcr.io/lgtm-hq/py-lintro` image** so

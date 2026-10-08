@@ -2,6 +2,10 @@
 
 All `lgtm-ci` reusable workflows share a common consumer contract.
 
+Upgrading from v0.75.x: v0.76.0 changes caller permissions, egress
+enforcement, Node runner inputs and artifact names. See the
+[v0.76 migration guide](migration/v0.76.md).
+
 ## Standard inputs
 
 Where applicable, workflows accept:

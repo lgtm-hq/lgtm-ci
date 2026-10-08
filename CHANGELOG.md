@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Migration guide for v0.76.0: `docs/migration/v0.76.md`.** Upgrading from
+  v0.75.x requires caller changes: `actions: read` on the language test
+  reusables, `package-manager` on the Node runner composites, enforced egress
+  presets, the isolated `version-update-script` job, `artifact-prefix` for
+  repeated test calls, frozen `uv` installs and digests for tool version
+  overrides. The guide lists who is affected, the symptom and the exact edit
+  for each.
+
 - `reusable-test-e2e-playwright.yml`: `reporters` input (default
   `list,json,junit,html`, must keep `json` and `html`) and
   `upload-report-when` input (`failure` default, `always` to upload the report
