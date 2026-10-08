@@ -305,7 +305,7 @@ def check_workflow_facts(
             workflows_dir=workflows_dir,
             name=f"{where}.yml",
         )
-    except (OSError, catalog_lib.yaml.YAMLError) as exc:
+    except (OSError, ValueError, catalog_lib.yaml.YAMLError) as exc:
         report.error(where, f"cannot derive check names ({exc})")
         return
     if list(facts.check_names) != entry["check-names"]:

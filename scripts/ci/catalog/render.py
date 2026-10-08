@@ -158,7 +158,9 @@ def entry_summary(
     kind = Kind(entry["kind"])
     path = repo_root / catalog_lib.entry_path(kind=kind, entry_id=entry["id"])
     text = path.read_text(encoding="utf-8")
-    document = catalog_lib.yaml.safe_load(text) or {}
+    document = catalog_lib.yaml.safe_load(text)
+    if not isinstance(document, dict):
+        document = {}
     if kind is Kind.REUSABLE_WORKFLOW:
         name = str(document.get("name", entry["id"]))
         for prefix in ("Reusable:", "Reusable -", "Reusable"):

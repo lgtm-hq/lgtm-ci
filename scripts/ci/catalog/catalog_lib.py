@@ -286,8 +286,17 @@ def workflow_facts(
 
     Returns:
         Check names in job order and the sorted set of resolvable runners.
+
+    Raises:
+        ValueError: When the workflow or one of its jobs is not a mapping.
     """
     document = yaml.safe_load((workflows_dir / name).read_text(encoding="utf-8"))
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    message = f"{name}: `jobs` must be a mapping of job id to mapping"
+    if not isinstance(jobs, dict):
+        raise ValueError(message)
+    if any(not isinstance(job, dict) for job in jobs.values()):
+        raise ValueError(message)
     # An input without a default (a required job-name) has no value a caller
     # can rely on, so its expression stays verbatim.
     values = {
@@ -298,7 +307,7 @@ def workflow_facts(
     values.update(overrides or {})
     check_names: list[str] = []
     runners: set[str] = set()
-    for job_id, job in (document.get("jobs") or {}).items():
+    for job_id, job in jobs.items():
         label = resolve_expressions(text=str(job.get("name", job_id)), values=values)
         nested = LOCAL_WORKFLOW_USES.match(str(job.get("uses", "")))
         if nested is not None and nested.group("name") not in seen:

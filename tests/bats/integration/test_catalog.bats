@@ -579,3 +579,13 @@ data['entries'].insert(1, {
 	assert_failure
 	assert_output --partial "use the .yml spelling"
 }
+
+@test "catalog: a workflow whose jobs are not a mapping is reported, not a traceback" {
+	local root
+	root="$(_fixture_root)"
+	printf 'name: Broken\non:\n  workflow_call:\njobs:\n  - test\n' >"${root}/.github/workflows/reusable-demo.yml"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "reusable-demo: cannot"
+	refute_output --partial "Traceback"
+}
