@@ -533,15 +533,40 @@ def check_coverage(
     for (_kind, entry_id), count in sorted(seen.items()):
         if count > 1:
             report.error(entry_id, f"listed {count} times; list each entry point once")
+    check_spellings(report=report, repo_root=repo_root)
+    check_order(report=report, entries=entries)
+
+
+def check_spellings(
+    report: Report,
+    repo_root: Path,
+) -> None:
+    """Reject ``.yaml`` entry points, which discovery would otherwise skip.
+
+    Args:
+        report: Findings sink.
+        repo_root: Repository root.
+    """
     workflows = repo_root / catalog_lib.WORKFLOWS_RELDIR
     actions = repo_root / catalog_lib.ACTIONS_RELDIR
     odd = [*workflows.glob("reusable-*.yaml"), *actions.glob("*/action.yaml")]
     for path in sorted(odd):
-        relative = path.relative_to(repo_root)
         report.error(
-            str(relative),
+            str(path.relative_to(repo_root)),
             "use the .yml spelling; the catalog only covers .yml",
         )
+
+
+def check_order(
+    report: Report,
+    entries: list[dict[str, Any]],
+) -> None:
+    """Require entries sorted by kind (workflows first), then id.
+
+    Args:
+        report: Findings sink.
+        entries: Catalog entries.
+    """
     rank = {kind.value: index for index, kind in enumerate(Kind)}
     keys = []
     for entry in entries:
@@ -605,6 +630,40 @@ def validate(
         return report
     fixture_repository, entries = top
     check_coverage(report=report, entries=entries, repo_root=repo_root)
+    check_entries(
+        report=report,
+        entries=entries,
+        fixture_repository=fixture_repository,
+        repo_root=repo_root,
+        history=history,
+    )
+    if report.errors:
+        report.notices.append("generated docs not compared: fix the catalog first")
+        return report
+    check_generated(report=report, repo_root=repo_root)
+    counts = ", ".join(
+        f"{sum(e['tier'] == tier.value for e in entries)} {tier.value}" for tier in Tier
+    )
+    report.notices.append(f"{len(entries)} entries: {counts}")
+    return report
+
+
+def check_entries(
+    report: Report,
+    entries: list[dict[str, Any]],
+    fixture_repository: str,
+    repo_root: Path,
+    history: History,
+) -> None:
+    """Run the per-entry schema and repository checks.
+
+    Args:
+        report: Findings sink.
+        entries: Catalog entries.
+        fixture_repository: ``owner/name`` of the fixture.
+        repo_root: Repository root.
+        history: Git history evidence commits are checked against.
+    """
     # The union logic is tooling from this checkout; --repo-root only
     # selects the data (workflows, actions, catalog) it is applied to.
     validator = catalog_lib.load_permissions_validator()
@@ -634,21 +693,25 @@ def validate(
             fixture_repository=fixture_repository,
             history=history,
         )
-    if report.errors:
-        report.notices.append("generated docs not compared: fix the catalog first")
-        return report
+
+
+def check_generated(
+    report: Report,
+    repo_root: Path,
+) -> None:
+    """Require docs/catalog.md and the README index to match the catalog.
+
+    Args:
+        report: Findings sink.
+        repo_root: Repository root.
+    """
     try:
         stale = render.stale_outputs(repo_root=repo_root)
     except (OSError, ValueError, KeyError, catalog_lib.yaml.YAMLError) as exc:
         report.error("generated docs", f"cannot render ({exc})")
-        return report
+        return
     for path in stale:
         report.error(str(path), f"out of date with the catalog; {REGENERATE}")
-    counts = ", ".join(
-        f"{sum(e['tier'] == tier.value for e in entries)} {tier.value}" for tier in Tier
-    )
-    report.notices.append(f"{len(entries)} entries: {counts}")
-    return report
 
 
 def parse_args(
@@ -663,12 +726,7 @@ def parse_args(
         Parsed arguments.
     """
     parser = argparse.ArgumentParser(description="Validate catalog/catalog.yml.")
-    parser.add_argument(
-        "--repo-root",
-        type=Path,
-        default=catalog_lib.REPO_ROOT,
-        help="Repository root (default: this checkout)",
-    )
+    catalog_lib.add_repo_root_argument(parser=parser)
     parser.add_argument(
         "--skip-ancestry",
         action="store_true",

@@ -14,7 +14,8 @@ not skip, in CI) and is in this repository's ``dev`` extra for local runs.
 
 from __future__ import annotations
 
-import importlib.util
+import argparse
+import importlib
 import re
 import sys
 from dataclasses import dataclass
@@ -108,23 +109,28 @@ def load_permissions_validator(
     Raises:
         ImportError: When the validator cannot be loaded.
     """
-    name = "validate_caller_permissions"
-    cached = sys.modules.get(name)
-    if cached is not None:
-        return cached
-    path = repo_root / PERMISSIONS_VALIDATOR
-    spec = importlib.util.spec_from_file_location(name, path)
-    if spec is None or spec.loader is None:
-        raise ImportError(f"cannot load {path}")
-    module = importlib.util.module_from_spec(spec)
-    # Dataclasses resolve annotations through sys.modules at class creation.
-    sys.modules[name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception:
-        sys.modules.pop(name, None)
-        raise
-    return module
+    # import_module takes the hyphenated stem as-is once its directory is on
+    # sys.path, and caches the module in sys.modules like any import.
+    directory = str(repo_root / PERMISSIONS_VALIDATOR.parent)
+    if directory not in sys.path:
+        sys.path.insert(0, directory)
+    return importlib.import_module(PERMISSIONS_VALIDATOR.stem)
+
+
+def add_repo_root_argument(
+    parser: argparse.ArgumentParser,
+) -> None:
+    """Add the shared ``--repo-root`` option to a catalog CLI.
+
+    Args:
+        parser: Parser to extend.
+    """
+    parser.add_argument(
+        "--repo-root",
+        type=Path,
+        default=REPO_ROOT,
+        help="Repository root (default: this checkout)",
+    )
 
 
 def load_catalog(
@@ -267,6 +273,93 @@ def resolve_expressions(
     return EXPRESSION.sub(substitute, text)
 
 
+def input_values(
+    document: dict[Any, Any],
+    overrides: dict[str, str] | None,
+) -> dict[str, str]:
+    """Return the effective value of every input that has one.
+
+    An input without a default (a required job-name) has no value a caller
+    can rely on, so it is left out and its expression stays verbatim.
+
+    Args:
+        document: Parsed workflow.
+        overrides: Values a calling job passes (nested calls only).
+
+    Returns:
+        Input name to effective value.
+    """
+    values = {
+        key: render_default(spec["default"])
+        for key, spec in workflow_call_inputs(document).items()
+        if isinstance(spec, dict) and "default" in spec
+    }
+    values.update(overrides or {})
+    return values
+
+
+def passed_values(
+    job: dict[str, Any],
+    values: dict[str, str],
+) -> dict[str, str]:
+    """Return the ``with:`` values a job passes to a nested reusable.
+
+    Args:
+        job: Job that calls a local reusable workflow.
+        values: The calling workflow's effective input values.
+
+    Returns:
+        Input name to the value after resolving the caller's expressions.
+    """
+    return {
+        key: resolve_expressions(text=render_default(value), values=values)
+        for key, value in (job.get("with") or {}).items()
+    }
+
+
+def load_workflow(
+    workflows_dir: Path,
+    name: str,
+) -> tuple[dict[Any, Any], dict[str, dict[str, Any]]]:
+    """Parse a workflow file and return it with its ``jobs`` mapping.
+
+    Args:
+        workflows_dir: Directory holding the workflow files.
+        name: Workflow file name.
+
+    Returns:
+        ``(document, jobs)``.
+
+    Raises:
+        ValueError: When the workflow or one of its jobs is not a mapping.
+    """
+    document = yaml.safe_load((workflows_dir / name).read_text(encoding="utf-8"))
+    jobs = document.get("jobs") if isinstance(document, dict) else None
+    message = f"{name}: `jobs` must be a mapping of job id to mapping"
+    if not isinstance(jobs, dict):
+        raise ValueError(message)
+    if any(not isinstance(job, dict) for job in jobs.values()):
+        raise ValueError(message)
+    return document, jobs
+
+
+def job_runner(
+    job: dict[str, Any],
+    values: dict[str, str],
+) -> str | None:
+    """Return a job's runner label when it resolves to a literal.
+
+    Args:
+        job: Job mapping.
+        values: Effective input values.
+
+    Returns:
+        The label, or None for matrix or otherwise dynamic runners.
+    """
+    runner = resolve_expressions(text=str(job.get("runs-on", "")), values=values)
+    return runner if runner and "${{" not in runner else None
+
+
 def workflow_facts(
     workflows_dir: Path,
     name: str,
@@ -290,35 +383,18 @@ def workflow_facts(
     Raises:
         ValueError: When the workflow or one of its jobs is not a mapping.
     """
-    document = yaml.safe_load((workflows_dir / name).read_text(encoding="utf-8"))
-    jobs = document.get("jobs") if isinstance(document, dict) else None
-    message = f"{name}: `jobs` must be a mapping of job id to mapping"
-    if not isinstance(jobs, dict):
-        raise ValueError(message)
-    if any(not isinstance(job, dict) for job in jobs.values()):
-        raise ValueError(message)
-    # An input without a default (a required job-name) has no value a caller
-    # can rely on, so its expression stays verbatim.
-    values = {
-        key: render_default(spec["default"])
-        for key, spec in workflow_call_inputs(document).items()
-        if isinstance(spec, dict) and "default" in spec
-    }
-    values.update(overrides or {})
+    document, jobs = load_workflow(workflows_dir=workflows_dir, name=name)
+    values = input_values(document=document, overrides=overrides)
     check_names: list[str] = []
     runners: set[str] = set()
     for job_id, job in jobs.items():
         label = resolve_expressions(text=str(job.get("name", job_id)), values=values)
         nested = LOCAL_WORKFLOW_USES.match(str(job.get("uses", "")))
         if nested is not None and nested.group("name") not in seen:
-            passed = {
-                key: resolve_expressions(text=render_default(value), values=values)
-                for key, value in (job.get("with") or {}).items()
-            }
             inner = workflow_facts(
                 workflows_dir=workflows_dir,
                 name=nested.group("name"),
-                overrides=passed,
+                overrides=passed_values(job=job, values=values),
                 seen=seen | {name},
             )
             for inner_name in inner.check_names:
@@ -328,10 +404,10 @@ def workflow_facts(
             runners.update(inner.runners)
             continue
         check_names.append(label)
-        runner = resolve_expressions(text=str(job.get("runs-on", "")), values=values)
-        if runner and "${{" not in runner:
-            runners.add(runner)
+        runners.update(filter(None, [job_runner(job=job, values=values)]))
     # Two jobs may share a display name (the sharded and unsharded legs of
     # reusable-test-shell); a check name is listed once.
-    unique_names = tuple(dict.fromkeys(check_names))
-    return WorkflowFacts(check_names=unique_names, runners=tuple(sorted(runners)))
+    return WorkflowFacts(
+        check_names=tuple(dict.fromkeys(check_names)),
+        runners=tuple(sorted(runners)),
+    )
