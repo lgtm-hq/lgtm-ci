@@ -14,6 +14,15 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/external-canary.sh"
 CANDIDATE="1111111111111111111111111111111111111111"
 OLD_PIN="f29da756f9f1673d6d10c5b956480807e5dc8a9b"
 
+# Runner *file* for calling functions of the script. Under kcov (CI
+# coverage) `bash -c "source ..."` leaves BASH_SOURCE unbound and the
+# script's `set -u` aborts; a script file keeps it bound (see
+# test_egress_presets_rendered.bats). Usage: bash "$CANARY_EVAL" '<cmd>'
+_write_canary_eval() {
+	export CANARY_EVAL="${BATS_TEST_TMPDIR}/canary-eval.sh"
+	printf '%s\n' '# shellcheck disable=SC1090' 'source "$SCRIPT"' 'eval "$1"' >"$CANARY_EVAL"
+}
+
 setup() {
 	setup_temp_dir
 	save_path
@@ -83,6 +92,7 @@ EOF
 	export MOCK_POSTED_TREE="${BATS_TEST_TMPDIR}/posted-tree.json"
 	: >"$MOCK_CALLS"
 	install_mock_gh
+	_write_canary_eval
 }
 
 teardown() {
@@ -204,7 +214,7 @@ all_green_snapshot() {
 
 # Call one function of the script with the environment of this test.
 call_fn() {
-	bash -c "source '$SCRIPT'; $*"
+	bash "$CANARY_EVAL" "$*"
 }
 
 @test "external-canary: passes bash syntax check" {
@@ -227,11 +237,11 @@ call_fn() {
 }
 
 @test "external-canary: the default expected-gate list names every gate exactly once" {
-	run bash -c "unset CANARY_EXPECTED_GATES; source '$SCRIPT'; printf '%s\n' \$CANARY_EXPECTED_GATES | sort | uniq -d"
+	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | sort | uniq -d"
 	assert_output ""
-	run bash -c "unset CANARY_EXPECTED_GATES; source '$SCRIPT'; for g in \$CANARY_EXPECTED_GATES; do classify_workflow \"\$g.yml\" | cut -f1; done | sort -u"
+	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "for g in \$CANARY_EXPECTED_GATES; do classify_workflow \"\$g.yml\" | cut -f1; done | sort -u"
 	assert_output "gate"
-	run bash -c "unset CANARY_EXPECTED_GATES; source '$SCRIPT'; printf '%s\n' \$CANARY_EXPECTED_GATES | wc -l | tr -d ' '"
+	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | wc -l | tr -d ' '"
 	assert_output "18"
 }
 
@@ -260,7 +270,7 @@ call_fn() {
 		assert_output "$(printf 'manual\tsuccess')"
 		run call_fn should_dispatch "$wf"
 		assert_failure
-		run env CANARY_INCLUDE_MANUAL=true bash -c "source '$SCRIPT'; should_dispatch '$wf'"
+		run env CANARY_INCLUDE_MANUAL=true bash "$CANARY_EVAL" "should_dispatch '$wf'"
 		assert_success
 	done
 	run call_fn classify_workflow release-tamper-hook.yml
@@ -334,7 +344,7 @@ call_fn() {
 }
 
 @test "external-canary: build_tree_payload emits one blob entry per workflow under .github/workflows" {
-	run bash -c "source '$SCRIPT'; build_tree_payload treesha '$MOCK_FIXTURE_DIR' | jq -r '.base_tree, (.tree | length), (.tree[] | \"\\(.mode) \\(.type) \\(.path)\")'"
+	run bash "$CANARY_EVAL" "build_tree_payload treesha '$MOCK_FIXTURE_DIR' | jq -r '.base_tree, (.tree | length), (.tree[] | \"\\(.mode) \\(.type) \\(.path)\")'"
 	assert_success
 	assert_line --index 0 "treesha"
 	assert_line --index 1 "4"
@@ -359,7 +369,7 @@ call_fn() {
 }
 
 @test "external-canary: since_timestamp is ISO-8601 UTC and lies in the past by the slack" {
-	run env CANARY_SINCE_SLACK_SECONDS=3600 bash -c "source '$SCRIPT'; since_timestamp"
+	run env CANARY_SINCE_SLACK_SECONDS=3600 bash "$CANARY_EVAL" "since_timestamp"
 	assert_success
 	assert_output --regexp '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$'
 	local now
@@ -493,7 +503,7 @@ call_fn() {
 
 @test "external-canary: poll_runs terminates at the bound with timeout and missing rows" {
 	run_row python.yml in_progress "" 11 >"$MOCK_RUNS_DIR/runs.1"
-	run env CANARY_TIMEOUT_SECONDS=0 bash -c "source '$SCRIPT'; poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml rust.yml"
+	run env CANARY_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml rust.yml"
 	assert_success
 	assert_line "$(printf 'python.yml\ttimeout\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 	assert_line "$(printf 'rust.yml\tmissing\t\t')"
@@ -513,13 +523,13 @@ call_fn() {
 	run_row python.yml in_progress "" 11 >"$MOCK_RUNS_DIR/runs.1"
 	run_row python.yml completed success 11 >"$MOCK_RUNS_DIR/runs.2"
 	# Call 2 fails; call 3 serves the completed snapshot.
-	run env MOCK_RUNS_FAIL_AT=2 bash -c "source '$SCRIPT'; poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml"
+	run env MOCK_RUNS_FAIL_AT=2 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml"
 	assert_success
 	assert_output --partial "run list fetch failed; keeping the previous snapshot"
 	assert_line "$(printf 'python.yml\tsuccess\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 	# A failure on the final poll at the bound still reports the last good rows.
 	rm -f "$MOCK_RUNS_DIR/.count" "$MOCK_RUNS_DIR/runs.2"
-	run env MOCK_RUNS_FAIL_AT=2 CANARY_TIMEOUT_SECONDS=0 bash -c "source '$SCRIPT'; poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml"
+	run env MOCK_RUNS_FAIL_AT=2 CANARY_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml"
 	assert_success
 	assert_line "$(printf 'python.yml\ttimeout\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 }
@@ -535,7 +545,7 @@ call_fn() {
 		printf 'release-version-pr.yml\tnot_dispatched\t\t\n'
 		printf 'rust.yml\tmissing\t\t\n'
 	)"
-	ROWS="$rows" run bash -c "source '$SCRIPT'; render_summary '$CANDIDATE' 'canary/$CANDIDATE' <<<\"\$ROWS\""
+	ROWS="$rows" run bash "$CANARY_EVAL" "render_summary '$CANDIDATE' 'canary/$CANDIDATE' <<<\"\$ROWS\""
 	assert_success
 	assert_line "## External consumer canary"
 	assert_line "| Workflow | Role | Expected | Conclusion | Verdict | Run |"
@@ -550,7 +560,7 @@ call_fn() {
 @test "external-canary: failed_gates lists gate mismatches only" {
 	local rows
 	rows="$(printf 'python.yml\tfailure\tu\tn\nrust.yml\tsuccess\tu\tn\nverify-negative.yml\tsuccess\tu\tn\nperms-negative.yml\tstartup_failure\tu\tn\nrelease-version-pr.yml\tnot_dispatched\t\t\n')"
-	ROWS="$rows" run bash -c "source '$SCRIPT'; failed_gates <<<\"\$ROWS\""
+	ROWS="$rows" run bash "$CANARY_EVAL" "failed_gates <<<\"\$ROWS\""
 	assert_success
 	assert_output "$(printf 'python.yml\tfailure')"
 }
@@ -616,7 +626,7 @@ call_fn() {
 # --- run/skip decision (always-run, fast-skip) ----------------------------
 
 @test "external-canary: workflow_dispatch always runs the full set without listing files" {
-	run env EVENT_NAME=workflow_dispatch bash -c "source '$SCRIPT'; decide_run_mode"
+	run env EVENT_NAME=workflow_dispatch bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_line --index 0 --partial "$(printf 'full\t')"
 	run grep -F "/pulls/" "$MOCK_CALLS"
@@ -630,7 +640,7 @@ call_fn() {
 		: >"$MOCK_CALLS"
 		printf 'README.md\n%s\ndocs/x.md\n' "$path" >"$BATS_TEST_TMPDIR/files.txt"
 		run env EVENT_NAME=pull_request EVENT_ACTION=synchronize PR_NUMBER=42 MOCK_PR_FILES="$BATS_TEST_TMPDIR/files.txt" \
-			bash -c "source '$SCRIPT'; decide_run_mode"
+			bash "$CANARY_EVAL" "decide_run_mode"
 		assert_success
 		assert_output "$(printf 'full\tpull request touches %s' "$path")"
 		run grep -F "repos/lgtm-hq/lgtm-ci/pulls/42/files?per_page=100 --paginate" "$MOCK_CALLS"
@@ -641,14 +651,14 @@ call_fn() {
 @test "external-canary: a pull request with no adoption-relevant change skips" {
 	printf 'README.md\ndocs/workflow-contract.md\ntests/bats/unit/x.bats\nscripts/other.sh\n' >"$BATS_TEST_TMPDIR/files.txt"
 	run env EVENT_NAME=pull_request EVENT_ACTION=opened PR_NUMBER=42 MOCK_PR_FILES="$BATS_TEST_TMPDIR/files.txt" \
-		bash -c "source '$SCRIPT'; decide_run_mode"
+		bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_output --partial "$(printf 'skip\tno adoption-relevant changes')"
 }
 
 @test "external-canary: a failed file listing fails the decision instead of skipping (fail closed)" {
 	run env EVENT_NAME=pull_request EVENT_ACTION=opened PR_NUMBER=42 MOCK_PR_FILES_FAIL=1 \
-		bash -c "source '$SCRIPT'; decide_run_mode"
+		bash "$CANARY_EVAL" "decide_run_mode"
 	assert_failure
 	assert_output --partial "cannot list the files of pull request #42; refusing to skip"
 	refute_output --partial "$(printf 'skip\t')"
@@ -665,7 +675,7 @@ call_fn() {
 
 @test "external-canary: the needs-external-canary label forces a full run without listing files" {
 	run env EVENT_NAME=pull_request EVENT_ACTION=synchronize PR_NUMBER=42 PR_LABELS="docs, needs-external-canary" \
-		bash -c "source '$SCRIPT'; decide_run_mode"
+		bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_output "$(printf 'full\tlabel needs-external-canary forces a full run')"
 	run grep -F "/pulls/" "$MOCK_CALLS"
@@ -674,11 +684,11 @@ call_fn() {
 
 @test "external-canary: a fork pull request skips, even with the force label" {
 	run env EVENT_NAME=pull_request EVENT_ACTION=opened PR_NUMBER=42 PR_HEAD_REPO_FORK=true \
-		bash -c "source '$SCRIPT'; decide_run_mode"
+		bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_output --partial "$(printf 'skip\tfork pull request')"
 	run env EVENT_NAME=pull_request EVENT_ACTION=labeled EVENT_LABEL=needs-external-canary PR_NUMBER=42 \
-		PR_HEAD_REPO_FORK=true PR_LABELS=needs-external-canary bash -c "source '$SCRIPT'; decide_run_mode"
+		PR_HEAD_REPO_FORK=true PR_LABELS=needs-external-canary bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_output --partial "$(printf 'skip\tfork pull request')"
 	run grep -F "/pulls/" "$MOCK_CALLS"
@@ -688,7 +698,7 @@ call_fn() {
 @test "external-canary: a labeled event for an unrelated label skips without re-running the set" {
 	printf '.github/workflows/x.yml\n' >"$BATS_TEST_TMPDIR/files.txt"
 	run env EVENT_NAME=pull_request EVENT_ACTION=labeled EVENT_LABEL=documentation PR_NUMBER=42 \
-		PR_LABELS="documentation" MOCK_PR_FILES="$BATS_TEST_TMPDIR/files.txt" bash -c "source '$SCRIPT'; decide_run_mode"
+		PR_LABELS="documentation" MOCK_PR_FILES="$BATS_TEST_TMPDIR/files.txt" bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_output "$(printf "skip\tlabel 'documentation' is not a canary label; this head was already decided on push")"
 	run grep -F "/pulls/" "$MOCK_CALLS"
@@ -697,12 +707,12 @@ call_fn() {
 
 @test "external-canary: labeled events for the force and override labels run the full set" {
 	run env EVENT_NAME=pull_request EVENT_ACTION=labeled EVENT_LABEL=needs-external-canary PR_NUMBER=42 \
-		PR_LABELS="needs-external-canary" bash -c "source '$SCRIPT'; decide_run_mode"
+		PR_LABELS="needs-external-canary" bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_output "$(printf 'full\tlabel needs-external-canary forces a full run')"
 	printf '.github/workflows/x.yml\n' >"$BATS_TEST_TMPDIR/files.txt"
 	run env EVENT_NAME=pull_request EVENT_ACTION=labeled EVENT_LABEL=canary-informational PR_NUMBER=42 \
-		PR_LABELS="canary-informational" MOCK_PR_FILES="$BATS_TEST_TMPDIR/files.txt" bash -c "source '$SCRIPT'; decide_run_mode"
+		PR_LABELS="canary-informational" MOCK_PR_FILES="$BATS_TEST_TMPDIR/files.txt" bash "$CANARY_EVAL" "decide_run_mode"
 	assert_success
 	assert_output "$(printf 'full\tpull request touches .github/workflows/x.yml')"
 }

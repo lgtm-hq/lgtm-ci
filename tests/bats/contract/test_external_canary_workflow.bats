@@ -16,6 +16,20 @@ VALIDATOR="${PROJECT_ROOT}/scripts/ci/actions/validate-harden-runner-action-ref.
 PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 SYNC="${PROJECT_ROOT}/scripts/ci/egress/sync-workflow-presets.sh"
 
+# Runner *file* for calling functions of the script. Under kcov (CI
+# coverage) `bash -c "source ..."` leaves BASH_SOURCE unbound and the
+# script's `set -u` aborts; a script file keeps it bound (see
+# test_egress_presets_rendered.bats). Usage: bash "$CANARY_EVAL" '<cmd>'
+_write_canary_eval() {
+	export CANARY_EVAL="${BATS_TEST_TMPDIR}/canary-eval.sh"
+	printf '%s\n' '# shellcheck disable=SC1090' 'source "$SCRIPT"' 'eval "$1"' >"$CANARY_EVAL"
+}
+
+setup() {
+	export SCRIPT
+	_write_canary_eval
+}
+
 # Names listed under one header comment of the workflow (indented `#   `
 # continuation lines up to the next non-continuation line).
 _header_list() {
@@ -125,13 +139,13 @@ _header_list() {
 @test "external-canary workflow: header gate list equals the script's expected-gate list" {
 	local listed expected
 	listed="$(_header_list "Gate workflows (")"
-	expected="$(bash -c "unset CANARY_EXPECTED_GATES; source '$SCRIPT'; printf '%s\n' \$CANARY_EXPECTED_GATES | sort")"
+	expected="$(env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | sort")"
 	[[ -n "$listed" && -n "$expected" ]]
 	run diff <(printf '%s\n' "$expected") <(printf '%s\n' "$listed")
 	assert_output ""
 	local name
 	while IFS= read -r name; do
-		run bash -c "source '$SCRIPT'; classify_workflow '${name}.yml'"
+		run bash "$CANARY_EVAL" "classify_workflow '${name}.yml'"
 		assert_output "$(printf 'gate\tsuccess')"
 	done <<<"$listed"
 }
@@ -140,12 +154,12 @@ _header_list() {
 	local name listed expected
 	while IFS= read -r name; do
 		[[ -n "$name" ]] || continue
-		run bash -c "source '$SCRIPT'; classify_workflow '${name}.yml' | cut -f1"
+		run bash "$CANARY_EVAL" "classify_workflow '${name}.yml' | cut -f1"
 		assert_output "informational"
 	done < <(_header_list "Informational workflows (")
 	while IFS= read -r name; do
 		[[ -n "$name" ]] || continue
-		run bash -c "source '$SCRIPT'; classify_workflow '${name}.yml' | cut -f1"
+		run bash "$CANARY_EVAL" "classify_workflow '${name}.yml' | cut -f1"
 		assert_output "manual"
 	done < <(_header_list "Manual workflows (")
 	# Every non-gate arm of the script is listed in one of the two headers.
