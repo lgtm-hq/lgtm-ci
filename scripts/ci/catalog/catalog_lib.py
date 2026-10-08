@@ -114,7 +114,7 @@ def load_permissions_validator(
     directory = str(repo_root / PERMISSIONS_VALIDATOR.parent)
     if directory not in sys.path:
         sys.path.insert(0, directory)
-    return importlib.import_module(PERMISSIONS_VALIDATOR.stem)
+    return importlib.import_module("validate-caller-permissions")
 
 
 def add_repo_root_argument(
