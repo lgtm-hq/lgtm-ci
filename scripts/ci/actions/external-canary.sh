@@ -23,7 +23,8 @@
 #      scripts/pin.sh), refuses any lgtm-ci reference that is not then pinned
 #      to the candidate, and commits the result through the git data API as
 #      branch `canary/<sha>` — never touching the fixture's base branch,
-#   3. checks every lgtm-ci path each workflow references against the
+#   3. checks every lgtm-ci path each workflow references, and every input
+#      it passes to an lgtm-ci reusable (#1134), against the
 #      candidate (`reference_verdict`, #1128): a path missing at the candidate
 #      but present at its merge base with lgtm-ci main means the candidate
 #      removes or renames a public interface (`removed_by_candidate`, fails
@@ -142,6 +143,8 @@ CANARY_BRANCH=""
 CANARY_WORKDIR=""
 # reference_verdict caches: "<ref>:<path>" -> present|absent, and the merge base.
 declare -A LGTM_CI_PATH_STATE=()
+# "<ref>:<reusable path>" -> " <input> <input> ... " or "<absent>".
+declare -A LGTM_CI_INPUTS=()
 CANDIDATE_MERGE_BASE=""
 
 # ---------------------------------------------------------------------------
@@ -419,6 +422,130 @@ resolve_candidate_merge_base() {
 	CANDIDATE_MERGE_BASE="$base"
 }
 
+# Print "<reusable path>#<input>" for every `with:` key a fixture job passes to
+# an lgtm-ci reusable workflow (job-level `uses:`; jobs at two-space indent).
+# GitHub refuses a run that passes an input the called workflow does not
+# declare, so a new input the fixture adopts has the same "landed after the
+# candidate branched" problem as a new reusable, and a removed input is a
+# consumer-breaking change (#1134).
+#
+# Line-based, for the two-space indentation yamllint enforces on the fixture:
+# comments and blank lines are skipped, a trailing comment and quotes are
+# stripped, and each job's `uses:` and `with:` keys are collected in either
+# order and emitted when the job ends. A flow-style `with: {...}` on an
+# lgtm-ci call cannot be read line by line, so it is emitted as
+# `<reusable>#<unparsed>` and reference_verdict fails closed on it.
+lgtm_ci_passed_inputs() {
+	local file="${1:?file required}"
+	awk '
+		function strip(s) {
+			sub(/[[:space:]]+#.*$/, "", s)
+			sub(/[[:space:]]+$/, "", s)
+			return s
+		}
+		function flush(i) {
+			if (wf != "") for (i = 1; i <= n; i++) print wf "#" keys[i]
+			if (wf != "" && flow) print wf "#<unparsed>"
+			wf = ""; n = 0; inwith = 0; flow = 0
+		}
+		/^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+		{ line = strip($0); gsub(/["\047]/, "", line) }
+		line ~ /^[^ ]/ { flush(); injobs = (line ~ /^jobs:$/); next }
+		!injobs { next }
+		line ~ /^  [^ ]/ { flush(); next }
+		line ~ /^    uses:/ {
+			v = line
+			sub(/^    uses:[[:space:]]*/, "", v)
+			gsub(/["\047]/, "", v)
+			if (v ~ /^lgtm-hq\/lgtm-ci\/\.github\/workflows\//) {
+				sub(/^lgtm-hq\/lgtm-ci\//, "", v)
+				sub(/@.*/, "", v)
+				wf = v
+			}
+			inwith = 0
+			next
+		}
+		line ~ /^    with:$/ { inwith = 1; next }
+		line ~ /^    with:[[:space:]]*[{]/ { flow = 1; inwith = 0; next }
+		line ~ /^    [^ ]/ { inwith = 0; next }
+		inwith && line ~ /^      [A-Za-z0-9_-]+:/ {
+			k = line
+			sub(/^      /, "", k)
+			sub(/:.*/, "", k)
+			keys[++n] = k
+		}
+		END { flush() }
+	' "$file" | sort -u
+}
+
+# Set REPLY to the space-separated `workflow_call` input names of one lgtm-ci
+# reusable at <ref> (raw contents API, cached per run), or to `<absent>` when
+# the file does not exist there. Any error other than a 404 fails.
+lgtm_ci_reusable_inputs() {
+	local path="${1:?path required}" ref="${2:?ref required}" errf out key
+	key="${2}:${1}"
+	if [[ -n "${LGTM_CI_INPUTS[$key]:-}" ]]; then
+		REPLY="${LGTM_CI_INPUTS[$key]}"
+		return 0
+	fi
+	errf="$(mktemp)"
+	if out="$(lgtm_ci_api -X GET -H "Accept: application/vnd.github.raw+json" \
+		"repos/${GITHUB_REPOSITORY}/contents/${path}?ref=${ref}" 2>"$errf")"; then
+		# Only `on.workflow_call.inputs` (a `workflow_dispatch` input of the
+		# same name does not make a call valid); comments and quoted keys are
+		# tolerated, a flow-style `inputs: {...}` is not.
+		LGTM_CI_INPUTS[$key]=" $(awk '
+			function strip(s) {
+				sub(/[[:space:]]+#.*$/, "", s)
+				sub(/[[:space:]]+$/, "", s)
+				return s
+			}
+			/^[[:space:]]*#/ || /^[[:space:]]*$/ { next }
+			{ line = strip($0); gsub(/["\047]/, "", line) }
+			line ~ /^[^ ]/ { inon = (line ~ /^on:$/); incall = 0; ininputs = 0; next }
+			!inon { next }
+			line ~ /^  [^ ]/ { incall = (line ~ /^  workflow_call:$/); if (incall) found = 1; ininputs = 0; next }
+			!incall { next }
+			line ~ /^    [^ ]/ { ininputs = (line ~ /^    inputs:$/); if (line ~ /^    inputs:[[:space:]]*[{]/) flow = 1; next }
+			ininputs && line ~ /^      [A-Za-z0-9_-]+:/ { k = line; sub(/^      /, "", k); sub(/:.*/, "", k); printf "%s ", k }
+			END { if (!found || flow) printf "<unparsed>" }
+		' <<<"$out")"
+		# A file that exists but shows no block-style `on.workflow_call` inputs
+		# would read as "no inputs" and turn every passed input into a false
+		# removal; refuse instead of guessing.
+		if [[ "${LGTM_CI_INPUTS[$key]}" == *"<unparsed>"* ]]; then
+			log_error "cannot read block-style on.workflow_call inputs in ${GITHUB_REPOSITORY}/${path} at ${ref}"
+			rm -f "$errf"
+			return 1
+		fi
+	elif grep -q 'HTTP 404' "$errf"; then
+		LGTM_CI_INPUTS[$key]="<absent>"
+	else
+		log_error "cannot read ${GITHUB_REPOSITORY}/${path} at ${ref}: $(tr '\n' ' ' <"$errf")"
+		rm -f "$errf"
+		return 1
+	fi
+	rm -f "$errf"
+	REPLY="${LGTM_CI_INPUTS[$key]}"
+}
+
+# Set REPLY to `present` or `absent` for one reference item at <ref>: a path
+# (`.github/workflows/<f>.yml`, `.github/actions/<name>`) or a passed input
+# (`<reusable path>#<input>`, absent when the reusable or the input is).
+lgtm_ci_item_state() {
+	local item="${1:?item required}" ref="${2:?ref required}"
+	if [[ "$item" != *"#"* ]]; then
+		lgtm_ci_path_state "$item" "$ref"
+		return
+	fi
+	lgtm_ci_reusable_inputs "${item%%#*}" "$ref" || return 1
+	if [[ "$REPLY" == *" ${item#*#} "* ]]; then
+		REPLY=present
+	else
+		REPLY=absent
+	fi
+}
+
 # Pre-dispatch verdict for one re-pinned workflow file (#1128). Sets REPLY to
 #   dispatch                          every referenced path exists at <sha>
 #                                     (or is missing everywhere: the run reports it)
@@ -430,22 +557,29 @@ resolve_candidate_merge_base() {
 #                                     candidate branched
 # Returns non-zero when any lookup fails (fail closed).
 reference_verdict() {
-	local file="${1:?file required}" sha="${2:?sha required}" path
-	local -a paths=() removed=() later=()
-	while IFS= read -r path; do
-		[[ -z "$path" ]] || paths+=("$path")
-	done < <(lgtm_ci_references "$file")
-	for path in "${paths[@]}"; do
-		lgtm_ci_path_state "$path" "$sha" || return 1
+	local file="${1:?file required}" sha="${2:?sha required}" item
+	local -a items=() removed=() later=()
+	while IFS= read -r item; do
+		[[ -z "$item" ]] || items+=("$item")
+	done < <(
+		lgtm_ci_references "$file"
+		lgtm_ci_passed_inputs "$file"
+	)
+	for item in "${items[@]}"; do
+		if [[ "$item" == *"#<unparsed>" ]]; then
+			log_error "${file##*/}: flow-style with: on the call to ${item%%#*} cannot be checked; write it in block style"
+			return 1
+		fi
+		lgtm_ci_item_state "$item" "$sha" || return 1
 		[[ "$REPLY" == "absent" ]] || continue
 		resolve_candidate_merge_base "$sha" || return 1
-		lgtm_ci_path_state "$path" "$CANDIDATE_MERGE_BASE" || return 1
+		lgtm_ci_item_state "$item" "$CANDIDATE_MERGE_BASE" || return 1
 		if [[ "$REPLY" == "present" ]]; then
-			removed+=("$path")
+			removed+=("$item")
 			continue
 		fi
-		lgtm_ci_path_state "$path" "$LGTM_CI_MAIN_BRANCH" || return 1
-		[[ "$REPLY" == "absent" ]] || later+=("$path")
+		lgtm_ci_item_state "$item" "$LGTM_CI_MAIN_BRANCH" || return 1
+		[[ "$REPLY" == "absent" ]] || later+=("$item")
 	done
 	if ((${#removed[@]})); then
 		REPLY="removed_by_candidate"$'\t'"${removed[*]}"
