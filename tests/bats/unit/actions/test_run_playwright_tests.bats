@@ -10,6 +10,8 @@ setup() {
 	setup_temp_dir
 	export WORK_DIR="${BATS_TEST_TMPDIR}/work"
 	mkdir -p "$WORK_DIR"
+	# results.v1 document (#1080) goes under the test tmpdir, never the repo root.
+	export RESULTS_OUTPUT="${BATS_TEST_TMPDIR}/results/results.json"
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
 }

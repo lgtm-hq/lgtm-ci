@@ -1,0 +1,10 @@
+{
+  "tool": "",
+  "status": "green",
+  "counts": { "passed": "1", "failed": -1, "skipped": 0.5, "total": 1 },
+  "duration_ms": "12",
+  "coverage": { "lines": 101, "statements": 50 },
+  "artifacts": [{ "kind": "HTML", "path": "" }],
+  "source": { "runner": "run-pytest", "version": "x" },
+  "summary": "not in v1"
+}

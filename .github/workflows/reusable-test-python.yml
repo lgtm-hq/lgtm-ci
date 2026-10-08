@@ -176,38 +176,26 @@ on:
         required: false
 
     outputs:
+      # Every value below is read from this call's results.v1 documents by
+      # the aggregate job (#1080): the same numbers the matrix legs wrote,
+      # for a single version and a matrix alike.
       tests-passed:
         description: "Number of tests passed"
-        value: >-
-          ${{ inputs.pipeline-skip && '0' ||
-          inputs.python-versions != '' && jobs.aggregate.outputs.tests-passed ||
-          jobs.test.outputs.tests-passed }}
+        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.tests-passed }}
       tests-failed:
         description: "Number of tests failed"
-        value: >-
-          ${{ inputs.pipeline-skip && '0' ||
-          inputs.python-versions != '' && jobs.aggregate.outputs.tests-failed ||
-          jobs.test.outputs.tests-failed }}
+        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.tests-failed }}
       tests-total:
         description: "Total number of tests"
-        value: >-
-          ${{ inputs.pipeline-skip && '0' ||
-          inputs.python-versions != '' && jobs.aggregate.outputs.tests-total ||
-          jobs.test.outputs.tests-total }}
+        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.tests-total }}
       coverage-percent:
         description: "Coverage percentage"
-        value: >-
-          ${{ inputs.pipeline-skip && '0' ||
-          inputs.python-versions != '' && jobs.aggregate.outputs.coverage-percent ||
-          jobs.test.outputs.coverage-percent }}
+        value: ${{ inputs.pipeline-skip && '0' || jobs.aggregate.outputs.coverage-percent }}
       passed:
         description: >-
           Whether all tests passed. Reports 'true' when pipeline-skip is set so
           callers gating on this output treat a skipped pipeline as green.
-        value: >-
-          ${{ inputs.pipeline-skip && 'true' ||
-          inputs.python-versions != '' && jobs.aggregate.outputs.passed ||
-          jobs.test.outputs.passed }}
+        value: ${{ inputs.pipeline-skip && 'true' || jobs.aggregate.outputs.passed }}
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -390,6 +378,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       - name: Validate compat/coverage contract
         shell: bash
@@ -497,6 +486,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Install uv
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
@@ -572,6 +562,8 @@ jobs:
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
         continue-on-error: true
+      # Native report -> results/pytest/<version>/results.json (results.v1,
+      # #1080); every tests-* / coverage-percent output is read back from it.
       - name: Parse results
         id: parse
         if: always()
@@ -583,18 +575,17 @@ jobs:
             ${{ steps.run.outputs.coverage-file != '' &&
             format('{0}/{1}', inputs.working-directory, steps.run.outputs.coverage-file)
             || '' }}
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          MATRIX_KEY: python-version
+          MATRIX_VALUE: ${{ matrix.python-version }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
       - name: Generate summary
         if: always()
         shell: bash
         env:
           STEP: summary
-          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
-          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
-          TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
-          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
-          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
-          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-pytest.sh
       - name: Check coverage threshold
         id: coverage-gate
@@ -603,25 +594,15 @@ jobs:
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
-      - name: Write matrix test summary
-        if: always()
+      # A gate that fails after the parser wrote the document must reach the
+      # document too, or the uploaded artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && (steps.coverage-gate.outcome == 'failure')
         shell: bash
         env:
-          MATRIX_KEY: python-version
-          MATRIX_VALUE: ${{ matrix.python-version }}
-          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
-          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
-          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
-          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
-          PASSED: >-
-            ${{
-              steps.run.outputs.exit-code == '0'
-              && (
-                steps.coverage-gate.outcome == 'success'
-                || steps.coverage-gate.outcome == 'skipped'
-              )
-            }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
+          RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
+          STATUS: failed
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload matrix test summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -629,7 +610,7 @@ jobs:
           # Namespaced by artifact-prefix so two calls in one run keep their
           # own summaries (#1091); the version suffix separates matrix legs.
           name: ${{ inputs.artifact-prefix }}-results-${{ matrix.python-version }}
-          path: python-result-${{ matrix.python-version }}/summary.json
+          path: results/pytest/${{ matrix.python-version }}/results.json
           retention-days: 7
           if-no-files-found: error
           # The aggregate job's verdict reads this summary, so no
@@ -701,9 +682,7 @@ jobs:
       tests-failed: ${{ steps.aggregate.outputs.tests-failed }}
       tests-total: ${{ steps.aggregate.outputs.tests-total }}
       coverage-percent: ${{ steps.aggregate.outputs.coverage-percent }}
-      passed: >-
-        ${{ needs.test.result == 'success'
-        && (inputs.python-versions == '' || steps.aggregate.outputs.passed == 'true') }}
+      passed: ${{ needs.test.result == 'success' && steps.aggregate.outputs.passed == 'true' }}
 
     steps:
       - name: Harden runner
@@ -766,6 +745,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       # Single-version calls (empty `python-versions`) gate on the test job
       # result alone and skip the download: a cost optimisation only, since
@@ -777,26 +757,29 @@ jobs:
       # is eventually consistent, so a one-shot download can miss a leg whose
       # upload already succeeded. Only under-counts and 404s on a listed id are
       # retried; an over-count fails at once as sibling contamination (#752).
-      - name: Wait for and download matrix test summaries
-        if: inputs.python-versions != ''
+      - name: Wait for and download matrix results
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           DOWNLOAD_DIR: python-results
-          MATRIX_JSON: ${{ needs.prepare.outputs.matrix }}
-          MATRIX_KEY: python-version
+          # By-name matrix check only for a multi-version call; a single
+          # version downloads its exact artifact name (#752).
+          MATRIX_JSON: ${{ inputs.python-versions != '' && needs.prepare.outputs.matrix || '' }}
+          MATRIX_KEY: ${{ inputs.python-versions != '' && 'python-version' || '' }}
           EXPECTED_COUNT: ${{ needs.prepare.outputs.matrix-count }}
           ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+          RESULTS_PATTERN: >-
+            ${{ inputs.python-versions != '' && format('{0}-results-*', inputs.artifact-prefix)
+            || format('{0}-results-{1}', inputs.artifact-prefix, inputs.python-version || '3.12') }}
           # A leg that was cancelled or crashed before uploading never shows
           # up; the aggregate still fails closed, so do not spend the full
           # budget waiting for it.
           WAIT_BUDGET_SECONDS: ${{ needs.test.result == 'success' && '90' || '10' }}
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
-          "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-results-*"
-      - name: Aggregate matrix test summaries
+          "$EXPECTED_COUNT" "$RESULTS_PATTERN"
+      - name: Aggregate matrix results
         id: aggregate
-        if: inputs.python-versions != ''
         shell: bash
         env:
           RESULTS_DIR: python-results
@@ -807,16 +790,14 @@ jobs:
         # failing matrix leg must fail the job, not just set `passed=false`.
         if: >-
           always()
-          && (
-            needs.test.result != 'success'
-            || (inputs.python-versions != '' && steps.aggregate.outputs.passed != 'true')
-          )
+          && (needs.test.result != 'success' || steps.aggregate.outputs.passed != 'true')
         shell: bash
         run: |
           echo "::error::A matrix test leg failed or its results could not be aggregated; failing the check."
           exit 1
   publish-test-summary:
     needs:
+      - prepare
       - test
       - aggregate
     if: >-
@@ -846,24 +827,16 @@ jobs:
     with:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
-      tests-passed: >-
-        ${{ inputs.python-versions != '' && needs.aggregate.outputs.tests-passed ||
-        needs.test.outputs.tests-passed }}
-      tests-failed: >-
-        ${{ inputs.python-versions != '' && needs.aggregate.outputs.tests-failed ||
-        needs.test.outputs.tests-failed }}
-      tests-total: >-
-        ${{ inputs.python-versions != '' && needs.aggregate.outputs.tests-total ||
-        needs.test.outputs.tests-total }}
-      coverage-percent: >-
-        ${{ inputs.python-versions != '' && needs.aggregate.outputs.coverage-percent ||
-        needs.test.outputs.coverage-percent }}
+      # The comment is rendered from this call's results.v1 artifacts, the
+      # same ones the aggregate verdict read (#1080): single version by exact
+      # name, matrix by prefix glob.
+      results-artifact-pattern: >-
+        ${{ inputs.python-versions != '' && format('{0}-results-*', inputs.artifact-prefix)
+        || format('{0}-results-{1}', inputs.artifact-prefix, inputs.python-version || '3.12') }}
+      results-expected-count: ${{ needs.prepare.outputs.matrix-count }}
       coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
-      job-result: >-
-        ${{ inputs.python-versions != '' &&
-        (needs.aggregate.outputs.passed == 'true' && 'success' || 'failure') ||
-        needs.test.result }}
+      job-result: ${{ needs.aggregate.outputs.passed == 'true' && 'success' || 'failure' }}
       rich-coverage-comment: ${{ inputs.coverage }}
       # Same name the test job uploaded (#1091): the rich coverage comment
       # must read this call's coverage, not a sibling call's.

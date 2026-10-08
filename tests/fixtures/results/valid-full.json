@@ -1,0 +1,14 @@
+{
+  "tool": "pytest",
+  "status": "failed",
+  "counts": { "passed": 10, "failed": 2, "skipped": 1, "total": 13 },
+  "duration_ms": 5250,
+  "coverage": { "lines": 85.5, "branches": 70.25, "functions": 100 },
+  "artifacts": [
+    { "kind": "report", "path": "python/pytest-results.json" },
+    { "kind": "coverage", "path": "python/coverage.json" }
+  ],
+  "source": { "runner": "run-pytest", "version": "f29da756f9f1673d6d10c5b956480807e5dc8a9b" },
+  "matrix": { "key": "python-version", "value": "3.12" },
+  "exit_code": 1
+}

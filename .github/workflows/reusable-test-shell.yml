@@ -79,8 +79,8 @@ on:
         default: "shell-test-results"
       artifact-prefix:
         description: >-
-          Namespace for this call's artifacts (<prefix>-test-results,
-          <prefix>-coverage, and the sharded
+          Namespace for this call's artifacts (<prefix>-results,
+          <prefix>-test-results, <prefix>-coverage, and the sharded
           <prefix>-test-results-<comment-marker>-shard-N /
           <prefix>-coverage-<comment-marker>-shard-N); give a second call in
           the same run its own prefix so the two calls' TAP and coverage
@@ -365,6 +365,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       # Runs before any upload in this job uses the prefix (#1091); the
       # uploads below are always()-gated, so they also require this step's
@@ -414,6 +415,8 @@ jobs:
           PARALLEL: ${{ inputs.parallel }}
           COVERAGE_DIR: coverage-report
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
+      # TAP -> results/bats/default/results.json (results.v1, #1080); every
+      # tests-* output is read back from it.
       - name: Parse test results
         id: results
         if: always()
@@ -421,6 +424,8 @@ jobs:
         working-directory: ${{ inputs.working-directory }}
         env:
           STEP: parse-results
+          EXIT_CODE: ${{ steps.test.outputs.exit-code || steps.coverage-run.outputs.exit-code }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
       - name: Parse coverage results
         id: coverage
@@ -431,7 +436,18 @@ jobs:
           STEP: parse-coverage
           COVERAGE_DIR: coverage-report
         run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh"
+      # kcov is parsed after the TAP, so the coverage joins the document here;
+      # a non-numeric percent (N/A) leaves the document without coverage.
+      - name: Attach coverage to results
+        if: inputs.coverage && always() && steps.results.outcome == 'success'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RESULTS_FILE: ${{ steps.results.outputs.results-json }}
+          COVERAGE_LINES: ${{ steps.coverage.outputs.coverage-percent }}
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/results-update.sh"
       - name: Check coverage threshold
+        id: coverage-gate
         if: inputs.coverage && inputs.coverage-threshold > 0
         shell: bash
         env:
@@ -439,8 +455,30 @@ jobs:
           COVERAGE_PERCENT: ${{ steps.coverage.outputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      # A failed threshold must reach the document before it is uploaded, or
+      # the artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && steps.coverage-gate.outcome == 'failure'
+        shell: bash
+        working-directory: ${{ inputs.working-directory }}
+        env:
+          RESULTS_FILE: ${{ steps.results.outputs.results-json }}
+          STATUS: failed
+        run: bash "${{ github.workspace }}/.lgtm-ci-tooling/scripts/ci/actions/results-update.sh"
+      # The results.v1 document the summary comment and required-check
+      # verdicts read (#1080); same name on the sharded path, where the
+      # aggregate job uploads it instead (the two paths never run in one call).
+      - name: Upload results
+        if: always() && steps.artifact-prefix.outcome == 'success' && steps.results.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact-prefix }}-results
+          path: ${{ inputs.working-directory }}/results/bats/default/results.json
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
       # Debug convenience only: nothing downloads the TAP output (the summary
-      # comment reads job outputs), and the bats run plus the coverage
+      # comment reads results.json), and the bats run plus the coverage
       # threshold step above own the job verdict.
       - name: Upload test results
         id: upload-results
@@ -558,6 +596,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       # The shard and aggregate jobs depend on this one, so an invalid
       # prefix fails before any upload or download glob uses it (#1091).
@@ -642,6 +681,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       - name: Start resource monitor
         continue-on-error: true
@@ -815,6 +855,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       # Bounded availability wait (#803): the listing is eventually consistent,
       # so a one-shot download can miss a shard whose upload already
@@ -872,6 +913,8 @@ jobs:
           pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-coverage
           merge-multiple: false
+      # Shard TAPs -> results/bats/default/results.json (results.v1, #1080);
+      # every tests-* output is read back from it.
       - name: Aggregate shard TAP results
         id: results
         if: always()
@@ -880,6 +923,8 @@ jobs:
           STEP: aggregate-results
           SHARD_ARTIFACTS_DIR: ${{ runner.temp }}/shard-taps
           EXPECTED_SHARDS: ${{ inputs.coverage-shards }}
+          EXIT_CODE: ${{ needs.test-sharded.result == 'success' && '0' || '1' }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
       - name: Merge shard Cobertura reports
         id: merge
@@ -890,7 +935,15 @@ jobs:
           SHARD_COVERAGE_DIR: ${{ runner.temp }}/shard-coverage
           MERGED_COVERAGE_FILE: ${{ runner.temp }}/merged-cobertura.xml
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      - name: Attach coverage to results
+        if: always() && steps.results.outcome == 'success' && steps.merge.outcome == 'success'
+        shell: bash
+        env:
+          RESULTS_FILE: ${{ steps.results.outputs.results-json }}
+          COVERAGE_LINES: ${{ steps.merge.outputs.coverage-percent }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Check coverage threshold
+        id: coverage-gate
         if: always() && inputs.coverage-threshold > 0 && steps.merge.outcome == 'success'
         shell: bash
         env:
@@ -898,6 +951,26 @@ jobs:
           COVERAGE_PERCENT: ${{ steps.merge.outputs.coverage-percent }}
           COVERAGE_THRESHOLD: ${{ inputs.coverage-threshold }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-bats-tests.sh
+      # A failed threshold must reach the document before it is uploaded, or
+      # the artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && steps.coverage-gate.outcome == 'failure'
+        shell: bash
+        env:
+          RESULTS_FILE: ${{ steps.results.outputs.results-json }}
+          STATUS: failed
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
+      - name: Upload results
+        if: always() && steps.results.outcome == 'success'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          # Same name the single-job path uploads (#1080); the two paths
+          # never run in one call.
+          name: ${{ inputs.artifact-prefix }}-results
+          path: results/bats/default/results.json
+          retention-days: 7
+          if-no-files-found: error
+          overwrite: true
       - name: Upload merged coverage report
         id: upload-merged-coverage
         if: always() && inputs.upload-coverage && steps.merge.outcome == 'success'
@@ -949,22 +1022,10 @@ jobs:
     with:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
-      tests-passed: >-
-        ${{ fromJson(format('["{0}","{1}"]',
-          needs.aggregate.outputs.tests-passed,
-          needs.test.outputs.tests-passed))[needs.aggregate.result == 'skipped' && 1 || 0] }}
-      tests-failed: >-
-        ${{ fromJson(format('["{0}","{1}"]',
-          needs.aggregate.outputs.tests-failed,
-          needs.test.outputs.tests-failed))[needs.aggregate.result == 'skipped' && 1 || 0] }}
-      tests-total: >-
-        ${{ fromJson(format('["{0}","{1}"]',
-          needs.aggregate.outputs.tests-total,
-          needs.test.outputs.tests-total))[needs.aggregate.result == 'skipped' && 1 || 0] }}
-      coverage-percent: >-
-        ${{ fromJson(format('["{0}","{1}"]',
-          needs.aggregate.outputs.coverage-percent,
-          needs.test.outputs.coverage-percent))[needs.aggregate.result == 'skipped' && 1 || 0] }}
+      # The comment is rendered from this call's results.v1 artifact (#1080),
+      # uploaded by whichever path ran.
+      results-artifact-pattern: ${{ format('{0}-results', inputs.artifact-prefix) }}
+      results-expected-count: "1"
       coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: >-

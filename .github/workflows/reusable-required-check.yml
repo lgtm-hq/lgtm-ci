@@ -29,6 +29,22 @@ on:
         required: false
         type: string
         default: "passed"
+      results-artifact-pattern:
+        description: >-
+          Artifact name or glob of results.v1 documents (#1080) to verify:
+          every results.json must validate against schemas/results.v1.json
+          and report status "passed" or "no-tests" (an empty leg is not a
+          failure, like the passed output). Empty skips the document check.
+        required: false
+        type: string
+        default: ""
+      results-expected-count:
+        description: >-
+          Number of results.v1 legs results-artifact-pattern must yield
+          (empty: any non-zero number)
+        required: false
+        type: string
+        default: ""
       draft-pr-skip:
         description: "Skip this gate on draft pull requests"
         required: false
@@ -269,7 +285,15 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
+      - name: Download results documents
+        if: inputs.results-artifact-pattern != ''
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: ${{ inputs.results-artifact-pattern }}
+          path: results-download
+          merge-multiple: false
       - name: Assert required check
         id: gate
         shell: bash
@@ -278,4 +302,6 @@ jobs:
           PASSED_OUTPUT: ${{ inputs.passed-output }}
           STATUS_OUTPUT: ${{ inputs.status-output }}
           STATUS_EXPECTED: ${{ inputs.status-expected }}
+          RESULTS_DIR: ${{ inputs.results-artifact-pattern != '' && 'results-download' || '' }}
+          EXPECTED_COUNT: ${{ inputs.results-expected-count }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/assert-required-check.sh

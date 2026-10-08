@@ -721,11 +721,16 @@ _lang_wait_globs() {
 		in_job && /^  [a-zA-Z0-9_-]+:$/ { exit }
 		in_job && /^      - name: / { wired = 0 }
 		in_job && /ARTIFACT_PREFIX: \$\{\{ inputs\.artifact-prefix \}\}$/ { wired = 1 }
+		# #1080: the pattern lives in the step env; its multi-version branch
+		# is the prefixed glob (the single-version branch is an exact name,
+		# asserted separately).
+		in_job && /format\(.\{0\}-results-\*., inputs\.artifact-prefix\)/ { pattern_env = 1 }
 		in_job && /wait-for-artifacts\.sh$/ { want = 1; next }
 		want {
 			line = $0
 			sub(/^ *"\$EXPECTED_COUNT" /, "", line)
 			gsub(/"/, "", line)
+			if (line == "$RESULTS_PATTERN" && pattern_env) line = "${ARTIFACT_PREFIX}-results-*"
 			print (wired ? "wired" : "unwired") "\t" line
 			want = 0
 		}
@@ -940,6 +945,22 @@ _lang_job_validates_prefix() {
 	[ "$(_lang_render '${ARTIFACT_PREFIX}-results-*' python)" = "python-results-*" ]
 }
 
+# A single-version call downloads its exact results artifact name (#1080):
+# with the default prefix two single-version siblings on different versions
+# stay invisible to each other, as they were before the aggregate always ran.
+@test "python/rust: single-version calls download their results by exact name" {
+	local entry wf single
+	for entry in "reusable-test-python.yml|inputs.python-version || '3.12'" \
+		"reusable-rust-test.yml|inputs.rust-toolchain || 'stable'"; do
+		wf="${entry%%|*}"
+		single="${entry#*|}"
+		run grep -F "format('{0}-results-{1}', inputs.artifact-prefix, ${single})" "${WORKFLOW_DIR}/${wf}"
+		assert_success
+		# aggregate wait and summary publisher resolve the same name
+		[ "$(grep -cF "format('{0}-results-{1}', inputs.artifact-prefix, ${single})" "${WORKFLOW_DIR}/${wf}")" -eq 2 ]
+	done
+}
+
 # Two calls with distinct prefixes must not see each other's artifacts: each
 # call's download glob matches its own upload names and none of the other's.
 @test "language test reusables: distinct prefixes are mutually invisible" {
@@ -1037,4 +1058,49 @@ _lang_job_validates_prefix() {
 	[ "$rendered" = "py312-coverage" ]
 	[[ "$publish" == *"format('{0}-coverage', inputs.artifact-prefix)"* ]]
 	[[ "$publish" != *"'python-coverage'"* ]]
+}
+
+# A coverage threshold (or post-test command) that fails after the parser
+# wrote the document must reach the uploaded results.json (#1080): every
+# language reusable records the gate verdict through results-update.sh
+# before its results upload, and the sharded shell aggregate uploads after
+# its threshold check.
+@test "language test reusables: gate verdicts reach the results document before upload" {
+	local entry wf job
+	for entry in "reusable-test-python.yml:test" "reusable-test-node.yml:test-vitest" \
+		"reusable-rust-test.yml:test" "reusable-test-shell.yml:test" "reusable-test-shell.yml:aggregate"; do
+		wf="${entry%%:*}"
+		job="${entry##*:}"
+		run awk -v job="  ${job}:" '
+			$0 == job { in_job = 1; next }
+			in_job && /^  [a-zA-Z0-9_-]+:$/ { exit }
+			in_job && /name: Check coverage threshold/ { gate = NR }
+			in_job && /name: Record gate verdict in results/ { record = NR }
+			in_job && /results-update\.sh/ && record && NR > record { script = 1 }
+			in_job && /name: Upload (matrix test summary|results)$/ { upload = NR }
+			END { exit !(gate && record && script && upload && gate < record && record < upload) }
+		' "${WORKFLOW_DIR}/${wf}"
+		assert_success
+	done
+}
+
+# Every job that runs a script sourcing results.sh validates against
+# schemas/results.v1.json, so its tooling checkout must list schemas/ (#1080).
+@test "workflows running results.v1 scripts check out schemas/" {
+	local wf
+	while IFS= read -r wf; do
+		run grep -c '^            schemas/$' "$wf"
+		[ "${output:-0}" -ge 1 ] || {
+			echo "${wf}: runs a results.v1 script but its sparse-checkout-extra lacks schemas/" >&2
+			return 1
+		}
+	done < <(grep -l -E 'run-vitest\.sh|run-pytest\.sh|run-playwright-tests\.sh|run-bats-tests\.sh|parse-rust-test-results\.sh|run-lintro-audit\.sh|aggregate-results\.sh|render-test-summary\.sh|assert-required-check\.sh|results-update\.sh|write-coverage-results\.sh' "${WORKFLOW_DIR}"/*.yml)
+}
+
+# Two sibling Playwright calls that already keep their reports apart through
+# report-artifact-name must keep their results.v1 documents apart too (#752).
+@test "reusable-test-e2e-playwright: results name follows report-artifact-name for sibling calls" {
+	local wf="${WORKFLOW_DIR}/reusable-test-e2e-playwright.yml"
+	run grep -c "inputs.report-artifact-name != '' && format('{0}-results', inputs.report-artifact-name)" "$wf"
+	assert_output "2"
 }

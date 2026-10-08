@@ -639,6 +639,7 @@ jobs:
           # yamllint disable-line rule:line-length
           sparse-checkout-extra: |
             .github/actions/setup-python
+            schemas/
             scripts/ci/
       - name: Setup Python and uv
         if: inputs.python-version != ''

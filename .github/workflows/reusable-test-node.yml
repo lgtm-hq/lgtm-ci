@@ -404,6 +404,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       - name: Validate compat/coverage contract
         shell: bash
@@ -506,6 +507,7 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             .github/actions/
+            schemas/
             scripts/ci/
       - name: Setup Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -603,6 +605,8 @@ jobs:
           COMMAND: ${{ inputs.post-test-command }}
           WORKING_DIRECTORY: ${{ inputs.working-directory }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-command.sh
+      # Native report -> results/vitest/<version>/results.json (results.v1,
+      # #1080); every tests-* / coverage-percent output is read back from it.
       - name: Parse results
         id: parse
         if: always()
@@ -611,18 +615,17 @@ jobs:
           STEP: parse
           RESULTS_FILE: ${{ inputs.working-directory }}/vitest-results.json
           COVERAGE_FILE: ${{ inputs.working-directory }}/coverage/coverage-summary.json
+          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          MATRIX_KEY: node-version
+          MATRIX_VALUE: ${{ matrix.node-version }}
+          RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
       - name: Generate summary
         if: always()
         shell: bash
         env:
           STEP: summary
-          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
-          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
-          TESTS_SKIPPED: ${{ steps.parse.outputs.tests-skipped }}
-          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
-          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
-          EXIT_CODE: ${{ steps.run.outputs.exit-code }}
+          RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/run-vitest.sh
       - name: Check coverage threshold
         id: coverage-gate
@@ -631,29 +634,15 @@ jobs:
         with:
           coverage-percent: ${{ steps.parse.outputs.coverage-percent }}
           threshold: ${{ inputs.coverage-threshold }}
-      - name: Write matrix test summary
-        if: always()
+      # A gate that fails after the parser wrote the document must reach the
+      # document too, or the uploaded artifact would carry a false "passed".
+      - name: Record gate verdict in results
+        if: always() && (steps.coverage-gate.outcome == 'failure' || steps.post-test.outcome == 'failure')
         shell: bash
         env:
-          MATRIX_KEY: node-version
-          MATRIX_VALUE: ${{ matrix.node-version }}
-          TESTS_PASSED: ${{ steps.parse.outputs.tests-passed }}
-          TESTS_FAILED: ${{ steps.parse.outputs.tests-failed }}
-          TESTS_TOTAL: ${{ steps.parse.outputs.tests-total }}
-          COVERAGE_PERCENT: ${{ steps.parse.outputs.coverage-percent }}
-          PASSED: >-
-            ${{
-              steps.run.outputs.exit-code == '0'
-              && (
-                steps.post-test.outcome == 'success'
-                || steps.post-test.outcome == 'skipped'
-              )
-              && (
-                steps.coverage-gate.outcome == 'success'
-                || steps.coverage-gate.outcome == 'skipped'
-              )
-            }}
-        run: bash .lgtm-ci-tooling/scripts/ci/actions/write-test-summary.sh
+          RESULTS_FILE: ${{ steps.parse.outputs.results-json }}
+          STATUS: failed
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload matrix test summary
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
@@ -661,7 +650,7 @@ jobs:
           # Namespaced by artifact-prefix so two calls in one run keep their
           # own summaries (#1091); the version suffix separates matrix legs.
           name: ${{ inputs.artifact-prefix }}-results-${{ matrix.node-version }}
-          path: node-result-${{ matrix.node-version }}/summary.json
+          path: results/vitest/${{ matrix.node-version }}/results.json
           retention-days: 7
           if-no-files-found: error
           # The aggregate job's verdict reads this summary, so no
@@ -862,6 +851,7 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       - name: Download pages coverage artifact
         id: download-pages-coverage
@@ -975,12 +965,13 @@ jobs:
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
+            schemas/
             scripts/ci/
       # Bounded availability wait, then download (#803): the artifact listing
       # is eventually consistent, so a one-shot download can miss a leg whose
       # upload already succeeded. Only under-counts and 404s on a listed id are
       # retried; an over-count fails at once as sibling contamination (#752).
-      - name: Wait for and download matrix test summaries
+      - name: Wait for and download matrix results
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -996,7 +987,7 @@ jobs:
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/wait-for-artifacts.sh
           "$EXPECTED_COUNT" "${ARTIFACT_PREFIX}-results-*"
-      - name: Aggregate matrix test summaries
+      - name: Aggregate matrix results
         id: aggregate
         shell: bash
         env:
@@ -1014,7 +1005,7 @@ jobs:
           echo "::error::A matrix test leg failed or its results could not be aggregated; failing the check."
           exit 1
   publish-test-summary:
-    needs: aggregate-tests
+    needs: [prepare, aggregate-tests]
     if: >-
       always()
       && needs.aggregate-tests.result != 'skipped'
@@ -1033,10 +1024,10 @@ jobs:
     with:
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
-      tests-passed: ${{ needs.aggregate-tests.outputs.tests-passed }}
-      tests-failed: ${{ needs.aggregate-tests.outputs.tests-failed }}
-      tests-total: ${{ needs.aggregate-tests.outputs.tests-total }}
-      coverage-percent: ${{ needs.aggregate-tests.outputs.coverage-percent }}
+      # The comment is rendered from this call's results.v1 artifacts, the
+      # same ones the aggregate verdict read (#1080).
+      results-artifact-pattern: ${{ format('{0}-results-*', inputs.artifact-prefix) }}
+      results-expected-count: ${{ needs.prepare.outputs.matrix-count }}
       coverage-enabled: ${{ inputs.coverage }}
       coverage-threshold: ${{ inputs.coverage-threshold }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}

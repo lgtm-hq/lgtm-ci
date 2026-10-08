@@ -130,8 +130,8 @@ _eval() {
 # (empty when the reusable has no single-version path), pipeline-skip support.
 _wiring() {
 	case "$1" in
-	reusable-test-python.yml) echo "aggregate test python-versions yes" ;;
-	reusable-rust-test.yml) echo "aggregate test rust-toolchains no" ;;
+	reusable-test-python.yml) echo "aggregate test - yes" ;;
+	reusable-rust-test.yml) echo "aggregate test - no" ;;
 	reusable-test-node.yml) echo "aggregate-tests test-vitest - no" ;;
 	reusable-test-node-custom.yml) echo "aggregate-tests test - no" ;;
 	*) return 1 ;;
@@ -409,16 +409,17 @@ _with_mutated() {
 	_assert_dependents_run_on_failure reusable-test-node-custom.yml
 }
 
-@test "python/rust: single-version calls skip the summary download and aggregation" {
-	local wf input step
-	for wf in reusable-test-python.yml:python-versions reusable-rust-test.yml:rust-toolchains; do
-		input="${wf#*:}"
-		wf="${wf%%:*}"
-		for step in "Wait for and download matrix test summaries" "Aggregate matrix test summaries"; do
-			run _eval "$(_step_if "$wf" aggregate "$step")" "inputs.${input}=" "job.status=success"
-			assert_output "false"
-			run _eval "$(_step_if "$wf" aggregate "$step")" "inputs.${input}=1.0,2.0" "job.status=success"
-			assert_output "true"
+# Since #1080 the aggregate reads this call's results.v1 documents for
+# single- and multi-version calls alike (the public outputs are derived from
+# them), so neither step may be gated on the multi-version input.
+@test "python/rust: single-version calls download and aggregate their results too" {
+	local wf step
+	for wf in reusable-test-python.yml reusable-rust-test.yml; do
+		for step in "Wait for and download matrix results" "Aggregate matrix results"; do
+			[[ -z "$(_step_if "$wf" aggregate "$step")" ]] || {
+				echo "${wf}: '${step}' must run unconditionally (got if: $(_step_if "$wf" aggregate "$step"))" >&2
+				return 1
+			}
 		done
 	done
 }
@@ -460,11 +461,13 @@ _with_mutated() {
 }
 
 @test "self-check: rejects an aggregate skipped for single-version calls" {
+	# Since #1080 the base scenario is a single-version call, so an aggregate
+	# gated on the multi-version input never runs there.
 	run _with_mutated reusable-test-python.yml \
 		"/^  aggregate:/,/^    runs-on:/ s/^      always()\$/      always() \&\& inputs.python-versions != ''/" \
 		_assert_scenarios reusable-test-python.yml
 	assert_failure
-	assert_output --partial "inputs.python-versions="
+	assert_output --partial "got 'run=false"
 }
 
 @test "self-check: rejects a never-true aggregate condition" {
