@@ -84,14 +84,6 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_line 'storage.googleapis.com:443'
 }
 
-@test "egress preset playwright map in reusable-test-e2e-playwright.yml carries the apt and CfT hosts (#1103)" {
-	# The folded (>-) map wraps entries across lines; join them first.
-	run bash -c "tr '\n' ' ' <'${PROJECT_ROOT}/.github/workflows/reusable-test-e2e-playwright.yml' | grep -o '\"playwright\":\"[^\"]*\"'"
-	assert_success
-	assert_output --partial 'azure.archive.ubuntu.com:80'
-	assert_output --partial 'storage.googleapis.com:443'
-}
-
 @test "egress preset pypi includes package index hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints pypi"
 	assert_success

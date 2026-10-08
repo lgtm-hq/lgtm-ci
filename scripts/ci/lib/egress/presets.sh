@@ -142,7 +142,10 @@ egress_preset_endpoints() {
 		# archive.ubuntu.com/security.ubuntu.com use :80 for apt HTTP mirrors in CI images;
 		# GitHub-hosted runners resolve apt to azure.archive.ubuntu.com, which
 		# `playwright install --with-deps` needs for browser system packages (#1103).
-		# cdn.playwright.dev redirects Chrome-for-Testing builds to storage.googleapis.com.
+		# cdn.playwright.dev redirects Chrome-for-Testing builds to
+		# storage.googleapis.com/chrome-for-testing-public/... (path-style), so the
+		# bucket-scoped host form used for sigstore-tuf-root cannot match; the whole
+		# GCS host is the narrowest entry a host-level allowlist can express.
 		;;
 	pypi)
 		# PyPI / TestPyPI (python dist, wait-for-package).

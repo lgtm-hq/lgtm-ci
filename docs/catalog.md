@@ -234,7 +234,7 @@ Playwright E2E Test Workflow
 **Prerequisites:**
 
 - Grant the caller job every scope listed under Permissions; GitHub validates the union statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)
-- Under `egress-policy: block`, append `azure.archive.ubuntu.com:80 storage.googleapis.com:443` (`allowed-endpoints-mode: append`): the `playwright` preset lacks the runner apt mirror and the Chrome-for-Testing redirect host, so `playwright install --with-deps` is refused (#1103)
+- Pinned at v0.76.0 or earlier under `egress-policy: block`, append `azure.archive.ubuntu.com:80 storage.googleapis.com:443` (`allowed-endpoints-mode: append`): those `playwright` presets lack the runner apt mirror and the Chrome-for-Testing redirect host, so `playwright install --with-deps` is refused. Later releases include both (#1103)
 - Set `upload-report-when: always` to keep the HTML report on green runs (#804)
 
 **Limitations:**
