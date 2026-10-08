@@ -2432,8 +2432,10 @@ keeps only the newest pending one, which scans the latest suppressions.
 `concurrency-scope` suffixes the group (`vuln-suppression-cleanup-<repo>-<scope>`)
 for a caller that dispatches from many throwaway refs at once and needs every
 run to conclude rather than be superseded, such as the external fixture
-(`concurrency-scope: ${{ github.ref }}`, #1134); leave it empty in a real
-repository so cleanup PRs stay serialized. A PR
+(`concurrency-scope: ${{ github.ref }}`, #1134). The fixture carries no
+`.osv-scanner.toml`, so its runs never reach the cleanup-PR path and cannot race
+each other into duplicate PRs. Leave it empty in a real repository so cleanup
+PRs stay serialized. A PR
 opened with `GITHUB_TOKEN` starts no workflows, so repositories that require
 status checks on the cleanup PR should pass a GitHub App token instead.
 

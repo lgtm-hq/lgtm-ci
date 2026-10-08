@@ -142,7 +142,7 @@ case "$args" in
 			exit 0
 		fi
 	done
-	printf 'on:\n  workflow_call:\n    inputs: {}\n'
+	printf 'on:\n  workflow_call:\n    secrets:\n      GH_TOKEN:\n        required: true\n'
 	;;
 *"repos/lgtm-hq/lgtm-ci/contents/"*"?ref="*" --silent")
 	if [[ "${MOCK_CONTENTS_FAIL:-}" == "1" ]]; then
@@ -1192,4 +1192,72 @@ EOF
 	run env MOCK_RAW_FAIL=1 bash "$CANARY_EVAL" "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'"
 	assert_failure
 	assert_output --partial "cannot read lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml at ${CANDIDATE}: gh: HTTP 502"
+}
+
+@test "external-canary: lgtm_ci_passed_inputs tolerates comments and either key order" {
+	cat >"$MOCK_FIXTURE_DIR/vuln-suppression.yml" <<EOF
+"on":
+  workflow_dispatch:
+    inputs:
+      not-a-call-input:
+        type: string
+jobs:
+  with-first: # inputs before uses
+    with: # ref scope
+      concurrency-scope: \${{ github.ref }} # per canary ref
+      # a comment line
+      job-name: >-
+        Vuln
+        check:
+          not-a-key
+    uses: "lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml@${OLD_PIN}" # pinned
+  local: # no lgtm-ci reusable
+    uses: ./.github/workflows/negative-probe.yml
+    with:
+      negative: x.yml
+EOF
+	run call_fn lgtm_ci_passed_inputs "$MOCK_FIXTURE_DIR/vuln-suppression.yml"
+	assert_success
+	assert_output "$(printf '.github/workflows/reusable-vuln-suppression-check.yml#concurrency-scope\n.github/workflows/reusable-vuln-suppression-check.yml#job-name')"
+}
+
+@test "external-canary: reusable inputs come from on.workflow_call only and tolerate comments" {
+	mkdir -p "$MOCK_REUSABLES/default"
+	cat >"$MOCK_REUSABLES/default/reusable-vuln-suppression-check.yml" <<'EOF'
+---
+name: x
+on: # triggers
+  workflow_dispatch:
+    inputs:
+      dispatch-only:
+        type: string
+  workflow_call: # the interface
+    inputs: # reusable inputs
+      # a comment
+      job-name:
+        description: "has: a colon"
+        type: string
+    outputs:
+      out-only:
+        value: x
+    secrets:
+      GH_TOKEN:
+        required: true
+jobs:
+  inputs:
+    runs-on: ubuntu-24.04
+EOF
+	run call_fn "lgtm_ci_reusable_inputs .github/workflows/reusable-vuln-suppression-check.yml '$CANDIDATE'; echo \"[\$REPLY]\""
+	assert_success
+	assert_output "[ job-name ]"
+}
+
+@test "external-canary: a reusable without a readable on.workflow_call fails closed" {
+	_add_scoped_caller
+	mkdir -p "$MOCK_REUSABLES/default"
+	printf 'on: {workflow_call: {inputs: {job-name: {type: string}}}}\n' \
+		>"$MOCK_REUSABLES/default/reusable-vuln-suppression-check.yml"
+	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'"
+	assert_failure
+	assert_output --partial "cannot find on.workflow_call in lgtm-hq/lgtm-ci/.github/workflows/reusable-vuln-suppression-check.yml at ${CANDIDATE}"
 }
