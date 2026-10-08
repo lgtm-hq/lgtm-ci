@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.75.4] - 2026-10-08
+
+### Added
+
 - `reusable-test-e2e-playwright.yml`: `reporters` input (default
   `list,json,junit,html`, must keep `json` and `html`) and
   `upload-report-when` input (`failure` default, `always` to upload the report
@@ -44,6 +58,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **ci**: enforce documented caller permissions, re-pin examples to v0.75.3, cover
+  examples in Renovate (#1114) (ea934b1)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.25.2 (patch) (#1117)
+  (8fb115c)
+- **deps**: update dependency anchore/syft to v1.54.1 (patch) (#1116) (0dacd17)
+- **deps**: update dependency anchore/grype to 0.120.1 (patch) (#1115) (485e9cf)
+- **deps**: update dependency uv to 0.12.23 (patch) (#1070) (93dcf6c)
+- **deps**: update dependency nextest-rs/nextest to 0.9.146 (patch) (#1069) (6ef0d84)
 - **Callers that invoke one language test reusable twice in one run must
   pass a distinct `artifact-prefix` per call.** Before #1091 the second call
   overwrote the first call's `<lang>-coverage` artifact (and its
@@ -58,7 +80,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `reusable-test-node-custom.yml`'s
   default coverage payload is therefore `node_custom-coverage` (was
   `node-custom-coverage`, `-` being the reserved separator) (#1091).
-
 - **Callers of `reusable-test-python.yml`, `reusable-test-node.yml`,
   `reusable-rust-test.yml` and `reusable-test-shell.yml` must grant
   `actions: read`** on the calling job alongside `contents: read` and
@@ -67,7 +88,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   validated statically, so a caller without the scope fails at startup. See
   "Matrix aggregation waits for the artifact listing" in
   `docs/reusable-workflows.md` (#803).
-
 - Node runners (`run-vitest`, `run-playwright`, `run-lighthouse`) dispatch on
   `package-manager` (bun/npm/pnpm) and never install test tooling into the
   consumer project; the direct composites require `package-manager`, and
@@ -76,12 +96,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `package-manager: bun`. Node default is 22. See the Node package-manager
   contract in `docs/workflow-contract.md` for the migration note (#1077).
 
-### Deprecated
-
-### Removed
-
 ### Fixed
 
+- **rust**: runner/tool-aware Windows release leg and caller-scoped rust-build
+  concurrency (#1119) (f29da75)
+- **supply-chain**: single source of truth and committed checksums for supplier tool
+  pins (#1113) (696e3f7)
+- **python**: install with uv sync --frozen and opt-in host-scoped auth for private git
+  deps (#1112) (b3db5e7)
+- **security**: read lintro metadata key for suppression status, fail when probe data is
+  missing (#1109) (8bdceed)
+- **test**: namespace coverage and result artifacts per call with artifact-prefix
+  (#1108) (2cbba29)
+- **python**: fetch the default branch for tag preflight on shallow checkouts (#1107)
+  (3bbe6b7)
+- **release,rust**: bootstrap CHANGELOG.md, PyPI/crates egress preset, nextest junit
+  path (#1106) (b272bf2)
+- **ci**: bounded artifact-availability wait before matrix aggregation (#1105) (87ec3f9)
+- **playwright**: one reporter set, HTML report asserted, integer duration normalization
+  (#1104) (65db513)
+- **coverage**: fail unsupported LCOV conversions and tolerate line-only LCOV (#1101)
+  (c74c9c3)
+- **node**: dispatch Vitest/Playwright/Lighthouse runners on package-manager and pin
+  runtime defaults (#1102) (467ebf0)
+- **sbom**: set GH_REPO on the SBOM release-asset upload step (#1100) (7362363)
+- **ai-review**: bound the review below the job cap and treat a timed-out review as
+  neutral (#1099) (97e1d79)
+- **release**: isolate the version-update hook from the App token and scope the token to
+  the caller repo (#1097) (26f4290)
+- **egress**: compose harden-runner allowlists from a generated preset map at job start
+  (#1094) (269b370)
+- **actions**: resolve nested setup-* refs via $/ self-repository form (#1089) (966c73b)
 - Playwright: `reusable-test-e2e-playwright.yml` and the `run-playwright`
   composite (`reporter: html`) emitted two `--reporter` flags; Playwright keeps
   only the last one, so the HTML report was never written while the job stayed
@@ -92,8 +137,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   removing the `invalid arithmetic operator` noise from every run. Fixtures for
   JSON, JUnit, HTML+sidecar, fractional, empty, malformed, sharded and merged
   reports live under `tests/fixtures/playwright/reports/` (#804).
-
-### Security
 
 ## [0.75.3] - 2026-10-04
 
@@ -2637,7 +2680,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.3...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.4...HEAD
+[0.75.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.3...v0.75.4
 [0.75.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.2...v0.75.3
 [0.75.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.1...v0.75.2
 [0.75.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.0...v0.75.1
