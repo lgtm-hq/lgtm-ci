@@ -18,6 +18,7 @@
 #   THRESHOLD_BEST_PRACTICES - Minimum best practices score (default: 80)
 #   THRESHOLD_SEO - Minimum SEO score (default: 80)
 #   EXTRA_ARGS - Additional arguments to pass to LHCI
+#   PARSE_OUTCOME - Outcome of the parse step (summary step; default: success)
 #
 # @lhci/cli is a consumer prerequisite: either already on PATH, or installed
 # in the project tree (resolved from the current directory) by the selected
@@ -46,14 +47,56 @@ run_lhci() {
 	fi
 }
 
-# Newest Lighthouse report (LHR JSON) under a filesystem-upload directory.
-# `lhci autorun --upload.target=filesystem` writes `<slug>.report.json` next to
-# a manifest.json; older layouts used `lhr-*.json`. Both are accepted. With a
-# marker file as the second argument only reports written after it count, so
-# a report left over from an earlier audit in the same directory is never
-# mistaken for this run's result.
+# Report of the representative run listed in LHCI's manifest.json, or nothing.
+# With several runs per URL (collect.numberOfRuns > 1) the representative
+# (median) run is the one LHCI asserts on; the newest file is not. LHCI writes
+# the reports flat next to the manifest with an absolute jsonPath, which goes
+# stale once the directory moves, so an absolute path is looked up by name
+# inside the directory (keeping the result in the same form as OUTPUT_DIR); a
+# relative one is taken relative to the directory. Only the first URL's
+# representative run is scored; a multi-URL manifest gets a warning.
+# A manifest, or the report it names, older than the marker belongs to an
+# earlier audit and is ignored.
+manifest_lighthouse_report() {
+	local dir="$1" marker="${2:-}" manifest="$1/manifest.json" path reps
+	[[ -f "$manifest" ]] || return 0
+	[[ -z "$marker" || "$manifest" -nt "$marker" ]] || return 0
+	path=$(jq -r '[.[] | select(.isRepresentativeRun == true)][0].jsonPath // empty' \
+		"$manifest" 2>/dev/null) || path=""
+	if [[ -z "$path" ]]; then
+		log_warn "manifest.json names no representative run; falling back to the newest report file"
+		return 0
+	fi
+	if [[ "$path" == /* ]]; then
+		path="$dir/$(basename "$path")"
+	else
+		path="$dir/$path"
+	fi
+	if [[ ! -f "$path" ]] || [[ -n "$marker" && ! "$path" -nt "$marker" ]]; then
+		log_warn "manifest.json names ${path}, which is missing or predates this audit; falling back to the newest report file"
+		return 0
+	fi
+	reps=$(jq '[.[] | select(.isRepresentativeRun == true)] | length' "$manifest" 2>/dev/null || echo 0)
+	if [[ "$reps" -gt 1 ]]; then
+		log_warn "manifest.json lists ${reps} URLs; only the first URL's representative run is scored"
+	fi
+	printf '%s\n' "$path"
+}
+
+# Lighthouse report (LHR JSON) under a filesystem-upload directory.
+# `lhci autorun --upload.target=filesystem` writes `<slug>.report.json` files
+# and a manifest.json naming the representative run; that report wins. Without
+# a usable manifest the newest `*.report.json` (or legacy `lhr-*.json`) is
+# taken. With a marker file as the second argument only reports written after
+# it count, so a report left over from an earlier audit in the same directory
+# is never mistaken for this run's result.
 find_lighthouse_report() {
 	local dir="$1" marker="${2:-}" newest="" f
+	newest=$(manifest_lighthouse_report "$dir" "$marker")
+	if [[ -n "$newest" ]]; then
+		printf '%s\n' "$newest"
+		return 0
+	fi
 	local -a find_args=("$dir" -type f \( -name "*.report.json" -o -name "lhr-*.json" \))
 	if [[ -n "$marker" ]]; then
 		find_args+=(-newer "$marker")
@@ -162,14 +205,16 @@ parse)
 		fi
 	fi
 
+	# A missing report is its own failure, not a threshold miss: fail here
+	# with an annotation instead of reporting four zero scores.
 	if [[ -z "$RESULTS_PATH" ]] || [[ ! -f "$RESULTS_PATH" ]]; then
-		log_warn "No Lighthouse results found"
 		set_github_output "performance" "0"
 		set_github_output "accessibility" "0"
 		set_github_output "best-practices" "0"
 		set_github_output "seo" "0"
 		set_github_output "passed" "false"
-		exit 0
+		echo "::error title=No Lighthouse report::No Lighthouse results found in ${OUTPUT_DIR} (expected manifest.json and *.report.json from lhci's filesystem upload target)" >&2
+		exit 1
 	fi
 
 	# Parse the results
@@ -205,8 +250,17 @@ summary)
 	: "${THRESHOLD_BEST_PRACTICES:=80}"
 	: "${THRESHOLD_SEO:=80}"
 
+	: "${PARSE_OUTCOME:=success}"
+
 	add_github_summary "## Lighthouse CI Results"
 	add_github_summary ""
+
+	# Parse failed (no report): say so instead of tabling four zero scores.
+	if [[ "$PARSE_OUTCOME" != "success" ]]; then
+		add_github_summary "**Status:** :x: No Lighthouse report was found, so nothing was scored"
+		add_github_summary ""
+		exit 0
+	fi
 
 	if [[ "$PASSED" == "true" ]]; then
 		add_github_summary "**Status:** :white_check_mark: All scores meet thresholds"

@@ -179,9 +179,12 @@ runs:
       run: $SCRIPTS_DIR/ci/actions/run-lighthouse.sh
 
     - name: Generate summary
+      # Also after a failed parse (no report), which the summary then states.
+      if: ${{ !cancelled() && steps.parse.outcome != 'skipped' }}
       shell: bash
       env:
         STEP: summary
+        PARSE_OUTCOME: ${{ steps.parse.outcome }}
         PERFORMANCE: ${{ steps.parse.outputs.performance }}
         ACCESSIBILITY: ${{ steps.parse.outputs.accessibility }}
         BEST_PRACTICES: ${{ steps.parse.outputs.best-practices }}
@@ -208,16 +211,20 @@ runs:
     - name: Check result
       # Thresholds below target, no fresh report, or a non-zero lhci exit
       # (e.g. a failed assertion in the consumer's lighthouserc) all fail.
+      # A missing report already failed Parse results with its own error, so
+      # only a non-zero lhci exit can still bring this step in after it.
       if: >-
-        steps.parse.outputs.passed == 'false'
-        || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0')
+        !cancelled()
+        && ((steps.parse.outcome == 'success' && steps.parse.outputs.passed == 'false')
+        || (steps.run.outputs.exit-code != '' && steps.run.outputs.exit-code != '0'))
       shell: bash
       env:
         FAILED_CATS: ${{ steps.parse.outputs.failed-categories }}
         LHCI_EXIT_CODE: ${{ steps.run.outputs.exit-code }}
         PASSED: ${{ steps.parse.outputs.passed }}
+        PARSE_OUTCOME: ${{ steps.parse.outcome }}
       run: |
-        if [[ "$PASSED" == "false" ]]; then
+        if [[ "$PARSE_OUTCOME" == "success" && "$PASSED" == "false" ]]; then
           echo "::error::Lighthouse audit failed. Categories below threshold: $FAILED_CATS"
         fi
         if [[ -n "$LHCI_EXIT_CODE" && "$LHCI_EXIT_CODE" != "0" ]]; then
