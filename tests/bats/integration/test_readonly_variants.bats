@@ -15,7 +15,9 @@ SYNC="${PROJECT_ROOT}/scripts/ci/workflows/sync-readonly-variants.sh"
 UNION="${PROJECT_ROOT}/scripts/ci/docs/validate-caller-permissions.py"
 VARIANT_MARK="# lgtm-ci-readonly-variant:"
 
-setup() {
+# Only the union and reference tests need Python; the generator tests run
+# without it.
+require_python_yaml() {
 	# PyYAML: system python3 on GitHub-hosted runners, the dev venv locally.
 	PY=""
 	local candidate
@@ -98,6 +100,7 @@ YAML
 }
 
 @test "read-only variants: permission union holds no write scope" {
+	require_python_yaml
 	local facade variant
 	while read -r facade variant; do
 		run "$PY" "$UNION" --union "$variant"
@@ -110,6 +113,7 @@ YAML
 }
 
 @test "read-only variants: no dangling job, needs, output or input reference" {
+	require_python_yaml
 	local facade variant
 	while read -r facade variant; do
 		run "$PY" -c '
@@ -147,7 +151,7 @@ sys.exit(1 if errors else 0)
 	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
 	assert_success
 	assert_output "wrote reusable-demo-run.yml"
-	run grep -c "publish:\|marker:\|lgtm-ci-readonly" "${dir}/reusable-demo-run.yml"
+	run grep -Ec "publish:|marker:|lgtm-ci-readonly" "${dir}/reusable-demo-run.yml"
 	assert_output "0"
 	run grep -x "name: Demo (read-only)" "${dir}/reusable-demo-run.yml"
 	assert_success
@@ -200,6 +204,46 @@ sys.exit(1 if errors else 0)
 	run env WORKFLOWS_DIR="$dir" bash "$SYNC" --check
 	assert_failure
 	assert_output --partial "generated variant without a facade marker: reusable-demo-run.yml"
+}
+
+@test "sync-readonly-variants: renames a double-quoted name inside the quotes" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	sed -i.bak 's/^name: Demo$/name: "Demo"/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_success
+	run grep -x 'name: "Demo (read-only)"' "${dir}/reusable-demo-run.yml"
+	assert_success
+}
+
+@test "sync-readonly-variants: a name it cannot rewrite safely fails" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	sed -i.bak 's/^name: Demo$/name: Demo # facade/' "${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	assert_failure
+	assert_output --partial "cannot rename this name: form"
+	[[ ! -f "${dir}/reusable-demo-run.yml" ]]
+}
+
+@test "sync-readonly-variants: a variant that inherits the marker is rejected, not used as a facade" {
+	local dir="${BATS_TEST_TMPDIR}/wf"
+	mkdir -p "$dir"
+	_write_facade "$dir"
+	# Marker outside every omit region: the variant would carry it too.
+	sed -i.bak '/^# lgtm-ci-readonly-variant:/d' "${dir}/reusable-demo.yml"
+	printf '# lgtm-ci-readonly-variant: reusable-demo-run.yml\n' >>"${dir}/reusable-demo.yml"
+	rm -f "${dir}/reusable-demo.yml.bak"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC"
+	run env WORKFLOWS_DIR="$dir" bash "$SYNC" --check
+	assert_failure
+	assert_output --partial "generated variant carries # lgtm-ci-readonly-variant:"
+	run grep -c "(read-only) (read-only)" "${dir}/reusable-demo-run.yml"
+	assert_output "0"
 }
 
 @test "sync-readonly-variants: rejects unknown arguments" {

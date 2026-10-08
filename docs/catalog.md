@@ -896,7 +896,15 @@ Node.js Vitest Test Workflow (read-only)
 
 **Prerequisites:**
 
-- Same inputs, outputs, artifacts and check names as `reusable-test-node.yml` except `comment-marker`; no PR comment. To publish one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write` and the same `artifact-prefix`
+- Grant the caller job `actions: read` and `contents: read`; the aggregate job's artifact-availability wait needs `actions: read` (#803)
+- Same inputs, outputs and artifacts as `reusable-test-node.yml` without `comment-marker`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
+- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write` and the same `artifact-prefix`
+- Every other prerequisite of `reusable-test-node` applies unchanged: committed lockfile of the selected `package-manager`, Vitest as a project dependency, pnpm version from `packageManager`, egress block mode, distinct `artifact-prefix` per sibling call
+
+**Limitations:**
+
+- Yarn is not supported
+- Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
 
 #### `reusable-test-python-publish`
 

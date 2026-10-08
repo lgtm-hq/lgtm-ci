@@ -136,22 +136,14 @@ pull-requests: write"
 
 # Read-only variants (#1081): the facade's jobs without the publish job, so a
 # caller that only runs tests grants read scopes only. The facade's own union
-# is unchanged; only callers that switch to the variant shed the write scope.
+# is unchanged (pinned by the matrix test-workflow test below); only callers
+# that switch to the variant shed the write scope.
 @test "reusable-test-node-run: caller permission union is pinned" {
 	run _permission_union \
 		"${PROJECT_ROOT}/.github/workflows/reusable-test-node-run.yml"
 	assert_success
 	assert_output "actions: read
 contents: read"
-}
-
-@test "reusable-test-node: facade union is unchanged by the read-only split" {
-	run _permission_union \
-		"${PROJECT_ROOT}/.github/workflows/reusable-test-node.yml"
-	assert_success
-	assert_output "actions: read
-contents: read
-pull-requests: write"
 }
 
 # The two workflows the publishing jobs moved into. Pinning their unions too

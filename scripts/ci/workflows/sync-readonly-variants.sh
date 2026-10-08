@@ -9,20 +9,21 @@
 # GitHub validates the permission union of a reusable workflow before any job
 # `if:` runs, so a caller of a facade that can publish must grant the publish
 # scopes even when it never publishes. A facade opts into a read-only variant
-# with one marker line before its `---`:
-#
-#   # lgtm-ci-readonly-variant: reusable-test-node-run.yml
-#
-# and wraps each mutation-only region (the publish job, inputs only that job
-# reads) in
+# with one marker line, conventionally inside the omit region that holds the
+# facade's own header comment so the variant does not inherit it:
 #
 #   # lgtm-ci-readonly:omit:begin
-#   ...
+#   # lgtm-ci-readonly-variant: reusable-test-node-run.yml
 #   # lgtm-ci-readonly:omit:end
+#
+# and wraps each mutation-only region (the publish job, inputs and env lines
+# only that job needs) in the same begin/end pair. A variant that still
+# carried the marker would be rejected rather than treated as a facade.
 #
 # The variant is the facade with the lines before `---` replaced by the
 # generated header below, the omitted regions dropped and ` (read-only)`
-# appended to the top-level `name:`. Everything else, job ids and job names
+# appended to the first top-level `name:` (plain or double-quoted scalar
+# without a trailing comment; anything else is an error). Everything else, job ids and job names
 # included, is copied verbatim, so the variant reports the same check names
 # under the caller's job id and cannot drift from the facade's behaviour. The
 # facade itself is never rewritten and keeps calling its jobs inline: nesting
@@ -77,11 +78,18 @@ EOF
 			omitting = 0; next
 		}
 		omitting { next }
-		/^name: / { print $0 " (read-only)"; next }
+		/^name: / && !renamed {
+			renamed = 1
+			if ($0 ~ /^name: [^"\047#|>][^#]*[^ #]$/) { print $0 " (read-only)"; next }
+			if ($0 ~ /^name: "[^"#]*"$/) { sub(/"$/, " (read-only)\""); print; next }
+			printf "%s:%d: cannot rename this name: form; use a plain or double-quoted scalar\n", facade, NR > "/dev/stderr"
+			bad = 1; next
+		}
 		{ print }
 		END {
 			if (!started) { printf "%s: no --- document start\n", facade > "/dev/stderr"; bad = 1 }
 			if (omitting) { printf "%s: unterminated %s\n", facade, omit_begin > "/dev/stderr"; bad = 1 }
+			if (!renamed) { printf "%s: no top-level name:\n", facade > "/dev/stderr"; bad = 1 }
 			exit bad
 		}
 	' "$facade"
@@ -91,6 +99,15 @@ status=0
 drifted=()
 expected=()
 for facade in "$WORKFLOWS_DIR"/reusable-*.yml; do
+	if grep -qF "$GENERATED_MARK" "$facade"; then
+		# A generated file is never a facade; one still carrying the marker
+		# means the facade left it outside every omit region.
+		if grep -q "^${VARIANT_MARK}" "$facade"; then
+			echo "$(basename "$facade"): generated variant carries ${VARIANT_MARK}; wrap it in an omit region" >&2
+			status=1
+		fi
+		continue
+	fi
 	variant_name="$(sed -n "s/^${VARIANT_MARK} *//p" "$facade" | head -n 1)"
 	[[ -n "$variant_name" ]] || continue
 	if [[ ! "$variant_name" =~ ^reusable-[A-Za-z0-9._-]+\.yml$ ]]; then

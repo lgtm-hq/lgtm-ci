@@ -137,8 +137,11 @@ on:
         default: "dist"
       publish-test-summary:
         description: >-
-          Publish or update the test summary comment on the pull request for this workflow run (rich
-          coverage table per matrix cell when coverage is enabled)
+          Stage the PR test summary's coverage payload (pull_request runs,
+          single-version, coverage on) and, in reusable-test-node.yml, publish
+          or update the comment (rich coverage table when coverage is
+          enabled). The read-only variant has no publish job and does not
+          reject a node-versions matrix for this input.
         required: false
         type: boolean
         default: true
@@ -425,7 +428,9 @@ jobs:
         env:
           MULTI_VERSIONS: ${{ inputs.node-versions }}
           COVERAGE: ${{ inputs.coverage }}
+          # lgtm-ci-readonly:omit:begin
           PUBLISH_TEST_SUMMARY: ${{ inputs.publish-test-summary }}
+          # lgtm-ci-readonly:omit:end
           PLATFORM: Node.js
         run: >-
           bash .lgtm-ci-tooling/scripts/ci/actions/validate-test-compat-coverage-contract.sh
@@ -703,7 +708,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           # Explicit coverage-artifact-name, else <artifact-prefix>-coverage;
-          # the publish-test-summary job resolves the identical expression (#1091).
+          # the facade's publish-test-summary job resolves the same expression (#1091).
           name: >-
             ${{ inputs.coverage-artifact-name != '' && inputs.coverage-artifact-name
             || format('{0}-coverage', inputs.artifact-prefix) }}

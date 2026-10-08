@@ -231,8 +231,8 @@ needs a matching example edit.
 A facade such as `reusable-test-node.yml` runs its tests and then publishes a
 PR comment. GitHub checks the permission union of the whole file before any
 `if:` runs, so every caller grants `pull-requests: write`, including callers
-that set `publish-test-summary: false`. #1081 adds a generated read-only
-variant next to each facade:
+that set `publish-test-summary: false`. Issue #1081 adds a generated
+read-only variant next to each facade:
 
 <!-- markdownlint-disable MD013 -- wide table -->
 
@@ -256,7 +256,8 @@ break the org rulesets that require them
 To move a call to the variant, change the `uses:` file name and remove
 `pull-requests: write` and `comment-marker`. With the variant,
 `publish-test-summary` only stages the coverage payload the comment would
-use. To keep the comment, call `reusable-publish-test-summary.yml` from a
+use, and a `node-versions` matrix no longer requires it to be `false`. To
+keep the comment, call `reusable-publish-test-summary.yml` from a
 separate job. That job reads the same `<artifact-prefix>-results-*` results.v1
 artifacts (#1080), so the write scope stays in a job that runs no project
 code:
@@ -289,8 +290,17 @@ jobs:
       job-result: ${{ needs.test.outputs.passed == 'true' && 'success' || 'failure' }}
 ```
 
+This posts the plain results table. For the facade's rich coverage comment
+(`coverage: true`, single Node version), also pass what the facade's own
+comment job passes: `coverage-enabled: true`, `rich-coverage-comment: true`,
+`coverage-threshold`, `coverage-artifact-name: node-coverage`
+(`<artifact-prefix>-coverage`), `coverage-file` (`coverage-summary-file`
+under `working-directory`) and `coverage-format: istanbul`. Set
+`results-expected-count` to the number of Node versions so a missing leg
+fails the comment job.
+
 The measured permission, secret and job inventory of the five reusables
-#1081 covers, and the split chosen for each, is in
+that issue #1081 covers, and the split chosen for each, is in
 [reusable-splits.md](reusable-splits.md).
 
 ## Runner pinning
