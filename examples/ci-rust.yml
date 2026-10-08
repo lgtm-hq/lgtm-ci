@@ -24,12 +24,11 @@ concurrency:
 jobs:
   quality:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       contents: read
       packages: read
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "🛠️ Lintro Code Quality"
       egress-policy: block
       # GHCR image pulls resolve layers via pkg-containers.githubusercontent.com;
@@ -54,23 +53,21 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       contents: read
       pull-requests: write
     with:
       exit-code: ${{ needs.quality.outputs.exit-code }}
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
 
   rust-build:
     # Build-only check, separate from tests (contract:
     # "Low-noise Rust and Node checks").
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       contents: read
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "Build Check"
       egress-policy: block
       # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
@@ -93,14 +90,13 @@ jobs:
     # "Compat vs coverage contract"). PR summary posts via the reusable's
     # internal publish-test-summary job.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       # actions: read — the aggregate job's artifact-availability wait (#803)
       actions: read
       contents: read
       pull-requests: write
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       job-name: "Rust Coverage"
       rust-toolchain: stable
       coverage: true

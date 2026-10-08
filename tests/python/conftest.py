@@ -41,8 +41,14 @@ def load_script_module(relative_path: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise ImportError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    # Register before executing: dataclasses resolve string annotations through
+    # sys.modules[cls.__module__] at class-creation time (Python 3.14+).
     sys.modules[name] = module
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        sys.modules.pop(name, None)
+        raise
     return module
 
 
@@ -93,3 +99,47 @@ def install_fixture(
         return dest
 
     return _install
+
+
+PERMISSIONS_VALIDATOR = "scripts/ci/docs/validate-caller-permissions.py"
+
+
+@pytest.fixture(scope="session")
+def permissions_validator() -> ModuleType:
+    """Load ``validate-caller-permissions.py`` once per session."""
+    return load_script_module(PERMISSIONS_VALIDATOR)
+
+
+@pytest.fixture
+def caller_repo(tmp_path: Path) -> Callable[[dict[str, str]], Path]:
+    """Return a builder for a caller-permissions fixture repository.
+
+    The returned callable writes each ``file name: YAML`` pair under
+    ``.github/workflows``, creates empty ``docs/`` and ``examples/``
+    directories, and returns the repository root.
+    """
+
+    def _build(workflows: dict[str, str]) -> Path:
+        workflows_dir = tmp_path / ".github" / "workflows"
+        workflows_dir.mkdir(parents=True)
+        for name, body in workflows.items():
+            (workflows_dir / name).write_text(body, encoding="utf-8")
+        (tmp_path / "docs").mkdir()
+        (tmp_path / "examples").mkdir()
+        return tmp_path
+
+    return _build
+
+
+@pytest.fixture
+# pytest injects the `permissions_validator` fixture by parameter name.
+def run_validator(
+    permissions_validator: ModuleType,  # pylint: disable=redefined-outer-name
+) -> Callable[..., int]:
+    """Return a runner: ``run_validator(repo, *paths)`` gives the exit code."""
+
+    def _run(repo: Path, *paths: str) -> int:
+        code: int = permissions_validator.main(argv=["--repo-root", str(repo), *paths])
+        return code
+
+    return _run

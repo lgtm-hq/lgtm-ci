@@ -235,9 +235,11 @@ production so runner OS does not drift with GitHub's `ubuntu-latest` alias:
 jobs:
   quality:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@<sha>
+    permissions:
+      contents: read
+      packages: read
     with:
       runner-image: ubuntu-24.04
-      tooling-ref: <sha>
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
@@ -1818,6 +1820,11 @@ jobs:
     permissions:
       contents: read
       security-events: write
+      # Declared by the push/sign/attest jobs this call never runs; reusable
+      # permission requests are validated statically, before `if:`.
+      packages: write
+      id-token: write
+      attestations: write
     with:
       file: docker/Dockerfile
       push: false

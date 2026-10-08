@@ -25,19 +25,24 @@ Sample caller layouts for lgtm-hq repositories. Copy and adapt into your
 
 <!-- markdownlint-enable MD013 -->
 
-All starters pin reusable workflow `uses:` refs and `tooling-ref` to the same
-lgtm-ci release commit SHA with a `# vX.Y.Z` comment (see
+All starters pin reusable workflow `uses:` refs to the same lgtm-ci release
+commit SHA with a `# vX.Y.Z` comment (see
 [docs/workflow-contract.md](../docs/workflow-contract.md), "Action pinning
-policy"). Update both together when bumping releases. Releases that include
-issue #995 resolve their own tooling from the `uses:` pin, so `tooling-ref`
-can be dropped once a starter is bumped to one of them; it stays while the pin
-is older.
+policy"); Renovate bumps every example and docs pin together (#808). Releases
+from v0.75.3 resolve their own tooling from the `uses:` pin (#995), so the
+starters pass no `tooling-ref`. Two places keep it, and there it must equal
+the `uses:` SHA: `release-recover.yml`, whose recovery deliberately pins its
+tooling from the default branch, and the direct `prepare-pypi-upload` action
+step in `publish-python-release.yml`, because a composite action cannot read
+its own ref. Every job that calls a reusable workflow carries the exact
+`permissions:` block the workflow declares; CI enforces it with
+`scripts/ci/docs/validate-caller-permissions.py`.
 
 ## Reusable workflows (recommended)
 
 Examples such as `publish-python-release.yml` and
 `release-version-pr-changelog-only.yml` call `lgtm-hq/lgtm-ci` **reusable
-workflows** at a pinned commit SHA and pass `tooling-ref` with the same SHA.
+workflows** at a pinned commit SHA.
 
 You do **not** need to vendor anything for egress hardening: reusables carry
 their allowlist presets as a workflow literal and call

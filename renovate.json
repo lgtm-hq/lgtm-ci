@@ -1,6 +1,19 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
   "extends": ["local>lgtm-hq/.github:renovate-config"],
+  "description": [
+    "ignorePaths overrides Renovate's default list only to drop **/examples/**: the lgtm-ci self-reference manager (#765) must see examples/**, which the default silently excluded (#808). The remaining defaults are kept verbatim.",
+    "**/tests/** stays ignored, so the two tests/bats entries in the harden-runner manager's file patterns are not scanned; lifting that is a separate decision."
+  ],
+  "ignorePaths": [
+    "**/node_modules/**",
+    "**/bower_components/**",
+    "**/vendor/**",
+    "**/__tests__/**",
+    "**/test/**",
+    "**/tests/**",
+    "**/__fixtures__/**"
+  ],
   "customManagers": [
     {
       "customType": "regex",

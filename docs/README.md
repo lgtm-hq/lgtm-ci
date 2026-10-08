@@ -28,6 +28,36 @@ straight to a component index below.
 | [release-changelog.md](release-changelog.md) | Keep a Changelog migration for `reusable-release-version-pr.yml` |
 | [org-rulesets.md](org-rulesets.md) | Org ruleset registry, required check-name contract, sync tooling |
 
+## Documentation conventions
+
+### Caller snippets and permissions
+
+Every YAML snippet that calls a reusable workflow is one of two classes,
+enforced by `scripts/ci/docs/validate-caller-permissions.py` (CI job
+`caller-permissions`):
+
+- **Complete snippets** have a top-level `jobs:` key and are meant to be copied
+  wholesale (`examples/**`, [getting-started.md](getting-started.md),
+  [onboarding.md](onboarding.md), and the full examples in reference docs).
+  Every reusable-workflow call in them carries the exact `permissions:` block
+  the called workflow declares: the union of its job-level and workflow-level
+  blocks (`write` outranks `read`), which GitHub validates statically before
+  any job `if:` runs. Print it with
+  `python3 scripts/ci/docs/validate-caller-permissions.py --union <file>.yml`.
+- **Fragments** have no top-level `jobs:` key and demonstrate inputs, not a
+  whole caller. They may omit `permissions:` only when the prose line directly
+  above the fence marks them non-copyable:
+
+  `*Fragment: permissions omitted for brevity, not copyable as-is. See
+  [Permissions by mode](workflow-contract.md#permissions-by-mode).*`
+
+  An unmarked blockless fragment, or a complete snippet without the block,
+  fails CI. A fragment that does carry a block is checked like a complete one.
+
+Jobs whose steps use `lgtm-hq/lgtm-ci/.github/actions/detect-changes` must
+grant `contents: read` and `pull-requests: read` (#669); the validator derives
+that requirement as well.
+
 ## Versioning
 
 lgtm-ci uses [semantic versioning](https://semver.org/) with

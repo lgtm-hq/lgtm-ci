@@ -15,11 +15,10 @@ concurrency:
 
 jobs:
   version-pr:
-    # Replace both <sha> placeholders with the same pinned commit SHA.
+    # Replace <sha> with a pinned lgtm-ci commit SHA (see docs/onboarding.md).
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@<sha>
     with:
       max-bump: minor
-      tooling-ref: <sha>
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}
       RELEASE_APP_PRIVATE_KEY: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}

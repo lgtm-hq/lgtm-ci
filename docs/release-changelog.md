@@ -21,6 +21,11 @@ jobs:
   version-pr:
     # v0.43.1+ — KAC-aligned changelog generator
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-version-pr.yml@<sha>
+    permissions:
+      contents: write
+      pull-requests: write
+      actions: read
+      issues: write
 ```
 
 ## Heading mapping

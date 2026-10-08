@@ -23,7 +23,7 @@ concurrency:
 jobs:
   docker:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b # v0.59.30
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-docker.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
     permissions:
       contents: read
       packages: write
@@ -31,7 +31,6 @@ jobs:
       attestations: write
       security-events: write
     with:
-      tooling-ref: "cc5b3cc982868fa4c0718d4b26045ca9f56f0f5b" # v0.59.30
       file: Dockerfile
       push: ${{ github.event_name == 'push' }}
       # Split per-platform validation on PRs without QEMU overhead

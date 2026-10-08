@@ -90,8 +90,8 @@ and the [function reference](libraries/reference.md).
 Releases are automated and PR-gated: pushes to `main` with releasable
 commits (`feat:`, `fix:`, etc.) open a release PR; merging it tags the
 release and moves the floating major version tag. Production callers pin
-`uses:` refs **and** `tooling-ref` (on script-backed reusables) to the same
-release commit SHA — see
+`uses:` refs to the release commit SHA (`tooling-ref` is unnecessary from
+v0.75.3, #995; where still passed it must equal the `uses:` SHA) — see
 [onboarding.md](onboarding.md#4-resolve-the-release-commit-sha) for the
 `git ls-remote` / `gh api` commands that resolve a tag to its commit.
 

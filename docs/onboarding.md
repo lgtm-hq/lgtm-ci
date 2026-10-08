@@ -35,12 +35,13 @@ Choose by repository type and copy the example into your repository's
 A typical repository takes one CI example plus, when it releases, the
 version-PR and auto-tag pair.
 
-Most examples pin `uses:` refs and `tooling-ref` to a specific lgtm-ci
-release commit SHA with a `# vX.Y.Z` comment; examples that contain `<sha>`
+Most examples pin `uses:` refs to a specific lgtm-ci release commit SHA with
+a `# vX.Y.Z` comment and pass no `tooling-ref` (releases from v0.75.3 resolve
+their own tooling from the `uses:` pin, #995); examples that contain `<sha>`
 placeholders must be filled in before use. The shipped pin ages; resolve the
 current release SHA (see
 [Resolve the release commit SHA](#4-resolve-the-release-commit-sha)) and
-update both pins together before committing.
+update every `uses:` pin before committing.
 
 ## 2. Prerequisites per capability
 
@@ -217,8 +218,8 @@ hardcodes block and does not accept an `egress-policy` input.
 ## 4. Resolve the release commit SHA
 
 The [action pinning policy](workflow-contract.md#action-pinning-policy)
-requires pinning `uses:` refs and `tooling-ref` to the **release commit
-SHA** with a `# vX.Y.Z` comment — not the tag name and not the annotated tag
+requires pinning `uses:` refs to the **release commit SHA** with a
+`# vX.Y.Z` comment — not the tag name and not the annotated tag
 object SHA. Resolve a release tag to its commit:
 
 ```bash
@@ -240,21 +241,26 @@ prints nothing and the `git/tags/{}` API call fails — in that case the tag
 ref itself already points at the commit, so use
 `git ls-remote https://github.com/lgtm-hq/lgtm-ci refs/tags/vX.Y.Z` or
 `gh api repos/lgtm-hq/lgtm-ci/git/ref/tags/vX.Y.Z --jq '.object.sha'`
-directly. Use the commit SHA in both places, always together:
+directly. Use the commit SHA on every `uses:` line:
+
+*Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](workflow-contract.md#permissions-by-mode).*
 
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
 ```yaml
-uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@d32388495d571a0ee13383bacc732765bf4e9e7d  # v0.74.6
-with:
-  tooling-ref: "d32388495d571a0ee13383bacc732765bf4e9e7d"  # v0.74.6
+uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
 ```
 
 <!-- markdownlint-enable MD013 -->
 
+`tooling-ref` is only needed on pins older than v0.75.3, in
+`release-recover.yml`, and on the direct `prepare-pypi-upload` action step;
+where it is passed it must equal the `uses:` SHA.
+
 **Repinning** to a newer release is the same procedure: resolve the new tag,
-replace every `uses:` SHA and `tooling-ref` value plus their `# vX.Y.Z`
-comments in one commit. A mismatched pair (workflow at one release, scripts
+replace every `uses:` SHA (and any `tooling-ref` still passed) plus their
+`# vX.Y.Z` comments in one commit. A mismatched pair (workflow at one release, scripts
 at another) is the most common source of drift bugs.
 
 ## 5. Align org ruleset check names
@@ -270,7 +276,8 @@ Ruleset documentation and sync tooling are tracked in
 ## First green build checklist
 
 - [ ] Starter example copied and `on:` triggers match your branch layout
-- [ ] `uses:` SHA and `tooling-ref` repinned to the current release (step 4)
+- [ ] `uses:` SHA repinned to the current release (step 4); `tooling-ref` only
+      where still required
 - [ ] Release repos: GitHub App installed, `RELEASE_APP_ID` and
       `RELEASE_APP_PRIVATE_KEY` secrets set (step 2)
 - [ ] Release repos: App holds `Workflows: Read and write`, and the

@@ -43,6 +43,9 @@ Use `rust-toolchains` (comma-separated) for multi-toolchain compat checks
 (MSRV, stable, beta). Compat matrix runs require `coverage: false` and
 `publish-test-summary: false`. Use `rust-toolchain` for single-toolchain coverage and PR comments.
 
+*Fragment: permissions omitted for brevity, not copyable as-is. See
+[Permissions by mode](workflow-contract.md#permissions-by-mode).*
+
 ```yaml
 rust-compat:
   uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
@@ -62,7 +65,6 @@ jobs:
   rust-test:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     with:
-      tooling-ref: "<sha>"
       job-name: "Rust Tests"
       coverage: false
       egress-policy: block
@@ -76,13 +78,14 @@ jobs:
         static.crates.io:443
         index.crates.io:443
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
 
   rust-coverage:
     uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@<sha>
     with:
-      tooling-ref: "<sha>"
       job-name: "Rust Coverage"
       coverage: true
       upload-pages-coverage-html: true
@@ -98,6 +101,8 @@ jobs:
         static.crates.io:443
         index.crates.io:443
     permissions:
+      # actions: read — the aggregate job's artifact-availability wait (#803)
+      actions: read
       contents: read
       pull-requests: write
 ```
