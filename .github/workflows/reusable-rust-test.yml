@@ -539,9 +539,13 @@ jobs:
           JUNIT_FILE: target/nextest/ci/junit.xml
           LCOV_FILE: rust-coverage.lcov
           COVERAGE_ENABLED: ${{ inputs.coverage }}
+          # Parenthesised as a whole: && binds tighter than ||, so without
+          # the outer group the nextest path would yield `true`, not '0'.
           EXIT_CODE: >-
-            ${{ (!inputs.coverage && steps.run-nextest.outcome == 'success')
-            || (inputs.coverage && steps.run-coverage.outcome == 'success') && '0' || '1' }}
+            ${{ (
+              (!inputs.coverage && steps.run-nextest.outcome == 'success')
+              || (inputs.coverage && steps.run-coverage.outcome == 'success')
+            ) && '0' || '1' }}
           MATRIX_KEY: rust-toolchain
           MATRIX_VALUE: ${{ matrix.rust-toolchain }}
           RESULTS_SOURCE_VERSION: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}

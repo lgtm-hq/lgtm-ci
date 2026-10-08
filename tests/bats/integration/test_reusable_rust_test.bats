@@ -168,3 +168,18 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-rust-test.yml"
 	run grep -E 'group: *rust-test-' "$WORKFLOW"
 	assert_failure
 }
+
+# The results.v1 exit code (#1080) must be exactly '0' or '1': `&&` binds
+# tighter than `||`, so an ungrouped `A || B && '0' || '1'` yields `true` on
+# the nextest path, which the contract reads as a failed leg.
+@test "reusable-rust-test: results.v1 EXIT_CODE groups both run paths before the ternary" {
+	run awk '
+		/^  test:/ { in_job = 1 }
+		/^  [a-zA-Z0-9_-]+:/ && !/^  test:/ { in_job = 0 }
+		in_job && /EXIT_CODE: >-/ { want = 1; next }
+		want && /^ *\$\{\{ \($/ { opened = 1 }
+		want && /^ *\) && .0. \|\| .1. \}\}$/ { closed = 1; want = 0 }
+		END { exit !(opened && closed) }
+	' "$WORKFLOW"
+	assert_success
+}
