@@ -322,6 +322,10 @@ takes `artifact-prefix` (default `rust`; `<artifact-prefix>-coverage-lcov`,
 reusables — see
 [Calling a language test reusable twice in one run](../reusable-workflows.md#calling-a-language-test-reusable-twice-in-one-run-1091).
 
+`reusable-rust-test-run.yml` is its read-only variant: the same jobs without
+the PR comment job, granting `actions: read` and `contents: read` only (#1081,
+see [Read-only variants](../reusable-workflows.md#read-only-variants)).
+
 ## Coverage
 
 `reusable-coverage.yml` unifies coverage collection (auto-detects format),

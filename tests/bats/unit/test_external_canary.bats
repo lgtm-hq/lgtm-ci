@@ -255,7 +255,7 @@ call_fn() {
 	for wf in python.yml node-bun.yml node-npm.yml node-pnpm.yml rust.yml siblings.yml retry.yml \
 		egress.yml perms.yml actions-direct.yml coverage-lcov.yml playwright.yml \
 		build-python-direct.yml vuln-suppression.yml rust-build-siblings.yml \
-		python-private-dep.yml verify-fresh-install.yml rust-release-build.yml readonly-node.yml; do
+		python-private-dep.yml verify-fresh-install.yml rust-release-build.yml readonly-node.yml readonly-shell.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_success
 		assert_output "$(printf 'gate\tsuccess')"
@@ -268,7 +268,7 @@ call_fn() {
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "for g in \$CANARY_EXPECTED_GATES; do classify_workflow \"\$g.yml\" | cut -f1; done | sort -u"
 	assert_output "gate"
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | wc -l | tr -d ' '"
-	assert_output "19"
+	assert_output "20"
 }
 
 @test "external-canary: App-token, SBOM and negative-probe paths are informational expecting success" {
@@ -286,7 +286,7 @@ call_fn() {
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tfailure')"
 	done
-	for wf in perms-negative.yml perms-negative-node.yml perms-negative-shell.yml; do
+	for wf in perms-negative.yml perms-negative-node.yml perms-negative-shell.yml perms-negative-rust.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tstartup_failure')"
 	done

@@ -87,8 +87,8 @@ on:
       # lgtm-ci-readonly:omit:end
       comment-marker:
         description: >-
-          Upsert marker for the shell test summary comment; also the leg
-          suffix of the sharded artifact names
+          Leg suffix of the sharded artifact names; in reusable-test-shell.yml
+          also the upsert marker of the shell test summary comment
         required: false
         type: string
         default: "shell-test-results"
