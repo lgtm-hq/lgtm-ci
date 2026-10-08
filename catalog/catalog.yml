@@ -1,0 +1,1775 @@
+# SPDX-License-Identifier: MIT
+# Support-tier catalog of every public reusable workflow and composite action (#1079).
+#
+# One entry per .github/workflows/reusable-*.yml and .github/actions/*/action.yml.
+# Checked by scripts/ci/catalog/validate.py (CI job "Support Catalog"); docs/catalog.md
+# and the README index are generated from it: scripts/ci/catalog/render.py --write.
+#
+# Field rules (enforced by the validator):
+#   tier         stable | preview | internal | deprecated
+#   reason       one line; required for non-stable tiers, rejected on stable
+#   evidence     required for stable: fixture workflow file, the lgtm-ci commit the
+#                run was pinned to (an ancestor of this commit) and the green run URL
+#   permissions  workflows: exactly the caller-facing union printed by
+#                scripts/ci/docs/validate-caller-permissions.py --union <file>;
+#                actions: the calling job's GITHUB_TOKEN scopes (a superset of any
+#                requirement that validator derives, e.g. detect-changes)
+#   runners      workflows: includes every default runner the jobs resolve to
+#   check-names  workflows: callee job names with input defaults applied, in job
+#                order; GitHub prefixes the caller job name and appends matrix values
+#   replacement  deprecated only: id of the entry to migrate to
+#   results      optional: the results.v1 document the entry uploads (#1080)
+---
+schema-version: 1
+fixture-repository: TurboCoder13/lgtm-ci-consumer-fixture
+
+entries:
+  - id: reusable-ai-review
+    kind: reusable-workflow
+    tier: internal
+    reason: "Org AI review posting as the lgtm-hq `lintro-review` GitHub App"
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    runners: [ubuntu-24.04]
+    package-managers: [uv]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "AI Review"
+
+  - id: reusable-auto-rerun-on-infra-failure
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; starter in `examples/` but never run from outside the org"
+    permissions:
+      actions: write
+      checks: read
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Re-run failed jobs on infra failure"
+
+  - id: reusable-build-artifact
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; generic multi-toolchain build matrix"
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Prepare Build Matrix"
+      - "Build"
+
+  - id: reusable-build-python-dist
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; PyPI dist build with attestations; only the direct
+              `build-python-package` path is proven"
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    runners: [ubuntu-24.04]
+    package-managers: [uv]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Build Python distribution"
+
+  - id: reusable-build-rust-binaries
+    kind: reusable-workflow
+    tier: preview
+    reason: "Green from the fixture's dispatch-only `rust-release-build.yml` (Linux and
+              windows-latest legs) but outside the initial stable set"
+    evidence:
+      fixture: rust-release-build.yml
+      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756155710
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    runners: [ubuntu-24.04]
+    package-managers: [cargo]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Rust binaries (${{ matrix.target }})"
+
+  - id: reusable-codeql
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; runs on `ubuntu-latest`"
+    permissions:
+      contents: read
+      security-events: write
+    runners: [ubuntu-latest]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Setup CodeQL matrix"
+      - "CodeQL"
+
+  - id: reusable-coverage
+    kind: reusable-workflow
+    tier: stable
+    evidence:
+      fixture: coverage-lcov.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062463
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact
+              `<coverage-artifact-name>-results`"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions; GitHub validates the union
+          statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)"
+      - "Upload coverage as workflow artifacts in the same run before calling; the default
+          `coverage-files` pattern matches the fixture's `node-lcov-coverage` artifact"
+    limitations:
+      - "Line-only LCOV is kept as LCOV and branches/functions render `n/a`; an output format no
+          converter implements fails with `unsupported coverage conversion` instead of passing
+          silently (#1078)"
+      - "`publish-pages` and badge generation are untested from the fixture"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+    check-names:
+      - "Coverage"
+      - "Publish test summary / Publish test summary"
+
+  - id: reusable-dependency-review
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; pull_request-only gate"
+    permissions:
+      contents: read
+      pull-requests: read
+    runners: [ubuntu-latest]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Dependency Review"
+
+  - id: reusable-deploy-pages
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; Pages deployment needs a Pages-enabled fixture"
+    permissions:
+      contents: read
+      id-token: write
+      pages: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Deploy to GitHub Pages"
+
+  - id: reusable-deploy-site-with-reports
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; Pages deployment needs a Pages-enabled fixture"
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      pages: write
+    runners: [ubuntu-24.04]
+    package-managers: [bun, npm, pnpm]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Build site and bundle reports"
+      - "Deploy to GitHub Pages"
+
+  - id: reusable-docker
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; image build and push need a registry the fixture owns"
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+      security-events: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Classify Platforms"
+      - "Docker build / Build and Push"
+      - "Docker build / Vulnerability Scan"
+      - "Docker multi-platform / Docker build per platform"
+      - "Docker multi-platform / Docker verify per platform"
+      - "Docker multi-platform / Docker health check per platform"
+      - "Docker multi-platform / Merge Manifests"
+      - "Docker multi-platform / Validation Summary"
+      - "Docker multi-platform / Vulnerability Scan"
+
+  - id: reusable-docker-build
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; image build and push need a registry the fixture owns"
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+      security-events: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Build and Push"
+      - "Vulnerability Scan"
+
+  - id: reusable-docker-multiplatform
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; multi-platform build needs arm64 runners and a registry"
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      packages: write
+      security-events: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Docker build per platform"
+      - "Docker verify per platform"
+      - "Docker health check per platform"
+      - "Merge Manifests"
+      - "Validation Summary"
+      - "Vulnerability Scan"
+
+  - id: reusable-docker-smoke-test
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; needs a published image"
+    permissions:
+      contents: read
+      packages: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Docker Smoke Test"
+
+  - id: reusable-ghcr-cleanup
+    kind: reusable-workflow
+    tier: internal
+    reason: "Prunes lgtm-hq GHCR packages"
+    permissions:
+      contents: read
+      packages: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Clean Untagged Images"
+
+  - id: reusable-github-release
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; release-creation path; an issue #1079 stable candidate
+              awaiting its fixture run"
+    permissions:
+      contents: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Create GitHub Release"
+
+  - id: reusable-link-check
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Link Check"
+      - "Publish link-check report / Publish link-check report"
+
+  - id: reusable-main-failure-notifier
+    kind: reusable-workflow
+    tier: internal
+    reason: "Opens lgtm-hq failure issues for lgtm-ci's own `main`"
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Report main workflow failure"
+
+  - id: reusable-pr-auto-assign
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; pull_request-only"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "PR Auto Assign"
+
+  - id: reusable-pr-labeler
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; pull_request-only"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-latest]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "PR Labeler"
+
+  - id: reusable-prune-build-staging-tags
+    kind: reusable-workflow
+    tier: internal
+    reason: "Prunes lgtm-hq GHCR build-staging tags"
+    permissions:
+      contents: read
+      packages: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Prune Build Staging Tags"
+
+  - id: reusable-publish-artifact-preview
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; PR publisher"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish artifact preview"
+
+  - id: reusable-publish-artifact-report
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; PR publisher; only exercised nested inside other
+              reusables"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish artifact report"
+
+  - id: reusable-publish-file-breakdown
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; PR publisher"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish file breakdown"
+
+  - id: reusable-publish-gem
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; RubyGems trusted publishing"
+    permissions:
+      contents: read
+      id-token: write
+    runners: [ubuntu-latest]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish to RubyGems"
+
+  - id: reusable-publish-npm
+    kind: reusable-workflow
+    tier: deprecated
+    reason: "Wrapper kept as a migration shim; it emits a deprecation notice and calls
+              `reusable-publish-npm-set.yml`"
+    replacement: reusable-publish-npm-set
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Deprecation notice"
+      - "Publish to npm (deprecated wrapper) / Publish to npm (deprecated wrapper)"
+
+  - id: reusable-publish-npm-set
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; npm trusted publishing needs a registry package the
+              fixture owns"
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish npm package set"
+
+  - id: reusable-publish-quality-summary
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; PR publisher; skipped on the fixture's push runs"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish quality summary"
+
+  - id: reusable-publish-rust-release
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; tag-triggered release; builds on
+              `reusable-build-rust-binaries.yml` (preview, fixture-green at `ea934b16`)"
+    permissions:
+      attestations: write
+      contents: write
+      id-token: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Verify release tag"
+      - "Build release binaries / Rust binaries (${{ matrix.target }})"
+      - "Create GitHub release"
+
+  - id: reusable-publish-security-audit-comment
+    kind: reusable-workflow
+    tier: preview
+    reason: "Fixture-green at the #1109 head `ae41597c` only (`security-audit.yml`); no run at a
+              `main` commit yet"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish security audit comment"
+
+  - id: reusable-publish-test-results-pages
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; Pages deployment needs a Pages-enabled fixture"
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      pages: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish Test Results"
+
+  - id: reusable-publish-test-summary
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; only exercised nested inside the stable test reusables, on
+              `pull_request`"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish test summary"
+
+  - id: reusable-quality-lint
+    kind: reusable-workflow
+    tier: preview
+    reason: "Green from the fixture's verbatim Python starter (`starter-python.yml`) but outside the
+              initial stable set; the PR summary path (`reusable-publish-quality-summary.yml`) is
+              skipped on push"
+    evidence:
+      fixture: starter-python.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770063208
+    permissions:
+      contents: read
+      packages: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "🛠️ Lintro Code Quality"
+
+  - id: reusable-registry-health-check
+    kind: reusable-workflow
+    tier: internal
+    reason: "Checks lgtm-hq registry pins"
+    permissions:
+      contents: read
+      issues: write
+      packages: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Registry Health Check"
+      - "Open Registry Health Issue"
+
+  - id: reusable-release-auto-tag
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; tag mutation path"
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Create Release"
+      - "Report release automation failure"
+
+  - id: reusable-release-failure-notifier
+    kind: reusable-workflow
+    tier: internal
+    reason: "Opens lgtm-hq release-failure issues"
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Report release tag publish outcome"
+
+  - id: reusable-release-multi-ecosystem
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; multi-manifest variant of the version PR"
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Prepare version update hook"
+      - "Run version update hook"
+      - "Create Version PR"
+      - "Report release automation failure"
+
+  - id: reusable-release-recover
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; recovery of a partially published release"
+    permissions:
+      actions: read
+      attestations: write
+      contents: write
+      id-token: write
+      issues: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Resolve tag, artifacts, and channels"
+      - "Resume npm channel"
+      - "Resume GitHub Release channel"
+      - "Re-dispatch Homebrew"
+      - "Record recovery outcome"
+
+  - id: reusable-release-version-pr
+    kind: reusable-workflow
+    tier: stable
+    evidence:
+      fixture: release-version-pr.yml
+      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756143865
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions; GitHub validates the union
+          statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)"
+      - "A GitHub App installed on the caller repository only, with Contents, Pull requests, Issues
+          and Workflows read & write; forward `RELEASE_APP_ID` and `RELEASE_APP_PRIVATE_KEY`
+          explicitly (no `secrets: inherit`). The minted token is scoped to the caller repository
+          (#849, fixture `app-token-probe.yml`)"
+      - "A baseline version tag; the bump is computed from conventional commits after it"
+      - "`CHANGELOG.md` is created with a Keep a Changelog header when absent (#1092); the PyPI
+          hosts the python updater needs are part of the job's allowlist (#1093)"
+      - "A `version-update-script` runs in its own job with no token and a read-only tooling
+          checkout; its edits reach the version PR through a scope-checked diff artifact (#849)"
+    limitations:
+      - "Proven with `ecosystems: python` only; the other ecosystems have no fixture run"
+      - "Stable covers calls without `version-update-script`. The hook path FAILS at `ea934b16`
+          (fixture `release-benign-hook.yml`, run 37756136378): the hook job's `git add` exits 1 when
+          the consumer's `.gitignore` lists `.lgtm-ci-tooling`. It was last green at the #1097 head
+          `2339aa8a`"
+      - "`uv` is absent on ubuntu-24.04, so `uv.lock` is rewritten by the tomlkit fallback (`[WARN]
+          uv not found`)"
+      - "Skips when a version PR is already open; close it before dispatching again"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+    check-names:
+      - "Prepare version update hook"
+      - "Run version update hook"
+      - "Create Version PR"
+      - "Report release automation failure"
+
+  - id: reusable-required-check
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "${{ inputs.job-name }}"
+
+  - id: reusable-rust-build
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; wrapper over `reusable-test-rust-build.yml` with a fixed
+              job name"
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "build / Rust Build"
+
+  - id: reusable-rust-test
+    kind: reusable-workflow
+    tier: stable
+    evidence:
+      fixture: rust.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062859
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact
+              `<prefix>-results-<rust-toolchain>`"
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: [cargo]
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions; GitHub validates the union
+          statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)"
+      - "`actions: read` is required by the aggregate job's artifact-availability wait (#803)"
+      - "Ship `.config/nextest.toml` with a `ci` profile writing JUnit to `junit.xml` (path relative
+          to nextest's store dir); without it nextest fails with `profile 'ci' not found`. Starter:
+          `examples/nextest-ci.toml` (#1086)"
+      - "cargo-nextest and cargo-llvm-cov are installed from releases verified against committed
+          sha256 digests (#1096)"
+      - "Egress is enforced in block mode; hosts outside the selected `egress-preset` go in
+          `allowed-endpoints` with `allowed-endpoints-mode: append` (#913, fixture `egress.yml`)"
+      - "Sibling calls in one run need distinct `artifact-prefix` values (#1091, fixture
+          `siblings.yml`)"
+    limitations:
+      - "No bundled fallback nextest profile: a consumer without `.config/nextest.toml` fails (#1086
+          item 3 not done)"
+      - "Fixture proves both `coverage: false` and `coverage: true` calls; Pages coverage upload is
+          untested"
+      - "A cached `~/.cargo/bin` at the pinned version is reused without re-verifying its digest;
+          the cache is scoped to the consumer repository and ref (#1096)"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+    check-names:
+      - "Prepare Rust Matrix"
+      - "Rust Tests"
+      - "Aggregate Rust Results"
+      - "publish-test-summary / Publish test summary"
+
+  - id: reusable-sbom
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; the SBOM upload fixture fakes this workflow's artifact"
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+      security-events: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Validate SBOM inputs"
+      - "SBOM & Supply Chain"
+
+  - id: reusable-sbom-release-upload
+    kind: reusable-workflow
+    tier: stable
+    evidence:
+      fixture: sbom-release-upload.yml
+      last-green: ea934b166217e13f0b2a56e62b724d8649c02061
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37756163922
+    permissions:
+      contents: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions; GitHub validates the union
+          statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)"
+      - "The release for `release-tag` exists and the run carries the SBOM artifact named
+          `artifact-name` (the shape `reusable-sbom.yml` leaves in `release-assets` mode)"
+    limitations:
+      - "Uploads with `github.token`; GitHub does not trigger workflows from events that token
+          causes"
+      - "`reusable-sbom.yml` itself has no fixture run; the fixture fakes its artifact"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+    check-names:
+      - "Upload SBOM release assets"
+
+  - id: reusable-scorecards
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; OpenSSF Scorecard needs a public default branch run"
+    permissions:
+      contents: read
+      id-token: write
+      security-events: write
+    runners: [ubuntu-latest]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "OpenSSF Scorecard"
+
+  - id: reusable-security-audit
+    kind: reusable-workflow
+    tier: preview
+    reason: "Fixture-green at the #1109 head `ae41597c` only (`security-audit.yml`); no run at a
+              `main` commit yet"
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact
+              `results-artifact-name` (default `security-audit-results`)"
+    permissions:
+      contents: read
+      packages: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Security Audit"
+
+  - id: reusable-semantic-pr-title
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; pull_request-only"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-latest]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Semantic PR Title"
+
+  - id: reusable-site-quality
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: [bun, npm, pnpm]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Build and check documentation site"
+      - "Test documentation site"
+      - "publish-test-summary / Publish test summary"
+
+  - id: reusable-test-e2e
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; single-project Playwright runner;
+              `reusable-test-e2e-playwright.yml` is the proven path"
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: [bun, npm, pnpm]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "E2E Tests"
+
+  - id: reusable-test-e2e-matrix
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; sharded Playwright matrix"
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: [bun, npm, pnpm]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Setup Matrix"
+      - "E2E tests"
+      - "Merge Reports"
+
+  - id: reusable-test-e2e-playwright
+    kind: reusable-workflow
+    tier: stable
+    evidence:
+      fixture: playwright.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062637
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact
+              `results-artifact-name` (default `playwright-results-<run_id>`)"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: [bun]
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions; GitHub validates the union
+          statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)"
+      - "Under `egress-policy: block`, append `azure.archive.ubuntu.com:80
+          storage.googleapis.com:443` (`allowed-endpoints-mode: append`): the `playwright` preset
+          lacks the runner apt mirror and the Chrome-for-Testing redirect host, so `playwright install
+          --with-deps` is refused (#1103)"
+      - "Set `upload-report-when: always` to keep the HTML report on green runs (#804)"
+    limitations:
+      - "Proven with `package-manager: bun` only; npm and pnpm are accepted but have no fixture run"
+      - "The failure path is covered by the dispatch-only `playwright-negative.yml` (the HTML report
+          is present in the failure artifact since #1104)"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+    check-names:
+      - "${{ inputs.job-name }}"
+      - "publish-test-summary / Publish test summary"
+
+  - id: reusable-test-node
+    kind: reusable-workflow
+    tier: stable
+    evidence:
+      fixture: node-bun.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062303
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact
+              `<prefix>-results-<node-version>`"
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: [bun, npm, pnpm]
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions; GitHub validates the union
+          statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)"
+      - "`actions: read` is required by the aggregate job's artifact-availability wait (#803)"
+      - "Commit the lockfile of the selected `package-manager` (`bun.lock`, `package-lock.json` or
+          `pnpm-lock.yaml`); installs are frozen and the fixture asserts the lockfile is untouched
+          (#1077)"
+      - "pnpm takes its version from the project's `packageManager` field (fixture `node-pnpm.yml`)"
+      - "Vitest must be a project dependency: it runs through the manager's no-install exec (`bun x
+          --no-install`, `npx --no-install`, `pnpm exec`)"
+      - "Egress is enforced in block mode; hosts outside the selected `egress-preset` go in
+          `allowed-endpoints` with `allowed-endpoints-mode: append` (#913, fixture `egress.yml`)"
+      - "Sibling calls in one run need distinct `artifact-prefix` values (#1091, fixture
+          `siblings.yml`)"
+    limitations:
+      - "npm and pnpm are proven by `node-npm.yml` and `node-pnpm.yml` at the same pin; yarn is not
+          supported"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+    check-names:
+      - "Prepare Node Matrix"
+      - "Node.js Tests"
+      - "Pages coverage upload status"
+      - "Aggregate Node.js Results"
+      - "publish-test-summary / Publish test summary"
+
+  - id: reusable-test-node-custom
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; custom test command variant of `reusable-test-node.yml`"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: [bun, npm, pnpm]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Prepare Node Matrix"
+      - "Node.js Tests"
+      - "Aggregate Node.js Results"
+      - "Pages coverage upload status"
+      - "publish-test-summary / Publish test summary"
+
+  - id: reusable-test-node-publish
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; Pages publisher"
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      pages: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish Results"
+
+  - id: reusable-test-python
+    kind: reusable-workflow
+    tier: stable
+    evidence:
+      fixture: python.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770062309
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact
+              `<prefix>-results-<python-version>`"
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: [uv]
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions; GitHub validates the union
+          statically and a smaller block is a `startup_failure` (#735, fixture `perms-negative.yml`)"
+      - "`actions: read` is required by the aggregate job's artifact-availability wait (#803)"
+      - "Commit a current `uv.lock`: dependencies install with `uv sync --frozen`, so a stale lock
+          is installed verbatim and never re-resolved; a `pyproject.toml` without `uv.lock` gets one
+          warned `uv lock` (#1021)"
+      - "Egress is enforced in block mode; hosts outside the selected `egress-preset` go in
+          `allowed-endpoints` with `allowed-endpoints-mode: append` (#913, fixture `egress.yml`)"
+      - "Sibling calls in one run need distinct `artifact-prefix` values (#1091, fixture
+          `siblings.yml`)"
+    limitations:
+      - "private git dependencies in installed groups require the explicit GIT_DEPS_TOKEN secret;
+          uv.lock must be committed and current (frozen installs); see #1021"
+      - "`gh run rerun --job` on a reusable-call job re-runs every job of the caller run;
+          convergence onto the same artifact names is proven (fixture `retry.yml`,
+          `scripts/rerun-sibling.sh`), an isolated sibling re-run is not"
+      - "The PR test-summary comment path was last exercised from the fixture on `pull_request`
+          before the current pin; push runs skip it"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+    check-names:
+      - "Prepare Python Matrix"
+      - "Python Tests"
+      - "Aggregate Python Results"
+      - "publish-test-summary / Publish test summary"
+
+  - id: reusable-test-python-publish
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; Pages publisher"
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      pages: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Publish Results"
+
+  - id: reusable-test-rust-build
+    kind: reusable-workflow
+    tier: preview
+    reason: "Green from the fixture's `rust-build-siblings.yml` (two sibling calls with distinct
+              `concurrency-scope`) but outside the initial stable set"
+    evidence:
+      fixture: rust-build-siblings.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061949
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: [cargo]
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Rust Build"
+
+  - id: reusable-test-shell
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet; lgtm-ci's own BATS suite is its only caller"
+    results: "`results.v1` document (`schemas/results.v1.json`, #1080) in artifact `<prefix>-results`
+              (single and sharded path)"
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations:
+      - "The sharded check only appears with `coverage: true` and `coverage-shards` above 1; GitHub
+          expands the listed template per leg, e.g. `Shell Tests (shard 1/4)`"
+    check-names:
+      - "Shell Tests"
+      - "Coverage shard matrix"
+      - "${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})"
+      - "publish-test-summary / Publish test summary"
+
+  - id: reusable-validate
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Validation"
+      - "Publish validation report / Publish validation report"
+
+  - id: reusable-validate-action-pinning
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Validate Action Pinning"
+
+  - id: reusable-validate-lintro-version
+    kind: reusable-workflow
+    tier: internal
+    reason: "Keeps lgtm-hq py-lintro pins in sync"
+    permissions:
+      contents: read
+      packages: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Validate Lintro Version"
+
+  - id: reusable-vuln-suppression-check
+    kind: reusable-workflow
+    tier: preview
+    reason: "The scan path is green from the fixture (`vuln-suppression.yml`); the cleanup-PR
+              mutation path has no external run"
+    evidence:
+      fixture: vuln-suppression.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061794
+    permissions:
+      contents: write
+      pull-requests: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations: []
+    check-names:
+      - "Check Vulnerability Suppressions"
+
+  - id: attest-build
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      attestations: write
+      contents: read
+      id-token: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: build-docker
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      packages: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: build-python-package
+    kind: composite-action
+    tier: preview
+    reason: "The direct build path is green from the fixture (`build-python-direct.yml`) but outside
+              the initial stable set; tag preflight needs `fetch-depth: 0` (#1087)"
+    evidence:
+      fixture: build-python-direct.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061099
+    permissions:
+      contents: read
+    runners: []
+    package-managers: [uv]
+    prerequisites: []
+    limitations: []
+
+  - id: bundle-workflow-artifacts
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      actions: read
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: calculate-version
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: check-coverage-threshold
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: checkout-and-harden
+    kind: composite-action
+    tier: internal
+    reason: "Preamble of every reusable; not an egress boundary and not for direct use"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: collect-coverage
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: create-github-release
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: create-release-tag
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: create-signed-commit
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: deploy-pages
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      actions: write
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: detect-changes
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      pull-requests: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: docker-auth
+    kind: composite-action
+    tier: internal
+    reason: "Registry login step shared by the Docker reusables"
+    permissions:
+      contents: read
+      packages: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: docker-login
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      packages: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: egress-audit
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: generate-changelog
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: generate-coverage-badge
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: generate-coverage-comment
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: generate-lighthouse-comment
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: generate-playwright-comment
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: generate-sbom
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: merge-playwright-reports
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: notify-discord
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: notify-slack
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: post-pr-comment
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      pull-requests: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: prepare-pypi-upload
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      id-token: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: publish-gem
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      id-token: write
+    runners: []
+    package-managers: [bundler]
+    prerequisites: []
+    limitations: []
+
+  - id: publish-test-results
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      actions: write
+      contents: read
+      id-token: write
+      pages: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: run-lighthouse
+    kind: composite-action
+    tier: stable
+    evidence:
+      fixture: actions-direct.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: [npm, bun, pnpm]
+    prerequisites:
+      - "Check out the caller repository first; the action resolves lgtm-ci scripts from its own
+          path (#1075)"
+      - "Pass `package-manager` (no default) and `url`; `@lhci/cli` must be a project dependency"
+    limitations:
+      - "The direct path is proven with `npm` only (fixture `actions-direct.yml`)"
+      - "Runs without its own harden-runner step; egress policy is the calling job's responsibility"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+
+  - id: run-playwright
+    kind: composite-action
+    tier: stable
+    evidence:
+      fixture: actions-direct.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: [npm, bun, pnpm]
+    prerequisites:
+      - "Check out the caller repository first; the action resolves lgtm-ci scripts from its own
+          path (#1075)"
+      - "Pass `package-manager` (no default); browsers are installed by the action"
+    limitations:
+      - "The direct path is proven with `bun` only (fixture `actions-direct.yml`)"
+      - "Runs without its own harden-runner step; egress policy is the calling job's responsibility"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+
+  - id: run-pytest
+    kind: composite-action
+    tier: stable
+    evidence:
+      fixture: actions-direct.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: [uv]
+    prerequisites:
+      - "Check out the caller repository first; the action resolves lgtm-ci scripts from its own
+          path (#1075)"
+      - "Python project with a committed `uv.lock`; installs with `uv sync --frozen` (#1021)"
+    limitations:
+      - "The direct path is proven with `uv` only (fixture `actions-direct.yml`)"
+      - "Runs without its own harden-runner step; egress policy is the calling job's responsibility"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+
+  - id: run-quality
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      packages: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: run-tests
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: run-vitest
+    kind: composite-action
+    tier: stable
+    evidence:
+      fixture: actions-direct.yml
+      last-green: 5185136b26b9cb76bcb77d9390ed8c57cfbcb191
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37770061230
+    permissions:
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: [npm, bun, pnpm]
+    prerequisites:
+      - "Check out the caller repository first; the action resolves lgtm-ci scripts from its own
+          path (#1075)"
+      - "Pass `package-manager` (no default); Vitest must be a project dependency"
+    limitations:
+      - "The direct path is proven with `npm` only (fixture `actions-direct.yml`)"
+      - "Runs without its own harden-runner step; egress policy is the calling job's responsibility"
+      - "Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested
+          (#1074)"
+
+  - id: scan-vulnerabilities
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: secure-checkout
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: setup-env
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: setup-node
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: [bun, npm, pnpm]
+    prerequisites: []
+    limitations: []
+
+  - id: setup-python
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: [uv]
+    prerequisites: []
+    limitations: []
+
+  - id: setup-ruby
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: [bundler]
+    prerequisites: []
+    limitations: []
+
+  - id: setup-rust
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: [cargo]
+    prerequisites: []
+    limitations: []
+
+  - id: sign-artifact
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+      id-token: write
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: trigger-homebrew-update
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: validate-action-pinning
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: validate-package
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: validate-runner-policy
+    kind: composite-action
+    tier: internal
+    reason: "Runner/egress tier gate used by the Rust release reusables"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: verify-attestation
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      attestations: read
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: verify-signature
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
+
+  - id: wait-for-package
+    kind: composite-action
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      contents: read
+    runners: []
+    package-managers: []
+    prerequisites: []
+    limitations: []
