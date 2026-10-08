@@ -146,6 +146,14 @@ pull-requests: write"
 contents: read"
 }
 
+@test "reusable-test-shell-run: caller permission union is pinned" {
+	run _permission_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-test-shell-run.yml"
+	assert_success
+	assert_output "actions: read
+contents: read"
+}
+
 # The two workflows the publishing jobs moved into. Pinning their unions too
 # keeps the accounting closed: every scope #770 removed from a producer above
 # must reappear here, in a workflow a caller invokes only when it publishes.

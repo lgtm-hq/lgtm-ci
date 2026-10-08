@@ -27,13 +27,14 @@
 #
 # Gate workflows (the canary fails when any does not succeed):
 #   actions-direct build-python-direct coverage-lcov egress node-bun node-npm
-#   node-pnpm perms playwright python python-private-dep retry rust
+#   node-pnpm perms playwright python python-private-dep readonly-node retry
+#   rust
 #   rust-build-siblings rust-release-build siblings verify-fresh-install
 #   vuln-suppression
 # Informational workflows (reported against their expected conclusion, never fail the canary):
 #   app-token-probe perms-negative perms-negative-node perms-negative-probe
-#   playwright-negative playwright-negative-probe sbom-release-upload
-#   verify-negative verify-negative-probe
+#   perms-negative-shell playwright-negative playwright-negative-probe
+#   sbom-release-upload verify-negative verify-negative-probe
 # A negative-by-design workflow with a `<name>-probe.yml` is dispatched only by
 # that probe, which asserts the designed failure and is green when it holds.
 #

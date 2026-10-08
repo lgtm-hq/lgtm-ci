@@ -68,9 +68,13 @@ $GENERATED_MARK from
 # docs/reusable-workflows.md "Read-only variants" to publish them separately.
 EOF
 	# Markers match whole lines only (indentation aside), so prose that
-	# mentions a marker is copied, not treated as one.
+	# mentions a marker is copied, not treated as one. Kept lines are copied
+	# verbatim (block scalars included); a variant that would end in a blank
+	# line fails instead, and the facade moves that blank line into the omit
+	# region it separates.
 	awk -v omit_begin="$OMIT_BEGIN" -v omit_end="$OMIT_END" -v facade="$facade_name" '
 		function is_marker(line, mark) { sub(/^[ \t]+/, "", line); sub(/[ \t]+$/, "", line); return line == mark }
+		function out(line) { print line; last_blank = (line ~ /^[ \t]*$/) }
 		!started { if ($0 == "---") { started = 1; print } ; next }
 		is_marker($0, omit_begin) {
 			if (omitting) { printf "%s:%d: nested %s\n", facade, NR, omit_begin > "/dev/stderr"; bad = 1 }
@@ -83,16 +87,17 @@ EOF
 		omitting { next }
 		/^name: / && !renamed {
 			renamed = 1
-			if ($0 ~ /^name: [^"\047#|> ]([^#]*[^ #])?$/) { print $0 " (read-only)"; next }
-			if ($0 ~ /^name: "[^"#]*"$/) { sub(/"$/, " (read-only)\""); print; next }
+			if ($0 ~ /^name: [^"\047#|> ]([^#]*[^ #])?$/) { out($0 " (read-only)"); next }
+			if ($0 ~ /^name: "[^"#]*"$/) { sub(/"$/, " (read-only)\""); out($0); next }
 			printf "%s:%d: cannot rename this name: form; use a plain or double-quoted scalar\n", facade, NR > "/dev/stderr"
 			bad = 1; next
 		}
-		{ print }
+		{ out($0) }
 		END {
 			if (!started) { printf "%s: no --- document start\n", facade > "/dev/stderr"; bad = 1 }
 			if (omitting) { printf "%s: unterminated %s\n", facade, omit_begin > "/dev/stderr"; bad = 1 }
 			if (!renamed) { printf "%s: no top-level name:\n", facade > "/dev/stderr"; bad = 1 }
+			if (last_blank) { printf "%s: variant would end in a blank line; move it inside the final omit region\n", facade > "/dev/stderr"; bad = 1 }
 			exit bad
 		}
 	' "$facade"

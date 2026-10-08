@@ -154,6 +154,11 @@ invocation in the same run so artifacts do not mix), plus standard
 **Outputs:** `tests-passed`, `tests-failed`, `tests-total`,
 `coverage-percent`, `passed`.
 
+**Read-only variant:** `reusable-test-shell-run.yml` runs the same jobs
+without the PR comment job (and its `publish-test-summary` input). Its
+caller grants `actions: read` and `contents: read` only (#1081, see
+[Read-only variants](../reusable-workflows.md#read-only-variants)).
+
 ### reusable-test-e2e.yml
 
 ```yaml
