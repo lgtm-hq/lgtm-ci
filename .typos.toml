@@ -3,7 +3,7 @@ extend-exclude = ["CHANGELOG.md"]
 
 [default]
 # Limit false positives to the exact regex and prose fragments that trigger them.
-extend-ignore-re = ["\\(ba\\)\\?sh", "mis-ordered"]
+extend-ignore-re = ["\\(ba\\)\\?sh", "mis-ordered", "retrie\\[s\\]"]
 
 [default.extend-words]
 # Valid project/domain terms.
