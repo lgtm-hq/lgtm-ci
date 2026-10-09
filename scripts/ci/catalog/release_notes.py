@@ -21,6 +21,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -33,6 +34,38 @@ import deprecations  # noqa: E402  # pylint: disable=wrong-import-position
 
 SCOPE = "**catalog**"
 SECTIONS = ("Added", "Changed", "Deprecated", "Removed")
+# CHANGELOG.md is linted with MD013 at 100 columns; wrap like the
+# hand-written entries, continuation lines indented under the bullet.
+WRAP_WIDTH = 80
+# Inline code spans stay whole: a break inside one would change its text.
+TOKEN = re.compile(r"`[^`]*`\S*|\S+")
+
+
+def wrap_bullet(
+    bullet: str,
+    width: int = WRAP_WIDTH,
+) -> str:
+    """Wrap one ``- `` bullet to ``width`` columns.
+
+    Args:
+        bullet: Single-line bullet.
+        width: Target line width; a token longer than that stays on a line
+            of its own rather than being split.
+
+    Returns:
+        The bullet, continuation lines indented by two spaces.
+    """
+    lines: list[str] = []
+    current = ""
+    for token in TOKEN.findall(bullet):
+        candidate = f"{current} {token}" if current else token
+        if current and len(candidate) > width:
+            lines.append(current)
+            current = f"  {token}"
+        else:
+            current = candidate
+    lines.append(current)
+    return "\n".join(lines)
 
 
 def catalog_at(
@@ -208,7 +241,8 @@ def render(
     blocks = []
     for section, bullets in notes.items():
         if bullets:
-            blocks.append("\n".join([f"### {section}", "", *bullets]))
+            wrapped = [wrap_bullet(bullet=b) for b in bullets]
+            blocks.append("\n".join([f"### {section}", "", *wrapped]))
     return "\n\n".join(blocks)
 
 

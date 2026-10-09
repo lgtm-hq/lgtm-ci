@@ -235,6 +235,34 @@ def test_release_notes_report_tier_changes_and_deprecations(
     )
 
 
+def test_release_notes_wrap_long_bullets_for_md013(
+    release_notes: ModuleType,
+) -> None:
+    """Bullets wrap under 100 columns and keep code spans whole (#1144)."""
+    replacement = "Pass `allowed-endpoints` to `reusable-publish-test-results-pages`"
+    record = {
+        "id": "x",
+        "kind": "input",
+        "name": "publish-allowed-endpoints",
+        "entries": ["reusable-test-e2e-matrix"],
+        "issue": 770,
+        "replacement": replacement,
+    }
+    text = release_notes.render(
+        base={"entries": [], "deprecations": []},
+        head={"entries": [], "deprecations": [record]},
+    )
+    lines = text.splitlines()
+    assert_that(max(len(line) for line in lines)).is_less_than_or_equal_to(80)
+    assert_that(lines[2]).starts_with("- **catalog**: input")
+    assert_that(lines[3]).starts_with("  ")
+    assert_that(" ".join(part.strip() for part in lines[2:])).is_equal_to(
+        "- **catalog**: input `publish-allowed-endpoints` on "
+        "`reusable-test-e2e-matrix` (#770): Pass `allowed-endpoints` to "
+        "`reusable-publish-test-results-pages`",
+    )
+
+
 def test_release_notes_are_empty_without_a_base_catalog(
     release_notes: ModuleType,
 ) -> None:
