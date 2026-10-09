@@ -294,6 +294,13 @@ job, and lowering it must not silently uncap — or, for reporters, cancel —
 these short-running legs. Only jobs that hand off to another reusable via
 `uses:` are exempt, because they carry no `runs-on` of their own.
 
+The one file-level exception is `reusable-release-recover-resume.yml`, the
+internal resume stage of `reusable-release-recover.yml` (#1081). Its jobs keep
+the fixed caps they had before the split (35 minutes for the npm resume with
+its propagation wait, 15, 5 and 10 for the others). The facade's
+`timeout-minutes` bounds the plan stage, as it bounded the `resolve` job
+before.
+
 `scripts/ci/quality/validate-runner-contract.sh` enforces both the input's
 presence and the per-job cap. It maintains two exception mechanisms mirroring
 the runner-image exceptions: `TIMEOUT_MINUTES_EXCEPTIONS` (file-level, exempt

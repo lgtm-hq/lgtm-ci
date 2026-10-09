@@ -463,7 +463,6 @@ jobs:
       signer-workflow: ${{ inputs.signer-workflow }}
       recovery-issue-workflow-key: ${{ inputs.recovery-issue-workflow-key }}
       runner-image: ${{ inputs.runner-image }}
-      timeout-minutes: ${{ inputs.timeout-minutes }}
       egress-policy: ${{ inputs.egress-policy }}
       allowed-endpoints: ${{ inputs.allowed-endpoints }}
       allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}

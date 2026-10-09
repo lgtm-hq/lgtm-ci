@@ -43,6 +43,37 @@ step_block_in_job() {
 	assert_output --partial "true"
 }
 
+@test "reusable-release-recover: facade forwards every input to the stages that read it" {
+	# A dropped forward silently falls back to the stage's default (e.g. an
+	# empty npm-order skips the npm resume), so pin the partition exactly.
+	run python3 -c '
+import re, sys
+def inputs(path, extra=()):
+    text = open(path).read()
+    head = text[: text.index("    secrets:")] if "    secrets:" in text[: text.index("\njobs:")] else text[: text.index("    outputs:")] if "    outputs:" in text else text
+    return set(re.findall(r"^      ([a-z-]+):\n(?:        #.*\n)?        description:", head, re.M)) - set(extra)
+facade = inputs(sys.argv[1])
+plan = inputs(sys.argv[2])
+resume = inputs(sys.argv[3], ("missing", "unresumable", "resolve-result"))
+text = open(sys.argv[1]).read()
+def forwarded(job, end):
+    body = text[text.index("  " + job + ":\n"):]
+    body = body[: body.index(end)]
+    return set(re.findall(r"^      ([a-z-]+): \$\{\{ inputs\.\1 \}\}$", body, re.M))
+fp, fr = forwarded("plan", "\n\n"), forwarded("resume", "    secrets:")
+errors = []
+if fp != plan:
+    errors.append(f"plan forwarding differs: {sorted(fp ^ plan)}")
+if fr != resume:
+    errors.append(f"resume forwarding differs: {sorted(fr ^ resume)}")
+if (plan | resume) != facade:
+    errors.append(f"facade inputs no stage reads: {sorted(facade - plan - resume)}")
+print("\n".join(errors))
+sys.exit(1 if errors else 0)
+' "$WORKFLOW" "$PLAN" "$RESUME"
+	assert_success
+}
+
 @test "reusable-release-recover: requires tag, source run id, the publish workflow path, and tooling-ref" {
 	run grep -cF "required: true" "$WORKFLOW"
 	assert_output 4
@@ -95,7 +126,7 @@ contents: read"
 }
 
 @test "reusable-release-recover: dry-run boundary stops before any resume job" {
-	run grep -F "Plan only: detection, nothing was resumed." "$PLAN"
+	run grep -F "Plan stage: detection only; this stage resumes nothing." "$PLAN"
 	assert_success
 	# Every resume job is gated on !inputs.dry-run and a successful plan.
 	run grep -cF "!inputs.dry-run &&" "$RESUME"

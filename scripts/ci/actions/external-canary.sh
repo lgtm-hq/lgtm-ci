@@ -355,12 +355,15 @@ rewrite_pins() {
 	local file="${1:?file required}" sha="${2:?sha required}" stale
 	[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "not a full SHA: $sha"
 	sed -E -e "s#(${PIN_RE})[0-9a-f]{40}#\1${sha}#g" \
-		-e "s#(ref: )[0-9a-f]{40}( \# lgtm-ci-pin)#\1${sha}\2#g" "$file" >"$file.tmp"
+		-e "s#(ref: )[0-9a-f]{40}([[:space:]]+\# lgtm-ci-pin)#\1${sha}\2#g" "$file" >"$file.tmp"
 	mv "$file.tmp" "$file"
 	# Only `uses:` lines count: header comments quote the pattern with a
 	# `@<sha>` placeholder.
 	stale="$(grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$file" | grep -oE "${PIN_RE}[^[:space:]\"']+" | grep -v "@${sha}\$" || true)"
 	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci reference not pinned to the candidate: ${stale//$'\n'/, }"
+	# A tagged ref the rewrite could not match would run old tooling green.
+	stale="$(grep -E '#[[:space:]]*lgtm-ci-pin' "$file" | grep -vE "ref: ${sha}[[:space:]]+# lgtm-ci-pin" || true)"
+	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci-pin ref not pinned to the candidate: ${stale//$'\n'/, }"
 }
 
 # Print the file names (basenames) under <dir> that declare workflow_dispatch

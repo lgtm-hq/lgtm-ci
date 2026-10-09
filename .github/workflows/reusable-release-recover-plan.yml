@@ -424,5 +424,5 @@ jobs:
       - name: Plan boundary
         shell: bash
         run: |
-          echo "Plan only: detection, nothing was resumed." >>"$GITHUB_STEP_SUMMARY"
-          echo "::notice::Plan complete; resume through reusable-release-recover.yml with dry-run: false."
+          echo "Plan stage: detection only; this stage resumes nothing." >>"$GITHUB_STEP_SUMMARY"
+          echo "::notice::Plan complete. Only the facade Resume stage (dry-run: false) resumes channels."

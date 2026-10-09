@@ -373,6 +373,21 @@ call_fn() {
 	assert_success
 }
 
+@test "external-canary: rewrite_pins accepts any spacing before lgtm-ci-pin" {
+	printf 'with:\n  tooling-ref: %s  # lgtm-ci-pin\n  ref: %s\t# lgtm-ci-pin\n' "$OLD_PIN" "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_success
+	run grep -c "${CANDIDATE}" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_output "2"
+}
+
+@test "external-canary: rewrite_pins refuses an lgtm-ci-pin it could not rewrite" {
+	printf 'with:\n  tooling-ref: v0.76.2 # lgtm-ci-pin\n' >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "lgtm-ci-pin ref not pinned to the candidate: "
+}
+
 @test "external-canary: rewrite_pins rejects a short SHA" {
 	cp "$MOCK_FIXTURE_DIR/python.yml" "$BATS_TEST_TMPDIR/wf.yml"
 	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" abc123

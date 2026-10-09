@@ -4,7 +4,11 @@
 # live run, a successful plan and membership in the missing set, and the
 # always() record job that comments on (and closes) the release-failure
 # issue. All write scopes and the Homebrew token live here. Call the facade,
-# not this file.
+# not this file: this stage trusts the plan inputs it is given (`missing`,
+# `unresumable`, `resolve-result`) and does not repeat the plan's tag and
+# source-run gates; it does re-verify the artifacts before publishing. Each job
+# keeps its own fixed timeout (the npm resume includes a propagation wait), so
+# there is no timeout-minutes input here.
 ---
 name: Reusable Release Recovery (resume)
 
@@ -152,11 +156,6 @@ name: Reusable Release Recovery (resume)
         required: false
         type: string
         default: ubuntu-24.04
-      timeout-minutes:
-        description: Timeout for the resolve job (the resume jobs keep their own caps)
-        required: false
-        type: number
-        default: 15
       egress-policy:
         description: harden-runner egress policy (audit or block)
         required: false
