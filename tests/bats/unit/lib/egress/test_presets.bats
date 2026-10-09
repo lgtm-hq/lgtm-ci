@@ -68,9 +68,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	run bash -c "source '$PRESETS' && egress_preset_endpoints docker"
 	assert_success
 	local host
-	# Each one was a block-mode failure in the external fixture (Trivy setup
-	# exit 7; attest-build-provenance in Merge Manifests) or, for the
-	# githubapp.com pair, the private-repository Sigstore instance.
+	# Fatal in block mode in the external fixture: get.trivy.dev and
+	# mirror.gcr.io (Trivy setup exit 7), the OIDC and sigstore.dev hosts
+	# (attest-build-provenance in Merge Manifests). check.trivy.dev only
+	# logged a denial (Trivy's version check). The githubapp.com pair is the
+	# private-repository Sigstore instance (actions/toolkit attest
+	# endpoints.ts), which a public fixture cannot reach.
 	for host in get.trivy.dev mirror.gcr.io check.trivy.dev \
 		token.actions.githubusercontent.com fulcio.sigstore.dev rekor.sigstore.dev \
 		timestamp.sigstore.dev tuf-repo-cdn.sigstore.dev \
