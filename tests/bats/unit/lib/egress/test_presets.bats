@@ -64,6 +64,24 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "egress preset docker includes the Trivy and attestation hosts (#1081)" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints docker"
+	assert_success
+	local host
+	# Each one was a block-mode failure in the external fixture (Trivy setup
+	# exit 7; attest-build-provenance in Merge Manifests) or, for the
+	# githubapp.com pair, the private-repository Sigstore instance.
+	for host in get.trivy.dev mirror.gcr.io check.trivy.dev \
+		token.actions.githubusercontent.com fulcio.sigstore.dev rekor.sigstore.dev \
+		timestamp.sigstore.dev tuf-repo-cdn.sigstore.dev \
+		fulcio.githubapp.com timestamp.githubapp.com; do
+		assert_line "${host}:443"
+	done
+	# Interactive OIDC and the GCS-hosted TUF root stay out on purpose.
+	refute_output --partial 'oauth2.sigstore.dev'
+	refute_output --partial 'storage.googleapis.com'
+}
+
 @test "egress preset playwright includes browser CDN hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints playwright"
 	assert_success

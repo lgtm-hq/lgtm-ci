@@ -103,7 +103,17 @@ egress_preset_endpoints() {
 			pipelines.actions.githubusercontent.com:443
 		;;
 	docker)
-		# Docker image pull/push (reusable-docker.yml).
+		# Docker image pull/push (reusable-docker.yml), plus what the family's
+		# optional steps reach under block mode (#1081):
+		# - `scan`: get.trivy.dev (Trivy binary), mirror.gcr.io (Trivy DB),
+		#   check.trivy.dev (version check; blocked it only logs a denial);
+		# - provenance/SBOM attestation on push, when enabled:
+		#   token.actions.githubusercontent.com (OIDC) and the Sigstore
+		#   public-good hosts for public repositories (proven by the external
+		#   fixture), fulcio/timestamp.githubapp.com for private ones (GitHub's
+		#   Sigstore instance, chosen by actions/attest; not fixture-proven).
+		# Keyless `cosign-sign` uses the same OIDC/Fulcio/Rekor/TUF hosts; it
+		# is expected to work but the fixture does not sign yet.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -113,13 +123,23 @@ egress_preset_endpoints() {
 			release-assets.githubusercontent.com:443 \
 			github-releases.githubusercontent.com:443 \
 			pipelines.actions.githubusercontent.com:443 \
+			token.actions.githubusercontent.com:443 \
 			ghcr.io:443 \
 			pkg-containers.githubusercontent.com:443 \
 			docker.io:443 \
 			registry-1.docker.io:443 \
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
-			production.cloudfront.docker.com:443
+			production.cloudfront.docker.com:443 \
+			get.trivy.dev:443 \
+			mirror.gcr.io:443 \
+			check.trivy.dev:443 \
+			fulcio.sigstore.dev:443 \
+			rekor.sigstore.dev:443 \
+			timestamp.sigstore.dev:443 \
+			tuf-repo-cdn.sigstore.dev:443 \
+			fulcio.githubapp.com:443 \
+			timestamp.githubapp.com:443
 		;;
 	playwright)
 		# Playwright browser downloads + package managers (reusable-test-e2e*.yml).
