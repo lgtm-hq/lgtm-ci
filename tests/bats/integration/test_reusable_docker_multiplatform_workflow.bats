@@ -88,10 +88,34 @@ sys.exit(1 if errors else 0)
 @test "reusable-docker-multiplatform: facade uploads validate-path SARIF from its own job" {
 	run _job "$WORKFLOW" upload-scan-results
 	assert_output --partial 'security-events: write'
-	assert_output --partial 'name: trivy-sarif-${{ matrix.slug }}'
+	# The runner token reads same-run artifacts: no actions: read, so the
+	# facade's caller union is unchanged by the split.
+	refute_line '      actions: read'
+	assert_output --partial 'name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}'
 	assert_output --partial 'uses: github/codeql-action/upload-sarif@'
 	assert_output --partial 'category: "trivy-${{ matrix.slug }}"'
 	assert_output --partial '!inputs.push &&'
+}
+
+@test "reusable-docker-multiplatform: a lost SARIF fails the upload job unless validate was cancelled" {
+	run _job "$WORKFLOW" upload-scan-results
+	# One delayed retry; the retry fails the job unless validate was cancelled.
+	run awk '/name: Retry Trivy SARIF artifact/ { on = 1 } on && /continue-on-error:/ { print; exit }' "$WORKFLOW"
+	assert_output --partial "continue-on-error: \${{ needs.validate.result == 'cancelled' }}"
+	run _job "$WORKFLOW" upload-scan-results
+	assert_output --partial "if: steps.fetch.outcome == 'success' || steps.retry.outcome == 'success'"
+	assert_output --partial "if: steps.locate.outputs.found == 'true'"
+	refute_output --partial "needs.validate.result != 'cancelled'"
+}
+
+@test "reusable-docker-multiplatform: artifact-prefix reaches the validate file from both entry points" {
+	run grep -c '      artifact-prefix: ${{ inputs.artifact-prefix }}' "$WORKFLOW"
+	assert_output "1"
+	run grep -c '      artifact-prefix: ${{ inputs.artifact-prefix }}' \
+		"${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
+	assert_output "1"
+	run grep -F 'run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh' "$VALIDATE"
+	assert_success
 }
 
 # ---------------------------------------------------------------- validate
@@ -119,8 +143,10 @@ sys.exit(1 if errors else 0)
 	run grep -F 'upload-sarif' "$VALIDATE"
 	assert_failure
 	run _job "$VALIDATE" build-per-platform
-	assert_output --partial 'name: trivy-sarif-${{ matrix.slug }}'
-	assert_output --partial "if: always() && inputs.scan && steps.trivy.outcome != 'skipped'"
+	assert_output --partial 'name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}'
+	# Every scanned leg uploads an artifact (SARIF or a no-sarif marker).
+	assert_output --partial 'MODE: stage'
+	assert_output --partial 'if-no-files-found: error'
 }
 
 @test "reusable-docker-multiplatform-validate: summary needs only the build job" {

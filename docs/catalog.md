@@ -588,7 +588,7 @@ Docker Build (multi-platform, validate)
 **Prerequisites:**
 
 - Pass the per-platform `matrix` (platform, slug, runner, qemu per entry), as `reusable-docker.yml`'s classify job does; arm64 legs need an arm64 runner such as `ubuntu-24.04-arm`
-- Nothing is pushed, signed, attested or uploaded to code scanning. With `scan: true` the Trivy SARIF is the artifact `trivy-sarif-<slug>`; upload it from a job with `security-events: write` if you want it in code scanning
+- Nothing is pushed, signed, attested or uploaded to code scanning. With `scan: true` the Trivy SARIF (or a `no-sarif.txt` marker when the scan never ran) is the artifact `<artifact-prefix>-trivy-sarif-<slug>` (default prefix `docker`); upload it from a job with `security-events: write` if you want it in code scanning
 
 **Limitations:**
 

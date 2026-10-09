@@ -6,7 +6,7 @@ name: Reusable Docker Build (multi-platform, validate)
 # test, health check and Trivy scan, and the validation summary. The caller
 # grants contents: read only; nothing is pushed, signed, attested or uploaded
 # to code scanning. The Trivy SARIF is kept as the artifact
-# trivy-sarif-<slug>.
+# <artifact-prefix>-trivy-sarif-<slug>.
 #
 # reusable-docker-multiplatform.yml calls this file when push is false and
 # uploads that SARIF to code scanning from a separate job. The push path,
@@ -23,6 +23,16 @@ on:
           in the orchestrator. Each entry carries platform, slug, runner, qemu.
         required: true
         type: string
+      artifact-prefix:
+        description: >-
+          Namespace for this call's Trivy SARIF artifacts
+          (<prefix>-trivy-sarif-<slug>); give a second call in the same run
+          its own prefix so the two calls' reports never overwrite each other
+          (#1081). Must match [A-Za-z0-9_.]+ ('-' separates prefix from the
+          rest of the name)
+        required: false
+        type: string
+        default: "docker"
       context:
         description: "Build context path"
         required: false
@@ -397,6 +407,13 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             scripts/ci/
+      # Every artifact below is named "<artifact-prefix>-..."; an invalid
+      # prefix fails before any upload uses it (#1091, #1081).
+      - name: Validate artifact prefix
+        shell: bash
+        env:
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
       - name: Free disk space
         if: inputs.free-disk-space && runner.environment == 'github-hosted'
         shell: bash
@@ -516,16 +533,29 @@ jobs:
       # Code-scanning upload needs security-events: write, so the SARIF
       # leaves this read-only job as an artifact. reusable-docker-multiplatform.yml
       # uploads it to code scanning from its own job; a direct caller may do
-      # the same or just keep the artifact.
+      # the same or just keep the artifact. Every scanned leg uploads one: the
+      # SARIF, or a no-sarif marker when the build or scan failed first, so
+      # the uploader can tell "no report" from "lost report" (#1081).
+      - name: Stage Trivy SARIF (${{ matrix.platform }})
+        if: always() && inputs.scan
+        shell: bash
+        env:
+          MODE: stage
+          SARIF_NAME: trivy-results-${{ matrix.slug }}.sarif
+          SARIF_FILE: trivy-results-${{ matrix.slug }}.sarif
+          STAGE_DIR: ${{ runner.temp }}/trivy-sarif
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/docker/trivy-sarif.sh
       - name: Upload Trivy SARIF artifact (${{ matrix.platform }})
-        if: always() && inputs.scan && steps.trivy.outcome != 'skipped'
+        if: always() && inputs.scan
         # Pinned to SHA for supply chain security
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: trivy-sarif-${{ matrix.slug }}
-          path: trivy-results-${{ matrix.slug }}.sarif
-          if-no-files-found: warn
+          name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}
+          path: ${{ runner.temp }}/trivy-sarif/
+          if-no-files-found: error
           retention-days: 1
+          # overwrite only covers a rerun of this same leg replacing its
+          # earlier attempt; isolation between calls is artifact-prefix.
           overwrite: true
       - name: Dump resource monitor
         if: always() && inputs.resource-monitor

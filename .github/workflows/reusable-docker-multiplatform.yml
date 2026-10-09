@@ -28,6 +28,16 @@ on:
           in the orchestrator. Each entry carries platform, slug, runner, qemu.
         required: true
         type: string
+      artifact-prefix:
+        description: >-
+          Namespace for this call's validate-path Trivy SARIF artifacts
+          (<prefix>-trivy-sarif-<slug>); give a second call in the same run
+          its own prefix so the two calls' reports never overwrite each other
+          (#1081). Must match [A-Za-z0-9_.]+ ('-' separates prefix from the
+          rest of the name)
+        required: false
+        type: string
+        default: "docker"
       context:
         description: "Build context path"
         required: false
@@ -410,12 +420,16 @@ jobs:
       allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
       egress-preset: ${{ inputs.egress-preset }}
       timeout-minutes: ${{ inputs.timeout-minutes }}
+      artifact-prefix: ${{ inputs.artifact-prefix }}
       validate-on-pr: ${{ inputs.validate-on-pr }}
 
   # The validate path's Trivy SARIF reaches code scanning here, so the
   # read-only build job never holds security-events: write. Same per-slug
-  # upload and category as before the split; a missing SARIF (scan failed
-  # before writing it) skips the upload instead of masking the scan failure.
+  # upload and category as before the split. Every scanned leg staged an
+  # artifact (the SARIF or a no-sarif marker), so a leg whose artifact never
+  # appears fails here instead of silently dropping its report; after a
+  # cancelled validate run, missing legs are tolerated and finished legs
+  # still upload.
   upload-scan-results:
     name: Upload Trivy scan results
     needs: validate
@@ -423,14 +437,15 @@ jobs:
       always() &&
       !inputs.push &&
       inputs.scan &&
-      needs.validate.result != 'skipped' &&
-      needs.validate.result != 'cancelled'
+      needs.validate.result != 'skipped'
     strategy:
       fail-fast: false
       matrix:
         include: ${{ fromJson(inputs.matrix) }}
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ inputs.timeout-minutes }}
+    # No actions: read: download-artifact reads this run's artifacts with the
+    # runner token, so the facade's caller-facing union stays as it was.
     permissions:
       contents: read
       security-events: write
@@ -460,19 +475,65 @@ jobs:
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
         run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
-      - name: Download Trivy SARIF (${{ matrix.platform }})
-        id: sarif
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          tooling-ref-override: ${{ inputs.tooling-ref }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      # Every scanned leg uploaded an artifact, so a download that still
+      # fails after one delayed retry (artifact listing lag, #803) fails the
+      # job. Only after a cancelled validate run is a missing leg tolerated.
+      - name: Fetch Trivy SARIF artifact (${{ matrix.platform }})
+        id: fetch
         continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: trivy-sarif-${{ matrix.slug }}
+          name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}
+          path: ${{ runner.temp }}/trivy-sarif
+      - name: Wait before retrying the SARIF download
+        if: steps.fetch.outcome == 'failure'
+        shell: bash
+        run: sleep 30
+      - name: Retry Trivy SARIF artifact (${{ matrix.platform }})
+        id: retry
+        if: steps.fetch.outcome == 'failure'
+        continue-on-error: ${{ needs.validate.result == 'cancelled' }}
+        # Pinned to SHA for supply chain security
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}
+          path: ${{ runner.temp }}/trivy-sarif
+      - name: Locate Trivy SARIF (${{ matrix.platform }})
+        id: locate
+        if: steps.fetch.outcome == 'success' || steps.retry.outcome == 'success'
+        shell: bash
+        env:
+          MODE: locate
+          SARIF_NAME: trivy-results-${{ matrix.slug }}.sarif
+          DOWNLOAD_DIR: ${{ runner.temp }}/trivy-sarif
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/docker/trivy-sarif.sh
       - name: Upload Trivy scan results (${{ matrix.platform }})
-        if: steps.sarif.outcome == 'success'
+        if: steps.locate.outputs.found == 'true'
         # Pinned to SHA for supply chain security
         uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
         with:
-          sarif_file: "trivy-results-${{ matrix.slug }}.sarif"
+          sarif_file: ${{ steps.locate.outputs.path }}
           category: "trivy-${{ matrix.slug }}"
 
   publish:

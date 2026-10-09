@@ -19,6 +19,16 @@ name: Reusable Docker Build and Push
 on:
   workflow_call:
     inputs:
+      artifact-prefix:
+        description: >-
+          Namespace for the split path's validate-time Trivy SARIF artifacts
+          (<prefix>-trivy-sarif-<slug>); give a second call in the same run
+          its own prefix so the two calls' reports never overwrite each other
+          (#1081). Must match [A-Za-z0-9_.]+ ('-' separates prefix from the
+          rest of the name)
+        required: false
+        type: string
+        default: "docker"
       context:
         description: "Build context path"
         required: false
@@ -569,6 +579,7 @@ jobs:
       health-check-cmd: ${{ inputs.health-check-cmd }}
       health-check-port: ${{ inputs.health-check-port }}
       health-check-timeout: ${{ inputs.health-check-timeout }}
+      artifact-prefix: ${{ inputs.artifact-prefix }}
       validate-on-pr: ${{ inputs.validate-on-pr }}
       scan-exit-code: ${{ inputs.scan-exit-code }}
       cache-registry-ref: ${{ inputs.cache-registry-ref }}

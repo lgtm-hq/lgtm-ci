@@ -322,8 +322,10 @@ calls `reusable-docker-multiplatform-validate.yml` for `push: false` and the
 internal `reusable-docker-multiplatform-publish.yml` for `push: true`. The
 validate file is the read-only entry point (`contents: read`): it builds
 each platform without pushing and keeps the Trivy SARIF as the artifact
-`trivy-sarif-<slug>`; the facade uploads that SARIF to code scanning from its
-own job. Calling the facade adds one segment to the per-platform check names
+`<artifact-prefix>-trivy-sarif-<slug>` (default prefix `docker`; give sibling
+calls in one run distinct prefixes); the facade uploads that SARIF to code
+scanning from its own job. Calling the facade adds one segment to the
+per-platform check names
 (`… / Validate / Docker build per platform (linux/amd64)`).
 
 ```yaml
