@@ -388,6 +388,14 @@ call_fn() {
 	assert_output --partial "lgtm-ci-pin ref not pinned to the candidate: "
 }
 
+@test "external-canary: rewrite_pins ignores comment lines that mention lgtm-ci-pin" {
+	printf '# the `# lgtm-ci-pin` marker lets scripts/pin.sh rewrite it\njobs:\n  a:\n    with:\n      tooling-ref: %s # lgtm-ci-pin\n' "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_success
+	run grep -F "tooling-ref: ${CANDIDATE} # lgtm-ci-pin" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
+}
+
 @test "external-canary: rewrite_pins rejects a short SHA" {
 	cp "$MOCK_FIXTURE_DIR/python.yml" "$BATS_TEST_TMPDIR/wf.yml"
 	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" abc123

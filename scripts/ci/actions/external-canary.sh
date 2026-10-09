@@ -362,7 +362,9 @@ rewrite_pins() {
 	stale="$(grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$file" | grep -oE "${PIN_RE}[^[:space:]\"']+" | grep -v "@${sha}\$" || true)"
 	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci reference not pinned to the candidate: ${stale//$'\n'/, }"
 	# A tagged ref the rewrite could not match would run old tooling green.
-	stale="$(grep -E '#[[:space:]]*lgtm-ci-pin' "$file" | grep -vE "ref: ${sha}[[:space:]]+# lgtm-ci-pin" || true)"
+	# Only YAML lines that set a value count: comment lines may mention the
+	# marker (as the fixture's headers do).
+	stale="$(grep -E '^[[:space:]]*[^#[:space:]].*#[[:space:]]*lgtm-ci-pin' "$file" | grep -vE "ref: ${sha}[[:space:]]+# lgtm-ci-pin" || true)"
 	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci-pin ref not pinned to the candidate: ${stale//$'\n'/, }"
 }
 
