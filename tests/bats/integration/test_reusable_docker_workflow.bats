@@ -8,22 +8,27 @@ load "../../helpers/common"
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker.yml"
 BUILD_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-build.yml"
 MULTI_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
+# The multi-platform facade delegates to these two since #1081.
+VALIDATE_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-validate.yml"
+PUBLISH_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-publish.yml"
 SMOKE_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-smoke-test.yml"
 
 # Workflows that carry docker/metadata-action blocks after the split.
 _metadata_workflows() {
-	cat "$BUILD_WORKFLOW" "$MULTI_WORKFLOW"
+	cat "$BUILD_WORKFLOW" "$VALIDATE_WORKFLOW" "$PUBLISH_WORKFLOW"
 }
 
 # Every workflow in the docker family.
 _family_workflows() {
-	cat "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$SMOKE_WORKFLOW"
+	cat "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$VALIDATE_WORKFLOW" \
+		"$PUBLISH_WORKFLOW" "$SMOKE_WORKFLOW"
 }
 
-# Every buildkit cache expression line across the two building reusables
-# (single-platform and per-platform). Both cache-from and cache-to entries.
+# Every buildkit cache expression line across the building reusables
+# (single-platform, per-platform validate and publish). Both cache-from and
+# cache-to entries.
 _cache_expressions() {
-	grep -hE 'type=(gha|registry)' "$BUILD_WORKFLOW" "$MULTI_WORKFLOW"
+	grep -hE 'type=(gha|registry)' "$BUILD_WORKFLOW" "$VALIDATE_WORKFLOW" "$PUBLISH_WORKFLOW"
 }
 
 # Only the cache-to (export) expressions: they carry mode=max.
@@ -187,7 +192,8 @@ _cache_import_expressions() {
 	# Every app-source 'Checkout repository' uses source-ref (build context);
 	# the count must match the number of app-source checkout steps, per file.
 	local wf checkouts refs total=0
-	for wf in "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$SMOKE_WORKFLOW"; do
+	for wf in "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$VALIDATE_WORKFLOW" \
+		"$PUBLISH_WORKFLOW" "$SMOKE_WORKFLOW"; do
 		checkouts=$(grep -cE '^      - name: Checkout repository' "$wf" || true)
 		refs=$(grep -cF "ref: \${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}" "$wf" || true)
 		[ "$checkouts" -eq "$refs" ]
@@ -199,13 +205,14 @@ _cache_import_expressions() {
 @test "reusable-docker family: tooling checkout stays on tooling-ref, not source-ref" {
 	# The lgtm-ci tooling checkout must not be repointed by source-ref.
 	run bash -c '
-		cat "$0" "$1" "$2" "$3" | awk "
+		cat "$@" | awk "
 			/name: Checkout lgtm-ci tooling/ { in_tool = 1 }
 			in_tool && /inputs\.source-ref/ { bad = 1; exit }
 			in_tool && /^      - name:/ && !/Checkout lgtm-ci tooling/ { in_tool = 0 }
 			END { exit bad }
 		"
-	' "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$SMOKE_WORKFLOW"
+	' _ "$WORKFLOW" "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$VALIDATE_WORKFLOW" \
+		"$PUBLISH_WORKFLOW" "$SMOKE_WORKFLOW"
 	assert_success
 }
 
@@ -219,8 +226,8 @@ _cache_import_expressions() {
 	[ "$raw" -eq "$gated" ]
 	[ "$gated" -ge 2 ]
 	# No ungated raw-latest remains.
-	run bash -c "cat \"\$0\" \"\$1\" | grep -E \"type=raw,value=latest,enable=\\\\\\\$\\{\\{ inputs.version != '' \\}\\}\"" \
-		"$BUILD_WORKFLOW" "$MULTI_WORKFLOW"
+	run bash -c "cat \"\$0\" \"\$1\" \"\$2\" | grep -E \"type=raw,value=latest,enable=\\\\\\\$\\{\\{ inputs.version != '' \\}\\}\"" \
+		"$BUILD_WORKFLOW" "$VALIDATE_WORKFLOW" "$PUBLISH_WORKFLOW"
 	assert_failure
 	# metadata-action's auto-latest is disabled in every block, so latest is
 	# controlled solely by the gated raw entry (backfills never move latest).
@@ -282,10 +289,15 @@ _cache_import_expressions() {
 	# The focused reusables must use the shared docker-auth composite instead
 	# of duplicated inline validate+login step sequences.
 	local wf
-	for wf in "$BUILD_WORKFLOW" "$MULTI_WORKFLOW" "$SMOKE_WORKFLOW"; do
+	for wf in "$BUILD_WORKFLOW" "$PUBLISH_WORKFLOW" "$SMOKE_WORKFLOW"; do
 		run grep -F 'uses: ./.lgtm-ci-tooling/.github/actions/docker-auth' "$wf"
 		assert_success
 		run grep -F 'uses: docker/login-action@' "$wf"
+		assert_failure
+	done
+	# The read-only validate path and the facade log in nowhere.
+	for wf in "$VALIDATE_WORKFLOW" "$MULTI_WORKFLOW"; do
+		run grep -E 'docker-auth$|docker/login-action@' "$wf"
 		assert_failure
 	done
 }
@@ -308,8 +320,9 @@ _cache_import_expressions() {
 	local total gated
 	total=$(_cache_expressions | grep -c 'type=')
 	gated=$(_cache_expressions | grep -cF '${{ inputs.no-cache == false &&')
-	# Two building reusables x (gha read, registry read, gha write, registry write).
-	[ "$total" -eq 8 ]
+	# build and publish: gha read, registry read, gha write, registry write;
+	# validate never pushes, so it has no registry write (#1081).
+	[ "$total" -eq 11 ]
 	[ "$gated" -eq "$total" ]
 }
 
@@ -319,7 +332,7 @@ _cache_import_expressions() {
 	local gha_imports push_gated
 	gha_imports=$(_cache_import_expressions | grep -cF 'type=gha')
 	push_gated=$(_cache_import_expressions | grep -F 'type=gha' | grep -cF 'inputs.push' || true)
-	[ "$gha_imports" -eq 2 ]
+	[ "$gha_imports" -eq 3 ]
 	[ "$push_gated" -eq 0 ]
 }
 
@@ -329,12 +342,15 @@ _cache_import_expressions() {
 	# builds the registry cache is the durable source of truth, so the
 	# redundant gha write must not run there. PR builds (push == false) and
 	# registry-less builds keep it as their only speedup.
-	local gha_exports gated
-	gha_exports=$(_cache_export_expressions | grep -cF 'type=gha')
-	gated=$(_cache_export_expressions | grep -F 'type=gha' |
-		grep -cF "(inputs.cache-registry-ref == '' || inputs.push == false) &&")
-	[ "$gha_exports" -eq 2 ]
-	[ "$gated" -eq "$gha_exports" ]
+	# reusable-docker-build.yml decides on push at runtime; since #1081 the
+	# multi-platform publish file always pushes and the validate file never
+	# does, so each carries the specialised form of the same rule.
+	run grep -cF "(inputs.cache-registry-ref == '' || inputs.push == false) && 'type=gha,mode=max" "$BUILD_WORKFLOW"
+	assert_output "1"
+	run grep -cF "inputs.no-cache == false && inputs.cache-registry-ref == '' && format('type=gha,mode=max" "$PUBLISH_WORKFLOW"
+	assert_output "1"
+	run grep -cF "inputs.no-cache == false && format('type=gha,mode=max" "$VALIDATE_WORKFLOW"
+	assert_output "1"
 }
 
 @test "reusable-docker family: every type=gha cache export is non-fatal" {
@@ -343,19 +359,23 @@ _cache_import_expressions() {
 	local gha_exports tolerant
 	gha_exports=$(_cache_export_expressions | grep -cF 'type=gha')
 	tolerant=$(_cache_export_expressions | grep -F 'type=gha' | grep -cF 'ignore-error=true')
-	[ "$gha_exports" -eq 2 ]
+	[ "$gha_exports" -eq 3 ]
 	[ "$tolerant" -eq "$gha_exports" ]
 }
 
 @test "reusable-docker family: push builds still export the registry cache" {
 	# The registry cache is what replaces the dropped gha write; it must stay
 	# gated on both a configured ref and an actual push.
-	local registry_exports gated
+	local registry_exports
 	registry_exports=$(_cache_export_expressions | grep -cF 'type=registry')
-	gated=$(_cache_export_expressions | grep -F 'type=registry' |
-		grep -cF "inputs.cache-registry-ref != '' && inputs.push &&")
 	[ "$registry_exports" -eq 2 ]
-	[ "$gated" -eq "$registry_exports" ]
+	run grep -cF "inputs.cache-registry-ref != '' && inputs.push && format('type=registry,ref={0},mode=max'" "$BUILD_WORKFLOW"
+	assert_output "1"
+	# The publish file always pushes, so only the configured ref gates it.
+	run grep -cF "inputs.cache-registry-ref != '' && format('type=registry,ref={0}-{1},mode=max'" "$PUBLISH_WORKFLOW"
+	assert_output "1"
+	run grep -F "mode=max', inputs.cache-registry-ref" "$VALIDATE_WORKFLOW"
+	assert_failure
 }
 
 @test "reusable-docker: orchestrator forwards policy-enforced provenance and sbom to both nested calls (#963)" {

@@ -1,27 +1,31 @@
 ---
-name: Reusable Docker Build and Push
+name: Reusable Docker Build (multi-platform, validate)
 
-# Supported Docker entry-point orchestrator (#381). The classify job resolves
-# the build strategy, then delegates to the focused reusables:
-#   - reusable-docker-build.yml          (use-split=false: single-platform or
-#                                         QEMU multi-platform build+scan)
-#   - reusable-docker-multiplatform.yml  (use-split=true: runner-map matrix,
-#                                         manifest merge, signing)
-# Callers may use this workflow, or call the focused reusables directly —
-# see docs/workflow-contract.md (runner-map section). reusable-docker-smoke-test.yml
-# is a standalone image-validation reusable and is not called from here.
+# Read-only entry point of the split multi-arch path (#1081): per-platform
+# native builds on runner-map runners without pushing, optional local smoke
+# test, health check and Trivy scan, and the validation summary. The caller
+# grants contents: read only; nothing is pushed, signed, attested or uploaded
+# to code scanning. The Trivy SARIF is kept as the artifact
+# <artifact-prefix>-trivy-sarif-<slug>.
 #
-# Caller repos only need to pin this workflow; all shared shell scripts are
-# resolved from lgtm-ci via a cross-repo checkout (same pattern as
-# reusable-release-auto-tag.yml). No vendored scripts/ci tree is required
-# in the caller repository.
+# reusable-docker-multiplatform.yml calls this file when push is false and
+# uploads that SARIF to code scanning from a separate job. The push path,
+# with its packages, id-token, attestations and security-events write scopes,
+# lives in reusable-docker-multiplatform-publish.yml. Callers pass the
+# classify matrix from reusable-docker.yml, or their own, in `matrix`.
 
 on:
   workflow_call:
     inputs:
+      matrix:
+        description: >-
+          Per-platform build matrix (JSON array) produced by the classify job
+          in the orchestrator. Each entry carries platform, slug, runner, qemu.
+        required: true
+        type: string
       artifact-prefix:
         description: >-
-          Namespace for the split path's validate-time Trivy SARIF artifacts
+          Namespace for this call's Trivy SARIF artifacts
           (<prefix>-trivy-sarif-<slug>); give a second call in the same run
           its own prefix so the two calls' reports never overwrite each other
           (#1081). Must match [A-Za-z0-9_.]+ ('-' separates prefix from the
@@ -40,7 +44,7 @@ on:
         type: string
         default: "Dockerfile"
       platforms:
-        description: "Target platforms (comma-separated)"
+        description: "Target platforms (comma-separated, for the summary)"
         required: false
         type: string
         default: "linux/amd64,linux/arm64"
@@ -54,21 +58,15 @@ on:
         required: false
         type: string
         default: ""
-      tags:
-        description: "Additional tags (comma-separated)"
-        required: false
-        type: string
-        default: ""
       version:
-        description: "Version for semver tags"
+        description: "Version for the image's OCI labels (nothing is tagged or pushed)"
         required: false
         type: string
         default: ""
       source-ref:
         description: >-
           Git ref to check out for the build context (app source), independent
-          of tooling-ref. Empty uses the triggering ref. Set for historical
-          backfills (e.g. build an old tag's source from a main dispatch).
+          of tooling-ref. Empty uses the triggering ref.
         required: false
         type: string
         default: ""
@@ -84,32 +82,9 @@ on:
         description: >-
           Publish ONLY the pinned version tag (and its immutable by-digest
           sha), suppressing major/minor/latest/branch/sha-<ref> floating tags.
-          For historical backfills so republishing an old version never drags
-          shared floating tags backward.
         required: false
         type: boolean
         default: false
-      push:
-        description: "Push image to registry"
-        required: false
-        type: boolean
-        default: false
-      provenance:
-        description: >-
-          Generate provenance attestation. Honoured only when push is false:
-          a pushed image always carries provenance (release-security policy,
-          section 1); an opt-out on a push is overridden with a warning.
-        required: false
-        type: boolean
-        default: true
-      sbom:
-        description: >-
-          Generate SBOM attestation. Honoured only when push is false: a
-          pushed image always carries an SBOM (release-security policy,
-          section 1); an opt-out on a push is overridden with a warning.
-        required: false
-        type: boolean
-        default: true
       scan:
         description: "Run vulnerability scan"
         required: false
@@ -125,99 +100,66 @@ on:
         required: false
         type: string
         default: ""
-      runner-map:
-        description: >-
-          JSON object mapping platform to runner label.
-          Platforms not in the map default to ubuntu-24.04 with QEMU.
-          Example: {"linux/arm64":"ubuntu-24.04-arm"}
-        required: false
-        type: string
-        default: "{}"
       smoke-test:
         description: >-
-          Shorthand command + args to run inside each per-platform staging
-          image. Executed as `docker run --rm --platform <p> <image> <smoke-test>`.
-          Good for trivial checks like `--version`. Word-split; values with
-          spaces or shell metacharacters need `smoke-test-script` instead.
-          Mutually exclusive with `smoke-test-script`. Skipped when both empty.
-          Only applies to the split per-platform path (multi-arch push).
+          Shorthand command + args to run inside each per-platform image
+          (with validate-on-pr). Word-split; values with spaces need
+          smoke-test-script.
+          Mutually exclusive with smoke-test-script.
         required: false
         type: string
         default: ""
       smoke-test-script:
         description: >-
-          Path (relative to checkout root) to a caller-owned script. Executed
-          on the runner with env `IMAGE`, `PLATFORM`, `REGISTRY`. The script
-          owns the `docker run` invocation — full control over flags, env,
-          network, tmpfs, etc. Preferred over `smoke-test` for anything
-          beyond a bare command. Mutually exclusive with `smoke-test`.
-          Any failing platform blocks the entire manifest merge.
+          Path (relative to checkout root) to a caller-owned smoke-test script.
+          Mutually exclusive with smoke-test.
         required: false
         type: string
         default: ""
       health-check-cmd:
         description: >-
-          Optional command run on the runner against the published localhost
-          port before publish, e.g. `curl -f http://127.0.0.1:8080/health`.
-          Starts a detached container, waits for `health-check-port`, runs the
-          command on the runner (not inside the image), then tears down. Requires
-          `health-check-port`. When set with `push: true`, publish is gated on
-          success. Skipped when empty (preserves current behavior).
+          Optional command run on the runner against each per-platform
+          image's published localhost port (with validate-on-pr). Requires
+          health-check-port.
         required: false
         type: string
         default: ""
       health-check-port:
-        description: >-
-          Container port to publish on 127.0.0.1 and wait for before running
-          `health-check-cmd` on the runner. Required when `health-check-cmd`
-          is set.
+        description: "Container port to publish for the health check."
         required: false
         type: string
         default: ""
       health-check-timeout:
-        description: >-
-          Max wait time for `health-check-port` to accept connections before
-          running `health-check-cmd` (e.g. 30s).
+        description: "Max wait for health-check-port to accept connections."
         required: false
         type: string
         default: "30s"
       validate-on-pr:
         description: >-
-          When true AND push is false, use the split per-platform path (native
-          runners) without pushing staging images. Enables full Dockerfile
-          validation on PRs without QEMU overhead.
+          Load each per-platform image locally, run the smoke test and
+          health check against it and write the validation summary. False
+          builds only (no load unless scan or health-check-cmd is set).
         required: false
         type: boolean
         default: false
       scan-exit-code:
         description: >-
-          Exit code for Trivy when findings match severity filter. Set to "1"
-          to fail the workflow on CRITICAL/HIGH CVEs. Set to "0" for
-          advisory-only SARIF upload.
+          Exit code for Trivy when findings match severity filter. "1" fails on
+          CRITICAL/HIGH; "0" is advisory-only SARIF upload.
         required: false
         type: string
         default: "0"
       cache-registry-ref:
         description: >-
-          Registry reference for cache fallback (e.g. ghcr.io/org/repo:cache).
-          When set, adds type=registry as a secondary cache-from source and
-          writes to it on push events. GHA cache remains primary. Per-platform
-          scope is appended automatically (-amd64, -arm64).
+          Registry reference for cache fallback. Per-platform scope is appended
+          automatically (-amd64, -arm64). GHA cache remains primary.
         required: false
         type: string
         default: ""
-      cosign-sign:
-        description: >-
-          Sign the final image manifest with Sigstore Cosign (keyless OIDC).
-          Requires id-token: write permission in caller. Only runs when push
-          is true and a digest is available.
-        required: false
-        type: boolean
-        default: false
       no-cache:
         description: >-
-          Disable build cache entirely. Use for release builds to ensure fully
-          reproducible images. When true, cache-from and cache-to are omitted.
+          Disable build cache entirely. When true, cache-from and cache-to are
+          omitted.
         required: false
         type: boolean
         default: false
@@ -247,7 +189,6 @@ on:
         required: false
         type: string
         default: ""
-
       egress-policy:
         description: "harden-runner egress policy (audit or block)"
         required: false
@@ -269,7 +210,6 @@ on:
         required: false
         type: string
         default: "replace"
-
       egress-preset:
         description: >-
           Named baseline allowlist from scripts/ci/lib/egress/presets.sh
@@ -278,28 +218,12 @@ on:
         required: false
         type: string
         default: "docker"
-
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
         type: number
         default: 60
 
-    outputs:
-      tags:
-        description: "Generated image tags"
-        value: ${{ jobs.build.outputs.tags || jobs.multiplatform.outputs.tags }}
-      digest:
-        description: "Image digest"
-        value: ${{ jobs.build.outputs.digest || jobs.multiplatform.outputs.digest }}
-
-    secrets:
-      DOCKERHUB_USERNAME:
-        required: false
-        description: "Docker Hub username (for docker.io registry)"
-      DOCKERHUB_TOKEN:
-        required: false
-        description: "Docker Hub token (for docker.io registry)"
 
 env:
   # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
@@ -416,23 +340,18 @@ env:
   # lgtm-ci-egress-presets:end
 
 jobs:
-  # Classify platforms and determine build strategy.
-  # Outputs use-split=true and a per-platform matrix when push or validate-on-pr
-  # is enabled and two or more platforms are requested; otherwise use-split=false.
-  classify:
-    name: Classify Platforms
-    runs-on: ubuntu-24.04
+  # Per-platform native build leg. One matrix entry per platform; runner and
+  # QEMU config resolved by the orchestrator's classify job.
+  build-per-platform:
+    name: Docker build per platform
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(inputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
-    outputs:
-      use-split: ${{ steps.classify.outputs.use-split }}
-      matrix: ${{ steps.classify.outputs.matrix }}
-      # Policy-enforced evidence flags: equal to the inputs unless push is
-      # true and an input opted out, in which case classify warns and forces
-      # true (release-security policy, section 1).
-      effective-provenance: ${{ steps.classify.outputs.effective-provenance }}
-      effective-sbom: ${{ steps.classify.outputs.effective-sbom }}
 
     steps:
       - name: Harden runner
@@ -488,111 +407,236 @@ jobs:
           tooling-ref-override: ${{ inputs.tooling-ref }}
           sparse-checkout-extra: |
             scripts/ci/
-      - name: Classify platforms
-        id: classify
+      # Every artifact below is named "<artifact-prefix>-..."; an invalid
+      # prefix fails before any upload uses it (#1091, #1081).
+      - name: Validate artifact prefix
         shell: bash
         env:
-          STEP: classify
-          PLATFORMS: ${{ inputs.platforms }}
-          PUSH: ${{ inputs.push }}
-          VALIDATE_ON_PR: ${{ inputs.validate-on-pr }}
-          PROVENANCE: ${{ inputs.provenance }}
-          SBOM: ${{ inputs.sbom }}
-          RUNNER_MAP: ${{ inputs.runner-map }}
+          ARTIFACT_PREFIX: ${{ inputs.artifact-prefix }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/validate-artifact-prefix.sh
+      - name: Free disk space
+        if: inputs.free-disk-space && runner.environment == 'github-hosted'
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/docker/free-disk-space.sh
+      - name: Start resource monitor
+        if: inputs.resource-monitor
+        continue-on-error: true
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh start
+      - name: Setup QEMU
+        if: ${{ matrix.qemu }}
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-qemu-action@99012661954931238ded8c8b007157a8430204e1 # v4.4.0
+      - name: Setup Docker Buildx
+        # Pinned to SHA for supply chain security
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
+      - name: Extract metadata
+        id: meta
+        # Pinned to SHA for supply chain security
+        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302 # v6.2.0
+        with:
+          images: |
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}
+          # Disable metadata-action's auto 'latest': the tag is controlled only
+          # by the gated raw entry below, so backfills never move latest.
+          flavor: |
+            latest=false
+          # exact-tags (backfill): suppress every floating tag (sha-<ref>,
+          # branch, pr, major, minor, latest); publish only the pinned version
+          # tag (its immutable by-digest sha is inherent to the pushed image).
+          # yamllint disable rule:line-length
+          tags: |
+            type=sha,prefix=sha-,enable=${{ !inputs.exact-tags }}
+            type=ref,event=branch,enable=${{ !inputs.exact-tags }}
+            type=ref,event=pr,enable=${{ !inputs.exact-tags }}
+            type=semver,pattern={{version}},value=${{ inputs.version }},enable=${{ inputs.version != '' }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=semver,pattern={{major}},value=${{ inputs.version }},enable=${{ inputs.version != '' && !inputs.exact-tags }}
+            type=raw,value=latest,enable=${{ inputs.version != '' && inputs.tag-latest && !inputs.exact-tags }}
+          # yamllint enable rule:line-length
+      - name: Build and push (${{ matrix.platform }})
+        id: build
+        # Pinned to SHA for supply chain security
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
+        with:
+          context: ${{ inputs.context }}
+          file: ${{ inputs.file }}
+          platforms: ${{ matrix.platform }}
+          push: false
+          load: >-
+            ${{ inputs.health-check-cmd != '' || inputs.validate-on-pr || inputs.scan }}
+          # yamllint disable rule:line-length
+          tags: >-
+            ${{ format('{0}/{1}:validate-{2}', inputs.registry, inputs.image-name || github.repository, matrix.slug) }}
+          labels: ${{ steps.meta.outputs.labels }}
+          build-args: ${{ inputs.build-args }}
+          target: ${{ inputs.target }}
+          cache-from: |
+            ${{ inputs.no-cache == false && format('type=gha,scope={0}', matrix.slug) || '' }}
+            ${{ inputs.no-cache == false && inputs.cache-registry-ref != '' && format('type=registry,ref={0}-{1}', inputs.cache-registry-ref, matrix.slug) || '' }}
+          cache-to: |
+            ${{ inputs.no-cache == false && format('type=gha,mode=max,scope={0},ignore-error=true', matrix.slug) || '' }}
+          # yamllint enable rule:line-length
+          # Nothing is pushed, so there is no provenance or SBOM to attach.
+          provenance: false
+          sbom: false
+      - name: Summarize blocked egress
+        if: ${{ failure() }}
+        shell: bash
+        env:
+          STEP: summarize-blocked-egress
+          BUILD_LOG: ${{ runner.temp }}/docker-build.log
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+      - name: Smoke test (${{ matrix.platform }})
+        if: >-
+          inputs.validate-on-pr &&
+          (inputs.smoke-test != '' || inputs.smoke-test-script != '')
+        shell: bash
+        env:
+          STEP: smoke-test-local
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          PLATFORM: ${{ matrix.platform }}
           SMOKE_TEST: ${{ inputs.smoke-test }}
           SMOKE_TEST_SCRIPT: ${{ inputs.smoke-test-script }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
+      - name: Health check (${{ matrix.platform }})
+        if: >-
+          inputs.validate-on-pr &&
+          inputs.health-check-cmd != ''
+        shell: bash
+        env:
+          STEP: health-check-local
+          IMAGE: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          PLATFORM: ${{ matrix.platform }}
           HEALTH_CHECK_CMD: ${{ inputs.health-check-cmd }}
           HEALTH_CHECK_PORT: ${{ inputs.health-check-port }}
           HEALTH_CHECK_TIMEOUT: ${{ inputs.health-check-timeout }}
         run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh
-  # Single-platform builds, or multi-platform when push is disabled (QEMU
-  # fallback). Delegated to the focused build reusable.
-  build:
-    name: Docker build
-    needs: classify
-    if: ${{ needs.classify.outputs.use-split == 'false' }}
-    uses: ./.github/workflows/reusable-docker-build.yml
-    with:
-      context: ${{ inputs.context }}
-      file: ${{ inputs.file }}
-      platforms: ${{ inputs.platforms }}
-      registry: ${{ inputs.registry }}
-      image-name: ${{ inputs.image-name }}
-      tags: ${{ inputs.tags }}
-      version: ${{ inputs.version }}
-      source-ref: ${{ inputs.source-ref }}
-      tag-latest: ${{ inputs.tag-latest }}
-      exact-tags: ${{ inputs.exact-tags }}
-      push: ${{ inputs.push }}
-      provenance: ${{ fromJSON(needs.classify.outputs.effective-provenance) }}
-      sbom: ${{ fromJSON(needs.classify.outputs.effective-sbom) }}
-      scan: ${{ inputs.scan }}
-      build-args: ${{ inputs.build-args }}
-      target: ${{ inputs.target }}
-      health-check-cmd: ${{ inputs.health-check-cmd }}
-      health-check-port: ${{ inputs.health-check-port }}
-      health-check-timeout: ${{ inputs.health-check-timeout }}
-      validate-on-pr: ${{ inputs.validate-on-pr }}
-      scan-exit-code: ${{ inputs.scan-exit-code }}
-      cache-registry-ref: ${{ inputs.cache-registry-ref }}
-      cosign-sign: ${{ inputs.cosign-sign }}
-      no-cache: ${{ inputs.no-cache }}
-      free-disk-space: ${{ inputs.free-disk-space }}
-      resource-monitor: ${{ inputs.resource-monitor }}
-      tooling-ref: ${{ inputs.tooling-ref }}
-      egress-policy: ${{ inputs.egress-policy }}
-      allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      egress-preset: ${{ inputs.egress-preset }}
-      timeout-minutes: ${{ inputs.timeout-minutes }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      - name: Run Trivy vulnerability scanner (${{ matrix.platform }})
+        id: trivy
+        if: inputs.scan
+        # Pinned to SHA for supply chain security
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: >-
+            ${{ inputs.registry }}/${{ inputs.image-name || github.repository }}:validate-${{
+            matrix.slug }}
+          format: "sarif"
+          output: "trivy-results-${{ matrix.slug }}.sarif"
+          severity: "CRITICAL,HIGH"
+          exit-code: ${{ inputs.scan-exit-code }}
+      # Code-scanning upload needs security-events: write, so the SARIF
+      # leaves this read-only job as an artifact. reusable-docker-multiplatform.yml
+      # uploads it to code scanning from its own job; a direct caller may do
+      # the same or just keep the artifact. Every scanned leg uploads one: the
+      # SARIF, or a no-sarif marker when the build or scan failed first, so
+      # the uploader can tell "no report" from "lost report" (#1081).
+      - name: Stage Trivy SARIF (${{ matrix.platform }})
+        if: always() && inputs.scan
+        shell: bash
+        env:
+          MODE: stage
+          SARIF_NAME: trivy-results-${{ matrix.slug }}.sarif
+          SARIF_FILE: trivy-results-${{ matrix.slug }}.sarif
+          STAGE_DIR: ${{ runner.temp }}/trivy-sarif
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/docker/trivy-sarif.sh
+      - name: Upload Trivy SARIF artifact (${{ matrix.platform }})
+        if: always() && inputs.scan
+        # Pinned to SHA for supply chain security
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}
+          path: ${{ runner.temp }}/trivy-sarif/
+          if-no-files-found: error
+          retention-days: 1
+          # overwrite only covers a rerun of this same leg replacing its
+          # earlier attempt; isolation between calls is artifact-prefix.
+          overwrite: true
+      - name: Dump resource monitor
+        if: always() && inputs.resource-monitor
+        shell: bash
+        run: .lgtm-ci-tooling/scripts/ci/actions/resource-monitor.sh dump
+  summary-validate:
+    name: Validation Summary
+    needs: build-per-platform
+    if: >-
+      always() &&
+      inputs.validate-on-pr
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      contents: read
 
-  # Split per-platform path: runner-map matrix builds, optional smoke-test and
-  # health-check gates, manifest merge + verification, provenance, signing.
-  multiplatform:
-    name: Docker multi-platform
-    needs: classify
-    if: ${{ needs.classify.outputs.use-split == 'true' }}
-    uses: ./.github/workflows/reusable-docker-multiplatform.yml
-    with:
-      matrix: ${{ needs.classify.outputs.matrix }}
-      context: ${{ inputs.context }}
-      file: ${{ inputs.file }}
-      platforms: ${{ inputs.platforms }}
-      registry: ${{ inputs.registry }}
-      image-name: ${{ inputs.image-name }}
-      tags: ${{ inputs.tags }}
-      version: ${{ inputs.version }}
-      source-ref: ${{ inputs.source-ref }}
-      tag-latest: ${{ inputs.tag-latest }}
-      exact-tags: ${{ inputs.exact-tags }}
-      push: ${{ inputs.push }}
-      provenance: ${{ fromJSON(needs.classify.outputs.effective-provenance) }}
-      sbom: ${{ fromJSON(needs.classify.outputs.effective-sbom) }}
-      scan: ${{ inputs.scan }}
-      build-args: ${{ inputs.build-args }}
-      target: ${{ inputs.target }}
-      smoke-test: ${{ inputs.smoke-test }}
-      smoke-test-script: ${{ inputs.smoke-test-script }}
-      health-check-cmd: ${{ inputs.health-check-cmd }}
-      health-check-port: ${{ inputs.health-check-port }}
-      health-check-timeout: ${{ inputs.health-check-timeout }}
-      artifact-prefix: ${{ inputs.artifact-prefix }}
-      validate-on-pr: ${{ inputs.validate-on-pr }}
-      scan-exit-code: ${{ inputs.scan-exit-code }}
-      cache-registry-ref: ${{ inputs.cache-registry-ref }}
-      cosign-sign: ${{ inputs.cosign-sign }}
-      no-cache: ${{ inputs.no-cache }}
-      free-disk-space: ${{ inputs.free-disk-space }}
-      resource-monitor: ${{ inputs.resource-monitor }}
-      tooling-ref: ${{ inputs.tooling-ref }}
-      egress-policy: ${{ inputs.egress-policy }}
-      allowed-endpoints: ${{ inputs.allowed-endpoints }}
-      allowed-endpoints-mode: ${{ inputs.allowed-endpoints-mode }}
-      egress-preset: ${{ inputs.egress-preset }}
-      timeout-minutes: ${{ inputs.timeout-minutes }}
-    secrets:
-      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'docker'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'docker'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
+          persist-credentials: false
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          tooling-ref-override: ${{ inputs.tooling-ref }}
+          sparse-checkout-extra: |
+            scripts/ci/
+      - name: Build summary
+        if: always()
+        shell: bash
+        env:
+          STEP: summary
+          REGISTRY: ${{ inputs.registry }}
+          IMAGE_NAME: ${{ inputs.image-name || github.repository }}
+          PLATFORMS: ${{ inputs.platforms }}
+          PUSH: false
+          SCAN_ENABLED: ${{ inputs.scan }}
+          VALIDATE_ON_PR: true
+          HEALTH_CHECK_ENABLED: ${{ inputs.health-check-cmd != '' }}
+          MATRIX: ${{ inputs.matrix }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/build-docker.sh

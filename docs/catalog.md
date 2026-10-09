@@ -45,7 +45,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 9 | 48 | 7 | 1 | 65 |
+| Reusable workflows | 10 | 48 | 8 | 1 | 67 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -55,6 +55,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-coverage`](#reusable-coverage) | `stable` | Coverage Workflow |
 | [`reusable-release-version-pr`](#reusable-release-version-pr) | `stable` | Release Version PR |
 | [`reusable-rust-test`](#reusable-rust-test) | `stable` | Rust Test Workflow |
+| [`reusable-rust-test-run`](#reusable-rust-test-run) | `stable` | Rust Test Workflow (read-only) |
 | [`reusable-sbom-release-upload`](#reusable-sbom-release-upload) | `stable` | SBOM Release Upload |
 | [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright) | `stable` | Playwright E2E Test Workflow |
 | [`reusable-test-node`](#reusable-test-node) | `stable` | Node.js Vitest Test Workflow |
@@ -72,6 +73,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-docker`](#reusable-docker) | `preview` | Docker Build and Push |
 | [`reusable-docker-build`](#reusable-docker-build) | `preview` | Docker Build (single-platform) |
 | [`reusable-docker-multiplatform`](#reusable-docker-multiplatform) | `preview` | Docker Build (multi-platform) |
+| [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate) | `preview` | Docker Build (multi-platform, validate) |
 | [`reusable-docker-smoke-test`](#reusable-docker-smoke-test) | `preview` | Docker Smoke Test |
 | [`reusable-github-release`](#reusable-github-release) | `preview` | GitHub Release Workflow |
 | [`reusable-link-check`](#reusable-link-check) | `preview` | Link Check |
@@ -93,7 +95,6 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-release-recover`](#reusable-release-recover) | `preview` | Release Recovery |
 | [`reusable-required-check`](#reusable-required-check) | `preview` | Required Check Gate |
 | [`reusable-rust-build`](#reusable-rust-build) | `preview` | Rust Build Workflow |
-| [`reusable-rust-test-run`](#reusable-rust-test-run) | `preview` | Rust Test Workflow (read-only) |
 | [`reusable-sbom`](#reusable-sbom) | `preview` | SBOM Workflow |
 | [`reusable-scorecards`](#reusable-scorecards) | `preview` | OpenSSF Scorecard |
 | [`reusable-security-audit`](#reusable-security-audit) | `preview` | Security Audit Workflow |
@@ -110,6 +111,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-validate-action-pinning`](#reusable-validate-action-pinning) | `preview` | Validate Action Pinning |
 | [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check) | `preview` | Vulnerability Suppression Check Workflow |
 | [`reusable-ai-review`](#reusable-ai-review) | `internal` | AI Review |
+| [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish) | `internal` | Docker Build (multi-platform, publish) |
 | [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup) | `internal` | GHCR Cleanup |
 | [`reusable-main-failure-notifier`](#reusable-main-failure-notifier) | `internal` | Main Failure Notifier |
 | [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags) | `internal` | Prune Build Staging Tags |
@@ -203,6 +205,34 @@ Rust Test Workflow
 - No bundled fallback nextest profile: a consumer without `.config/nextest.toml` fails (#1086 item 3 not done)
 - Fixture proves both `coverage: false` and `coverage: true` calls; Pages coverage upload is untested
 - A cached `~/.cargo/bin` at the pinned version is reused without re-verifying its digest; the cache is scoped to the consumer repository and ref (#1096)
+- Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
+
+#### `reusable-rust-test-run`
+
+Rust Test Workflow (read-only)
+
+- **Path:** [`.github/workflows/reusable-rust-test-run.yml`](../.github/workflows/reusable-rust-test-run.yml)
+- **Tier:** stable
+- **Evidence:** [`readonly-rust.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37857465432) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `00a4db8b`
+- **Permissions:** `actions: read`, `contents: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** `cargo`
+- **Check names:** `Prepare Rust Matrix`, `Rust Tests`, `Aggregate Rust Results`
+- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<rust-toolchain>`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Prerequisites:**
+
+- Grant the caller job `actions: read` and `contents: read`; the aggregate job's artifact-availability wait needs `actions: read` (#803)
+- Same inputs, outputs and artifacts as `reusable-rust-test.yml` without `comment-marker`, and its check names without `publish-test-summary / Publish test summary`: when switching, remove `comment-marker` from `with:` and drop that context from required checks
+- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `results-artifact-pattern: <artifact-prefix>-results-*` and `tests-total-excludes-skipped: true` (as the facade does); see docs/reusable-workflows.md "Read-only variants" for the LCOV coverage inputs
+- Every other prerequisite of `reusable-rust-test` applies unchanged: `.config/nextest.toml` with a `ci` profile, digest-verified nextest / llvm-cov installs, egress block mode, distinct `artifact-prefix` per sibling call
+
+**Limitations:**
+
+- No bundled fallback nextest profile (#1086 item 3 not done)
+- A cached `~/.cargo/bin` at the pinned version is reused without re-verifying its digest; the cache is scoped to the consumer repository and ref (#1096)
+- Fixture proves a `coverage: false` call only; coverage and Pages coverage upload are untested through the variant
 - Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
 
 #### `reusable-sbom-release-upload`
@@ -302,7 +332,7 @@ Node.js Vitest Test Workflow (read-only)
 **Prerequisites:**
 
 - Grant the caller job `actions: read` and `contents: read`; the aggregate job's artifact-availability wait needs `actions: read` (#803)
-- Same inputs, outputs and artifacts as `reusable-test-node.yml` without `comment-marker`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
+- Same inputs, outputs and artifacts as `reusable-test-node.yml` without `comment-marker`, and its check names without `publish-test-summary / Publish test summary`: when switching, remove `comment-marker` from `with:` and drop that context from required checks
 - No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write` and the same `artifact-prefix`
 - Every other prerequisite of `reusable-test-node` applies unchanged: committed lockfile of the selected `package-manager`, Vitest as a project dependency, pnpm version from `packageManager`, egress block mode, distinct `artifact-prefix` per sibling call
 
@@ -357,7 +387,7 @@ Shell Test Workflow (read-only)
 **Prerequisites:**
 
 - Grant the caller job `actions: read` and `contents: read`; the sharded aggregate's artifact-availability wait needs `actions: read` (#803)
-- Same inputs, outputs and artifacts as `reusable-test-shell.yml` without `publish-test-summary`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
+- Same inputs, outputs and artifacts as `reusable-test-shell.yml` without `publish-test-summary`, and its check names without `publish-test-summary / Publish test summary`: when switching, remove `publish-test-summary` from `with:` and drop that context from required checks
 - No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `comment-marker` and `results-artifact-pattern: <artifact-prefix>-results`
 
 **Limitations:**
@@ -499,7 +529,7 @@ Docker Build and Push
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
-- **Check names:** `Classify Platforms`, `Docker build / Build and Push`, `Docker build / Vulnerability Scan`, `Docker multi-platform / Docker build per platform`, `Docker multi-platform / Docker verify per platform`, `Docker multi-platform / Docker health check per platform`, `Docker multi-platform / Merge Manifests`, `Docker multi-platform / Validation Summary`, `Docker multi-platform / Vulnerability Scan`
+- **Check names:** `Classify Platforms`, `Docker build / Build and Push`, `Docker build / Vulnerability Scan`, `Docker multi-platform / Validate / Docker build per platform`, `Docker multi-platform / Validate / Validation Summary`, `Docker multi-platform / Upload Trivy scan results`, `Docker multi-platform / Publish / Docker build per platform`, `Docker multi-platform / Publish / Docker verify per platform`, `Docker multi-platform / Publish / Docker health check per platform`, `Docker multi-platform / Publish / Merge Manifests`, `Docker multi-platform / Publish / Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-docker-build`
@@ -522,15 +552,49 @@ Docker Build (single-platform)
 Docker Build (multi-platform)
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet; multi-platform build needs arm64 runners and a registry
+> **Preview.** Facade since #1081; the fixture's `docker-publish.yml` proves the push path once it runs green from the fixture's main
 
 - **Path:** [`.github/workflows/reusable-docker-multiplatform.yml`](../.github/workflows/reusable-docker-multiplatform.yml)
 - **Tier:** preview
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
-- **Check names:** `Docker build per platform`, `Docker verify per platform`, `Docker health check per platform`, `Merge Manifests`, `Validation Summary`, `Vulnerability Scan`
+- **Check names:** `Validate / Docker build per platform`, `Validate / Validation Summary`, `Upload Trivy scan results`, `Publish / Docker build per platform`, `Publish / Docker verify per platform`, `Publish / Docker health check per platform`, `Publish / Merge Manifests`, `Publish / Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Prerequisites:**
+
+- Grant the caller job every scope listed under Permissions, also for `push: false`: GitHub validates the union statically. A caller that only validates can call `reusable-docker-multiplatform-validate` with `contents: read` instead (#1081)
+
+**Limitations:**
+
+- Since #1081 the per-platform checks are nested one level deeper (`Validate / …`, `Publish / …`); required-check contexts naming the old paths must be updated (migration notes)
+
+#### `reusable-docker-multiplatform-validate`
+
+Docker Build (multi-platform, validate)
+
+> [!WARNING]
+> **Preview.** Read-only build path split from `reusable-docker-multiplatform.yml` by #1081; promoted to stable once the fixture's `readonly-docker.yml` runs green from the fixture's main
+
+- **Path:** [`.github/workflows/reusable-docker-multiplatform-validate.yml`](../.github/workflows/reusable-docker-multiplatform-validate.yml)
+- **Tier:** preview
+- **Permissions:** `contents: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Docker build per platform`, `Validation Summary`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Prerequisites:**
+
+- Pass the per-platform `matrix` (platform, slug, runner, qemu per entry), as `reusable-docker.yml`'s classify job does; arm64 legs need an arm64 runner such as `ubuntu-24.04-arm`
+- Nothing is pushed, signed, attested or uploaded to code scanning. With `scan: true` the Trivy SARIF (or a `no-sarif.txt` marker when the scan never ran) is the artifact `<artifact-prefix>-trivy-sarif-<slug>` (default prefix `docker`); upload it from a job with `security-events: write` if you want it in code scanning
+
+**Limitations:**
+
+- Base images are pulled anonymously: no `push: false` path logs in, through the facade or not (only the publish path does), so private base images cannot be validated; `cache-registry-ref` is read-only here
+- The code-scanning category stays `trivy-<slug>`, so two validate calls in one run with the same slugs share it (as before #1081); `artifact-prefix` only keeps their artifacts apart
+- Fixture proves the build, smoke test, Trivy and SARIF hand-off paths, including a failing scan; the local health check is untested
 
 #### `reusable-docker-smoke-test`
 
@@ -846,36 +910,6 @@ Rust Build Workflow
 - **Check names:** `build / Rust Build`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
-#### `reusable-rust-test-run`
-
-Rust Test Workflow (read-only)
-
-> [!WARNING]
-> **Preview.** Read-only variant of `reusable-rust-test.yml` generated by #1081; promoted to stable once the fixture's `readonly-rust.yml` runs green from the fixture's main
-
-- **Path:** [`.github/workflows/reusable-rust-test-run.yml`](../.github/workflows/reusable-rust-test-run.yml)
-- **Tier:** preview
-- **Permissions:** `actions: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
-- **Package managers:** `cargo`
-- **Check names:** `Prepare Rust Matrix`, `Rust Tests`, `Aggregate Rust Results`
-- **Results:** `results.v1` document (`schemas/results.v1.json`, #1080) per leg in artifact `<prefix>-results-<rust-toolchain>`
-- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
-
-**Prerequisites:**
-
-- Grant the caller job `actions: read` and `contents: read`; the aggregate job's artifact-availability wait needs `actions: read` (#803)
-- Same inputs, outputs and artifacts as `reusable-rust-test.yml` without `comment-marker`, and its check names without `publish-test-summary / Publish test summary`: drop that context from required checks when switching
-- No PR comment. To post one, call `reusable-publish-test-summary.yml` from a separate job with `pull-requests: write`, `results-artifact-pattern: <artifact-prefix>-results-*` and `tests-total-excludes-skipped: true` (as the facade does); see docs/reusable-workflows.md "Read-only variants" for the LCOV coverage inputs
-- Every other prerequisite of `reusable-rust-test` applies unchanged: `.config/nextest.toml` with a `ci` profile, digest-verified nextest / llvm-cov installs, egress block mode, distinct `artifact-prefix` per sibling call
-
-**Limitations:**
-
-- No bundled fallback nextest profile (#1086 item 3 not done)
-- A cached `~/.cargo/bin` at the pinned version is reused without re-verifying its digest; the cache is scoped to the consumer repository and ref (#1096)
-- Fixture proves a `coverage: false` call only; coverage and Pages coverage upload are untested through the variant
-- Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
-
 #### `reusable-sbom`
 
 SBOM Workflow
@@ -1126,6 +1160,21 @@ AI Review
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** `uv`
 - **Check names:** `AI Review`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+#### `reusable-docker-multiplatform-publish`
+
+Docker Build (multi-platform, publish)
+
+> [!NOTE]
+> **Internal.** Push path of `reusable-docker-multiplatform.yml` (#1081); call the facade, not this file
+
+- **Path:** [`.github/workflows/reusable-docker-multiplatform-publish.yml`](../.github/workflows/reusable-docker-multiplatform-publish.yml)
+- **Tier:** internal
+- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Docker build per platform`, `Docker verify per platform`, `Docker health check per platform`, `Merge Manifests`, `Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
 #### `reusable-ghcr-cleanup`
@@ -2066,4 +2115,4 @@ exception naming the approving issue is recorded
 - **Retires:** input `tooling-ref`
 - **Deprecated since:** v0.75.3 (#995)
 - **Replacement:** Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`)
-- **Entries (59):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm`](#reusable-publish-npm), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)
+- **Entries (61):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish), [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm`](#reusable-publish-npm), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)

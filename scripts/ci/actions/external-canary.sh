@@ -123,7 +123,7 @@ CANARY_OVERRIDE_LABEL="${CANARY_OVERRIDE_LABEL:-canary-informational}"
 CANARY_RELEVANT_PATHS="${CANARY_RELEVANT_PATHS:-.github/workflows/ .github/actions/ scripts/ci/ schemas/ examples/}"
 # Keep in sync with the "Gate workflows" header of
 # .github/workflows/external-consumer-canary.yml (contract-tested).
-CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-node readonly-shell retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
+CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-node readonly-rust readonly-shell retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
 CANARY_INCLUDE_MANUAL="${CANARY_INCLUDE_MANUAL:-false}"
 CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
@@ -176,12 +176,12 @@ classify_workflow() {
 		printf 'informational\tsuccess\n'
 		;;
 	# Negative-by-design workflows: a green run here is the finding.
-	verify-negative.yml | playwright-negative.yml)
+	verify-negative.yml | playwright-negative.yml | docker-scan-failure.yml)
 		printf 'informational\tfailure\n'
 		;;
 	# Under-permissioned callers: GitHub rejects the run at parse time, before
 	# any job (and so any publish step) starts (#735, #1081).
-	perms-negative.yml | perms-negative-node.yml | perms-negative-shell.yml | perms-negative-rust.yml)
+	perms-negative.yml | perms-negative-node.yml | perms-negative-shell.yml | perms-negative-rust.yml | perms-negative-docker.yml)
 		printf 'informational\tstartup_failure\n'
 		;;
 	*)

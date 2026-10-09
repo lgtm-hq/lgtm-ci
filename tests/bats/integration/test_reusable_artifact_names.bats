@@ -301,7 +301,7 @@ _uploads_missing_overwrite() {
 		"reusable-build-python-dist.yml:Upload Python distribution" \
 		"reusable-build-rust-binaries.yml:Upload binaries" \
 		"reusable-coverage.yml:Upload coverage report" \
-		"reusable-docker-multiplatform.yml:Upload staging digest" \
+		"reusable-docker-multiplatform-publish.yml:Upload staging digest" \
 		"reusable-site-quality.yml:Upload site artifact" \
 		"reusable-test-e2e-matrix.yml:Upload merged report" \
 		"reusable-test-node.yml:Upload build artifact" \

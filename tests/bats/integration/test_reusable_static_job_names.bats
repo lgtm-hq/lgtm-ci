@@ -111,12 +111,16 @@ YAML
 }
 
 @test "reusable-docker: per-platform jobs use static names" {
-	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform.yml"
-	run grep -F 'name: Docker build per platform' "$workflow"
+	# Split into a read-only validate file and an internal publish file (#1081).
+	local validate="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-validate.yml"
+	local publish="${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-publish.yml"
+	run grep -F 'name: Docker build per platform' "$validate"
 	assert_success
-	run grep -F 'name: Docker verify per platform' "$workflow"
+	run grep -F 'name: Docker build per platform' "$publish"
 	assert_success
-	run grep -F 'name: Docker health check per platform' "$workflow"
+	run grep -F 'name: Docker verify per platform' "$publish"
+	assert_success
+	run grep -F 'name: Docker health check per platform' "$publish"
 	assert_success
 }
 

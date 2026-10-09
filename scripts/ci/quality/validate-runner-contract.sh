@@ -53,17 +53,23 @@ TIMEOUT_PER_JOB_EXCEPTIONS: set[str] = set()
 DOCKER_FAMILY: dict[str, set[str]] = {
     "reusable-docker.yml": {"classify"},
     "reusable-docker-build.yml": {"build", "scan"},
-    "reusable-docker-multiplatform.yml": {
+    # Facade (#1081): the validate/publish calls have no runs-on; only the
+    # validate-path SARIF upload job runs here.
+    "reusable-docker-multiplatform.yml": {"upload-scan-results"},
+    "reusable-docker-multiplatform-validate.yml": {
+        "build-per-platform",
+        "summary-validate",
+    },
+    "reusable-docker-multiplatform-publish.yml": {
         "build-per-platform",
         "verify-per-platform",
         "health-check-per-platform",
         "merge",
-        "summary-validate",
         "scan",
     },
 }
-# Only the orchestrator exposes runner-map; the multiplatform reusable
-# receives the already-resolved matrix from the classify job.
+# Only the orchestrator exposes runner-map; the multiplatform reusables
+# receive the already-resolved matrix from the classify job.
 DOCKER_RUNNER_MAP_FILES = {"reusable-docker.yml"}
 DOCKER_MATRIX_RUNS_ON = {"${{ matrix.runner }}"}
 RUNNER_IMAGE_RUNS_ON = "${{ inputs.runner-image }}"

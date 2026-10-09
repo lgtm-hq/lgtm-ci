@@ -162,6 +162,41 @@ contents: read"
 contents: read"
 }
 
+# Docker multi-platform (#1081): composed rather than generated. The validate
+# entry point is read-only; the facade keeps its union for push callers.
+@test "reusable-docker-multiplatform-validate: caller permission union is pinned" {
+	run _permission_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-validate.yml"
+	assert_success
+	assert_output "contents: read"
+}
+
+@test "reusable-docker-multiplatform and reusable-docker: facade unions unchanged by the split" {
+	# Both reach their scopes through nested `uses:` jobs, which the local
+	# helper above does not follow; the caller-permissions validator does.
+	local wf
+	for wf in reusable-docker-multiplatform.yml reusable-docker.yml; do
+		run python3 "${PROJECT_ROOT}/scripts/ci/docs/validate-caller-permissions.py" --union "$wf"
+		assert_success
+		assert_output "attestations: write
+contents: read
+id-token: write
+packages: write
+security-events: write"
+	done
+}
+
+@test "reusable-docker-multiplatform-publish: caller permission union is pinned" {
+	run _permission_union \
+		"${PROJECT_ROOT}/.github/workflows/reusable-docker-multiplatform-publish.yml"
+	assert_success
+	assert_output "attestations: write
+contents: read
+id-token: write
+packages: write
+security-events: write"
+}
+
 # The two workflows the publishing jobs moved into. Pinning their unions too
 # keeps the accounting closed: every scope #770 removed from a producer above
 # must reappear here, in a workflow a caller invokes only when it publishes.

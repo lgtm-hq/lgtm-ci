@@ -28,6 +28,7 @@ straight to a component index below.
 | [release-security-policy.md](release-security-policy.md) | Org-wide release policy: mandatory evidence per artifact class, build-then-publish ordering, blocking failures, partial states, recovery tiers, backfills |
 | [reusable-splits.md](reusable-splits.md) | Permission/secret inventory of the high-branching reusables and their read-only variants (#1081) |
 | [rust-testing.md](rust-testing.md) | Nextest config, fast-tests-vs-coverage, Rust workspace layouts |
+| [migration/v0.77.md](migration/v0.77.md) | Upgrading to the next release (unreleased): Docker multi-platform check names, read-only entry points (#1081) |
 | [migration/v0.76.md](migration/v0.76.md) | Upgrading from v0.75.x: every caller-visible change in v0.76.0 and the edit to make |
 | [release-changelog.md](release-changelog.md) | Keep a Changelog migration for `reusable-release-version-pr.yml` |
 | [org-rulesets.md](org-rulesets.md) | Org ruleset registry, required check-name contract, sync tooling |

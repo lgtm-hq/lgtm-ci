@@ -193,12 +193,14 @@ working unchanged.
 
 <!-- markdownlint-disable MD013 -->
 
-| Workflow                            | Responsibility                                                         | `runner-map`?                      |
-| ----------------------------------- | ---------------------------------------------------------------------- | ---------------------------------- |
-| `reusable-docker.yml`               | Orchestrator: classify + delegate (supported entry point)              | Yes (resolved by `classify`)       |
-| `reusable-docker-build.yml`         | Single-platform or QEMU multi-platform build + scan (non-split path)   | No (fixed `ubuntu-24.04` + QEMU)   |
-| `reusable-docker-multiplatform.yml` | Per-platform matrix build + smoke/health gates + manifest merge + sign | No (takes classify `matrix` input) |
-| `reusable-docker-smoke-test.yml`    | Standalone validation of a published image by immutable digest         | No (`runner-image` input)          |
+| Workflow                                     | Responsibility                                                                                                       | `runner-map`?                      |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `reusable-docker.yml`                        | Orchestrator: classify + delegate (supported entry point)                                                            | Yes (resolved by `classify`)       |
+| `reusable-docker-build.yml`                  | Single-platform or QEMU multi-platform build + scan (non-split path)                                                 | No (fixed `ubuntu-24.04` + QEMU)   |
+| `reusable-docker-multiplatform.yml`          | Per-platform matrix build + smoke/health gates + manifest merge + sign. Since #1081 a facade over the two rows below | No (takes classify `matrix` input) |
+| `reusable-docker-multiplatform-validate.yml` | `push: false` path only: per-platform build, local smoke/health/scan, summary. Read-only (`contents: read`)          | No (takes classify `matrix` input) |
+| `reusable-docker-multiplatform-publish.yml`  | Internal `push: true` path: staging pushes, gates, merge, attestation, signing, scan                                 | No (called by the facade)          |
+| `reusable-docker-smoke-test.yml`             | Standalone validation of a published image by immutable digest                                                       | No (`runner-image` input)          |
 
 <!-- markdownlint-enable MD013 -->
 
@@ -216,9 +218,16 @@ contract and must not change; the GHCR staging pruner depends on it.
 Nested job names: when called through the orchestrator, GitHub prefixes check
 names with the delegating job (for example
 `<caller-job> / Docker build / Build and Push` or
-`<caller-job> / Docker multi-platform / Merge Manifests`). Update branch
+`<caller-job> / Docker multi-platform / Publish / Merge Manifests`). Update branch
 protection / merge-queue required checks accordingly when upgrading across
-the #381 split.
+the #381 split. Since #1081 the multi-platform facade nests its jobs one
+level deeper: `Docker multi-platform / Validate / …` on `push: false`,
+`Docker multi-platform / Publish / …` on `push: true`, plus `Docker
+multi-platform / Upload Trivy scan results` for the validate-path SARIF. A
+direct caller of the facade sees `<job> / Validate / Docker build per
+platform (linux/amd64, linux-amd64, ubuntu-24.04, false)` where it used to see
+`<job> / Docker build per platform (linux/amd64, linux-amd64, ubuntu-24.04,
+false)` (all four matrix values are appended).
 
 #### Opt-in runner disk and resource observability
 
@@ -812,8 +821,9 @@ under one shared name**, with no per-leg suffix: `python-versions:
 shape #623 recorded for `build / 🏗️ Build & Quality Checks` on
 turbo-themes#598). The only way a leg value reaches such a context is the
 caller putting it in `job-name` itself. The Docker per-platform jobs in
-`reusable-docker-multiplatform.yml` use literal names (`Docker build per
-platform`, `Docker verify per platform`, `Docker health check per platform`),
+`reusable-docker-multiplatform-validate.yml` and
+`reusable-docker-multiplatform-publish.yml` use literal names (`Docker build
+per platform`, `Docker verify per platform`, `Docker health check per platform`),
 so their legs **do** carry the platform values as a suffix.
 
 When several check runs on the head commit share a required name, GitHub
@@ -2759,9 +2769,10 @@ before/after run. What each workflow proves:
 | `rust-release-build.yml` | Default `reusable-build-rust-binaries` matrix builds and runs a Windows binary (#1076) | gate |
 | `app-token-probe.yml`, `sbom-release-upload.yml` | Scoped App-token reach (#849); SBOM assets attached to a disposable prerelease that the run deletes again (#935) | informational, expected `success` |
 | `verify-negative.yml`, `playwright-negative.yml` | Negative-by-design: a wrong tool digest refuses to install (#1096); the failure-path Playwright artifact still carries the report (#804) | informational, expected `failure`; dispatched by its probe |
+| `docker-scan-failure.yml` | Negative-by-design (#1081): the Docker multi-platform facade with `scan-exit-code: "1"` on an image with known HIGH/CRITICAL findings fails, and its check job asserts both `trivy-<slug>` analyses still reached code scanning | informational, expected `failure`; no probe yet, so the canary dispatches it directly |
 | `perms-negative.yml` | An under-permissioned caller is rejected at parse time | informational, expected `startup_failure`; dispatched by its probe |
-| `perms-negative-node.yml`, `perms-negative-shell.yml`, `perms-negative-rust.yml` | The Node, shell and Rust facades, called with only the read scopes their read-only variants need, are rejected at parse time, before any job starts (#1081). The Rust negative lands on the fixture's main after its PR merges | informational, expected `startup_failure`; no probe yet, so the canary dispatches each directly |
-| `readonly-node.yml` (and one `readonly-<family>.yml` per further variant) | The generated read-only variant (`reusable-*-run.yml`, #1081) runs green with read scopes only, and its check job asserts the tests ran. One workflow per variant, so a candidate that predates a variant loses only that gate (`not_applicable`). `readonly-shell.yml` is an expected gate; `readonly-rust.yml` lands after its PR merges and becomes one in the next family's PR | gate |
+| `perms-negative-node.yml`, `perms-negative-shell.yml`, `perms-negative-rust.yml`, `perms-negative-docker.yml` | The Node, shell, Rust and Docker multi-platform facades, called with only the read scopes their read-only entry points need, are rejected at parse time, before any job starts or anything is pushed (#1081). The Docker negative lands on the fixture's main after its PR merges | informational, expected `startup_failure`; no probe yet, so the canary dispatches each directly |
+| `readonly-node.yml` (and one `readonly-<family>.yml` per further variant) | The generated read-only variant (`reusable-*-run.yml`, #1081) runs green with read scopes only, and its check job asserts the tests ran. One workflow per variant, so a candidate that predates a variant loses only that gate (`not_applicable`). `readonly-shell.yml` and `readonly-rust.yml` are expected gates; `readonly-docker.yml` (validate entry, both architectures) and `docker-publish.yml` (facade, push to the fixture's GHCR package) land after the Docker PR merges and become expected gates in the next PR | gate |
 | `verify-negative-probe.yml`, `playwright-negative-probe.yml`, `perms-negative-probe.yml` | Each dispatches its negative on the same ref and asserts the designed failure: run conclusion plus job evidence (the `digest mismatch` annotation in both digest jobs; the failing e2e job next to a green report-verdict job; zero jobs for the parse-time rejection). Green exactly when the negative failed as designed; after a pass it deletes the red negative run, keeping its jobs and annotations in the probe's summary and `negative-evidence` artifact | informational, expected `success` |
 | `release-version-pr.yml`, `release-benign-hook.yml`, `release-tamper-hook.yml` | `reusable-release-version-pr` from outside the org with the fixture's single-repo App: version PR, well-behaved hook, tampering hook stopped (#849). The three share one fixture concurrency group (concurrent dispatch cancels one) and every success opens a version PR a human closes, so the canary lists them as `not_dispatched` and runs them only with `CANARY_INCLUDE_MANUAL=true` | manual |
 
