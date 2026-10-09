@@ -69,25 +69,34 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
 fi
 
 # The probe ignores the caller's config. From osv-scanner 2.4.0 the Go
-# toolchain version in go.mod is only scanned with ScanGoModVersion = true,
-# and older releases reject that key. Without it a suppressed Go stdlib
-# advisory looks resolved and would be removed as stale.
-PROBE_CONFIG=/dev/null
-PROBE_OSV_VERSION=$(osv-scanner --version 2>/dev/null | sed -n 's/^osv-scanner version: v\{0,1\}//p') || PROBE_OSV_VERSION=""
-if [[ ! "$PROBE_OSV_VERSION" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
-	echo "::warning title=osv-scanner version::Could not read the osv-scanner version; probing without ScanGoModVersion" >&2
-elif ((10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 4))); then
-	PROBE_CONFIG=$(mktemp)
-	trap 'rm -f "$PROBE_CONFIG"' EXIT
-	printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
-fi
+# toolchain version in go.mod is only scanned with ScanGoModVersion = true;
+# without it a suppressed Go stdlib advisory looks resolved and would be
+# removed as stale. Older releases scan it by default but reject the key as
+# unknown, so the probe tries the key first and falls back to an empty config
+# only on that error. No version parsing, so no version string can make the
+# probe skip the key on a scanner that needs it.
+PROBE_CONFIG=$(mktemp)
+PROBE_STDERR=$(mktemp)
+trap 'rm -f "$PROBE_CONFIG" "$PROBE_STDERR"' EXIT
+printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
+
+# Sets PROBE_OUTPUT and PROBE_EXIT. stderr is kept for the fallback check and
+# replayed to the log.
+run_probe() {
+	PROBE_EXIT=0
+	PROBE_OUTPUT=$(
+		osv-scanner scan --recursive --format json --config "$1" \
+			. 2>"$PROBE_STDERR"
+	) || PROBE_EXIT=$?
+	cat "$PROBE_STDERR" >&2
+}
 
 log_info "Probing osv-scanner without suppressions..."
-PROBE_EXIT=0
-PROBE_OUTPUT=$(
-	osv-scanner scan --recursive --format json --config "$PROBE_CONFIG" \
-		.
-) || PROBE_EXIT=$?
+run_probe "$PROBE_CONFIG"
+if [[ "$PROBE_EXIT" -gt 1 ]] && grep -q 'unknown keys in config file' "$PROBE_STDERR"; then
+	log_info "This osv-scanner predates ScanGoModVersion; probing again with an empty config"
+	run_probe /dev/null
+fi
 
 if [[ "$PROBE_EXIT" -gt 1 ]]; then
 	log_error "osv-scanner failed with exit code $PROBE_EXIT"

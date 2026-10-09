@@ -16,9 +16,10 @@ Usage:
     osv-scanner scan --recursive --format json --config <probe-config> . \
         | python3 classify-suppressions.py
 
-    check-vuln-suppressions.sh picks the probe config: /dev/null before
-    osv-scanner 2.4.0, and a file with ``ScanGoModVersion = true`` from 2.4.0
-    on so Go toolchain advisories from go.mod are still reported.
+    check-vuln-suppressions.sh probes with a config that sets
+    ``ScanGoModVersion = true`` so osv-scanner 2.4.0 and later still report Go
+    toolchain advisories from go.mod, and retries with /dev/null on older
+    releases that reject the key.
 
 Environment:
     CONFIG_PATH  Path to suppression TOML (default: .osv-scanner.toml)
