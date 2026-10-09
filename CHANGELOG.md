@@ -19,6 +19,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.77.1] - 2026-10-09
+
+### Changed
+
+- **migration**: mark v0.77 guide released (#1154) (cd3b4bb)
+- **canary**: gate recover and the Docker scan-failure probe; promote the recover
+  entries (#1081) (#1150) (a39e3fe)
+- **deps**: update dependency uv to 0.12.24 (patch) (#1153) (ac34a8a)
+- **catalog**: `reusable-release-recover` tier `preview` → `stable`
+- **catalog**: `reusable-release-recover-plan` tier `preview` → `stable`
+
+### Fixed
+
+- **deps**: update dependency @anthropic-ai/claude-code to 2.1.291 (patch) (#1120)
+  (6e5380e)
+- **lint**: ignore the retrie[s] regex fragment in typos (#1156) (f46cba1)
+
 ## [0.77.0] - 2026-10-09
 
 ### Added
@@ -2811,7 +2828,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.1...HEAD
+[0.77.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.0...v0.77.1
 [0.77.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.2...v0.77.0
 [0.76.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.1...v0.76.2
 [0.76.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.0...v0.76.1
