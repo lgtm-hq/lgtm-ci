@@ -73,10 +73,10 @@ fi
 # and older releases reject that key. Without it a suppressed Go stdlib
 # advisory looks resolved and would be removed as stale.
 PROBE_CONFIG=/dev/null
-OSV_VERSION=$(osv-scanner --version 2>/dev/null | sed -n 's/^osv-scanner version: v\{0,1\}//p') || OSV_VERSION=""
-if [[ ! "$OSV_VERSION" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
-	log_warn "Could not read the osv-scanner version; probing without ScanGoModVersion"
-elif ((BASH_REMATCH[1] > 2 || (BASH_REMATCH[1] == 2 && BASH_REMATCH[2] >= 4))); then
+PROBE_OSV_VERSION=$(osv-scanner --version 2>/dev/null | sed -n 's/^osv-scanner version: v\{0,1\}//p') || PROBE_OSV_VERSION=""
+if [[ ! "$PROBE_OSV_VERSION" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
+	echo "::warning title=osv-scanner version::Could not read the osv-scanner version; probing without ScanGoModVersion" >&2
+elif ((10#${BASH_REMATCH[1]} > 2 || (10#${BASH_REMATCH[1]} == 2 && 10#${BASH_REMATCH[2]} >= 4))); then
 	PROBE_CONFIG=$(mktemp)
 	trap 'rm -f "$PROBE_CONFIG"' EXIT
 	printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"

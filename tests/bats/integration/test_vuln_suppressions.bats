@@ -45,27 +45,54 @@ setup_suppression_repo() {
 # Probe mock that reports the pinned osv-scanner version, so these tests take
 # the same version branch as the installed scanner in production.
 mock_osv_probe() {
-	local pinned
+	local probe_json="$1" pinned
 	pinned="$(sed -n 's/^DEFAULT_OSV_SCANNER_VERSION="\([^"]*\)".*/\1/p' \
 		"${PROJECT_ROOT}/scripts/ci/versions.env")"
 	[[ -n "$pinned" ]] || return 1
-	mock_osv_probe_versioned "$pinned" "$1"
-}
-
-# Probe mock that reports a version and keeps a copy of the --config it got
-# (the path is the second-to-last argument, before ".").
-mock_osv_probe_versioned() {
-	local version="$1"
-	local probe_json="$2"
 	mock_command_multi "osv-scanner" "
-		--version) printf 'osv-scanner version: %s\n' '$version';;
-		*scan*)
-			cfg=\"\${@: -2:1}\"
-			printf '%s' \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config-path'
-			cat \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config'
-			printf '%s' '$probe_json';;
+		--version) printf 'osv-scanner version: %s\n' '$pinned';;
+		*scan*) printf '%s' '$probe_json';;
 		*) exit 1;;
 	"
+}
+
+# osv-scanner mock for the Go toolchain tests. It records the --config path it
+# got (the second-to-last argument, before ".") and models both upstream
+# behaviours for a go.mod toolchain advisory:
+#   needs-key   (2.4.0 and later) reports it only when the config sets
+#               ScanGoModVersion = true
+#   rejects-key (before 2.4.0) always reports it, and fails with exit 127 on
+#               that key as an unknown config key
+# A version of "fail" makes --version exit 1.
+mock_osv_go_toolchain() {
+	local version="$1" behaviour="$2"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/osv-scanner" <<EOF
+#!/usr/bin/env bash
+if [[ "\$1" == "--version" ]]; then
+	[[ "$version" == "fail" ]] && exit 1
+	printf 'osv-scanner version: %s\n' '$version'
+	exit 0
+fi
+cfg="\${@: -2:1}"
+printf '%s' "\$cfg" >'$BATS_TEST_TMPDIR/probe-config-path'
+has_key=0
+grep -qx 'ScanGoModVersion = true' "\$cfg" && has_key=1
+if [[ "$behaviour" == "rejects-key" && \$has_key -eq 1 ]]; then
+	echo "unknown keys in config file: ScanGoModVersion" >&2
+	exit 127
+fi
+if [[ "$behaviour" == "rejects-key" || \$has_key -eq 1 ]]; then
+	printf '%s' '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+else
+	printf '%s' '{"results":[]}'
+fi
+EOF
+	chmod +x "${mock_bin}/osv-scanner"
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
 }
 
 run_check_script() {
@@ -127,30 +154,50 @@ EOF
 	)
 }
 
-@test "vuln-suppressions: probe enables ScanGoModVersion on osv-scanner 2.4.0 and later" {
+@test "vuln-suppressions: osv-scanner 2.6.0 keeps a Go toolchain suppression active" {
 	setup_active_go_stdlib_suppression
-	mock_osv_probe_versioned "2.6.0" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+	mock_osv_go_toolchain "2.6.0" needs-key
 
 	run_check_script
 	assert_success
 	assert_output --partial "All suppressions are active"
-	run cat "$BATS_TEST_TMPDIR/probe-config"
-	assert_output "ScanGoModVersion = true"
+	refute_output --partial "Stale"
 }
 
-@test "vuln-suppressions: probe enables ScanGoModVersion on osv-scanner 2.4.0 exactly" {
+@test "vuln-suppressions: osv-scanner 2.4.0 exactly keeps a Go toolchain suppression active" {
 	setup_active_go_stdlib_suppression
-	mock_osv_probe_versioned "2.4.0" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+	mock_osv_go_toolchain "2.4.0" needs-key
 
 	run_check_script
 	assert_success
-	run cat "$BATS_TEST_TMPDIR/probe-config"
-	assert_output "ScanGoModVersion = true"
+	assert_output --partial "All suppressions are active"
+	refute_output --partial "Stale"
 }
 
-@test "vuln-suppressions: probe warns and keeps an empty config when the version is unreadable" {
+@test "vuln-suppressions: osv-scanner before 2.4.0 probes with an empty config" {
 	setup_active_go_stdlib_suppression
-	mock_osv_probe_versioned "unknown" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+	mock_osv_go_toolchain "2.3.5" rejects-key
+
+	run_check_script
+	assert_success
+	assert_output --partial "All suppressions are active"
+	[ "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" = "/dev/null" ]
+}
+
+@test "vuln-suppressions: an unparseable osv-scanner version warns and probes with an empty config" {
+	setup_active_go_stdlib_suppression
+	mock_osv_go_toolchain "dev" rejects-key
+
+	run_check_script
+	assert_success
+	assert_output --partial "::warning title=osv-scanner version::Could not read the osv-scanner version"
+	assert_output --partial "All suppressions are active"
+	[ "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" = "/dev/null" ]
+}
+
+@test "vuln-suppressions: a failing osv-scanner --version warns and probes with an empty config" {
+	setup_active_go_stdlib_suppression
+	mock_osv_go_toolchain "fail" rejects-key
 
 	run_check_script
 	assert_success
@@ -158,22 +205,17 @@ EOF
 	[ "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" = "/dev/null" ]
 }
 
-@test "vuln-suppressions: probe keeps an empty config on osv-scanner before 2.4.0" {
+@test "vuln-suppressions: the probe config file is removed after the run" {
+	local cfg
 	setup_active_go_stdlib_suppression
-	mock_osv_probe_versioned "2.3.5" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+	mock_osv_go_toolchain "2.6.0" needs-key
 
 	run_check_script
 	assert_success
-	[ "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" = "/dev/null" ]
-}
-
-@test "vuln-suppressions: probe config file is removed after the run" {
-	setup_active_go_stdlib_suppression
-	mock_osv_probe_versioned "2.6.0" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
-
-	run_check_script
-	assert_success
-	[ ! -e "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" ]
+	cfg="$(cat "$BATS_TEST_TMPDIR/probe-config-path")"
+	[ -n "$cfg" ]
+	[ "$cfg" != "/dev/null" ]
+	[ ! -e "$cfg" ]
 }
 
 BASE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"

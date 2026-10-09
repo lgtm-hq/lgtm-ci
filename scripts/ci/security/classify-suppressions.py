@@ -13,8 +13,12 @@ longer present (safe to auto-remove), while expired means the suppression
 timebox lapsed and a human must re-evaluate it (flag, do not remove).
 
 Usage:
-    osv-scanner scan --recursive --format json --config /dev/null . \
+    osv-scanner scan --recursive --format json --config <probe-config> . \
         | python3 classify-suppressions.py
+
+    check-vuln-suppressions.sh picks the probe config: /dev/null before
+    osv-scanner 2.4.0, and a file with ``ScanGoModVersion = true`` from 2.4.0
+    on so Go toolchain advisories from go.mod are still reported.
 
 Environment:
     CONFIG_PATH  Path to suppression TOML (default: .osv-scanner.toml)
