@@ -2,9 +2,11 @@
 
 All `lgtm-ci` reusable workflows share a common consumer contract.
 
-Upgrading from v0.75.x: v0.76.0 changes caller permissions, egress
-enforcement, Node runner inputs and artifact names. See the
-[v0.76 migration guide](migration/v0.76.md).
+Upgrading from v0.76.x: v0.77.0 renames the Docker multi-platform and
+release-recovery check names; see the
+[v0.77 migration guide](migration/v0.77.md). From v0.75.x, start with the
+[v0.76 migration guide](migration/v0.76.md), which covers caller
+permissions, egress enforcement, Node runner inputs and artifact names.
 
 ## Standard inputs
 
