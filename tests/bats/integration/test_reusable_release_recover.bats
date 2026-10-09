@@ -60,7 +60,7 @@ def forwarded(job):
     start = text.index("  " + job + ":\n")
     # The job body ends at the next top-level job key (or end of file), so a
     # blank line or comment inside `with:` cannot cut it short.
-    nxt = re.search(r"^  [a-z][a-z0-9-]*:$", text[start + 1:], re.M)
+    nxt = re.search(r"^  [A-Za-z_][\w-]*:\s*(#.*)?$", text[start + 1:], re.M)
     body = text[start : start + 1 + nxt.start()] if nxt else text[start:]
     return set(re.findall(r"^      ([a-z-]+): \$\{\{ inputs\.\1 \}\}$", body, re.M))
 fp, fr = forwarded("plan"), forwarded("resume")
