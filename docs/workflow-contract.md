@@ -193,14 +193,14 @@ working unchanged.
 
 <!-- markdownlint-disable MD013 -->
 
-| Workflow                            | Responsibility                                                         | `runner-map`?                      |
-| ----------------------------------- | ---------------------------------------------------------------------- | ---------------------------------- |
-| `reusable-docker.yml`               | Orchestrator: classify + delegate (supported entry point)              | Yes (resolved by `classify`)       |
-| `reusable-docker-build.yml`         | Single-platform or QEMU multi-platform build + scan (non-split path)   | No (fixed `ubuntu-24.04` + QEMU)   |
-| `reusable-docker-multiplatform.yml` | Per-platform matrix build + smoke/health gates + manifest merge + sign. Since #1081 a facade over the two rows below | No (takes classify `matrix` input) |
-| `reusable-docker-multiplatform-validate.yml` | `push: false` path only: per-platform build, local smoke/health/scan, summary. Read-only (`contents: read`) | No (takes classify `matrix` input) |
-| `reusable-docker-multiplatform-publish.yml` | Internal `push: true` path: staging pushes, gates, merge, attestation, signing, scan | No (called by the facade) |
-| `reusable-docker-smoke-test.yml`    | Standalone validation of a published image by immutable digest         | No (`runner-image` input)          |
+| Workflow                                     | Responsibility                                                                                                       | `runner-map`?                      |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `reusable-docker.yml`                        | Orchestrator: classify + delegate (supported entry point)                                                            | Yes (resolved by `classify`)       |
+| `reusable-docker-build.yml`                  | Single-platform or QEMU multi-platform build + scan (non-split path)                                                 | No (fixed `ubuntu-24.04` + QEMU)   |
+| `reusable-docker-multiplatform.yml`          | Per-platform matrix build + smoke/health gates + manifest merge + sign. Since #1081 a facade over the two rows below | No (takes classify `matrix` input) |
+| `reusable-docker-multiplatform-validate.yml` | `push: false` path only: per-platform build, local smoke/health/scan, summary. Read-only (`contents: read`)          | No (takes classify `matrix` input) |
+| `reusable-docker-multiplatform-publish.yml`  | Internal `push: true` path: staging pushes, gates, merge, attestation, signing, scan                                 | No (called by the facade)          |
+| `reusable-docker-smoke-test.yml`             | Standalone validation of a published image by immutable digest                                                       | No (`runner-image` input)          |
 
 <!-- markdownlint-enable MD013 -->
 
