@@ -1,24 +1,30 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
 # Purpose: Contract tests for reusable-release-recover.yml and the retention
-#          defaults (#966)
+#          defaults (#966). Since #1081 the workflow is a facade over the
+#          read-only reusable-release-recover-plan.yml and the internal
+#          reusable-release-recover-resume.yml; job-level contracts are
+#          asserted on the file that now holds the job.
 
 load "../../helpers/common"
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-recover.yml"
+PLAN="${PROJECT_ROOT}/.github/workflows/reusable-release-recover-plan.yml"
+RESUME="${PROJECT_ROOT}/.github/workflows/reusable-release-recover-resume.yml"
 EXAMPLE="${PROJECT_ROOT}/examples/release-recover.yml"
 
-# Print the lines of one job (from its key to the next job key).
+# Print the lines of one job (from its key to the next job key) of FILE
+# (default: the facade).
 job_block() {
 	awk -v job="$1" '
 		$0 == "  " job ":" { in_job = 1; next }
 		in_job && /^  [a-z-]+:$/ { exit }
 		in_job { print }
-	' "$WORKFLOW"
+	' "${2:-$WORKFLOW}"
 }
 
 
-# Lines of one named step inside one job of the workflow.
+# Lines of one named step inside one job of FILE (default: the facade).
 step_block_in_job() {
 	awk -v job="$1" -v step="$2" '
 		$0 == "  " job ":" { in_job = 1; next }
@@ -26,7 +32,7 @@ step_block_in_job() {
 		in_job && $0 == "      - name: " step { in_step = 1; print; next }
 		in_step && /^      - name: / { in_step = 0 }
 		in_step { print }
-	' "$WORKFLOW"
+	' "${3:-$WORKFLOW}"
 }
 
 @test "reusable-release-recover: dry-run defaults to true" {
@@ -35,6 +41,37 @@ step_block_in_job() {
 		in_input && /default:/ { print; exit }
 	' "$WORKFLOW"
 	assert_output --partial "true"
+}
+
+@test "reusable-release-recover: facade forwards every input to the stages that read it" {
+	# A dropped forward silently falls back to the stage's default (e.g. an
+	# empty npm-order skips the npm resume), so pin the partition exactly.
+	run python3 -c '
+import re, sys
+def inputs(path, extra=()):
+    text = open(path).read()
+    head = text[: text.index("    secrets:")] if "    secrets:" in text[: text.index("\njobs:")] else text[: text.index("    outputs:")] if "    outputs:" in text else text
+    return set(re.findall(r"^      ([a-z-]+):\n(?:        #.*\n)?        description:", head, re.M)) - set(extra)
+facade = inputs(sys.argv[1])
+plan = inputs(sys.argv[2])
+resume = inputs(sys.argv[3], ("missing", "unresumable", "resolve-result"))
+text = open(sys.argv[1]).read()
+def forwarded(job, end):
+    body = text[text.index("  " + job + ":\n"):]
+    body = body[: body.index(end)]
+    return set(re.findall(r"^      ([a-z-]+): \$\{\{ inputs\.\1 \}\}$", body, re.M))
+fp, fr = forwarded("plan", "\n\n"), forwarded("resume", "    secrets:")
+errors = []
+if fp != plan:
+    errors.append(f"plan forwarding differs: {sorted(fp ^ plan)}")
+if fr != resume:
+    errors.append(f"resume forwarding differs: {sorted(fr ^ resume)}")
+if (plan | resume) != facade:
+    errors.append(f"facade inputs no stage reads: {sorted(facade - plan - resume)}")
+print("\n".join(errors))
+sys.exit(1 if errors else 0)
+' "$WORKFLOW" "$PLAN" "$RESUME"
+	assert_success
 }
 
 @test "reusable-release-recover: requires tag, source run id, the publish workflow path, and tooling-ref" {
@@ -51,35 +88,60 @@ step_block_in_job() {
 	# The source run's identity is read from the API, never from an input.
 	run grep -F "source-run-sha" "$WORKFLOW"
 	assert_failure
-	run job_block resolve
+	run job_block resolve "$PLAN"
 	assert_line "          SOURCE_RUN_ID: \${{ inputs.source-run-id }}"
 	assert_line "          SOURCE_WORKFLOW: \${{ inputs.source-workflow }}"
 }
 
+@test "reusable-release-recover: facade runs the read-only plan, then the resume stage" {
+	run job_block plan
+	assert_line "    uses: ./.github/workflows/reusable-release-recover-plan.yml"
+	assert_line "      contents: read"
+	refute_output --partial ": write"
+	run job_block resume
+	assert_line "    uses: ./.github/workflows/reusable-release-recover-resume.yml"
+	# The record job inside must also run after a failed or dry-run plan.
+	assert_line "    if: always()"
+	assert_line "      missing: \${{ needs.plan.outputs.missing || '[]' }}"
+	assert_line "      unresumable: \${{ needs.plan.outputs.unresumable || '[]' }}"
+	assert_line "      resolve-result: \${{ needs.plan.result }}"
+	assert_line "      homebrew-dispatch-token: \${{ secrets.homebrew-dispatch-token }}"
+	# The plan grants no write scope and mints no OIDC token.
+	run python3 "${PROJECT_ROOT}/scripts/ci/docs/validate-caller-permissions.py" \
+		--union reusable-release-recover-plan.yml
+	assert_output "actions: read
+contents: read"
+}
+
 @test "reusable-release-recover: detection gets the verified release manifest and the record stage the closure inputs" {
-	run job_block resolve
+	run job_block resolve "$PLAN"
 	assert_output --partial "RELEASE_MANIFEST: \${{ inputs.release-artifact-name != '' && format('recovery-artifacts/release/{0}', inputs.release-checksums-file) || '' }}"
 	assert_line "      unresumable: \${{ steps.detect.outputs.unresumable }}"
-	run job_block record
-	assert_line "          UNRESUMABLE_SET: \${{ needs.resolve.outputs.unresumable }}"
+	run grep -F "value: \${{ jobs.resolve.outputs.unresumable }}" "$PLAN"
+	assert_success
+	run job_block record "$RESUME"
+	assert_line "          UNRESUMABLE_SET: \${{ inputs.unresumable }}"
+	assert_line "          RESOLVE_RESULT: \${{ inputs.resolve-result }}"
 	assert_line "          DRY_RUN: \${{ inputs.dry-run == true && '1' || '0' }}"
 }
 
 @test "reusable-release-recover: dry-run boundary stops before any resume job" {
-	run grep -F "Dry run: detection only" "$WORKFLOW"
+	run grep -F "Plan stage: detection only; this stage resumes nothing." "$PLAN"
 	assert_success
-	# Every resume job is gated on !inputs.dry-run.
-	run grep -cF "!inputs.dry-run &&" "$WORKFLOW"
+	# Every resume job is gated on !inputs.dry-run and a successful plan.
+	run grep -cF "!inputs.dry-run &&" "$RESUME"
+	assert_output 3
+	run grep -cF "inputs.resolve-result == 'success' &&" "$RESUME"
 	assert_output 3
 }
 
 @test "reusable-release-recover: resume jobs are gated on the detected missing set" {
-	run grep -cF "contains(fromJSON(needs.resolve.outputs.missing)" "$WORKFLOW"
+	run grep -cF "contains(fromJSON(inputs.missing)" "$RESUME"
 	assert_output 3
 }
 
 @test "reusable-release-recover: resumes through the same scripts and guards as the tag path" {
-	run job_block resume-npm
+	run job_block resume-npm "$RESUME"
 	# #965's contract, in order: entry guard, live preconditions,
 	# verify-artifacts, publish-set (the only writer), verify-published.
 	assert_output --partial "scripts/ci/actions/npm/assert-entry-workflow.sh"
@@ -95,10 +157,10 @@ step_block_in_job() {
 		/npm\/publish-set.sh/ { publish = NR }
 		/npm\/verify-published.sh/ { post = NR }
 		END { exit !(guard && pre && download && verify && publish && post && guard < pre && pre < download && download < verify && verify < publish && publish < post) }
-	' "$WORKFLOW"
+	' "$RESUME"
 	assert_success
 	# The resume is always live and inherits the #965 inputs.
-	run job_block resume-npm
+	run job_block resume-npm "$RESUME"
 	assert_line '          LIVE: "1"'
 	assert_line "          ALLOWED_ENTRY_WORKFLOWS: \${{ inputs.npm-entry-workflows }}"
 	assert_line "          ACCESS: \${{ inputs.npm-access }}"
@@ -108,13 +170,13 @@ step_block_in_job() {
 	assert_line '          DRY_RUN: "0"'
 	# The verifier waits for dist-tags.<npm-dist-tag> to point at the publish,
 	# so the resume's verify step is wired with the tag like the tag path.
-	run step_block_in_job resume-npm "Verify published packages"
+	run step_block_in_job resume-npm "Verify published packages" "$RESUME"
 	assert_line "          DIST_TAG: \${{ inputs.npm-dist-tag }}"
 	assert_line "          PROVENANCE: \${{ inputs.npm-provenance == true && '1' || '0' }}"
 	assert_line '          DRY_RUN: "0"'
 	# The GitHub Release resumes through create-github-release.sh with
 	# immutable assets so only missing assets upload.
-	run job_block resume-github-release
+	run job_block resume-github-release "$RESUME"
 	assert_output --partial "scripts/ci/release/create-github-release.sh"
 	assert_line '          IMMUTABLE_ASSETS: "true"'
 	assert_output --partial "verify-recovery-artifacts.sh"
@@ -137,45 +199,51 @@ step_block_in_job() {
 	# inputs.tag, and neither github.workflow_sha (the caller's commit inside
 	# a called workflow) nor the job.workflow_sha default used elsewhere is a
 	# ref here: recovery tooling is always an explicit operator choice.
-	run grep -c "ref: \${{ inputs.tooling-ref }}" "$WORKFLOW"
+	run bash -c 'cat "$0" "$1" | grep -c "ref: \${{ inputs.tooling-ref }}"' "$PLAN" "$RESUME"
 	assert_output 5
-	run grep -E "(github|job)\.workflow_sha \}\}" "$WORKFLOW"
+	run grep -E "(github|job)\.workflow_sha \}\}" "$WORKFLOW" "$PLAN" "$RESUME"
 	assert_failure
+	run bash -c 'cat "$0" "$1" | grep -cE "^\s+ref: "' "$PLAN" "$RESUME"
+	assert_output 5
+	# The facade checks nothing out.
 	run grep -cE "^\s+ref: " "$WORKFLOW"
-	assert_output 5
-	run grep -F "ref: \${{ inputs.tag }}" "$WORKFLOW"
+	assert_output 0
+	run grep -F "ref: \${{ inputs.tag }}" "$WORKFLOW" "$PLAN" "$RESUME"
 	assert_failure
-	run grep -F "inputs.tag }}" "$WORKFLOW"
+	run grep -F "inputs.tag }}" "$PLAN"
 	assert_success
-	run grep -E "uses: .*@\\$\{\{ inputs\.tag" "$WORKFLOW"
+	run grep -E "uses: .*@\\$\{\{ inputs\.tag" "$WORKFLOW" "$PLAN" "$RESUME"
 	assert_failure
 }
 
 @test "reusable-release-recover: every job is under the runner contract with harden first" {
 	# runs-on is the runner-image input on every job; no hardcoded label.
+	run bash -c 'cat "$0" "$1" | grep -cE "^    runs-on: "' "$PLAN" "$RESUME"
+	assert_output 5
+	run bash -c 'cat "$0" "$1" | grep -c "runs-on: \${{ inputs.runner-image }}"' "$PLAN" "$RESUME"
+	assert_output 5
+	run bash -c 'cat "$0" "$1" | grep -cE "^    timeout-minutes: "' "$PLAN" "$RESUME"
+	assert_output 5
+	# The facade's jobs only call the stages.
 	run grep -cE "^    runs-on: " "$WORKFLOW"
-	assert_output 5
-	run grep -c 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
-	assert_output 5
-	run grep -cE "^    timeout-minutes: " "$WORKFLOW"
-	assert_output 5
+	assert_output 0
 	# The first step of every job is the harden-runner step.
 	run awk '
 		/^    steps:$/ { expect = 1; next }
 		expect && /^      - / { if ($0 != "      - name: Harden runner") bad++; expect = 0 }
 		END { exit bad > 0 }
-	' "$WORKFLOW"
+	' "$PLAN" "$RESUME"
 	assert_success
-	run grep -c "      - name: Harden runner" "$WORKFLOW"
+	run bash -c 'cat "$0" "$1" | grep -c "      - name: Harden runner"' "$PLAN" "$RESUME"
 	assert_output 5
 }
 
 @test "reusable-release-recover: records the outcome on the release-failure issue" {
-	run grep -F "record-recovery.sh" "$WORKFLOW"
+	run grep -F "record-recovery.sh" "$RESUME"
 	assert_success
 	# The record job runs always(): a failed recovery must land on the issue too.
-	run grep -F "if: always()" "$WORKFLOW"
-	assert_success
+	run job_block record "$RESUME"
+	assert_line "    if: always()"
 }
 
 @test "reusable-release-recover: declares the least-privilege union" {
@@ -215,7 +283,9 @@ step_block_in_job() {
 @test "reusable-release-recover: the Homebrew re-dispatch uses the declared cross-repo secret" {
 	run grep -F "      homebrew-dispatch-token:" "$WORKFLOW"
 	assert_success
-	run job_block resume-homebrew
+	run grep -F "      homebrew-dispatch-token:" "$RESUME"
+	assert_success
+	run job_block resume-homebrew "$RESUME"
 	assert_line "          GH_TOKEN: \${{ secrets.homebrew-dispatch-token }}"
 	refute_output --partial "GH_TOKEN: \${{ github.token }}"
 }
@@ -224,9 +294,9 @@ step_block_in_job() {
 	# harden-runner installs the allowlist at job start, so every job selects
 	# the release-recover preset from the embedded map by expression (#913).
 	# Five harden-runner selectors plus their five unknown-preset guards.
-	run grep -c "fromJSON(env.LGTM_CI_EGRESS_PRESETS)\[inputs.egress-preset || 'release-recover'\]" "$WORKFLOW"
+	run bash -c 'cat "$0" "$1" | grep -c "fromJSON(env.LGTM_CI_EGRESS_PRESETS)\[inputs.egress-preset || '"'"'release-recover'"'"'\]"' "$PLAN" "$RESUME"
 	assert_output 10
-	run grep -c "^      - name: Fail on unknown egress-preset" "$WORKFLOW"
+	run bash -c 'cat "$0" "$1" | grep -c "^      - name: Fail on unknown egress-preset"' "$PLAN" "$RESUME"
 	assert_output 5
 	run awk '/^      egress-preset:$/{f=1;next} f&&/^      [a-z-]+:/{exit} f{print}' "$WORKFLOW"
 	assert_output --partial 'default: "release-recover"'

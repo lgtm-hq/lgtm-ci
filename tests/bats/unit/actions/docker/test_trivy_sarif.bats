@@ -58,6 +58,7 @@ teardown() {
 	run env MODE=stage SARIF_NAME="$NAME" SARIF_FILE="$sarif" STAGE_DIR="$stage" bash "$SCRIPT"
 	assert_success
 	[ -f "${stage}/no-sarif.txt" ]
+	[ ! -e "${stage}/${NAME}" ]
 }
 
 @test "trivy-sarif.sh: locate finds the SARIF in the extracted artifact" {

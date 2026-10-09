@@ -123,7 +123,7 @@ CANARY_OVERRIDE_LABEL="${CANARY_OVERRIDE_LABEL:-canary-informational}"
 CANARY_RELEVANT_PATHS="${CANARY_RELEVANT_PATHS:-.github/workflows/ .github/actions/ scripts/ci/ schemas/ examples/}"
 # Keep in sync with the "Gate workflows" header of
 # .github/workflows/external-consumer-canary.yml (contract-tested).
-CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-node readonly-rust readonly-shell retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
+CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov docker-facade-validate docker-orchestrator docker-publish egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-docker readonly-node readonly-rust readonly-shell retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
 CANARY_INCLUDE_MANUAL="${CANARY_INCLUDE_MANUAL:-false}"
 CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
@@ -181,7 +181,7 @@ classify_workflow() {
 		;;
 	# Under-permissioned callers: GitHub rejects the run at parse time, before
 	# any job (and so any publish step) starts (#735, #1081).
-	perms-negative.yml | perms-negative-node.yml | perms-negative-shell.yml | perms-negative-rust.yml | perms-negative-docker.yml)
+	perms-negative.yml | perms-negative-node.yml | perms-negative-shell.yml | perms-negative-rust.yml | perms-negative-docker.yml | perms-negative-recover.yml)
 		printf 'informational\tstartup_failure\n'
 		;;
 	*)
@@ -347,16 +347,23 @@ since_timestamp() {
 
 # Rewrite every lgtm-ci pin in one workflow file to the candidate SHA, then
 # refuse any lgtm-ci reference that is not pinned to it (a tag or branch pin
-# would otherwise run old code and report green).
+# would otherwise run old code and report green). Like the fixture's
+# scripts/pin.sh, a 40-hex `ref:` value tagged `# lgtm-ci-pin` (a direct
+# tooling checkout, or a `tooling-ref:` input that must name the same commit
+# as the `uses:` line) is rewritten too (#1081).
 rewrite_pins() {
 	local file="${1:?file required}" sha="${2:?sha required}" stale
 	[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "not a full SHA: $sha"
-	sed -E "s#(${PIN_RE})[0-9a-f]{40}#\1${sha}#g" "$file" >"$file.tmp"
+	sed -E -e "s#(${PIN_RE})[0-9a-f]{40}#\1${sha}#g" \
+		-e "s#(ref: )[0-9a-f]{40}([[:space:]]+\# lgtm-ci-pin)#\1${sha}\2#g" "$file" >"$file.tmp"
 	mv "$file.tmp" "$file"
 	# Only `uses:` lines count: header comments quote the pattern with a
 	# `@<sha>` placeholder.
 	stale="$(grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$file" | grep -oE "${PIN_RE}[^[:space:]\"']+" | grep -v "@${sha}\$" || true)"
 	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci reference not pinned to the candidate: ${stale//$'\n'/, }"
+	# A tagged ref the rewrite could not match would run old tooling green.
+	stale="$(grep -E '#[[:space:]]*lgtm-ci-pin' "$file" | grep -vE "ref: ${sha}[[:space:]]+# lgtm-ci-pin" || true)"
+	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci-pin ref not pinned to the candidate: ${stale//$'\n'/, }"
 }
 
 # Print the file names (basenames) under <dir> that declare workflow_dispatch

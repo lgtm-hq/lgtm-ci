@@ -35,8 +35,13 @@ RUNNER_PINNING_EXCEPTIONS = {
 }
 
 # Reusables documented in docs/workflow-contract.md as exempt from the
-# timeout-minutes input requirement. Currently every reusable exposes it.
-TIMEOUT_MINUTES_EXCEPTIONS: set[str] = set()
+# timeout-minutes input requirement.
+TIMEOUT_MINUTES_EXCEPTIONS: set[str] = {
+    # Internal resume stage of reusable-release-recover.yml (#1081): every job
+    # keeps the fixed cap it had before the split; the facade's input bounds
+    # the plan stage.
+    "reusable-release-recover-resume.yml",
+}
 
 # Per-job exemptions from the requirement that every runs-on job declares
 # timeout-minutes (literal or input-wired). Entries are "<file>.yml:<job-id>"

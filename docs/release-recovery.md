@@ -93,6 +93,27 @@ On completion the recovery run updates the release-failure issue the notifier
 (#964) opened with the outcome table, and closes it only when the run was
 live and every detected-missing channel was resumed successfully.
 
+### Stages and permissions (#1081)
+
+`reusable-release-recover.yml` is a facade over two stages:
+
+- `reusable-release-recover-plan.yml`, the read-only stage: tag gate,
+  artifact download and verification, and channel detection. It needs
+  `actions: read` and `contents: read`. Its outputs `missing`,
+  `missing-count` and `unresumable` carry the detected sets.
+- `reusable-release-recover-resume.yml`, the internal stage: the per-channel
+  resume jobs and the record job, with every write scope and the Homebrew
+  token.
+
+GitHub validates the facade's whole permission union before any `if:`
+runs, so a dispatch workflow calling the facade grants the resume scopes
+even for `dry-run: true`. To check what a recovery would do without granting
+any write scope, call the plan stage directly. It takes the same `tag`,
+`source-run-id`, `source-workflow`, `tooling-ref` and channel inputs, and
+writes nothing, including no issue comment. The check names gain a segment:
+`<job> / Plan / Resolve tag, artifacts, and channels`, `<job> / Resume / …`
+(see [migration/v0.77.md](migration/v0.77.md)).
+
 ## Retention window
 
 Recovery needs the original artifacts. Release-artifact retention defaults to

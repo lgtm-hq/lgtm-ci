@@ -21,6 +21,9 @@ EXPLICIT_PIN_ONLY=(
 	# Recovery runs newer tooling against an older release on purpose; the
 	# operator must choose the tooling commit (docs/release-recovery.md).
 	"reusable-release-recover.yml"
+	# Its plan and resume stages (#1081) keep the same explicit pin.
+	"reusable-release-recover-plan.yml"
+	"reusable-release-recover-resume.yml"
 )
 
 _is_explicit_pin_only() {

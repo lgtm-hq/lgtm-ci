@@ -281,7 +281,8 @@ call_fn() {
 		egress.yml perms.yml actions-direct.yml coverage-lcov.yml playwright.yml \
 		build-python-direct.yml vuln-suppression.yml rust-build-siblings.yml \
 		python-private-dep.yml verify-fresh-install.yml rust-release-build.yml readonly-node.yml readonly-shell.yml \
-		readonly-rust.yml; do
+		readonly-rust.yml readonly-docker.yml docker-publish.yml docker-facade-validate.yml \
+		docker-orchestrator.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_success
 		assert_output "$(printf 'gate\tsuccess')"
@@ -294,7 +295,7 @@ call_fn() {
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "for g in \$CANARY_EXPECTED_GATES; do classify_workflow \"\$g.yml\" | cut -f1; done | sort -u"
 	assert_output "gate"
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | wc -l | tr -d ' '"
-	assert_output "21"
+	assert_output "25"
 }
 
 @test "external-canary: App-token, SBOM and negative-probe paths are informational expecting success" {
@@ -313,7 +314,7 @@ call_fn() {
 		assert_output "$(printf 'informational\tfailure')"
 	done
 	for wf in perms-negative.yml perms-negative-node.yml perms-negative-shell.yml perms-negative-rust.yml \
-		perms-negative-docker.yml; do
+		perms-negative-docker.yml perms-negative-recover.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tstartup_failure')"
 	done
@@ -358,6 +359,33 @@ call_fn() {
 	assert_success
 	run grep -F "lgtm-hq/lgtm-ci/.github/actions/run-pytest@${CANDIDATE}" "$BATS_TEST_TMPDIR/wf.yml"
 	assert_success
+}
+
+@test "external-canary: rewrite_pins rewrites refs tagged lgtm-ci-pin, like the fixture's pin.sh" {
+	printf 'jobs:\n  a:\n    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-recover-plan.yml@%s\n    with:\n      tooling-ref: %s # lgtm-ci-pin\n      other-ref: %s\n' \
+		"$OLD_PIN" "$OLD_PIN" "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_success
+	run grep -F "tooling-ref: ${CANDIDATE} # lgtm-ci-pin" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
+	# An untagged 40-hex value is not an lgtm-ci pin and stays as it is.
+	run grep -F "other-ref: ${OLD_PIN}" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
+}
+
+@test "external-canary: rewrite_pins accepts any spacing before lgtm-ci-pin" {
+	printf 'with:\n  tooling-ref: %s  # lgtm-ci-pin\n  ref: %s\t# lgtm-ci-pin\n' "$OLD_PIN" "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_success
+	run grep -c "${CANDIDATE}" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_output "2"
+}
+
+@test "external-canary: rewrite_pins refuses an lgtm-ci-pin it could not rewrite" {
+	printf 'with:\n  tooling-ref: v0.76.2 # lgtm-ci-pin\n' >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "lgtm-ci-pin ref not pinned to the candidate: "
 }
 
 @test "external-canary: rewrite_pins rejects a short SHA" {

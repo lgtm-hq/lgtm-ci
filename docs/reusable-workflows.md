@@ -343,6 +343,13 @@ jobs:
       scan: true
 ```
 
+Release recovery is composed the same way:
+`reusable-release-recover.yml` calls the read-only
+`reusable-release-recover-plan.yml` (`actions: read`, `contents: read`),
+then the internal `reusable-release-recover-resume.yml`. A dry run without
+write scopes calls the plan stage directly; see
+[release-recovery.md](release-recovery.md#stages-and-permissions-1081).
+
 The measured permission, secret and job inventory of the five reusables
 that issue #1081 covers, and the split chosen for each, is in
 [reusable-splits.md](reusable-splits.md).
