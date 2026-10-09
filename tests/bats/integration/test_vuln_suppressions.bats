@@ -6,6 +6,8 @@ load "../../helpers/common"
 load "../../helpers/mocks"
 load "../../helpers/github_env"
 
+bats_require_minimum_version 1.5.0
+
 SCRIPT="${PROJECT_ROOT}/scripts/ci/security/check-vuln-suppressions.sh"
 
 setup() {
