@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+### Changed
+
+### Deprecated
+
+### Removed
+
+### Fixed
+
+### Security
+
+## [0.76.3] - 2026-10-09
+
+### Added
+
 - **Deprecation governance: `docs/governance.md`** (#1082). What each support
   tier promises, exact-SHA pinning (`v0` is convenience-only), the
   announce → inert shim with `::warning` → removal lifecycle, and the rule
@@ -43,16 +57,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **governance**: gate deprecation removal on known-consumer evidence (#1133) (f1b383a)
 - Docs and the README pin lgtm-ci by `@<sha> # vX.Y.Z` everywhere; the
   `@main`, `@v1` and short-SHA examples are gone (#1082).
 
 ### Deprecated
 
-### Removed
+- **catalog**: input `node-version-matrix` on `reusable-build-artifact` (#760): Pass `matrix` (a JSON array of objects) instead; `node-version` covers a single version
+- **catalog**: output `pages-url` on `reusable-coverage` (#770): Read the `pages-url` output of `reusable-publish-test-results-pages`
+- **catalog**: input `publish-pages` on `reusable-coverage` (#770): Call `reusable-publish-test-results-pages` from its own caller job
+- **catalog**: input `pages-target-dir` on `reusable-test-e2e-matrix` (#770): Pass it as `pages-target-dir` to `reusable-publish-test-results-pages`
+- **catalog**: input `publish-allowed-endpoints` on `reusable-test-e2e-matrix` (#770): Pass `allowed-endpoints` to `reusable-publish-test-results-pages`
+- **catalog**: input `publish-egress-preset` on `reusable-test-e2e-matrix` (#770): Pass `egress-preset` to `reusable-publish-test-results-pages`
+- **catalog**: input `publish-results` on `reusable-test-e2e-matrix` (#770): Call `reusable-publish-test-results-pages` from its own caller job
+- **catalog**: output `report-url` on `reusable-test-e2e-matrix` (#770): Read the `pages-url` output of `reusable-publish-test-results-pages`
+- **catalog**: `reusable-publish-npm` deprecated (#965): Call `reusable-publish-npm-set` with a one-package set
+- **catalog**: input `upload-release-assets` on `reusable-sbom` (#770): Call `reusable-sbom-release-upload` from its own caller job
+- **catalog**: input `tooling-ref` on 59 entries (#995): Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`)
 
 ### Fixed
 
-### Security
+- **egress**: docker preset allows the Trivy and Sigstore attestation hosts (#1143)
+  (b778a79)
 
 ## [0.76.2] - 2026-10-08
 
@@ -2753,7 +2779,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.3...HEAD
+[0.76.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.2...v0.76.3
 [0.76.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.1...v0.76.2
 [0.76.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.0...v0.76.1
 [0.76.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.75.3...v0.76.0
