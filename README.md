@@ -87,8 +87,10 @@ What each support tier promises, how deprecated inputs are retired, and the
 known-consumer evidence a removal needs are in
 [docs/governance.md](docs/governance.md).
 
-Upgrading from v0.75.x? v0.76.0 changes what callers must grant and pass;
-follow [docs/migration/v0.76.md](docs/migration/v0.76.md) before moving the pin.
+Upgrading from v0.76.x? v0.77.0 renames the Docker multi-platform and
+release-recovery check names; follow
+[docs/migration/v0.77.md](docs/migration/v0.77.md) before moving the pin.
+From v0.75.x, start with [docs/migration/v0.76.md](docs/migration/v0.76.md).
 
 ## 🔨 Development
 
