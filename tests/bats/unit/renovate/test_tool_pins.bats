@@ -310,7 +310,7 @@ _install_bats_clone_args() {
 	pin="$(_pin DEFAULT_BATS_CORE_VERSION)"
 	[[ -n "$pin" ]]
 	_install_bats_clone_args ""
-	assert_output "clone --depth 1 --branch v${pin} https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
+	assert_output "clone --depth 1 --branch v${pin#v} https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
 }
 
 @test "run-bats-tests: a v-prefixed BATS_VERSION override clones a single-v tag" {
