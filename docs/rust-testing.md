@@ -72,6 +72,7 @@ jobs:
         github.com:443
         api.github.com:443
         codeload.github.com:443
+        release-assets.githubusercontent.com:443
         static.rust-lang.org:443
         sh.rustup.rs:443
         crates.io:443
@@ -95,6 +96,7 @@ jobs:
         github.com:443
         api.github.com:443
         codeload.github.com:443
+        release-assets.githubusercontent.com:443
         static.rust-lang.org:443
         sh.rustup.rs:443
         crates.io:443

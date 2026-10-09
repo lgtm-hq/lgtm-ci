@@ -70,9 +70,8 @@ jobs:
     with:
       job-name: "Build Check"
       egress-policy: block
-      # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
-      # (installer script + release binary downloads) run by setup-rust;
-      # GitHub release downloads redirect to release-assets.
+      # GitHub release hosts cover the pinned cargo-binstall download run by
+      # setup-rust; GitHub release downloads redirect to release-assets.
       allowed-endpoints: >
         github.com:443
         api.github.com:443
@@ -105,9 +104,8 @@ jobs:
       publish-test-summary: true
       runner-image: ubuntu-24.04
       egress-policy: block
-      # raw/objects/github-releases hosts cover the cargo-binstall bootstrap
-      # (installer script + release binary downloads) used to install
-      # cargo-nextest and cargo-llvm-cov (GitHub release downloads redirect
+      # GitHub release hosts cover the cargo-binstall, cargo-nextest and
+      # cargo-llvm-cov release downloads (GitHub release downloads redirect
       # to release-assets); pipelines host covers the coverage artifact
       # upload for the PR summary.
       allowed-endpoints: >
