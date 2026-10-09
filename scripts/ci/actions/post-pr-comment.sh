@@ -102,26 +102,30 @@ MARKER_TAG="<!-- lgtm-ci:${MARKER} -->"
 
 # Find existing comment with this marker
 # Use jq --arg to safely pass marker and avoid command injection
-EXISTING_COMMENT_ID=$(gh api \
+EXISTING_COMMENT_IDS=$(gh api \
 	-H "Accept: application/vnd.github+json" \
 	"/repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" \
-	2>/dev/null | jq -r --arg marker "$MARKER_TAG" '.[] | select(.body | contains($marker)) | .id' | head -1 || echo "")
+	2>/dev/null | jq -r --arg marker "$MARKER_TAG" '.[] | select(.body | contains($marker)) | .id' || echo "")
+EXISTING_COMMENT_ID=$(head -1 <<<"$EXISTING_COMMENT_IDS")
 
 # Handle empty body
 if [[ -z "${COMMENT_BODY:-}" ]]; then
 	if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
-		# Overlapping runs can both find the comment; the later DELETE gets a
-		# 404 because the comment is already gone. Any other error still fails.
-		if DELETE_ERROR=$(gh api \
-			-X DELETE \
-			"/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT_ID}" 2>&1 >/dev/null); then
-			echo "Deleted comment $EXISTING_COMMENT_ID"
-		elif [[ "$DELETE_ERROR" == *"HTTP 404"* ]]; then
-			echo "Comment $EXISTING_COMMENT_ID was already deleted"
-		else
-			echo "$DELETE_ERROR" >&2
-			exit 1
-		fi
+		# Overlapping runs can each create a marker comment, so delete them all.
+		# An overlapping run may already have deleted one; that DELETE gets a
+		# 404 because the comment is gone. Any other error still fails.
+		while read -r comment_id; do
+			if DELETE_ERROR=$(gh api \
+				-X DELETE \
+				"/repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" 2>&1 >/dev/null); then
+				echo "Deleted comment $comment_id"
+			elif [[ "$DELETE_ERROR" == *"HTTP 404"* ]]; then
+				echo "Comment $comment_id was already deleted"
+			else
+				echo "$DELETE_ERROR" >&2
+				exit 1
+			fi
+		done <<<"$EXISTING_COMMENT_IDS"
 		echo "action-taken=deleted" >>"$GITHUB_OUTPUT"
 		exit 0
 	else

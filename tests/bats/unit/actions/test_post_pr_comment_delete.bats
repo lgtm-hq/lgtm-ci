@@ -15,17 +15,22 @@ setup() {
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github_output"
 	: >"$GITHUB_OUTPUT"
 
-	# gh stub: listing returns one marker comment; DELETE prints
-	# $GH_DELETE_STDERR to stderr and exits $GH_DELETE_EXIT.
+	# gh stub: listing prints $GH_LIST_JSON (one marker comment, id 7, unless
+	# a test overrides it). DELETE records its path in $GH_DELETE_LOG, prints $GH_DELETE_STDERR
+	# to stderr and exits $GH_DELETE_EXIT.
+	export GH_DELETE_LOG="${BATS_TEST_TMPDIR}/gh_deletes"
+	: >"$GH_DELETE_LOG"
+	export GH_LIST_JSON='[{"id": 7, "body": "<!-- lgtm-ci:test-marker -->\nold failure"}]'
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
 	cat >"${mock_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
 if [[ " $* " == *" -X DELETE "* ]]; then
+	printf '%s\n' "${!#}" >>"$GH_DELETE_LOG"
 	[[ -n "${GH_DELETE_STDERR:-}" ]] && printf '%s\n' "$GH_DELETE_STDERR" >&2
 	exit "${GH_DELETE_EXIT:-0}"
 fi
-printf '[{"id": 7, "body": "<!-- lgtm-ci:test-marker -->\\nold failure"}]\n'
+printf '%s\n' "$GH_LIST_JSON"
 EOF
 	chmod +x "${mock_bin}/gh"
 	export PATH="${mock_bin}:$PATH"
@@ -50,6 +55,30 @@ _run_clear() {
 	assert_success
 	assert_output --partial "Deleted comment 7"
 	grep -q 'action-taken=deleted' "$GITHUB_OUTPUT"
+}
+
+@test "post-pr-comment: deletes every marker comment on empty body" {
+	# Two overlapping failing runs can each create a marker comment.
+	export GH_LIST_JSON='[{"id": 7, "body": "<!-- lgtm-ci:test-marker -->\na"}, {"id": 8, "body": "unrelated"}, {"id": 9, "body": "<!-- lgtm-ci:test-marker -->\nb"}]'
+
+	_run_clear
+
+	assert_success
+	assert_output --partial "Deleted comment 7"
+	assert_output --partial "Deleted comment 9"
+	run cat "$GH_DELETE_LOG"
+	assert_output "$(printf '%s\n' /repos/lgtm-hq/consumer/issues/comments/7 /repos/lgtm-hq/consumer/issues/comments/9)"
+}
+
+@test "post-pr-comment: skips delete when no marker comment exists" {
+	export GH_LIST_JSON='[{"id": 8, "body": "unrelated"}]'
+
+	_run_clear
+
+	assert_success
+	assert_output --partial "Skipped: empty body"
+	run cat "$GH_DELETE_LOG"
+	assert_output ""
 }
 
 @test "post-pr-comment: treats a 404 on delete as already deleted" {
