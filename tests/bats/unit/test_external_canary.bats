@@ -282,7 +282,7 @@ call_fn() {
 		build-python-direct.yml vuln-suppression.yml rust-build-siblings.yml \
 		python-private-dep.yml verify-fresh-install.yml rust-release-build.yml readonly-node.yml readonly-shell.yml \
 		readonly-rust.yml readonly-docker.yml docker-publish.yml docker-facade-validate.yml \
-		docker-orchestrator.yml; do
+		docker-orchestrator.yml recover.yml docker-scan-failure-probe.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_success
 		assert_output "$(printf 'gate\tsuccess')"
@@ -295,7 +295,7 @@ call_fn() {
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "for g in \$CANARY_EXPECTED_GATES; do classify_workflow \"\$g.yml\" | cut -f1; done | sort -u"
 	assert_output "gate"
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | wc -l | tr -d ' '"
-	assert_output "25"
+	assert_output "27"
 }
 
 @test "external-canary: App-token, SBOM and negative-probe paths are informational expecting success" {

@@ -123,7 +123,7 @@ CANARY_OVERRIDE_LABEL="${CANARY_OVERRIDE_LABEL:-canary-informational}"
 CANARY_RELEVANT_PATHS="${CANARY_RELEVANT_PATHS:-.github/workflows/ .github/actions/ scripts/ci/ schemas/ examples/}"
 # Keep in sync with the "Gate workflows" header of
 # .github/workflows/external-consumer-canary.yml (contract-tested).
-CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov docker-facade-validate docker-orchestrator docker-publish egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-docker readonly-node readonly-rust readonly-shell retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
+CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov docker-facade-validate docker-orchestrator docker-publish docker-scan-failure-probe egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-docker readonly-node readonly-rust readonly-shell recover retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
 CANARY_INCLUDE_MANUAL="${CANARY_INCLUDE_MANUAL:-false}"
 CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"

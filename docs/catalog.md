@@ -45,7 +45,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 12 | 47 | 9 | 1 | 69 |
+| Reusable workflows | 14 | 45 | 9 | 1 | 69 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -55,6 +55,8 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-coverage`](#reusable-coverage) | `stable` | Coverage Workflow |
 | [`reusable-docker-multiplatform`](#reusable-docker-multiplatform) | `stable` | Docker Build (multi-platform) |
 | [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate) | `stable` | Docker Build (multi-platform, validate) |
+| [`reusable-release-recover`](#reusable-release-recover) | `stable` | Release Recovery |
+| [`reusable-release-recover-plan`](#reusable-release-recover-plan) | `stable` | Release Recovery (plan) |
 | [`reusable-release-version-pr`](#reusable-release-version-pr) | `stable` | Release Version PR |
 | [`reusable-rust-test`](#reusable-rust-test) | `stable` | Rust Test Workflow |
 | [`reusable-rust-test-run`](#reusable-rust-test-run) | `stable` | Rust Test Workflow (read-only) |
@@ -92,8 +94,6 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-quality-lint`](#reusable-quality-lint) | `preview` | Quality Lint Workflow |
 | [`reusable-release-auto-tag`](#reusable-release-auto-tag) | `preview` | Release Auto Tag |
 | [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem) | `preview` | Release Multi-Ecosystem Version PR |
-| [`reusable-release-recover`](#reusable-release-recover) | `preview` | Release Recovery |
-| [`reusable-release-recover-plan`](#reusable-release-recover-plan) | `preview` | Release Recovery (plan) |
 | [`reusable-required-check`](#reusable-required-check) | `preview` | Required Check Gate |
 | [`reusable-rust-build`](#reusable-rust-build) | `preview` | Rust Build Workflow |
 | [`reusable-sbom`](#reusable-sbom) | `preview` | SBOM Workflow |
@@ -193,6 +193,43 @@ Docker Build (multi-platform, validate)
 - Base images are pulled anonymously: no `push: false` path logs in, through the facade or not (only the publish path does), so private base images cannot be validated; `cache-registry-ref` is read-only here
 - The code-scanning category stays `trivy-<slug>`, so two validate calls in one run with the same slugs share it (as before #1081); `artifact-prefix` only keeps their artifacts apart
 - Fixture proves the build, smoke test, Trivy and SARIF hand-off paths, including a failing scan; the local health check is untested
+
+#### `reusable-release-recover`
+
+Release Recovery
+
+- **Path:** [`.github/workflows/reusable-release-recover.yml`](../.github/workflows/reusable-release-recover.yml)
+- **Tier:** stable
+- **Evidence:** [`recover.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37873426577) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `65f3fe15`
+- **Permissions:** `actions: read`, `attestations: write`, `contents: write`, `id-token: write`, `issues: write`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Plan / Resolve tag, artifacts, and channels`, `Resume / Resume npm channel`, `Resume / Resume GitHub Release channel`, `Resume / Re-dispatch Homebrew`, `Resume / Record recovery outcome`
+
+**Prerequisites:**
+
+- Grant the caller job every scope listed under Permissions, also for `dry-run: true`: GitHub validates the union statically. A dry run that needs no write scope can call `reusable-release-recover-plan` with `actions: read` and `contents: read` (#1081)
+
+**Limitations:**
+
+- Since #1081 the checks are nested one level deeper (`Plan / …`, `Resume / …`); required-check contexts naming the old paths must be updated (migration notes)
+- The fixture proves the dry run and the live GitHub Release resume; the npm and Homebrew resumes are untested externally
+
+#### `reusable-release-recover-plan`
+
+Release Recovery (plan)
+
+- **Path:** [`.github/workflows/reusable-release-recover-plan.yml`](../.github/workflows/reusable-release-recover-plan.yml)
+- **Tier:** stable
+- **Evidence:** [`recover.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37873426577) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `65f3fe15`
+- **Permissions:** `actions: read`, `contents: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Resolve tag, artifacts, and channels`
+
+**Prerequisites:**
+
+- Same required inputs as the facade (`tag`, `source-run-id`, `source-workflow`, `tooling-ref`); nothing is resumed and no issue is written. The outputs `missing`, `missing-count` and `unresumable` carry the detected sets
 
 #### `reusable-release-version-pr`
 
@@ -863,46 +900,6 @@ Release Multi-Ecosystem Version PR
 - **Package managers:** —
 - **Check names:** `Prepare version update hook`, `Run version update hook`, `Create Version PR`, `Report release automation failure`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
-
-#### `reusable-release-recover`
-
-Release Recovery
-
-> [!WARNING]
-> **Preview.** Facade since #1081; the fixture's `recover.yml` proves the plan and the GitHub Release resume once it runs green from the fixture's main
-
-- **Path:** [`.github/workflows/reusable-release-recover.yml`](../.github/workflows/reusable-release-recover.yml)
-- **Tier:** preview
-- **Permissions:** `actions: read`, `attestations: write`, `contents: write`, `id-token: write`, `issues: write`
-- **Runners:** `ubuntu-24.04`
-- **Package managers:** —
-- **Check names:** `Plan / Resolve tag, artifacts, and channels`, `Resume / Resume npm channel`, `Resume / Resume GitHub Release channel`, `Resume / Re-dispatch Homebrew`, `Resume / Record recovery outcome`
-
-**Prerequisites:**
-
-- Grant the caller job every scope listed under Permissions, also for `dry-run: true`: GitHub validates the union statically. A dry run that needs no write scope can call `reusable-release-recover-plan` with `actions: read` and `contents: read` (#1081)
-
-**Limitations:**
-
-- Since #1081 the checks are nested one level deeper (`Plan / …`, `Resume / …`); required-check contexts naming the old paths must be updated (migration notes)
-
-#### `reusable-release-recover-plan`
-
-Release Recovery (plan)
-
-> [!WARNING]
-> **Preview.** Read-only plan stage split from `reusable-release-recover.yml` by #1081; promoted to stable once the fixture's `recover.yml` runs green from the fixture's main
-
-- **Path:** [`.github/workflows/reusable-release-recover-plan.yml`](../.github/workflows/reusable-release-recover-plan.yml)
-- **Tier:** preview
-- **Permissions:** `actions: read`, `contents: read`
-- **Runners:** `ubuntu-24.04`
-- **Package managers:** —
-- **Check names:** `Resolve tag, artifacts, and channels`
-
-**Prerequisites:**
-
-- Same required inputs as the facade (`tag`, `source-run-id`, `source-workflow`, `tooling-ref`); nothing is resumed and no issue is written. The outputs `missing`, `missing-count` and `unresumable` carry the detected sets
 
 #### `reusable-required-check`
 

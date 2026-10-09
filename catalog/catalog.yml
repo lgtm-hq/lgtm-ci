@@ -711,9 +711,11 @@ entries:
 
   - id: reusable-release-recover
     kind: reusable-workflow
-    tier: preview
-    reason: "Facade since #1081; the fixture's `recover.yml` proves the plan and the GitHub Release
-              resume once it runs green from the fixture's main"
+    tier: stable
+    evidence:
+      fixture: recover.yml
+      last-green: 65f3fe1597c41ff1bed38b743f755beea1b5ef34
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37873426577
     permissions:
       actions: read
       attestations: write
@@ -729,6 +731,8 @@ entries:
     limitations:
       - "Since #1081 the checks are nested one level deeper (`Plan / …`, `Resume / …`); required-check
           contexts naming the old paths must be updated (migration notes)"
+      - "The fixture proves the dry run and the live GitHub Release resume; the npm and Homebrew
+          resumes are untested externally"
     check-names:
       - "Plan / Resolve tag, artifacts, and channels"
       - "Resume / Resume npm channel"
@@ -738,9 +742,11 @@ entries:
 
   - id: reusable-release-recover-plan
     kind: reusable-workflow
-    tier: preview
-    reason: "Read-only plan stage split from `reusable-release-recover.yml` by #1081; promoted to
-              stable once the fixture's `recover.yml` runs green from the fixture's main"
+    tier: stable
+    evidence:
+      fixture: recover.yml
+      last-green: 65f3fe1597c41ff1bed38b743f755beea1b5ef34
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37873426577
     permissions:
       actions: read
       contents: read

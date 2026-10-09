@@ -87,7 +87,7 @@ families compose internal reusables, and their nested check names change
 | Shell tests | same | `reusable-test-shell-run.yml` (generated): `actions: read`, `contents: read` | unchanged | done (#1140) |
 | Rust tests | same | `reusable-rust-test-run.yml` (generated): `actions: read`, `contents: read` | unchanged | done (#1141) |
 | Docker multi-platform | build and validate (read) / registry push, manifest, signing, attestation, code scanning (write) | `reusable-docker-multiplatform-validate.yml`: `contents: read`; SARIF kept as an artifact | composes `-validate` (`push: false`), an `upload-scan-results` job (`security-events: write`) and the internal `-publish` (`push: true`); nested check names gain a segment | done (#1145) |
-| Release recover | resolve, dry run (read) / resume per channel (write, secret) / record (`issues: write`) | `reusable-release-recover-plan.yml`: `actions: read`, `contents: read` (the resolve job's `id-token: write` was never used: `gh attestation verify` reads the attestations API with the job token) | composes `-plan` and the internal `-resume` (channel jobs plus the always() record job); nested check names gain a segment | this change |
+| Release recover | resolve, dry run (read) / resume per channel (write, secret) / record (`issues: write`) | `reusable-release-recover-plan.yml`: `actions: read`, `contents: read` (the resolve job's `id-token: write` was never used: `gh attestation verify` reads the attestations API with the job token) | composes `-plan` and the internal `-resume` (channel jobs plus the always() record job); nested check names gain a segment | done (#1149) |
 
 <!-- markdownlint-enable MD013 -->
 
