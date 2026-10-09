@@ -300,8 +300,10 @@ _install_bats_clone_args() {
 	mock_command_record "git" "" 1
 	run env STEP=install-bats BATS_VERSION="$1" BATS_INSTALL_NO_SUDO=1 \
 		BATS_INSTALL_SRC="$BATS_TEST_TMPDIR/src" \
+		BATS_INSTALL_PREFIX="$BATS_TEST_TMPDIR/prefix" \
+		BATS_LIB_INSTALL_PREFIX="$BATS_TEST_TMPDIR/lib" \
 		bash "${PROJECT_ROOT}/scripts/ci/actions/run-bats-tests.sh"
-	assert_failure
+	assert_failure 1
 	run head -n 1 "$BATS_TEST_TMPDIR/mock_calls_git"
 }
 
@@ -315,5 +317,10 @@ _install_bats_clone_args() {
 
 @test "run-bats-tests: a v-prefixed BATS_VERSION override clones a single-v tag" {
 	_install_bats_clone_args "v9.8.7"
+	assert_output "clone --depth 1 --branch v9.8.7 https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
+}
+
+@test "run-bats-tests: a bare BATS_VERSION override clones its v tag" {
+	_install_bats_clone_args "9.8.7"
 	assert_output "clone --depth 1 --branch v9.8.7 https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
 }
