@@ -461,7 +461,7 @@ jobs:
           && steps.check-pr.outputs.pr-exists == 'false'
           && steps.version.outputs.release-needed == 'true'
         # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-multi-ecosystem-metadata-${{ steps.artifact-key.outputs.key }}
           path: ${{ runner.temp }}/release-metadata/release-metadata.json
@@ -523,7 +523,7 @@ jobs:
           persist-credentials: false
       - name: Download release metadata
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-multi-ecosystem-metadata-${{ needs.prepare.outputs.artifact-key }}
           path: ${{ runner.temp }}/release-metadata
@@ -572,7 +572,7 @@ jobs:
         run: .lgtm-ci-tooling/scripts/ci/release/run-version-update-hook.sh
       - name: Upload version update changes
         # yamllint disable-line rule:line-length
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: release-multi-ecosystem-hook-changes-${{ needs.prepare.outputs.artifact-key }}
           path: ${{ runner.temp }}/version-update-changes/version-update.diff
@@ -763,7 +763,7 @@ jobs:
           && steps.version.outputs.release-needed == 'true'
           && inputs.version-update-script != ''
         # yamllint disable-line rule:line-length
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           name: release-multi-ecosystem-hook-changes-${{ needs.prepare.outputs.artifact-key }}
           path: ${{ runner.temp }}/version-update-changes

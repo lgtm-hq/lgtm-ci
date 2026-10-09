@@ -609,7 +609,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload matrix test summary
         if: always()
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Namespaced by artifact-prefix so two calls in one run keep their
           # own summaries (#1091); the version suffix separates matrix legs.
@@ -629,7 +629,7 @@ jobs:
           && inputs.coverage
           && steps.run.outputs.coverage-file != ''
         # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # No version suffix: this step needs `coverage: true`, and the
           # compat/coverage contract (#345) rejects that with a non-empty
