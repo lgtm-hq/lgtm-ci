@@ -2134,6 +2134,12 @@ removing stale entries (vulnerability resolved). Expired entries (past
 `ignoreUntil`) are left untouched and flagged for manual review with a
 non-zero exit.
 
+The probe ignores the caller's config. It runs with `ScanGoModVersion = true`,
+so on osv-scanner 2.4.0 and later Go toolchain advisories from the `go`
+directive in `go.mod` stay visible and their suppressions are not removed as
+stale. Older releases reject that key as unknown; on that error the probe runs
+again with an empty config, which already scans the `go` directive there.
+
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
 | Input                    | Default                                              | Notes                                           |

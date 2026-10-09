@@ -6,6 +6,8 @@ load "../../helpers/common"
 load "../../helpers/mocks"
 load "../../helpers/github_env"
 
+bats_require_minimum_version 1.5.0
+
 SCRIPT="${PROJECT_ROOT}/scripts/ci/security/check-vuln-suppressions.sh"
 
 setup() {
@@ -50,8 +52,51 @@ mock_osv_probe() {
 	"
 }
 
+# osv-scanner mock for the Go toolchain tests. Each scan appends the --config
+# path it got (the second-to-last argument, before ".") to probe-config-paths.
+# It models how a release treats a go.mod toolchain advisory, with the real
+# exit codes (1 when it reports vulnerabilities, 127 on an error):
+#   needs-key       (2.4.0 and later) reports it only when the config sets
+#                   ScanGoModVersion = true
+#   rejects-key     (before 2.4.0) always reports it, and fails on that key as
+#                   an unknown config key
+#   broken          fails every scan with an unrelated error
+#   rejects-broken  fails on the key, then fails the retry with an unrelated
+#                   error
+mock_osv_go_toolchain() {
+	local behaviour="$1"
+	local mock_bin="${BATS_TEST_TMPDIR}/bin"
+	mkdir -p "$mock_bin"
+	cat >"${mock_bin}/osv-scanner" <<EOF
+#!/usr/bin/env bash
+cfg="\${@: -2:1}"
+printf '%s\n' "\$cfg" >>'$BATS_TEST_TMPDIR/probe-config-paths'
+has_key=0
+grep -qx 'ScanGoModVersion = true' "\$cfg" && has_key=1
+if [[ "$behaviour" == "broken" || ("$behaviour" == "rejects-broken" && \$has_key -eq 0) ]]; then
+	echo "failed to query OSV API: connection refused" >&2
+	exit 127
+fi
+if [[ "$behaviour" == rejects-* && \$has_key -eq 1 ]]; then
+	echo "unknown keys in config file: ScanGoModVersion" >&2
+	exit 127
+fi
+if [[ "$behaviour" == "rejects-key" || \$has_key -eq 1 ]]; then
+	printf '%s' '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+	exit 1
+fi
+printf '%s' '{"results":[]}'
+EOF
+	chmod +x "${mock_bin}/osv-scanner"
+	if [[ ":$PATH:" != *":${mock_bin}:"* ]]; then
+		export PATH="${mock_bin}:$PATH"
+	fi
+}
+
+# Optional first argument: bats' expected-status flag, e.g. -127, for runs
+# that end in a scanner error.
 run_check_script() {
-	run bash -c "
+	run "$@" bash -c "
 		cd '$MOCK_GIT_REPO'
 		export GITHUB_WORKSPACE='$MOCK_GIT_REPO'
 		export GH_TOKEN='$GH_TOKEN'
@@ -92,6 +137,89 @@ EOF
 	run_check_script
 	assert_success
 	assert_output --partial "All suppressions are active"
+}
+
+setup_active_go_stdlib_suppression() {
+	setup_suppression_repo
+	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GO-2023-1568"
+reason = "Go stdlib advisory"
+EOF
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git add .osv-scanner.toml
+		git commit -q --amend --no-edit
+	)
+	# A regression would reach the cleanup path; fail there instead of
+	# calling the real gh.
+	mock_command_multi "gh" "*) exit 1;;"
+}
+
+@test "vuln-suppressions: a scanner that needs ScanGoModVersion keeps a Go toolchain suppression active" {
+	setup_active_go_stdlib_suppression
+	mock_osv_go_toolchain needs-key
+
+	run_check_script
+	assert_success
+	assert_output --partial "All suppressions are active"
+	refute_output --partial "Stale"
+	refute_output --partial "rejected ScanGoModVersion"
+	run wc -l <"$BATS_TEST_TMPDIR/probe-config-paths"
+	assert_output --regexp '^ *1$'
+}
+
+@test "vuln-suppressions: a scanner that rejects ScanGoModVersion is probed again with an empty config" {
+	setup_active_go_stdlib_suppression
+	mock_osv_go_toolchain rejects-key
+
+	run_check_script
+	assert_success
+	assert_output --partial "rejected ScanGoModVersion"
+	assert_output --partial "All suppressions are active"
+	run wc -l <"$BATS_TEST_TMPDIR/probe-config-paths"
+	assert_output --regexp '^ *2$'
+	run sed -n 2p "$BATS_TEST_TMPDIR/probe-config-paths"
+	assert_output "/dev/null"
+}
+
+@test "vuln-suppressions: other probe failures are not retried" {
+	setup_active_go_stdlib_suppression
+	mock_osv_go_toolchain broken
+
+	run_check_script -127
+	assert_failure 127
+	assert_output --partial "osv-scanner failed with exit code 127"
+	assert_output --partial "connection refused"
+	refute_output --partial "rejected ScanGoModVersion"
+	run wc -l <"$BATS_TEST_TMPDIR/probe-config-paths"
+	assert_output --regexp '^ *1$'
+}
+
+@test "vuln-suppressions: a failing retry fails the job" {
+	setup_active_go_stdlib_suppression
+	mock_osv_go_toolchain rejects-broken
+
+	run_check_script -127
+	assert_failure 127
+	assert_output --partial "rejected ScanGoModVersion"
+	assert_output --partial "osv-scanner failed with exit code 127"
+	assert_output --partial "connection refused"
+	run wc -l <"$BATS_TEST_TMPDIR/probe-config-paths"
+	assert_output --regexp '^ *2$'
+}
+
+@test "vuln-suppressions: the probe config file is removed after the run" {
+	local cfg
+	setup_active_go_stdlib_suppression
+	mock_osv_go_toolchain needs-key
+
+	run_check_script
+	assert_success
+	cfg="$(head -n 1 "$BATS_TEST_TMPDIR/probe-config-paths")"
+	[ -n "$cfg" ]
+	[ "$cfg" != "/dev/null" ]
+	[ ! -e "$cfg" ]
 }
 
 BASE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
