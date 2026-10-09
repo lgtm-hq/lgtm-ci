@@ -256,9 +256,11 @@ entries:
 
   - id: reusable-docker-multiplatform
     kind: reusable-workflow
-    tier: preview
-    reason: "Facade since #1081; the fixture's `docker-publish.yml` proves the push path once it runs
-              green from the fixture's main"
+    tier: stable
+    evidence:
+      fixture: docker-publish.yml
+      last-green: 5479e741825e8866d7ba577a93305ff3a7e49d33
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869052424
     permissions:
       attestations: write
       contents: read
@@ -308,9 +310,11 @@ entries:
 
   - id: reusable-docker-multiplatform-validate
     kind: reusable-workflow
-    tier: preview
-    reason: "Read-only build path split from `reusable-docker-multiplatform.yml` by #1081; promoted
-              to stable once the fixture's `readonly-docker.yml` runs green from the fixture's main"
+    tier: stable
+    evidence:
+      fixture: readonly-docker.yml
+      last-green: 5479e741825e8866d7ba577a93305ff3a7e49d33
+      run: https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869051739
     permissions:
       contents: read
     runners: [ubuntu-24.04]
@@ -708,7 +712,52 @@ entries:
   - id: reusable-release-recover
     kind: reusable-workflow
     tier: preview
-    reason: "No external-fixture run yet; recovery of a partially published release"
+    reason: "Facade since #1081; the fixture's `recover.yml` proves the plan and the GitHub Release
+              resume once it runs green from the fixture's main"
+    permissions:
+      actions: read
+      attestations: write
+      contents: write
+      id-token: write
+      issues: write
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites:
+      - "Grant the caller job every scope listed under Permissions, also for `dry-run: true`:
+          GitHub validates the union statically. A dry run that needs no write scope can call
+          `reusable-release-recover-plan` with `actions: read` and `contents: read` (#1081)"
+    limitations:
+      - "Since #1081 the checks are nested one level deeper (`Plan / …`, `Resume / …`); required-check
+          contexts naming the old paths must be updated (migration notes)"
+    check-names:
+      - "Plan / Resolve tag, artifacts, and channels"
+      - "Resume / Resume npm channel"
+      - "Resume / Resume GitHub Release channel"
+      - "Resume / Re-dispatch Homebrew"
+      - "Resume / Record recovery outcome"
+
+  - id: reusable-release-recover-plan
+    kind: reusable-workflow
+    tier: preview
+    reason: "Read-only plan stage split from `reusable-release-recover.yml` by #1081; promoted to
+              stable once the fixture's `recover.yml` runs green from the fixture's main"
+    permissions:
+      actions: read
+      contents: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites:
+      - "Same required inputs as the facade (`tag`, `source-run-id`, `source-workflow`,
+          `tooling-ref`); nothing is resumed and no issue is written. The outputs `missing`,
+          `missing-count` and `unresumable` carry the detected sets"
+    limitations: []
+    check-names:
+      - "Resolve tag, artifacts, and channels"
+
+  - id: reusable-release-recover-resume
+    kind: reusable-workflow
+    tier: internal
+    reason: "Resume stage of `reusable-release-recover.yml` (#1081); call the facade, not this file"
     permissions:
       actions: read
       attestations: write
@@ -720,7 +769,6 @@ entries:
     prerequisites: []
     limitations: []
     check-names:
-      - "Resolve tag, artifacts, and channels"
       - "Resume npm channel"
       - "Resume GitHub Release channel"
       - "Re-dispatch Homebrew"

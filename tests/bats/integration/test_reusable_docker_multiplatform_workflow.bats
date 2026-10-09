@@ -104,7 +104,6 @@ sys.exit(1 if errors else 0)
 }
 
 @test "reusable-docker-multiplatform: a lost SARIF fails the upload job unless validate was cancelled" {
-	run _job "$WORKFLOW" upload-scan-results
 	# One delayed retry; the retry fails the job unless validate was cancelled.
 	run awk '/name: Retry Trivy SARIF artifact/ { on = 1 } on && /continue-on-error:/ { print; exit }' "$WORKFLOW"
 	assert_output --partial "continue-on-error: \${{ needs.validate.result == 'cancelled' }}"
@@ -211,7 +210,7 @@ sys.exit(1 if errors else 0)
 }
 
 @test "reusable-docker-multiplatform-publish: no validate-path or push input remains" {
-	run grep -E '^      (push|validate-on-pr):$|inputs\.push|inputs\.validate-on-pr|upload-sarif@.*\n.*validate' "$PUBLISH"
+	run grep -E '^      (push|validate-on-pr):$|inputs\.push|inputs\.validate-on-pr' "$PUBLISH"
 	assert_failure
 	run grep -F ':validate-' "$PUBLISH"
 	assert_failure

@@ -45,7 +45,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 10 | 48 | 8 | 1 | 67 |
+| Reusable workflows | 12 | 47 | 9 | 1 | 69 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -53,6 +53,8 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | Entry | Tier | Summary |
 | ----- | ---- | ------- |
 | [`reusable-coverage`](#reusable-coverage) | `stable` | Coverage Workflow |
+| [`reusable-docker-multiplatform`](#reusable-docker-multiplatform) | `stable` | Docker Build (multi-platform) |
+| [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate) | `stable` | Docker Build (multi-platform, validate) |
 | [`reusable-release-version-pr`](#reusable-release-version-pr) | `stable` | Release Version PR |
 | [`reusable-rust-test`](#reusable-rust-test) | `stable` | Rust Test Workflow |
 | [`reusable-rust-test-run`](#reusable-rust-test-run) | `stable` | Rust Test Workflow (read-only) |
@@ -72,8 +74,6 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports) | `preview` | Deploy Site With Reports Workflow |
 | [`reusable-docker`](#reusable-docker) | `preview` | Docker Build and Push |
 | [`reusable-docker-build`](#reusable-docker-build) | `preview` | Docker Build (single-platform) |
-| [`reusable-docker-multiplatform`](#reusable-docker-multiplatform) | `preview` | Docker Build (multi-platform) |
-| [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate) | `preview` | Docker Build (multi-platform, validate) |
 | [`reusable-docker-smoke-test`](#reusable-docker-smoke-test) | `preview` | Docker Smoke Test |
 | [`reusable-github-release`](#reusable-github-release) | `preview` | GitHub Release Workflow |
 | [`reusable-link-check`](#reusable-link-check) | `preview` | Link Check |
@@ -93,6 +93,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-release-auto-tag`](#reusable-release-auto-tag) | `preview` | Release Auto Tag |
 | [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem) | `preview` | Release Multi-Ecosystem Version PR |
 | [`reusable-release-recover`](#reusable-release-recover) | `preview` | Release Recovery |
+| [`reusable-release-recover-plan`](#reusable-release-recover-plan) | `preview` | Release Recovery (plan) |
 | [`reusable-required-check`](#reusable-required-check) | `preview` | Required Check Gate |
 | [`reusable-rust-build`](#reusable-rust-build) | `preview` | Rust Build Workflow |
 | [`reusable-sbom`](#reusable-sbom) | `preview` | SBOM Workflow |
@@ -117,6 +118,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags) | `internal` | Prune Build Staging Tags |
 | [`reusable-registry-health-check`](#reusable-registry-health-check) | `internal` | Registry Health Check |
 | [`reusable-release-failure-notifier`](#reusable-release-failure-notifier) | `internal` | Release Failure Notifier |
+| [`reusable-release-recover-resume`](#reusable-release-recover-resume) | `internal` | Release Recovery (resume) |
 | [`reusable-validate-lintro-version`](#reusable-validate-lintro-version) | `internal` | Validate Lintro Version |
 | [`reusable-publish-npm`](#reusable-publish-npm) | `deprecated` | npm Publishing Workflow (deprecated) |
 
@@ -146,6 +148,51 @@ Coverage Workflow
 - Line-only LCOV is kept as LCOV and branches/functions render `n/a`; an output format no converter implements fails with `unsupported coverage conversion` instead of passing silently (#1078)
 - `publish-pages` and badge generation are untested from the fixture
 - Proven on GitHub-hosted ubuntu-24.04 only; macOS, Windows and GHES runners are untested (#1074)
+
+#### `reusable-docker-multiplatform`
+
+Docker Build (multi-platform)
+
+- **Path:** [`.github/workflows/reusable-docker-multiplatform.yml`](../.github/workflows/reusable-docker-multiplatform.yml)
+- **Tier:** stable
+- **Evidence:** [`docker-publish.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869052424) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5479e741`
+- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Validate / Docker build per platform`, `Validate / Validation Summary`, `Upload Trivy scan results`, `Publish / Docker build per platform`, `Publish / Docker verify per platform`, `Publish / Docker health check per platform`, `Publish / Merge Manifests`, `Publish / Vulnerability Scan`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Prerequisites:**
+
+- Grant the caller job every scope listed under Permissions, also for `push: false`: GitHub validates the union statically. A caller that only validates can call `reusable-docker-multiplatform-validate` with `contents: read` instead (#1081)
+
+**Limitations:**
+
+- Since #1081 the per-platform checks are nested one level deeper (`Validate / …`, `Publish / …`); required-check contexts naming the old paths must be updated (migration notes)
+
+#### `reusable-docker-multiplatform-validate`
+
+Docker Build (multi-platform, validate)
+
+- **Path:** [`.github/workflows/reusable-docker-multiplatform-validate.yml`](../.github/workflows/reusable-docker-multiplatform-validate.yml)
+- **Tier:** stable
+- **Evidence:** [`readonly-docker.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869051739) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5479e741`
+- **Permissions:** `contents: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Docker build per platform`, `Validation Summary`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Prerequisites:**
+
+- Pass the per-platform `matrix` (platform, slug, runner, qemu per entry), as `reusable-docker.yml`'s classify job does; arm64 legs need an arm64 runner such as `ubuntu-24.04-arm`
+- Nothing is pushed, signed, attested or uploaded to code scanning. With `scan: true` the Trivy SARIF (or a `no-sarif.txt` marker when the scan never ran) is the artifact `<artifact-prefix>-trivy-sarif-<slug>` (default prefix `docker`); upload it from a job with `security-events: write` if you want it in code scanning
+
+**Limitations:**
+
+- Base images are pulled anonymously: no `push: false` path logs in, through the facade or not (only the publish path does), so private base images cannot be validated; `cache-registry-ref` is read-only here
+- The code-scanning category stays `trivy-<slug>`, so two validate calls in one run with the same slugs share it (as before #1081); `artifact-prefix` only keeps their artifacts apart
+- Fixture proves the build, smoke test, Trivy and SARIF hand-off paths, including a failing scan; the local health check is untested
 
 #### `reusable-release-version-pr`
 
@@ -547,55 +594,6 @@ Docker Build (single-platform)
 - **Check names:** `Build and Push`, `Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
 
-#### `reusable-docker-multiplatform`
-
-Docker Build (multi-platform)
-
-> [!WARNING]
-> **Preview.** Facade since #1081; the fixture's `docker-publish.yml` proves the push path once it runs green from the fixture's main
-
-- **Path:** [`.github/workflows/reusable-docker-multiplatform.yml`](../.github/workflows/reusable-docker-multiplatform.yml)
-- **Tier:** preview
-- **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
-- **Runners:** `ubuntu-24.04`
-- **Package managers:** —
-- **Check names:** `Validate / Docker build per platform`, `Validate / Validation Summary`, `Upload Trivy scan results`, `Publish / Docker build per platform`, `Publish / Docker verify per platform`, `Publish / Docker health check per platform`, `Publish / Merge Manifests`, `Publish / Vulnerability Scan`
-- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
-
-**Prerequisites:**
-
-- Grant the caller job every scope listed under Permissions, also for `push: false`: GitHub validates the union statically. A caller that only validates can call `reusable-docker-multiplatform-validate` with `contents: read` instead (#1081)
-
-**Limitations:**
-
-- Since #1081 the per-platform checks are nested one level deeper (`Validate / …`, `Publish / …`); required-check contexts naming the old paths must be updated (migration notes)
-
-#### `reusable-docker-multiplatform-validate`
-
-Docker Build (multi-platform, validate)
-
-> [!WARNING]
-> **Preview.** Read-only build path split from `reusable-docker-multiplatform.yml` by #1081; promoted to stable once the fixture's `readonly-docker.yml` runs green from the fixture's main
-
-- **Path:** [`.github/workflows/reusable-docker-multiplatform-validate.yml`](../.github/workflows/reusable-docker-multiplatform-validate.yml)
-- **Tier:** preview
-- **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
-- **Package managers:** —
-- **Check names:** `Docker build per platform`, `Validation Summary`
-- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
-
-**Prerequisites:**
-
-- Pass the per-platform `matrix` (platform, slug, runner, qemu per entry), as `reusable-docker.yml`'s classify job does; arm64 legs need an arm64 runner such as `ubuntu-24.04-arm`
-- Nothing is pushed, signed, attested or uploaded to code scanning. With `scan: true` the Trivy SARIF (or a `no-sarif.txt` marker when the scan never ran) is the artifact `<artifact-prefix>-trivy-sarif-<slug>` (default prefix `docker`); upload it from a job with `security-events: write` if you want it in code scanning
-
-**Limitations:**
-
-- Base images are pulled anonymously: no `push: false` path logs in, through the facade or not (only the publish path does), so private base images cannot be validated; `cache-registry-ref` is read-only here
-- The code-scanning category stays `trivy-<slug>`, so two validate calls in one run with the same slugs share it (as before #1081); `artifact-prefix` only keeps their artifacts apart
-- Fixture proves the build, smoke test, Trivy and SARIF hand-off paths, including a failing scan; the local health check is untested
-
 #### `reusable-docker-smoke-test`
 
 Docker Smoke Test
@@ -871,14 +869,40 @@ Release Multi-Ecosystem Version PR
 Release Recovery
 
 > [!WARNING]
-> **Preview.** No external-fixture run yet; recovery of a partially published release
+> **Preview.** Facade since #1081; the fixture's `recover.yml` proves the plan and the GitHub Release resume once it runs green from the fixture's main
 
 - **Path:** [`.github/workflows/reusable-release-recover.yml`](../.github/workflows/reusable-release-recover.yml)
 - **Tier:** preview
 - **Permissions:** `actions: read`, `attestations: write`, `contents: write`, `id-token: write`, `issues: write`
 - **Runners:** `ubuntu-24.04`
 - **Package managers:** —
-- **Check names:** `Resolve tag, artifacts, and channels`, `Resume npm channel`, `Resume GitHub Release channel`, `Re-dispatch Homebrew`, `Record recovery outcome`
+- **Check names:** `Plan / Resolve tag, artifacts, and channels`, `Resume / Resume npm channel`, `Resume / Resume GitHub Release channel`, `Resume / Re-dispatch Homebrew`, `Resume / Record recovery outcome`
+
+**Prerequisites:**
+
+- Grant the caller job every scope listed under Permissions, also for `dry-run: true`: GitHub validates the union statically. A dry run that needs no write scope can call `reusable-release-recover-plan` with `actions: read` and `contents: read` (#1081)
+
+**Limitations:**
+
+- Since #1081 the checks are nested one level deeper (`Plan / …`, `Resume / …`); required-check contexts naming the old paths must be updated (migration notes)
+
+#### `reusable-release-recover-plan`
+
+Release Recovery (plan)
+
+> [!WARNING]
+> **Preview.** Read-only plan stage split from `reusable-release-recover.yml` by #1081; promoted to stable once the fixture's `recover.yml` runs green from the fixture's main
+
+- **Path:** [`.github/workflows/reusable-release-recover-plan.yml`](../.github/workflows/reusable-release-recover-plan.yml)
+- **Tier:** preview
+- **Permissions:** `actions: read`, `contents: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Resolve tag, artifacts, and channels`
+
+**Prerequisites:**
+
+- Same required inputs as the facade (`tag`, `source-run-id`, `source-workflow`, `tooling-ref`); nothing is resumed and no issue is written. The outputs `missing`, `missing-count` and `unresumable` carry the detected sets
 
 #### `reusable-required-check`
 
@@ -1251,6 +1275,20 @@ Release Failure Notifier
 - **Package managers:** —
 - **Check names:** `Report release tag publish outcome`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+#### `reusable-release-recover-resume`
+
+Release Recovery (resume)
+
+> [!NOTE]
+> **Internal.** Resume stage of `reusable-release-recover.yml` (#1081); call the facade, not this file
+
+- **Path:** [`.github/workflows/reusable-release-recover-resume.yml`](../.github/workflows/reusable-release-recover-resume.yml)
+- **Tier:** internal
+- **Permissions:** `actions: read`, `attestations: write`, `contents: write`, `id-token: write`, `issues: write`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `Resume npm channel`, `Resume GitHub Release channel`, `Re-dispatch Homebrew`, `Record recovery outcome`
 
 #### `reusable-validate-lintro-version`
 

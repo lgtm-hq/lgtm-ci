@@ -1,0 +1,686 @@
+# Internal resume stage of the release recovery (#1081), called by
+# reusable-release-recover.yml after its plan stage: one job per channel the
+# plan detected as missing (npm, GitHub Release, Homebrew), each gated on a
+# live run, a successful plan and membership in the missing set, and the
+# always() record job that comments on (and closes) the release-failure
+# issue. All write scopes and the Homebrew token live here. Call the facade,
+# not this file.
+---
+name: Reusable Release Recovery (resume)
+
+"on":
+  workflow_call:
+    inputs:
+      missing:
+        description: Plan stage's missing set (JSON array)
+        required: true
+        type: string
+      unresumable:
+        description: Plan stage's unresumable set (JSON array)
+        required: true
+        type: string
+      resolve-result:
+        description: Result of the plan stage (success, failure, cancelled, skipped)
+        required: true
+        type: string
+      tag:
+        description: The release tag to recover (e.g. v1.2.3)
+        required: true
+        type: string
+      source-run-id:
+        description: Original publish run whose artifacts are the recovery source
+        required: true
+        type: string
+      dry-run:
+        description: Detect and summarize only; resume nothing
+        required: false
+        type: boolean
+        default: true
+      # --- channel configuration (a channel without config is not applicable)
+      npm-artifact-name:
+        description: >-
+          Source-run artifact holding the staged npm package set (the
+          artifact publish-npm-set uploaded from its packages directory)
+        required: false
+        type: string
+        default: ""
+      npm-packages-dir:
+        description: >-
+          Directory INSIDE the artifact containing one subdirectory per
+          package. "." when the artifact was uploaded from the packages
+          directory itself (the examples/publish-npm-set.yml layout).
+        required: false
+        type: string
+        default: "."
+      npm-order:
+        description: Package order for the npm resume (meta last), as publish-npm-set takes it
+        required: false
+        type: string
+        default: ""
+      npm-dist-tag:
+        description: Dist-tag for the npm resume
+        required: false
+        type: string
+        default: latest
+      npm-checksums-file:
+        description: >-
+          SHA256SUMS manifest for the npm artifacts, relative to the npm
+          packages directory; entries inside it are relative to that
+          directory too
+        required: false
+        type: string
+        default: SHA256SUMS
+      npm-files-to-verify:
+        description: >-
+          Additional artifact globs (relative to the packages directory) to
+          verify on top of every file npm would pack
+        required: false
+        type: string
+        default: "[]"
+      npm-entry-workflows:
+        description: >-
+          Allowlisted entry workflow path(s) for npm trusted publishing —
+          the consumer's recovery dispatch workflow (e.g.
+          .github/workflows/release-recover.yml). Required for a live npm
+          resume; the guard fails closed without it.
+        required: false
+        type: string
+        default: ""
+      npm-access:
+        description: >-
+          npm access level; must stay public (provenance and post-publish
+          verification need a public package)
+        required: false
+        type: string
+        default: public
+      npm-provenance:
+        description: Pass --provenance on the npm resume (also automatic under OIDC)
+        required: false
+        type: boolean
+        default: true
+      release-artifact-name:
+        description: Source-run artifact for the GitHub Release resume
+        required: false
+        type: string
+        default: ""
+      release-checksums-file:
+        description: >-
+          SHA256SUMS manifest inside the release artifact (written by
+          reusable-build-python-dist.yml); used to verify the downloaded
+          assets and to compare them with any already-published asset
+        required: false
+        type: string
+        default: SHA256SUMS
+      homebrew-dispatch-repo:
+        description: Repository whose release workflow is re-dispatched when the tap lacks the version
+        required: false
+        type: string
+        default: ""
+      homebrew-dispatch-workflow:
+        description: Workflow file name (e.g. dispatch-homebrew.yml) to re-dispatch
+        required: false
+        type: string
+        default: ""
+      homebrew-dispatch-ref:
+        description: Git ref for the re-dispatch (usually the default branch)
+        required: false
+        type: string
+        default: main
+      signer-repo:
+        description: Repository the artifact attestations must come from (owner/repo)
+        required: false
+        type: string
+        default: ""
+      signer-workflow:
+        description: >-
+          Workflow the artifact attestations must come from: a path inside
+          signer-repo (e.g. .github/workflows/build.yml) or fully qualified
+        required: false
+        type: string
+        default: ""
+      recovery-issue-workflow-key:
+        description: >-
+          The notifier workflow-key the release-failure issue was filed
+          under, so the recovery outcome lands on that issue
+        required: false
+        type: string
+        default: release-publish
+      runner-image:
+        description: >-
+          GitHub-hosted runner image label for every job. Must stay
+          GitHub-hosted: the npm resume needs trusted publishing/provenance.
+        required: false
+        type: string
+        default: ubuntu-24.04
+      timeout-minutes:
+        description: Timeout for the resolve job (the resume jobs keep their own caps)
+        required: false
+        type: number
+        default: 15
+      egress-policy:
+        description: harden-runner egress policy (audit or block)
+        required: false
+        type: string
+        default: audit
+      allowed-endpoints:
+        description: >-
+          Extra or replacement host:port list (whitespace-separated) for
+          harden-runner. replace mode: a non-empty list is used alone;
+          append mode: merged with egress-preset. Composed at job start, so
+          it is enforced (#913).
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: >-
+          replace (default): non-empty allowed-endpoints is used instead of
+          egress-preset; append: egress-preset plus allowed-endpoints
+        required: false
+        type: string
+        default: "replace"
+      egress-preset:
+        description: >-
+          Named baseline allowlist from scripts/ci/lib/egress/presets.sh
+          (default release-recover). Selected at job start inside every harden-runner
+          step, so it is enforced (#913).
+        required: false
+        type: string
+        default: "release-recover"
+      tooling-ref:
+        description: >-
+          lgtm-ci commit SHA for the tooling checkout; pin it to the same SHA
+          as the `uses:` reference. Kept required here so the tooling an
+          operator runs against an older release is an explicit choice
+          (other reusables default to job.workflow_sha, #995). Never the
+          release tag.
+        required: true
+        type: string
+
+    secrets:
+      homebrew-dispatch-token:
+        description: >-
+          Token with `actions: write` on homebrew-dispatch-repo (a GitHub App
+          token or fine-grained PAT) for the cross-repository Homebrew
+          re-dispatch; github.token cannot dispatch workflows in another
+          repository. Required when homebrew-dispatch-repo is set.
+        required: false
+
+permissions:
+  contents: read
+
+
+env:
+  # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
+  # scripts/ci/egress/sync-workflow-presets.sh — do not edit by hand. Every
+  # harden-runner step below indexes this map by expression: the
+  # step-security pre hook installs the agent before any step runs, so the
+  # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-presets:begin
+  LGTM_CI_EGRESS_PRESETS: >-
+    {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443",
+    "github-results":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443",
+    "github-tooling":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "github-pages":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "docker":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 get.trivy.dev:443
+    mirror.gcr.io:443 check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443
+    timestamp.githubapp.com:443",
+    "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
+    playwright.azureedge.net:443 playwright-akamai.azureedge.net:443 storage.googleapis.com:443
+    archive.ubuntu.com:80 azure.archive.ubuntu.com:80 security.ubuntu.com:80",
+    "pypi":"github.com:443 api.github.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 test.pypi.org:443 upload.pypi.org:443 upload.test.pypi.org:443",
+    "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    test.pypi.org:443 upload.pypi.org:443 upload.test.pypi.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443
+    sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    rubygems.org:443 api.rubygems.org:443 index.rubygems.org:443",
+    "npm-publish":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    token.actions.githubusercontent.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 registry.npmjs.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443",
+    "quality":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 bun.sh:443 astral.sh:443 releases.astral.sh:443 sh.rustup.rs:443
+    deb.debian.org:80 registry.npmjs.org:443 crates.io:443 static.crates.io:443 index.crates.io:443
+    semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443 api.deps.dev:443",
+    "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 bun.sh:443 nodejs.org:443 registry.npmjs.org:443
+    pypi.org:443 files.pythonhosted.org:443 astral.sh:443 releases.astral.sh:443
+    static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 security.ubuntu.com:443",
+    "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
+    toolbox-data.anchore.io:443 grype.anchore.io:443 pipelines.actions.githubusercontent.com:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "scorecard":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 gcr.io:443 api.osv.dev:443 api.scorecard.dev:443
+    api.securityscorecards.dev:443",
+    "osv-scanner":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 api.osv.dev:443 api.deps.dev:443",
+    "ai-review":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443 astral.sh:443
+    releases.astral.sh:443",
+    "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
+    actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443",
+    "release-version-pr":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "external-canary":"github.com:443 api.github.com:443"}
+  # lgtm-ci-egress-presets:end
+
+jobs:
+  # Resume npm through the SAME scripts the tag path uses (#965's guard,
+  # verify-artifacts, publish-set and verify-published), from the verified
+  # original artifacts, under the same live preconditions. A regular job
+  # (not a nested `uses:` call) because the recovery artifacts live on the
+  # SOURCE run; the scripts, not the wiring, are the shared surface that
+  # prevents drift.
+  resume-npm:
+    name: Resume npm channel
+    if: >-
+      !inputs.dry-run &&
+      inputs.resolve-result == 'success' &&
+      inputs.npm-artifact-name != '' &&
+      inputs.npm-order != '' &&
+      contains(fromJSON(inputs.missing), 'npm')
+    runs-on: ${{ inputs.runner-image }}
+    # Publish plus the post-publish propagation wait (up to fifteen minutes).
+    timeout-minutes: 35
+    environment: npm # the caller's approval gate, same as the tag path
+    permissions:
+      contents: read
+      id-token: write
+      attestations: write
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Set up Node.js
+        # Node 24 ships npm >= 11.5.1 (OIDC trusted publishing); never
+        # self-upgrade npm in place.
+        # yamllint disable-line rule:line-length
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: "24"
+          registry-url: https://registry.npmjs.org
+      # The recovery is always a live publish: the same guards the tag path
+      # applies fail closed here before anything is downloaded or packed.
+      - name: Assert entry workflow is allowlisted
+        shell: bash
+        env:
+          ALLOWED_ENTRY_WORKFLOWS: ${{ inputs.npm-entry-workflows }}
+          LIVE: "1"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/assert-entry-workflow.sh
+      - name: Assert live-publish preconditions
+        shell: bash
+        env:
+          LIVE: "1"
+          RUNNER_ENVIRONMENT: ${{ runner.environment }}
+          CHECKSUMS_FILE: ${{ inputs.npm-checksums-file }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          ACCESS: ${{ inputs.npm-access }}
+          PROVENANCE: ${{ inputs.npm-provenance == true && '1' || '0' }}
+          POST_PUBLISH_VERIFY: "1"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/assert-live-publish-inputs.sh
+      - name: Download the original npm artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+          NPM_ARTIFACT: ${{ inputs.npm-artifact-name }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/download-artifacts.sh
+      # Contract step 1 of 3 (same script as the tag path): every file npm
+      # would pack must match the manifest and carry an attestation.
+      - name: Verify artifacts
+        shell: bash
+        env:
+          PACKAGES_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
+          ORDER: ${{ inputs.npm-order }}
+          CHECKSUMS_FILE: ${{ inputs.npm-checksums-file }}
+          FILES: ${{ inputs.npm-files-to-verify }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/verify-artifacts.sh
+      # Contract step 2 of 3: the ONLY step that writes to the registry.
+      # Already-published packages are skipped (status: skipped) and only the
+      # missing ones publish (status: published) — the idempotent set loop.
+      - name: Publish package set
+        id: publish
+        shell: bash
+        env:
+          PACKAGES_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
+          ORDER: ${{ inputs.npm-order }}
+          DIST_TAG: ${{ inputs.npm-dist-tag }}
+          LIVE: "1"
+          PROVENANCE: ${{ inputs.npm-provenance == true && '1' || '0' }}
+          ACCESS: ${{ inputs.npm-access }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/publish-set.sh
+      # Contract step 3 of 3: read-only registry verification, last.
+      - name: Verify published packages
+        shell: bash
+        env:
+          PACKAGES_DIR: recovery-artifacts/npm/${{ inputs.npm-packages-dir }}
+          ORDER: ${{ inputs.npm-order }}
+          DIST_TAG: ${{ inputs.npm-dist-tag }}
+          PROVENANCE: ${{ inputs.npm-provenance == true && '1' || '0' }}
+          DRY_RUN: "0"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/actions/npm/verify-published.sh
+
+  # Resume the GitHub Release through the SAME script the tag path uses;
+  # IMMUTABLE_ASSETS=true skips already-published assets with the same digest
+  # and fails on a different one, so only the missing assets upload.
+  resume-github-release:
+    name: Resume GitHub Release channel
+    if: >-
+      !inputs.dry-run &&
+      inputs.resolve-result == 'success' &&
+      inputs.release-artifact-name != '' &&
+      contains(fromJSON(inputs.missing), 'github-release')
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Download the original release artifacts
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          SOURCE_RUN_ID: ${{ inputs.source-run-id }}
+          RELEASE_ARTIFACT: ${{ inputs.release-artifact-name }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/download-artifacts.sh
+      - name: Verify the original release artifacts against published assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          ARTIFACTS_DIR: recovery-artifacts/release
+          CHECKSUMS_FILE: ${{ inputs.release-checksums-file }}
+          SIGNER_REPO: ${{ inputs.signer-repo }}
+          SIGNER_WORKFLOW: ${{ inputs.signer-workflow }}
+          RELEASE_TAG: ${{ inputs.tag }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/verify-recovery-artifacts.sh
+      - name: Create the release and upload only missing assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          TITLE: ${{ inputs.tag }}
+          GENERATE_NOTES: "true"
+          FILE_PATTERNS: "recovery-artifacts/release/*"
+          ARTIFACT_PATH: recovery-artifacts/release
+          REPO: ${{ github.repository }}
+          CHECKSUMS: "true"
+          IMMUTABLE_ASSETS: "true"
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/create-github-release.sh
+
+  # Re-send the Homebrew cross-repo dispatch ONLY when the tap lacks the
+  # version (the detection probe already proved it).
+  resume-homebrew:
+    name: Re-dispatch Homebrew
+    if: >-
+      !inputs.dry-run &&
+      inputs.resolve-result == 'success' &&
+      inputs.homebrew-dispatch-repo != '' &&
+      contains(fromJSON(inputs.missing), 'homebrew')
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Re-dispatch the tap update workflow
+        shell: bash
+        env:
+          # Cross-repository dispatch needs a credential for the target repo.
+          GH_TOKEN: ${{ secrets.homebrew-dispatch-token }}
+          REPO: ${{ inputs.homebrew-dispatch-repo }}
+          WORKFLOW: ${{ inputs.homebrew-dispatch-workflow }}
+          REF: ${{ inputs.homebrew-dispatch-ref }}
+          TAG: ${{ inputs.tag }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/redispatch-homebrew.sh
+
+  # Always(): a failed recovery is exactly what the issue must show, and a
+  # successful one closes it.
+  record:
+    name: Record recovery outcome
+    needs: [resume-npm, resume-github-release, resume-homebrew]
+    if: always()
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: 10
+    permissions:
+      # Read run metadata for the run link
+      actions: read
+      # Read repo context
+      contents: read
+      # Comment on and close the release-failure issue
+      issues: write
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # yamllint disable-line rule:line-length
+        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'release-recover'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ inputs.tooling-ref }}
+          sparse-checkout: |
+            scripts/ci/
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Record outcome on the release-failure issue
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          TAG: ${{ inputs.tag }}
+          WORKFLOW_KEY: ${{ inputs.recovery-issue-workflow-key }}
+          NPM_RESULT: ${{ needs.resume-npm.result }}
+          RELEASE_RESULT: ${{ needs.resume-github-release.result }}
+          HOMEBREW_RESULT: ${{ needs.resume-homebrew.result }}
+          MISSING_SET: ${{ inputs.missing }}
+          UNRESUMABLE_SET: ${{ inputs.unresumable }}
+          RESOLVE_RESULT: ${{ inputs.resolve-result }}
+          DRY_RUN: ${{ inputs.dry-run == true && '1' || '0' }}
+        run: >-
+          .lgtm-ci-tooling/scripts/ci/release/recover/record-recovery.sh
