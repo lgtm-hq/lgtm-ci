@@ -447,6 +447,7 @@ attest_mock() {
 	assert_failure
 	assert_output --partial "gh: no attestations found for subject"
 	assert_output --partial "after 2 attempt(s)"
+	assert_output --partial "nothing was resumed"
 }
 
 @test "verify-recovery-artifacts: fails a swapped artifact before any resume" {
