@@ -326,7 +326,8 @@ each platform without pushing and keeps the Trivy SARIF as the artifact
 calls in one run distinct prefixes); the facade uploads that SARIF to code
 scanning from its own job. Calling the facade adds one segment to the
 per-platform check names
-(`… / Validate / Docker build per platform (linux/amd64)`).
+(`… / Validate / Docker build per platform (linux/amd64, linux-amd64,
+ubuntu-24.04, false)`: every matrix value is appended).
 
 ```yaml
 jobs:

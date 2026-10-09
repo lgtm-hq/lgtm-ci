@@ -308,7 +308,7 @@ call_fn() {
 
 @test "external-canary: negative-by-design workflows are informational expecting failure" {
 	local wf
-	for wf in verify-negative.yml playwright-negative.yml; do
+	for wf in verify-negative.yml playwright-negative.yml docker-scan-failure.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_output "$(printf 'informational\tfailure')"
 	done

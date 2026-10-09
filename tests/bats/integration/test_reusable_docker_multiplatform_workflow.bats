@@ -94,7 +94,13 @@ sys.exit(1 if errors else 0)
 	assert_output --partial 'name: ${{ inputs.artifact-prefix }}-trivy-sarif-${{ matrix.slug }}'
 	assert_output --partial 'uses: github/codeql-action/upload-sarif@'
 	assert_output --partial 'category: "trivy-${{ matrix.slug }}"'
+	# Gating: runs after a failed scan (always()), never without a validate
+	# run, and attributes the analysis to the built source.
+	assert_output --partial '      always() &&'
 	assert_output --partial '!inputs.push &&'
+	assert_output --partial '      inputs.scan &&'
+	assert_output --partial "needs.validate.result != 'skipped'"
+	assert_output --partial "ref: \${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}"
 }
 
 @test "reusable-docker-multiplatform: a lost SARIF fails the upload job unless validate was cancelled" {

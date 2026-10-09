@@ -592,7 +592,9 @@ Docker Build (multi-platform, validate)
 
 **Limitations:**
 
-- Base images are pulled anonymously (no registry login), so private base images need the facade; `cache-registry-ref` is read-only here
+- Base images are pulled anonymously: no `push: false` path logs in, through the facade or not (only the publish path does), so private base images cannot be validated; `cache-registry-ref` is read-only here
+- The code-scanning category stays `trivy-<slug>`, so two validate calls in one run with the same slugs share it (as before #1081); `artifact-prefix` only keeps their artifacts apart
+- Fixture proves the build, smoke test, Trivy and SARIF hand-off paths, including a failing scan; the local health check is untested
 
 #### `reusable-docker-smoke-test`
 

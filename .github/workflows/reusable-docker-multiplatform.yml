@@ -475,6 +475,15 @@ jobs:
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
         run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      # upload-sarif attributes the analysis to the checked-out HEAD, so check
+      # out the built source as the in-job upload did before #1081.
+      - name: Checkout repository
+        # Pinned to SHA for supply chain security
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # source-ref = build-context (app source); tooling-ref stays separate
+          ref: ${{ inputs.source-ref != '' && inputs.source-ref || github.sha }}
+          persist-credentials: false
       - name: Checkout lgtm-ci tooling
         # yamllint disable-line rule:line-length
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

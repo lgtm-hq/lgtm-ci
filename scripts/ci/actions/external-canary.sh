@@ -176,7 +176,7 @@ classify_workflow() {
 		printf 'informational\tsuccess\n'
 		;;
 	# Negative-by-design workflows: a green run here is the finding.
-	verify-negative.yml | playwright-negative.yml)
+	verify-negative.yml | playwright-negative.yml | docker-scan-failure.yml)
 		printf 'informational\tfailure\n'
 		;;
 	# Under-permissioned callers: GitHub rejects the run at parse time, before
