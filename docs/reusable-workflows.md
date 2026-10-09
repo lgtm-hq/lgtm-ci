@@ -2456,6 +2456,7 @@ suppressions that are stale (vulnerability resolved upstream). Expired entries
 the job so a human re-evaluates each one. On osv-scanner 2.4.0 and later the
 probe sets `ScanGoModVersion = true` so Go toolchain advisories from `go.mod`
 are still found; older releases reject that key and probe with an empty config.
+If the version can't be read, the probe logs a warning and uses the empty config.
 
 | Input                    | Default                 | Notes                                      |
 | ------------------------ | ----------------------- | ------------------------------------------ |

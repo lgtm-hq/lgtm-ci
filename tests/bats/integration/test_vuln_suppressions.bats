@@ -42,10 +42,28 @@ setup_suppression_repo() {
 	)
 }
 
+# Probe mock that reports the pinned osv-scanner version, so these tests take
+# the same version branch as the installed scanner in production.
 mock_osv_probe() {
-	local probe_json="$1"
+	local pinned
+	pinned="$(sed -n 's/^DEFAULT_OSV_SCANNER_VERSION="\([^"]*\)".*/\1/p' \
+		"${PROJECT_ROOT}/scripts/ci/versions.env")"
+	[[ -n "$pinned" ]] || return 1
+	mock_osv_probe_versioned "$pinned" "$1"
+}
+
+# Probe mock that reports a version and keeps a copy of the --config it got
+# (the path is the second-to-last argument, before ".").
+mock_osv_probe_versioned() {
+	local version="$1"
+	local probe_json="$2"
 	mock_command_multi "osv-scanner" "
-		*scan*) printf '%s' '$probe_json';;
+		--version) printf 'osv-scanner version: %s\n' '$version';;
+		*scan*)
+			cfg=\"\${@: -2:1}\"
+			printf '%s' \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config-path'
+			cat \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config'
+			printf '%s' '$probe_json';;
 		*) exit 1;;
 	"
 }
@@ -92,22 +110,7 @@ EOF
 	run_check_script
 	assert_success
 	assert_output --partial "All suppressions are active"
-}
-
-# Probe mock that reports a version and keeps a copy of the --config it got
-# (the path is the second-to-last argument, before ".").
-mock_osv_probe_versioned() {
-	local version="$1"
-	local probe_json="$2"
-	mock_command_multi "osv-scanner" "
-		--version) printf 'osv-scanner version: %s\n' '$version';;
-		*scan*)
-			cfg=\"\${@: -2:1}\"
-			printf '%s' \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config-path'
-			cat \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config'
-			printf '%s' '$probe_json';;
-		*) exit 1;;
-	"
+	refute_output --partial "Could not read the osv-scanner version"
 }
 
 setup_active_go_stdlib_suppression() {

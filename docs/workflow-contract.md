@@ -2137,7 +2137,8 @@ non-zero exit.
 The probe ignores the caller's config. On osv-scanner 2.4.0 and later it runs
 with `ScanGoModVersion = true`, so Go toolchain advisories from the `go`
 directive in `go.mod` stay visible and their suppressions are not removed as
-stale. Older releases reject that key and keep the empty config.
+stale. Older releases reject that key and keep the empty config. If the
+version can't be read, the probe logs a warning and uses the empty config.
 
 <!-- markdownlint-disable MD013 MD060 -- wide input reference table -->
 
