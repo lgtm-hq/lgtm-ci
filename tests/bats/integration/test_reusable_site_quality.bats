@@ -69,7 +69,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-site-quality.yml"
 }
 
 @test "reusable-site-quality: upload-artifact uses upload repo v7 SHA" {
-	run grep -F 'uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1' \
+	run grep -F 'uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2' \
 		"$WORKFLOW"
 	assert_success
 }
