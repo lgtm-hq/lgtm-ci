@@ -6,6 +6,7 @@
 #          equals its annotated source.
 
 load "../../../helpers/common"
+load "../../../helpers/mocks"
 
 MATCHER="${PROJECT_ROOT}/scripts/ci/maintenance/match-renovate-pins.py"
 RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
@@ -292,14 +293,27 @@ _yaml_pin() {
 	assert_output --partial 'default: ""'
 }
 
-@test "run-bats-tests: empty BATS_VERSION falls back to the versions.env default" {
-	local resolved
-	resolved="$(
-		set -euo pipefail
-		source "$VERSIONS_ENV"
-		BATS_VERSION=""
-		BATS_VERSION="${BATS_VERSION:-$DEFAULT_BATS_CORE_VERSION}"
-		printf '%s' "$BATS_VERSION"
-	)"
-	[[ "$resolved" == "1.10.0" ]]
+# Run the real install-bats step with a recording git stub that fails the
+# first clone, so the step stops before installing anything. The recorded
+# clone shows which bats-core tag the step resolved.
+_install_bats_clone_args() {
+	mock_command_record "git" "" 1
+	run env STEP=install-bats BATS_VERSION="$1" BATS_INSTALL_NO_SUDO=1 \
+		BATS_INSTALL_SRC="$BATS_TEST_TMPDIR/src" \
+		bash "${PROJECT_ROOT}/scripts/ci/actions/run-bats-tests.sh"
+	assert_failure
+	run head -n 1 "$BATS_TEST_TMPDIR/mock_calls_git"
+}
+
+@test "run-bats-tests: empty BATS_VERSION clones the versions.env bats-core tag" {
+	local pin
+	pin="$(_pin DEFAULT_BATS_CORE_VERSION)"
+	[[ -n "$pin" ]]
+	_install_bats_clone_args ""
+	assert_output "clone --depth 1 --branch v${pin} https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
+}
+
+@test "run-bats-tests: a v-prefixed BATS_VERSION override clones a single-v tag" {
+	_install_bats_clone_args "v9.8.7"
+	assert_output "clone --depth 1 --branch v9.8.7 https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
 }
