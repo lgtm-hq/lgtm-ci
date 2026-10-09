@@ -235,6 +235,98 @@ def test_release_notes_report_tier_changes_and_deprecations(
     )
 
 
+def test_release_notes_wrap_long_bullets_for_md013(
+    release_notes: ModuleType,
+) -> None:
+    """Bullets wrap under 100 columns and keep code spans whole (#1144)."""
+    replacement = "Pass `allowed-endpoints` to `reusable-publish-test-results-pages`"
+    record = {
+        "id": "x",
+        "kind": "input",
+        "name": "publish-allowed-endpoints",
+        "entries": ["reusable-test-e2e-matrix"],
+        "issue": 770,
+        "replacement": replacement,
+    }
+    text = release_notes.render(
+        base={"entries": [], "deprecations": []},
+        head={"entries": [], "deprecations": [record]},
+    )
+    lines = text.splitlines()
+    assert_that(max(len(line) for line in lines)).is_less_than_or_equal_to(100)
+    assert_that(lines[2]).starts_with("- **catalog**: input")
+    assert_that(lines[3]).starts_with("  ")
+    assert_that(" ".join(part.strip() for part in lines[2:])).is_equal_to(
+        "- **catalog**: input `publish-allowed-endpoints` on "
+        "`reusable-test-e2e-matrix` (#770): Pass `allowed-endpoints` to "
+        "`reusable-publish-test-results-pages`",
+    )
+
+
+@pytest.mark.parametrize("marker", ["-", "+", "*", ">", "#", "##", "1.", "2)"])
+def test_wrap_never_starts_a_line_with_a_block_marker(
+    release_notes: ModuleType,
+    marker: str,
+) -> None:
+    """A continuation line must not open a list, heading or quote."""
+    filler = " ".join(["word"] * 40)
+    for offset in range(12):
+        bullet = f"- {'x' * offset} {filler} {marker} tail {filler}"
+        wrapped = release_notes.wrap_bullet(bullet=bullet, width=40)
+        for line in wrapped.splitlines()[1:]:
+            assert_that(line.split()[0]).is_not_equal_to(marker)
+        assert_that(" ".join(wrapped.split())).is_equal_to(" ".join(bullet.split()))
+
+
+@pytest.mark.parametrize(
+    "span",
+    [
+        "`with: a b c`",
+        "(`with: a b c`)",
+        "x`a b`y",
+        "`a b`,`c d`",
+        '(`printf "a  b"`)',
+        "``a ` b``",
+    ],
+)
+def test_wrap_keeps_code_spans_whole(
+    release_notes: ModuleType,
+    span: str,
+) -> None:
+    """A code span with spaces is never split, with or without punctuation."""
+    filler = " ".join(["word"] * 30)
+    for offset in range(20):
+        bullet = f"- {'y' * offset} {filler} {span} {filler}"
+        wrapped = release_notes.wrap_bullet(bullet=bullet, width=40)
+        assert_that([span in line for line in wrapped.splitlines()]).contains(True)
+
+
+def test_wrap_breaks_an_oversized_code_span_only_at_single_spaces(
+    release_notes: ModuleType,
+) -> None:
+    """A span wider than the line wraps where a break renders as a space."""
+    span = "`python -m tool " + " ".join(["longarg"] * 15) + " --x  y`"
+    wrapped = release_notes.wrap_bullet(bullet=f"- Run {span} instead", width=40)
+    lines = wrapped.splitlines()
+    assert_that(max(len(line) for line in lines)).is_less_than_or_equal_to(40)
+    # The double space is never a break point, so it survives intact.
+    assert_that(wrapped).contains("--x  y`")
+    assert_that(" ".join(part.strip() for part in lines)).is_equal_to(
+        f"- Run {span} instead",
+    )
+
+
+def test_wrap_edge_cases(
+    release_notes: ModuleType,
+) -> None:
+    """Empty input, a short bullet and an over-wide token."""
+    assert_that(release_notes.wrap_bullet(bullet="")).is_equal_to("")
+    assert_that(release_notes.wrap_bullet(bullet="- short")).is_equal_to("- short")
+    long_token = "x" * 120
+    wrapped = release_notes.wrap_bullet(bullet=f"- a {long_token} b", width=40)
+    assert_that(wrapped.splitlines()).is_equal_to(["- a", f"  {long_token}", "  b"])
+
+
 def test_release_notes_are_empty_without_a_base_catalog(
     release_notes: ModuleType,
 ) -> None:
