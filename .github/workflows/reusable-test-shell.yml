@@ -489,7 +489,7 @@ jobs:
       # aggregate job uploads it instead (the two paths never run in one call).
       - name: Upload results
         if: always() && steps.artifact-prefix.outcome == 'success' && steps.results.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: ${{ inputs.artifact-prefix }}-results
           path: ${{ inputs.working-directory }}/results/bats/default/results.json
@@ -504,7 +504,7 @@ jobs:
         if: always() && steps.artifact-prefix.outcome == 'success'
         continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Namespaced by artifact-prefix so two calls in one run keep their
           # own TAP output (#1091).
@@ -530,7 +530,7 @@ jobs:
           && steps.artifact-prefix.outcome == 'success'
         continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Namespaced by artifact-prefix so two calls in one run keep their
           # own coverage (#1091).
@@ -738,7 +738,7 @@ jobs:
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # artifact-prefix replaces the language word (#1091); the
           # comment-marker and shard coordinates stay as the leg suffix.
@@ -759,7 +759,7 @@ jobs:
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # artifact-prefix replaces the language word (#1091); the
           # comment-marker and shard coordinates stay as the leg suffix.
@@ -900,7 +900,7 @@ jobs:
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ${{ inputs.artifact-prefix }}-test-results-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-taps
@@ -927,7 +927,7 @@ jobs:
         if: always()
         continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
         with:
           pattern: ${{ inputs.artifact-prefix }}-coverage-${{ inputs.comment-marker }}-shard-*
           path: ${{ runner.temp }}/shard-coverage
@@ -981,7 +981,7 @@ jobs:
         run: bash .lgtm-ci-tooling/scripts/ci/actions/results-update.sh
       - name: Upload results
         if: always() && steps.results.outcome == 'success'
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Same name the single-job path uploads (#1080); the two paths
           # never run in one call.
@@ -995,7 +995,7 @@ jobs:
         if: always() && inputs.upload-coverage && steps.merge.outcome == 'success'
         continue-on-error: true
         # Pinned to SHA for supply chain security
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           # Same name the single-job path uploads, namespaced by
           # artifact-prefix (#1091); the two paths never run in one call.
