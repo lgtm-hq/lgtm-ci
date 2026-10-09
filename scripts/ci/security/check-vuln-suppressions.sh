@@ -75,28 +75,29 @@ fi
 # unknown, so the probe tries the key first and falls back to an empty config
 # only on that error. No version parsing, so no version string can make the
 # probe skip the key on a scanner that needs it.
+PROBE_STDERR=""
 PROBE_CONFIG=$(mktemp)
+trap 'rm -f "$PROBE_CONFIG" ${PROBE_STDERR:+"$PROBE_STDERR"}' EXIT
 PROBE_STDERR=$(mktemp)
-trap 'rm -f "$PROBE_CONFIG" "$PROBE_STDERR"' EXIT
 printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
 
-# Sets PROBE_OUTPUT and PROBE_EXIT. stderr is kept for the fallback check and
-# replayed to the log.
+# Sets PROBE_OUTPUT and PROBE_EXIT and leaves the scanner's stderr in
+# PROBE_STDERR for the caller to check and replay.
 run_probe() {
 	PROBE_EXIT=0
 	PROBE_OUTPUT=$(
 		osv-scanner scan --recursive --format json --config "$1" \
 			. 2>"$PROBE_STDERR"
 	) || PROBE_EXIT=$?
-	cat "$PROBE_STDERR" >&2
 }
 
 log_info "Probing osv-scanner without suppressions..."
 run_probe "$PROBE_CONFIG"
 if [[ "$PROBE_EXIT" -gt 1 ]] && grep -q 'unknown keys in config file' "$PROBE_STDERR"; then
-	log_info "This osv-scanner predates ScanGoModVersion; probing again with an empty config"
+	log_info "osv-scanner rejected ScanGoModVersion (releases before 2.4.0 scan go.mod by default); probing again with an empty config"
 	run_probe /dev/null
 fi
+cat "$PROBE_STDERR" >&2
 
 if [[ "$PROBE_EXIT" -gt 1 ]]; then
 	log_error "osv-scanner failed with exit code $PROBE_EXIT"
