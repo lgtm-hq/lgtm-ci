@@ -2211,11 +2211,12 @@ cancelled check on the head commit; `cancel-in-progress: false` still cancels a
 superseded pending run. Without a group, runs can overlap. The semantic check
 reads the current title from the API, so a run that starts after a title fix
 passes. A run that already failed on the older title can still finish last.
-The next successful run clears its failure comment, but its failed check run
-stays on that head commit, because later runs add check runs rather than
-replace them. The
-`max-length` check reads the title from the event payload, so an overlapping
-run for an older title can also report a stale length failure.
+Its failed check run stays on that head commit, because later runs add check
+runs rather than replace them; only a new head commit starts a clean set. The
+next successful run deletes the failure comments it finds, but it lists only
+the first page of PR comments. The `max-length` check reads the title from the
+event payload, so an overlapping run for an older title can also report a
+stale length failure.
 
 ### Security audit (lintro + osv-scanner)
 

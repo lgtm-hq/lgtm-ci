@@ -15,11 +15,12 @@ permissions: {}
 # synchronize run and left a cancelled check on the head commit, and
 # cancel-in-progress: false would still cancel a superseded pending run.
 # Overlapping runs validate the title current when each one fetches it from
-# the API. A run that fetched an older invalid title can still finish last:
-# the next successful run clears its failure comment, but its failed check
-# run stays on that head commit because later runs add check runs rather than
-# replace them. Keep max-length unset: the length step reads the possibly
-# stale event payload.
+# the API. A run that fetched an older invalid title can still finish last.
+# Its failed check run stays on that head commit because later runs add check
+# runs rather than replace them; only a new head commit gets a clean set.
+# The next successful run deletes the failure comments it finds on the first
+# page of PR comments. Keep max-length unset: the length step reads the
+# possibly stale event payload.
 
 jobs:
   semantic-title:

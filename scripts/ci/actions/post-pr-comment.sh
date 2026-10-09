@@ -111,9 +111,11 @@ EXISTING_COMMENT_ID=$(head -1 <<<"$EXISTING_COMMENT_IDS")
 # Handle empty body
 if [[ -z "${COMMENT_BODY:-}" ]]; then
 	if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
-		# Overlapping runs can each create a marker comment, so delete them all.
-		# An overlapping run may already have deleted one; that DELETE gets a
-		# 404 because the comment is gone. Any other error still fails.
+		# Overlapping runs can each create a marker comment, so delete every
+		# match the listing returned. The listing reads only the first page of
+		# comments, so a match on a later page is not found. An overlapping run
+		# may already have deleted one; that DELETE gets a 404 because the
+		# comment is gone. Any other error still fails.
 		while read -r comment_id; do
 			if DELETE_ERROR=$(gh api \
 				-X DELETE \
