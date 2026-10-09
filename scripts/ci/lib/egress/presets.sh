@@ -103,7 +103,12 @@ egress_preset_endpoints() {
 			pipelines.actions.githubusercontent.com:443
 		;;
 	docker)
-		# Docker image pull/push (reusable-docker.yml).
+		# Docker image pull/push (reusable-docker.yml), plus what the family's
+		# optional steps reach under block mode, proven by the external fixture
+		# (#1081): get.trivy.dev (Trivy binary) and mirror.gcr.io (Trivy DB)
+		# for `scan`; token.actions.githubusercontent.com (OIDC) and the
+		# Sigstore public-good hosts for the provenance attestation every
+		# push makes.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
@@ -113,13 +118,20 @@ egress_preset_endpoints() {
 			release-assets.githubusercontent.com:443 \
 			github-releases.githubusercontent.com:443 \
 			pipelines.actions.githubusercontent.com:443 \
+			token.actions.githubusercontent.com:443 \
 			ghcr.io:443 \
 			pkg-containers.githubusercontent.com:443 \
 			docker.io:443 \
 			registry-1.docker.io:443 \
 			auth.docker.io:443 \
 			production.cloudflare.docker.com:443 \
-			production.cloudfront.docker.com:443
+			production.cloudfront.docker.com:443 \
+			get.trivy.dev:443 \
+			mirror.gcr.io:443 \
+			fulcio.sigstore.dev:443 \
+			rekor.sigstore.dev:443 \
+			timestamp.sigstore.dev:443 \
+			tuf-repo-cdn.sigstore.dev:443
 		;;
 	playwright)
 		# Playwright browser downloads + package managers (reusable-test-e2e*.yml).
