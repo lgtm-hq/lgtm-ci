@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.77.2] - 2026-10-09
+
+### Changed
+
+- **deps**: update dependency google/osv-scanner to v2.6.0 (minor) (#1121) (139a88e)
+- **renovate**: check the bats fallback through the install-bats step (#1160) (00ab399)
+
+### Fixed
+
+- **security**: keep Go toolchain advisories in the suppression probe (#1159) (3567274)
+
 ## [0.77.1] - 2026-10-09
 
 ### Changed
@@ -2828,7 +2839,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.2...HEAD
+[0.77.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.1...v0.77.2
 [0.77.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.0...v0.77.1
 [0.77.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.2...v0.77.0
 [0.76.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.76.1...v0.76.2
