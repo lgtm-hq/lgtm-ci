@@ -9,12 +9,15 @@ name: PR - Semantic Title
 
 permissions: {}
 
-# No concurrency group: every event gets its own run that is never cancelled.
-# A bot that pushes and then edits the PR body fires synchronize and edited
-# back to back; cancel-in-progress cancelled the first run, and even
-# cancel-in-progress: false cancels a superseded pending run. Either way a
-# cancelled check stayed on the head commit. Overlapping runs are safe here:
-# the semantic step reads the current title from the API, not the event.
+# No concurrency group, so no event can cancel or replace another event's
+# run. A bot that pushes and then edits the PR body fires synchronize and
+# edited back to back; with cancel-in-progress the edited run cancelled the
+# synchronize run and left a cancelled check on the head commit, and
+# cancel-in-progress: false would still cancel a superseded pending run.
+# Overlapping runs validate the title current when each one fetches it from
+# the API. A run that fetched an older invalid title can still finish last
+# and leave its failure check and comment until the next event. Keep
+# max-length unset: the length step reads the possibly stale event payload.
 
 jobs:
   semantic-title:

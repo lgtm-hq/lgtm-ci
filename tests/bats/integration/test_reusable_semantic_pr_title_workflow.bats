@@ -190,6 +190,13 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/prepare-semantic-pr-lists.sh"
 	assert_success
 }
 
+@test "reusable-semantic-pr-title: declares no concurrency group" {
+	# Callers drop their own group so a push plus PR body edit cannot cancel a
+	# run (semantic-pr-title.yml); a group here would bring that back.
+	run grep -E '^[[:space:]]*concurrency:' "$WORKFLOW"
+	assert_failure 1
+}
+
 @test "reusable-semantic-pr-title: job grants pull-requests write" {
 	local expected='      pull-requests: write'
 

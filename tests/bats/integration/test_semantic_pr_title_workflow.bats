@@ -24,18 +24,21 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/semantic-pr-title.yml"
 }
 
 @test "semantic-pr-title: declares no concurrency group that could cancel runs" {
-	# A bot push followed by a PR body edit fires synchronize then edited. A
-	# per-PR group cancelled the in-progress run (cancel-in-progress: true) or
-	# the superseded pending run (cancel-in-progress: false), leaving a
-	# cancelled check on the head commit.
+	# A bot push followed by a PR body edit fires synchronize then edited. The
+	# per-PR group with cancel-in-progress cancelled the synchronize run and
+	# left a cancelled check on the head commit; cancel-in-progress: false
+	# would still cancel a superseded pending run.
 	run grep -E '^[[:space:]]*concurrency:' "$WORKFLOW"
-	assert_failure
+	assert_failure 1
 }
 
 @test "semantic-pr-title: still runs on every title-affecting event" {
-	run grep -Fx '    types: [opened, edited, synchronize, reopened, ready_for_review]' "$WORKFLOW"
-	assert_success
-	run grep -Fx '  merge_group:' "$WORKFLOW"
+	local event
+	for event in opened edited synchronize reopened ready_for_review; do
+		run grep -E "^[[:space:]]+types:[[:space:]]*\\[.*\\b${event}\\b.*\\]" "$WORKFLOW"
+		assert_success
+	done
+	run grep -E '^[[:space:]]+merge_group:' "$WORKFLOW"
 	assert_success
 }
 
@@ -44,5 +47,5 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/semantic-pr-title.yml"
 	# semantic step re-reads the current title. Without a concurrency group a
 	# stale run could post a length failure for an already-fixed title.
 	run grep -F 'max-length:' "$WORKFLOW"
-	assert_failure
+	assert_failure 1
 }

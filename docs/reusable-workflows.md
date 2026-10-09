@@ -2204,6 +2204,15 @@ Callers must grant `pull-requests: write` when `post-failure-comment` is enabled
 sufficient. Workflow root `permissions: {}` otherwise strips PR access from the
 reusable job.
 
+Avoid a per-PR `concurrency` group on the caller. A bot that pushes and then
+edits the PR body fires `synchronize` and `edited` back to back. With
+`cancel-in-progress: true` the second run cancels the first, which leaves a
+cancelled check on the head commit; `cancel-in-progress: false` still cancels a
+superseded pending run. The semantic check reads the current title from the
+API, so overlapping runs are safe. The `max-length` check reads the title from
+the event payload, so with overlapping runs a run for an older title can
+report a stale length failure.
+
 ### Security audit (lintro + osv-scanner)
 
 `reusable-security-audit.yml` runs osv-scanner via the pinned py-lintro Docker
