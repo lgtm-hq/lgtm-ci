@@ -68,10 +68,24 @@ if [[ -z "${GH_TOKEN:-}" ]]; then
 	exit 1
 fi
 
+# The probe ignores the caller's config. From osv-scanner 2.4.0 the Go
+# toolchain version in go.mod is only scanned with ScanGoModVersion = true,
+# and older releases reject that key. Without it a suppressed Go stdlib
+# advisory looks resolved and would be removed as stale.
+PROBE_CONFIG=/dev/null
+OSV_VERSION=$(osv-scanner --version 2>/dev/null | sed -n 's/^osv-scanner version: v\{0,1\}//p') || OSV_VERSION=""
+if [[ ! "$OSV_VERSION" =~ ^([0-9]+)\.([0-9]+)\. ]]; then
+	log_warn "Could not read the osv-scanner version; probing without ScanGoModVersion"
+elif ((BASH_REMATCH[1] > 2 || (BASH_REMATCH[1] == 2 && BASH_REMATCH[2] >= 4))); then
+	PROBE_CONFIG=$(mktemp)
+	trap 'rm -f "$PROBE_CONFIG"' EXIT
+	printf 'ScanGoModVersion = true\n' >"$PROBE_CONFIG"
+fi
+
 log_info "Probing osv-scanner without suppressions..."
 PROBE_EXIT=0
 PROBE_OUTPUT=$(
-	osv-scanner scan --recursive --format json --config /dev/null \
+	osv-scanner scan --recursive --format json --config "$PROBE_CONFIG" \
 		.
 ) || PROBE_EXIT=$?
 

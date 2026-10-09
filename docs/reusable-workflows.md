@@ -2453,7 +2453,9 @@ own dogfood workflow (different trust model).
 probes the repository without suppressions, and opens a cleanup PR removing
 suppressions that are stale (vulnerability resolved upstream). Expired entries
 (past `ignoreUntil`) are left untouched and flagged for manual review, failing
-the job so a human re-evaluates each one.
+the job so a human re-evaluates each one. On osv-scanner 2.4.0 and later the
+probe sets `ScanGoModVersion = true` so Go toolchain advisories from `go.mod`
+are still found; older releases reject that key and probe with an empty config.
 
 | Input                    | Default                 | Notes                                      |
 | ------------------------ | ----------------------- | ------------------------------------------ |

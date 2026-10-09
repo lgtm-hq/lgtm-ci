@@ -94,6 +94,85 @@ EOF
 	assert_output --partial "All suppressions are active"
 }
 
+# Probe mock that reports a version and keeps a copy of the --config it got
+# (the path is the second-to-last argument, before ".").
+mock_osv_probe_versioned() {
+	local version="$1"
+	local probe_json="$2"
+	mock_command_multi "osv-scanner" "
+		--version) printf 'osv-scanner version: %s\n' '$version';;
+		*scan*)
+			cfg=\"\${@: -2:1}\"
+			printf '%s' \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config-path'
+			cat \"\$cfg\" >'$BATS_TEST_TMPDIR/probe-config'
+			printf '%s' '$probe_json';;
+		*) exit 1;;
+	"
+}
+
+setup_active_go_stdlib_suppression() {
+	setup_suppression_repo
+	cat >"$MOCK_GIT_REPO/.osv-scanner.toml" <<'EOF'
+[[IgnoredVulns]]
+id = "GO-2023-1568"
+reason = "Go stdlib advisory"
+EOF
+	(
+		cd "$MOCK_GIT_REPO" || exit 1
+		git add .osv-scanner.toml
+		git commit -q --amend --no-edit
+	)
+}
+
+@test "vuln-suppressions: probe enables ScanGoModVersion on osv-scanner 2.4.0 and later" {
+	setup_active_go_stdlib_suppression
+	mock_osv_probe_versioned "2.6.0" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+
+	run_check_script
+	assert_success
+	assert_output --partial "All suppressions are active"
+	run cat "$BATS_TEST_TMPDIR/probe-config"
+	assert_output "ScanGoModVersion = true"
+}
+
+@test "vuln-suppressions: probe enables ScanGoModVersion on osv-scanner 2.4.0 exactly" {
+	setup_active_go_stdlib_suppression
+	mock_osv_probe_versioned "2.4.0" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+
+	run_check_script
+	assert_success
+	run cat "$BATS_TEST_TMPDIR/probe-config"
+	assert_output "ScanGoModVersion = true"
+}
+
+@test "vuln-suppressions: probe warns and keeps an empty config when the version is unreadable" {
+	setup_active_go_stdlib_suppression
+	mock_osv_probe_versioned "unknown" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+
+	run_check_script
+	assert_success
+	assert_output --partial "Could not read the osv-scanner version"
+	[ "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" = "/dev/null" ]
+}
+
+@test "vuln-suppressions: probe keeps an empty config on osv-scanner before 2.4.0" {
+	setup_active_go_stdlib_suppression
+	mock_osv_probe_versioned "2.3.5" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+
+	run_check_script
+	assert_success
+	[ "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" = "/dev/null" ]
+}
+
+@test "vuln-suppressions: probe config file is removed after the run" {
+	setup_active_go_stdlib_suppression
+	mock_osv_probe_versioned "2.6.0" '{"results":[{"packages":[{"vulnerabilities":[{"id":"GO-2023-1568"}]}]}]}'
+
+	run_check_script
+	assert_success
+	[ ! -e "$(cat "$BATS_TEST_TMPDIR/probe-config-path")" ]
+}
+
 BASE_SHA="deadbeefdeadbeefdeadbeefdeadbeefdeadbeef"
 
 # Recording gh mock covering the cleanup flow, including the gh api calls made
