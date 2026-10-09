@@ -9,9 +9,12 @@ name: PR - Semantic Title
 
 permissions: {}
 
-concurrency:
-  group: semantic-pr-title-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+# No concurrency group: every event gets its own run that is never cancelled.
+# A bot that pushes and then edits the PR body fires synchronize and edited
+# back to back; cancel-in-progress cancelled the first run, and even
+# cancel-in-progress: false cancels a superseded pending run. Either way a
+# cancelled check stayed on the head commit. Overlapping runs are safe here:
+# the semantic step reads the current title from the API, not the event.
 
 jobs:
   semantic-title:
