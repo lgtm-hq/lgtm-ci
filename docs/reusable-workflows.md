@@ -1604,7 +1604,7 @@ jobs:
       attestations: write
     steps:
       - name: Harden runner
-        uses: step-security/harden-runner@<pin> # v2.19.4
+        uses: step-security/harden-runner@<pin> # v2.22.1
         with:
           egress-policy: block
           # workflow-contract.md § PyPI upload (OIDC)
