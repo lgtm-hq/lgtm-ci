@@ -112,17 +112,17 @@ if [[ -z "${COMMENT_BODY:-}" ]]; then
 	if [[ "$DELETE_ON_EMPTY" == "true" && -n "$EXISTING_COMMENT_ID" ]]; then
 		# Overlapping runs can both find the comment; the later DELETE gets a
 		# 404 because the comment is already gone. Any other error still fails.
-		if ! DELETE_ERROR=$(gh api \
+		if DELETE_ERROR=$(gh api \
 			-X DELETE \
 			"/repos/${GITHUB_REPOSITORY}/issues/comments/${EXISTING_COMMENT_ID}" 2>&1 >/dev/null); then
-			if [[ "$DELETE_ERROR" != *"HTTP 404"* ]]; then
-				echo "$DELETE_ERROR" >&2
-				exit 1
-			fi
+			echo "Deleted comment $EXISTING_COMMENT_ID"
+		elif [[ "$DELETE_ERROR" == *"HTTP 404"* ]]; then
 			echo "Comment $EXISTING_COMMENT_ID was already deleted"
+		else
+			echo "$DELETE_ERROR" >&2
+			exit 1
 		fi
 		echo "action-taken=deleted" >>"$GITHUB_OUTPUT"
-		echo "Deleted comment $EXISTING_COMMENT_ID"
 		exit 0
 	else
 		echo "action-taken=skipped" >>"$GITHUB_OUTPUT"

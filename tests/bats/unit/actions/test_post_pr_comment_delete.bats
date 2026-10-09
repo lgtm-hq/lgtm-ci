@@ -61,6 +61,7 @@ _run_clear() {
 
 	assert_success
 	assert_output --partial "Comment 7 was already deleted"
+	refute_output --partial "Deleted comment 7"
 	grep -q 'action-taken=deleted' "$GITHUB_OUTPUT"
 }
 
