@@ -361,6 +361,18 @@ call_fn() {
 	assert_success
 }
 
+@test "external-canary: rewrite_pins rewrites refs tagged lgtm-ci-pin, like the fixture's pin.sh" {
+	printf 'jobs:\n  a:\n    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-release-recover-plan.yml@%s\n    with:\n      tooling-ref: %s # lgtm-ci-pin\n      other-ref: %s\n' \
+		"$OLD_PIN" "$OLD_PIN" "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_success
+	run grep -F "tooling-ref: ${CANDIDATE} # lgtm-ci-pin" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
+	# An untagged 40-hex value is not an lgtm-ci pin and stays as it is.
+	run grep -F "other-ref: ${OLD_PIN}" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
+}
+
 @test "external-canary: rewrite_pins rejects a short SHA" {
 	cp "$MOCK_FIXTURE_DIR/python.yml" "$BATS_TEST_TMPDIR/wf.yml"
 	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" abc123

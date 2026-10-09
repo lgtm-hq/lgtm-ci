@@ -347,11 +347,15 @@ since_timestamp() {
 
 # Rewrite every lgtm-ci pin in one workflow file to the candidate SHA, then
 # refuse any lgtm-ci reference that is not pinned to it (a tag or branch pin
-# would otherwise run old code and report green).
+# would otherwise run old code and report green). Like the fixture's
+# scripts/pin.sh, a 40-hex `ref:` value tagged `# lgtm-ci-pin` (a direct
+# tooling checkout, or a `tooling-ref:` input that must name the same commit
+# as the `uses:` line) is rewritten too (#1081).
 rewrite_pins() {
 	local file="${1:?file required}" sha="${2:?sha required}" stale
 	[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || die "not a full SHA: $sha"
-	sed -E "s#(${PIN_RE})[0-9a-f]{40}#\1${sha}#g" "$file" >"$file.tmp"
+	sed -E -e "s#(${PIN_RE})[0-9a-f]{40}#\1${sha}#g" \
+		-e "s#(ref: )[0-9a-f]{40}( \# lgtm-ci-pin)#\1${sha}\2#g" "$file" >"$file.tmp"
 	mv "$file.tmp" "$file"
 	# Only `uses:` lines count: header comments quote the pattern with a
 	# `@<sha>` placeholder.
