@@ -22,3 +22,30 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/semantic-pr-title.yml"
 	run grep -F 'tooling-ref:' "$WORKFLOW"
 	assert_failure
 }
+
+@test "semantic-pr-title: declares no concurrency group that could cancel runs" {
+	# A bot push followed by a PR body edit fires synchronize then edited. The
+	# per-PR group with cancel-in-progress cancelled the synchronize run and
+	# left a cancelled check on the head commit; cancel-in-progress: false
+	# would still cancel a superseded pending run.
+	run grep -E '^[[:space:]]*concurrency:' "$WORKFLOW"
+	assert_failure 1
+}
+
+@test "semantic-pr-title: still runs on every title-affecting event" {
+	local event
+	for event in opened edited synchronize reopened ready_for_review; do
+		run grep -E "^[[:space:]]+types:[[:space:]]*\\[.*\\b${event}\\b.*\\]" "$WORKFLOW"
+		assert_success
+	done
+	run grep -E '^[[:space:]]+merge_group:' "$WORKFLOW"
+	assert_success
+}
+
+@test "semantic-pr-title: leaves max-length unset so overlapping runs agree" {
+	# The length step reads the title from the event payload; only the
+	# semantic step re-reads the current title. Without a concurrency group a
+	# stale run could post a length failure for an already-fixed title.
+	run grep -F 'max-length:' "$WORKFLOW"
+	assert_failure 1
+}
