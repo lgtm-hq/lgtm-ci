@@ -24,7 +24,7 @@ concurrency:
 jobs:
   quality:
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@d1a4cbe278d60e631d95800f449d25e174140ea1 # v0.77.4
     permissions:
       contents: read
       packages: read
@@ -53,7 +53,7 @@ jobs:
       && github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-publish-quality-summary.yml@d1a4cbe278d60e631d95800f449d25e174140ea1 # v0.77.4
     permissions:
       contents: read
       pull-requests: write
@@ -64,7 +64,7 @@ jobs:
     # Build-only check, separate from tests (contract:
     # "Low-noise Rust and Node checks").
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-build.yml@d1a4cbe278d60e631d95800f449d25e174140ea1 # v0.77.4
     permissions:
       contents: read
     with:
@@ -91,7 +91,7 @@ jobs:
     # "Compat vs coverage contract"). PR summary posts via the reusable's
     # internal publish-test-summary job.
     # yamllint disable-line rule:line-length
-    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@31750ecad528ca9312bfe169dd33325b18f6c637 # v0.75.3
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-rust-test.yml@d1a4cbe278d60e631d95800f449d25e174140ea1 # v0.77.4
     permissions:
       # actions: read — the aggregate job's artifact-availability wait (#803)
       actions: read
