@@ -35,10 +35,79 @@ import deprecations  # noqa: E402  # pylint: disable=wrong-import-position
 SCOPE = "**catalog**"
 SECTIONS = ("Added", "Changed", "Deprecated", "Removed")
 # CHANGELOG.md is linted with MD013 at 100 columns; wrap like the
-# hand-written entries, continuation lines indented under the bullet.
-WRAP_WIDTH = 80
-# Inline code spans stay whole: a break inside one would change its text.
-TOKEN = re.compile(r"`[^`]*`\S*|\S+")
+# hand-written entries, continuation lines indented under the bullet. The
+# margin leaves room for the ` (#N, #M) (sha)` a duplicate merge appends.
+WRAP_WIDTH = 72
+# A continuation line starting with one of these would open a new Markdown
+# block (list, heading, quote) instead of continuing the bullet.
+BLOCK_MARKER = re.compile(r"^(?:[-+*>]|#{1,6}|\d+[.)])$")
+# One space with no space on either side: inside a code span, a line break
+# there renders exactly like the space it replaces (CommonMark).
+SINGLE_SPACE = re.compile(r"(?<! ) (?! )")
+
+
+def tokens(
+    text: str,
+) -> list[str]:
+    """Split text at whitespace outside inline code spans.
+
+    A code span opens with a run of N backticks and closes at the next run
+    of exactly N (CommonMark), so ``` ``a ` b`` ``` and ``(`a  b`)`` are one
+    token each, internal whitespace intact. An unclosed run is literal.
+
+    Args:
+        text: One line of Markdown.
+
+    Returns:
+        Tokens in order.
+    """
+    found: list[str] = []
+    current = ""
+    index = 0
+    while index < len(text):
+        char = text[index]
+        if char == "`":
+            run = len(text[index:]) - len(text[index:].lstrip("`"))
+            fence = "`" * run
+            close = index + run
+            while True:
+                close = text.find(fence, close)
+                if close < 0 or text[close + run : close + run + 1] != "`":
+                    break
+                close += len(text[close:]) - len(text[close:].lstrip("`"))
+            end = index + run if close < 0 else close + run
+            current += text[index:end]
+            index = end
+        elif char.isspace():
+            if current:
+                found.append(current)
+            current = ""
+            index += 1
+        else:
+            current += char
+            index += 1
+    if current:
+        found.append(current)
+    return found
+
+
+def fitted(
+    token: str,
+    width: int,
+) -> list[str]:
+    """Break an over-wide token at single spaces inside its code spans.
+
+    Args:
+        token: Token from ``tokens()``.
+        width: Target line width.
+
+    Returns:
+        The token, or its pieces when it is wider than a continuation line
+        and has single spaces to break at; a word without one stays whole.
+    """
+    if len(token) <= width - 2:
+        return [token]
+    return SINGLE_SPACE.split(token)
 
 
 def wrap_bullet(
@@ -49,20 +118,22 @@ def wrap_bullet(
 
     Args:
         bullet: Single-line bullet.
-        width: Target line width; a token longer than that stays on a line
-            of its own rather than being split.
+        width: Target line width. A word with no break point that is longer
+            stays on a line of its own (MD013 does not count such lines).
 
     Returns:
         The bullet, continuation lines indented by two spaces.
     """
     lines: list[str] = []
     current = ""
-    for token in TOKEN.findall(bullet):
+    pieces = [piece for token in tokens(bullet) for piece in fitted(token, width)]
+    for token in pieces:
         candidate = f"{current} {token}" if current else token
-        if current and len(candidate) > width:
+        if current and len(candidate) > width and not BLOCK_MARKER.match(token):
             lines.append(current)
             current = f"  {token}"
         else:
+            # A block marker stays at the end of the line it follows.
             current = candidate
     lines.append(current)
     return "\n".join(lines)
