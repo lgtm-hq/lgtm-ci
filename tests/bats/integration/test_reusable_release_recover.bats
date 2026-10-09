@@ -56,11 +56,14 @@ facade = inputs(sys.argv[1])
 plan = inputs(sys.argv[2])
 resume = inputs(sys.argv[3], ("missing", "unresumable", "resolve-result"))
 text = open(sys.argv[1]).read()
-def forwarded(job, end):
-    body = text[text.index("  " + job + ":\n"):]
-    body = body[: body.index(end)]
+def forwarded(job):
+    start = text.index("  " + job + ":\n")
+    # The job body ends at the next top-level job key (or end of file), so a
+    # blank line or comment inside `with:` cannot cut it short.
+    nxt = re.search(r"^  [A-Za-z_][\w-]*:\s*(#.*)?$", text[start + 1:], re.M)
+    body = text[start : start + 1 + nxt.start()] if nxt else text[start:]
     return set(re.findall(r"^      ([a-z-]+): \$\{\{ inputs\.\1 \}\}$", body, re.M))
-fp, fr = forwarded("plan", "\n\n"), forwarded("resume", "    secrets:")
+fp, fr = forwarded("plan"), forwarded("resume")
 errors = []
 if fp != plan:
     errors.append(f"plan forwarding differs: {sorted(fp ^ plan)}")

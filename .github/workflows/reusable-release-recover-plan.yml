@@ -114,8 +114,9 @@ name: Reusable Release Recovery (plan)
         default: ""
       runner-image:
         description: >-
-          GitHub-hosted runner image label for every job. Must stay
-          GitHub-hosted: the npm resume needs trusted publishing/provenance.
+          GitHub-hosted runner image label for the plan job. Pass the same
+          value as the facade: its resume stage must stay GitHub-hosted for
+          npm trusted publishing and provenance.
         required: false
         type: string
         default: ubuntu-24.04

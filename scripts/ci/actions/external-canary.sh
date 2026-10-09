@@ -123,7 +123,7 @@ CANARY_OVERRIDE_LABEL="${CANARY_OVERRIDE_LABEL:-canary-informational}"
 CANARY_RELEVANT_PATHS="${CANARY_RELEVANT_PATHS:-.github/workflows/ .github/actions/ scripts/ci/ schemas/ examples/}"
 # Keep in sync with the "Gate workflows" header of
 # .github/workflows/external-consumer-canary.yml (contract-tested).
-CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov docker-facade-validate docker-orchestrator docker-publish egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-docker readonly-node readonly-rust readonly-shell retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
+CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-direct coverage-lcov docker-facade-validate docker-orchestrator docker-publish docker-scan-failure-probe egress node-bun node-npm node-pnpm perms playwright python python-private-dep readonly-docker readonly-node readonly-rust readonly-shell recover retry rust rust-build-siblings rust-release-build siblings verify-fresh-install vuln-suppression}"
 CANARY_INCLUDE_MANUAL="${CANARY_INCLUDE_MANUAL:-false}"
 CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_POLL_SECONDS="${CANARY_POLL_SECONDS:-30}"
@@ -362,7 +362,9 @@ rewrite_pins() {
 	stale="$(grep -E '^[[:space:]]*(-[[:space:]]+)?uses:' "$file" | grep -oE "${PIN_RE}[^[:space:]\"']+" | grep -v "@${sha}\$" || true)"
 	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci reference not pinned to the candidate: ${stale//$'\n'/, }"
 	# A tagged ref the rewrite could not match would run old tooling green.
-	stale="$(grep -E '#[[:space:]]*lgtm-ci-pin' "$file" | grep -vE "ref: ${sha}[[:space:]]+# lgtm-ci-pin" || true)"
+	# Only YAML lines that set a value count: comment lines may mention the
+	# marker (as the fixture's headers do).
+	stale="$(grep -E '^[[:space:]]*[^#[:space:]].*#[[:space:]]*lgtm-ci-pin' "$file" | grep -vE "ref: ${sha}[[:space:]]+# lgtm-ci-pin" || true)"
 	[[ -z "$stale" ]] || die "$(basename "$file"): lgtm-ci-pin ref not pinned to the candidate: ${stale//$'\n'/, }"
 }
 

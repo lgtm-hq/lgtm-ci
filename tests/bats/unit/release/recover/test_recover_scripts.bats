@@ -379,6 +379,7 @@ verify_env() {
 	export SIGNER_REPO=lgtm-hq/lgtm-ci
 	export SIGNER_WORKFLOW=.github/workflows/publish.yml
 	export RELEASE_ASSET_DIGESTS=""
+	export ATTEST_RETRY_SECONDS=0
 }
 
 attest_mock() {
@@ -409,6 +410,43 @@ attest_mock() {
 	run bash "$VERIFY"
 	assert_failure
 	assert_output --partial "attestation verification failed for 'tool-linux-x64'"
+	assert_output --partial "after 3 attempt(s)"
+	assert_output --partial "nothing was resumed"
+}
+
+@test "verify-recovery-artifacts: retries a transient attestation failure" {
+	verify_env
+	local count="${BATS_TEST_TMPDIR}/attest-count"
+	echo 0 >"$count"
+	# First attempt fails like a Sigstore/API blip, the second passes.
+	mock_command_multi "gh" "
+		*attestation*verify*)
+			n=\$((\$(cat '${count}') + 1)); echo \$n >'${count}'
+			[ \$n -ge 2 ] && exit 0
+			echo 'error: failed to fetch trusted root' >&2; exit 1;;
+		*) exit 0;;
+	"
+
+	run bash "$VERIFY"
+	assert_success
+	assert_output --partial "attempt 1/3 failed; retrying"
+	assert_output --partial "Recovery artifacts verified"
+	run cat "$count"
+	assert_output "2"
+}
+
+@test "verify-recovery-artifacts: shows gh's reason when every attempt fails" {
+	verify_env
+	export ATTEST_ATTEMPTS=2
+	mock_command_multi "gh" "
+		*attestation*verify*) echo 'no attestations found for subject' >&2; exit 1;;
+		*) exit 0;;
+	"
+
+	run bash "$VERIFY"
+	assert_failure
+	assert_output --partial "gh: no attestations found for subject"
+	assert_output --partial "after 2 attempt(s)"
 	assert_output --partial "nothing was resumed"
 }
 

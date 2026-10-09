@@ -282,7 +282,7 @@ call_fn() {
 		build-python-direct.yml vuln-suppression.yml rust-build-siblings.yml \
 		python-private-dep.yml verify-fresh-install.yml rust-release-build.yml readonly-node.yml readonly-shell.yml \
 		readonly-rust.yml readonly-docker.yml docker-publish.yml docker-facade-validate.yml \
-		docker-orchestrator.yml; do
+		docker-orchestrator.yml recover.yml docker-scan-failure-probe.yml; do
 		run call_fn classify_workflow "$wf"
 		assert_success
 		assert_output "$(printf 'gate\tsuccess')"
@@ -295,7 +295,7 @@ call_fn() {
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "for g in \$CANARY_EXPECTED_GATES; do classify_workflow \"\$g.yml\" | cut -f1; done | sort -u"
 	assert_output "gate"
 	run env -u CANARY_EXPECTED_GATES bash "$CANARY_EVAL" "printf '%s\n' \$CANARY_EXPECTED_GATES | wc -l | tr -d ' '"
-	assert_output "25"
+	assert_output "27"
 }
 
 @test "external-canary: App-token, SBOM and negative-probe paths are informational expecting success" {
@@ -386,6 +386,14 @@ call_fn() {
 	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "lgtm-ci-pin ref not pinned to the candidate: "
+}
+
+@test "external-canary: rewrite_pins ignores comment lines that mention lgtm-ci-pin" {
+	printf '# the `# lgtm-ci-pin` marker lets scripts/pin.sh rewrite it\njobs:\n  a:\n    with:\n      tooling-ref: %s # lgtm-ci-pin\n' "$OLD_PIN" >"$BATS_TEST_TMPDIR/wf.yml"
+	run call_fn rewrite_pins "$BATS_TEST_TMPDIR/wf.yml" "$CANDIDATE"
+	assert_success
+	run grep -F "tooling-ref: ${CANDIDATE} # lgtm-ci-pin" "$BATS_TEST_TMPDIR/wf.yml"
+	assert_success
 }
 
 @test "external-canary: rewrite_pins rejects a short SHA" {

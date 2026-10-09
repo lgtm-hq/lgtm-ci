@@ -33,6 +33,12 @@
 #                    the map is read from the published release under this
 #                    tag in GITHUB_REPOSITORY (`gh release view --json
 #                    assets`); no release yet means nothing to compare
+#   ATTEST_ATTEMPTS  `gh attestation verify` attempts per file (default 3).
+#                    A transient Sigstore or API error fails a single attempt
+#                    exactly like an invalid attestation, so every failure is
+#                    retried; an invalid attestation still fails every
+#                    attempt, only later (#1081)
+#   ATTEST_RETRY_SECONDS  Pause between attempts (default 10)
 
 set -euo pipefail
 
@@ -49,6 +55,16 @@ if [[ "$SIGNER_WORKFLOW" != */.github/workflows/* ]]; then
 fi
 FILES="${FILES:-[]}"
 RELEASE_ASSET_DIGESTS="${RELEASE_ASSET_DIGESTS:-}"
+ATTEST_ATTEMPTS="${ATTEST_ATTEMPTS:-3}"
+ATTEST_RETRY_SECONDS="${ATTEST_RETRY_SECONDS:-10}"
+[[ "$ATTEST_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || {
+	echo "ERROR: ATTEST_ATTEMPTS must be a positive integer" >&2
+	exit 2
+}
+[[ "$ATTEST_RETRY_SECONDS" =~ ^[0-9]+$ ]] || {
+	echo "ERROR: ATTEST_RETRY_SECONDS must be a non-negative integer" >&2
+	exit 2
+}
 RELEASE_TAG="${RELEASE_TAG:-}"
 GH="${GH_CMD:-gh}"
 
@@ -111,12 +127,21 @@ verify_file() {
 		failures=$((failures + 1))
 		return 0
 	fi
-	if ! "$GH" attestation verify "$file" --repo "$SIGNER_REPO" \
-		--signer-workflow "$SIGNER_WORKFLOW" >/dev/null 2>&1; then
-		echo "ERROR: attestation verification failed for '$rel' (expected $SIGNER_REPO / $SIGNER_WORKFLOW)" >&2
-		failures=$((failures + 1))
-		return 0
-	fi
+	local attempt=1 attest_out=""
+	until attest_out="$("$GH" attestation verify "$file" --repo "$SIGNER_REPO" \
+		--signer-workflow "$SIGNER_WORKFLOW" 2>&1)"; do
+		if ((attempt >= ATTEST_ATTEMPTS)); then
+			# gh's own reason (no attestation, wrong signer, service error)
+			# is what an operator needs to choose between retry and tier three.
+			printf '%s\n' "$attest_out" | tail -n 20 | sed 's/^/    gh: /' >&2
+			echo "ERROR: attestation verification failed for '$rel' (expected $SIGNER_REPO / $SIGNER_WORKFLOW) after ${ATTEST_ATTEMPTS} attempt(s)" >&2
+			failures=$((failures + 1))
+			return 0
+		fi
+		echo "    attestation verification attempt ${attempt}/${ATTEST_ATTEMPTS} failed; retrying in ${ATTEST_RETRY_SECONDS}s" >&2
+		sleep "$ATTEST_RETRY_SECONDS"
+		attempt=$((attempt + 1))
+	done
 	# Optional channel equality: a GitHub Release asset already published for
 	# this name must hash to the same bytes. A published digest that differs
 	# from the attested artifact is the tier-three trigger, checked BEFORE any
