@@ -113,6 +113,16 @@ filter_kcov_console() {
 	return "$filter_status"
 }
 
+# Bats 1.14 exits 1 when no test is found: a TEST_FILTER that matches nothing,
+# or a coverage shard whose files hold no matching test while another shard
+# runs them. Older bats passed with 0 tests; keep that result for callers.
+# Probed, because a BATS_VERSION override may install a bats without the flag.
+bats_supports_allow_empty_suite() {
+	local help
+	help="$(bats --help 2>/dev/null || true)"
+	[[ "$help" == *--allow-empty-suite* ]]
+}
+
 # =============================================================================
 # Step: install-bats - Install BATS core and helper libraries
 # =============================================================================
@@ -256,6 +266,10 @@ if [[ "$STEP" == "run-tests" ]]; then
 		BATS_ARGS+=("--jobs" "$PARALLEL")
 	fi
 
+	if bats_supports_allow_empty_suite; then
+		BATS_ARGS+=("--allow-empty-suite")
+	fi
+
 	# Run tests
 	echo "Running: bats ${BATS_ARGS[*]} $TEST_PATH"
 	run_start_ts="$(date +%s)"
@@ -381,6 +395,9 @@ if [[ "$STEP" == "run-coverage" ]]; then
 	BATS_ARGS=(--tap)
 	if [[ -n "$FILTER" ]]; then
 		BATS_ARGS+=(--filter "$FILTER")
+	fi
+	if bats_supports_allow_empty_suite; then
+		BATS_ARGS+=(--allow-empty-suite)
 	fi
 	# Never pass --jobs under kcov (serialized above).
 

@@ -446,6 +446,130 @@ _shard_of() {
 	[[ ! -s "$BATS_CALLS" ]]
 }
 
+# =============================================================================
+# Empty suites (bats 1.14 exits 1 when no test is found)
+# =============================================================================
+
+# Mock bats whose --help advertises --allow-empty-suite, like bats >= 1.14.
+_mock_bats_with_allow_empty_suite() {
+	cat >"${MOCK_BIN}/bats" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${BATS_CALLS}"
+if [[ "\${1:-}" == "--help" ]]; then
+	echo "  --allow-empty-suite       Exit with code 0 when no tests are found."
+	exit 0
+fi
+echo "1..1"
+echo "ok 1 mocked \$*"
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+}
+
+@test "run-tests: passes --allow-empty-suite when bats supports it" {
+	_mock_bats_with_allow_empty_suite
+
+	run run_coverage \
+		STEP=run-tests \
+		TEST_PATH=tests
+
+	assert_success
+	grep -q -- '--tap --allow-empty-suite tests$' "$BATS_CALLS"
+}
+
+@test "run-coverage: passes --allow-empty-suite when bats supports it" {
+	_mock_bats_with_allow_empty_suite
+
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests \
+		COVERAGE_DIR=coverage-report \
+		TEST_FILTER=alpha
+
+	assert_success
+	grep -q -- '--tap --filter alpha --allow-empty-suite ' "$BATS_CALLS"
+}
+
+@test "run-tests/run-coverage: omit --allow-empty-suite when bats lacks it" {
+	run run_coverage \
+		STEP=run-tests \
+		TEST_PATH=tests
+	assert_success
+
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests \
+		COVERAGE_DIR=coverage-report
+	assert_success
+
+	run grep -c -- '--allow-empty-suite' "$BATS_CALLS"
+	assert_output "0"
+}
+
+# Mock bats >= 1.14 with an empty suite: exit 1 unless --allow-empty-suite.
+_mock_bats_empty_suite() {
+	cat >"${MOCK_BIN}/bats" <<EOF
+#!/usr/bin/env bash
+printf '%s\n' "\$*" >>"${BATS_CALLS}"
+if [[ "\${1:-}" == "--help" ]]; then
+	echo "  --allow-empty-suite       Exit with code 0 when no tests are found."
+	exit 0
+fi
+echo "1..0"
+for arg in "\$@"; do
+	[[ "\$arg" == "--allow-empty-suite" ]] && exit 0
+done
+echo "ERROR: Found no tests. (Try \\\`--allow-empty-suite\\\`?)" >&2
+exit 1
+EOF
+	chmod +x "${MOCK_BIN}/bats"
+}
+
+@test "run-tests: a TEST_FILTER that matches no test still succeeds" {
+	_mock_bats_empty_suite
+
+	run run_coverage \
+		STEP=run-tests \
+		TEST_PATH=tests \
+		TEST_FILTER=no-test-matches-this
+
+	assert_success
+	refute_output --partial "Found no tests"
+	grep -qx 'exit-code=0' "$GITHUB_OUTPUT"
+}
+
+@test "run-coverage: a shard whose files match no TEST_FILTER test still succeeds" {
+	_mock_bats_empty_suite
+
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests \
+		COVERAGE_DIR=coverage-report \
+		TEST_FILTER=no-test-matches-this
+
+	assert_success
+	refute_output --partial "Found no tests"
+	grep -qx 'exit-code=0' "$GITHUB_OUTPUT"
+}
+
+@test "run-coverage: real bats passes when TEST_FILTER matches no test in its files" {
+	# A sharded filtered run hands bats files with no matching test whenever
+	# the matches hash to another shard. Use the installed bats; older bats
+	# without the flag passed empty suites anyway, so it proves nothing there.
+	rm "${MOCK_BIN}/bats"
+	if ! bats --help 2>/dev/null | grep -q -- '--allow-empty-suite'; then
+		skip "installed bats has no --allow-empty-suite"
+	fi
+
+	run run_coverage \
+		STEP=run-coverage \
+		TEST_PATH=tests/alpha.bats \
+		COVERAGE_DIR=coverage-report \
+		TEST_FILTER=no-test-matches-this
+
+	assert_success
+	grep -qx 'exit-code=0' "$GITHUB_OUTPUT"
+}
+
 @test "aggregate-results: sums ok/not ok across shard TAP files" {
 	local artifacts="$BATS_TEST_TMPDIR/shard-taps"
 	mkdir -p "$artifacts/shell-test-results-shard-0"
