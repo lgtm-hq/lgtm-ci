@@ -249,7 +249,7 @@ directly. Use the commit SHA on every `uses:` line:
 <!-- markdownlint-disable MD013 -- pinned uses: line exceeds line length by design -->
 
 ```yaml
-uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@77f3f7e123df42c91b065222273389fba450e489 # v0.77.6
+uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-quality-lint.yml@b777111fb3aaa6f09589fb029f0094a05dd76003 # v0.77.7
 ```
 
 <!-- markdownlint-enable MD013 -->
