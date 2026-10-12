@@ -4,8 +4,8 @@
 #
 # The canary is a caller workflow that runs with a token for a foreign
 # repository, so it must harden before anything else, allow only the GitHub
-# API, resolve nothing through a caller-local action path, pass one named
-# secret, and keep its header's gate / informational lists in step with the
+# API, resolve nothing through a caller-local action path, mint one
+# fixture-scoped App token from two named secrets, and keep its header's gate / informational lists in step with the
 # classification in scripts/ci/actions/external-canary.sh.
 
 load "../../helpers/common"
@@ -83,11 +83,42 @@ _header_list() {
 	assert_file_exists "$SCRIPT"
 }
 
-@test "external-canary workflow: one named secret, no secrets: inherit, no fixture write via GITHUB_TOKEN" {
-	run grep -c 'secrets\.' "$WORKFLOW"
+@test "external-canary workflow: fixture token is a pinned App mint scoped to the fixture, fed to the canary step" {
+	# One mint, at the pin the release workflows use.
+	run grep -c 'uses: actions/create-github-app-token@' "$WORKFLOW"
 	assert_output "1"
-	run grep -F 'GH_TOKEN: ${{ secrets.EXTERNAL_FIXTURE_TOKEN }}' "$WORKFLOW"
+	run grep -F 'uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0' "$WORKFLOW"
 	assert_success
+	# Fixture repository and the three write permissions only.
+	local block
+	block="$(awk '/^      - name: Create fixture App installation token$/ { on = 1 } on && /^      - name: Run external consumer canary$/ { exit } on { print }' "$WORKFLOW")"
+	[[ -n "$block" ]]
+	run grep -E '^          (owner|repositories|permission-[a-z-]+): ' <<<"$block"
+	assert_output "$(printf '%s\n' \
+		'          owner: TurboCoder13' \
+		'          repositories: lgtm-ci-consumer-fixture' \
+		'          permission-actions: write' \
+		'          permission-contents: write' \
+		'          permission-workflows: write')"
+	run grep -F 'id: fixture-token' <<<"$block"
+	assert_success
+	# Fork PRs cannot read the secrets; the mint is skipped there.
+	run grep -F 'if: github.event.pull_request.head.repo.fork != true' <<<"$block"
+	assert_success
+	# The mint precedes the canary step, which reads only its output.
+	local mint_line run_line
+	mint_line="$(grep -n '^      - name: Create fixture App installation token$' "$WORKFLOW" | cut -d: -f1)"
+	run_line="$(grep -n '^      - name: Run external consumer canary$' "$WORKFLOW" | cut -d: -f1)"
+	[[ -n "$mint_line" && -n "$run_line" && "$mint_line" -lt "$run_line" ]]
+	run grep -F 'GH_TOKEN: ${{ steps.fixture-token.outputs.token }}' "$WORKFLOW"
+	assert_success
+}
+
+@test "external-canary workflow: two named App secrets, no PAT, no secrets: inherit, no fixture write via GITHUB_TOKEN" {
+	run grep -o 'secrets\.[A-Z_]*' "$WORKFLOW"
+	assert_output "$(printf 'secrets.EXTERNAL_FIXTURE_APP_ID\nsecrets.EXTERNAL_FIXTURE_APP_PRIVATE_KEY')"
+	run grep -F 'EXTERNAL_FIXTURE_TOKEN' "$WORKFLOW" "$SCRIPT"
+	refute_output
 	run grep -E "^[[:space:]]+secrets: inherit" "$WORKFLOW"
 	refute_output
 	run grep -cE '^permissions: \{\}$' "$WORKFLOW"
