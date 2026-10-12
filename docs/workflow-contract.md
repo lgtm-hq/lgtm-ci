@@ -101,7 +101,9 @@ Consequences of the contract:
   and `scripts/ci/actions/validate-harden-runner-action-ref.sh` fail on any
   embedded copy that differs from the render, on any harden-runner block that
   carries a literal host list, and on any block that reads `steps.*`,
-  `needs.*` or other non-job-start context.
+  `needs.*` or other non-job-start context. The single exception is the
+  scorecard job in `reusable-scorecards.yml`, which takes exactly
+  `needs.egress-preset.outputs.allowed-endpoints` (#1173, see below).
 - Every harden-runner block in a workflow honours the same caller inputs,
   coordinator jobs (`prepare`, `aggregate`, …) included. A few jobs that
   must never be widened by a caller (failure reporters, the Rust release tag
@@ -159,7 +161,12 @@ For these workflows:
   publish allowlist forbids lgtm-ci composites (#540). Its egress inputs
   (`egress-preset` default `scorecard`, `allowed-endpoints`,
   `allowed-endpoints-mode`) still work because the preset map is a workflow
-  literal, not a composite.
+  literal, not a composite. The Scorecard API re-verifies the workflow before
+  it accepts published results and rejects a workflow-level `env` and any
+  non-`uses:` step in the scorecard job (#1173), so the map and the
+  unknown-preset guard live in a separate `egress-preset` job (check name
+  `Scorecard egress preset`); the scorecard job's harden-runner reads that
+  job's composed `allowed-endpoints` output.
 - Do **not** assume `tooling-ref` pins the third-party action inside the
   reusable; those actions are pinned by SHA inside the workflow YAML.
 

@@ -958,7 +958,7 @@ OpenSSF Scorecard
 - **Permissions:** `contents: read`, `id-token: write`, `security-events: write`
 - **Runners:** `ubuntu-latest`
 - **Package managers:** —
-- **Check names:** `OpenSSF Scorecard`
+- **Check names:** `Scorecard egress preset`, `OpenSSF Scorecard`
 
 #### `reusable-security-audit`
 

@@ -32,6 +32,12 @@ IN_REPO_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+\./\.github/actions/harden-runn
 REMOTE_EGRESS_RE='lgtm-hq/lgtm-ci/\.github/actions/(harden-runner|resolve-egress-allowlist)@'
 TOOLING_CAH_RE='^[[:space:]]+uses:[[:space:]]+\./\.lgtm-ci-tooling/\.github/actions/checkout-and-harden[[:space:]]*$'
 ANY_STEP_SECURITY_HARDEN_RE='^[[:space:]]+uses:[[:space:]]+step-security/harden-runner@'
+# The one block allowed to read needs.*: the scorecard job cannot carry the
+# preset map (the Scorecard API rejects workflow and job env, #1173), so it
+# takes the allowlist its egress-preset job composed. needs outputs are fixed
+# before the job starts, so the pre hook sees them.
+# shellcheck disable=SC2016 # literal expression text, not a shell expansion
+SCORECARD_NEEDS_AE='allowed-endpoints: ${{ needs.egress-preset.outputs.allowed-endpoints }}'
 
 violations=0
 
@@ -143,6 +149,9 @@ _check_harden_with_blocks() {
 		if [[ -z "$ae_block" ]]; then
 			echo "${wf_name}:${line_num}: step-security/harden-runner must set allowed-endpoints" >&2
 			violations=$((violations + 1))
+			continue
+		fi
+		if [[ "$wf_name" == "reusable-scorecards.yml" && "$(sed -e 's/^[[:space:]]*//' -e '/^#/d' -e '/^$/d' <<<"$ae_block")" == "$SCORECARD_NEEDS_AE" ]]; then
 			continue
 		fi
 		while IFS= read -r msg; do

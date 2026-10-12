@@ -19,11 +19,17 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 BEGIN_MARK="# lgtm-ci-egress-presets:begin"
 END_MARK="# lgtm-ci-egress-presets:end"
 
+# reusable-scorecards.yml carries the map in its egress-preset job's env and
+# its scorecard job takes the composed allowlist from that job's output: the
+# Scorecard API rejects workflow and job env in the scorecard job (#1173).
+SCORECARDS="reusable-scorecards.yml"
+SCORECARD_NEEDS_AE='allowed-endpoints: ${{ needs.egress-preset.outputs.allowed-endpoints }}'
+
 # Lines of the embedded map in one workflow, de-indented (env block body).
 embedded_map() {
 	awk -v begin="$BEGIN_MARK" -v end="$END_MARK" '
 		index($0, end) { on = 0 }
-		on && !/LGTM_CI_EGRESS_PRESETS: >-/ { sub(/^    /, ""); print }
+		on && !/LGTM_CI_EGRESS_PRESETS: >-/ { sub(/^ +/, ""); print }
 		index($0, begin) { on = 1 }
 	' "$1"
 }
@@ -82,7 +88,8 @@ SH
 }
 
 @test "render-presets: lines stay under yamllint's limit once indented" {
-	run bash -c "bash '$RENDER' | awk 'length(\$0) + 4 > 120 { bad = 1; print } END { exit bad }'"
+	# Deepest copy: the job-level env in reusable-scorecards.yml (8 spaces).
+	run bash -c "bash '$RENDER' | awk 'length(\$0) + 8 > 120 { bad = 1; print } END { exit bad }'"
 	assert_success
 }
 
@@ -188,11 +195,14 @@ SH
 }
 
 @test "the preset map is a workflow-level env literal (not job or step scoped)" {
-	local workflow
+	local workflow env_re
 	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
-		# `env:` at column 0 immediately introduces the map block.
-		run awk -v begin="$BEGIN_MARK" '
-			/^env:$/ { env_line = NR }
+		# `env:` at column 0 immediately introduces the map block; in
+		# reusable-scorecards.yml it is the egress-preset job's env (#1173).
+		env_re='^env:$'
+		[[ "${workflow##*/}" != "$SCORECARDS" ]] || env_re='^    env:$'
+		run awk -v begin="$BEGIN_MARK" -v env_re="$env_re" '
+			$0 ~ env_re { env_line = NR }
 			index($0, begin) { mark_line = NR }
 			END { exit !(env_line && mark_line && mark_line > env_line && mark_line - env_line < 12) }
 		' "$workflow"
@@ -210,6 +220,9 @@ SH
 		[[ "$n_steps" -gt 0 ]] || continue
 		blocks="$(harden_allowed_endpoints_blocks "$workflow")"
 		n_select="$(grep -cF 'fromJSON(env.LGTM_CI_EGRESS_PRESETS)' <<<"$blocks" || true)"
+		if [[ "${workflow##*/}" == "$SCORECARDS" ]]; then
+			n_select=$((n_select + $(grep -cxF "          $SCORECARD_NEEDS_AE" <<<"$blocks" || true)))
+		fi
 		[[ "$n_select" -eq "$n_steps" ]] || {
 			echo "$workflow: $n_steps harden-runner steps but $n_select env-map selections"
 			echo "$blocks"
@@ -229,6 +242,10 @@ source <(sed -n '/^_allowed_endpoints_violations()/,/^}/p' "${PROJECT_ROOT}/scri
 	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
 		while IFS= read -r -d $'\x1e' block; do
 			[[ -n "${block//[[:space:]]/}" ]] || continue
+			# The scorecard job's exact needs-output block (#1173) is the only exception.
+			if [[ "${workflow##*/}" == "$SCORECARDS" && "$(sed 's/^[[:space:]]*//' <<<"$block")" == "$SCORECARD_NEEDS_AE" ]]; then
+				continue
+			fi
 			run _allowed_endpoints_violations <<<"$block"
 			assert_output ""
 		done < <(harden_allowed_endpoints_blocks "$workflow" | awk 'BEGIN { RS = ""; ORS = "\x1e" } { print }')
