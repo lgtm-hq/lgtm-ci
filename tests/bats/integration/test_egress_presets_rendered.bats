@@ -243,7 +243,7 @@ source <(sed -n '/^_allowed_endpoints_violations()/,/^}/p' "${PROJECT_ROOT}/scri
 		while IFS= read -r -d $'\x1e' block; do
 			[[ -n "${block//[[:space:]]/}" ]] || continue
 			# The scorecard job's exact needs-output block (#1173) is the only exception.
-			if [[ "${workflow##*/}" == "$SCORECARDS" && "$(sed 's/^[[:space:]]*//' <<<"$block")" == "$SCORECARD_NEEDS_AE" ]]; then
+			if [[ "${workflow##*/}" == "$SCORECARDS" && "$(sed -e 's/^[[:space:]]*//' -e '/^#/d' -e '/^$/d' <<<"$block")" == "$SCORECARD_NEEDS_AE" ]]; then
 				continue
 			fi
 			run _allowed_endpoints_violations <<<"$block"

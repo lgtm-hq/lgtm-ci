@@ -170,7 +170,8 @@ PY
 		in_job && /^    permissions: \{\}$/ { perms = 1 }
 		in_job && /^      allowed-endpoints: >-$/ { out = 1 }
 		in_job && /- name: Fail on unknown egress-preset/ { guard = 1 }
-		END { exit !(perms && out && guard) }
+		in_job && /# lgtm-ci-egress-presets:begin/ { map = 1 }
+		END { exit !(perms && out && guard && map) }
 	' "$WORKFLOW"
 	assert_success
 	# The output the scorecard job hardens with is the same expression the
