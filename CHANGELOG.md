@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.77.5] - 2026-10-12
+
+### Changed
+
+- **migration**: clarify v0.77 tiers and arm64 egress (#1167) (0995769)
+
+### Fixed
+
+- **canary**: mint a repo-scoped App token for the fixture instead of a PAT (#1123)
+  (#1168) (d029556)
+
 ## [0.77.4] - 2026-10-09
 
 ### Fixed
@@ -2855,7 +2866,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.4...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.5...HEAD
+[0.77.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.4...v0.77.5
 [0.77.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.3...v0.77.4
 [0.77.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.2...v0.77.3
 [0.77.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.1...v0.77.2
