@@ -77,7 +77,8 @@ Presets are defined once in `scripts/ci/lib/egress/presets.sh`
 at run time, `scripts/ci/egress/render-presets.sh` renders every preset into a
 JSON map and `scripts/ci/egress/sync-workflow-presets.sh` writes it into each
 reusable as the workflow-level literal `env.LGTM_CI_EGRESS_PRESETS` (between
-`# lgtm-ci-egress-presets:begin/end` markers). Each harden-runner step then
+`# lgtm-ci-egress-presets:begin/end` markers; `reusable-scorecards.yml` carries
+it as a job-level literal instead, see #1173 below). Each harden-runner step then
 selects by expression:
 
 ```yaml
@@ -160,13 +161,16 @@ For these workflows:
 - `reusable-scorecards.yml` does **not** accept `tooling-ref`: the scorecard
   publish allowlist forbids lgtm-ci composites (#540). Its egress inputs
   (`egress-preset` default `scorecard`, `allowed-endpoints`,
-  `allowed-endpoints-mode`) still work because the preset map is a workflow
-  literal, not a composite. The Scorecard API re-verifies the workflow before
+  `allowed-endpoints-mode`) still work because the preset map is a YAML
+  literal in the workflow file, not a composite. The Scorecard API re-verifies the workflow before
   it accepts published results and rejects a workflow-level `env` and any
   non-`uses:` step in the scorecard job (#1173), so the map and the
   unknown-preset guard live in a separate `egress-preset` job (check name
   `Scorecard egress preset`); the scorecard job's harden-runner reads that
-  job's composed `allowed-endpoints` output.
+  job's composed `allowed-endpoints` output. An unknown preset therefore fails
+  `Scorecard egress preset` and the workflow run, and the `OpenSSF Scorecard`
+  check reports skipped; a caller that requires the scorecard check on a
+  ruleset should require both names.
 - Do **not** assume `tooling-ref` pins the third-party action inside the
   reusable; those actions are pinned by SHA inside the workflow YAML.
 

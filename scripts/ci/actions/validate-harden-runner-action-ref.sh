@@ -127,6 +127,39 @@ _check_harden_with_blocks() {
 	local block
 	local next_step_re='^[[:space:]]{6}- (name|uses|run):'
 
+	# The waived scorecard block (SCORECARD_NEEDS_AE) hardens with whatever
+	# the egress-preset job outputs, so that output gets the same analysis,
+	# and the waiver only applies while the scorecard job needs that job.
+	local scorecard_waiver=0
+	if [[ "$wf_name" == "reusable-scorecards.yml" ]]; then
+		local out_block
+		out_block="$(awk '
+			/^  egress-preset:$/ { in_job = 1; next }
+			in_job && /^  [A-Za-z0-9_-]+:$/ { in_job = 0 }
+			in_job && /^      allowed-endpoints:/ { on = 1; print; next }
+			on && /^        / { print; next }
+			on { on = 0 }
+		' "$workflow")"
+		if [[ -z "$out_block" ]]; then
+			echo "${wf_name}: egress-preset job must output allowed-endpoints for the scorecard job" >&2
+			violations=$((violations + 1))
+		else
+			while IFS= read -r msg; do
+				[[ -z "$msg" ]] && continue
+				echo "${wf_name}: egress-preset outputs.allowed-endpoints: ${msg}" >&2
+				violations=$((violations + 1))
+			done < <(_allowed_endpoints_violations <<<"$out_block")
+		fi
+		if awk '
+			/^  scorecards:$/ { in_job = 1; next }
+			in_job && /^  [A-Za-z0-9_-]+:$/ { in_job = 0 }
+			in_job && /^    needs: egress-preset$/ { found = 1 }
+			END { exit !found }
+		' "$workflow"; then
+			scorecard_waiver=1
+		fi
+	fi
+
 	while IFS= read -r line_num; do
 		[[ -z "$line_num" ]] && continue
 		block="$(
@@ -151,7 +184,7 @@ _check_harden_with_blocks() {
 			violations=$((violations + 1))
 			continue
 		fi
-		if [[ "$wf_name" == "reusable-scorecards.yml" && "$(sed -e 's/^[[:space:]]*//' -e '/^#/d' -e '/^$/d' <<<"$ae_block")" == "$SCORECARD_NEEDS_AE" ]]; then
+		if ((scorecard_waiver)) && [[ "$(sed -e 's/^[[:space:]]*//' -e '/^#/d' -e '/^$/d' <<<"$ae_block")" == "$SCORECARD_NEEDS_AE" ]]; then
 			continue
 		fi
 		while IFS= read -r msg; do

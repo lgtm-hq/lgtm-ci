@@ -194,7 +194,7 @@ SH
 	done
 }
 
-@test "the preset map is a workflow-level env literal (not job or step scoped)" {
+@test "the preset map is a job-start env literal (workflow-level; job-level only in scorecards)" {
 	local workflow env_re
 	for workflow in "$WORKFLOWS_DIR"/reusable-*.yml; do
 		# `env:` at column 0 immediately introduces the map block; in
@@ -202,7 +202,7 @@ SH
 		env_re='^env:$'
 		[[ "${workflow##*/}" != "$SCORECARDS" ]] || env_re='^    env:$'
 		run awk -v begin="$BEGIN_MARK" -v env_re="$env_re" '
-			$0 ~ env_re { env_line = NR }
+			$0 ~ env_re && !mark_line { env_line = NR }
 			index($0, begin) { mark_line = NR }
 			END { exit !(env_line && mark_line && mark_line > env_line && mark_line - env_line < 12) }
 		' "$workflow"

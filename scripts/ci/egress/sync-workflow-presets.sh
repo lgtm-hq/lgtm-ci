@@ -6,8 +6,8 @@
 #   bash scripts/ci/egress/sync-workflow-presets.sh           # rewrite in place
 #   bash scripts/ci/egress/sync-workflow-presets.sh --check   # exit 1 on drift
 #
-# Each reusable workflow carries the preset map as a workflow-level env value
-# between two marker comments:
+# Each reusable workflow carries the preset map as an env value between two
+# marker comments, normally at workflow level:
 #
 #   env:
 #     # lgtm-ci-egress-presets:begin
@@ -19,8 +19,9 @@
 # The block body is exactly the output of render-presets.sh indented two
 # spaces past the markers. The markers normally sit at workflow-level env
 # (two spaces); reusable-scorecards.yml carries them in a job-level env
-# because the Scorecard API rejects a workflow-level env (#1173). Workflows without the markers are skipped (and listed in --check so
-# a new reusable cannot ship without the map). The BATS contract test runs
+# because the Scorecard API rejects a workflow-level env (#1173).
+# Workflows without the markers are skipped (and listed in --check so a new
+# reusable cannot ship without the map). The BATS contract test runs
 # `--check`; after editing scripts/ci/lib/egress/presets.sh, run this script
 # and commit the workflow changes with it.
 

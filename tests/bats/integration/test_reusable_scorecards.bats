@@ -91,25 +91,6 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-scorecards.yml"
 	assert_success
 }
 
-# PyYAML: system python3 on GitHub-hosted runners, the dev venv locally.
-require_python_yaml() {
-	PY=""
-	local candidate
-	for candidate in python3 "${PROJECT_ROOT}/.venv/bin/python"; do
-		if command -v "${candidate}" >/dev/null 2>&1 && "${candidate}" -c 'import yaml' 2>/dev/null; then
-			PY="${candidate}"
-			break
-		fi
-	done
-	if [[ -z "${PY}" ]]; then
-		# Skipping in CI would hide the contract.
-		if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
-			fail "no python3 with PyYAML in CI"
-		fi
-		skip "no python3 with PyYAML (install the dev extra)"
-	fi
-}
-
 @test "reusable-scorecards: passes the Scorecard API publish verifier rules" {
 	# Mirrors ossf/scorecard-infra verifyScorecardWorkflow
 	# (api/app/server/verify_workflow.go): the API re-verifies this file at the
@@ -192,4 +173,24 @@ PY
 		END { exit !(perms && out && guard) }
 	' "$WORKFLOW"
 	assert_success
+	# The output the scorecard job hardens with is the same expression the
+	# egress-preset job's own harden-runner (and guard gate) uses.
+	local output_expr harden_expr
+	output_expr="$(awk '
+		/^      allowed-endpoints: >-$/ { on = 1; next }
+		on && /^        / { print; next }
+		on { exit }
+	' "$WORKFLOW" | tr -s ' \n' ' ')"
+	harden_expr="$(awk '
+		/^  egress-preset:/ { in_job = 1 }
+		/^  scorecards:/ { in_job = 0 }
+		in_job && /^          allowed-endpoints: >-$/ { on = 1; next }
+		on && /^            / { print; next }
+		on { exit }
+	' "$WORKFLOW" | tr -s ' \n' ' ')"
+	[[ -n "$output_expr" && "$output_expr" == "$harden_expr" ]] || {
+		echo "output:  $output_expr"
+		echo "harden:  $harden_expr"
+		return 1
+	}
 }

@@ -15,26 +15,8 @@ SYNC="${PROJECT_ROOT}/scripts/ci/workflows/sync-readonly-variants.sh"
 UNION="${PROJECT_ROOT}/scripts/ci/docs/validate-caller-permissions.py"
 VARIANT_MARK="# lgtm-ci-readonly-variant:"
 
-# Only the union and reference tests need Python; the generator tests run
-# without it.
-require_python_yaml() {
-	# PyYAML: system python3 on GitHub-hosted runners, the dev venv locally.
-	PY=""
-	local candidate
-	for candidate in python3 "${PROJECT_ROOT}/.venv/bin/python"; do
-		if command -v "${candidate}" >/dev/null 2>&1 && "${candidate}" -c 'import yaml' 2>/dev/null; then
-			PY="${candidate}"
-			break
-		fi
-	done
-	if [[ -z "${PY}" ]]; then
-		# Skipping in CI would hide the whole contract suite.
-		if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
-			fail "no python3 with PyYAML in CI"
-		fi
-		skip "no python3 with PyYAML (install the dev extra)"
-	fi
-}
+# Only the union and reference tests need Python (require_python_yaml, from
+# tests/helpers/common.bash); the generator tests run without it.
 
 # Print "<facade> <variant>" for every facade carrying the marker.
 variant_pairs() {

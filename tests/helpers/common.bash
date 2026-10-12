@@ -137,6 +137,26 @@ require_bash4() {
 
 # Run command with modern bash (use in tests that need bash 4+ features)
 # Usage: run_with_modern_bash 'source "$LIB_DIR/log.sh" && log_verbose "test"'
+# Usage: require_python_yaml (at start of test); sets PY to a python with PyYAML.
+# PyYAML: system python3 on GitHub-hosted runners, the dev venv locally.
+require_python_yaml() {
+	PY=""
+	local candidate
+	for candidate in python3 "${PROJECT_ROOT}/.venv/bin/python"; do
+		if command -v "${candidate}" >/dev/null 2>&1 && "${candidate}" -c 'import yaml' 2>/dev/null; then
+			PY="${candidate}"
+			break
+		fi
+	done
+	if [[ -z "${PY}" ]]; then
+		# Skipping in CI would hide the whole contract suite.
+		if [[ "${CI:-}" == "true" || "${GITHUB_ACTIONS:-}" == "true" ]]; then
+			fail "no python3 with PyYAML in CI"
+		fi
+		skip "no python3 with PyYAML (install the dev extra)"
+	fi
+}
+
 run_with_modern_bash() {
 	if bash4_available; then
 		run "$MODERN_BASH" -c "$1"
