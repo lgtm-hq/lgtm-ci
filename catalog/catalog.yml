@@ -990,6 +990,7 @@ entries:
     prerequisites: []
     limitations: []
     check-names:
+      - "Scorecard egress preset"
       - "OpenSSF Scorecard"
 
   - id: reusable-security-audit

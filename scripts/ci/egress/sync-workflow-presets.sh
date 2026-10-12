@@ -6,8 +6,8 @@
 #   bash scripts/ci/egress/sync-workflow-presets.sh           # rewrite in place
 #   bash scripts/ci/egress/sync-workflow-presets.sh --check   # exit 1 on drift
 #
-# Each reusable workflow carries the preset map as a workflow-level env value
-# between two marker comments:
+# Each reusable workflow carries the preset map as an env value between two
+# marker comments, normally at workflow level:
 #
 #   env:
 #     # lgtm-ci-egress-presets:begin
@@ -16,9 +16,12 @@
 #       ...
 #     # lgtm-ci-egress-presets:end
 #
-# The block body is exactly the output of render-presets.sh indented by four
-# spaces. Workflows without the markers are skipped (and listed in --check so
-# a new reusable cannot ship without the map). The BATS contract test runs
+# The block body is exactly the output of render-presets.sh indented two
+# spaces past the markers. The markers normally sit at workflow-level env
+# (two spaces); reusable-scorecards.yml carries them in a job-level env
+# because the Scorecard API rejects a workflow-level env (#1173).
+# Workflows without the markers are skipped (and listed in --check so a new
+# reusable cannot ship without the map). The BATS contract test runs
 # `--check`; after editing scripts/ci/lib/egress/presets.sh, run this script
 # and commit the workflow changes with it.
 
@@ -31,7 +34,6 @@ WORKFLOWS_DIR="${WORKFLOWS_DIR:-$REPO_ROOT/.github/workflows}"
 BEGIN_MARK="# lgtm-ci-egress-presets:begin"
 END_MARK="# lgtm-ci-egress-presets:end"
 ENV_KEY="LGTM_CI_EGRESS_PRESETS"
-INDENT="    "
 
 check=0
 case "${1:-}" in
@@ -45,10 +47,7 @@ esac
 
 rendered="$(mktemp)"
 trap 'rm -f "$rendered"' EXIT
-{
-	printf '  %s: >-\n' "$ENV_KEY"
-	bash "$SCRIPT_DIR/render-presets.sh" | sed "s/^/${INDENT}/"
-} >"$rendered"
+bash "$SCRIPT_DIR/render-presets.sh" >"$rendered"
 
 status=0
 missing=()
@@ -64,10 +63,20 @@ for workflow in "$WORKFLOWS_DIR"/*.yml; do
 	fi
 
 	# Splice: everything before the begin marker, the marker, the rendered
-	# block, the end marker, everything after it.
+	# block (key at the marker's indent, body two spaces deeper), the end
+	# marker, everything after it.
 	updated="$(mktemp)"
-	awk -v begin="$BEGIN_MARK" -v end="$END_MARK" -v body="$rendered" '
-		index($0, begin) { print; while ((getline line < body) > 0) print line; close(body); skipping = 1; next }
+	awk -v begin="$BEGIN_MARK" -v end="$END_MARK" -v key="$ENV_KEY" -v body="$rendered" '
+		index($0, begin) {
+			print
+			match($0, /^[ ]*/)
+			ind = substr($0, 1, RLENGTH)
+			print ind key ": >-"
+			while ((getline line < body) > 0) print ind "  " line
+			close(body)
+			skipping = 1
+			next
+		}
 		index($0, end) { skipping = 0 }
 		!skipping { print }
 	' "$workflow" >"$updated"
