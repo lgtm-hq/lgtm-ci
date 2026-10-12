@@ -120,7 +120,8 @@ _header_list() {
 	run_line="$(grep -n '^      - name: Run external consumer canary$' "$WORKFLOW" | cut -d: -f1)"
 	[[ -n "$mint_line" && -n "$run_line" && "$mint_line" -lt "$run_line" ]]
 	local canary_step
-	canary_step="$(awk '/^      - name: Run external consumer canary$/ { on = 1 } on { print }' "$WORKFLOW")"
+	canary_step="$(awk '/^      - name: Run external consumer canary$/ { on = 1; print; next } on && /^      - name: / { exit } on { print }' "$WORKFLOW")"
+	[[ -n "$canary_step" ]]
 	run grep -F 'GH_TOKEN: ${{ steps.fixture-token.outputs.token }}' <<<"$canary_step"
 	assert_success
 }
