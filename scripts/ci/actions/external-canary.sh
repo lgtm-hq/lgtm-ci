@@ -3,7 +3,7 @@
 # Purpose: Run the external consumer fixture against one lgtm-ci candidate SHA (#1074)
 #
 # Usage:
-#   GH_TOKEN=<EXTERNAL_FIXTURE_TOKEN> bash scripts/ci/actions/external-canary.sh <ref>
+#   GH_TOKEN=<fixture App installation token> bash scripts/ci/actions/external-canary.sh <ref>
 #
 # The fixture (TurboCoder13/lgtm-ci-consumer-fixture) calls lgtm-ci only
 # through `uses: lgtm-hq/lgtm-ci/.github/workflows/<file>.yml@<sha>` (and the
@@ -67,10 +67,13 @@
 #                  CANARY_INCLUDE_MANUAL=true; reported `not_dispatched`.
 #
 # Environment:
-#   GH_TOKEN                 fixture token (EXTERNAL_FIXTURE_TOKEN): Actions
-#                            read/write, Contents read/write, Workflows
-#                            read/write on the fixture only (workflow files
-#                            cannot be written without the Workflows scope)
+#   GH_TOKEN                 fixture token: installation token of the App
+#                            lgtm-ci-fixture-release (secrets
+#                            EXTERNAL_FIXTURE_APP_ID and
+#                            EXTERNAL_FIXTURE_APP_PRIVATE_KEY), Actions,
+#                            Contents and Workflows write on the fixture only
+#                            (workflow files cannot be written without the
+#                            Workflows permission)
 #   LGTM_CI_TOKEN            token for the lgtm-ci repository (github.token):
 #                            resolves <ref>, lists the PR's files, reads the
 #                            referenced paths and the merge base; defaults to GH_TOKEN
@@ -253,7 +256,7 @@ decide_run_mode() {
 		return 0
 	fi
 	if [[ "$PR_HEAD_REPO_FORK" == "true" ]]; then
-		printf 'skip\t%s\n' "fork pull request: EXTERNAL_FIXTURE_TOKEN is not available; re-run from a same-repository branch"
+		printf 'skip\t%s\n' "fork pull request: the fixture App secrets (EXTERNAL_FIXTURE_APP_ID, EXTERNAL_FIXTURE_APP_PRIVATE_KEY) are not available; re-run from a same-repository branch"
 		return 0
 	fi
 	if [[ "$EVENT_ACTION" == "labeled" && "$EVENT_LABEL" != "$CANARY_FORCE_LABEL" && "$EVENT_LABEL" != "$CANARY_OVERRIDE_LABEL" ]]; then
@@ -855,7 +858,7 @@ main() {
 		return 0
 	fi
 	log_info "running the full fixture set: ${reason}"
-	_require_env GH_TOKEN
+	[[ -n "${GH_TOKEN:-}" ]] || die "GH_TOKEN is required for a full run: no fixture App token was minted (see the 'Create fixture App installation token' step: secrets EXTERNAL_FIXTURE_APP_ID / EXTERNAL_FIXTURE_APP_PRIVATE_KEY, and Actions, Contents, Workflows write on the App installation)"
 
 	local sha since results table failures
 	sha="$(resolve_candidate_sha "$ref")"

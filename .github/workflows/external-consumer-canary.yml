@@ -19,11 +19,10 @@
 #
 # Labels: `needs-external-canary` forces the full set on any PR;
 # `canary-informational` (owner-only by convention) reports gate failures as
-# warnings. Fork PRs skip (they cannot read the secret).
+# warnings. Fork PRs skip (they cannot read the App secrets).
 #
-# Not a required check yet: promotion follows an observation period and the
-# replacement of the PAT by a GitHub App (follow-up issue). Contract:
-# docs/workflow-contract.md "External verification".
+# Not a required check yet: promotion follows an observation period (#1123).
+# Contract: docs/workflow-contract.md "External verification".
 #
 # Gate workflows (the canary fails when any does not succeed):
 #   actions-direct build-python-direct coverage-lcov docker-facade-validate
@@ -51,11 +50,13 @@
 # Manual workflows (shared fixture concurrency group and a version PR per run; dispatched only on request):
 #   release-benign-hook release-tamper-hook release-version-pr
 #
-# The only secret is EXTERNAL_FIXTURE_TOKEN (fine-grained PAT scoped to the
-# fixture: Actions read/write, Contents read/write, Workflows read/write).
-# No `secrets: inherit`. On pull_request the script runs from the PR head, so
-# a same-repository author with push access can read the token; its reach is
-# the fixture only (see the contract section).
+# The fixture token is a GitHub App installation token (#1123) minted per
+# run from EXTERNAL_FIXTURE_APP_ID / EXTERNAL_FIXTURE_APP_PRIVATE_KEY (App
+# lgtm-ci-fixture-release, installed on the fixture only), scoped to the
+# fixture repository with Actions, Contents and Workflows write; it expires
+# after one hour. No `secrets: inherit`. On pull_request the script runs from
+# the PR head, so a same-repository author with push access can read the
+# token; its reach is the fixture only (see the contract section).
 ---
 name: External Consumer Canary
 
@@ -214,9 +215,32 @@ jobs:
           sparse-checkout: scripts/ci
           persist-credentials: false
 
+      - name: Create fixture App installation token
+        id: fixture-token
+        # Fork PRs cannot read the App secrets; the script skips them.
+        if: github.event.pull_request.head.repo.fork != true
+        # The mint runs before the script's run/skip decision. A failed mint
+        # (missing secrets or permissions, API error) must not turn a skip
+        # run red; a full run still fails on the empty GH_TOKEN.
+        continue-on-error: true
+        # Pinned to SHA for supply chain security
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.EXTERNAL_FIXTURE_APP_ID }}
+          private-key: ${{ secrets.EXTERNAL_FIXTURE_APP_PRIVATE_KEY }}
+          # Scoped to the fixture repository only; the token reaches nothing
+          # in lgtm-hq (the job's github.token reads lgtm-ci).
+          owner: TurboCoder13
+          repositories: lgtm-ci-consumer-fixture
+          # Dispatch and poll (actions), create and delete the canary branch
+          # (contents), write pinned workflow files (workflows).
+          permission-actions: write
+          permission-contents: write
+          permission-workflows: write
+
       - name: Run external consumer canary
         env:
-          GH_TOKEN: ${{ secrets.EXTERNAL_FIXTURE_TOKEN }}
+          GH_TOKEN: ${{ steps.fixture-token.outputs.token }}
           LGTM_CI_TOKEN: ${{ github.token }}
           CANDIDATE_REF: >-
             ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}

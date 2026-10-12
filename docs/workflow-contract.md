@@ -2877,7 +2877,7 @@ When it runs:
   it touches; every later push to the labelled PR re-runs it at the new head.
   A `labeled` event for any other label is skipped, so adding an unrelated
   label does not re-run the fixture set.
-- **Fork PRs skip**: they cannot read the secret. Re-run from a same-repo
+- **Fork PRs skip**: they cannot read the App secrets. Re-run from a same-repo
   branch with the force label when a fork PR needs the evidence.
 - **Dispatch it** from the Actions tab with `ref` set to any commit, branch or
   tag (empty means the commit the workflow was dispatched on, e.g. `main`).
@@ -2894,45 +2894,61 @@ the cause is fixed.
 
 **Status.** The canary is **not** a required check yet and the ruleset is
 untouched. It is promoted to required after an observation period on real
-PRs and after `EXTERNAL_FIXTURE_TOKEN` is replaced by a GitHub App installed
-on the fixture only (follow-up issue); the App removes the personal-token
-expiry and ties the credential to the fixture instead of a person. Until
-then a red canary is a signal to read, not a merge block. One full run
-dispatches roughly 25 fixture workflows (one on a Windows runner), and the
-release-path workflows open and leave a version PR in the fixture that is
-closed by hand.
+PRs (#1123). Until then a red canary is a signal to read, not a merge
+block. One full run dispatches roughly 25 fixture workflows (one on a
+Windows runner), and the release-path workflows open and leave a version PR
+in the fixture that is closed by hand.
 
 ### Token scope and rotation
 
-The only secret is `EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access
-token owned by the fixture owner and stored as a repository secret on
-`lgtm-hq/lgtm-ci`. It is scoped to the single repository
-`TurboCoder13/lgtm-ci-consumer-fixture` with **Actions: read and write**
-(dispatch and poll), **Contents: read and write** (create and delete the
-`canary/<sha>` branch) and **Workflows: read and write** (GitHub refuses to
-write anything under `.github/workflows/` without it, through the git data
-API too; a token without it fails at "create tree" with HTTP 403). It has no
-access to any lgtm-hq repository; the candidate ref and the PR file list are
-read with the job's own `github.token`. The workflow passes it as one named
-env value to one step, there is no `secrets: inherit`, and the hardened job
-can reach only `github.com:443` and `api.github.com:443` (preset
-`external-canary`).
+The fixture token is a GitHub App installation token minted per run by
+`actions/create-github-app-token` from two repository secrets on
+`lgtm-hq/lgtm-ci`: `EXTERNAL_FIXTURE_APP_ID` and
+`EXTERNAL_FIXTURE_APP_PRIVATE_KEY`. The App (`lgtm-ci-fixture-release`) is
+owned by the fixture owner and installed on the single repository
+`TurboCoder13/lgtm-ci-consumer-fixture` only, and its permission set must
+include the three permissions below: GitHub refuses the mint (HTTP 422,
+"The permissions requested are not granted to this installation") when the
+App or its installation lacks one. The mint step names that repository and
+requests **Actions: write** (dispatch and poll),
+**Contents: write** (create and delete the `canary/<sha>` branch) and
+**Workflows: write** (GitHub refuses to write anything under
+`.github/workflows/` without it, through the git data API too; a token
+without it fails at "create tree" with HTTP 403). The token has no access to
+any lgtm-hq repository; the candidate ref and the PR file list are read with
+the job's own `github.token`. The mint step is skipped on fork PRs and
+runs with `continue-on-error`, so a failed mint never turns a skip run red;
+a full run then fails with "GH_TOKEN is required for a full run". The
+token reaches the canary step as one named env value, there is no
+`secrets: inherit`, and the hardened job can reach only `github.com:443` and
+`api.github.com:443` (preset `external-canary`), which is all the mint step
+needs as well.
+
+**Why an App token instead of a PAT (#1123).** The canary used to run on
+`EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access token. A PAT is tied
+to a person and expires on a calendar date (a silent red canary once it
+lapses). The App belongs to no personal session and has no calendar expiry,
+which is what makes the canary fit to become a required check. Each
+installation token is scoped to the fixture repository and the three
+permissions above and expires one hour after the mint, so a leaked *token*
+is short-lived. The App private key is long-lived: this workflow passes it
+only to the mint action, but a leaked key stays usable until it is deleted in
+the App settings. `EXTERNAL_FIXTURE_TOKEN` is no longer read and can be
+deleted.
 
 What that does **not** protect against: on `pull_request` the job runs the
 workflow and the script from the PR head, so a same-repository author with
-push access can read the token or point it at the fixture's `main`. The
-token's reach is the fixture only, which exists to be written by candidates,
-and fork PRs never see the secret. Treat the PAT as a fixture credential, not
-an lgtm-ci one; the GitHub App that replaces it (follow-up) issues
-short-lived installation tokens, and a fixture ruleset on `main` is the
-owner's lever against a hostile candidate.
+push access can read the installation token or the App secrets, or point the
+token at the fixture's `main`. The reach is the fixture only, which exists to
+be written by candidates, and fork PRs never see the secrets. Treat the App
+as a fixture credential, not an lgtm-ci one; a fixture ruleset on `main` is
+the owner's lever against a hostile candidate.
 
-Rotation: fine-grained tokens expire; generate a new one with the same three
-permissions on the same single repository, update the secret, and run the
-canary once by dispatch. A read-only API listing of the fixture's workflows
-from a job is enough to confirm the new token before relying on it. If the
-token is lost, revoke it in the owner's token settings; nothing else is
-affected because it grants nothing outside the fixture.
+Rotation: installation tokens rotate themselves (one per run). To rotate the
+App key, generate a new private key in the App settings, update
+`EXTERNAL_FIXTURE_APP_PRIVATE_KEY`, delete the old key, and run the canary
+once by dispatch. If the key leaks, delete it in the App settings; nothing
+else is affected because the App is installed on the fixture only.
 
 ## Related docs
 
