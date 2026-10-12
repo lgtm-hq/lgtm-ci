@@ -219,6 +219,10 @@ jobs:
         id: fixture-token
         # Fork PRs cannot read the App secrets; the script skips them.
         if: github.event.pull_request.head.repo.fork != true
+        # The mint runs before the script's run/skip decision. A failed mint
+        # (missing secrets or permissions, API error) must not turn a skip
+        # run red; a full run still fails on the empty GH_TOKEN.
+        continue-on-error: true
         # Pinned to SHA for supply chain security
         uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
         with:

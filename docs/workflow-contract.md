@@ -2894,10 +2894,10 @@ the cause is fixed.
 
 **Status.** The canary is **not** a required check yet and the ruleset is
 untouched. It is promoted to required after an observation period on real
-PRs (#1123). Until then a red canary is a signal to read, not a merge block. One full run
-dispatches roughly 25 fixture workflows (one on a Windows runner), and the
-release-path workflows open and leave a version PR in the fixture that is
-closed by hand.
+PRs (#1123). Until then a red canary is a signal to read, not a merge
+block. One full run dispatches roughly 25 fixture workflows (one on a
+Windows runner), and the release-path workflows open and leave a version PR
+in the fixture that is closed by hand.
 
 ### Token scope and rotation
 
@@ -2906,14 +2906,19 @@ The fixture token is a GitHub App installation token minted per run by
 `lgtm-hq/lgtm-ci`: `EXTERNAL_FIXTURE_APP_ID` and
 `EXTERNAL_FIXTURE_APP_PRIVATE_KEY`. The App (`lgtm-ci-fixture-release`) is
 owned by the fixture owner and installed on the single repository
-`TurboCoder13/lgtm-ci-consumer-fixture` only. The mint step names that
-repository and requests **Actions: write** (dispatch and poll),
+`TurboCoder13/lgtm-ci-consumer-fixture` only, and its permission set must
+include the three permissions below: GitHub refuses the mint (HTTP 422,
+"The permissions requested are not granted to this installation") when the
+App or its installation lacks one. The mint step names that repository and
+requests **Actions: write** (dispatch and poll),
 **Contents: write** (create and delete the `canary/<sha>` branch) and
 **Workflows: write** (GitHub refuses to write anything under
 `.github/workflows/` without it, through the git data API too; a token
 without it fails at "create tree" with HTTP 403). The token has no access to
 any lgtm-hq repository; the candidate ref and the PR file list are read with
-the job's own `github.token`. The mint step is skipped on fork PRs, the
+the job's own `github.token`. The mint step is skipped on fork PRs and
+runs with `continue-on-error`, so a failed mint never turns a skip run red;
+a full run then fails with "GH_TOKEN is required for a full run". The
 token reaches the canary step as one named env value, there is no
 `secrets: inherit`, and the hardened job can reach only `github.com:443` and
 `api.github.com:443` (preset `external-canary`), which is all the mint step
@@ -2921,12 +2926,15 @@ needs as well.
 
 **Why an App token instead of a PAT (#1123).** The canary used to run on
 `EXTERNAL_FIXTURE_TOKEN`, a fine-grained personal access token. A PAT is tied
-to a person, expires on a calendar date (a silent red canary once it lapses)
-and stays valid for its whole lifetime once read. The installation token is
-scoped to the fixture repository and the three permissions above, expires
-one hour after the mint, and the App key never leaves the mint step. That
-makes the canary fit to become a required check. `EXTERNAL_FIXTURE_TOKEN` is
-no longer read and can be deleted.
+to a person and expires on a calendar date (a silent red canary once it
+lapses). The App belongs to no personal session and has no calendar expiry,
+which is what makes the canary fit to become a required check. Each
+installation token is scoped to the fixture repository and the three
+permissions above and expires one hour after the mint, so a leaked *token*
+is short-lived. The App private key is long-lived: this workflow passes it
+only to the mint action, but a leaked key stays usable until it is deleted in
+the App settings. `EXTERNAL_FIXTURE_TOKEN` is no longer read and can be
+deleted.
 
 What that does **not** protect against: on `pull_request` the job runs the
 workflow and the script from the PR head, so a same-repository author with

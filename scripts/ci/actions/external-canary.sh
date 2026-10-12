@@ -858,7 +858,7 @@ main() {
 		return 0
 	fi
 	log_info "running the full fixture set: ${reason}"
-	_require_env GH_TOKEN
+	[[ -n "${GH_TOKEN:-}" ]] || die "GH_TOKEN is required for a full run: no fixture App token was minted (see the 'Create fixture App installation token' step: secrets EXTERNAL_FIXTURE_APP_ID / EXTERNAL_FIXTURE_APP_PRIVATE_KEY, and Actions, Contents, Workflows write on the App installation)"
 
 	local sha since results table failures
 	sha="$(resolve_candidate_sha "$ref")"

@@ -5,8 +5,9 @@
 # The canary is a caller workflow that runs with a token for a foreign
 # repository, so it must harden before anything else, allow only the GitHub
 # API, resolve nothing through a caller-local action path, mint one
-# fixture-scoped App token from two named secrets, and keep its header's gate / informational lists in step with the
-# classification in scripts/ci/actions/external-canary.sh.
+# fixture-scoped App token from two named secrets, and keep its header's
+# gate / informational lists in step with the classification in
+# scripts/ci/actions/external-canary.sh.
 
 load "../../helpers/common"
 
@@ -93,8 +94,11 @@ _header_list() {
 	local block
 	block="$(awk '/^      - name: Create fixture App installation token$/ { on = 1 } on && /^      - name: Run external consumer canary$/ { exit } on { print }' "$WORKFLOW")"
 	[[ -n "$block" ]]
-	run grep -E '^          (owner|repositories|permission-[a-z-]+): ' <<<"$block"
+	# Exactly these `with:` inputs (no skip-token-revoke, no extra permission).
+	run grep -E '^          [a-z-]+: ' <<<"$block"
 	assert_output "$(printf '%s\n' \
+		'          app-id: ${{ secrets.EXTERNAL_FIXTURE_APP_ID }}' \
+		'          private-key: ${{ secrets.EXTERNAL_FIXTURE_APP_PRIVATE_KEY }}' \
 		'          owner: TurboCoder13' \
 		'          repositories: lgtm-ci-consumer-fixture' \
 		'          permission-actions: write' \
@@ -105,12 +109,19 @@ _header_list() {
 	# Fork PRs cannot read the secrets; the mint is skipped there.
 	run grep -F 'if: github.event.pull_request.head.repo.fork != true' <<<"$block"
 	assert_success
+	# A failed mint must not turn a skip run red; the script fails full runs.
+	run grep -F 'continue-on-error: true' <<<"$block"
+	assert_success
+	run grep -F 'GH_TOKEN is required for a full run' "$SCRIPT"
+	assert_success
 	# The mint precedes the canary step, which reads only its output.
 	local mint_line run_line
 	mint_line="$(grep -n '^      - name: Create fixture App installation token$' "$WORKFLOW" | cut -d: -f1)"
 	run_line="$(grep -n '^      - name: Run external consumer canary$' "$WORKFLOW" | cut -d: -f1)"
 	[[ -n "$mint_line" && -n "$run_line" && "$mint_line" -lt "$run_line" ]]
-	run grep -F 'GH_TOKEN: ${{ steps.fixture-token.outputs.token }}' "$WORKFLOW"
+	local canary_step
+	canary_step="$(awk '/^      - name: Run external consumer canary$/ { on = 1 } on { print }' "$WORKFLOW")"
+	run grep -F 'GH_TOKEN: ${{ steps.fixture-token.outputs.token }}' <<<"$canary_step"
 	assert_success
 }
 
