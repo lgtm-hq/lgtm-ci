@@ -19,6 +19,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.77.7] - 2026-10-12
+
+### Changed
+
+- **deps**: update dependency uv to 0.13.0 (minor) (#1176) (72aad12)
+
+### Fixed
+
+- **deps**: update dependency @anthropic-ai/claude-code to 2.1.296 (patch) (#1171)
+  (d471fe4)
+
 ## [0.77.6] - 2026-10-12
 
 ### Changed
@@ -2880,7 +2891,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.6...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.7...HEAD
+[0.77.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.6...v0.77.7
 [0.77.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.5...v0.77.6
 [0.77.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.4...v0.77.5
 [0.77.4]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.3...v0.77.4
