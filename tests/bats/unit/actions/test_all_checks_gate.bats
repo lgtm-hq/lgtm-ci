@@ -262,15 +262,16 @@ status_() { # context state
 	assert_output --partial "All 2 other check(s) passed"
 }
 
-@test "all-checks-gate: a superseded run's jobs do not count, even when the new run has other job names" {
+@test "all-checks-gate: a cancelled job the newer run never ran keeps the old run" {
+	# Fail closed: nothing newer re-did `test (3.11)`; re-running run 1 clears it
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
 		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
 	poll 1 checks "$(check 11 'test (3.11)' completed cancelled github-actions 1)" \
 		"$(check 12 'test (3.12)' completed success github-actions 2)"
 
 	run bash "$SCRIPT"
-	assert_success
-	refute_output --partial "3.11"
+	assert_failure
+	assert_output --partial "check test (3.11): cancelled"
 }
 
 @test "all-checks-gate: a later run whose jobs skip cannot hide an earlier failure" {
@@ -297,6 +298,42 @@ status_() { # context state
 	assert_failure
 	assert_output --partial "workflow run CI: cancelled"
 	assert_output --partial "check test: cancelled"
+}
+
+@test "all-checks-gate: a newer run's unrelated job does not supersede a cancelled test" {
+	# `labeled` cancels the `opened` run; label-sync runs, test skips
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'test' completed cancelled github-actions 1)" \
+		"$(check 12 'label-sync' completed success github-actions 2)" \
+		"$(check 13 'test' completed skipped github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check test: cancelled"
+}
+
+@test "all-checks-gate: a chain of superseded runs collapses to the run that did the work" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 3 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'test' completed cancelled github-actions 1)" \
+		"$(check 12 'test' completed cancelled github-actions 2)" \
+		"$(check 13 'test' completed success github-actions 3)"
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "All 1 other check(s) passed"
+}
+
+@test "all-checks-gate: a run cancelled before any job started needs a newer run that did work" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 12 'test' completed skipped github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "workflow run CI: cancelled"
 }
 
 @test "all-checks-gate: a run cancelled by a newer run on another event is superseded" {
@@ -450,6 +487,49 @@ status_() { # context state
 	assert_output --partial "Timed out after 60s"
 	assert_output --partial "workflow run Slow (in_progress)"
 	assert_output --partial "workflow run Lint: failure"
+}
+
+@test "all-checks-gate: a timeout while runs are pending flags cancelled runs as possibly superseded" {
+	poll 1 runs "$(run_ 1 Slow .github/workflows/slow.yml in_progress null)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed cancelled)"
+	export TIMEOUT_SECONDS=60
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "workflow run CI: cancelled (may be superseded)"
+}
+
+@test "all-checks-gate: backs off while only a status stays pending" {
+	poll 1 statuses "$(status_ CodeRabbit pending)"
+	poll 4 statuses "$(status_ CodeRabbit success)"
+
+	run bash "$SCRIPT"
+	assert_success
+	# pending sleeps 30, 45, 67; then settle 30 + 30
+	run cat "$CLOCK_FILE"
+	assert_output "1202"
+}
+
+@test "all-checks-gate: polls once more at the deadline instead of giving up a long sleep early" {
+	export TIMEOUT_SECONDS=100 POLL_INTERVAL=60 SETTLE_SECONDS=0
+	poll 1 statuses "$(status_ CodeRabbit pending)"
+	poll 2 statuses "$(status_ CodeRabbit success)"
+
+	run bash "$SCRIPT"
+	assert_success
+	# poll 1 at 1000, poll 2 at 1060 (quiet), poll 3 at the deadline 1100
+	run cat "$CLOCK_FILE"
+	assert_output "1100"
+}
+
+@test "all-checks-gate: a deadline inside the settle period says so" {
+	export TIMEOUT_SECONDS=90
+	poll 1 statuses "$(status_ CodeRabbit pending)"
+	poll 3 statuses "$(status_ CodeRabbit success)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "while settling"
 }
 
 @test "all-checks-gate: times out and names what is still pending" {

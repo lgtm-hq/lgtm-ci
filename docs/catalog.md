@@ -501,7 +501,7 @@ All Checks Gate
 
 - Call it from one dedicated workflow file per repository: runs of the calling workflow are not waited on
 - A verdict is final: re-run the gate after re-running a failed check or after a pending status resolves late
-- Each poll costs 1-3 GITHUB_TOKEN requests (1,000/hour per repository)
+- Each poll costs 1-3 GITHUB_TOKEN requests (1,000/hour per repository); about 15-180/hour per waiting gate
 - Fails when no other check or status exists on the commit, unless allow-empty
 
 #### `reusable-auto-rerun-on-infra-failure`

@@ -711,12 +711,13 @@ concluded `success`, `skipped` or `neutral`:
 - **Workflow runs** for the commit: a run that is not completed keeps the
   gate waiting (this covers jobs still waiting on `needs:`, which have no
   check run yet). A run that concluded `failure`, `cancelled`, `timed_out`,
-  `startup_failure` or `action_required` fails the gate. An older run of a
-  workflow file that was cancelled while a newer run of the same file did
-  real work (a check run that is not skipped) was superseded (concurrency)
-  and is dropped with its check runs; any other older run still counts, so
-  a later run (say on `labeled`) whose jobs all skip can hide neither an
-  earlier failure nor an earlier cancellation.
+  `startup_failure` or `action_required` fails the gate. A cancelled run
+  counts as superseded (concurrency) and is dropped with its check runs
+  only when newer runs of the same workflow file did its work: every job it
+  left unfinished has a check run that is not skipped in a newer run. Any
+  other older run still counts, so a later run (say on `labeled`) that
+  skips the real jobs can hide neither an earlier failure nor an earlier
+  cancellation.
 - **Check runs** from every app: anything other than `success`, `skipped`
   or `neutral` (`failure`, `cancelled`, `timed_out`, `action_required`,
   `stale`, `startup_failure`, or no conclusion) fails the gate. Actions check runs are
@@ -776,11 +777,12 @@ apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 Limitations:
 
 - **Request budget.** While a workflow run is in progress a poll costs one
-  request (the interval grows to 4x while nothing changes), otherwise three
-  (more when a list passes 100 entries). `GITHUB_TOKEN` allows 1,000
-  requests per hour per repository, shared by every workflow: at the
-  default 60 s each waiting gate uses roughly 15–60 requests an hour, so
-  raise `poll-interval-seconds` for repositories that run ten or more PRs
+  request, otherwise three (more when a list passes 100 entries); while
+  nothing changes the interval grows to 4x `poll-interval-seconds`.
+  `GITHUB_TOKEN` allows 1,000 requests per hour per repository, shared by
+  every workflow. At the default 60 s a gate waiting on workflows uses
+  about 15–60 requests an hour, one waiting on a status or another app's
+  check about 45–180, so raise `poll-interval-seconds` where many PRs wait
   at once. A rate-limited poll waits instead of failing.
 - **`pull_request_target` workflows** run on the base commit, not the PR
   head, so the gate does not see them.
@@ -799,8 +801,10 @@ Limitations:
   runs (matching only the job still waits for its workflow run). When
   `reusable-auto-rerun-on-infra-failure` re-runs failed jobs, raise
   `settle-seconds` above its start-up delay (a few minutes) so the gate
-  sees the re-run. Add `labeled` to the trigger types if workflows start on
-  labels.
+  sees the re-run. Workflows that start after the gate finished (for
+  example on `labeled` or `edited`) are not gated: add every
+  `pull_request` activity type your other workflows use to the gate's
+  trigger types.
 - **Nothing to gate fails.** When no other check or status exists on the
   commit after the settle period the gate fails, so a merge queue whose
   workflows do not trigger on `merge_group` cannot merge unchecked. Set

@@ -15,11 +15,13 @@
 #     (queued, in_progress, waiting, pending, requested) keeps the gate
 #     waiting, which covers jobs whose check run does not exist yet because
 #     they wait on `needs:`. An older run of a workflow file that concluded
-#     cancelled while a newer run of the same file exists that did real work
-#     (a check run that is not skipped) was superseded (concurrency) and is
-#     dropped with its check runs; every other run counts, so a later run (say
-#     on `labeled`) whose jobs all skip can hide neither an earlier failure nor
-#     an earlier cancellation. A run that concluded failure, cancelled, timed_out,
+#     cancelled is superseded (concurrency) and dropped with its check runs
+#     only when newer runs of the same file did its work: every job name it
+#     left unfinished (not success, skipped or neutral) has a check run that
+#     is not skipped in a newer run, and the newer runs have at least one such
+#     check run at all. Every other run counts, so a later run (say on
+#     `labeled`) that skips the real jobs can hide neither an earlier failure
+#     nor an earlier cancellation. A run that concluded failure, cancelled, timed_out,
 #     startup_failure or action_required fails the gate even when it left no
 #     failed check run. Runs of the gate's own workflow file
 #     (SELF_WORKFLOW_REF), its own run (SELF_RUN_ID) and workflows matching
@@ -196,23 +198,30 @@ fetch_checks_and_statuses() {
 }
 
 # Shared jq prelude: exclusions of workflow runs and dropping of superseded
-# runs (cancelled while a newer run of the same file that did real work, its
-# id in $real, exists). $names are jq variables, not shell.
+# runs (ids in $superseded). $names are jq variables, not shell.
 # shellcheck disable=SC2016
 readonly JQ_RUNS='
 	def ignored: ($pat != "") and test($pat);
 	def ok: . == "success" or . == "skipped" or . == "neutral";
-	def gated_runs($real): map(select((.id | tostring) != $self_run)
+	def in_set($set): . as $x | $set | index([$x]) != null;
+	def candidate_runs: map(select((.id | tostring) != $self_run)
 		| select($self_path == "" or .path != $self_path)
-		| select((.name // "") | ignored | not))
-		| group_by(.path)
-		| map(. as $group
-			| map(. as $run
-				| select(.conclusion != "cancelled"
-					or ([$group[] | select(.id > $run.id)
-						| select((.id | tostring) as $id | $real | index([$id]) != null)]
-						| length == 0))))
-		| add // [];
+		| select((.name // "") | ignored | not));
+	def gated_runs($superseded): candidate_runs
+		| map(select((.id | tostring) | in_set($superseded) | not));
+	# Ids of cancelled runs whose work newer runs of the same file did;
+	# $byrun maps a run id to its check runs.
+	def superseded_runs($byrun):
+		[candidate_runs | group_by(.path)[] as $group
+			| $group[] | select(.conclusion == "cancelled") as $old
+			| [$group[] | select(.id > $old.id)] as $newer
+			| ([$newer[] | ($byrun[.id | tostring] // [])[]
+				| select(.conclusion != "skipped") | .name] | unique) as $done
+			| select($done | length > 0)
+			| ([($byrun[$old.id | tostring] // [])[]
+				| select((.conclusion // "none") | ok | not) | .name] | unique) as $need
+			| select(all($need[]; in_set($done)))
+			| $old.id | tostring];
 	def run_lists($runs):
 		{pending: [$runs[] | select(.status != "completed")
 			| "workflow run \(.name | clean) (\(.status))"],
@@ -227,7 +236,10 @@ evaluate_runs() {
 		--arg self_path "$SELF_WORKFLOW_PATH" \
 		--arg self_run "$SELF_RUN_ID" \
 		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
-		run_lists(gated_runs([])) + {passed: [], misplaced: [], fingerprint: ""}' "$WORK_DIR/runs.json"
+		# Without check runs nothing is known to be superseded yet.
+		run_lists(gated_runs([]))
+		| .failed |= map(if endswith(": cancelled") then . + " (may be superseded)" else . end)
+		| . + {passed: [], misplaced: [], fingerprint: ""}' "$WORK_DIR/runs.json"
 }
 
 # Reduce a full snapshot to {pending, failed, passed, fingerprint}.
@@ -241,13 +253,13 @@ evaluate_snapshot() {
 		--arg self_run "$SELF_RUN_ID" \
 		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
 		def is_self: . == $self or endswith(" / " + $self);
-		def in_set($set): . as $x | $set | index([$x]) != null;
 		($checks[0]
 			| map(. + {run: ((.url | capture("/actions/runs/(?<run>[0-9]+)/") | .run) // "")})) as $all
-		# Runs that did real work: at least one check run that is not skipped.
-		| ([$all[] | select(.run != "" and .conclusion != "skipped") | .run] | unique) as $real
+		| ($all | map(select(.run != "")) | group_by(.run)
+			| map({key: .[0].run, value: .}) | from_entries) as $byrun
+		| ($runs[0] | superseded_runs($byrun)) as $superseded
 		| ($runs[0] | map(.id | tostring)) as $known
-		| ($runs[0] | gated_runs($real)) as $r
+		| ($runs[0] | gated_runs($superseded)) as $r
 		| ($r | map(.id | tostring)) as $kept
 		| ([$all[] | select($self_run != "" and .run == $self_run)
 			| select(.name | is_self | not) | .name | clean]) as $misplaced
@@ -358,6 +370,7 @@ fi
 
 if [[ "$FAIL_ON_DRAFT" == "true" && "$PR_DRAFT" == "true" ]]; then
 	echo "::error title=all-checks-gate::Draft PR: not gated (fail-on-draft); marking the PR ready re-runs the gate"
+	write_summary "failed (draft PR)" '{"pending":[],"failed":[],"passed":[]}'
 	write_outputs failed 1
 	exit 1
 fi
@@ -404,6 +417,7 @@ while :; do
 			last_eval="$eval_json"
 			if (($(jq '.misplaced | length' <<<"$eval_json") > 0)); then
 				echo "::error title=all-checks-gate::The gate shares its workflow run with other jobs ($(jq -r '.misplaced | join(", ")' <<<"$eval_json")); call it from its own workflow file, or those jobs go ungated"
+				write_summary "failed (shares its workflow run)" "$last_eval"
 				write_outputs failed 1
 				exit 1
 			fi
@@ -412,6 +426,7 @@ while :; do
 			t="$(now)"
 			if ((pending_count > 0)); then
 				report_pending "$pending_count" "$(jq -r '.pending | join("; ")' <<<"$eval_json")" "$t"
+				sleep_for="$pending_interval"
 			elif [[ -z "$quiet_since" || "$fp" != "$quiet_fp" ]]; then
 				quiet_since="$t"
 				quiet_fp="$fp"
@@ -439,19 +454,28 @@ while :; do
 			echo "::warning title=all-checks-gate::API poll failed (${api_errors}/${MAX_API_ERRORS})"
 			if ((api_errors >= MAX_API_ERRORS)); then
 				echo "::error title=all-checks-gate::${MAX_API_ERRORS} consecutive API polls failed; cannot verify checks"
+				write_summary "failed (API errors)" "$last_eval"
 				write_outputs failed 1
 				exit 1
 			fi
 		fi
 	fi
-	if (($(now) + sleep_for > deadline)); then
+	# Poll once more right at the deadline rather than giving up a long
+	# (backed-off) sleep early; time out only when no time is left.
+	remaining=$((deadline - $(now)))
+	if ((remaining <= 0)); then
 		print_list "Still pending" pending "$last_eval"
 		print_list "Failed" failed "$last_eval"
 		write_summary "timed out" "$last_eval"
-		echo "::error title=all-checks-gate::Timed out after ${TIMEOUT_SECONDS}s waiting for checks to finish"
+		if [[ -n "$quiet_since" ]]; then
+			echo "::error title=all-checks-gate::Timed out after ${TIMEOUT_SECONDS}s while settling (nothing pending for under ${SETTLE_SECONDS}s); raise timeout-minutes or lower settle-seconds"
+		else
+			echo "::error title=all-checks-gate::Timed out after ${TIMEOUT_SECONDS}s waiting for checks to finish"
+		fi
 		write_outputs failed 1
 		exit 1
 	fi
+	((sleep_for <= remaining)) || sleep_for="$remaining"
 	sleep "$sleep_for"
 done
 
