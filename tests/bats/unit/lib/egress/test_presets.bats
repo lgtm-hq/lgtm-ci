@@ -288,6 +288,13 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'pipelines.actions.githubusercontent.com:443'
 }
 
+@test "egress preset pypi includes the setup-uv download hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints pypi"
+	assert_success
+	assert_line 'releases.astral.sh:443'
+	assert_line 'release-assets.githubusercontent.com:443'
+}
+
 @test "egress preset rejects unknown name" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints not-a-preset"
 	assert_failure
