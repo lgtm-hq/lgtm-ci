@@ -192,11 +192,13 @@ pin OS reproducibility (for example `ubuntu-24.04`). Defaults are
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
-`{"linux/arm64":"ubuntu-24.04-arm"}`). Platforms not in the map default to
-`ubuntu-24.04` with QEMU. Coordinator jobs inside the Docker workflow family
-(`classify`, `merge`, summaries, scan) and the single-platform `build` job of
-`reusable-docker-build.yml` run on fixed `ubuntu-26.04` runners and are not
-caller-pinnable (#1183; `ubuntu-24.04` before).
+`{"linux/arm64":"ubuntu-24.04-arm"}`). On the per-platform (split) path,
+platforms not in the map build on `ubuntu-24.04`, with QEMU for non-amd64
+platforms. The Docker family's fixed jobs run on `ubuntu-26.04` and are not
+caller-pinnable (#1183; `ubuntu-24.04` before): the coordinators (`classify`,
+`merge`, summaries, scan) and the `build` job of `reusable-docker-build.yml`,
+which builds a single platform that has no `runner-map` entry, and builds
+QEMU multi-platform when neither `push` nor `validate-on-pr` is set.
 
 #### Docker workflow family and migration path
 
