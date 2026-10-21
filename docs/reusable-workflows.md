@@ -703,21 +703,31 @@ test-suite-coverage:
 Native auto-merge and the merge queue wait for **required** checks only, so a
 PR (Renovate automerge included) can merge while non-required checks are
 still running or after one failed. This gate turns "every check passed" into
-one required context: it polls the commit's workflow runs, check runs and
-commit statuses until nothing is queued or in progress and nothing new has
-appeared for `settle-seconds`, then passes only if every other check
-concluded `success`, `skipped` or `neutral`. Any `failure`, `cancelled`,
-`timed_out`, `action_required`, `stale` or `startup_failure`, and any
-`failure`/`error` commit status, fails it; a `pending` status (CodeRabbit,
-`renovate/stability-days`) counts as not finished. Re-runs and superseded
-runs are deduplicated: the newest check run per app and name counts.
+one required context. It polls the commit's workflow runs, check runs and
+commit statuses until nothing is queued or in progress and nothing has
+changed for `settle-seconds`, then passes only if every other check
+concluded `success`, `skipped` or `neutral`:
+
+- **Workflow runs** for the commit: a run that is not completed keeps the
+  gate waiting (this covers jobs still waiting on `needs:`, which have no
+  check run yet). The newest run per workflow file and event counts; if it
+  concluded `failure`, `cancelled`, `timed_out`, `startup_failure` or
+  `action_required`, the gate fails.
+- **Check runs** from every app: any `failure`, `cancelled`, `timed_out`,
+  `action_required` or `stale` fails the gate. Re-runs and
+  concurrency-superseded runs of the same workflow collapse to the newest
+  check run, while jobs that share a name in different workflows (or on
+  `push` and `pull_request`) are judged separately.
+- **Commit statuses**: `pending` (CodeRabbit, `renovate/stability-days`)
+  counts as not finished; `failure` and `error` fail the gate.
 
 It gates the PR head SHA on `pull_request` and `merge_group.head_sha` on
-`merge_group`, needs no secrets (read-only `GITHUB_TOKEN`, so fork PRs work)
-and has a static job name. Put it in its **own** workflow file: runs of the
-calling workflow are excluded so a gate never waits on itself or on an
-older gate run for the same commit. Require the context
-`gate / ✅ All Checks Passed` (caller job id `gate`) in the ruleset.
+`merge_group`, needs no secrets (read-only `GITHUB_TOKEN`, so fork PRs
+work) and has a static job name. Put it in its **own** workflow file, one
+per repository: runs of the calling workflow are excluded so a gate never
+waits on itself or on an older gate run for the same commit. Require the
+context `gate / ✅ All Checks Passed` (caller job id `gate`), with GitHub
+Actions as its expected source, in the ruleset.
 
 ```yaml
 name: All Checks Gate
@@ -746,15 +756,39 @@ jobs:
 | Input | Default | Purpose |
 | ----- | ------- | ------- |
 | `timeout-minutes` | `60` | Job timeout; the wait gives up 3 minutes earlier |
-| `settle-seconds` | `60` | Quiet period before the verdict; catches late-starting workflows |
-| `poll-interval-seconds` | `30` | Seconds between API polls (3+ requests each) |
+| `settle-seconds` | `60` | Quiet period before the verdict |
+| `poll-interval-seconds` | `60` | Seconds between API polls |
 | `ignore-checks` | `""` | Regex (jq) of check, status or workflow names to skip |
 | `head-sha` | `""` | Override the gated commit |
 
-Outputs: `status` (`passed`/`failed`) and `exit-code`. A verdict is final:
-after re-running a failed check, or when a pending status resolves after the
-gate gave up, re-run the gate too. Drafts are gated like any PR (workflows
-that skip on drafts report `skipped`); `ready_for_review` re-runs the gate.
+The standard `egress-policy`, `egress-preset` (default `github-minimal`),
+`allowed-endpoints`, `allowed-endpoints-mode` and `runner-image` inputs
+apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
+(`passed`/`failed`) and `exit-code`.
+
+Limitations:
+
+- **Request budget.** While a workflow run is in progress a poll costs one
+  request, otherwise three. `GITHUB_TOKEN` allows 1,000 requests per hour
+  per repository, shared by every workflow, so keep the poll interval at a
+  minute or more when many PRs run at once. A rate-limited poll waits for
+  the reset instead of failing.
+- **The verdict is final.** After re-running a failed check, or when a
+  pending status resolves after the gate timed out, re-run the gate too.
+  Statuses that can stay pending for hours (`renovate/stability-days`) or
+  jobs waiting on an environment approval will time the gate out; list them
+  in `ignore-checks` if they are enforced elsewhere.
+- **Nothing to gate passes.** When no other check or status exists on the
+  commit after the settle period, the gate passes with a warning; check the
+  `head-sha` wiring and that the other workflows trigger on the same events.
+- **Same-SHA re-trigger window.** On `ready_for_review` or `reopened` the
+  previous gate result for the same commit stays visible until the new run
+  registers its check (seconds). Drafts are gated like any PR (workflows
+  that skip on drafts report `skipped`).
+- **Trust model.** As with every `pull_request` check, a PR can edit the
+  caller workflow (for example `ignore-checks: '.*'`). Protect
+  `.github/workflows/` with CODEOWNERS review and pin the required check's
+  source to GitHub Actions.
 
 ## Tests
 

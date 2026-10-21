@@ -8,8 +8,10 @@ name: Reusable All Checks Gate
 # nothing is queued or in progress and the set has been stable for
 # settle-seconds, then fails on any conclusion other than success, skipped or
 # neutral (scripts/ci/actions/all-checks-gate.sh). Needs no secrets, so it
-# works read-only on fork PRs. Call it from its OWN workflow file: runs of the
-# calling workflow are excluded so a gate never waits on itself.
+# works read-only on fork PRs. Call it from its OWN workflow file, and from
+# one caller workflow per repository: runs of the calling workflow are
+# excluded so a gate never waits on itself, but two different caller files
+# would wait on each other until both time out.
 #
 #   name: All Checks Gate
 #   on:
@@ -50,15 +52,25 @@ name: Reusable All Checks Gate
         type: number
         default: 60
       poll-interval-seconds:
-        description: "Seconds between API polls"
+        description: >-
+          Seconds between API polls. While a workflow run is in progress a
+          poll is one request, otherwise three; GITHUB_TOKEN allows 1,000
+          requests per hour per repository, shared by every workflow
         required: false
         type: number
-        default: 30
+        default: 60
       ignore-checks:
         description: >-
           Regex (jq/Oniguruma) of check-run names, commit-status contexts and
           workflow names that are not gated, e.g. bots that never finish.
           Empty gates everything
+        required: false
+        type: string
+        default: ""
+      tooling-ref:
+        description: >-
+          Optional lgtm-ci tooling override; unset tracks the workflow pin
+          (job.workflow_sha), set emits a deprecation warning (#995).
         required: false
         type: string
         default: ""
@@ -282,7 +294,7 @@ jobs:
         with:
           repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
           path: .lgtm-ci-tooling
-          ref: ${{ job.workflow_sha || 'tooling-ref-required' }}
+          ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}
           sparse-checkout: |
             .github/actions/checkout-and-harden
           sparse-checkout-cone-mode: true
@@ -291,8 +303,9 @@ jobs:
         id: egress
         uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
         with:
-          tooling-ref: ${{ job.workflow_sha }}
+          tooling-ref: ${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha }}
           tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          tooling-ref-override: ${{ inputs.tooling-ref }}
       - name: Wait for every other check
         id: gate
         shell: bash

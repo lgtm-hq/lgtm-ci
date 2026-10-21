@@ -11,22 +11,32 @@
 # conclusion other than success, skipped or neutral.
 #
 # What counts:
-#   - Workflow runs for HEAD_SHA (any event) gate completion only: a run that
-#     is not completed (queued, in_progress, waiting, pending, requested) keeps
-#     the gate waiting, which covers jobs whose check run does not exist yet
-#     because they wait on `needs:`. A run that concluded startup_failure or
-#     action_required never produced check runs, so it fails the gate. The
-#     gate's own workflow file (SELF_WORKFLOW_REF) and run (SELF_RUN_ID) are
-#     excluded, so concurrent gate runs on the same commit cannot deadlock.
-#   - Check runs for HEAD_SHA, from every app. Re-runs and superseded runs
-#     leave several check runs with the same app and name; only the newest
-#     (highest id) counts, so a cancelled run replaced by a green re-run
-#     passes. Conclusions success, skipped and neutral pass; everything else
-#     (failure, cancelled, timed_out, action_required, stale, startup_failure)
-#     fails. Check runs named SELF_CHECK_NAME or "<caller job> / SELF_CHECK_NAME"
-#     are this gate (any attempt) and are excluded.
+#   - Workflow runs for HEAD_SHA (any event). A run that is not completed
+#     (queued, in_progress, waiting, pending, requested) keeps the gate
+#     waiting, which covers jobs whose check run does not exist yet because
+#     they wait on `needs:`. Runs are deduplicated to the newest per workflow
+#     file and event (a concurrency-superseded run does not count); a newest
+#     run that concluded failure, cancelled, timed_out, startup_failure or
+#     action_required fails the gate even when it left no failed check run.
+#     The gate's own workflow file (SELF_WORKFLOW_REF) and run (SELF_RUN_ID)
+#     are excluded, so concurrent gate runs on one commit cannot deadlock.
+#   - Check runs for HEAD_SHA, from every app. An Actions check run is keyed
+#     by the workflow file and event of the run it belongs to (from its URL)
+#     plus its name, so jobs that share a name in different workflows are
+#     judged separately, while re-run attempts and superseded runs of the same
+#     workflow collapse to the newest (highest id). Other apps are keyed by
+#     check suite and name. Conclusions success, skipped and neutral pass;
+#     everything else (failure, cancelled, timed_out, action_required, stale,
+#     startup_failure, none) fails. Check runs named SELF_CHECK_NAME or
+#     "<caller job> / SELF_CHECK_NAME" are this gate (any attempt) and are
+#     excluded.
 #   - Commit statuses (latest per context): pending keeps the gate waiting,
 #     failure and error fail it, success passes.
+#
+# Request budget: while a workflow run is still in progress only the runs
+# list is fetched (one request per poll); check runs and statuses are fetched
+# once no run is pending. A rate-limited poll waits for the reset instead of
+# counting as an API error.
 #
 # Environment variables:
 #   HEAD_SHA              - Commit to gate (required): the PR head SHA on
@@ -45,15 +55,16 @@
 #                           TIMEOUT_MINUTES*60 - TIMEOUT_MARGIN_SECONDS)
 #   TIMEOUT_MINUTES       - The job's timeout-minutes; used to derive
 #                           TIMEOUT_SECONDS when that is unset (optional)
-#   TIMEOUT_MARGIN_SECONDS - Room left for setup steps inside the job timeout
-#                           (default: 180, floor of 60s for the wait)
+#   TIMEOUT_MARGIN_SECONDS - Room left for setup steps and one last slow poll
+#                           inside the job timeout (default: 180, floor of 60s
+#                           for the wait)
 #   SETTLE_SECONDS        - Quiet period with no pending check and no change
 #                           before the verdict (default: 60)
-#   POLL_INTERVAL         - Seconds between polls (default: 30)
+#   POLL_INTERVAL         - Seconds between polls (default: 60)
 #   MAX_API_ERRORS        - Consecutive failed API polls tolerated before the
 #                           gate fails (default: 5)
 #   GH_CMD_TIMEOUT        - Wall-clock bound in seconds on each gh call
-#                           (default: 60)
+#                           (default: 20)
 #   GITHUB_OUTPUT         - Receives status=passed|failed and exit-code
 #   GITHUB_STEP_SUMMARY   - Receives the verdict table (optional)
 
@@ -84,9 +95,9 @@ if [[ -z "${TIMEOUT_SECONDS:-}" && -n "$TIMEOUT_MINUTES" ]]; then
 fi
 : "${TIMEOUT_SECONDS:=3300}"
 : "${SETTLE_SECONDS:=60}"
-: "${POLL_INTERVAL:=30}"
+: "${POLL_INTERVAL:=60}"
 : "${MAX_API_ERRORS:=5}"
-: "${GH_CMD_TIMEOUT:=60}"
+: "${GH_CMD_TIMEOUT:=20}"
 
 for var in TIMEOUT_SECONDS SETTLE_SECONDS POLL_INTERVAL MAX_API_ERRORS GH_CMD_TIMEOUT; do
 	if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
@@ -108,9 +119,11 @@ if [[ -n "$IGNORE_PATTERN" ]] && ! jq -n --arg p "$IGNORE_PATTERN" '"" | test($p
 fi
 
 # owner/repo/.github/workflows/gate.yml@refs/pull/1/merge -> .github/workflows/gate.yml
+# Anything that does not reduce to a .github/ path is not this repository's
+# workflow, so nothing is excluded by path (the run id still is).
 SELF_WORKFLOW_PATH="${SELF_WORKFLOW_REF%%@*}"
 SELF_WORKFLOW_PATH="${SELF_WORKFLOW_PATH#"${GITHUB_REPOSITORY}/"}"
-if [[ "$SELF_WORKFLOW_PATH" == "$SELF_WORKFLOW_REF" && "$SELF_WORKFLOW_REF" != .github/* ]]; then
+if [[ "$SELF_WORKFLOW_PATH" != .github/* ]]; then
 	SELF_WORKFLOW_PATH=""
 fi
 
@@ -127,28 +140,52 @@ gh_bounded() {
 	fi
 }
 
-# Fetch one snapshot into WORK_DIR/{runs,checks,statuses}.json. Returns non-zero
-# when any call failed so the caller can retry instead of judging a partial view.
-fetch_snapshot() {
-	local repo="$GITHUB_REPOSITORY" sha="$HEAD_SHA"
+# Names come from workflow files, which a fork PR controls: keep them on one
+# line so nothing printed can start a workflow command.
+readonly JQ_CLEAN='def clean: tostring | gsub("[\\r\\n\\t]"; " ");'
+
+fetch_runs() {
 	gh_bounded api --paginate \
-		"repos/${repo}/actions/runs?head_sha=${sha}&per_page=100" \
+		"repos/${GITHUB_REPOSITORY}/actions/runs?head_sha=${HEAD_SHA}&per_page=100" \
 		--jq '.workflow_runs[] | {id, name, path, event, status, conclusion}' \
 		>"$WORK_DIR/runs.ndjson" || return 1
+	jq -s . "$WORK_DIR/runs.ndjson" >"$WORK_DIR/runs.json" || return 1
+}
+
+fetch_checks_and_statuses() {
 	gh_bounded api --paginate \
-		"repos/${repo}/commits/${sha}/check-runs?filter=all&per_page=100" \
-		--jq '.check_runs[] | {id, name, status, conclusion, app: (.app.slug // ""), url: (.html_url // "")}' \
+		"repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/check-runs?filter=all&per_page=100" \
+		--jq '.check_runs[] | {id, name, status, conclusion, app: (.app.slug // ""), suite: (.check_suite.id // 0), url: (.html_url // "")}' \
 		>"$WORK_DIR/checks.ndjson" || return 1
 	gh_bounded api --paginate \
-		"repos/${repo}/commits/${sha}/status?per_page=100" \
-		--jq '.statuses[] | {context, state, url: (.target_url // "")}' \
+		"repos/${GITHUB_REPOSITORY}/commits/${HEAD_SHA}/status?per_page=100" \
+		--jq '.statuses[] | {context, state}' \
 		>"$WORK_DIR/statuses.ndjson" || return 1
-	jq -s . "$WORK_DIR/runs.ndjson" >"$WORK_DIR/runs.json" || return 1
 	jq -s . "$WORK_DIR/checks.ndjson" >"$WORK_DIR/checks.json" || return 1
 	jq -s . "$WORK_DIR/statuses.ndjson" >"$WORK_DIR/statuses.json" || return 1
 }
 
-# Reduce a snapshot to {pending, failed, passed, fingerprint}.
+# Shared jq prelude: exclusions and dedupe of workflow runs ($names are jq
+# variables, not shell).
+# shellcheck disable=SC2016
+readonly JQ_RUNS='
+	def ignored: ($pat != "") and test($pat);
+	def gated_runs: map(select((.id | tostring) != $self_run)
+		| select($self_path == "" or .path != $self_path)
+		| select((.name // "") | ignored | not))
+		| group_by([.path, .event]) | map(max_by(.id));'
+
+# Pending workflow runs (after exclusions and dedupe), one per line.
+pending_runs() {
+	jq -r \
+		--arg self_path "$SELF_WORKFLOW_PATH" \
+		--arg self_run "$SELF_RUN_ID" \
+		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
+		gated_runs | .[] | select(.status != "completed")
+		| "workflow run \(.name | clean) (\(.status))"' "$WORK_DIR/runs.json"
+}
+
+# Reduce a full snapshot to {pending, failed, passed, fingerprint}.
 evaluate_snapshot() {
 	jq -n \
 		--slurpfile runs "$WORK_DIR/runs.json" \
@@ -157,45 +194,59 @@ evaluate_snapshot() {
 		--arg self "$SELF_CHECK_NAME" \
 		--arg self_path "$SELF_WORKFLOW_PATH" \
 		--arg self_run "$SELF_RUN_ID" \
-		--arg pat "$IGNORE_PATTERN" '
-		def ignored: ($pat != "") and test($pat);
+		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
 		def is_self: . == $self or endswith(" / " + $self);
 		def ok: . == "success" or . == "skipped" or . == "neutral";
-		($runs[0]
-			| map(select((.id | tostring) != $self_run)
-				| select($self_path == "" or .path != $self_path)
-				| select((.name // "") | ignored | not))) as $r
+		# Every run, excluded or not, so any Actions check run finds its workflow.
+		($runs[0] | map({key: (.id | tostring), value: .}) | from_entries) as $by_id
+		| ($runs[0] | gated_runs) as $r
 		| ($checks[0]
-			| map(select(.name | is_self | not) | select(.name | ignored | not))
-			| group_by([.app, .name]) | map(max_by(.id))) as $c
+			| map(select(.name | is_self | not) | select(.name | ignored | not)
+				| ((.url | capture("/actions/runs/(?<run>[0-9]+)/") | .run) // "") as $run
+				| ($by_id[$run] // null) as $wf
+				| . + {key: (if $wf then [.app, $wf.path, $wf.event, .name]
+					else [.app, (.suite | tostring), "", .name] end)})
+			| group_by(.key) | map(max_by(.id))) as $c
 		| ($statuses[0] | map(select(.context | ignored | not))) as $s
 		| {
 			pending: (
 				[$r[] | select(.status != "completed")
-					| "workflow run \(.name) (\(.status))"]
+					| "workflow run \(.name | clean) (\(.status))"]
 				+ [$c[] | select(.status != "completed")
-					| "check \(.name) (\(.status))"]
+					| "check \(.name | clean) (\(.status))"]
 				+ [$s[] | select(.state == "pending")
-					| "status \(.context) (pending)"]),
+					| "status \(.context | clean) (pending)"]),
 			failed: (
 				[$r[] | select(.status == "completed")
-					| select(.conclusion == "startup_failure" or .conclusion == "action_required")
-					| "workflow run \(.name): \(.conclusion)"]
+					| select((.conclusion // "none") | ok | not)
+					| "workflow run \(.name | clean): \(.conclusion // "none")"]
 				+ [$c[] | select(.status == "completed")
 					| select((.conclusion // "none") | ok | not)
-					| "check \(.name): \(.conclusion // "none")"]
+					| "check \(.name | clean): \(.conclusion // "none")"]
 				+ [$s[] | select(.state == "failure" or .state == "error")
-					| "status \(.context): \(.state)"]),
+					| "status \(.context | clean): \(.state)"]),
 			passed: (
 				[$c[] | select(.status == "completed" and ((.conclusion // "none") | ok))
-					| "check \(.name): \(.conclusion)"]
-				+ [$s[] | select(.state == "success") | "status \(.context): success"]),
+					| "check \(.name | clean): \(.conclusion)"]
+				+ [$s[] | select(.state == "success")
+					| "status \(.context | clean): success"]),
 			fingerprint: (
 				[$r[] | "r:\(.id):\(.status):\(.conclusion)"]
 				+ [$c[] | "c:\(.id):\(.status):\(.conclusion)"]
 				+ [$s[] | "s:\(.context):\(.state)"]
 				| sort | join(","))
 		}'
+}
+
+# Seconds until the core rate limit resets when it is exhausted, else empty.
+# The rate_limit endpoint does not count against the limit.
+rate_limit_wait() {
+	local remaining="" reset=""
+	read -r remaining reset < <(gh_bounded api rate_limit \
+		--jq '.resources.core | "\(.remaining) \(.reset)"' 2>/dev/null) || return 0
+	[[ "$remaining" =~ ^[0-9]+$ && "$reset" =~ ^[0-9]+$ ]] || return 0
+	((remaining == 0)) || return 0
+	echo $((reset - $(now) + 1))
 }
 
 write_outputs() {
@@ -219,9 +270,10 @@ write_summary() {
 		echo "| Result | Check |"
 		echo "| ------ | ----- |"
 		jq -r '
-			(.failed[] | "| ❌ failed | \(.) |"),
-			(.pending[] | "| ⏳ pending | \(.) |"),
-			(.passed[] | "| ✅ passed | \(.) |")' <<<"$eval_json"
+			def cell: gsub("\\|"; "\\|");
+			(.failed[] | "| ❌ failed | \(cell) |"),
+			(.pending[] | "| ⏳ pending | \(cell) |"),
+			(.passed[] | "| ✅ passed | \(cell) |")' <<<"$eval_json"
 	} >>"$GITHUB_STEP_SUMMARY"
 }
 
@@ -235,8 +287,12 @@ print_list() {
 }
 
 echo "all-checks-gate: ${GITHUB_REPOSITORY}@${HEAD_SHA} (timeout ${TIMEOUT_SECONDS}s, settle ${SETTLE_SECONDS}s, poll ${POLL_INTERVAL}s)"
-[[ -n "$IGNORE_PATTERN" ]] && echo "ignoring checks matching: ${IGNORE_PATTERN}"
-[[ -n "$SELF_WORKFLOW_PATH" ]] && echo "excluding own workflow: ${SELF_WORKFLOW_PATH}"
+if [[ -n "$IGNORE_PATTERN" ]]; then
+	echo "ignoring checks matching: ${IGNORE_PATTERN}"
+fi
+if [[ -n "$SELF_WORKFLOW_PATH" ]]; then
+	echo "excluding own workflow: ${SELF_WORKFLOW_PATH}"
+fi
 
 start="$(now)"
 deadline=$((start + TIMEOUT_SECONDS))
@@ -246,38 +302,63 @@ quiet_fp=""
 last_eval='{"pending":[],"failed":[],"passed":[],"fingerprint":""}'
 last_report=""
 
+report_pending() {
+	local count="$1" report="$2" t="$3"
+	quiet_since=""
+	if [[ "$report" != "$last_report" ]]; then
+		echo "[$((t - start))s] waiting on ${count}: ${report}"
+		last_report="$report"
+	fi
+}
+
 while :; do
-	if fetch_snapshot && eval_json="$(evaluate_snapshot)"; then
-		api_errors=0
-		last_eval="$eval_json"
-		fp="$(jq -r .fingerprint <<<"$eval_json")"
-		pending_count="$(jq '.pending | length' <<<"$eval_json")"
-		t="$(now)"
-		if ((pending_count > 0)); then
-			quiet_since=""
-			report="$(jq -r '.pending | join("; ")' <<<"$eval_json")"
-			if [[ "$report" != "$last_report" ]]; then
-				echo "[$((t - start))s] waiting on ${pending_count}: ${report}"
-				last_report="$report"
+	sleep_for="$POLL_INTERVAL"
+	poll_ok=0
+	if fetch_runs && runs_pending="$(pending_runs)"; then
+		if [[ -n "$runs_pending" ]]; then
+			# Still running: skip the check-run and status requests this poll.
+			poll_ok=1
+			last_eval="$(jq -Rn '{pending: [inputs], failed: [], passed: [], fingerprint: ""}' <<<"$runs_pending")"
+			report_pending "$(jq '.pending | length' <<<"$last_eval")" \
+				"$(jq -r '.pending | join("; ")' <<<"$last_eval")" "$(now)"
+		elif fetch_checks_and_statuses && eval_json="$(evaluate_snapshot)"; then
+			poll_ok=1
+			last_eval="$eval_json"
+			fp="$(jq -r .fingerprint <<<"$eval_json")"
+			pending_count="$(jq '.pending | length' <<<"$eval_json")"
+			t="$(now)"
+			if ((pending_count > 0)); then
+				report_pending "$pending_count" "$(jq -r '.pending | join("; ")' <<<"$eval_json")" "$t"
+			elif [[ -z "$quiet_since" || "$fp" != "$quiet_fp" ]]; then
+				quiet_since="$t"
+				quiet_fp="$fp"
+				last_report=""
+				echo "[$((t - start))s] nothing pending; settling for ${SETTLE_SECONDS}s"
+			elif ((t - quiet_since >= SETTLE_SECONDS)); then
+				break
 			fi
-		elif [[ -z "$quiet_since" || "$fp" != "$quiet_fp" ]]; then
-			quiet_since="$t"
-			quiet_fp="$fp"
-			last_report=""
-			echo "[$((t - start))s] nothing pending; settling for ${SETTLE_SECONDS}s"
-		elif ((t - quiet_since >= SETTLE_SECONDS)); then
-			break
-		fi
-	else
-		api_errors=$((api_errors + 1))
-		echo "::warning title=all-checks-gate::API poll failed (${api_errors}/${MAX_API_ERRORS})"
-		if ((api_errors >= MAX_API_ERRORS)); then
-			echo "::error title=all-checks-gate::${MAX_API_ERRORS} consecutive API polls failed; cannot verify checks"
-			write_outputs failed 1
-			exit 1
 		fi
 	fi
-	if (($(now) + POLL_INTERVAL > deadline)); then
+	if ((poll_ok)); then
+		api_errors=0
+	else
+		wait_s="$(rate_limit_wait)"
+		if [[ -n "$wait_s" ]]; then
+			echo "::warning title=all-checks-gate::API rate limit exhausted; waiting ${wait_s}s for the reset"
+			if ((wait_s > POLL_INTERVAL)); then
+				sleep_for="$wait_s"
+			fi
+		else
+			api_errors=$((api_errors + 1))
+			echo "::warning title=all-checks-gate::API poll failed (${api_errors}/${MAX_API_ERRORS})"
+			if ((api_errors >= MAX_API_ERRORS)); then
+				echo "::error title=all-checks-gate::${MAX_API_ERRORS} consecutive API polls failed; cannot verify checks"
+				write_outputs failed 1
+				exit 1
+			fi
+		fi
+	fi
+	if (($(now) + sleep_for > deadline)); then
 		print_list "Still pending" pending "$last_eval"
 		print_list "Failed" failed "$last_eval"
 		write_summary "timed out" "$last_eval"
@@ -285,7 +366,7 @@ while :; do
 		write_outputs failed 1
 		exit 1
 	fi
-	sleep "$POLL_INTERVAL"
+	sleep "$sleep_for"
 done
 
 failed_count="$(jq '.failed | length' <<<"$last_eval")"

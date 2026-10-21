@@ -6,6 +6,7 @@ load "../../../helpers/common"
 load "../../../helpers/mocks"
 
 SHA="0123456789abcdef0123456789abcdef01234567"
+RUN_URL="https://github.com/lgtm-hq/example/actions/runs"
 
 setup() {
 	setup_temp_dir
@@ -24,8 +25,10 @@ setup() {
 	export FIXTURES="${BATS_TEST_TMPDIR}/fixtures"
 	export CLOCK_FILE="${BATS_TEST_TMPDIR}/clock"
 	export POLL_FILE="${BATS_TEST_TMPDIR}/polls"
+	export GH_CALLS="${BATS_TEST_TMPDIR}/gh_calls"
 	unset IGNORE_PATTERN MAX_API_ERRORS GH_CMD_TIMEOUT TIMEOUT_MINUTES TIMEOUT_MARGIN_SECONDS
 	: >"$GITHUB_OUTPUT"
+	: >"$GH_CALLS"
 	echo 1000 >"$CLOCK_FILE"
 	echo 0 >"$POLL_FILE"
 	mkdir -p "$FIXTURES"
@@ -41,21 +44,33 @@ teardown() {
 # --jq-filtered lines real gh would print), falling back to the newest earlier
 # poll, so a test describes only the polls where something changes. Each
 # actions/runs call starts a new poll. A missing file for the poll means an
-# empty list; a file named fail makes that poll's call exit 1.
-# sleep advances a fake clock that date reads, so timeouts run instantly.
+# empty list; a file named fail makes that poll's calls exit 1. `gh api
+# rate_limit` prints $FIXTURES/rate_limit ("<remaining> <reset>") once when
+# present. Every call is appended to $GH_CALLS. sleep advances a fake clock
+# that date reads, so timeouts run instantly.
 _mock_tools() {
 	local mock_bin="${BATS_TEST_TMPDIR}/bin"
 	mkdir -p "$mock_bin"
 
 	cat >"${mock_bin}/gh" <<'EOF'
 #!/usr/bin/env bash
+echo "$*" >>"$GH_CALLS"
 url=""
 for arg in "$@"; do
 	case "$arg" in
-	repos/*) url="$arg" ;;
+	repos/* | rate_limit) url="$arg" ;;
 	esac
 done
 case "$url" in
+rate_limit)
+	if [[ -f "$FIXTURES/rate_limit" ]]; then
+		cat "$FIXTURES/rate_limit"
+		rm -f "$FIXTURES/rate_limit"
+	else
+		echo "4999 0"
+	fi
+	exit 0
+	;;
 */actions/runs\?*)
 	kind=runs
 	echo $(($(cat "$POLL_FILE") + 1)) >"$POLL_FILE"
@@ -67,7 +82,8 @@ esac
 poll="$(cat "$POLL_FILE")"
 for ((p = poll; p >= 1; p--)); do
 	if [[ -e "$FIXTURES/$p/fail" ]]; then
-		exit 1
+		[[ "$p" == "$poll" ]] && exit 1
+		continue
 	fi
 	if [[ -d "$FIXTURES/$p" ]]; then
 		[[ -f "$FIXTURES/$p/${kind}.ndjson" ]] && cat "$FIXTURES/$p/${kind}.ndjson"
@@ -101,29 +117,32 @@ poll() {
 	printf '%s\n' "$@" >>"$FIXTURES/$n/${kind}.ndjson"
 }
 
-check() { # id name status conclusion [app]
-	local conclusion="null"
+check() { # id name status conclusion [app] [run-id] [suite]
+	local conclusion="null" url=""
 	[[ "$4" != "null" ]] && conclusion="\"$4\""
-	printf '{"id":%s,"name":"%s","status":"%s","conclusion":%s,"app":"%s","url":""}' \
-		"$1" "$2" "$3" "$conclusion" "${5:-github-actions}"
+	[[ -n "${6:-}" && "${6:-}" != "0" ]] && url="${RUN_URL}/$6/job/$1"
+	jq -cn --argjson id "$1" --arg name "$2" --arg status "$3" \
+		--argjson conclusion "$conclusion" --arg app "${5:-github-actions}" \
+		--arg url "$url" --argjson suite "${7:-0}" \
+		'{id: $id, name: $name, status: $status, conclusion: $conclusion, app: $app, suite: $suite, url: $url}'
 }
 
-run_() { # id name path status conclusion
+run_() { # id name path status conclusion [event]
 	local conclusion="null"
 	[[ "$5" != "null" ]] && conclusion="\"$5\""
-	printf '{"id":%s,"name":"%s","path":"%s","event":"pull_request","status":"%s","conclusion":%s}' \
-		"$1" "$2" "$3" "$4" "$conclusion"
+	printf '{"id":%s,"name":"%s","path":"%s","event":"%s","status":"%s","conclusion":%s}' \
+		"$1" "$2" "$3" "${6:-pull_request}" "$4" "$conclusion"
 }
 
 status_() { # context state
-	printf '{"context":"%s","state":"%s","url":""}' "$1" "$2"
+	printf '{"context":"%s","state":"%s"}' "$1" "$2"
 }
 
 @test "all-checks-gate: passes when every other check succeeded, skipped or was neutral" {
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed success)"
-	poll 1 checks "$(check 11 'quality / Lint' completed success)" \
-		"$(check 12 'notify-failure' completed skipped)" \
-		"$(check 13 'ai-review / AI Review' completed neutral)"
+	poll 1 checks "$(check 11 'quality / Lint' completed success github-actions 1)" \
+		"$(check 12 'notify-failure' completed skipped github-actions 1)" \
+		"$(check 13 'ai-review / AI Review' completed neutral github-actions 1)"
 	poll 1 statuses "$(status_ CodeRabbit success)"
 
 	run bash "$SCRIPT"
@@ -136,27 +155,49 @@ status_() { # context state
 	assert_output --partial "✅ All Checks Passed: passed"
 }
 
-@test "all-checks-gate: waits for running checks, then passes after the settle period" {
+@test "all-checks-gate: queries every page of runs, all check runs and statuses for the commit" {
+	run bash "$SCRIPT"
+	assert_success
+	run cat "$GH_CALLS"
+	assert_output --partial "api --paginate repos/lgtm-hq/example/actions/runs?head_sha=${SHA}&per_page=100"
+	assert_output --partial "api --paginate repos/lgtm-hq/example/commits/${SHA}/check-runs?filter=all&per_page=100"
+	assert_output --partial "api --paginate repos/lgtm-hq/example/commits/${SHA}/status?per_page=100"
+}
+
+@test "all-checks-gate: waits for running workflows, then passes after the settle period" {
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml in_progress null)"
-	poll 1 checks "$(check 11 'quality / Lint' in_progress null)"
+	poll 1 checks "$(check 11 'quality / Lint' in_progress null github-actions 1)"
 	poll 3 runs "$(run_ 1 CI .github/workflows/ci.yml completed success)"
-	poll 3 checks "$(check 11 'quality / Lint' completed success)"
+	poll 3 checks "$(check 11 'quality / Lint' completed success github-actions 1)"
 
 	run bash "$SCRIPT"
 	assert_success
-	assert_output --partial "waiting on 2: workflow run CI (in_progress); check quality / Lint (in_progress)"
+	assert_output --partial "waiting on 1: workflow run CI (in_progress)"
 	assert_output --partial "nothing pending; settling for 60s"
 	# polls 1-2 pending, 3 quiet, 4 still within settle, 5 settled
 	run cat "$POLL_FILE"
 	assert_output "5"
 }
 
+@test "all-checks-gate: only lists workflow runs while one is still running" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml in_progress null)"
+	poll 2 runs "$(run_ 1 CI .github/workflows/ci.yml completed success)"
+
+	run bash "$SCRIPT"
+	assert_success
+	# poll 1 is one request; polls 2-4 fetch runs, check runs and statuses
+	run grep -c "check-runs" "$GH_CALLS"
+	assert_output "3"
+	run grep -c "actions/runs" "$GH_CALLS"
+	assert_output "4"
+}
+
 @test "all-checks-gate: waits for a workflow run whose jobs have no check run yet" {
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml in_progress null)"
-	poll 1 checks "$(check 11 'build / Build' completed success)"
+	poll 1 checks "$(check 11 'build / Build' completed success github-actions 1)"
 	poll 2 runs "$(run_ 1 CI .github/workflows/ci.yml completed failure)"
-	poll 2 checks "$(check 11 'build / Build' completed success)" \
-		"$(check 12 'deploy / Deploy' completed failure)"
+	poll 2 checks "$(check 11 'build / Build' completed success github-actions 1)" \
+		"$(check 12 'deploy / Deploy' completed failure github-actions 1)"
 
 	run bash "$SCRIPT"
 	assert_failure
@@ -164,18 +205,19 @@ status_() { # context state
 	assert_output --partial "check deploy / Deploy: failure"
 }
 
-@test "all-checks-gate: fails on failure, cancelled, timed_out, action_required and stale" {
+@test "all-checks-gate: fails on failure, cancelled, timed_out, action_required, stale and no conclusion" {
 	poll 1 checks "$(check 11 'a' completed failure)" \
 		"$(check 12 'b' completed cancelled)" \
 		"$(check 13 'c' completed timed_out)" \
 		"$(check 14 'd' completed action_required)" \
 		"$(check 15 'e' completed stale)" \
-		"$(check 16 'f' completed success)"
+		"$(check 16 'f' completed success)" \
+		"$(check 17 'g' completed null)"
 
 	run bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "5 check(s) did not pass"
-	for line in "a: failure" "b: cancelled" "c: timed_out" "d: action_required" "e: stale"; do
+	assert_output --partial "6 check(s) did not pass"
+	for line in "a: failure" "b: cancelled" "c: timed_out" "d: action_required" "e: stale" "g: none"; do
 		assert_output --partial "check ${line}"
 	done
 	run cat "$GITHUB_OUTPUT"
@@ -185,30 +227,94 @@ status_() { # context state
 	assert_output --partial "❌ failed"
 }
 
-@test "all-checks-gate: only the newest check run per app and name counts" {
-	poll 1 checks "$(check 11 'test / Tests' completed cancelled)" \
-		"$(check 19 'test / Tests' completed success)" \
-		"$(check 12 'lint' completed success)" \
-		"$(check 18 'lint' completed failure)"
+@test "all-checks-gate: a re-run or superseded run of the same workflow replaces the old result" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'test / Tests' completed cancelled github-actions 1)" \
+		"$(check 19 'test / Tests' completed success github-actions 2)" \
+		"$(check 12 'lint' completed failure github-actions 2)" \
+		"$(check 18 'lint' completed success github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "cancelled"
+	assert_output --partial "All 2 other check(s) passed"
+}
+
+@test "all-checks-gate: same job name in two workflows is judged separately" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed failure)" \
+		"$(run_ 2 Docker .github/workflows/docker.yml completed success)"
+	poll 1 checks "$(check 11 'build' completed failure github-actions 1)" \
+		"$(check 12 'build' completed success github-actions 2)"
 
 	run bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "check lint: failure"
-	refute_output --partial "test / Tests: cancelled"
+	assert_output --partial "check build: failure"
+	assert_output --partial "check build: success"
+}
+
+@test "all-checks-gate: same workflow on push and pull_request is judged separately" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed failure push)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success pull_request)"
+	poll 1 checks "$(check 11 'test' completed failure github-actions 1)" \
+		"$(check 12 'test' completed success github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check test: failure"
+	assert_output --partial "workflow run CI: failure"
+}
+
+@test "all-checks-gate: same check name from two apps is judged separately" {
+	poll 1 checks "$(check 11 'Security' completed failure socket-security 0 101)" \
+		"$(check 12 'Security' completed success other-app 0 102)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check Security: failure"
+}
+
+@test "all-checks-gate: a cancelled workflow run without check runs fails the gate" {
+	poll 1 runs "$(run_ 3 Nightly .github/workflows/nightly.yml completed cancelled)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "workflow run Nightly: cancelled"
+}
+
+@test "all-checks-gate: a workflow run that failed to start or awaits approval fails the gate" {
+	poll 1 runs "$(run_ 3 Broken .github/workflows/broken.yml completed startup_failure)" \
+		"$(run_ 4 Fork .github/workflows/fork.yml completed action_required)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "workflow run Broken: startup_failure"
+	assert_output --partial "workflow run Fork: action_required"
 }
 
 @test "all-checks-gate: excludes its own check runs and workflow runs" {
 	poll 1 runs "$(run_ 900 'All Checks Gate' .github/workflows/all-checks-gate.yml in_progress null)" \
 		"$(run_ 800 'All Checks Gate' .github/workflows/all-checks-gate.yml in_progress null)" \
 		"$(run_ 1 CI .github/workflows/ci.yml completed success)"
-	poll 1 checks "$(check 21 'gate / ✅ All Checks Passed' in_progress null)" \
-		"$(check 20 'gate / ✅ All Checks Passed' completed failure)" \
-		"$(check 11 'quality / Lint' completed success)"
+	poll 1 checks "$(check 21 'gate / ✅ All Checks Passed' in_progress null github-actions 900)" \
+		"$(check 20 'gate / ✅ All Checks Passed' completed failure github-actions 800)" \
+		"$(check 22 '✅ All Checks Passed' completed failure)" \
+		"$(check 11 'quality / Lint' completed success github-actions 1)"
 
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "excluding own workflow: .github/workflows/all-checks-gate.yml"
 	assert_output --partial "All 1 other check(s) passed"
+}
+
+@test "all-checks-gate: a workflow ref from another repository excludes only the own run id" {
+	export SELF_WORKFLOW_REF="other/repo/.github/workflows/all-checks-gate.yml@refs/heads/main"
+	poll 1 runs "$(run_ 900 'All Checks Gate' .github/workflows/all-checks-gate.yml in_progress null)" \
+		"$(run_ 2 'Other' .github/workflows/all-checks-gate.yml completed success)"
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "excluding own workflow"
 }
 
 @test "all-checks-gate: a pending commit status keeps the gate waiting until it resolves" {
@@ -252,6 +358,15 @@ status_() { # context state
 	assert_output --partial "All 1 other check(s) passed"
 }
 
+@test "all-checks-gate: ignore pattern alone releases a status that never finishes" {
+	poll 1 statuses "$(status_ 'renovate/stability-days' pending)"
+	export IGNORE_PATTERN='^renovate/stability-days$'
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "stability-days (pending)"
+}
+
 @test "all-checks-gate: a check that appears during the settle period restarts it" {
 	poll 1 checks "$(check 11 'lint' completed success)"
 	poll 2 checks "$(check 11 'lint' completed success)" "$(check 12 'late / Report' completed failure)"
@@ -261,12 +376,16 @@ status_() { # context state
 	assert_output --partial "check late / Report: failure"
 }
 
-@test "all-checks-gate: a workflow run that failed to start fails the gate" {
-	poll 1 runs "$(run_ 3 Broken .github/workflows/broken.yml completed startup_failure)"
+@test "all-checks-gate: check names cannot inject workflow commands or break the summary" {
+	poll 1 checks "$(check 11 $'evil\n::error::injected' completed failure)" \
+		"$(check 12 'a | b' completed success)"
 
 	run bash "$SCRIPT"
 	assert_failure
-	assert_output --partial "workflow run Broken: startup_failure"
+	refute_line "::error::injected"
+	assert_output --partial "check evil ::error::injected: failure"
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial 'check a \| b: success'
 }
 
 @test "all-checks-gate: passes with a warning when nothing else ran" {
@@ -276,7 +395,8 @@ status_() { # context state
 }
 
 @test "all-checks-gate: retries failed API polls, then fails after MAX_API_ERRORS" {
-	mkdir -p "$FIXTURES/1" && touch "$FIXTURES/1/fail"
+	mkdir -p "$FIXTURES/1" "$FIXTURES/2" "$FIXTURES/3"
+	touch "$FIXTURES/1/fail" "$FIXTURES/2/fail" "$FIXTURES/3/fail"
 	export MAX_API_ERRORS=3
 
 	run bash "$SCRIPT"
@@ -292,6 +412,18 @@ status_() { # context state
 	run bash "$SCRIPT"
 	assert_success
 	assert_output --partial "API poll failed (1/5)"
+}
+
+@test "all-checks-gate: waits out an exhausted rate limit instead of counting an error" {
+	mkdir -p "$FIXTURES/1" && touch "$FIXTURES/1/fail"
+	poll 2 checks "$(check 11 'lint' completed success)"
+	echo "0 1300" >"$FIXTURES/rate_limit"
+	export MAX_API_ERRORS=1
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "API rate limit exhausted; waiting 301s for the reset"
+	refute_output --partial "API poll failed"
 }
 
 @test "all-checks-gate: derives the wait budget from TIMEOUT_MINUTES" {
