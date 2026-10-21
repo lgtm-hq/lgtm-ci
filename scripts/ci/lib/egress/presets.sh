@@ -172,15 +172,21 @@ egress_preset_endpoints() {
 		;;
 	pypi)
 		# PyPI / TestPyPI (python dist, wait-for-package).
+		# releases.astral.sh + release-assets.githubusercontent.com: setup-uv
+		# (via the setup-python composite) downloads the uv binary from the
+		# Astral mirror, falling back to GitHub Releases, whenever the pinned
+		# uv version is not already in the runner tool cache.
 		printf '%s\n' \
 			github.com:443 \
 			api.github.com:443 \
 			codeload.github.com:443 \
+			release-assets.githubusercontent.com:443 \
 			objects.githubusercontent.com:443 \
 			raw.githubusercontent.com:443 \
 			pipelines.actions.githubusercontent.com:443 \
 			pypi.org:443 \
 			files.pythonhosted.org:443 \
+			releases.astral.sh:443 \
 			test.pypi.org:443 \
 			upload.pypi.org:443 \
 			upload.test.pypi.org:443
