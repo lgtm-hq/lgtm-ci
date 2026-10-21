@@ -45,7 +45,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 14 | 45 | 9 | 1 | 69 |
+| Reusable workflows | 14 | 46 | 9 | 1 | 70 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -66,6 +66,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-test-node-run`](#reusable-test-node-run) | `stable` | Node.js Vitest Test Workflow (read-only) |
 | [`reusable-test-python`](#reusable-test-python) | `stable` | Python Test Workflow |
 | [`reusable-test-shell-run`](#reusable-test-shell-run) | `stable` | Shell Test Workflow (read-only) |
+| [`reusable-all-checks-gate`](#reusable-all-checks-gate) | `preview` | All Checks Gate |
 | [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure) | `preview` | Auto Re-run on Infra Failure |
 | [`reusable-build-artifact`](#reusable-build-artifact) | `preview` | Build Artifact Workflow |
 | [`reusable-build-python-dist`](#reusable-build-python-dist) | `preview` | Python Distribution Build Workflow |
@@ -480,6 +481,25 @@ Shell Test Workflow (read-only)
 - Fixture proves the single-job `coverage: false` path only; the kcov coverage and sharded paths are exercised by lgtm-ci's own CI through the facade, not by the external fixture
 
 ### Reusable workflows: preview
+
+#### `reusable-all-checks-gate`
+
+All Checks Gate
+
+> [!WARNING]
+> **Preview.** No external-fixture run yet
+
+- **Path:** [`.github/workflows/reusable-all-checks-gate.yml`](../.github/workflows/reusable-all-checks-gate.yml)
+- **Tier:** preview
+- **Permissions:** `actions: read`, `checks: read`, `contents: read`, `statuses: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `✅ All Checks Passed`
+
+**Limitations:**
+
+- Call it from its own workflow file: runs of the calling workflow are not waited on
+- A verdict is final: re-run the gate after re-running a failed check or after a pending status resolves late
 
 #### `reusable-auto-rerun-on-infra-failure`
 

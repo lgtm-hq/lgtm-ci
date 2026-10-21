@@ -53,6 +53,24 @@ entries:
     check-names:
       - "AI Review"
 
+  - id: reusable-all-checks-gate
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      statuses: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations:
+      - "Call it from its own workflow file: runs of the calling workflow are not waited on"
+      - "A verdict is final: re-run the gate after re-running a failed check or after a pending status resolves late"
+    check-names:
+      - "✅ All Checks Passed"
+
   - id: reusable-auto-rerun-on-infra-failure
     kind: reusable-workflow
     tier: preview

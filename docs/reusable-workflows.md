@@ -698,6 +698,64 @@ test-suite-coverage:
     passed-output: ${{ needs.test.outputs.passed }}
 ```
 
+### All checks gate (`reusable-all-checks-gate.yml`)
+
+Native auto-merge and the merge queue wait for **required** checks only, so a
+PR (Renovate automerge included) can merge while non-required checks are
+still running or after one failed. This gate turns "every check passed" into
+one required context: it polls the commit's workflow runs, check runs and
+commit statuses until nothing is queued or in progress and nothing new has
+appeared for `settle-seconds`, then passes only if every other check
+concluded `success`, `skipped` or `neutral`. Any `failure`, `cancelled`,
+`timed_out`, `action_required`, `stale` or `startup_failure`, and any
+`failure`/`error` commit status, fails it; a `pending` status (CodeRabbit,
+`renovate/stability-days`) counts as not finished. Re-runs and superseded
+runs are deduplicated: the newest check run per app and name counts.
+
+It gates the PR head SHA on `pull_request` and `merge_group.head_sha` on
+`merge_group`, needs no secrets (read-only `GITHUB_TOKEN`, so fork PRs work)
+and has a static job name. Put it in its **own** workflow file: runs of the
+calling workflow are excluded so a gate never waits on itself or on an
+older gate run for the same commit. Require the context
+`gate / ✅ All Checks Passed` (caller job id `gate`) in the ruleset.
+
+```yaml
+name: All Checks Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: all-checks-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-all-checks-gate.yml@<sha>
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      statuses: read
+```
+
+| Input | Default | Purpose |
+| ----- | ------- | ------- |
+| `timeout-minutes` | `60` | Job timeout; the wait gives up 3 minutes earlier |
+| `settle-seconds` | `60` | Quiet period before the verdict; catches late-starting workflows |
+| `poll-interval-seconds` | `30` | Seconds between API polls (3+ requests each) |
+| `ignore-checks` | `""` | Regex (jq) of check, status or workflow names to skip |
+| `head-sha` | `""` | Override the gated commit |
+
+Outputs: `status` (`passed`/`failed`) and `exit-code`. A verdict is final:
+after re-running a failed check, or when a pending status resolves after the
+gate gave up, re-run the gate too. Drafts are gated like any PR (workflows
+that skip on drafts report `skipped`); `ready_for_review` re-runs the gate.
+
 ## Tests
 
 ```yaml

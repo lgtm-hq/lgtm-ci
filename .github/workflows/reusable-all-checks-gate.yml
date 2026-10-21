@@ -1,0 +1,309 @@
+---
+name: Reusable All Checks Gate
+
+# One required check that passes only when every OTHER check on the commit
+# finished green. Native auto-merge and the merge queue wait for REQUIRED
+# checks only; requiring this gate makes them wait for all of them. The job
+# polls the commit's workflow runs, check runs and commit statuses until
+# nothing is queued or in progress and the set has been stable for
+# settle-seconds, then fails on any conclusion other than success, skipped or
+# neutral (scripts/ci/actions/all-checks-gate.sh). Needs no secrets, so it
+# works read-only on fork PRs. Call it from its OWN workflow file: runs of the
+# calling workflow are excluded so a gate never waits on itself.
+#
+#   name: All Checks Gate
+#   on:
+#     pull_request:
+#       types: [opened, synchronize, reopened, ready_for_review]
+#     merge_group:
+#   permissions: {}
+#   concurrency:
+#     group: all-checks-gate-${{ github.event.pull_request.number || github.ref }}
+#     cancel-in-progress: true
+#   jobs:
+#     gate:
+#       uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-all-checks-gate.yml@<sha>
+#       permissions:
+#         actions: read
+#         checks: read
+#         contents: read
+#         statuses: read
+#
+# Require the context `gate / ✅ All Checks Passed` in the ruleset.
+
+"on":
+  workflow_call:
+    inputs:
+      head-sha:
+        description: >-
+          Commit to gate. Empty (default) resolves the PR head SHA on
+          pull_request, merge_group.head_sha on merge_group, else github.sha
+        required: false
+        type: string
+        default: ""
+      settle-seconds:
+        description: >-
+          Quiet period, with nothing pending and no new or changed check,
+          before the verdict; catches late-starting workflows and jobs that
+          are still waiting on needs
+        required: false
+        type: number
+        default: 60
+      poll-interval-seconds:
+        description: "Seconds between API polls"
+        required: false
+        type: number
+        default: 30
+      ignore-checks:
+        description: >-
+          Regex (jq/Oniguruma) of check-run names, commit-status contexts and
+          workflow names that are not gated, e.g. bots that never finish.
+          Empty gates everything
+        required: false
+        type: string
+        default: ""
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
+      allowed-endpoints:
+        description: >-
+          Extra or replacement host:port list (whitespace-separated) for
+          harden-runner. replace mode: a non-empty list is used alone;
+          append mode: merged with egress-preset. Composed at job start, so
+          it is enforced (#913).
+        required: false
+        type: string
+        default: ""
+      allowed-endpoints-mode:
+        description: >-
+          replace (default): non-empty allowed-endpoints is used instead of
+          egress-preset; append: egress-preset plus allowed-endpoints
+        required: false
+        type: string
+        default: "replace"
+      egress-preset:
+        description: >-
+          Named baseline allowlist from scripts/ci/lib/egress/presets.sh
+          (default github-minimal). Selected at job start inside every harden-runner
+          step, so it is enforced (#913).
+        required: false
+        type: string
+        default: "github-minimal"
+      runner-image:
+        description: "GitHub-hosted runner image label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
+      timeout-minutes:
+        description: >-
+          Job timeout in minutes; the wait gives up (and fails) three minutes
+          earlier so the log names what was still pending
+        required: false
+        type: number
+        default: 60
+
+    outputs:
+      exit-code:
+        description: "0 when every other check passed, 1 otherwise"
+        value: ${{ jobs.gate.outputs.exit-code }}
+      status:
+        description: "passed or failed"
+        value: ${{ jobs.gate.outputs.status }}
+
+env:
+  # Egress presets rendered from scripts/ci/lib/egress/presets.sh by
+  # scripts/ci/egress/sync-workflow-presets.sh — do not edit by hand. Every
+  # harden-runner step below indexes this map by expression: the
+  # step-security pre hook installs the agent before any step runs, so the
+  # allowlist must be composed from literals and inputs only (#412/#420/#913).
+  # lgtm-ci-egress-presets:begin
+  LGTM_CI_EGRESS_PRESETS: >-
+    {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443",
+    "github-results":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443",
+    "github-tooling":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "github-pages":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "docker":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 get.trivy.dev:443
+    mirror.gcr.io:443 check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443
+    timestamp.githubapp.com:443",
+    "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
+    playwright.azureedge.net:443 playwright-akamai.azureedge.net:443 storage.googleapis.com:443
+    archive.ubuntu.com:80 azure.archive.ubuntu.com:80 security.ubuntu.com:80",
+    "pypi":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
+    upload.test.pypi.org:443",
+    "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
+    upload.test.pypi.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    rubygems.org:443 api.rubygems.org:443 index.rubygems.org:443",
+    "npm-publish":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    token.actions.githubusercontent.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 registry.npmjs.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443",
+    "quality":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 bun.sh:443 astral.sh:443 releases.astral.sh:443 sh.rustup.rs:443
+    deb.debian.org:80 registry.npmjs.org:443 crates.io:443 static.crates.io:443 index.crates.io:443
+    semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443 api.deps.dev:443",
+    "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 bun.sh:443 nodejs.org:443 registry.npmjs.org:443
+    pypi.org:443 files.pythonhosted.org:443 astral.sh:443 releases.astral.sh:443
+    static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 security.ubuntu.com:443",
+    "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
+    toolbox-data.anchore.io:443 grype.anchore.io:443 pipelines.actions.githubusercontent.com:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "scorecard":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 gcr.io:443 api.osv.dev:443 api.scorecard.dev:443
+    api.securityscorecards.dev:443",
+    "osv-scanner":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 api.osv.dev:443 api.deps.dev:443",
+    "ai-review":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443 astral.sh:443
+    releases.astral.sh:443",
+    "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
+    actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443",
+    "release-version-pr":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "external-canary":"github.com:443 api.github.com:443"}
+  # lgtm-ci-egress-presets:end
+
+
+jobs:
+  gate:
+    # Static name: rulesets require `<caller job id> / ✅ All Checks Passed`,
+    # and the script excludes this name so the gate never waits on itself.
+    name: "✅ All Checks Passed"
+    runs-on: ${{ inputs.runner-image }}
+    timeout-minutes: ${{ inputs.timeout-minutes }}
+    permissions:
+      # List the workflow runs on the commit (jobs still waiting on needs)
+      actions: read
+      # Read the commit's check runs
+      checks: read
+      # Read repository context for the tooling checkout
+      contents: read
+      # Read the commit's statuses (CodeRabbit, renovate/stability-days, ...)
+      statuses: read
+    outputs:
+      exit-code: ${{ steps.gate.outputs.exit-code }}
+      status: ${{ steps.gate.outputs.status }}
+
+    steps:
+      - name: Harden runner
+        if: runner.os == 'Linux' || runner.environment == 'self-hosted'
+        # Pinned to SHA for supply chain security
+        uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+        with:
+          egress-policy: ${{ inputs.egress-policy }}
+          # Composed from inputs and the literal map in env only: harden-runner's
+          # pre hook runs before any step, so nothing computed later can reach it.
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
+            && inputs.allowed-endpoints
+            || format('{0} {1}',
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-minimal'],
+            inputs.allowed-endpoints) }}
+      - name: Fail on unknown egress-preset
+        # harden-runner's pre hook already ran with whatever the selector
+        # resolved; an unknown name yields an empty baseline, which would
+        # surface later as an opaque network error. Fail here by name (#913).
+        if: >-
+          inputs.egress-policy != 'audit'
+          && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-minimal'] == null
+        shell: bash
+        env:
+          EGRESS_PRESET: ${{ inputs.egress-preset }}
+        run: echo "::error title=unknown egress-preset::not a preset - '${EGRESS_PRESET}'"; exit 1
+      - name: Checkout lgtm-ci tooling
+        # yamllint disable-line rule:line-length
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-tooling
+          ref: ${{ job.workflow_sha || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/checkout-and-harden
+          sparse-checkout-cone-mode: true
+          persist-credentials: false
+      - name: Checkout and harden
+        id: egress
+        uses: ./.lgtm-ci-tooling/.github/actions/checkout-and-harden
+        with:
+          tooling-ref: ${{ job.workflow_sha }}
+          tooling-repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+      - name: Wait for every other check
+        id: gate
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # yamllint disable-line rule:line-length
+          HEAD_SHA: ${{ inputs.head-sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
+          SELF_WORKFLOW_REF: ${{ github.workflow_ref }}
+          SELF_RUN_ID: ${{ github.run_id }}
+          IGNORE_PATTERN: ${{ inputs.ignore-checks }}
+          SETTLE_SECONDS: ${{ inputs.settle-seconds }}
+          POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
+          TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+        run: bash .lgtm-ci-tooling/scripts/ci/actions/all-checks-gate.sh
