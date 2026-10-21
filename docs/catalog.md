@@ -158,7 +158,7 @@ Docker Build (multi-platform)
 - **Tier:** stable
 - **Evidence:** [`docker-publish.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869052424) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5479e741`
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-24.04`, `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Validate / Docker build per platform`, `Validate / Validation Summary`, `Upload Trivy scan results`, `Publish / Docker build per platform`, `Publish / Docker verify per platform`, `Publish / Docker health check per platform`, `Publish / Merge Manifests`, `Publish / Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -179,7 +179,7 @@ Docker Build (multi-platform, validate)
 - **Tier:** stable
 - **Evidence:** [`readonly-docker.yml`](https://github.com/TurboCoder13/lgtm-ci-consumer-fixture/actions/runs/37869051739) in `TurboCoder13/lgtm-ci-consumer-fixture`, green at lgtm-ci `5479e741`
 - **Permissions:** `contents: read`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-24.04`, `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Docker build per platform`, `Validation Summary`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -634,7 +634,7 @@ Docker Build and Push
 - **Path:** [`.github/workflows/reusable-docker.yml`](../.github/workflows/reusable-docker.yml)
 - **Tier:** preview
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-24.04`, `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Classify Platforms`, `Docker build / Build and Push`, `Docker build / Vulnerability Scan`, `Docker multi-platform / Validate / Docker build per platform`, `Docker multi-platform / Validate / Validation Summary`, `Docker multi-platform / Upload Trivy scan results`, `Docker multi-platform / Publish / Docker build per platform`, `Docker multi-platform / Publish / Docker verify per platform`, `Docker multi-platform / Publish / Docker health check per platform`, `Docker multi-platform / Publish / Merge Manifests`, `Docker multi-platform / Publish / Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -649,7 +649,7 @@ Docker Build (single-platform)
 - **Path:** [`.github/workflows/reusable-docker-build.yml`](../.github/workflows/reusable-docker-build.yml)
 - **Tier:** preview
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Build and Push`, `Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
@@ -1216,7 +1216,7 @@ Docker Build (multi-platform, publish)
 - **Path:** [`.github/workflows/reusable-docker-multiplatform-publish.yml`](../.github/workflows/reusable-docker-multiplatform-publish.yml)
 - **Tier:** internal
 - **Permissions:** `attestations: write`, `contents: read`, `id-token: write`, `packages: write`, `security-events: write`
-- **Runners:** `ubuntu-24.04`
+- **Runners:** `ubuntu-24.04`, `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Docker build per platform`, `Docker verify per platform`, `Docker health check per platform`, `Merge Manifests`, `Vulnerability Scan`
 - **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
