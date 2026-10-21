@@ -21,7 +21,8 @@
 #     is not skipped in a newer run, and the newer runs have at least one such
 #     check run at all. Every other run counts, so a later run (say on
 #     `labeled`) that skips the real jobs can hide neither an earlier failure
-#     nor an earlier cancellation. A run that concluded failure, cancelled, timed_out,
+#     nor an earlier cancellation. Known gap: jobs the cancelled run never
+#     started (skipped or absent) are not compared. A run that concluded failure, cancelled, timed_out,
 #     startup_failure or action_required fails the gate even when it left no
 #     failed check run. Runs of the gate's own workflow file
 #     (SELF_WORKFLOW_REF), its own run (SELF_RUN_ID) and workflows matching
