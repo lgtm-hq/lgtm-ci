@@ -791,7 +791,8 @@ Limitations:
   workflow creates through the API are not tied to its run, so
   `ignore-checks` must match them by name.
 - **`pull_request_target` workflows** run on the base commit, not the PR
-  head, so the gate does not see them.
+  head, so the gate does not wait for their runs; only check runs that land
+  on the PR head commit are gated.
 - **Duplicate job names in one run** cannot be told apart from re-run
   attempts, so only the newest counts; the run's own conclusion still fails
   the gate.
