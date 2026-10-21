@@ -52,9 +52,9 @@ TIMEOUT_PER_JOB_EXCEPTIONS: set[str] = set()
 
 # Docker family (#381): reusable-docker.yml is the thin orchestrator
 # (classify + nested workflow calls); the focused reusables own the
-# build/merge jobs. Internal coordinator jobs are pinned to ubuntu-24.04
-# and are not caller-pinnable; per-platform matrix jobs use the
-# runner-map-resolved ${{ matrix.runner }} expression.
+# build/merge jobs. Internal coordinator jobs are pinned to
+# DOCKER_COORDINATOR_RUNNER and are not caller-pinnable; per-platform matrix
+# jobs use the runner-map-resolved ${{ matrix.runner }} expression.
 DOCKER_FAMILY: dict[str, set[str]] = {
     "reusable-docker.yml": {"classify"},
     "reusable-docker-build.yml": {"build", "scan"},
@@ -77,6 +77,8 @@ DOCKER_FAMILY: dict[str, set[str]] = {
 # receive the already-resolved matrix from the classify job.
 DOCKER_RUNNER_MAP_FILES = {"reusable-docker.yml"}
 DOCKER_MATRIX_RUNS_ON = {"${{ matrix.runner }}"}
+# Moved from ubuntu-24.04 with the ubuntu-26.04 runner bump (#1183).
+DOCKER_COORDINATOR_RUNNER = "ubuntu-26.04"
 RUNNER_IMAGE_RUNS_ON = "${{ inputs.runner-image }}"
 
 
@@ -200,10 +202,10 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
             if runs_on in DOCKER_MATRIX_RUNS_ON:
                 continue
             if job_id in DOCKER_FAMILY[rel]:
-                if runs_on != "ubuntu-24.04":
+                if runs_on != DOCKER_COORDINATOR_RUNNER:
                     violations.append(
-                        f"{rel}: job {job_id} must use ubuntu-24.04 coordinator runner "
-                        f"(found {runs_on!r})",
+                        f"{rel}: job {job_id} must use {DOCKER_COORDINATOR_RUNNER} "
+                        f"coordinator runner (found {runs_on!r})",
                     )
                 continue
             if re.fullmatch(r"ubuntu-[\w.-]+", runs_on):

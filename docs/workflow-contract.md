@@ -194,8 +194,9 @@ Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
 `{"linux/arm64":"ubuntu-24.04-arm"}`). Platforms not in the map default to
 `ubuntu-24.04` with QEMU. Coordinator jobs inside the Docker workflow family
-(`classify`, `merge`, summaries, scan) stay on fixed `ubuntu-24.04`
-coordinators and are not caller-pinnable.
+(`classify`, `merge`, summaries, scan) and the single-platform `build` job of
+`reusable-docker-build.yml` run on fixed `ubuntu-26.04` runners and are not
+caller-pinnable (#1183; `ubuntu-24.04` before).
 
 #### Docker workflow family and migration path
 
@@ -209,7 +210,7 @@ working unchanged.
 | Workflow                                     | Responsibility                                                                                                       | `runner-map`?                      |
 | -------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
 | `reusable-docker.yml`                        | Orchestrator: classify + delegate (supported entry point)                                                            | Yes (resolved by `classify`)       |
-| `reusable-docker-build.yml`                  | Single-platform or QEMU multi-platform build + scan (non-split path)                                                 | No (fixed `ubuntu-24.04` + QEMU)   |
+| `reusable-docker-build.yml`                  | Single-platform or QEMU multi-platform build + scan (non-split path)                                                 | No (fixed `ubuntu-26.04` + QEMU)   |
 | `reusable-docker-multiplatform.yml`          | Per-platform matrix build + smoke/health gates + manifest merge + sign. Since #1081 a facade over the two rows below | No (takes classify `matrix` input) |
 | `reusable-docker-multiplatform-validate.yml` | `push: false` path only: per-platform build, local smoke/health/scan, summary. Read-only (`contents: read`)          | No (takes classify `matrix` input) |
 | `reusable-docker-multiplatform-publish.yml`  | Internal `push: true` path: staging pushes, gates, merge, attestation, signing, scan                                 | No (called by the facade)          |
