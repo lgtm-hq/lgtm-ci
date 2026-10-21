@@ -28,6 +28,7 @@ standard summary comment when callers grant `pull-requests: write`.
 | `reusable-publish-quality-summary.yml` | Publish lintro quality PR summary |
 | `reusable-validate.yml` | Generic repo validation script runner |
 | `reusable-required-check.yml` | Org ruleset aggregate-status gate |
+| `reusable-all-checks-gate.yml` | One required check that waits for every other check to pass |
 | `reusable-validate-action-pinning.yml` | GitHub Action SHA pinning validation |
 | `reusable-validate-lintro-version.yml` | Resolve/validate the pinned py-lintro image digest |
 

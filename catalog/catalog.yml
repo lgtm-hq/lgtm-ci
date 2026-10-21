@@ -53,6 +53,26 @@ entries:
     check-names:
       - "AI Review"
 
+  - id: reusable-all-checks-gate
+    kind: reusable-workflow
+    tier: preview
+    reason: "No external-fixture run yet"
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      statuses: read
+    runners: [ubuntu-24.04]
+    package-managers: []
+    prerequisites: []
+    limitations:
+      - "Call it from one dedicated workflow file per repository: runs of the calling workflow are not waited on"
+      - "A verdict is final: re-run the gate after re-running a failed check or after a pending status resolves late"
+      - "Each poll costs 1-3 GITHUB_TOKEN requests (1,000/hour per repository); about 15-180/hour per waiting gate"
+      - "Fails when no other check or status exists on the commit, unless allow-empty"
+    check-names:
+      - "✅ All Checks Passed"
+
   - id: reusable-auto-rerun-on-infra-failure
     kind: reusable-workflow
     tier: preview
@@ -2113,6 +2133,7 @@ deprecations:
     replacement: "Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`)"
     entries:
       - reusable-ai-review
+      - reusable-all-checks-gate
       - reusable-auto-rerun-on-infra-failure
       - reusable-build-artifact
       - reusable-build-python-dist

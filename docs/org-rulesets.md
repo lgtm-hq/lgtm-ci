@@ -16,6 +16,10 @@ Org rulesets must require the **exact** check names workflows report:
   alone is **not** sufficient for a ruleset.
 - **Inline `runs-on` jobs:** the ruleset matches the job `name:` only (for
   example `🔐 Security Audit`).
+- **All-checks gate:** a caller of `reusable-all-checks-gate.yml` with job id
+  `gate` reports `gate / ✅ All Checks Passed`; requiring that one context
+  makes auto-merge and the merge queue wait for every other check
+  ([reusable-workflows.md](reusable-workflows.md#all-checks-gate-reusable-all-checks-gateyml)).
 
 See [workflow-contract.md](workflow-contract.md) (Org ruleset check names)
 for the caller-side YAML pattern.

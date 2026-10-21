@@ -698,6 +698,134 @@ test-suite-coverage:
     passed-output: ${{ needs.test.outputs.passed }}
 ```
 
+### All checks gate (`reusable-all-checks-gate.yml`)
+
+Native auto-merge and the merge queue wait for **required** checks only, so a
+PR (Renovate automerge included) can merge while non-required checks are
+still running or after one failed. This gate turns "every check passed" into
+one required context. It polls the commit's workflow runs, check runs and
+commit statuses until nothing is queued or in progress and nothing has
+changed for `settle-seconds`, then passes only if every other check
+concluded `success`, `skipped` or `neutral`:
+
+- **Workflow runs** for the commit: a run that is not completed keeps the
+  gate waiting (this covers jobs still waiting on `needs:`, which have no
+  check run yet). A run that concluded `failure`, `cancelled`, `timed_out`,
+  `startup_failure` or `action_required` fails the gate. A cancelled run
+  counts as superseded (concurrency) and is dropped with its check runs
+  only when newer runs of the same workflow file did its work: they have at
+  least one check run that is not skipped, and every job the cancelled run
+  left unfinished has such a check run in a newer run. Any other older run
+  still counts, so a later run (say on `labeled`) that skips the real jobs
+  can hide neither an earlier failure nor an earlier cancellation.
+- **Check runs** from every app: anything other than `success`, `skipped`
+  or `neutral` (`failure`, `cancelled`, `timed_out`, `action_required`,
+  `stale`, `startup_failure`, or no conclusion) fails the gate. Actions check runs are
+  judged per workflow run and job name (the newest re-run attempt counts),
+  so jobs that share a name in different workflows are judged separately.
+- **Commit statuses**: `pending` (CodeRabbit, `renovate/stability-days`)
+  counts as not finished; `failure` and `error` fail the gate.
+
+It gates the PR head SHA on `pull_request` and `merge_group.head_sha` on
+`merge_group`, needs no secrets (read-only `GITHUB_TOKEN`, so fork PRs
+work) and has a static job name. Put it in its **own** workflow file, one
+per repository: runs of the calling workflow are excluded so a gate never
+waits on itself or on an older gate run for the same commit; a gate that
+shares its workflow run with other jobs fails and says so. Require the
+context `gate / ✅ All Checks Passed` (caller job id `gate`), with GitHub
+Actions as its expected source, in the ruleset.
+
+```yaml
+name: All Checks Gate
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  merge_group:
+
+permissions: {}
+
+concurrency:
+  group: all-checks-gate-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  gate:
+    uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-all-checks-gate.yml@<sha>
+    permissions:
+      actions: read
+      checks: read
+      contents: read
+      statuses: read
+```
+
+| Input | Default | Purpose |
+| ----- | ------- | ------- |
+| `timeout-minutes` | `60` | Job timeout; the wait gives up 3 minutes earlier |
+| `settle-seconds` | `60` | Quiet period before the verdict |
+| `poll-interval-seconds` | `60` | Seconds between API polls |
+| `ignore-checks` | `""` | Regex (jq) of check, status or workflow names to skip |
+| `allow-empty` | `false` | Pass when no other check exists |
+| `fail-on-draft` | `false` | Fail draft PRs at once instead of gating them |
+| `head-sha` | `""` | Override the gated commit |
+
+The standard `egress-policy`, `egress-preset` (default `github-minimal`),
+`allowed-endpoints`, `allowed-endpoints-mode` and `runner-image` inputs
+apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
+(`passed`/`failed`) and `exit-code`.
+
+Limitations:
+
+- **Request budget.** While a workflow run is in progress a poll costs one
+  request, otherwise three (more when a list passes 100 entries); while
+  nothing changes the interval grows to 4x `poll-interval-seconds`.
+  `GITHUB_TOKEN` allows 1,000 requests per hour per repository, shared by
+  every workflow. At the default 60 s a gate waiting on workflows uses
+  about 15–60 requests an hour, one waiting on a status or another app's
+  check about 45–180, so raise `poll-interval-seconds` where many PRs wait
+  at once. A rate-limited poll waits instead of failing.
+- **Jobs a cancelled run never started** (still waiting on `needs:`, so
+  skipped or without a check run) are not compared against newer runs: if
+  a newer run of the same file skips them too (say behind
+  `if: github.event.action != 'labeled'`), they go unchecked. Check runs a
+  workflow creates through the API are not tied to its run, so
+  `ignore-checks` must match them by name.
+- **`pull_request_target` workflows** run on the base commit, not the PR
+  head, so the gate does not wait for their runs; only check runs that land
+  on the PR head commit are gated.
+- **Duplicate job names in one run** cannot be told apart from re-run
+  attempts, so only the newest counts; the run's own conclusion still fails
+  the gate.
+- **The verdict is final.** After re-running a failed check, or when a
+  pending status resolves after the gate timed out, re-run the gate too.
+  A failed run stays failed even when a later run of the same workflow on
+  the same commit is green (for example after close and reopen): re-run the
+  failed run itself.
+  Statuses that can stay pending for hours (`renovate/stability-days`) or
+  jobs waiting on an environment approval will time the gate out; list them
+  in `ignore-checks` if they are enforced elsewhere. For a job, match its
+  workflow's name: a matched workflow is dropped together with its check
+  runs (matching only the job still waits for its workflow run). When
+  `reusable-auto-rerun-on-infra-failure` re-runs failed jobs, raise
+  `settle-seconds` above its start-up delay (a few minutes) so the gate
+  sees the re-run. Workflows that start after the gate finished (for
+  example on `labeled` or `edited`) are not gated: add every
+  `pull_request` activity type your other workflows use to the gate's
+  trigger types.
+- **Nothing to gate fails.** When no other check or status exists on the
+  commit after the settle period the gate fails, so a merge queue whose
+  workflows do not trigger on `merge_group` cannot merge unchecked. Set
+  `allow-empty: true` for a repository with no other CI.
+- **Same-SHA re-trigger window.** On `ready_for_review` or `reopened` the
+  previous gate result for the same commit stays visible until the new run
+  registers its check (seconds). Drafts are gated like any PR, and
+  workflows that skip on drafts report `skipped`, so a draft's gate can be
+  green on nothing real; `fail-on-draft: true` makes it red instead.
+- **Trust model.** As with every `pull_request` check, a PR can edit the
+  caller workflow (for example `ignore-checks: '.*'`). Protect
+  `.github/workflows/` with CODEOWNERS review and pin the required check's
+  source to GitHub Actions.
+
 ## Tests
 
 ```yaml

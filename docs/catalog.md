@@ -45,7 +45,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 
 | Kind | `stable` | `preview` | `internal` | `deprecated` | Total |
 | ---- | ---- | ---- | ---- | ---- | ---- |
-| Reusable workflows | 14 | 45 | 9 | 1 | 69 |
+| Reusable workflows | 14 | 46 | 9 | 1 | 70 |
 | Composite actions | 4 | 43 | 3 | 0 | 50 |
 
 ## Reusable workflows
@@ -66,6 +66,7 @@ the deprecation and removal rules are in [docs/governance.md](governance.md).
 | [`reusable-test-node-run`](#reusable-test-node-run) | `stable` | Node.js Vitest Test Workflow (read-only) |
 | [`reusable-test-python`](#reusable-test-python) | `stable` | Python Test Workflow |
 | [`reusable-test-shell-run`](#reusable-test-shell-run) | `stable` | Shell Test Workflow (read-only) |
+| [`reusable-all-checks-gate`](#reusable-all-checks-gate) | `preview` | All Checks Gate |
 | [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure) | `preview` | Auto Re-run on Infra Failure |
 | [`reusable-build-artifact`](#reusable-build-artifact) | `preview` | Build Artifact Workflow |
 | [`reusable-build-python-dist`](#reusable-build-python-dist) | `preview` | Python Distribution Build Workflow |
@@ -480,6 +481,28 @@ Shell Test Workflow (read-only)
 - Fixture proves the single-job `coverage: false` path only; the kcov coverage and sharded paths are exercised by lgtm-ci's own CI through the facade, not by the external fixture
 
 ### Reusable workflows: preview
+
+#### `reusable-all-checks-gate`
+
+All Checks Gate
+
+> [!WARNING]
+> **Preview.** No external-fixture run yet
+
+- **Path:** [`.github/workflows/reusable-all-checks-gate.yml`](../.github/workflows/reusable-all-checks-gate.yml)
+- **Tier:** preview
+- **Permissions:** `actions: read`, `checks: read`, `contents: read`, `statuses: read`
+- **Runners:** `ubuntu-24.04`
+- **Package managers:** —
+- **Check names:** `✅ All Checks Passed`
+- **Deprecated:** [input `tooling-ref`](#deprecation-tooling-ref)
+
+**Limitations:**
+
+- Call it from one dedicated workflow file per repository: runs of the calling workflow are not waited on
+- A verdict is final: re-run the gate after re-running a failed check or after a pending status resolves late
+- Each poll costs 1-3 GITHUB_TOKEN requests (1,000/hour per repository); about 15-180/hour per waiting gate
+- Fails when no other check or status exists on the commit, unless allow-empty
 
 #### `reusable-auto-rerun-on-infra-failure`
 
@@ -2150,4 +2173,4 @@ exception naming the approving issue is recorded
 - **Retires:** input `tooling-ref`
 - **Deprecated since:** v0.75.3 (#995)
 - **Replacement:** Delete the input; the tooling checkout follows the workflow pin (`job.workflow_sha`)
-- **Entries (61):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish), [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm`](#reusable-publish-npm), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)
+- **Entries (62):** [`reusable-ai-review`](#reusable-ai-review), [`reusable-all-checks-gate`](#reusable-all-checks-gate), [`reusable-auto-rerun-on-infra-failure`](#reusable-auto-rerun-on-infra-failure), [`reusable-build-artifact`](#reusable-build-artifact), [`reusable-build-python-dist`](#reusable-build-python-dist), [`reusable-build-rust-binaries`](#reusable-build-rust-binaries), [`reusable-codeql`](#reusable-codeql), [`reusable-coverage`](#reusable-coverage), [`reusable-deploy-pages`](#reusable-deploy-pages), [`reusable-deploy-site-with-reports`](#reusable-deploy-site-with-reports), [`reusable-docker`](#reusable-docker), [`reusable-docker-build`](#reusable-docker-build), [`reusable-docker-multiplatform`](#reusable-docker-multiplatform), [`reusable-docker-multiplatform-publish`](#reusable-docker-multiplatform-publish), [`reusable-docker-multiplatform-validate`](#reusable-docker-multiplatform-validate), [`reusable-docker-smoke-test`](#reusable-docker-smoke-test), [`reusable-ghcr-cleanup`](#reusable-ghcr-cleanup), [`reusable-github-release`](#reusable-github-release), [`reusable-link-check`](#reusable-link-check), [`reusable-main-failure-notifier`](#reusable-main-failure-notifier), [`reusable-pr-auto-assign`](#reusable-pr-auto-assign), [`reusable-prune-build-staging-tags`](#reusable-prune-build-staging-tags), [`reusable-publish-artifact-preview`](#reusable-publish-artifact-preview), [`reusable-publish-artifact-report`](#reusable-publish-artifact-report), [`reusable-publish-file-breakdown`](#reusable-publish-file-breakdown), [`reusable-publish-gem`](#reusable-publish-gem), [`reusable-publish-npm`](#reusable-publish-npm), [`reusable-publish-npm-set`](#reusable-publish-npm-set), [`reusable-publish-quality-summary`](#reusable-publish-quality-summary), [`reusable-publish-rust-release`](#reusable-publish-rust-release), [`reusable-publish-security-audit-comment`](#reusable-publish-security-audit-comment), [`reusable-publish-test-results-pages`](#reusable-publish-test-results-pages), [`reusable-publish-test-summary`](#reusable-publish-test-summary), [`reusable-quality-lint`](#reusable-quality-lint), [`reusable-registry-health-check`](#reusable-registry-health-check), [`reusable-release-auto-tag`](#reusable-release-auto-tag), [`reusable-release-failure-notifier`](#reusable-release-failure-notifier), [`reusable-release-multi-ecosystem`](#reusable-release-multi-ecosystem), [`reusable-release-version-pr`](#reusable-release-version-pr), [`reusable-required-check`](#reusable-required-check), [`reusable-rust-build`](#reusable-rust-build), [`reusable-rust-test`](#reusable-rust-test), [`reusable-rust-test-run`](#reusable-rust-test-run), [`reusable-sbom`](#reusable-sbom), [`reusable-sbom-release-upload`](#reusable-sbom-release-upload), [`reusable-security-audit`](#reusable-security-audit), [`reusable-site-quality`](#reusable-site-quality), [`reusable-test-e2e`](#reusable-test-e2e), [`reusable-test-e2e-matrix`](#reusable-test-e2e-matrix), [`reusable-test-e2e-playwright`](#reusable-test-e2e-playwright), [`reusable-test-node`](#reusable-test-node), [`reusable-test-node-custom`](#reusable-test-node-custom), [`reusable-test-node-publish`](#reusable-test-node-publish), [`reusable-test-node-run`](#reusable-test-node-run), [`reusable-test-python`](#reusable-test-python), [`reusable-test-python-publish`](#reusable-test-python-publish), [`reusable-test-rust-build`](#reusable-test-rust-build), [`reusable-test-shell`](#reusable-test-shell), [`reusable-test-shell-run`](#reusable-test-shell-run), [`reusable-validate`](#reusable-validate), [`reusable-validate-action-pinning`](#reusable-validate-action-pinning), [`reusable-vuln-suppression-check`](#reusable-vuln-suppression-check)
