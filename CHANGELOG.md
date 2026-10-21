@@ -19,6 +19,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.78.0] - 2026-10-21
+
+### Added
+
+- **workflows**: add reusable-all-checks-gate for one all-checks required context
+  (#1188) (14d4fea)
+- **catalog**: `reusable-all-checks-gate` added as `preview`
+
+### Changed
+
+- **deps**: update dependency uv to 0.13.4 (patch) [security] (#1185) (91dee13)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.77.7 (patch) (#1182) (4337778)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.77.6 (patch) (#1180) (5f1a955)
+
+### Deprecated
+
+- **catalog**: input `tooling-ref` on `reusable-all-checks-gate` (#995):
+  Delete the input; the tooling checkout follows the workflow pin
+  (`job.workflow_sha`)
+
+### Fixed
+
+- **ci**: restore green main baseline (certifi GHSA-6q48-6c7w-9gw2, rust-toolchain v1
+  pin, uv download hosts) (#1186) (d4d43d3)
+
 ## [0.77.7] - 2026-10-12
 
 ### Changed
@@ -2891,7 +2916,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.7...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.0...HEAD
+[0.78.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.7...v0.78.0
 [0.77.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.6...v0.77.7
 [0.77.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.5...v0.77.6
 [0.77.5]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.4...v0.77.5
