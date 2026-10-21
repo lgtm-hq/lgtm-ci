@@ -193,7 +193,7 @@ jobs:
   canary:
     name: "🐤 External Consumer Canary"
     # Always runs so the check always reports; the script decides full vs skip.
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-26.04
     timeout-minutes: 35
     permissions:
       # Resolve the candidate ref to a SHA and read the canary script.
