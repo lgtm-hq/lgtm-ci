@@ -14,29 +14,34 @@
 #   - Workflow runs for HEAD_SHA (any event). A run that is not completed
 #     (queued, in_progress, waiting, pending, requested) keeps the gate
 #     waiting, which covers jobs whose check run does not exist yet because
-#     they wait on `needs:`. Runs are deduplicated to the newest per workflow
-#     file and event (a concurrency-superseded run does not count); a newest
-#     run that concluded failure, cancelled, timed_out, startup_failure or
-#     action_required fails the gate even when it left no failed check run.
-#     The gate's own workflow file (SELF_WORKFLOW_REF) and run (SELF_RUN_ID)
-#     are excluded, so concurrent gate runs on one commit cannot deadlock.
-#   - Check runs for HEAD_SHA, from every app. An Actions check run is keyed
-#     by the workflow file and event of the run it belongs to (from its URL)
-#     plus its name, so jobs that share a name in different workflows are
-#     judged separately, while re-run attempts and superseded runs of the same
-#     workflow collapse to the newest (highest id). Other apps are keyed by
-#     check suite and name. Conclusions success, skipped and neutral pass;
-#     everything else (failure, cancelled, timed_out, action_required, stale,
-#     startup_failure, none) fails. Check runs named SELF_CHECK_NAME or
-#     "<caller job> / SELF_CHECK_NAME" are this gate (any attempt) and are
-#     excluded.
+#     they wait on `needs:`. An older run of a workflow file that concluded
+#     cancelled while a newer run of the same file exists was superseded
+#     (concurrency) and is dropped with its check runs; every other run
+#     counts, so a later run (say on `labeled`) whose jobs skip cannot hide an
+#     earlier failure. A run that concluded failure, cancelled, timed_out,
+#     startup_failure or action_required fails the gate even when it left no
+#     failed check run. Runs of the gate's own workflow file
+#     (SELF_WORKFLOW_REF), its own run (SELF_RUN_ID) and workflows matching
+#     IGNORE_PATTERN are dropped with their check runs, so concurrent gate runs
+#     on one commit cannot deadlock.
+#   - Check runs for HEAD_SHA, from every app. Actions check runs belong to
+#     the run in their URL and are judged per run and name; re-run attempts
+#     keep the run id, so the newest attempt (highest id) counts. Other apps
+#     are judged per check suite and name. Conclusions success, skipped and
+#     neutral pass; everything else (failure, cancelled, timed_out,
+#     action_required, stale, startup_failure, none) fails. A check run whose
+#     run is unknown is kept unless it is named SELF_CHECK_NAME or
+#     "<caller job> / SELF_CHECK_NAME".
 #   - Commit statuses (latest per context): pending keeps the gate waiting,
 #     failure and error fail it, success passes.
+#   - Nothing else on the commit after the settle period fails the gate unless
+#     ALLOW_EMPTY is true: in a merge queue whose other workflows do not
+#     trigger on merge_group, a vacuous pass would merge unchecked.
 #
 # Request budget: while a workflow run is still in progress only the runs
-# list is fetched (one request per poll); check runs and statuses are fetched
-# once no run is pending. A rate-limited poll waits for the reset instead of
-# counting as an API error.
+# list is fetched (one request per poll, more past 100 runs); check runs and
+# statuses are fetched once no run is pending. A rate-limited poll (primary
+# or secondary limit) waits instead of counting as an API error.
 #
 # Environment variables:
 #   HEAD_SHA              - Commit to gate (required): the PR head SHA on
@@ -65,11 +70,21 @@
 #                           gate fails (default: 5)
 #   GH_CMD_TIMEOUT        - Wall-clock bound in seconds on each gh call
 #                           (default: 20)
+#   ALLOW_EMPTY           - true: pass when no other check exists (default:
+#                           false)
+#   FAIL_ON_DRAFT         - true: fail at once when PR_DRAFT is true, so a
+#                           draft's result can never be read as a pass after
+#                           ready_for_review (default: false)
+#   PR_DRAFT              - github.event.pull_request.draft (optional)
 #   GITHUB_OUTPUT         - Receives status=passed|failed and exit-code
 #   GITHUB_STEP_SUMMARY   - Receives the verdict table (optional)
 
 set -euo pipefail
 exec </dev/null
+
+# Caller-supplied values echoed into the log stay on one line, so none can
+# start a workflow command.
+one_line() { printf '%s' "${1//[$'\r\n']/ }"; }
 
 : "${HEAD_SHA:?HEAD_SHA is required}"
 : "${GITHUB_REPOSITORY:?GITHUB_REPOSITORY is required}"
@@ -77,6 +92,9 @@ exec </dev/null
 : "${SELF_WORKFLOW_REF:=}"
 : "${SELF_RUN_ID:=}"
 : "${IGNORE_PATTERN:=}"
+: "${ALLOW_EMPTY:=false}"
+: "${FAIL_ON_DRAFT:=false}"
+: "${PR_DRAFT:=false}"
 : "${TIMEOUT_MINUTES:=}"
 : "${TIMEOUT_MARGIN_SECONDS:=180}"
 if [[ ! "$TIMEOUT_MARGIN_SECONDS" =~ ^[0-9]+$ ]]; then
@@ -101,7 +119,7 @@ fi
 
 for var in TIMEOUT_SECONDS SETTLE_SECONDS POLL_INTERVAL MAX_API_ERRORS GH_CMD_TIMEOUT; do
 	if [[ ! "${!var}" =~ ^[0-9]+$ ]]; then
-		echo "::error title=all-checks-gate::${var} must be a non-negative integer (got '${!var}')"
+		echo "::error title=all-checks-gate::${var} must be a non-negative integer (got '$(one_line "${!var}")')"
 		exit 1
 	fi
 done
@@ -110,11 +128,11 @@ if ((POLL_INTERVAL < 1 || MAX_API_ERRORS < 1 || GH_CMD_TIMEOUT < 1)); then
 	exit 1
 fi
 if [[ ! "$HEAD_SHA" =~ ^[0-9a-f]{40}$ ]]; then
-	echo "::error title=all-checks-gate::HEAD_SHA must be a 40-character commit SHA (got '${HEAD_SHA}')"
+	echo "::error title=all-checks-gate::HEAD_SHA must be a 40-character commit SHA (got '$(one_line "$HEAD_SHA")')"
 	exit 1
 fi
 if [[ -n "$IGNORE_PATTERN" ]] && ! jq -n --arg p "$IGNORE_PATTERN" '"" | test($p)' >/dev/null 2>&1; then
-	echo "::error title=all-checks-gate::IGNORE_PATTERN is not a valid regex: ${IGNORE_PATTERN}"
+	echo "::error title=all-checks-gate::IGNORE_PATTERN is not a valid regex: $(one_line "$IGNORE_PATTERN")"
 	exit 1
 fi
 
@@ -132,11 +150,13 @@ trap 'rm -rf "$WORK_DIR"' EXIT
 
 now() { date +%s; }
 
+# Each gh call's stderr lands in WORK_DIR/gh.err so a failed poll can tell a
+# rate limit from other errors. GH_CMD_TIMEOUT bounds a whole --paginate call.
 gh_bounded() {
 	if command -v timeout >/dev/null 2>&1; then
-		timeout "$GH_CMD_TIMEOUT" gh "$@"
+		timeout "$GH_CMD_TIMEOUT" gh "$@" 2>>"$WORK_DIR/gh.err"
 	else
-		gh "$@"
+		gh "$@" 2>>"$WORK_DIR/gh.err"
 	fi
 }
 
@@ -165,15 +185,19 @@ fetch_checks_and_statuses() {
 	jq -s . "$WORK_DIR/statuses.ndjson" >"$WORK_DIR/statuses.json" || return 1
 }
 
-# Shared jq prelude: exclusions and dedupe of workflow runs ($names are jq
-# variables, not shell).
+# Shared jq prelude: exclusions of workflow runs and dropping of superseded
+# (cancelled, newer run of the same file exists) runs. $names are jq
+# variables, not shell.
 # shellcheck disable=SC2016
 readonly JQ_RUNS='
 	def ignored: ($pat != "") and test($pat);
 	def gated_runs: map(select((.id | tostring) != $self_run)
 		| select($self_path == "" or .path != $self_path)
 		| select((.name // "") | ignored | not))
-		| group_by([.path, .event]) | map(max_by(.id));'
+		| group_by(.path)
+		| map((map(.id) | max) as $newest
+			| map(select(.id == $newest or .conclusion != "cancelled")))
+		| add // [];'
 
 # Pending workflow runs (after exclusions and dedupe), one per line.
 pending_runs() {
@@ -197,15 +221,20 @@ evaluate_snapshot() {
 		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
 		def is_self: . == $self or endswith(" / " + $self);
 		def ok: . == "success" or . == "skipped" or . == "neutral";
-		# Every run, excluded or not, so any Actions check run finds its workflow.
-		($runs[0] | map({key: (.id | tostring), value: .}) | from_entries) as $by_id
+		def in_set($set): . as $x | $set | index([$x]) != null;
+		($runs[0] | map(.id | tostring)) as $known
 		| ($runs[0] | gated_runs) as $r
+		| ($r | map(.id | tostring)) as $kept
 		| ($checks[0]
-			| map(select(.name | is_self | not) | select(.name | ignored | not)
-				| ((.url | capture("/actions/runs/(?<run>[0-9]+)/") | .run) // "") as $run
-				| ($by_id[$run] // null) as $wf
-				| . + {key: (if $wf then [.app, $wf.path, $wf.event, .name]
-					else [.app, (.suite | tostring), "", .name] end)})
+			| map(. + {run: ((.url | capture("/actions/runs/(?<run>[0-9]+)/") | .run) // "")})
+			# A check run of a dropped run (own, ignored, superseded) goes with
+			# it; one whose run is unknown is kept unless it is this gate.
+			| map(select(if .run != "" and (.run | in_set($known))
+				then (.run | in_set($kept))
+				else (.name | is_self | not) end))
+			| map(select(.name | ignored | not)
+				| . + {key: (if .run != "" then ["run", .run, .name]
+					else [.app, (.suite | tostring), .name] end)})
 			| group_by(.key) | map(max_by(.id))) as $c
 		| ($statuses[0] | map(select(.context | ignored | not))) as $s
 		| {
@@ -246,7 +275,15 @@ rate_limit_wait() {
 		--jq '.resources.core | "\(.remaining) \(.reset)"' 2>/dev/null) || return 0
 	[[ "$remaining" =~ ^[0-9]+$ && "$reset" =~ ^[0-9]+$ ]] || return 0
 	((remaining == 0)) || return 0
-	echo $((reset - $(now) + 1))
+	local wait_s=$((reset - $(now) + 1))
+	((wait_s >= 1)) || wait_s=1
+	echo "$wait_s"
+}
+
+# Secondary rate limits answer 403/429 with a message rather than an
+# exhausted counter; gh prints it to stderr.
+secondary_rate_limited() {
+	grep -qiE 'rate limit|retry-after|abuse' "$WORK_DIR/gh.err" 2>/dev/null
 }
 
 write_outputs() {
@@ -288,10 +325,16 @@ print_list() {
 
 echo "all-checks-gate: ${GITHUB_REPOSITORY}@${HEAD_SHA} (timeout ${TIMEOUT_SECONDS}s, settle ${SETTLE_SECONDS}s, poll ${POLL_INTERVAL}s)"
 if [[ -n "$IGNORE_PATTERN" ]]; then
-	echo "ignoring checks matching: ${IGNORE_PATTERN}"
+	echo "ignoring checks matching: $(one_line "$IGNORE_PATTERN")"
 fi
 if [[ -n "$SELF_WORKFLOW_PATH" ]]; then
-	echo "excluding own workflow: ${SELF_WORKFLOW_PATH}"
+	echo "excluding own workflow: $(one_line "$SELF_WORKFLOW_PATH")"
+fi
+
+if [[ "$FAIL_ON_DRAFT" == "true" && "$PR_DRAFT" == "true" ]]; then
+	echo "::error title=all-checks-gate::Draft PR: not gated (fail-on-draft); marking the PR ready re-runs the gate"
+	write_outputs failed 1
+	exit 1
 fi
 
 start="$(now)"
@@ -314,6 +357,7 @@ report_pending() {
 while :; do
 	sleep_for="$POLL_INTERVAL"
 	poll_ok=0
+	: >"$WORK_DIR/gh.err"
 	if fetch_runs && runs_pending="$(pending_runs)"; then
 		if [[ -n "$runs_pending" ]]; then
 			# Still running: skip the check-run and status requests this poll.
@@ -343,8 +387,11 @@ while :; do
 		api_errors=0
 	else
 		wait_s="$(rate_limit_wait)"
+		if [[ -z "$wait_s" ]] && secondary_rate_limited; then
+			wait_s=60
+		fi
 		if [[ -n "$wait_s" ]]; then
-			echo "::warning title=all-checks-gate::API rate limit exhausted; waiting ${wait_s}s for the reset"
+			echo "::warning title=all-checks-gate::API rate limit hit; waiting ${wait_s}s"
 			if ((wait_s > POLL_INTERVAL)); then
 				sleep_for="$wait_s"
 			fi
@@ -380,7 +427,13 @@ if ((failed_count > 0)); then
 	exit 1
 fi
 if ((passed_count == 0)); then
-	echo "::warning title=all-checks-gate::No other checks found on ${HEAD_SHA}; nothing to gate"
+	if [[ "$ALLOW_EMPTY" != "true" ]]; then
+		write_summary "failed (no other checks)" "$last_eval"
+		echo "::error title=all-checks-gate::No other checks found on ${HEAD_SHA}; check that the other workflows trigger on ${GITHUB_EVENT_NAME:-this event} (allow-empty: true accepts this)"
+		write_outputs failed 1
+		exit 1
+	fi
+	echo "::warning title=all-checks-gate::No other checks found on ${HEAD_SHA}; nothing to gate (allow-empty)"
 fi
 write_summary "passed" "$last_eval"
 echo "All ${passed_count} other check(s) passed"

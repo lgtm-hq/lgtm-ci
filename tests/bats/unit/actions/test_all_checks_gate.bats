@@ -27,6 +27,7 @@ setup() {
 	export POLL_FILE="${BATS_TEST_TMPDIR}/polls"
 	export GH_CALLS="${BATS_TEST_TMPDIR}/gh_calls"
 	unset IGNORE_PATTERN MAX_API_ERRORS GH_CMD_TIMEOUT TIMEOUT_MINUTES TIMEOUT_MARGIN_SECONDS
+	unset ALLOW_EMPTY FAIL_ON_DRAFT PR_DRAFT
 	: >"$GITHUB_OUTPUT"
 	: >"$GH_CALLS"
 	echo 1000 >"$CLOCK_FILE"
@@ -44,7 +45,8 @@ teardown() {
 # --jq-filtered lines real gh would print), falling back to the newest earlier
 # poll, so a test describes only the polls where something changes. Each
 # actions/runs call starts a new poll. A missing file for the poll means an
-# empty list; a file named fail makes that poll's calls exit 1. `gh api
+# empty list; a file named fail makes that poll's calls exit 1 with the file's
+# content on stderr. `gh api
 # rate_limit` prints $FIXTURES/rate_limit ("<remaining> <reset>") once when
 # present. Every call is appended to $GH_CALLS. sleep advances a fake clock
 # that date reads, so timeouts run instantly.
@@ -82,7 +84,10 @@ esac
 poll="$(cat "$POLL_FILE")"
 for ((p = poll; p >= 1; p--)); do
 	if [[ -e "$FIXTURES/$p/fail" ]]; then
-		[[ "$p" == "$poll" ]] && exit 1
+		if [[ "$p" == "$poll" ]]; then
+			cat "$FIXTURES/$p/fail" >&2
+			exit 1
+		fi
 		continue
 	fi
 	if [[ -d "$FIXTURES/$p" ]]; then
@@ -156,6 +161,7 @@ status_() { # context state
 }
 
 @test "all-checks-gate: queries every page of runs, all check runs and statuses for the commit" {
+	export ALLOW_EMPTY=true
 	run bash "$SCRIPT"
 	assert_success
 	run cat "$GH_CALLS"
@@ -182,6 +188,7 @@ status_() { # context state
 @test "all-checks-gate: only lists workflow runs while one is still running" {
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml in_progress null)"
 	poll 2 runs "$(run_ 1 CI .github/workflows/ci.yml completed success)"
+	poll 2 checks "$(check 11 'lint' completed success github-actions 1)"
 
 	run bash "$SCRIPT"
 	assert_success
@@ -241,6 +248,40 @@ status_() { # context state
 	assert_output --partial "All 2 other check(s) passed"
 }
 
+@test "all-checks-gate: a superseded run's jobs do not count, even when the new run has other job names" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'test (3.11)' completed cancelled github-actions 1)" \
+		"$(check 12 'test (3.12)' completed success github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_success
+	refute_output --partial "3.11"
+}
+
+@test "all-checks-gate: a later run whose jobs skip cannot hide an earlier failure" {
+	# e.g. synchronize failed, then a `labeled` run of the same workflow skipped
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed failure)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'test' completed failure github-actions 1)" \
+		"$(check 12 'test' completed skipped github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check test: failure"
+	assert_output --partial "workflow run CI: failure"
+}
+
+@test "all-checks-gate: a run cancelled by a newer run on another event is superseded" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled push)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success pull_request)"
+	poll 1 checks "$(check 11 'test' completed cancelled github-actions 1)" \
+		"$(check 12 'test' completed success github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_success
+}
+
 @test "all-checks-gate: same job name in two workflows is judged separately" {
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed failure)" \
 		"$(run_ 2 Docker .github/workflows/docker.yml completed success)"
@@ -298,6 +339,7 @@ status_() { # context state
 		"$(run_ 1 CI .github/workflows/ci.yml completed success)"
 	poll 1 checks "$(check 21 'gate / ✅ All Checks Passed' in_progress null github-actions 900)" \
 		"$(check 20 'gate / ✅ All Checks Passed' completed failure github-actions 800)" \
+		"$(check 23 'other job in the gate workflow' completed failure github-actions 900)" \
 		"$(check 22 '✅ All Checks Passed' completed failure)" \
 		"$(check 11 'quality / Lint' completed success github-actions 1)"
 
@@ -310,11 +352,27 @@ status_() { # context state
 @test "all-checks-gate: a workflow ref from another repository excludes only the own run id" {
 	export SELF_WORKFLOW_REF="other/repo/.github/workflows/all-checks-gate.yml@refs/heads/main"
 	poll 1 runs "$(run_ 900 'All Checks Gate' .github/workflows/all-checks-gate.yml in_progress null)" \
-		"$(run_ 2 'Other' .github/workflows/all-checks-gate.yml completed success)"
+		"$(run_ 2 'Other' .github/workflows/all-checks-gate.yml in_progress null)"
+	poll 2 runs "$(run_ 900 'All Checks Gate' .github/workflows/all-checks-gate.yml in_progress null)" \
+		"$(run_ 2 'Other' .github/workflows/all-checks-gate.yml completed failure)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	refute_output --partial "excluding own workflow"
+	assert_output --partial "waiting on 1: workflow run Other (in_progress)"
+	assert_output --partial "workflow run Other: failure"
+}
+
+@test "all-checks-gate: an ignored workflow's check runs are dropped with it" {
+	poll 1 runs "$(run_ 5 Nightly .github/workflows/nightly.yml completed failure)" \
+		"$(run_ 1 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'build' completed failure github-actions 5)" \
+		"$(check 12 'lint' completed success github-actions 1)"
+	export IGNORE_PATTERN='^Nightly$'
 
 	run bash "$SCRIPT"
 	assert_success
-	refute_output --partial "excluding own workflow"
+	assert_output --partial "All 1 other check(s) passed"
 }
 
 @test "all-checks-gate: a pending commit status keeps the gate waiting until it resolves" {
@@ -359,7 +417,7 @@ status_() { # context state
 }
 
 @test "all-checks-gate: ignore pattern alone releases a status that never finishes" {
-	poll 1 statuses "$(status_ 'renovate/stability-days' pending)"
+	poll 1 statuses "$(status_ 'renovate/stability-days' pending)" "$(status_ CodeRabbit success)"
 	export IGNORE_PATTERN='^renovate/stability-days$'
 
 	run bash "$SCRIPT"
@@ -388,10 +446,38 @@ status_() { # context state
 	assert_output --partial 'check a \| b: success'
 }
 
-@test "all-checks-gate: passes with a warning when nothing else ran" {
+@test "all-checks-gate: fails when nothing else ran" {
+	export GITHUB_EVENT_NAME=merge_group
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "No other checks found"
+	assert_output --partial "trigger on merge_group"
+	run cat "$GITHUB_OUTPUT"
+	assert_output --partial "status=failed"
+}
+
+@test "all-checks-gate: allow-empty passes with a warning when nothing else ran" {
+	export ALLOW_EMPTY=true
 	run bash "$SCRIPT"
 	assert_success
-	assert_output --partial "No other checks found"
+	assert_output --partial "nothing to gate (allow-empty)"
+}
+
+@test "all-checks-gate: fail-on-draft fails a draft PR at once" {
+	export FAIL_ON_DRAFT=true PR_DRAFT=true
+	poll 1 checks "$(check 11 'lint' completed success)"
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Draft PR: not gated"
+	run cat "$GH_CALLS"
+	assert_output ""
+}
+
+@test "all-checks-gate: drafts are gated normally without fail-on-draft" {
+	export PR_DRAFT=true
+	poll 1 checks "$(check 11 'lint' completed skipped)"
+	run bash "$SCRIPT"
+	assert_success
 }
 
 @test "all-checks-gate: retries failed API polls, then fails after MAX_API_ERRORS" {
@@ -422,7 +508,30 @@ status_() { # context state
 
 	run bash "$SCRIPT"
 	assert_success
-	assert_output --partial "API rate limit exhausted; waiting 301s for the reset"
+	assert_output --partial "API rate limit hit; waiting 301s"
+	refute_output --partial "API poll failed"
+}
+
+@test "all-checks-gate: a rate-limit reset in the past waits at least a second" {
+	mkdir -p "$FIXTURES/1" && touch "$FIXTURES/1/fail"
+	poll 2 checks "$(check 11 'lint' completed success)"
+	echo "0 900" >"$FIXTURES/rate_limit"
+	export MAX_API_ERRORS=1
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "API rate limit hit; waiting 1s"
+}
+
+@test "all-checks-gate: a secondary rate limit waits instead of counting an error" {
+	mkdir -p "$FIXTURES/1"
+	echo "gh: You have exceeded a secondary rate limit (HTTP 403)" >"$FIXTURES/1/fail"
+	poll 2 checks "$(check 11 'lint' completed success)"
+	export MAX_API_ERRORS=1
+
+	run bash "$SCRIPT"
+	assert_success
+	assert_output --partial "API rate limit hit; waiting 60s"
 	refute_output --partial "API poll failed"
 }
 
@@ -442,6 +551,15 @@ status_() { # context state
 	run bash "$SCRIPT"
 	assert_failure
 	assert_output --partial "IGNORE_PATTERN is not a valid regex"
+}
+
+@test "all-checks-gate: caller-supplied values cannot inject workflow commands" {
+	export IGNORE_PATTERN=$'^skip\n::error::injected'
+	poll 1 checks "$(check 11 'lint' completed success)"
+	run bash "$SCRIPT"
+	assert_success
+	refute_line "::error::injected"
+	assert_output --partial "ignoring checks matching: ^skip ::error::injected"
 }
 
 @test "all-checks-gate: rejects a malformed HEAD_SHA" {

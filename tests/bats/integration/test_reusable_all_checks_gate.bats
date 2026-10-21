@@ -79,6 +79,9 @@ statuses:read"
 		'SETTLE_SECONDS: ${{ inputs.settle-seconds }}' \
 		'POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}' \
 		'TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}' \
+		'ALLOW_EMPTY: ${{ inputs.allow-empty }}' \
+		'FAIL_ON_DRAFT: ${{ inputs.fail-on-draft }}' \
+		'PR_DRAFT: ${{ github.event.pull_request.draft || false }}' \
 		'timeout-minutes: ${{ inputs.timeout-minutes }}'; do
 		run grep -F "$pair" "$WORKFLOW"
 		assert_success

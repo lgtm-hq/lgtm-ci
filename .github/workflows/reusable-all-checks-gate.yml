@@ -67,6 +67,22 @@ name: Reusable All Checks Gate
         required: false
         type: string
         default: ""
+      allow-empty:
+        description: >-
+          Pass when no other check or status exists on the commit. Off by
+          default: in a merge queue whose other workflows do not trigger on
+          merge_group, a vacuous pass would merge unchecked
+        required: false
+        type: boolean
+        default: false
+      fail-on-draft:
+        description: >-
+          Fail at once on draft PRs, so a draft's result (often all skipped)
+          can never be read as a pass in the moments after ready_for_review,
+          which re-runs the gate
+        required: false
+        type: boolean
+        default: false
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -319,4 +335,7 @@ jobs:
           SETTLE_SECONDS: ${{ inputs.settle-seconds }}
           POLL_INTERVAL: ${{ inputs.poll-interval-seconds }}
           TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          ALLOW_EMPTY: ${{ inputs.allow-empty }}
+          FAIL_ON_DRAFT: ${{ inputs.fail-on-draft }}
+          PR_DRAFT: ${{ github.event.pull_request.draft || false }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/all-checks-gate.sh

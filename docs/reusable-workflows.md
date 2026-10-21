@@ -710,14 +710,17 @@ concluded `success`, `skipped` or `neutral`:
 
 - **Workflow runs** for the commit: a run that is not completed keeps the
   gate waiting (this covers jobs still waiting on `needs:`, which have no
-  check run yet). The newest run per workflow file and event counts; if it
-  concluded `failure`, `cancelled`, `timed_out`, `startup_failure` or
-  `action_required`, the gate fails.
-- **Check runs** from every app: any `failure`, `cancelled`, `timed_out`,
-  `action_required` or `stale` fails the gate. Re-runs and
-  concurrency-superseded runs of the same workflow collapse to the newest
-  check run, while jobs that share a name in different workflows (or on
-  `push` and `pull_request`) are judged separately.
+  check run yet). A run that concluded `failure`, `cancelled`, `timed_out`,
+  `startup_failure` or `action_required` fails the gate. An older run of a
+  workflow file that was cancelled while a newer run of the same file
+  exists was superseded (concurrency) and is dropped with its check runs;
+  any other older run still counts, so a later run (say on `labeled`) whose
+  jobs skip cannot hide an earlier failure.
+- **Check runs** from every app: anything other than `success`, `skipped`
+  or `neutral` (`failure`, `cancelled`, `timed_out`, `action_required`,
+  `stale`, `startup_failure`, or no conclusion) fails the gate. Actions check runs are
+  judged per workflow run and job name (the newest re-run attempt counts),
+  so jobs that share a name in different workflows are judged separately.
 - **Commit statuses**: `pending` (CodeRabbit, `renovate/stability-days`)
   counts as not finished; `failure` and `error` fail the gate.
 
@@ -759,6 +762,8 @@ jobs:
 | `settle-seconds` | `60` | Quiet period before the verdict |
 | `poll-interval-seconds` | `60` | Seconds between API polls |
 | `ignore-checks` | `""` | Regex (jq) of check, status or workflow names to skip |
+| `allow-empty` | `false` | Pass when no other check exists |
+| `fail-on-draft` | `false` | Fail draft PRs at once instead of gating them |
 | `head-sha` | `""` | Override the gated commit |
 
 The standard `egress-policy`, `egress-preset` (default `github-minimal`),
@@ -769,22 +774,25 @@ apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 Limitations:
 
 - **Request budget.** While a workflow run is in progress a poll costs one
-  request, otherwise three. `GITHUB_TOKEN` allows 1,000 requests per hour
-  per repository, shared by every workflow, so keep the poll interval at a
-  minute or more when many PRs run at once. A rate-limited poll waits for
-  the reset instead of failing.
+  request, otherwise three (more when a list passes 100 entries).
+  `GITHUB_TOKEN` allows 1,000 requests per hour per repository, shared by
+  every workflow, so keep the poll interval at a minute or more when many
+  PRs run at once. A rate-limited poll waits instead of failing.
 - **The verdict is final.** After re-running a failed check, or when a
   pending status resolves after the gate timed out, re-run the gate too.
   Statuses that can stay pending for hours (`renovate/stability-days`) or
   jobs waiting on an environment approval will time the gate out; list them
-  in `ignore-checks` if they are enforced elsewhere.
-- **Nothing to gate passes.** When no other check or status exists on the
-  commit after the settle period, the gate passes with a warning; check the
-  `head-sha` wiring and that the other workflows trigger on the same events.
+  in `ignore-checks` if they are enforced elsewhere. A workflow matched by
+  `ignore-checks` is dropped together with its check runs.
+- **Nothing to gate fails.** When no other check or status exists on the
+  commit after the settle period the gate fails, so a merge queue whose
+  workflows do not trigger on `merge_group` cannot merge unchecked. Set
+  `allow-empty: true` for a repository with no other CI.
 - **Same-SHA re-trigger window.** On `ready_for_review` or `reopened` the
   previous gate result for the same commit stays visible until the new run
-  registers its check (seconds). Drafts are gated like any PR (workflows
-  that skip on drafts report `skipped`).
+  registers its check (seconds). Drafts are gated like any PR, and
+  workflows that skip on drafts report `skipped`, so a draft's gate can be
+  green on nothing real; `fail-on-draft: true` makes it red instead.
 - **Trust model.** As with every `pull_request` check, a PR can edit the
   caller workflow (for example `ignore-checks: '.*'`). Protect
   `.github/workflows/` with CODEOWNERS review and pin the required check's
