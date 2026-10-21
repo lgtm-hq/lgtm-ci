@@ -15,10 +15,11 @@
 #     (queued, in_progress, waiting, pending, requested) keeps the gate
 #     waiting, which covers jobs whose check run does not exist yet because
 #     they wait on `needs:`. An older run of a workflow file that concluded
-#     cancelled while a newer run of the same file exists was superseded
-#     (concurrency) and is dropped with its check runs; every other run
-#     counts, so a later run (say on `labeled`) whose jobs skip cannot hide an
-#     earlier failure. A run that concluded failure, cancelled, timed_out,
+#     cancelled while a newer run of the same file exists that did real work
+#     (a check run that is not skipped) was superseded (concurrency) and is
+#     dropped with its check runs; every other run counts, so a later run (say
+#     on `labeled`) whose jobs all skip can hide neither an earlier failure nor
+#     an earlier cancellation. A run that concluded failure, cancelled, timed_out,
 #     startup_failure or action_required fails the gate even when it left no
 #     failed check run. Runs of the gate's own workflow file
 #     (SELF_WORKFLOW_REF), its own run (SELF_RUN_ID) and workflows matching
@@ -30,8 +31,10 @@
 #     are judged per check suite and name. Conclusions success, skipped and
 #     neutral pass; everything else (failure, cancelled, timed_out,
 #     action_required, stale, startup_failure, none) fails. A check run whose
-#     run is unknown is kept unless it is named SELF_CHECK_NAME or
-#     "<caller job> / SELF_CHECK_NAME".
+#     run is unknown is kept unless it is an Actions check run named
+#     SELF_CHECK_NAME or "<caller job> / SELF_CHECK_NAME". Any other job in the
+#     gate's own run fails the gate: the gate must live in its own workflow
+#     file, or the jobs it shares a file with would go ungated.
 #   - Commit statuses (latest per context): pending keeps the gate waiting,
 #     failure and error fail it, success passes.
 #   - Nothing else on the commit after the settle period fails the gate unless
@@ -39,9 +42,16 @@
 #     trigger on merge_group, a vacuous pass would merge unchecked.
 #
 # Request budget: while a workflow run is still in progress only the runs
-# list is fetched (one request per poll, more past 100 runs); check runs and
-# statuses are fetched once no run is pending. A rate-limited poll (primary
-# or secondary limit) waits instead of counting as an API error.
+# list is fetched (one request per poll, more past 100 runs), and while that
+# pending set stays unchanged the interval grows by half up to 4x
+# POLL_INTERVAL; check runs and statuses are fetched once no run is pending.
+# A rate-limited poll (primary or secondary limit) waits instead of counting
+# as an API error, so a persistent rate limit runs into the timeout rather
+# than MAX_API_ERRORS.
+#
+# Known limit: two jobs with the same display name in one workflow run are
+# indistinguishable from re-run attempts of one job, so only the newest
+# counts; the run's own conclusion still fails the gate when either failed.
 #
 # Environment variables:
 #   HEAD_SHA              - Commit to gate (required): the PR head SHA on
@@ -98,12 +108,12 @@ one_line() { printf '%s' "${1//[$'\r\n']/ }"; }
 : "${TIMEOUT_MINUTES:=}"
 : "${TIMEOUT_MARGIN_SECONDS:=180}"
 if [[ ! "$TIMEOUT_MARGIN_SECONDS" =~ ^[0-9]+$ ]]; then
-	echo "::error title=all-checks-gate::TIMEOUT_MARGIN_SECONDS must be a non-negative integer (got '${TIMEOUT_MARGIN_SECONDS}')"
+	echo "::error title=all-checks-gate::TIMEOUT_MARGIN_SECONDS must be a non-negative integer (got '$(one_line "$TIMEOUT_MARGIN_SECONDS")')"
 	exit 1
 fi
 if [[ -z "${TIMEOUT_SECONDS:-}" && -n "$TIMEOUT_MINUTES" ]]; then
 	if [[ ! "$TIMEOUT_MINUTES" =~ ^[0-9]+$ ]]; then
-		echo "::error title=all-checks-gate::TIMEOUT_MINUTES must be a non-negative integer (got '${TIMEOUT_MINUTES}')"
+		echo "::error title=all-checks-gate::TIMEOUT_MINUTES must be a non-negative integer (got '$(one_line "$TIMEOUT_MINUTES")')"
 		exit 1
 	fi
 	# Leave the job's setup steps and the verdict room inside the job timeout,
@@ -186,27 +196,38 @@ fetch_checks_and_statuses() {
 }
 
 # Shared jq prelude: exclusions of workflow runs and dropping of superseded
-# (cancelled, newer run of the same file exists) runs. $names are jq
-# variables, not shell.
+# runs (cancelled while a newer run of the same file that did real work, its
+# id in $real, exists). $names are jq variables, not shell.
 # shellcheck disable=SC2016
 readonly JQ_RUNS='
 	def ignored: ($pat != "") and test($pat);
-	def gated_runs: map(select((.id | tostring) != $self_run)
+	def ok: . == "success" or . == "skipped" or . == "neutral";
+	def gated_runs($real): map(select((.id | tostring) != $self_run)
 		| select($self_path == "" or .path != $self_path)
 		| select((.name // "") | ignored | not))
 		| group_by(.path)
-		| map((map(.id) | max) as $newest
-			| map(select(.id == $newest or .conclusion != "cancelled")))
-		| add // [];'
+		| map(. as $group
+			| map(. as $run
+				| select(.conclusion != "cancelled"
+					or ([$group[] | select(.id > $run.id)
+						| select((.id | tostring) as $id | $real | index([$id]) != null)]
+						| length == 0))))
+		| add // [];
+	def run_lists($runs):
+		{pending: [$runs[] | select(.status != "completed")
+			| "workflow run \(.name | clean) (\(.status))"],
+		failed: [$runs[] | select(.status == "completed")
+			| select((.conclusion // "none") | ok | not)
+			| "workflow run \(.name | clean): \(.conclusion // "none")"]};'
 
-# Pending workflow runs (after exclusions and dedupe), one per line.
-pending_runs() {
-	jq -r \
+# {pending, failed} from the workflow runs alone (after exclusions); used
+# while a run is still in progress, when check runs are not fetched.
+evaluate_runs() {
+	jq -c \
 		--arg self_path "$SELF_WORKFLOW_PATH" \
 		--arg self_run "$SELF_RUN_ID" \
 		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
-		gated_runs | .[] | select(.status != "completed")
-		| "workflow run \(.name | clean) (\(.status))"' "$WORK_DIR/runs.json"
+		run_lists(gated_runs([])) + {passed: [], misplaced: [], fingerprint: ""}' "$WORK_DIR/runs.json"
 }
 
 # Reduce a full snapshot to {pending, failed, passed, fingerprint}.
@@ -220,35 +241,38 @@ evaluate_snapshot() {
 		--arg self_run "$SELF_RUN_ID" \
 		--arg pat "$IGNORE_PATTERN" "${JQ_CLEAN}${JQ_RUNS}"'
 		def is_self: . == $self or endswith(" / " + $self);
-		def ok: . == "success" or . == "skipped" or . == "neutral";
 		def in_set($set): . as $x | $set | index([$x]) != null;
-		($runs[0] | map(.id | tostring)) as $known
-		| ($runs[0] | gated_runs) as $r
+		($checks[0]
+			| map(. + {run: ((.url | capture("/actions/runs/(?<run>[0-9]+)/") | .run) // "")})) as $all
+		# Runs that did real work: at least one check run that is not skipped.
+		| ([$all[] | select(.run != "" and .conclusion != "skipped") | .run] | unique) as $real
+		| ($runs[0] | map(.id | tostring)) as $known
+		| ($runs[0] | gated_runs($real)) as $r
 		| ($r | map(.id | tostring)) as $kept
-		| ($checks[0]
-			| map(. + {run: ((.url | capture("/actions/runs/(?<run>[0-9]+)/") | .run) // "")})
+		| ([$all[] | select($self_run != "" and .run == $self_run)
+			| select(.name | is_self | not) | .name | clean]) as $misplaced
+		| ($all
 			# A check run of a dropped run (own, ignored, superseded) goes with
 			# it; one whose run is unknown is kept unless it is this gate.
 			| map(select(if .run != "" and (.run | in_set($known))
 				then (.run | in_set($kept))
-				else (.name | is_self | not) end))
+				else ((.app == "github-actions" and (.name | is_self)) | not) end))
 			| map(select(.name | ignored | not)
 				| . + {key: (if .run != "" then ["run", .run, .name]
 					else [.app, (.suite | tostring), .name] end)})
 			| group_by(.key) | map(max_by(.id))) as $c
 		| ($statuses[0] | map(select(.context | ignored | not))) as $s
+		| run_lists($r) as $rl
 		| {
+			misplaced: $misplaced,
 			pending: (
-				[$r[] | select(.status != "completed")
-					| "workflow run \(.name | clean) (\(.status))"]
+				$rl.pending
 				+ [$c[] | select(.status != "completed")
 					| "check \(.name | clean) (\(.status))"]
 				+ [$s[] | select(.state == "pending")
 					| "status \(.context | clean) (pending)"]),
 			failed: (
-				[$r[] | select(.status == "completed")
-					| select((.conclusion // "none") | ok | not)
-					| "workflow run \(.name | clean): \(.conclusion // "none")"]
+				$rl.failed
 				+ [$c[] | select(.status == "completed")
 					| select((.conclusion // "none") | ok | not)
 					| "check \(.name | clean): \(.conclusion // "none")"]
@@ -281,7 +305,8 @@ rate_limit_wait() {
 }
 
 # Secondary rate limits answer 403/429 with a message rather than an
-# exhausted counter; gh prints it to stderr.
+# exhausted counter; gh prints it to stderr. The pattern also matches primary
+# limit messages, which only means a 60s wait instead of the exact reset.
 secondary_rate_limited() {
 	grep -qiE 'rate limit|retry-after|abuse' "$WORK_DIR/gh.err" 2>/dev/null
 }
@@ -345,12 +370,20 @@ quiet_fp=""
 last_eval='{"pending":[],"failed":[],"passed":[],"fingerprint":""}'
 last_report=""
 
+# Poll interval while workflow runs are pending: back to POLL_INTERVAL when
+# the pending set changes, else grows by half up to 4x POLL_INTERVAL.
+pending_interval="$POLL_INTERVAL"
+
 report_pending() {
 	local count="$1" report="$2" t="$3"
 	quiet_since=""
 	if [[ "$report" != "$last_report" ]]; then
 		echo "[$((t - start))s] waiting on ${count}: ${report}"
 		last_report="$report"
+		pending_interval="$POLL_INTERVAL"
+	else
+		pending_interval=$((pending_interval + pending_interval / 2))
+		((pending_interval <= POLL_INTERVAL * 4)) || pending_interval=$((POLL_INTERVAL * 4))
 	fi
 }
 
@@ -358,16 +391,22 @@ while :; do
 	sleep_for="$POLL_INTERVAL"
 	poll_ok=0
 	: >"$WORK_DIR/gh.err"
-	if fetch_runs && runs_pending="$(pending_runs)"; then
-		if [[ -n "$runs_pending" ]]; then
+	if fetch_runs && runs_eval="$(evaluate_runs)"; then
+		if (($(jq '.pending | length' <<<"$runs_eval") > 0)); then
 			# Still running: skip the check-run and status requests this poll.
 			poll_ok=1
-			last_eval="$(jq -Rn '{pending: [inputs], failed: [], passed: [], fingerprint: ""}' <<<"$runs_pending")"
+			last_eval="$runs_eval"
 			report_pending "$(jq '.pending | length' <<<"$last_eval")" \
 				"$(jq -r '.pending | join("; ")' <<<"$last_eval")" "$(now)"
+			sleep_for="$pending_interval"
 		elif fetch_checks_and_statuses && eval_json="$(evaluate_snapshot)"; then
 			poll_ok=1
 			last_eval="$eval_json"
+			if (($(jq '.misplaced | length' <<<"$eval_json") > 0)); then
+				echo "::error title=all-checks-gate::The gate shares its workflow run with other jobs ($(jq -r '.misplaced | join(", ")' <<<"$eval_json")); call it from its own workflow file, or those jobs go ungated"
+				write_outputs failed 1
+				exit 1
+			fi
 			fp="$(jq -r .fingerprint <<<"$eval_json")"
 			pending_count="$(jq '.pending | length' <<<"$eval_json")"
 			t="$(now)"

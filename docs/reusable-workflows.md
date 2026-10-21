@@ -712,10 +712,11 @@ concluded `success`, `skipped` or `neutral`:
   gate waiting (this covers jobs still waiting on `needs:`, which have no
   check run yet). A run that concluded `failure`, `cancelled`, `timed_out`,
   `startup_failure` or `action_required` fails the gate. An older run of a
-  workflow file that was cancelled while a newer run of the same file
-  exists was superseded (concurrency) and is dropped with its check runs;
-  any other older run still counts, so a later run (say on `labeled`) whose
-  jobs skip cannot hide an earlier failure.
+  workflow file that was cancelled while a newer run of the same file did
+  real work (a check run that is not skipped) was superseded (concurrency)
+  and is dropped with its check runs; any other older run still counts, so
+  a later run (say on `labeled`) whose jobs all skip can hide neither an
+  earlier failure nor an earlier cancellation.
 - **Check runs** from every app: anything other than `success`, `skipped`
   or `neutral` (`failure`, `cancelled`, `timed_out`, `action_required`,
   `stale`, `startup_failure`, or no conclusion) fails the gate. Actions check runs are
@@ -728,7 +729,8 @@ It gates the PR head SHA on `pull_request` and `merge_group.head_sha` on
 `merge_group`, needs no secrets (read-only `GITHUB_TOKEN`, so fork PRs
 work) and has a static job name. Put it in its **own** workflow file, one
 per repository: runs of the calling workflow are excluded so a gate never
-waits on itself or on an older gate run for the same commit. Require the
+waits on itself or on an older gate run for the same commit; a gate that
+shares its workflow run with other jobs fails and says so. Require the
 context `gate / ✅ All Checks Passed` (caller job id `gate`), with GitHub
 Actions as its expected source, in the ruleset.
 
@@ -774,16 +776,31 @@ apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 Limitations:
 
 - **Request budget.** While a workflow run is in progress a poll costs one
-  request, otherwise three (more when a list passes 100 entries).
-  `GITHUB_TOKEN` allows 1,000 requests per hour per repository, shared by
-  every workflow, so keep the poll interval at a minute or more when many
-  PRs run at once. A rate-limited poll waits instead of failing.
+  request (the interval grows to 4x while nothing changes), otherwise three
+  (more when a list passes 100 entries). `GITHUB_TOKEN` allows 1,000
+  requests per hour per repository, shared by every workflow: at the
+  default 60 s each waiting gate uses roughly 15–60 requests an hour, so
+  raise `poll-interval-seconds` for repositories that run ten or more PRs
+  at once. A rate-limited poll waits instead of failing.
+- **`pull_request_target` workflows** run on the base commit, not the PR
+  head, so the gate does not see them.
+- **Duplicate job names in one run** cannot be told apart from re-run
+  attempts, so only the newest counts; the run's own conclusion still fails
+  the gate.
 - **The verdict is final.** After re-running a failed check, or when a
   pending status resolves after the gate timed out, re-run the gate too.
+  A failed run stays failed even when a later run of the same workflow on
+  the same commit is green (for example after close and reopen): re-run the
+  failed run itself.
   Statuses that can stay pending for hours (`renovate/stability-days`) or
   jobs waiting on an environment approval will time the gate out; list them
-  in `ignore-checks` if they are enforced elsewhere. A workflow matched by
-  `ignore-checks` is dropped together with its check runs.
+  in `ignore-checks` if they are enforced elsewhere. For a job, match its
+  workflow's name: a matched workflow is dropped together with its check
+  runs (matching only the job still waits for its workflow run). When
+  `reusable-auto-rerun-on-infra-failure` re-runs failed jobs, raise
+  `settle-seconds` above its start-up delay (a few minutes) so the gate
+  sees the re-run. Add `labeled` to the trigger types if workflows start on
+  labels.
 - **Nothing to gate fails.** When no other check or status exists on the
   commit after the settle period the gate fails, so a merge queue whose
   workflows do not trigger on `merge_group` cannot merge unchecked. Set

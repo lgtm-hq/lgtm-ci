@@ -199,6 +199,20 @@ status_() { # context state
 	assert_output "4"
 }
 
+@test "all-checks-gate: backs off while the same runs stay pending, up to 4x the interval" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml in_progress null)"
+	poll 7 runs "$(run_ 1 CI .github/workflows/ci.yml completed success)"
+	poll 7 checks "$(check 11 'lint' completed success github-actions 1)"
+	export TIMEOUT_SECONDS=3000
+
+	run bash "$SCRIPT"
+	assert_success
+	# polls 1-6 pending: sleeps 30, 45, 67, 100, 120 (capped), 120
+	run cat "$CLOCK_FILE"
+	# 1000 + 30 + 45 + 67 + 100 + 120 + 120, then settle: 30 + 30
+	assert_output "1542"
+}
+
 @test "all-checks-gate: waits for a workflow run whose jobs have no check run yet" {
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml in_progress null)"
 	poll 1 checks "$(check 11 'build / Build' completed success github-actions 1)"
@@ -272,6 +286,19 @@ status_() { # context state
 	assert_output --partial "workflow run CI: failure"
 }
 
+@test "all-checks-gate: a cancelled run is not superseded by a newer run whose jobs all skip" {
+	# e.g. a `labeled` run cancels the real `synchronize` run and skips its jobs
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled)" \
+		"$(run_ 2 CI .github/workflows/ci.yml completed success)"
+	poll 1 checks "$(check 11 'test' completed cancelled github-actions 1)" \
+		"$(check 12 'test' completed skipped github-actions 2)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "workflow run CI: cancelled"
+	assert_output --partial "check test: cancelled"
+}
+
 @test "all-checks-gate: a run cancelled by a newer run on another event is superseded" {
 	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed cancelled push)" \
 		"$(run_ 2 CI .github/workflows/ci.yml completed success pull_request)"
@@ -339,7 +366,7 @@ status_() { # context state
 		"$(run_ 1 CI .github/workflows/ci.yml completed success)"
 	poll 1 checks "$(check 21 'gate / ✅ All Checks Passed' in_progress null github-actions 900)" \
 		"$(check 20 'gate / ✅ All Checks Passed' completed failure github-actions 800)" \
-		"$(check 23 'other job in the gate workflow' completed failure github-actions 900)" \
+		"$(check 23 'job of an older gate run' completed failure github-actions 800)" \
 		"$(check 22 '✅ All Checks Passed' completed failure)" \
 		"$(check 11 'quality / Lint' completed success github-actions 1)"
 
@@ -347,6 +374,26 @@ status_() { # context state
 	assert_success
 	assert_output --partial "excluding own workflow: .github/workflows/all-checks-gate.yml"
 	assert_output --partial "All 1 other check(s) passed"
+}
+
+@test "all-checks-gate: fails when the gate shares its workflow run with other jobs" {
+	poll 1 runs "$(run_ 900 CI .github/workflows/all-checks-gate.yml in_progress null)"
+	poll 1 checks "$(check 21 'gate / ✅ All Checks Passed' in_progress null github-actions 900)" \
+		"$(check 22 'test / Tests' completed failure github-actions 900)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "shares its workflow run with other jobs (test / Tests)"
+}
+
+@test "all-checks-gate: keeps check runs of unknown runs and third-party checks named like the gate" {
+	poll 1 checks "$(check 11 'orphan' completed failure github-actions 777)" \
+		"$(check 12 'x / ✅ All Checks Passed' completed failure other-app 0 55)"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check orphan: failure"
+	assert_output --partial "check x / ✅ All Checks Passed: failure"
 }
 
 @test "all-checks-gate: a workflow ref from another repository excludes only the own run id" {
@@ -391,6 +438,18 @@ status_() { # context state
 	assert_failure
 	assert_output --partial "status ci/legacy: failure"
 	assert_output --partial "status ci/other: error"
+}
+
+@test "all-checks-gate: a timeout while a run is pending still lists runs that already failed" {
+	poll 1 runs "$(run_ 1 Slow .github/workflows/slow.yml in_progress null)" \
+		"$(run_ 2 Lint .github/workflows/lint.yml completed failure)"
+	export TIMEOUT_SECONDS=60
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "Timed out after 60s"
+	assert_output --partial "workflow run Slow (in_progress)"
+	assert_output --partial "workflow run Lint: failure"
 }
 
 @test "all-checks-gate: times out and names what is still pending" {
@@ -544,6 +603,16 @@ status_() { # context state
 	assert_failure
 	assert_output --partial "timeout 120s"
 	assert_output --partial "Timed out after 120s"
+}
+
+@test "all-checks-gate: the wait budget derived from TIMEOUT_MINUTES has a 60s floor" {
+	poll 1 statuses "$(status_ CodeRabbit pending)"
+	unset TIMEOUT_SECONDS
+	export TIMEOUT_MINUTES=2
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "timeout 60s"
 }
 
 @test "all-checks-gate: rejects an invalid ignore regex" {
