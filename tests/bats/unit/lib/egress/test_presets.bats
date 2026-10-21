@@ -348,6 +348,9 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'fulcio.sigstore.dev:443'
 	assert_output --partial 'oauth2.sigstore.dev:443'
 	assert_output --partial 'sigstore-tuf-root.storage.googleapis.com:443'
+	# Inherited from pypi: setup-uv download hosts.
+	assert_line 'releases.astral.sh:443'
+	assert_line 'release-assets.githubusercontent.com:443'
 }
 
 @test "egress preset npm-publish includes the artifact service for the built tarball" {
