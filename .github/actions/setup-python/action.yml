@@ -14,7 +14,7 @@ inputs:
     description: 'uv version to install (e.g., "0.12.22")'
     required: false
     # renovate: datasource=pypi depName=uv
-    default: "0.13.0"
+    default: "0.13.4"
   cache:
     description: "Enable uv cache"
     required: false
