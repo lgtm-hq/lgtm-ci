@@ -7,7 +7,7 @@ import yaml
 WORKFLOWS = Path(__file__).resolve().parents[2] / ".github" / "workflows"
 
 
-def test_gate_covers_other_workflows_pull_request_events():
+def test_gate_covers_other_workflows_pull_request_events() -> None:
     """A later label/title event must invalidate the previous gate result."""
     gate = yaml.safe_load((WORKFLOWS / "all-checks-gate.yml").read_text())
     gate_events = set(gate["on"]["pull_request"]["types"])
