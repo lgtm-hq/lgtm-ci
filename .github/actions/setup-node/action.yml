@@ -14,7 +14,7 @@ inputs:
     description: 'Bun version to install (e.g., "1.4.2")'
     required: false
     # renovate: datasource=npm depName=bun
-    default: "1.4.2"
+    default: "1.4.3"
   cache:
     description: "Enable bun cache"
     required: false
