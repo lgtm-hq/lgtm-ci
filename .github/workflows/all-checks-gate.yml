@@ -1,15 +1,15 @@
 ---
 name: PR - All Checks Gate
 # One required check, `gate / ✅ All Checks Passed`, that passes only when
-# every other check on the PR head (or merge-queue head) finished success,
-# skipped or neutral, so native auto-merge and the merge queue wait for all
-# checks, not just the required ones. Keep it in its own workflow file: runs
-# of this file are excluded so the gate never waits on itself.
+# every other observed check on the head finished success, skipped or neutral
+# after a bounded quiet period. Checks started after it exits need a new run.
+# Keep this in its own workflow file: runs of this file are excluded so the
+# gate never waits on itself.
 
 'on':
   pull_request:
-    # `edited` too: PR - Title Validation re-runs on title edits.
-    types: [opened, edited, synchronize, reopened, ready_for_review]
+    # Title edits and external-canary label changes must refresh the gate.
+    types: [opened, edited, synchronize, reopened, ready_for_review, labeled]
   merge_group:
 
 permissions: {}
