@@ -136,8 +136,24 @@ def test_refuses_to_replace_an_existing_login(
     assert_that(auth.read_text()).is_equal_to("existing")
 
 
+@pytest.fixture(name="codex_cli")
+def make_codex_cli(
+    load_script: Callable[[str], ModuleType],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> ModuleType:
+    """Prepare the CLI with an isolated session destination."""
+    module = load_script("scripts/ci/actions/prepare_codex_session.py")
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        ["prepare_codex_session.py", str(tmp_path)],
+    )
+    return module
+
+
 @pytest.mark.parametrize(
-    ("failure", "reason"),
+    "failure_case",
     [
         ("invalid-json", "Invalid base64 session JSON"),
         ("api-conflict", "Subscription session conflicts with API authentication"),
@@ -145,21 +161,18 @@ def test_refuses_to_replace_an_existing_login(
     ],
 )
 def test_cli_reports_safe_validation_reasons_without_credential_material(
-    load_script: Callable[[str], ModuleType],
-    tmp_path: Path,
+    codex_cli: ModuleType,
     session_environment: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
     capsys: pytest.CaptureFixture[str],
-    failure: str,
-    reason: str,
+    failure_case: tuple[str, str],
 ) -> None:
     """Diagnostics identify validation failures without printing secrets or paths."""
-    module = load_script("scripts/ci/actions/prepare_codex_session.py")
+    failure, reason = failure_case
     for key in ("CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
         monkeypatch.delenv(key, raising=False)
     for key, value in session_environment.items():
         monkeypatch.setenv(key, value)
-    destination = tmp_path
     if failure == "invalid-json":
         monkeypatch.setenv(
             "CODEX_AUTH_JSON",
@@ -168,13 +181,13 @@ def test_cli_reports_safe_validation_reasons_without_credential_material(
     elif failure == "api-conflict":
         monkeypatch.setenv("CODEX_API_KEY", "sensitive-api-key")
     else:
-        destination = tmp_path / "sensitive-filesystem-path"
-    monkeypatch.setattr(
-        module.sys,
-        "argv",
-        ["prepare_codex_session.py", str(destination)],
-    )
-    assert_that(module.main()).is_equal_to(2)
+        destination = Path(codex_cli.sys.argv[1]) / "sensitive-filesystem-path"
+        monkeypatch.setattr(
+            codex_cli.sys,
+            "argv",
+            [codex_cli.sys.argv[0], str(destination)],
+        )
+    assert_that(codex_cli.main()).is_equal_to(2)
     captured = capsys.readouterr()
     assert_that(captured.out).is_empty()
     assert_that(captured.err).contains(reason).does_not_contain(

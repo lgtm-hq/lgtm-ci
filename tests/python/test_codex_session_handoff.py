@@ -90,9 +90,12 @@ def test_pinned_lintro_passes_restored_subscription_to_codex(
     for key in credential_keys:
         monkeypatch.delenv(key, raising=False)
     assert_that(uses_subscription_session()).is_true()
-    provider = OpenAIProvider(model="gpt-6.1-sol", transport=AITransport.CLI)
-    completion = provider.complete("Offline protocol smoke", repo_root=str(tmp_path))
-    response = asyncio.run(completion)
+    response = asyncio.run(
+        OpenAIProvider(model="gpt-6.1-sol", transport=AITransport.CLI).complete(
+            "Offline protocol smoke",
+            repo_root=str(tmp_path),
+        ),
+    )
     assert_that(response.content).is_equal_to("offline subscription handoff passed")
     record = json.loads(record_file.read_text())
     assert_that(record["subscription"]).is_equal_to("chatgpt")
