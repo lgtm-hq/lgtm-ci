@@ -99,4 +99,6 @@ def test_pinned_lintro_passes_restored_subscription_to_codex(
     assert_that(response.content).is_equal_to("offline subscription handoff passed")
     record = json.loads(record_file.read_text())
     assert_that(record["subscription"]).is_equal_to("chatgpt")
-    assert_that(record["args"]).contains("--model", "gpt-6.1-sol")
+    assert_that(record["args"][record["args"].index("--model") + 1]).is_equal_to(
+        "gpt-6.1-sol",
+    )
