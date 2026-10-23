@@ -34,9 +34,8 @@ def restore_session(*, destination: Path, environment: Mapping[str, str]) -> Non
     if any(environment.get(name) for name in competing_auth):
         raise ValueError("Subscription session conflicts with API authentication")
     try:
-        payload = json.loads(
-            base64.b64decode(environment.get("CODEX_AUTH_JSON", ""), validate=True),
-        )
+        encoded = "".join(environment.get("CODEX_AUTH_JSON", "").split())
+        payload = json.loads(base64.b64decode(encoded, validate=True))
     except (ValueError, binascii.Error, UnicodeError) as error:
         raise ValueError("Invalid base64 session JSON") from error
     if not isinstance(payload, dict) or payload.get("OPENAI_API_KEY"):

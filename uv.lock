@@ -267,6 +267,7 @@ dev = [
 ]
 test = [
     { name = "assertpy" },
+    { name = "lintro" },
     { name = "pytest" },
     { name = "pyyaml" },
 ]
@@ -277,6 +278,7 @@ requires-dist = [
     { name = "bandit", marker = "extra == 'dev'", specifier = ">=1.9.4" },
     { name = "black", marker = "extra == 'dev'", specifier = ">=25.0.0" },
     { name = "lintro", marker = "extra == 'dev'", specifier = "==0.173.1" },
+    { name = "lintro", marker = "extra == 'test'" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.19.1" },
     { name = "pytest", marker = "extra == 'test'", specifier = ">=8.4.0" },
     { name = "pyyaml", marker = "extra == 'test'", specifier = ">=6.0.2" },

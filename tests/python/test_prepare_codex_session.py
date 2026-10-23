@@ -44,12 +44,17 @@ def make_session_environment() -> dict[str, str]:
     }
 
 
+@pytest.mark.parametrize("wrapped", [False, True], ids=["unwrapped", "wrapped"])
 def test_restores_private_session_without_inheriting_user_config(
     load_script: Callable[[str], ModuleType],
     tmp_path: Path,
     session_environment: dict[str, str],
+    wrapped: bool,
 ) -> None:
-    """Restore the exact session with private modes and subscription enforcement."""
+    """Restore wrapped or plain sessions with private subscription configuration."""
+    if wrapped:
+        raw = base64.b64decode(session_environment["CODEX_AUTH_JSON"])
+        session_environment["CODEX_AUTH_JSON"] = base64.encodebytes(raw).decode()
     module = load_script("scripts/ci/actions/prepare-codex-session.py")
     module.restore_session(destination=tmp_path, environment=session_environment)
     auth = tmp_path / "auth.json"

@@ -2457,8 +2457,8 @@ error. Inputs map onto that env overlay surface; there is no workflow fallback.
 **Caller snippet** (same shape for every provider; listed alphabetically, none
 recommended). Enumerate the secrets explicitly — least privilege: `secrets:
 inherit` would hand the reusable the caller's entire secret set, while it
-only ever declares the seven below — the two App secrets reach only the
-credential-guard and token-minting steps, and of the five provider
+only ever declares the eight below — the two App secrets reach only the
+credential-guard and token-minting steps, and of the six provider
 credentials the run step receives only the one for the resolved
 `(provider, transport)` pair:
 
@@ -2482,7 +2482,8 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
-      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
+      # Subscription alternative: omit CODEX_API_KEY when using this secret.
+      # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
       tooling-ref: "<sha>"
@@ -2508,8 +2509,10 @@ ChatGPT `auth.json` (the same secret format used by py-lintro). Do not also supp
 `CODEX_API_KEY` or `OPENAI_API_KEY`. The workflow validates the session, restores
 it in a private temporary `CODEX_HOME`, forces first-party ChatGPT authentication,
 unsets the encoded secret before invoking lintro, and removes the session on exit.
-The review never installs or executes PR code. An expired session or exhausted
-allowance fails the review; it does not fall back to API credentials. CLI egress
+Both wrapped and unwrapped base64 output are accepted. The review never installs
+or executes PR code. An expired session or exhausted allowance produces no review:
+with `blocking: true` the job fails; non-blocking callers receive a no-review notice.
+Neither mode falls back to API credentials. CLI egress
 includes `auth.openai.com` and `chatgpt.com` for session refresh and model requests.
 
 `LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)

@@ -40,7 +40,9 @@ dev = [
 # pytest suite for the standalone scripts under scripts/ci (tests/python).
 # Separate from `dev` so CI installs only this; locally use
 # `uv sync --extra dev --extra test`.
-test = ["pytest>=8.4.0", "assertpy>=1.1", "pyyaml>=6.0.2"]
+# lintro's version is constrained by dev above and resolved once in uv.lock.
+# The provider handoff test exercises the real installed CLI transport offline.
+test = ["pytest>=8.4.0", "assertpy>=1.1", "pyyaml>=6.0.2", "lintro"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests/python"]
