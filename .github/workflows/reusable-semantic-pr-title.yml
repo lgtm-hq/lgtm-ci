@@ -11,6 +11,11 @@ name: Reusable Semantic PR Title
 on:
   workflow_call:
     inputs:
+      runner-image:
+        description: "GitHub-hosted runner OS label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
       types:
         description: >-
           Allowed conventional commit types (newline-delimited; legacy
@@ -215,7 +220,7 @@ env:
 jobs:
   semantic-title:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # Do NOT skip this job on merge_group: GitHub cannot evaluate the dynamic
     # name of a skipped job, so its check would report as "inputs.job-name"

@@ -1047,6 +1047,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      runner-image: ${{ inputs.runner-image }}
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
       # The comment is rendered from this call's results.v1 artifacts, the

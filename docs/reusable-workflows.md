@@ -371,8 +371,9 @@ jobs:
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
-[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables
-and the gem publish workflow do not expose `runner-image`;
+[Docker workflow inputs](#docker-workflow-inputs) below. The labeler and
+semantic PR title reusables also accept `runner-image`. The dependency review,
+CodeQL, Scorecard and gem publish reusables do not expose `runner-image`;
 `reusable-publish-npm-set.yml` and the deprecated `reusable-publish-npm.yml`
 wrapper (which forwards it) do, GitHub-hosted labels only, since npm
 provenance needs a hosted runner; see
@@ -2321,6 +2322,7 @@ check-only adopters.
 
 | Input                  | Default              | Notes                                      |
 | ---------------------- | -------------------- | ------------------------------------------ |
+| `runner-image`        | `ubuntu-24.04`       | Runner label for validation and reporting  |
 | `post-failure-comment` | `true`               | Opt out for check-only workflows           |
 | `comment-marker`       | `semantic-pr-title`  | Upsert marker for failure comments         |
 | `max-length`           | `0` (no limit)       | Optional title length cap                  |
@@ -2457,8 +2459,8 @@ error. Inputs map onto that env overlay surface; there is no workflow fallback.
 **Caller snippet** (same shape for every provider; listed alphabetically, none
 recommended). Enumerate the secrets explicitly — least privilege: `secrets:
 inherit` would hand the reusable the caller's entire secret set, while it
-only ever declares the seven below — the two App secrets reach only the
-credential-guard and token-minting steps, and of the five provider
+only ever declares the eight below — the two App secrets reach only the
+credential-guard and token-minting steps, and of the six provider
 credentials the run step receives only the one for the resolved
 `(provider, transport)` pair:
 
@@ -2482,6 +2484,8 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+      # Subscription alternative: omit CODEX_API_KEY when using this secret.
+      # CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
       tooling-ref: "<sha>"
@@ -2490,17 +2494,41 @@ jobs:
       # then repo lintro config
 ```
 
-`secrets: inherit` also works (all seven are org-wide, so it is the
-zero-maintenance shape) but is discouraged: it grants the called workflow
-access to every secret the caller can see, not just these seven.
+`secrets: inherit` also works but is discouraged: it grants the called workflow
+access to every secret the caller can see, not just these eight. When both
+`CODEX_AUTH_JSON` and `CODEX_API_KEY` are visible to an openai/cli caller using
+inheritance, session validation fails before review. Keep those credentials
+mutually exclusive or enumerate only the chosen credential explicitly.
 
 | provider | transport | binary | credential (env) |
 | -------- | --------- | ------ | ---------------- |
 | anthropic | cli | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | anthropic | api | — | `ANTHROPIC_API_KEY` |
 | cursor | cli | `agent` | `CURSOR_API_KEY` |
-| openai | cli | `codex` | `CODEX_API_KEY` |
+| openai | cli | `codex` | `CODEX_API_KEY` or subscription `CODEX_AUTH_JSON` |
 | openai | api | — | `OPENAI_API_KEY` |
+
+For subscription-only OpenAI CLI review, supply `CODEX_AUTH_JSON` as base64 of a
+ChatGPT `auth.json` (the same secret format used by py-lintro). Do not also supply
+`CODEX_API_KEY`. `OPENAI_API_KEY` is forwarded only for API transport and does
+not reach the CLI review step. The workflow validates the session, restores
+it in a private temporary `CODEX_HOME`, forces first-party ChatGPT authentication,
+unsets the encoded secret before invoking lintro, and removes the session on exit.
+Both wrapped and unwrapped base64 output are accepted. An undecodable, malformed
+or non-ChatGPT session, or a competing API credential, fails validation before
+review and fails the job regardless of `blocking`. The review never installs or
+executes PR code. After review starts, failures that lintro reports as no review
+(exit 2), such as an expired session or exhausted allowance, follow `blocking`:
+with `blocking: true` the job fails; non-blocking callers receive a no-review notice.
+Neither mode falls back to API credentials. CLI egress
+includes `auth.openai.com` and `chatgpt.com` for session refresh and model requests.
+
+`CODEX_AUTH_JSON` is a caller-managed session snapshot. Any credentials refreshed
+inside the temporary home are deleted on exit and are never written back to the
+GitHub secret. Do not assume that a snapshot remains reusable after refresh-token
+rotation, expiration or revocation. If later reviews fail authentication, renew
+the subscription login and replace the encoded secret privately. The workflow
+requires no secret-write permission and never switches to API billing.
 
 `LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)
 and mint the posting token. That token is in scope **only** for the review
@@ -2928,6 +2956,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      runner-image: ubuntu-26.04
       egress-preset: github-minimal
       # Optional: override types (newline-delimited; CSV is normalized)
       # types: |

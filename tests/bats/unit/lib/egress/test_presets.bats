@@ -214,11 +214,15 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'api.openai.com:443'
 	refute_output --partial 'nodejs.org'
 	refute_output --partial 'registry.npmjs.org'
+	refute_output --partial 'auth.openai.com'
+	refute_output --partial 'chatgpt.com'
 	run bash -c "source '$PRESETS' && egress_ai_review_provider_endpoints openai cli"
 	assert_success
 	assert_output --partial 'api.openai.com:443'
 	assert_output --partial 'nodejs.org:443'
 	assert_output --partial 'registry.npmjs.org:443'
+	assert_output --partial 'auth.openai.com:443'
+	assert_output --partial 'chatgpt.com:443'
 }
 
 @test "egress_ai_review_provider_endpoints: cursor cli lists the full shard set" {

@@ -53,6 +53,8 @@
 #   VENV_DIR           Scratch venv (default: $RUNNER_TEMP/ai-review-venv).
 #   LINTRO_BIN         Test hook: use this binary instead of installing.
 #   LINTRO_AI_*        Pass-through overlays (set by the workflow).
+#   CODEX_AUTH_JSON    Optional base64 ChatGPT session; rejects API credentials.
+#                      Restored only for the review, then removed on exit.
 #   LINTRO_REVIEW_STATE_DIR  Coverage artifact directory (default:
 #                            ai-review-state).
 #   JOB_TIMEOUT_MINUTES      Job cap. The review is bounded to what remains
@@ -287,6 +289,9 @@ if [[ "$STEP" == "run" ]]; then
 	: "${PR_NUMBER:?PR_NUMBER is required}"
 
 	blocking="${BLOCKING:-false}"
+	# Keep the session out of trusted install subprocess environments as well.
+	codex_auth_json="${CODEX_AUTH_JSON:-}"
+	unset CODEX_AUTH_JSON
 
 	# Size gate before any install or spend: the model will not finish a
 	# diff this large inside the bound anyway (#1098). Opt-in via input;
@@ -328,7 +333,16 @@ if [[ "$STEP" == "run" ]]; then
 	out_file="$(mktemp)"
 	err_file="$(mktemp)"
 	wrap_file="$(mktemp)"
-	trap 'rm -f "$out_file" "$err_file" "$wrap_file"' EXIT
+	codex_home=""
+	trap 'rm -f "$out_file" "$err_file" "$wrap_file"; if [[ -n "$codex_home" ]]; then rm -rf "$codex_home"; fi' EXIT
+	trap 'exit 143' TERM
+	trap 'exit 130' INT
+	if [[ -n "$codex_auth_json" ]]; then
+		codex_home="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lintro-codex.XXXXXX")"
+		CODEX_AUTH_JSON="$codex_auth_json" python3 "$SCRIPT_DIR/prepare_codex_session.py" "$codex_home"
+		unset codex_auth_json
+		export CODEX_HOME="$codex_home"
+	fi
 
 	# Bounded below the job cap so the step — not the runner — ends a review
 	# that will not finish, and this script maps the result (#1098). A job-

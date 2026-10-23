@@ -179,8 +179,11 @@ on:
       OPENAI_API_KEY:
         description: "openai + api credential"
         required: false
+      CODEX_AUTH_JSON:
+        description: "openai + cli subscription: base64 ChatGPT auth.json (exclusive with API keys)"
+        required: false
       CODEX_API_KEY:
-        description: "openai + cli credential"
+        description: "openai + cli API credential (exclusive with CODEX_AUTH_JSON)"
         required: false
       CURSOR_API_KEY:
         description: "cursor + cli credential"
@@ -362,6 +365,8 @@ jobs:
             inputs.allowed-endpoints) }}
             ${{ env.AI_REVIEW_PROVIDER == 'anthropic' && 'api.anthropic.com:443' || '' }}
             ${{ env.AI_REVIEW_PROVIDER == 'openai' && 'api.openai.com:443' || '' }}
+            ${{ env.AI_REVIEW_PROVIDER == 'openai' && (env.AI_REVIEW_TRANSPORT == 'cli'
+            || env.AI_REVIEW_TRANSPORT == '') && 'auth.openai.com:443 chatgpt.com:443' || '' }}
             ${{ env.AI_REVIEW_PROVIDER == 'cursor' && env.AI_REVIEW_CURSOR_EGRESS || '' }}
             ${{ env.AI_REVIEW_NPM_EGRESS }}
       - name: Fail on unknown egress-preset
@@ -530,8 +535,8 @@ jobs:
           # so consuming repos need no ai block in their lintro config.
           LINTRO_AI_REVIEW: "1"
           LINTRO_REVIEW_STATE_DIR: ai-review-state
-          LINTRO_AI_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
-          LINTRO_AI_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
+          LINTRO_AI_PROVIDER: ${{ steps.resolve.outputs.provider }}
+          LINTRO_AI_TRANSPORT: ${{ steps.resolve.outputs.transport }}
           LINTRO_AI_MODEL: ${{ inputs.model || vars.LINTRO_AI_MODEL }}
           LINTRO_AI_MAX_COST_USD: ${{ inputs.max-cost-usd || vars.LINTRO_AI_MAX_COST_USD }}
           # Only the credential for the resolved pair — never the union.
@@ -541,6 +546,8 @@ jobs:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport == 'cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
           # yamllint disable-line rule:line-length
           OPENAI_API_KEY: ${{ steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport == 'api' && secrets.OPENAI_API_KEY || '' }}
+          # yamllint disable-line rule:line-length
+          CODEX_AUTH_JSON: ${{ steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport == 'cli' && secrets.CODEX_AUTH_JSON || '' }}
           # yamllint disable-line rule:line-length
           CODEX_API_KEY: ${{ steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport == 'cli' && secrets.CODEX_API_KEY || '' }}
           # yamllint disable-line rule:line-length

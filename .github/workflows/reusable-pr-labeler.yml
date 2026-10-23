@@ -7,6 +7,11 @@ name: Reusable PR Auto Label
 "on":
   workflow_call:
     inputs:
+      runner-image:
+        description: "GitHub-hosted runner OS label"
+        required: false
+        type: string
+        default: "ubuntu-24.04"
       configuration-path:
         description: "Path to labeler config"
         required: false
@@ -185,7 +190,7 @@ env:
 jobs:
   label:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read

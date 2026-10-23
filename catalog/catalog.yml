@@ -453,7 +453,7 @@ entries:
     permissions:
       contents: read
       pull-requests: write
-    runners: [ubuntu-latest]
+    runners: [ubuntu-24.04]
     package-managers: []
     prerequisites: []
     limitations: []
@@ -1037,7 +1037,7 @@ entries:
     permissions:
       contents: read
       pull-requests: write
-    runners: [ubuntu-latest]
+    runners: [ubuntu-24.04]
     package-managers: []
     prerequisites: []
     limitations: []
