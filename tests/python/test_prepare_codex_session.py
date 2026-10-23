@@ -134,3 +134,52 @@ def test_refuses_to_replace_an_existing_login(
     with pytest.raises(ValueError, match="empty private"):
         module.restore_session(destination=tmp_path, environment=session_environment)
     assert_that(auth.read_text()).is_equal_to("existing")
+
+
+@pytest.mark.parametrize(
+    ("failure", "reason"),
+    [
+        ("invalid-json", "Invalid base64 session JSON"),
+        ("api-conflict", "Subscription session conflicts with API authentication"),
+        ("filesystem", "Cannot restore a subscription-only Codex session"),
+    ],
+)
+def test_cli_reports_safe_validation_reasons_without_credential_material(
+    load_script: Callable[[str], ModuleType],
+    tmp_path: Path,
+    session_environment: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    failure: str,
+    reason: str,
+) -> None:
+    """Diagnostics identify validation failures without printing secrets or paths."""
+    module = load_script("scripts/ci/actions/prepare_codex_session.py")
+    for key in ("CODEX_API_KEY", "OPENAI_API_KEY", "OPENAI_BASE_URL"):
+        monkeypatch.delenv(key, raising=False)
+    for key, value in session_environment.items():
+        monkeypatch.setenv(key, value)
+    destination = tmp_path
+    if failure == "invalid-json":
+        monkeypatch.setenv(
+            "CODEX_AUTH_JSON",
+            base64.b64encode(b"sensitive-invalid-json").decode(),
+        )
+    elif failure == "api-conflict":
+        monkeypatch.setenv("CODEX_API_KEY", "sensitive-api-key")
+    else:
+        destination = tmp_path / "sensitive-filesystem-path"
+    monkeypatch.setattr(
+        module.sys,
+        "argv",
+        ["prepare_codex_session.py", str(destination)],
+    )
+    assert_that(module.main()).is_equal_to(2)
+    captured = capsys.readouterr()
+    assert_that(captured.out).is_empty()
+    assert_that(captured.err).contains(reason).does_not_contain(
+        "sensitive-",
+        "inert-access",
+        "inert-refresh",
+        session_environment["CODEX_AUTH_JSON"],
+    )

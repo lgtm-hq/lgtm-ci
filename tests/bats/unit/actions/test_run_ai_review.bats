@@ -9,6 +9,8 @@ SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/run-ai-review.sh"
 
 setup() {
 	setup_temp_dir
+	# Tests supply their own credentials; ignore developer/runner authentication.
+	unset CODEX_AUTH_JSON CODEX_API_KEY OPENAI_API_KEY OPENAI_BASE_URL
 	export GITHUB_OUTPUT="${BATS_TEST_TMPDIR}/github-output"
 	touch "$GITHUB_OUTPUT"
 }
@@ -703,7 +705,15 @@ PY
 #!/usr/bin/env bash
 set -euo pipefail
 [[ -z "${CODEX_AUTH_JSON:-}" ]]
-[[ -f "$CODEX_HOME/auth.json" ]]
+[[ -z "${CODEX_API_KEY:-}" ]]
+python3 - <<'PY_MODE'
+import os
+from pathlib import Path
+home = Path(os.environ["CODEX_HOME"])
+expected = {home: 0o700, home / "auth.json": 0o600, home / "config.toml": 0o600}
+if any(path.stat().st_mode & 0o777 != mode for path, mode in expected.items()):
+    raise SystemExit("Subscription session permissions are not private")
+PY_MODE
 printf '%s' "$CODEX_HOME" >"$SESSION_PATH_RECORD"
 printf '{"verdict":"approve"}'
 SH
@@ -745,7 +755,7 @@ SH
 		LINTRO_AI_PROVIDER=openai LINTRO_AI_TRANSPORT=cli CODEX_AUTH_JSON=invalid \
 		SESSION_PATH_RECORD="${BATS_TEST_TMPDIR}/unexpected" RUNNER_TEMP="$BATS_TEST_TMPDIR"
 	assert_failure
-	assert_output --partial "Cannot restore a subscription-only Codex session"
+	assert_output --partial "Cannot restore a subscription-only Codex session: Invalid base64 session JSON"
 	[[ ! -e "${BATS_TEST_TMPDIR}/unexpected" ]]
 	run find "$BATS_TEST_TMPDIR" -name 'lintro-codex.*'
 	assert_output ""

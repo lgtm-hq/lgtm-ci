@@ -8,6 +8,7 @@ import base64
 import json
 import os
 from collections.abc import Callable
+from importlib.metadata import version
 from pathlib import Path
 from types import ModuleType
 
@@ -34,8 +35,6 @@ else:
     record = {
         "args": sys.argv[1:],
         "subscription": session.get("auth_mode"),
-        "encoded_secret_forwarded": bool(os.environ.get("CODEX_AUTH_JSON")),
-        "api_key_forwarded": bool(os.environ.get("CODEX_API_KEY")),
     }
     Path(os.environ["HANDOFF_RECORD"]).write_text(json.dumps(record))
     print(json.dumps({"type": "item.completed", "item": {
@@ -53,6 +52,14 @@ def test_pinned_lintro_passes_restored_subscription_to_codex(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """A real lintro completion reaches an inert Codex with isolated file auth."""
+    # This test's installed transport must match the canonical runtime pin.
+    versions_file = Path(__file__).resolve().parents[2] / "scripts/ci/versions.env"
+    runtime_version = next(
+        line.removeprefix("DEFAULT_LINTRO_VERSION=").strip().strip('"')
+        for line in versions_file.read_text().splitlines()
+        if line.startswith("DEFAULT_LINTRO_VERSION=")
+    )
+    assert_that(version("lintro")).is_equal_to(runtime_version)
     module = load_script("scripts/ci/actions/prepare_codex_session.py")
     session_home = tmp_path / "session"
     session_home.mkdir()
@@ -73,6 +80,7 @@ def test_pinned_lintro_passes_restored_subscription_to_codex(
     monkeypatch.setenv("PATH", f"{tmp_path}{os.pathsep}{os.environ['PATH']}")
     monkeypatch.setenv("CODEX_HOME", str(session_home))
     monkeypatch.setenv("HANDOFF_RECORD", str(record_file))
+    # The shell-wrapper BATS tests cover withholding; isolate this transport test.
     credential_keys = (
         "CODEX_AUTH_JSON",
         "CODEX_API_KEY",
@@ -88,6 +96,4 @@ def test_pinned_lintro_passes_restored_subscription_to_codex(
     assert_that(response.content).is_equal_to("offline subscription handoff passed")
     record = json.loads(record_file.read_text())
     assert_that(record["subscription"]).is_equal_to("chatgpt")
-    assert_that(record["encoded_secret_forwarded"]).is_false()
-    assert_that(record["api_key_forwarded"]).is_false()
     assert_that(record["args"]).contains("--model", "gpt-6.1-sol")

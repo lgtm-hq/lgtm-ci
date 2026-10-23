@@ -76,7 +76,14 @@ def main() -> int:
         if len(sys.argv) != 2:
             raise ValueError("Expected a private session directory")
         restore_session(destination=Path(sys.argv[1]), environment=os.environ)
-    except (ValueError, OSError):
+    except ValueError as error:
+        # Validation reasons are fixed messages; never expose underlying causes.
+        print(
+            f"::error::Cannot restore a subscription-only Codex session: {error}",
+            file=sys.stderr,
+        )
+        return 2
+    except OSError:
         print(
             "::error::Cannot restore a subscription-only Codex session",
             file=sys.stderr,

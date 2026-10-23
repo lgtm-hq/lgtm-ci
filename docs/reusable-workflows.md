@@ -2492,9 +2492,11 @@ jobs:
       # then repo lintro config
 ```
 
-`secrets: inherit` also works (all eight may be org-wide, so it is the
-zero-maintenance shape) but is discouraged: it grants the called workflow
-access to every secret the caller can see, not just these eight.
+`secrets: inherit` also works but is discouraged: it grants the called workflow
+access to every secret the caller can see, not just these eight. When both
+`CODEX_AUTH_JSON` and `CODEX_API_KEY` are visible to an openai/cli caller using
+inheritance, session validation fails before review. Keep those credentials
+mutually exclusive or enumerate only the chosen credential explicitly.
 
 | provider | transport | binary | credential (env) |
 | -------- | --------- | ------ | ---------------- |
@@ -2506,7 +2508,8 @@ access to every secret the caller can see, not just these eight.
 
 For subscription-only OpenAI CLI review, supply `CODEX_AUTH_JSON` as base64 of a
 ChatGPT `auth.json` (the same secret format used by py-lintro). Do not also supply
-`CODEX_API_KEY` or `OPENAI_API_KEY`. The workflow validates the session, restores
+`CODEX_API_KEY`. `OPENAI_API_KEY` is forwarded only for API transport and does
+not reach the CLI review step. The workflow validates the session, restores
 it in a private temporary `CODEX_HOME`, forces first-party ChatGPT authentication,
 unsets the encoded secret before invoking lintro, and removes the session on exit.
 Both wrapped and unwrapped base64 output are accepted. The review never installs
