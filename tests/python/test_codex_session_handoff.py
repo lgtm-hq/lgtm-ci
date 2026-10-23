@@ -53,7 +53,7 @@ def test_pinned_lintro_passes_restored_subscription_to_codex(
     monkeypatch: MonkeyPatch,
 ) -> None:
     """A real lintro completion reaches an inert Codex with isolated file auth."""
-    module = load_script("scripts/ci/actions/prepare-codex-session.py")
+    module = load_script("scripts/ci/actions/prepare_codex_session.py")
     session_home = tmp_path / "session"
     session_home.mkdir()
     payload = {

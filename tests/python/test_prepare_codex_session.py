@@ -55,7 +55,7 @@ def test_restores_private_session_without_inheriting_user_config(
     if wrapped:
         raw = base64.b64decode(session_environment["CODEX_AUTH_JSON"])
         session_environment["CODEX_AUTH_JSON"] = base64.encodebytes(raw).decode()
-    module = load_script("scripts/ci/actions/prepare-codex-session.py")
+    module = load_script("scripts/ci/actions/prepare_codex_session.py")
     module.restore_session(destination=tmp_path, environment=session_environment)
     auth = tmp_path / "auth.json"
     config = tmp_path / "config.toml"
@@ -90,7 +90,7 @@ def test_rejects_malformed_or_api_sessions_before_writing(
     secret: str,
 ) -> None:
     """Invalid authentication cannot leave a partial login on disk."""
-    module = load_script("scripts/ci/actions/prepare-codex-session.py")
+    module = load_script("scripts/ci/actions/prepare_codex_session.py")
     session_environment["CODEX_AUTH_JSON"] = secret
     with pytest.raises(ValueError):
         module.restore_session(destination=tmp_path, environment=session_environment)
@@ -115,7 +115,7 @@ def test_rejects_competing_authentication_and_provider_mismatch(
     value: str,
 ) -> None:
     """Subscription callers cannot drift onto API billing or another provider."""
-    module = load_script("scripts/ci/actions/prepare-codex-session.py")
+    module = load_script("scripts/ci/actions/prepare_codex_session.py")
     session_environment[name] = value
     with pytest.raises(ValueError):
         module.restore_session(destination=tmp_path, environment=session_environment)
@@ -128,7 +128,7 @@ def test_refuses_to_replace_an_existing_login(
     session_environment: dict[str, str],
 ) -> None:
     """Existing authentication and configuration must never be overwritten."""
-    module = load_script("scripts/ci/actions/prepare-codex-session.py")
+    module = load_script("scripts/ci/actions/prepare_codex_session.py")
     auth = tmp_path / "auth.json"
     auth.write_text("existing")
     with pytest.raises(ValueError, match="empty private"):

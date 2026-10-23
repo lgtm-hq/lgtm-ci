@@ -339,7 +339,7 @@ if [[ "$STEP" == "run" ]]; then
 	trap 'exit 130' INT
 	if [[ -n "$codex_auth_json" ]]; then
 		codex_home="$(mktemp -d "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/lintro-codex.XXXXXX")"
-		CODEX_AUTH_JSON="$codex_auth_json" python3 "$SCRIPT_DIR/prepare-codex-session.py" "$codex_home"
+		CODEX_AUTH_JSON="$codex_auth_json" python3 "$SCRIPT_DIR/prepare_codex_session.py" "$codex_home"
 		unset codex_auth_json
 		export CODEX_HOME="$codex_home"
 	fi
