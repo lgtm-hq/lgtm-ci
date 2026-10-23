@@ -2938,6 +2938,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      runner-image: ubuntu-26.04
       egress-preset: github-minimal
       # Optional: override types (newline-delimited; CSV is normalized)
       # types: |

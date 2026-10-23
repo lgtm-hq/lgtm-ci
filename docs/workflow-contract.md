@@ -281,8 +281,6 @@ These reusables intentionally omit `runner-image`:
 | `reusable-codeql.yml`                | Action-only wrapper (`github/codeql-action/*`)         |
 | `reusable-dependency-review.yml`     | Action-only wrapper                                    |
 | `reusable-scorecards.yml`            | Action-only wrapper                                    |
-| `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
-| `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->
