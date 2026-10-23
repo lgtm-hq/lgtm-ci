@@ -2514,8 +2514,11 @@ ChatGPT `auth.json` (the same secret format used by py-lintro). Do not also supp
 not reach the CLI review step. The workflow validates the session, restores
 it in a private temporary `CODEX_HOME`, forces first-party ChatGPT authentication,
 unsets the encoded secret before invoking lintro, and removes the session on exit.
-Both wrapped and unwrapped base64 output are accepted. The review never installs
-or executes PR code. An expired session or exhausted allowance produces no review:
+Both wrapped and unwrapped base64 output are accepted. An undecodable, malformed
+or non-ChatGPT session, or a competing API credential, fails validation before
+review and fails the job regardless of `blocking`. The review never installs or
+executes PR code. After review starts, failures that lintro reports as no review
+(exit 2), such as an expired session or exhausted allowance, follow `blocking`:
 with `blocking: true` the job fails; non-blocking callers receive a no-review notice.
 Neither mode falls back to API credentials. CLI egress
 includes `auth.openai.com` and `chatgpt.com` for session refresh and model requests.
