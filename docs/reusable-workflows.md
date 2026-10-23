@@ -371,8 +371,9 @@ jobs:
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
-[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables
-and the gem publish workflow do not expose `runner-image`;
+[Docker workflow inputs](#docker-workflow-inputs) below. The labeler and
+semantic PR title reusables also accept `runner-image`. The dependency review,
+CodeQL, Scorecard and gem publish reusables do not expose `runner-image`;
 `reusable-publish-npm-set.yml` and the deprecated `reusable-publish-npm.yml`
 wrapper (which forwards it) do, GitHub-hosted labels only, since npm
 provenance needs a hosted runner; see
@@ -2321,6 +2322,7 @@ check-only adopters.
 
 | Input                  | Default              | Notes                                      |
 | ---------------------- | -------------------- | ------------------------------------------ |
+| `runner-image`        | `ubuntu-24.04`       | Runner label for validation and reporting  |
 | `post-failure-comment` | `true`               | Opt out for check-only workflows           |
 | `comment-marker`       | `semantic-pr-title`  | Upsert marker for failure comments         |
 | `max-length`           | `0` (no limit)       | Optional title length cap                  |
@@ -2517,6 +2519,13 @@ or executes PR code. An expired session or exhausted allowance produces no revie
 with `blocking: true` the job fails; non-blocking callers receive a no-review notice.
 Neither mode falls back to API credentials. CLI egress
 includes `auth.openai.com` and `chatgpt.com` for session refresh and model requests.
+
+`CODEX_AUTH_JSON` is a caller-managed session snapshot. Any credentials refreshed
+inside the temporary home are deleted on exit and are never written back to the
+GitHub secret. Do not assume that a snapshot remains reusable after refresh-token
+rotation, expiration or revocation. If later reviews fail authentication, renew
+the subscription login and replace the encoded secret privately. The workflow
+requires no secret-write permission and never switches to API billing.
 
 `LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)
 and mint the posting token. That token is in scope **only** for the review
