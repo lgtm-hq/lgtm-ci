@@ -683,3 +683,70 @@ JSON
 	assert_output --partial "--output"
 	assert_output --partial "json"
 }
+
+# --- isolated subscription session -------------------------------------------
+
+subscription_fixture() {
+	python3 - <<'PY'
+import base64
+import json
+print(base64.b64encode(json.dumps({
+    "auth_mode": "chatgpt",
+    "tokens": {"access_token": "inert-access", "refresh_token": "inert-refresh"},
+}).encode()).decode())
+PY
+}
+
+@test "run: subscription session is private, not forwarded, and cleaned after review" {
+	local bin="${BATS_TEST_TMPDIR}/inspect-lintro"
+	cat >"$bin" <<'SH'
+#!/usr/bin/env bash
+set -euo pipefail
+[[ -z "${CODEX_AUTH_JSON:-}" ]]
+[[ -f "$CODEX_HOME/auth.json" ]]
+printf '%s' "$CODEX_HOME" >"$SESSION_PATH_RECORD"
+printf '{"verdict":"approve"}'
+SH
+	chmod +x "$bin"
+	run run_review LINTRO_BIN="$bin" BLOCKING=true \
+		LINTRO_AI_PROVIDER=openai LINTRO_AI_TRANSPORT=cli \
+		CODEX_AUTH_JSON="$(subscription_fixture)" \
+		SESSION_PATH_RECORD="${BATS_TEST_TMPDIR}/session-path" RUNNER_TEMP="$BATS_TEST_TMPDIR"
+	assert_success
+	refute_output --partial "inert-access"
+	refute_output --partial "inert-refresh"
+	[[ -f "${BATS_TEST_TMPDIR}/session-path" ]]
+	[[ ! -e "$(cat "${BATS_TEST_TMPDIR}/session-path")" ]]
+}
+
+@test "run: failing subscription review still removes its temporary authentication" {
+	local bin="${BATS_TEST_TMPDIR}/fail-lintro"
+	cat >"$bin" <<'SH'
+#!/usr/bin/env bash
+printf '%s' "$CODEX_HOME" >"$SESSION_PATH_RECORD"
+printf '{"error":{"kind":"auth_failed"}}'
+exit 2
+SH
+	chmod +x "$bin"
+	run run_review LINTRO_BIN="$bin" BLOCKING=true \
+		LINTRO_AI_PROVIDER=openai LINTRO_AI_TRANSPORT=cli \
+		CODEX_AUTH_JSON="$(subscription_fixture)" \
+		SESSION_PATH_RECORD="${BATS_TEST_TMPDIR}/session-path" RUNNER_TEMP="$BATS_TEST_TMPDIR"
+	assert_failure
+	[[ -f "${BATS_TEST_TMPDIR}/session-path" ]]
+	[[ ! -e "$(cat "${BATS_TEST_TMPDIR}/session-path")" ]]
+}
+
+@test "run: invalid subscription does not execute lintro or leave session files" {
+	local bin="${BATS_TEST_TMPDIR}/unexpected-lintro"
+	printf '#!/usr/bin/env bash\ntouch "$SESSION_PATH_RECORD"\n' >"$bin"
+	chmod +x "$bin"
+	run run_review LINTRO_BIN="$bin" BLOCKING=true \
+		LINTRO_AI_PROVIDER=openai LINTRO_AI_TRANSPORT=cli CODEX_AUTH_JSON=invalid \
+		SESSION_PATH_RECORD="${BATS_TEST_TMPDIR}/unexpected" RUNNER_TEMP="$BATS_TEST_TMPDIR"
+	assert_failure
+	assert_output --partial "Cannot restore a subscription-only Codex session"
+	[[ ! -e "${BATS_TEST_TMPDIR}/unexpected" ]]
+	run find "$BATS_TEST_TMPDIR" -name 'lintro-codex.*'
+	assert_output ""
+}

@@ -521,6 +521,8 @@ egress_ai_review_provider_endpoints() {
 		printf '%s\n' api.openai.com:443
 		if [[ -z "$transport" || "$transport" == "cli" ]]; then
 			printf '%s\n' \
+				auth.openai.com:443 \
+				chatgpt.com:443 \
 				nodejs.org:443 \
 				registry.npmjs.org:443
 		fi

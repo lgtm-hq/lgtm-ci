@@ -2482,6 +2482,7 @@ jobs:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
       OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
       CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
       tooling-ref: "<sha>"
@@ -2490,17 +2491,26 @@ jobs:
       # then repo lintro config
 ```
 
-`secrets: inherit` also works (all seven are org-wide, so it is the
+`secrets: inherit` also works (all eight may be org-wide, so it is the
 zero-maintenance shape) but is discouraged: it grants the called workflow
-access to every secret the caller can see, not just these seven.
+access to every secret the caller can see, not just these eight.
 
 | provider | transport | binary | credential (env) |
 | -------- | --------- | ------ | ---------------- |
 | anthropic | cli | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
 | anthropic | api | — | `ANTHROPIC_API_KEY` |
 | cursor | cli | `agent` | `CURSOR_API_KEY` |
-| openai | cli | `codex` | `CODEX_API_KEY` |
+| openai | cli | `codex` | `CODEX_API_KEY` or subscription `CODEX_AUTH_JSON` |
 | openai | api | — | `OPENAI_API_KEY` |
+
+For subscription-only OpenAI CLI review, supply `CODEX_AUTH_JSON` as base64 of a
+ChatGPT `auth.json` (the same secret format used by py-lintro). Do not also supply
+`CODEX_API_KEY` or `OPENAI_API_KEY`. The workflow validates the session, restores
+it in a private temporary `CODEX_HOME`, forces first-party ChatGPT authentication,
+unsets the encoded secret before invoking lintro, and removes the session on exit.
+The review never installs or executes PR code. An expired session or exhausted
+allowance fails the review; it does not fall back to API credentials. CLI egress
+includes `auth.openai.com` and `chatgpt.com` for session refresh and model requests.
 
 `LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)
 and mint the posting token. That token is in scope **only** for the review
