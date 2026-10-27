@@ -211,9 +211,14 @@ blocked connections. Recommended flow:
 4. **Flip to block.** Set `egress-policy: block` (or remove the input — block
    is the default) and re-run. Repeat 2–3 if a host was missed.
 
-Audit mode is a bring-up tool; production callers should run `block`.
-Release publishing workflows enforce this: `reusable-publish-rust-release.yml`
-hardcodes block and does not accept an `egress-policy` input.
+Audit mode is a bring-up tool; production callers should normally run `block`.
+<!-- TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix -->
+`reusable-publish-rust-release.yml` accepts `egress-policy` (default `block`)
+and forwards it to the nested binary build. Set `egress-policy: audit` to
+select the temporary mitigation tracked in [#1207](https://github.com/lgtm-hq/lgtm-ci/issues/1207).
+Tag verification and GitHub release jobs temporarily use fixed `audit`
+with the marked strict-tier carve-out. Their runner-policy validator tracks
+the workflow revision independently of any `tooling-ref` override.
 
 ## 4. Resolve the release commit SHA
 

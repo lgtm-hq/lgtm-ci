@@ -276,9 +276,23 @@ jobs:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
+      # TEMP: lgtm-hq/lgtm-ci#1207 — older tooling overrides reject strict + audit.
+      - name: Checkout workflow runner policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-runner-policy
+          # GHES lacks job.workflow_sha; it still needs a compatible explicit pin.
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/validate-runner-policy
+            scripts/ci/actions/validate-runner-policy.sh
+            scripts/ci/lib/github/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Validate runner policy
         id: policy
-        uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
+        uses: ./.lgtm-ci-runner-policy/.github/actions/validate-runner-policy
         with:
           tier: strict
           # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
@@ -364,9 +378,23 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
+      # TEMP: lgtm-hq/lgtm-ci#1207 — older tooling overrides reject strict + audit.
+      - name: Checkout workflow runner policy
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
+          path: .lgtm-ci-runner-policy
+          # GHES lacks job.workflow_sha; it still needs a compatible explicit pin.
+          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
+          sparse-checkout: |
+            .github/actions/validate-runner-policy
+            scripts/ci/actions/validate-runner-policy.sh
+            scripts/ci/lib/github/
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
       - name: Validate runner policy
         id: policy
-        uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
+        uses: ./.lgtm-ci-runner-policy/.github/actions/validate-runner-policy
         with:
           tier: strict
           # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix

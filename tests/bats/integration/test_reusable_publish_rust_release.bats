@@ -58,3 +58,20 @@ BUILD_WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-build-rust-binaries.y
 	run grep -F 'attestations: write' "$WORKFLOW"
 	assert_success
 }
+
+# TEMP: lgtm-hq/lgtm-ci#1207 — old tooling validators reject strict + audit.
+@test "reusable-publish-rust-release: policy checkout is independent of older tooling overrides" {
+	local job block
+	for job in verify-tag github-release; do
+		block=$(sed -n "/^  ${job}:/,/^  [a-z].*:/p" "$WORKFLOW")
+		run grep -F 'uses: ./.lgtm-ci-runner-policy/.github/actions/validate-runner-policy' <<<"$block"
+		assert_success
+		run grep -F "ref: \${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}" <<<"$block"
+		assert_success
+		# Release helpers must still honor the caller-selected older tooling.
+		run grep -F "ref: \${{ inputs.tooling-ref != '' && inputs.tooling-ref || job.workflow_sha || 'tooling-ref-required' }}" <<<"$block"
+		assert_success
+		run grep -F 'uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy' <<<"$block"
+		assert_failure
+	done
+}
