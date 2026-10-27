@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.78.1] - 2026-10-27
+
+### Changed
+
+- **deps**: update dependency ubuntu to 26.04 (major) (#1183) (03ebe10)
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.78.0 (minor) (#1191) (10d5bd0)
+- **actionlint**: allow ubuntu-26.04 runner labels (#1190) (97e78e7)
+
+### Fixed
+
+- **ci**: temporarily switch harden-runner egress to audit (#1208) (d1d688b)
+- **deps**: update lintro (#1193) (0d0dcaf)
+
 ## [0.78.0] - 2026-10-21
 
 ### Added
@@ -2916,7 +2929,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.1...HEAD
+[0.78.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.0...v0.78.1
 [0.78.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.7...v0.78.0
 [0.77.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.6...v0.77.7
 [0.77.6]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.5...v0.77.6
