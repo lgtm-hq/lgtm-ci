@@ -26,6 +26,7 @@ jobs:
   semantic-title:
     uses: ./.github/workflows/reusable-semantic-pr-title.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "📝 Validate PR Title"
       egress-preset: github-minimal
     permissions:

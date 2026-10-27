@@ -431,6 +431,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      egress-policy: ${{ inputs.egress-policy }}
       test-suite-name: ${{ inputs.comment-title }}
       comment-marker: ${{ inputs.comment-marker }}
       # Fallback totals summary (rich comment unavailable) renders from the

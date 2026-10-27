@@ -328,14 +328,14 @@ is empty. Add an entry here with justification before adding one to the script.
 
 #### Egress policy exceptions
 
-`reusable-publish-rust-release.yml` intentionally omits the `egress-policy`
-input. Every job hardcodes `egress-policy: block` and validates the runner
-policy at tier `strict`, so callers cannot downgrade release publishing to
-`audit`. Callers can still extend the allowlist for the binary build job
-through `allowed-endpoints` and `allowed-endpoints-mode`; the tag
-verification and GitHub release jobs keep their fixed presets
-(`github-minimal` and `github-tooling`) and do not accept caller endpoints.
-Contract checks should not flag the missing input.
+`reusable-publish-rust-release.yml` exposes `egress-policy` with default
+`block` and forwards it to `reusable-build-rust-binaries.yml`. The tag
+verification and GitHub release jobs use a fixed policy (temporarily `audit`
+under #1207) and validate the runner policy at tier `strict`. Callers can
+extend the allowlist for the binary build job through `allowed-endpoints`
+and `allowed-endpoints-mode`; the tag verification and GitHub release jobs
+keep their fixed presets (`github-minimal` and `github-tooling`) and do not
+accept caller endpoints.
 
 See [reusable-workflows.md](reusable-workflows.md) (CodeQL build-mode) for
 interpreted-language scanning guidance.
@@ -1061,6 +1061,9 @@ Consumers cannot override the tier — it is baked into the reusable contract.
 | `strict`     | Enforce             | Hard fail               | Enforce                | Hard fail     |
 | `hardened`   | Enforce             | Skip + warn             | Enforce                | Hard fail     |
 | `permissive` | Enforce (advisory)  | Skip + log              | Skip + log             | Skip          |
+
+<!-- TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix -->
+**TEMP:** Per lgtm-hq/lgtm-ci#1207, strict/hardened tiers temporarily permit `audit` with a warning, effective policy `audit`, and `enforce-egress=false`.
 
 **Egress capabilities** ([StepSecurity harden-runner](https://github.com/step-security/harden-runner)):
 

@@ -59,10 +59,17 @@ _run_policy() {
 	assert_output "true"
 }
 
-@test "strict: audit rejected on all runners" {
+# TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
+@test "strict: audit temporarily permitted with warning" {
 	_run_policy strict audit github-hosted Linux
-	assert_failure
-	assert_output --partial "audit' is not permitted"
+	assert_success
+	assert_output --partial "::warning::strict tier: audit is temporarily permitted per lgtm-hq/lgtm-ci#1207"
+	run get_github_output "enforce-egress"
+	assert_output "false"
+	run get_github_output "effective-policy"
+	assert_output "audit"
+	run get_github_output "tier-warning"
+	assert_output "strict tier: audit is temporarily permitted per lgtm-hq/lgtm-ci#1207"
 }
 
 @test "hardened: block on GitHub-hosted Windows skips with warning" {
@@ -83,10 +90,17 @@ _run_policy() {
 	assert_output "true"
 }
 
-@test "hardened: audit rejected" {
+# TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
+@test "hardened: audit temporarily permitted with warning" {
 	_run_policy hardened audit github-hosted Linux
-	assert_failure
-	assert_output --partial "audit' is not permitted"
+	assert_success
+	assert_output --partial "::warning::hardened tier: audit is temporarily permitted per lgtm-hq/lgtm-ci#1207"
+	run get_github_output "enforce-egress"
+	assert_output "false"
+	run get_github_output "effective-policy"
+	assert_output "audit"
+	run get_github_output "tier-warning"
+	assert_output "hardened tier: audit is temporarily permitted per lgtm-hq/lgtm-ci#1207"
 }
 
 @test "permissive: audit skips enforcement with advisory" {

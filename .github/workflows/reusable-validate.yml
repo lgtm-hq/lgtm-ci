@@ -329,6 +329,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      egress-policy: ${{ inputs.egress-policy }}
       artifact-name: validation-report
       report-file: validation-report.md
       marker: ${{ inputs.comment-marker }}

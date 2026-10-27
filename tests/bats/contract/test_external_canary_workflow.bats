@@ -41,7 +41,8 @@ _header_list() {
 	' "$WORKFLOW" | tr ' ' '\n' | sed '/^$/d' | sort
 }
 
-@test "external-canary workflow: first step of every job is the pinned direct harden-runner in block mode" {
+# TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
+@test "external-canary workflow: first step of every job is the pinned direct harden-runner in audit mode" {
 	local harden_sha
 	harden_sha="$(sed -nE "s/^HARDEN_SHA='([a-f0-9]{40})'.*/\1/p" "$VALIDATOR" | head -1)"
 	[[ -n "$harden_sha" ]]
@@ -50,7 +51,7 @@ _header_list() {
 	assert_output --partial "uses: step-security/harden-runner@${harden_sha}"
 	run grep -c 'uses: step-security/harden-runner@' "$WORKFLOW"
 	assert_output "1"
-	run grep -cE '^          egress-policy: block$' "$WORKFLOW"
+	run grep -cFx '          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207' "$WORKFLOW"
 	assert_output "1"
 }
 

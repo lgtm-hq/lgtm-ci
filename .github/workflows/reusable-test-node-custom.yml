@@ -824,6 +824,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      egress-policy: ${{ inputs.egress-policy }}
       test-suite-name: ${{ inputs.job-name }}
       comment-marker: ${{ inputs.comment-marker }}
       job-result: ${{ needs.aggregate-tests.outputs.passed == 'true' && 'success' || 'failure' }}
