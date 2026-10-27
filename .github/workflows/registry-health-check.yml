@@ -18,6 +18,7 @@ jobs:
   registry-health:
     uses: ./.github/workflows/reusable-registry-health-check.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       open-issue-on-failure: true
     permissions:
       # Read repository and lgtm-ci tooling for health checks

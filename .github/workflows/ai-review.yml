@@ -55,5 +55,6 @@ jobs:
       CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       model: ${{ vars.LINTRO_AI_MODEL }}
       max-cost-usd: ${{ vars.LINTRO_AI_MAX_COST_USD }}

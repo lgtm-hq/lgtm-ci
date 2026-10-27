@@ -5,6 +5,11 @@ name: Reusable Rust Release Publish Workflow
 on:
   workflow_call:
     inputs:
+      egress-policy:
+        description: "harden-runner egress policy (audit or block)"
+        required: false
+        type: string
+        default: "block"
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -306,6 +311,7 @@ jobs:
       attestations: write
     uses: ./.github/workflows/reusable-build-rust-binaries.yml
     with:
+      egress-policy: ${{ inputs.egress-policy }}
       # The nested reusable resolves its own job.workflow_sha; `job` is not
       # available at jobs.<id>.with, so only the override is passed through.
       tooling-ref: ${{ inputs.tooling-ref }}

@@ -30,6 +30,7 @@ jobs:
   prune-staging:
     uses: ./.github/workflows/reusable-prune-build-staging-tags.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       package-name: ${{ inputs.package-name || 'py-lintro' }}
       # Scheduled runs never delete; deletion requires an explicit dispatch.
       dry-run: ${{ github.event_name != 'workflow_dispatch' || inputs.dry-run }}

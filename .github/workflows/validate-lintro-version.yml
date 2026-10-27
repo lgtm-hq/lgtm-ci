@@ -34,6 +34,7 @@ jobs:
   validate:
     uses: ./.github/workflows/reusable-validate-lintro-version.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       tooling-ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.sha }}
       tooling-ref-fallback: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || '' }}
       tooling-bootstrap-script: scripts/ci/quality/check-lintro-tooling-bootstrap.sh
