@@ -1062,6 +1062,9 @@ Consumers cannot override the tier — it is baked into the reusable contract.
 | `hardened`   | Enforce             | Skip + warn             | Enforce                | Hard fail     |
 | `permissive` | Enforce (advisory)  | Skip + log              | Skip + log             | Skip          |
 
+<!-- TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix -->
+**TEMP:** Per lgtm-hq/lgtm-ci#1207, strict/hardened tiers temporarily permit `audit` with a warning, effective policy `audit`, and `enforce-egress=false`.
+
 **Egress capabilities** ([StepSecurity harden-runner](https://github.com/step-security/harden-runner)):
 
 | Runner type                  | `egress-policy: block` |

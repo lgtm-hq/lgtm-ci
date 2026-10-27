@@ -242,7 +242,8 @@ jobs:
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # Fixed preset from the literal map in env (not caller-selectable).
           allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
       - name: Checkout repository
@@ -275,7 +276,8 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
         with:
           tier: strict
-          egress-policy: block
+          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           runner-environment: ${{ runner.environment }}
           runner-os: ${{ runner.os }}
       - name: Read Cargo version
@@ -337,7 +339,8 @@ jobs:
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
         with:
-          egress-policy: block
+          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           # Fixed preset from the literal map in env (not caller-selectable).
           allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-tooling'] }}
       - name: Checkout repository
@@ -360,7 +363,8 @@ jobs:
         uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
         with:
           tier: strict
-          egress-policy: block
+          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
+          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
           runner-environment: ${{ runner.environment }}
           runner-os: ${{ runner.os }}
       - name: Download binary artifacts
