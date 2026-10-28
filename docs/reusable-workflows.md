@@ -723,6 +723,16 @@ concluded `success`, `skipped` or `neutral`:
   `stale`, `startup_failure`, or no conclusion) fails the gate. Actions check runs are
   judged per workflow run and job name (the newest re-run attempt counts),
   so jobs that share a name in different workflows are judged separately.
+  Retried Actions runs additionally use complete job-to-check attempt membership,
+  preserving every current matrix job ID and retaining ambiguous historical
+  failures. A cancelled, never-started `inputs.job-name` placeholder is retired
+  only for the audited CodeQL source contract, after both attempts' runner
+  headers attest the same immutable reusable revision and evaluated inputs and
+  the later setup and analysis actually succeed. This currently supports one
+  explicit language and the exact workflow/generator bytes recognized by
+  `reconcile_check_retries.py`; auto-detect, multiple languages, other dynamic
+  graphs and unavailable evidence keep the cancellation. No sibling-name or
+  successful-run heuristic is used to prove replacement.
 - **Commit statuses**: `pending` (CodeRabbit, `renovate/stability-days`)
   counts as not finished; `failure` and `error` fail the gate.
 
@@ -769,7 +779,13 @@ jobs:
 | `fail-on-draft` | `false` | Fail draft PRs at once instead of gating them |
 | `head-sha` | `""` | Override the gated commit |
 
-The standard `egress-policy`, `egress-preset` (default `github-minimal`),
+Choose `timeout-minutes` above the longest dependency path plus setup, queue,
+settle time and the three-minute reporting margin. A caller with a 120-minute
+Docker job needs a larger gate budget, for example 130 minutes; the reducer
+derives its wait budget from that input rather than imposing a one-hour cap.
+
+The standard `egress-policy`, `egress-preset` (default `github-results`, for
+Actions log downloads as well as the API),
 `allowed-endpoints`, `allowed-endpoints-mode` and `runner-image` inputs
 apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 (`passed`/`failed`) and `exit-code`.
@@ -777,12 +793,14 @@ apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 Limitations:
 
 - **Request budget.** While a workflow run is in progress a poll costs one
-  request, otherwise three (more when a list passes 100 entries); while
+  request, otherwise three plus one jobs listing per retried run (more when
+  a list passes 100 entries). Placeholder reconciliation also fetches immutable
+  source and completed job logs once, caching them for the remaining polls. While
   nothing changes the interval grows to 4x `poll-interval-seconds`.
   `GITHUB_TOKEN` allows 1,000 requests per hour per repository, shared by
   every workflow. At the default 60 s a gate waiting on workflows uses
   about 15–60 requests an hour, one waiting on a status or another app's
-  check about 45–180, so raise `poll-interval-seconds` where many PRs wait
+  check about 45–180 before retry lookups, so raise `poll-interval-seconds` where many PRs wait
   at once. A rate-limited poll waits instead of failing.
 - **Jobs a cancelled run never started** (still waiting on `needs:`, so
   skipped or without a check run) are not compared against newer runs: if

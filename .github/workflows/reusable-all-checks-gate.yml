@@ -114,11 +114,11 @@ name: Reusable All Checks Gate
       egress-preset:
         description: >-
           Named baseline allowlist from scripts/ci/lib/egress/presets.sh
-          (default github-minimal). Selected at job start inside every harden-runner
+          (default github-results, including Actions log downloads). Selected at job start inside every harden-runner
           step, so it is enforced (#913).
         required: false
         type: string
-        default: "github-minimal"
+        default: "github-results"
       runner-image:
         description: "GitHub-hosted runner image label"
         required: false
@@ -127,7 +127,9 @@ name: Reusable All Checks Gate
       timeout-minutes:
         description: >-
           Job timeout in minutes; the wait gives up (and fails) three minutes
-          earlier so the log names what was still pending
+          earlier so the log names what was still pending. Set above the longest
+          dependency path plus setup, queue and settle time; e.g. a 120-minute
+          build needs a larger gate budget than the default 60 minutes
         required: false
         type: number
         default: 60
@@ -289,7 +291,7 @@ jobs:
             ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
             && inputs.allowed-endpoints
             || format('{0} {1}',
-            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-minimal'],
+            fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-results'],
             inputs.allowed-endpoints) }}
       - name: Fail on unknown egress-preset
         # harden-runner's pre hook already ran with whatever the selector
@@ -298,7 +300,7 @@ jobs:
         if: >-
           inputs.egress-policy != 'audit'
           && (inputs.allowed-endpoints-mode == 'append' || inputs.allowed-endpoints == '')
-          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-minimal'] == null
+          && fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'github-results'] == null
         shell: bash
         env:
           EGRESS_PRESET: ${{ inputs.egress-preset }}
