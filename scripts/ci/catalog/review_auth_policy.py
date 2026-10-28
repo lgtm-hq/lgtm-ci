@@ -31,12 +31,12 @@ def source_name(expression: Any, context: str = "secrets") -> str | None:
     return (match[1] or match[2]) if match else None
 
 
-def findings(
+def resolve_selection(
     passed: Any,
-    secrets: Any,
-    variables: dict[str, str] | None = None,
-) -> set[str]:
-    """Check the selected credential and API-key provenance using known repo vars."""
+    variables: dict[str, str] | None,
+    rows: list[list[str]],
+) -> list[str]:
+    """Resolve caller selectors, repository variables and the default auth mode."""
     config = passed if isinstance(passed, dict) else {}
     keys = ("provider", "transport", "auth")
     selection = []
@@ -47,12 +47,22 @@ def findings(
             value = variables.get(variable.upper())
         value = value or (variables or {}).get(f"LINTRO_AI_{key.upper()}")
         selection.append(str(value or ""))
-    rows = matrix_rows()
     if not selection[2]:
         selection[2] = next(
             (row[2] for row in rows if row[:2] == selection[:2] and row[3] == "yes"),
             "",
         )
+    return selection
+
+
+def findings(
+    passed: Any,
+    secrets: Any,
+    variables: dict[str, str] | None = None,
+) -> set[str]:
+    """Check the selected credential and API-key provenance using known repo vars."""
+    rows = matrix_rows()
+    selection = resolve_selection(passed=passed, variables=variables, rows=rows)
     row = next((row for row in rows if row[:3] == selection), None)
     result: set[str] = set()
     if row is None:

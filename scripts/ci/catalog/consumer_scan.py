@@ -23,7 +23,7 @@ import sys
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 # catalog_lib lives next to this module.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -46,6 +46,13 @@ WORKFLOW_FILE = re.compile(r"^\.github/workflows/[^/]+\.ya?ml$")
 ACTION_FILE = re.compile(r"(?:^|/)action\.ya?ml$")
 REGISTRY_HEADER_END = "---\n"
 EVERY = "*"
+
+
+class ReviewAuthOptions(TypedDict, total=False):
+    """Optional caller context for checking review credential provenance."""
+
+    secrets: Any
+    variables: dict[str, str] | None
 
 
 @dataclass
@@ -123,8 +130,7 @@ def record_call(
     uses: str,
     passed: Any,
     reads: list[str],
-    secrets: Any = None,
-    variables: dict[str, str] | None = None,
+    **options: Unpack[ReviewAuthOptions],
 ) -> None:
     """Record one ``uses:`` of an lgtm-ci entry point.
 
@@ -133,19 +139,20 @@ def record_call(
         uses: The ``uses:`` value.
         passed: The ``with:`` mapping.
         reads: Output names the file reads from this call; ``*`` for all.
-        secrets: The job's ``secrets:`` mapping, or ``inherit`` (all).
-        variables: Known repository Actions variables, when readable.
+        **options: The job's ``secrets`` mapping (or ``inherit``) and known
+            repository Actions ``variables``, when readable.
     """
     match = LGTM_CI_USES.match(uses.strip())
     if match is None:
         return
+    secrets = options.get("secrets")
     entry_id = match.group("workflow") or match.group("action")
     if entry_id == "reusable-ai-review":
         usage.review_auth_findings.update(
             review_auth_policy.findings(
                 passed=passed,
                 secrets=secrets,
-                variables=variables,
+                variables=options.get("variables"),
             )
         )
     usage.pins.add(match.group("ref"))
