@@ -105,3 +105,15 @@ def test_known_tuple_requires_exact_slot(
     assert_that(found).is_equal_to(
         {"error: selected review slot CODEX_AUTH_JSON is missing"},
     )
+
+
+def test_known_unsupported_tuple_is_an_error(consumer_scan: ModuleType) -> None:
+    """Fully known unsupported selectors cannot be repaired by repository config."""
+    found = consumer_scan.review_auth_policy.findings(
+        passed={"provider": "cursor", "transport": "api", "auth": "api_key"},
+        secrets={"CURSOR_API_KEY": "${{ secrets.CURSOR_API_KEY }}"},
+        variables={},
+    )
+    assert_that(found).is_equal_to(
+        {"error: selected review tuple cursor/api/api_key is unsupported"},
+    )

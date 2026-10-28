@@ -41,7 +41,11 @@ ai_review_matrix_field() {
 ai_review_credential_env() { ai_review_matrix_field "${1:-}" "${2:-}" "${3-$(ai_review_default_auth "${1:-}" "${2:-}")}" 5; }
 ai_review_cli_binary() { ai_review_matrix_field "${1:-}" "${2:-}" "${3-$(ai_review_default_auth "${1:-}" "${2:-}")}" 6; }
 ai_review_needs_cli() { [[ -n "$(ai_review_cli_binary "$@")" ]]; }
-ai_review_supported_choices() { ai_review_matrix_rows | awk -F '|' '{print $1 "/" $2 "/" $3}' | paste -sd ', ' -; }
+ai_review_supported_choices() {
+	ai_review_matrix_rows | awk -F '|' '
+        {printf "%s%s/%s/%s", (NR > 1 ? ", " : ""), $1, $2, $3}
+        END {print ""}'
+}
 
 export -f ai_review_normalize ai_review_matrix_rows ai_review_default_auth ai_review_matrix_field
 export -f ai_review_credential_env ai_review_cli_binary ai_review_needs_cli ai_review_supported_choices

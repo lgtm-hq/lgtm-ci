@@ -11,7 +11,8 @@ remain unknown; repository config and matrix defaults never establish knowledge.
 Only known components filter the capability matrix. Any unknown component emits
 an informational auth-selection-unverified note listing compatible tuples. A
 forwarded credential for any compatible tuple suffices; no compatible credential
-is an error. An exact missing-slot error requires all three components known.
+is an error. An exact missing-slot error requires all three components known;
+a fully known unsupported tuple is also an error.
 API-key source policy is checked separately: encrypted values cannot prove origin.
 """
 
@@ -116,8 +117,11 @@ def findings(
     row = next((row for row in rows if not unverified and row[:3] == values), None)
     result: set[str] = set()
     if row is None and not unverified:
-        detail = "Actions-variable/config inspection"
-        result.add(f"unverified: review auth selectors require {detail}")
+        result.add(
+            "error: selected review tuple "
+            + "/".join(str(value) for value in values)
+            + " is unsupported",
+        )
     mapping = secrets if isinstance(secrets, dict) else {}
     if unverified:
         result.update(

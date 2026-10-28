@@ -2542,8 +2542,8 @@ possible tuples using only known components. If any component is unknown, it
 accepts a forwarded credential slot for any compatible tuple and emits an
 informational "auth selection unverified" note listing those tuples. Forwarding
 no compatible credential still fails. An exact missing-slot finding requires all
-three components known. API-key source mappings are checked independently; dynamic
-source expressions remain unverified.
+three components known; a fully known unsupported tuple also fails. API-key source
+mappings are checked independently; dynamic source expressions remain unverified.
 
 <!-- markdownlint-disable MD013 -- generated capability table -->
 
