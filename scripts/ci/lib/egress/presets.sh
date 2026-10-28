@@ -172,6 +172,8 @@ egress_preset_endpoints() {
 		;;
 	pypi)
 		# PyPI / TestPyPI (python dist, wait-for-package).
+		# TestPyPI uploads use test.pypi.org/legacy/; upload.test.pypi.org
+		# does not resolve and breaks harden-runner DNS initialization (#1206).
 		# releases.astral.sh + release-assets.githubusercontent.com: setup-uv
 		# (via the setup-python composite) downloads the uv binary from the
 		# Astral mirror, falling back to GitHub Releases, whenever the pinned
@@ -188,8 +190,7 @@ egress_preset_endpoints() {
 			files.pythonhosted.org:443 \
 			releases.astral.sh:443 \
 			test.pypi.org:443 \
-			upload.pypi.org:443 \
-			upload.test.pypi.org:443
+			upload.pypi.org:443
 		;;
 	python-dist)
 		# Python dist build + Sigstore attestation (reusable-build-python-dist.yml).

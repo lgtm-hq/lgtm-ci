@@ -1558,7 +1558,6 @@ allowed-endpoints: >
   upload.pypi.org:443
   files.pythonhosted.org:443
   test.pypi.org:443
-  upload.test.pypi.org:443
   fulcio.sigstore.dev:443
   rekor.sigstore.dev:443
   tuf-repo-cdn.sigstore.dev:443
