@@ -110,9 +110,10 @@ poll_runs() {
 	for file in "${files[@]}"; do printf '%s\n' "${results[$file]}"; done
 }
 
-# Never prune an active owner's ref between dispatch waves. Empty listings
+# Never prune an active owning attempt's ref between dispatch waves. Empty listings
 # cannot prove that an ambiguous dispatch was rejected, so retain those too.
-# Only terminal, visible runs on a completed canary's ref are safe to prune.
+# Check the exact attempt encoded in the ref, independently of fixture visibility.
+# Only terminal, visible runs on a completed canary attempt's ref are safe to prune.
 cleanup_stale_canary_branches() {
 	local owned="${1:?owned branch required}" sha refs ref branch owner_status runs
 	[[ "$CANARY_KEEP_BRANCH" != true ]] || return 0
@@ -125,8 +126,8 @@ cleanup_stale_canary_branches() {
 	fi
 	while IFS= read -r ref; do
 		branch="${ref#refs/heads/}"
-		[[ "$branch" != "$owned" && "$branch" =~ ^canary/${sha}-([0-9]+)-[0-9]+$ ]] || continue
-		if ! owner_status="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${BASH_REMATCH[1]}" --jq .status)"; then
+		[[ "$branch" != "$owned" && "$branch" =~ ^canary/${sha}-([0-9]+)-([0-9]+)$ ]] || continue
+		if ! owner_status="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${BASH_REMATCH[1]}/attempts/${BASH_REMATCH[2]}" --jq .status)"; then
 			log_warn "cannot verify owner of ${branch}; leaving it untouched"
 			continue
 		fi

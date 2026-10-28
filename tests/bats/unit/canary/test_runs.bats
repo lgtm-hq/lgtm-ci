@@ -36,6 +36,7 @@ case "$*" in
 *'/actions/runs/'*' --jq .status')
 	id="${args##*/runs/}"
 	id="${id%% *}"
+	id="${id//\/attempts\//-}"
 	cat "$MOCK_DIR/owners/$id"
 	;;
 *'/dispatches'*)
@@ -268,9 +269,10 @@ run_row() {
 }
 
 stale_ref() {
-	local branch="canary/${STALE_SHA}-${1}-1"
+	local attempt="${4:-1}" branch
+	branch="canary/${STALE_SHA}-${1}-${attempt}"
 	printf 'refs/heads/%s\n' "$branch" >>"$MOCK_DIR/refs"
-	printf '%s\n' "${3:-completed}" >"$MOCK_DIR/owners/$1"
+	printf '%s\n' "${3:-completed}" >"$MOCK_DIR/owners/$1-$attempt"
 	if [[ -n "$2" ]]; then
 		run_row one.yml "$2" success 11 >"$MOCK_DIR/stale-runs/$branch"
 	else
@@ -280,9 +282,13 @@ stale_ref() {
 
 @test "runs: stale cleanup prunes completed prior attempts including terminal probe children" {
 	stale_ref 12345 completed
+	# The latest attempt is still running; this ref belongs to completed attempt 1.
+	printf 'in_progress\n' >"$MOCK_DIR/owners/12345"
 	run_row child.yml completed failure 12 >>"$MOCK_DIR/stale-runs/canary/${STALE_SHA}-12345-1"
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
+	run grep '/actions/runs/12345' "$MOCK_DIR/calls"
+	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/12345/attempts/1 --jq .status'
 	run grep -E '/cancel|-X DELETE' "$MOCK_DIR/calls"
 	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-12345-1"
 	run grep 'git/matching-refs' "$MOCK_DIR/calls"
@@ -302,10 +308,23 @@ stale_ref() {
 	assert_failure
 }
 
-@test "runs: stale cleanup retains refs owned by active or unqueryable canaries" {
-	stale_ref 100 completed in_progress
+@test "runs: stale cleanup retains ref while its owning attempt is running" {
+	stale_ref 100 completed in_progress 2
+	# A run-level response cannot establish that the owning attempt completed.
+	printf 'completed\n' >"$MOCK_DIR/owners/100"
+	printf 'completed\n' >"$MOCK_DIR/owners/100-1"
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run grep '/actions/runs/100' "$MOCK_DIR/calls"
+	assert_output 'api -X GET repos/lgtm-hq/lgtm-ci/actions/runs/100/attempts/2 --jq .status'
+	run grep -E '/actions/runs\?|-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: stale cleanup retains ref when its owning attempt lookup fails" {
 	stale_ref 101 completed
-	rm "$MOCK_DIR/owners/101"
+	printf 'completed\n' >"$MOCK_DIR/owners/101"
+	rm "$MOCK_DIR/owners/101-1"
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
 	assert_success
 	assert_output --partial 'cannot verify owner'
@@ -313,9 +332,18 @@ stale_ref() {
 	assert_failure
 }
 
-@test "runs: stale cleanup does not touch owned refs other SHAs or malformed refs" {
+@test "runs: stale cleanup does not touch owned refs or other SHAs" {
 	printf '%s\n' "refs/heads/$OWNED_BRANCH" \
-		'refs/heads/canary/2222222222222222222222222222222222222222-100-1' \
+		'refs/heads/canary/2222222222222222222222222222222222222222-100-1' >"$MOCK_DIR/refs"
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run wc -l <"$MOCK_DIR/calls"
+	assert_output --regexp '^[[:space:]]*1$'
+}
+
+@test "runs: stale cleanup retains refs whose owner cannot be parsed" {
+	printf '%s\n' "refs/heads/canary/${STALE_SHA}-unknown-1" \
+		"refs/heads/canary/${STALE_SHA}-100-unknown" \
 		"refs/heads/canary/${STALE_SHA}-100-1/child" \
 		"refs/heads/canary/${STALE_SHA}" >"$MOCK_DIR/refs"
 	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'

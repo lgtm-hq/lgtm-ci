@@ -2895,10 +2895,15 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    ref with a warning so pending jobs can still resolve it. A journal under
    `runner.temp` lets an `if: always()` cleanup step retry after cancellation.
    Cleanup also best-effort prunes other `canary/<sha>-*` refs for the same
-   candidate, without cancelling their runs: the owning lgtm-ci canary must be
-   completed, at least one fixture run must be visible, and every fixture run
-   on that exact ref (including probe children) must be terminal. Active owners,
-   empty listings, failed lookups, and refs for other SHAs are left untouched.
+   candidate, without cancelling their runs: the owning lgtm-ci workflow run ID
+   and attempt are parsed from `canary/<sha>-<run-id>-<attempt>`. The exact attempt
+   must have `status: completed` from
+   `repos/lgtm-hq/lgtm-ci/actions/runs/<run-id>/attempts/<attempt>`; fixture run
+   visibility alone cannot establish that the owner is finished. At least one
+   fixture run must also be visible, and every fixture run on that exact ref
+   (including probe children) must be terminal. Active owning attempts,
+   unparsable refs, empty listings, failed lookups, and refs for other SHAs are
+   left untouched. The owned ref still uses the dispatch journal rule above.
    `CANARY_KEEP_BRANCH=true` disables deletion of both owned and stale refs.
    The fixture uses the full ref for dispatch, probe children, and concurrency;
    no exact `canary/<sha>` name is assumed.
