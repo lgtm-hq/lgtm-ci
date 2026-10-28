@@ -2530,8 +2530,20 @@ verify an OAuth tuple. Only that tuple's OAuth slot is injected; inherited API k
 remain outside the invocation. API-key callers must use explicit source remapping;
 inherit cannot express this contract. A called workflow cannot inspect an encrypted
 value's original secret name: caller review and the known-consumer scan enforce
-source policy, not a runtime provenance claim. The scan reports smoke/dynamic
-source expressions and unresolved Actions-variable/config auth as unverified.
+source policy, not a runtime provenance claim.
+
+The known-consumer scan resolves each selector component (`provider`, `transport`,
+`auth`) to either `KNOWN(value, source)` or `UNKNOWN`. Only a nonempty literal
+workflow input or a readable Actions variable that is set establishes `KNOWN`.
+Empty literals, dynamic expressions, readable-but-unset variables, unreadable
+variables, and lookup errors leave the component `UNKNOWN`; repository lintro
+config and matrix defaults do not establish a known selection. The scan filters
+possible tuples using only known components. If any component is unknown, it
+accepts a forwarded credential slot for any compatible tuple and emits an
+informational "auth selection unverified" note listing those tuples. Forwarding
+no compatible credential still fails. An exact missing-slot finding requires all
+three components known. API-key source mappings are checked independently; dynamic
+source expressions remain unverified.
 
 <!-- markdownlint-disable MD013 -- generated capability table -->
 

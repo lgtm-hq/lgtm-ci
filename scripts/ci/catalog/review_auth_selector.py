@@ -7,16 +7,15 @@ from enum import StrEnum, auto
 
 
 class SelectorSource(StrEnum):
-    """Distinguish explicit inputs, inspected variables, and unknown selectors."""
+    """Identify the evidence for a known selector."""
 
     INPUT = auto()
     VARIABLE = auto()
-    UNVERIFIED = auto()
 
 
 @dataclass(frozen=True)
 class ReviewAuthSelector:
-    """Hold a selector value and whether its source could be inspected."""
+    """Hold KNOWN(value, source); None represents UNKNOWN instead."""
 
     value: str
     source: SelectorSource

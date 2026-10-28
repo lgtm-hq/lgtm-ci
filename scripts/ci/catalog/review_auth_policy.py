@@ -1,6 +1,19 @@
 #!/usr/bin/env python3
 # SPDX-License-Identifier: MIT
-"""Inspect caller source expressions; encrypted slot values cannot prove provenance."""
+"""Conservatively inspect caller auth selection and credential source expressions.
+
+Each provider, transport, and auth component is either KNOWN(value, source),
+represented by ReviewAuthSelector, or UNKNOWN, represented by None. Only nonempty
+literal workflow inputs and readable, set Actions variables provide known values.
+Empty/unset values, dynamic expressions, unreadable variables, and lookup errors
+remain unknown; repository config and matrix defaults never establish knowledge.
+
+Only known components filter the capability matrix. Any unknown component emits
+an informational auth-selection-unverified note listing compatible tuples. A
+forwarded credential for any compatible tuple suffices; no compatible credential
+is an error. An exact missing-slot error requires all three components known.
+API-key source policy is checked separately: encrypted values cannot prove origin.
+"""
 
 from __future__ import annotations
 
@@ -36,69 +49,53 @@ def source_name(expression: Any, context: str = "secrets") -> str | None:
 def resolve_selection(
     passed: Any,
     variables: dict[str, str] | None,
-    rows: list[list[str]],
-) -> list[ReviewAuthSelector]:
-    """Resolve each component without treating unreadable variables as absent."""
+) -> list[ReviewAuthSelector | None]:
+    """Resolve each component to known input/variable evidence or unknown."""
     config = passed if isinstance(passed, dict) else {}
-    selection = []
+    selection: list[ReviewAuthSelector | None] = []
     for key in ("provider", "transport", "auth"):
         value = config.get(key)
         variable = source_name(expression=value, context="vars")
         source = SelectorSource.INPUT
         if variable or not value:
             source = SelectorSource.VARIABLE
-            if variables is None:
-                source = SelectorSource.UNVERIFIED
-                value = ""
-            else:
-                value = variables.get(variable.upper()) if variable else None
-                value = value or variables.get(f"LINTRO_AI_{key.upper()}", "")
-        elif "${{" in str(value):
-            source = SelectorSource.UNVERIFIED
-        selection.append(ReviewAuthSelector(value=str(value or ""), source=source))
-    if not selection[2].value and selection[2].source != SelectorSource.UNVERIFIED:
-        pair = [item.value for item in selection[:2]]
-        if any(item.source == SelectorSource.UNVERIFIED for item in selection[:2]):
-            selection[2] = ReviewAuthSelector(
-                value="",
-                source=SelectorSource.UNVERIFIED,
-            )
-        else:
-            default = next(
-                (row[2] for row in rows if row[:2] == pair and row[3] == "yes"),
-                "",
-            )
-            selection[2] = ReviewAuthSelector(
-                value=default,
-                source=SelectorSource.VARIABLE,
-            )
+            readable = variables or {}
+            value = readable.get(variable.upper()) if variable else None
+            value = value or readable.get(f"LINTRO_AI_{key.upper()}")
+        known = isinstance(value, str) and bool(value.strip()) and "${{" not in value
+        selection.append(
+            ReviewAuthSelector(value=value, source=source) if known else None,
+        )
     return selection
 
 
 def unverified_findings(
-    selection: list[ReviewAuthSelector],
+    selection: list[ReviewAuthSelector | None],
     secrets: Any,
     rows: list[list[str]],
     variables_readable: bool,
 ) -> set[str]:
     """Accept a possible credential slot while recording selection uncertainty."""
     mapping = secrets if isinstance(secrets, dict) else {}
-    detail = "dynamic caller selectors"
+    detail = "unresolved caller selectors"
     if not variables_readable:
         detail = "Actions variables unreadable"
     forwarded = "inherit" if secrets == "inherit" else ", ".join(sorted(mapping))
-    result = {
-        f"unverified: auth selection unverified: {detail}; "
-        f"caller forwards {forwarded or 'no slots'}",
-    }
-    possible_slots = {
-        candidate[4]
+    compatible = [
+        candidate
         for candidate in rows
         if all(
-            item.source == SelectorSource.UNVERIFIED or item.value == value
+            item is None or item.value == value
             for item, value in zip(selection, candidate[:3], strict=True)
         )
+    ]
+    tuples = ", ".join("/".join(candidate[:3]) for candidate in compatible)
+    result = {
+        f"unverified: auth selection unverified: {detail}; "
+        f"caller forwards {forwarded or 'no slots'}; "
+        f"compatible tuples: {tuples or 'none'}",
     }
+    possible_slots = {candidate[4] for candidate in compatible}
     if secrets != "inherit" and not possible_slots.intersection(mapping):
         result.add(
             "error: caller forwards no credential for any possible review auth tuple",
@@ -113,9 +110,9 @@ def findings(
 ) -> set[str]:
     """Check the selected credential and API-key provenance using known repo vars."""
     rows = matrix_rows()
-    selection = resolve_selection(passed=passed, variables=variables, rows=rows)
-    unverified = any(item.source == SelectorSource.UNVERIFIED for item in selection)
-    values = [item.value for item in selection]
+    selection = resolve_selection(passed=passed, variables=variables)
+    unverified = any(item is None for item in selection)
+    values = [item.value if item is not None else None for item in selection]
     row = next((row for row in rows if not unverified and row[:3] == values), None)
     result: set[str] = set()
     if row is None and not unverified:

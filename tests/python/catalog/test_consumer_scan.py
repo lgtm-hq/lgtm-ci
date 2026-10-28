@@ -270,7 +270,7 @@ def test_write_registry_round_trips_through_the_validator(
     ("passed", "secrets", "expected"),
     [
         (
-            {"provider": "openai", "transport": "cli"},
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
             {"CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"},
             None,
         ),
@@ -287,15 +287,15 @@ def test_write_registry_round_trips_through_the_validator(
         (
             {"provider": None, "transport": "cli"},
             "inherit",
-            "unverified: review auth selectors",
+            "auth selection unverified",
         ),
         (
             {"provider": "openai", "transport": "cli"},
             "inherit",
-            None,
+            "auth selection unverified",
         ),
         (
-            {"provider": "openai", "transport": "api"},
+            {"provider": "openai", "transport": "api", "auth": "api_key"},
             "inherit",
             "error: api_key reviews require explicit",
         ),
@@ -317,7 +317,7 @@ def test_write_registry_round_trips_through_the_validator(
         (
             {"provider": "${{ vars.LINTRO_AI_PROVIDER }}"},
             "inherit",
-            "unverified: review auth selectors",
+            "auth selection unverified",
         ),
     ],
 )
@@ -395,10 +395,22 @@ def test_review_auth_requires_selected_credential(
         secrets=secrets,
         variables={},
     )
-    expected = set()
+    errors = {item for item in usage.review_auth_findings if item.startswith("error:")}
     if mapping == "missing":
-        expected.add(f"error: selected review slot {slot} is missing")
-    assert_that(usage.review_auth_findings).is_equal_to(expected)
+        if passed.get("auth"):
+            assert_that(errors).is_equal_to(
+                {f"error: selected review slot {slot} is missing"},
+            )
+        else:
+            assert_that(errors).is_length(1)
+            assert_that(next(iter(errors))).contains("no credential for any possible")
+    else:
+        assert_that(errors).is_empty()
+    notes = usage.review_auth_findings - errors
+    if passed.get("auth"):
+        assert_that(notes).is_empty()
+    else:
+        assert_that("\n".join(notes)).contains("auth selection unverified")
 
 
 @pytest.mark.parametrize(
@@ -406,7 +418,11 @@ def test_review_auth_requires_selected_credential(
     [
         (
             {},
-            {"LINTRO_AI_PROVIDER": "openai", "LINTRO_AI_TRANSPORT": "cli"},
+            {
+                "LINTRO_AI_PROVIDER": "openai",
+                "LINTRO_AI_TRANSPORT": "cli",
+                "LINTRO_AI_AUTH": "oauth",
+            },
             "CODEX_AUTH_JSON",
         ),
         (
@@ -427,7 +443,11 @@ def test_review_auth_requires_selected_credential(
                 "provider": "${{ vars.review_provider }}",
                 "transport": "${{ vars['REVIEW_TRANSPORT'] }}",
             },
-            {"REVIEW_PROVIDER": "anthropic", "REVIEW_TRANSPORT": "cli"},
+            {
+                "REVIEW_PROVIDER": "anthropic",
+                "REVIEW_TRANSPORT": "cli",
+                "LINTRO_AI_AUTH": "oauth",
+            },
             "CLAUDE_CODE_OAUTH_TOKEN",
         ),
         (
@@ -446,13 +466,13 @@ def test_review_auth_requires_selected_credential(
         ),
     ],
 )
-def test_review_auth_resolves_input_then_variable_then_default(
+def test_review_auth_resolves_input_then_variable(
     consumer_scan: ModuleType,
     passed: dict[str, str | None],
     variables: dict[str, str],
     slot: str,
 ) -> None:
-    """Resolve caller inputs, then repo variables, then matrix auth defaults."""
+    """Resolve literal inputs and set Actions variables without inferring defaults."""
     usage = consumer_scan.Usage()
     consumer_scan.record_call(
         usage=usage,
@@ -589,8 +609,8 @@ def test_refresh_rows_flags_review_auth_policy_errors(
             {"provider": "openai", "transport": "cli"},
             {},
             "CODEX_API_KEY",
-            ("selected review slot CODEX_AUTH_JSON is missing", False),
-            id="readable-absent-default-oauth",
+            (None, True),
+            id="readable-absent-auth-unknown",
         ),
         pytest.param(
             {"provider": "openai", "transport": "cli", "auth": "oauth"},
@@ -675,8 +695,10 @@ def test_review_auth_uncertain_selection(
     if unverified:
         assert_that(notes).is_length(1)
         assert_that(notes[0]).contains(
-            "auth selection unverified: Actions variables unreadable; caller forwards",
+            "auth selection unverified:",
+            "caller forwards",
             slot or "no slots",
+            "compatible tuples:",
         )
         assert_that("\n".join(errors)).does_not_contain("selected review slot")
     else:
