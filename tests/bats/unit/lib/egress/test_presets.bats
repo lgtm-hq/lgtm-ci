@@ -112,6 +112,17 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
 	assert_output --partial 'files.pythonhosted.org:443'
 }
 
+@test "Python presets use the real PyPI and TestPyPI upload hosts" {
+	local preset
+	for preset in pypi python-dist; do
+		run bash -c "source '$PRESETS' && egress_preset_endpoints '$preset'"
+		assert_success
+		assert_line 'upload.pypi.org:443'
+		assert_line 'test.pypi.org:443'
+		refute_line 'upload.test.pypi.org:443'
+	done
+}
+
 @test "egress preset rubygems includes RubyGems API hosts" {
 	run bash -c "source '$PRESETS' && egress_preset_endpoints rubygems | grep -cE '^actions\\.githubusercontent\\.com:443$'"
 	assert_success

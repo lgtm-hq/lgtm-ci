@@ -3,9 +3,9 @@
 #
 # External consumer canary (#1074). Pins every workflow of the external
 # fixture TurboCoder13/lgtm-ci-consumer-fixture to one lgtm-ci candidate SHA
-# on a throwaway fixture branch `canary/<sha>`, dispatches the gate and
-# informational workflows there, waits for the verdicts (25 minute bound),
-# writes the table to the job summary and deletes the branch it created. The
+# on a throwaway fixture branch `canary/<sha>-<run-id>-<attempt>`, dispatches the gate and
+# informational workflows there, waits with separate queue and execution budgets,
+# writes the table, cancels unfinished runs and deletes the ref once settled. The
 # fixture's main is never written. Shell logic lives in
 # scripts/ci/actions/external-canary.sh.
 #
@@ -75,8 +75,12 @@ name: External Consumer Canary
 permissions: {}
 
 concurrency:
-  group: external-consumer-canary-${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: false
+  # An unrelated label's fast-skip must not supersede a full canary.
+  group: >-
+    external-consumer-canary-${{ github.event.pull_request.number || inputs.ref || github.ref }}-${{
+    github.event.action == 'labeled' && github.event.label.name != 'needs-external-canary' &&
+    github.event.label.name != 'canary-informational' && github.run_id || 'active' }}
+  cancel-in-progress: true
 
 env:
   # lgtm-ci-egress-presets:begin
@@ -110,13 +114,12 @@ env:
     "pypi":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
-    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
-    upload.test.pypi.org:443",
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443",
     "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
     release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
     raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
     files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
-    upload.test.pypi.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
     tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
     "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
     codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
@@ -194,12 +197,14 @@ jobs:
     name: "🐤 External Consumer Canary"
     # Always runs so the check always reports; the script decides full vs skip.
     runs-on: ubuntu-26.04
-    timeout-minutes: 35
+    timeout-minutes: 55
     permissions:
       # Resolve the candidate ref to a SHA and read the canary script.
       contents: read
       # List the pull request's changed files for the run/skip decision.
       pull-requests: read
+      # Verify stale refs belong to completed canaries before pruning them.
+      actions: read
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
@@ -246,6 +251,7 @@ jobs:
           LGTM_CI_TOKEN: ${{ github.token }}
           CANDIDATE_REF: >-
             ${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}
+          CANARY_STATE_DIR: ${{ runner.temp }}/external-canary
           CANARY_SOURCE_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
           EVENT_NAME: ${{ github.event_name }}
           EVENT_ACTION: ${{ github.event.action }}
@@ -254,3 +260,11 @@ jobs:
           PR_LABELS: ${{ join(github.event.pull_request.labels.*.name, ',') }}
           PR_HEAD_REPO_FORK: ${{ github.event.pull_request.head.repo.fork }}
         run: bash scripts/ci/actions/external-canary.sh "$CANDIDATE_REF"
+
+      - name: Cancel unfinished fixture runs and clean up ref
+        if: always() && steps.fixture-token.outputs.token != ''
+        env:
+          GH_TOKEN: ${{ steps.fixture-token.outputs.token }}
+          LGTM_CI_TOKEN: ${{ github.token }}
+          CANARY_STATE_DIR: ${{ runner.temp }}/external-canary
+        run: bash scripts/ci/actions/external-canary.sh --cleanup
