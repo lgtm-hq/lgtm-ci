@@ -39,7 +39,8 @@
 #      completed run (bounded by CANARY_TIMEOUT_SECONDS),
 #   6. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
-#   7. deletes the canary branch it created (also on failure), and
+#   7. deletes the canary branch once all dispatched runs have completed;
+#      retains it when a run may still need the ref (including on failure), and
 #   8. exits non-zero when any GATE workflow did not succeed or any workflow
 #      is `removed_by_candidate`, unless the owner-only override label (CANARY_OVERRIDE_LABEL) is on the pull
 #      request, in which case the failure is reported as a warning.
@@ -142,6 +143,13 @@ PIN_RE='lgtm-hq/lgtm-ci/\.github/(workflows/[A-Za-z0-9._-]+\.yml|actions/[A-Za-z
 # Set by create_canary_branch once the ref exists; the EXIT trap deletes only
 # a branch this invocation created.
 CANARY_BRANCH_CREATED=0
+# Cleared before dispatch; set again only after every attempted dispatch
+# has an observed terminal run. A timeout is not a fixture cancellation.
+CANARY_RUNS_SETTLED=1
+# fixture_write exposes whether its last call retried. A dispatch retry
+# can create duplicate or late-visible runs, even when the retry succeeds.
+FIXTURE_WRITE_RETRIED=0
+CANARY_DISPATCH_UNCERTAIN=0
 CANARY_BRANCH=""
 CANARY_WORKDIR=""
 # reference_verdict caches: "<ref>:<path>" -> present|absent, and the merge base.
@@ -303,12 +311,14 @@ fixture_api() {
 fixture_write() {
 	local step="${1:?step name required}" out errf
 	shift
+	FIXTURE_WRITE_RETRIED=0
 	errf="$(mktemp)"
 	if out="$(fixture_api "$@" 2>"$errf")"; then
 		rm -f "$errf"
 		printf '%s\n' "$out"
 		return 0
 	fi
+	FIXTURE_WRITE_RETRIED=1
 	log_warn "${step}: $(tr '\n' ' ' <"$errf"); retrying in ${CANARY_WRITE_RETRY_SECONDS}s"
 	sleep "$CANARY_WRITE_RETRY_SECONDS"
 	if out="$(fixture_api "$@" 2>"$errf")"; then
@@ -827,11 +837,16 @@ _write_summary() {
 	printf '%s\n' "$@" >>"$GITHUB_STEP_SUMMARY"
 }
 
-# EXIT trap: remove the work dir and the branch this run created.
+# EXIT trap: remove the work dir, then the owned branch if no run still needs it.
 _cleanup() {
 	[[ -z "$CANARY_WORKDIR" ]] || rm -rf "$CANARY_WORKDIR"
 	if [[ "$CANARY_BRANCH_CREATED" == 1 && "$CANARY_KEEP_BRANCH" != "true" ]]; then
-		delete_canary_branch "$CANARY_BRANCH"
+		if [[ "$CANARY_RUNS_SETTLED" == 1 ]]; then
+			delete_canary_branch "$CANARY_BRANCH"
+		else
+			log_warn "retained ${FIXTURE_REPO}@${CANARY_BRANCH}: fixture runs may still need this ref"
+			_write_summary "" "> ⚠️ Branch \`${FIXTURE_REPO}@${CANARY_BRANCH}\` retained because fixture runs may still need it. Delete it only after every run on this branch has completed; a retry of this candidate must wait for that cleanup."
+		fi
 	fi
 }
 
@@ -919,11 +934,15 @@ main() {
 
 	since="$(since_timestamp)"
 	for file in "${to_dispatch[@]}"; do
+		CANARY_RUNS_SETTLED=0
 		if dispatch_workflow "$file" "$CANARY_BRANCH"; then
 			log_info "dispatched ${file} on ${CANARY_BRANCH}"
 			dispatched+=("$file")
 		else
 			extra_rows+=("$(printf '%s\tdispatch_failed\t\t' "$file")")
+		fi
+		if [[ "$FIXTURE_WRITE_RETRIED" == 1 ]]; then
+			CANARY_DISPATCH_UNCERTAIN=1
 		fi
 	done
 
@@ -932,6 +951,12 @@ main() {
 		if ((${#extra_rows[@]})); then printf '%s\n' "${extra_rows[@]}"; fi
 	)"
 	results="$(sort <<<"$results")"
+	# A failed dispatch can have been accepted before the API error; a
+	# missing run can appear late. Neither proves the ref is safe to delete.
+	if [[ "$CANARY_DISPATCH_UNCERTAIN" == 0 ]] &&
+		awk -F'\t' '$2 == "timeout" || $2 == "missing" || $2 == "dispatch_failed" { unsettled = 1 } END { exit unsettled }' <<<"$results"; then
+		CANARY_RUNS_SETTLED=1
+	fi
 	table="$(render_summary "$sha" "$CANARY_BRANCH" <<<"$results")"
 	printf '%s\n' "$table"
 	_write_summary "$table"

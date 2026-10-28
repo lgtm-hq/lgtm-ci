@@ -5,7 +5,8 @@
 # fixture TurboCoder13/lgtm-ci-consumer-fixture to one lgtm-ci candidate SHA
 # on a throwaway fixture branch `canary/<sha>`, dispatches the gate and
 # informational workflows there, waits for the verdicts (25 minute bound),
-# writes the table to the job summary and deletes the branch it created. The
+# writes the table to the job summary and deletes the branch after every run
+# completes. Unsettled runs retain the branch so queued jobs can resolve it. The
 # fixture's main is never written. Shell logic lives in
 # scripts/ci/actions/external-canary.sh.
 #

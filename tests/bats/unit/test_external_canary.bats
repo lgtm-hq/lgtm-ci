@@ -216,6 +216,15 @@ case "$args" in
 	echo "refs/heads/canary/$CANDIDATE"
 	;;
 *"/actions/workflows/"*"/dispatches -f ref="*)
+	if [[ "${MOCK_DISPATCH_FAIL_FIRST:-}" == "1" ]]; then
+		count_file="$MOCK_RUNS_DIR/.dispatch-count"
+		n=$(( $(cat "$count_file" 2>/dev/null || echo 0) + 1 ))
+		echo "$n" >"$count_file"
+		if [[ "$n" -eq 1 ]]; then
+			echo "gh: HTTP 500 after accepting dispatch" >&2
+			exit 1
+		fi
+	fi
 	if [[ -n "${MOCK_DISPATCH_FAIL:-}" && "$args" == *"/actions/workflows/${MOCK_DISPATCH_FAIL}/dispatches"* ]]; then
 		echo "gh: HTTP 422" >&2
 		exit 1
@@ -552,6 +561,8 @@ call_fn() {
 	# Only the dispatched workflow is polled, and the snapshot completes it at once.
 	run cat "$MOCK_RUNS_DIR/.count"
 	assert_output "1"
+	run grep -F -- "-X DELETE" "$MOCK_CALLS"
+	refute_output
 }
 
 @test "external-canary: an expected gate the fixture no longer exposes is reported not_dispatchable and fails" {
@@ -696,6 +707,49 @@ call_fn() {
 	run env CANARY_TIMEOUT_SECONDS=0 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
 	assert_output --partial "gate python.yml concluded 'timeout'"
+	assert_output --partial "retained owner/fixture@canary/${CANDIDATE}"
+	run grep -F -- "-X DELETE" "$MOCK_CALLS"
+	refute_output
+	run grep -F "retained" "$GITHUB_STEP_SUMMARY"
+	assert_success
+}
+
+@test "external-canary: an unobserved dispatch retains the branch for a late run" {
+	run_row verify-negative.yml completed failure 12 >"$MOCK_RUNS_DIR/runs.1"
+	run env CANARY_TIMEOUT_SECONDS=0 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial "gate python.yml concluded 'missing'"
+	assert_output --partial "retained owner/fixture@canary/${CANDIDATE}"
+	run grep -F -- "-X DELETE" "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: an informational timeout retains the branch even when gates pass" {
+	{
+		run_row python.yml completed success 11
+		run_row verify-negative.yml queued "" 12
+	} >"$MOCK_RUNS_DIR/runs.1"
+	run env CANARY_TIMEOUT_SECONDS=0 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "retained owner/fixture@canary/${CANDIDATE}"
+	run grep -F -- "-X DELETE" "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: an ambiguous dispatch retry retains the branch for duplicate runs" {
+	{
+		run_row python.yml completed success 22
+		run_row python.yml queued "" 11
+		run_row verify-negative.yml completed failure 12
+	} >"$MOCK_RUNS_DIR/runs.1"
+	run env MOCK_DISPATCH_FAIL_FIRST=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial "retrying"
+	assert_output --partial "retained owner/fixture@canary/${CANDIDATE}"
+	run grep -c "actions/workflows/python.yml/dispatches" "$MOCK_CALLS"
+	assert_output "2"
+	run grep -F -- "-X DELETE" "$MOCK_CALLS"
+	refute_output
 }
 
 @test "external-canary: CANARY_KEEP_BRANCH=true leaves the canary branch in place" {

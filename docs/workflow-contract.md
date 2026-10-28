@@ -2871,7 +2871,8 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    completed run, bounded at 25 minutes; a workflow whose dispatch was
    rejected is reported `dispatch_failed` at once instead of waiting;
 6. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
-   the job summary, deletes the branch it created on every exit path, and
+   the job summary, deletes the branch it created once every dispatched run
+   has completed, and
    fails when any **gate** workflow did not succeed (a `not_applicable` gate
    is not a failure) or any workflow is `removed_by_candidate`. Informational rows are
    compared with their expected conclusion and flagged `unexpected`, but
@@ -2879,6 +2880,24 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    fixture no longer exposes for dispatch is reported `not_dispatchable` and
    fails the canary, and a fixture workflow the script has never seen is a
    gate (fail closed).
+
+The 25-minute poll bound does not cancel fixture runs. On a timeout, a
+missing run, a dispatch retry or failure, or an interruption after dispatch,
+the canary retains `TurboCoder13/lgtm-ci-consumer-fixture@canary/<candidate-sha>`
+and records that retention in the summary. Jobs still running or queued can
+resolve their own branch for checkout, nested dispatches and scan uploads.
+A dispatch response can fail after GitHub accepted it, so even a successful
+retry retains the ref for duplicate or late-visible runs.
+An operator must wait until every run on that branch has completed before
+deleting it; a retry of the same candidate refuses to overwrite the retained
+branch. No permanent fixture branch needs to be created or repointed.
+
+For example, lgtm-ci run `40728201788` deleted
+`canary/b8ba243eda7f24c6e83aeee1e40722e1e54a33a4` at 17:07 UTC on
+2026-10-28, while fixture run `40728352820` still needed that ref at 17:31
+UTC. The resulting missing-ref errors followed premature cleanup, not a
+missing fixture `main`. Timeouts and cancelled gates remain failures to
+investigate; retaining their ref does not change the verdict.
 
 When it runs:
 
