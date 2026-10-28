@@ -124,6 +124,7 @@ def record_call(
     passed: Any,
     reads: list[str],
     secrets: Any = None,
+    variables: dict[str, str] | None = None,
 ) -> None:
     """Record one ``uses:`` of an lgtm-ci entry point.
 
@@ -133,6 +134,7 @@ def record_call(
         passed: The ``with:`` mapping.
         reads: Output names the file reads from this call; ``*`` for all.
         secrets: The job's ``secrets:`` mapping, or ``inherit`` (all).
+        variables: Known repository Actions variables, when readable.
     """
     match = LGTM_CI_USES.match(uses.strip())
     if match is None:
@@ -140,7 +142,11 @@ def record_call(
     entry_id = match.group("workflow") or match.group("action")
     if entry_id == "reusable-ai-review":
         usage.review_auth_findings.update(
-            review_auth_policy.findings(passed=passed, secrets=secrets)
+            review_auth_policy.findings(
+                passed=passed,
+                secrets=secrets,
+                variables=variables,
+            )
         )
     usage.pins.add(match.group("ref"))
     usage.entries.add(entry_id)
@@ -229,6 +235,7 @@ def scan_file(
     usage: Usage,
     path: str,
     text: str,
+    variables: dict[str, str] | None = None,
 ) -> None:
     """Record the lgtm-ci calls in one workflow or action file.
 
@@ -236,6 +243,7 @@ def scan_file(
         usage: Accumulator for the repository.
         path: Repository-relative path.
         text: File text.
+        variables: Known repository Actions variables, when readable.
     """
     try:
         document = catalog_lib.yaml.safe_load(text)
@@ -260,6 +268,7 @@ def scan_file(
                 passed=job.get("with"),
                 reads=outputs_read(text=text, context="needs", ident=job_id),
                 secrets=job.get("secrets"),
+                variables=variables,
             )
         scan_steps(usage=usage, steps=job.get("steps"), text=text)
 
@@ -276,8 +285,29 @@ def scan_repository(
         What it uses from lgtm-ci.
     """
     usage = Usage()
-    for path, text in sorted(consumer_files(repository=repository).items()):
-        scan_file(usage=usage, path=path, text=text)
+    files = consumer_files(repository=repository)
+    variables = None
+    if any("reusable-ai-review" in text.lower() for text in files.values()):
+        try:
+            pages = json.loads(
+                gh(
+                    "api",
+                    f"repos/{repository}/actions/variables",
+                    "--paginate",
+                    "--slurp",
+                ),
+            )
+            variables = {}
+            for page in pages:
+                variables.update(
+                    {item["name"]: item["value"] for item in page.get("variables", [])},
+                )
+        except RuntimeError:
+            # Public source may be readable without permission to inspect vars.
+            # Keep dynamic selectors unverified; use matrix defaults otherwise.
+            pass
+    for path, text in sorted(files.items()):
+        scan_file(usage=usage, path=path, text=text, variables=variables)
     return usage
 
 

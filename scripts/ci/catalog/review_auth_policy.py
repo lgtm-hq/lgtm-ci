@@ -21,34 +21,45 @@ REVIEW_SOURCES = {
 }
 
 
-def source_name(expression: Any) -> str | None:
-    """Recognize literal dotted/bracket secret sources; do not guess dynamic sources."""
+def source_name(expression: Any, context: str = "secrets") -> str | None:
+    """Recognize literal dotted/bracket context sources; do not guess expressions."""
     match = re.fullmatch(
-        r"\s*\$\{\{\s*secrets(?:\.([A-Za-z_][A-Za-z_0-9]*)|"
+        rf"\s*\$\{{\{{\s*{re.escape(context)}(?:\.([A-Za-z_][A-Za-z_0-9]*)|"
         r"\[['\"]([A-Za-z_][A-Za-z_0-9]*)['\"]\])\s*\}\}\s*",
         str(expression),
     )
     return (match[1] or match[2]) if match else None
 
 
-def findings(passed: Any, secrets: Any) -> set[str]:
-    """Report smoke mappings, unsupported inherit and statically unverified routing."""
+def findings(
+    passed: Any,
+    secrets: Any,
+    variables: dict[str, str] | None = None,
+) -> set[str]:
+    """Check the selected credential and API-key provenance using known repo vars."""
     config = passed if isinstance(passed, dict) else {}
     keys = ("provider", "transport", "auth")
-    selection = [str(config.get(key) or "") for key in keys]
+    selection = []
+    for key in keys:
+        value = config.get(key)
+        variable = source_name(expression=value, context="vars")
+        if variable and variables is not None:
+            value = variables.get(variable.upper())
+        value = value or (variables or {}).get(f"LINTRO_AI_{key.upper()}")
+        selection.append(str(value or ""))
     rows = matrix_rows()
     if not selection[2]:
-        # A variable can override an omitted auth input. Only a pair with one
-        # supported auth can be inferred without reading the consumer's vars.
-        auths = {row[2] for row in rows if row[:2] == selection[:2]}
-        selection[2] = next(iter(auths)) if len(auths) == 1 else ""
+        selection[2] = next(
+            (row[2] for row in rows if row[:2] == selection[:2] and row[3] == "yes"),
+            "",
+        )
     row = next((row for row in rows if row[:3] == selection), None)
     result: set[str] = set()
     if row is None:
         detail = "Actions-variable/config inspection"
         result.add(f"unverified: review auth selectors require {detail}")
     if secrets == "inherit":
-        if selection[2] == "api_key":
+        if selection[2] == "api_key" and (row is None or row[4] in REVIEW_SOURCES):
             result.add(
                 "error: api_key reviews require explicit review-source mappings; "
                 "secrets: inherit is unsupported"
@@ -59,10 +70,10 @@ def findings(passed: Any, secrets: Any) -> set[str]:
             )
         return result
     mapping = secrets if isinstance(secrets, dict) else {}
+    if row and row[4] not in mapping:
+        result.add(f"error: selected review slot {row[4]} is missing")
     for slot, expected in REVIEW_SOURCES.items():
         if slot not in mapping:
-            if row and row[4] == slot:
-                result.add(f"error: selected review slot {slot} is missing")
             continue
         source = source_name(mapping[slot])
         if source != expected:
