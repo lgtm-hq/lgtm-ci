@@ -335,6 +335,7 @@ def test_review_auth_source_policy(
         passed=passed,
         reads=[],
         secrets=secrets,
+        variables={},
     )
     if expected is None:
         assert_that(usage.review_auth_findings).is_empty()
@@ -392,6 +393,7 @@ def test_review_auth_requires_selected_credential(
         passed=passed,
         reads=[],
         secrets=secrets,
+        variables={},
     )
     expected = set()
     if mapping == "missing":
@@ -505,10 +507,14 @@ def test_scan_repository_reads_review_auth_variables(
 
     monkeypatch.setattr(consumer_scan, "gh", read_variables)
     usage = consumer_scan.scan_repository(repository="o/a")
-    slot = "CODEX_API_KEY" if variables_readable else "CODEX_AUTH_JSON"
-    assert_that(usage.review_auth_findings).is_equal_to(
-        {f"error: selected review slot {slot} is missing"},
-    )
+    if variables_readable:
+        assert_that(usage.review_auth_findings).is_equal_to(
+            {"error: selected review slot CODEX_API_KEY is missing"},
+        )
+    else:
+        findings = "\n".join(usage.review_auth_findings)
+        assert_that(findings).contains("auth selection unverified", "no credential")
+        assert_that(findings).does_not_contain("selected review slot")
 
 
 def test_refresh_rows_flags_review_auth_policy_errors(
@@ -526,3 +532,132 @@ def test_refresh_rows_flags_review_auth_policy_errors(
     )
     assert_that(failed).is_equal_to(1)
     assert_that(rows[0]["review-auth-findings"]).contains("error: smoke source mapping")
+
+
+@pytest.mark.parametrize(
+    ("passed", "variables", "slot", "expected"),
+    [
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            None,
+            "CODEX_API_KEY",
+            (None, True),
+            id="unreadable-api-key",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            None,
+            None,
+            ("no credential", True),
+            id="unreadable-no-credential",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            None,
+            "OPENAI_API_KEY",
+            ("no credential", True),
+            id="unreadable-wrong-transport-slot",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            {"LINTRO_AI_AUTH": "api_key"},
+            "CODEX_API_KEY",
+            (None, False),
+            id="readable-api-key",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            {},
+            "CODEX_API_KEY",
+            ("selected review slot CODEX_AUTH_JSON is missing", False),
+            id="readable-absent-default-oauth",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            None,
+            "CODEX_API_KEY",
+            ("selected review slot CODEX_AUTH_JSON is missing", False),
+            id="explicit-input-strict",
+        ),
+        pytest.param(
+            {"transport": "cli", "auth": "api_key"},
+            None,
+            "CODEX_API_KEY",
+            (None, True),
+            id="unreadable-provider",
+        ),
+        pytest.param(
+            {"provider": "openai", "auth": "api_key"},
+            None,
+            "OPENAI_API_KEY",
+            (None, True),
+            id="unreadable-transport",
+        ),
+        pytest.param(
+            {"provider": "${{ vars.REVIEW_PROVIDER }}", "transport": "cli"},
+            None,
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            (None, True),
+            id="unreadable-input-variable",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "${{ vars.REVIEW_TRANSPORT }}"},
+            None,
+            "CODEX_API_KEY",
+            (None, True),
+            id="unreadable-transport-variable",
+        ),
+        pytest.param(
+            {
+                "provider": "anthropic",
+                "transport": "cli",
+                "auth": "${{ vars.REVIEW_AUTH }}",
+            },
+            None,
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            (None, True),
+            id="unreadable-auth-variable",
+        ),
+    ],
+)
+def test_review_auth_uncertain_selection(
+    consumer_scan: ModuleType,
+    passed: dict[str, str],
+    variables: dict[str, str] | None,
+    slot: str | None,
+    expected: tuple[str | None, bool],
+) -> None:
+    """Only require an exact slot when all credential selectors are known."""
+    error, unverified = expected
+    mapping = {}
+    if slot:
+        source = {
+            "CODEX_API_KEY": "OPENAI_REVIEW_API_KEY",
+            "OPENAI_API_KEY": "OPENAI_REVIEW_API_KEY",
+        }.get(slot, slot)
+        mapping[slot] = f"${{{{ secrets.{source} }}}}"
+    usage = consumer_scan.Usage()
+    consumer_scan.record_call(
+        usage=usage,
+        uses="lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@abc",
+        passed=passed,
+        reads=[],
+        secrets=mapping,
+        variables=variables,
+    )
+    errors = [item for item in usage.review_auth_findings if item.startswith("error:")]
+    if error:
+        assert_that(errors).is_length(1)
+        assert_that(errors[0]).contains(error)
+    else:
+        assert_that(errors).is_empty()
+    notes = sorted(usage.review_auth_findings - set(errors))
+    if unverified:
+        assert_that(notes).is_length(1)
+        assert_that(notes[0]).contains(
+            "auth selection unverified: Actions variables unreadable; caller forwards",
+            slot or "no slots",
+        )
+        assert_that("\n".join(errors)).does_not_contain("selected review slot")
+    else:
+        assert_that(notes).is_empty()

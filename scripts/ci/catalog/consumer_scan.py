@@ -309,9 +309,9 @@ def scan_repository(
                 variables.update(
                     {item["name"]: item["value"] for item in page.get("variables", [])},
                 )
-        except RuntimeError:
+        except (RuntimeError, json.JSONDecodeError):
             # Public source may be readable without permission to inspect vars.
-            # Keep dynamic selectors unverified; use matrix defaults otherwise.
+            # Unreadable variables may override every omitted selector.
             pass
     for path, text in sorted(files.items()):
         scan_file(usage=usage, path=path, text=text, variables=variables)
