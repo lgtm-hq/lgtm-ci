@@ -293,26 +293,27 @@ def scan_repository(
     """
     usage = Usage()
     files = consumer_files(repository=repository)
-    variables = None
+    variables: dict[str, str] | None = None
     if any("reusable-ai-review" in text.lower() for text in files.values()):
         try:
-            pages = json.loads(
-                gh(
-                    "api",
-                    f"repos/{repository}/actions/variables",
-                    "--paginate",
-                    "--slurp",
-                ),
-            )
             variables = {}
-            for page in pages:
-                variables.update(
-                    {item["name"]: item["value"] for item in page.get("variables", [])},
+            # Repository values take precedence over shared organization values.
+            for scope in ("organization-variables", "variables"):
+                pages = json.loads(
+                    gh(
+                        "api",
+                        f"repos/{repository}/actions/{scope}",
+                        "--paginate",
+                        "--slurp",
+                    ),
                 )
+                for page in pages:
+                    items = page.get("variables", [])
+                    variables.update({item["name"]: item["value"] for item in items})
         except (RuntimeError, json.JSONDecodeError):
             # Public source may be readable without permission to inspect vars.
             # Unreadable variables may override every omitted selector.
-            pass
+            variables = None
     for path, text in sorted(files.items()):
         scan_file(usage=usage, path=path, text=text, variables=variables)
     return usage

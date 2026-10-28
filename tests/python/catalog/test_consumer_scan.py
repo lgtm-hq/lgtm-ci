@@ -467,13 +467,17 @@ def test_review_auth_resolves_input_then_variable_then_default(
     )
 
 
-@pytest.mark.parametrize("variables_readable", [True, False])
+@pytest.mark.parametrize("failure_scope", [None, "organization-variables", "variables"])
+@pytest.mark.parametrize("forwarded", [False, True])
+@pytest.mark.parametrize("repo_auth", [None, "oauth"])
 def test_scan_repository_reads_review_auth_variables(
     consumer_scan: ModuleType,
     monkeypatch: pytest.MonkeyPatch,
-    variables_readable: bool,
+    failure_scope: str | None,
+    forwarded: bool,
+    repo_auth: str | None,
 ) -> None:
-    """Use readable Actions vars and keep scanning when they are unavailable."""
+    """Respect org/repo precedence and keep either unreadable scope unverified."""
     text = textwrap.dedent(
         """\
         jobs:
@@ -485,36 +489,52 @@ def test_scan_repository_reads_review_auth_variables(
             secrets: {}
         """,
     )
+    if forwarded:
+        text = text.replace(
+            "secrets: {}",
+            "secrets:\n      CODEX_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}",
+        )
     monkeypatch.setattr(
         consumer_scan,
         "consumer_files",
         lambda repository: {".github/workflows/ci.yml": text},
     )
+    calls = []
 
     def read_variables(*args: str) -> str:
-        """Return repository variable pages or simulate missing read permissions."""
+        """Return org/repository variable pages or simulate missing permissions."""
+        scope = args[1].rsplit("/", maxsplit=1)[1]
         assert_that(args).is_equal_to(
-            ("api", "repos/o/a/actions/variables", "--paginate", "--slurp"),
+            ("api", f"repos/o/a/actions/{scope}", "--paginate", "--slurp"),
         )
-        if not variables_readable:
+        calls.append(scope)
+        if scope == failure_scope:
             raise RuntimeError("variables are not readable")
-        return json.dumps(
-            [
-                {"variables": []},
-                {"variables": [{"name": "LINTRO_AI_AUTH", "value": "api_key"}]},
-            ],
-        )
+        auth = "api_key" if scope == "organization-variables" else repo_auth
+        variables = [{"name": "LINTRO_AI_AUTH", "value": auth}] if auth else []
+        return json.dumps([{"variables": []}, {"variables": variables}])
 
     monkeypatch.setattr(consumer_scan, "gh", read_variables)
     usage = consumer_scan.scan_repository(repository="o/a")
-    if variables_readable:
-        assert_that(usage.review_auth_findings).is_equal_to(
-            {"error: selected review slot CODEX_API_KEY is missing"},
-        )
+    expected_calls = ["organization-variables"]
+    if failure_scope != "organization-variables":
+        expected_calls.append("variables")
+    assert_that(calls).is_equal_to(expected_calls)
+    if failure_scope is None:
+        slot = "CODEX_AUTH_JSON" if repo_auth else "CODEX_API_KEY"
+        expected = set()
+        if not forwarded or repo_auth:
+            expected.add(f"error: selected review slot {slot} is missing")
+        assert_that(usage.review_auth_findings).is_equal_to(expected)
     else:
         findings = "\n".join(usage.review_auth_findings)
-        assert_that(findings).contains("auth selection unverified", "no credential")
+        assert_that(findings).contains("auth selection unverified")
         assert_that(findings).does_not_contain("selected review slot")
+        if forwarded:
+            assert_that(findings).does_not_contain("error:")
+            assert_that(findings).contains("caller forwards CODEX_API_KEY")
+        else:
+            assert_that(findings).contains("error: caller forwards no credential")
 
 
 def test_refresh_rows_flags_review_auth_policy_errors(
