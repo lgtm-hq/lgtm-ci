@@ -24,6 +24,7 @@ from pathlib import Path
 SCRIPT_DIR = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_DIR.parent / "lib"))
 # Standalone script library is added to the search path above.
+# pylint: disable-next=wrong-import-position
 from ai_review_capabilities import matrix_rows  # noqa: E402
 
 MAX_SESSION_BYTES = 65536
@@ -61,7 +62,7 @@ def session_payload(encoded: str) -> tuple[bytes, list[str]]:
         raise ValueError("CODEX_AUTH_JSON exceeds the 64 KiB secret limit")
     try:
         raw = base64.b64decode(encoded, validate=True)
-        value = json.loads(raw)
+        value = json.loads(raw.decode("utf-8"))
     except (ValueError, binascii.Error, RecursionError) as exc:
         raise ValueError(
             "CODEX_AUTH_JSON must be base64 of a complete OAuth auth.json",
@@ -209,8 +210,9 @@ def invoke(home: Path, env: dict[str, str], redactions: list[str]) -> int:
         group_absent_errors += (PermissionError,)
     # Buffer inside the owned home, then redact before any log emission. This
     # also avoids a detached CLI holding a pipe open after its parent exits.
-    with (home / "review.log").open("w+", encoding="utf-8") as log:
-        process = subprocess.Popen(
+    with (
+        (home / "review.log").open("w+", encoding="utf-8") as log,
+        subprocess.Popen(
             ["/bin/bash", str(SCRIPT_DIR / "run-ai-review.sh")],
             cwd=home / "work",
             env=env,
@@ -218,10 +220,11 @@ def invoke(home: Path, env: dict[str, str], redactions: list[str]) -> int:
             stderr=subprocess.STDOUT,
             text=True,
             start_new_session=True,
-        )
+        ) as process,
+    ):
 
         def cancel(signum: int, _frame: object) -> None:
-            """Forward cancellation and reap the child before removing credentials."""
+            """Reap the cancelled child before removing credentials."""
             raise SystemExit(128 + signum)
 
         for sig in (signal.SIGTERM, signal.SIGINT):

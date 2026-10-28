@@ -16,6 +16,7 @@ WORKFLOW = ROOT / ".github/workflows/reusable-ai-review.yml"
 DOC = ROOT / "docs/reusable-workflows.md"
 sys.path.insert(0, str(ROOT / "scripts/ci/lib"))
 # Shared standalone script library lives outside the package search path.
+# pylint: disable-next=wrong-import-position
 from ai_review_capabilities import matrix_rows  # noqa: E402
 
 
@@ -60,6 +61,7 @@ def review_steps(matrix: list[list[str]]) -> str:
                 "        if: >-",
                 "          steps.preflight.outputs.should-run == 'true'",
                 f"          && steps.resolve.outputs.auth == '{auth}'",
+                "          && steps.size.outputs.skip-size != 'true'",
                 "        shell: bash",
                 "        env:",
             ]
@@ -113,13 +115,12 @@ def replace_block(text: str, name: str, body: str) -> str:
 def rendered(matrix: list[list[str]]) -> dict[Path, str]:
     """Compute every derived block from the capability rows."""
     defaults = {"/".join(row[:2]): row[2] for row in matrix if row[3] == "yes"}
-    literal = json.dumps(defaults)
     selector = (
         "format('{0}/{1}', inputs.provider || vars.LINTRO_AI_PROVIDER, "
         "inputs.transport || vars.LINTRO_AI_TRANSPORT)"
     )
-    default_expression = f"fromJSON('{literal}')[{selector}]"
-    auth_expression = "inputs.auth || vars.LINTRO_AI_AUTH || " + default_expression
+    auth_expression = "inputs.auth || vars.LINTRO_AI_AUTH || "
+    auth_expression += f"fromJSON('{json.dumps(defaults)}')[{selector}]"
     source_expression = "inputs.auth != '' && 'input' || "
     source_expression += "vars.LINTRO_AI_AUTH != '' && 'var' || 'default'"
     env = folded(key="AI_REVIEW_AUTH", value=expression(auth_expression), indent=6)

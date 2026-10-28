@@ -2565,7 +2565,8 @@ check or API health smoke does not prove the subscription review succeeded.
 
 `LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)
 and mint the posting token. That token is in scope **only** for the review
-step (`GITHUB_TOKEN`); `GH_TOKEN` stays the workflow token for fetching the
+invocation or credential-free size-notice step (`GITHUB_TOKEN`); `GH_TOKEN`
+stays the workflow token for fetching the
 diff. The GitHub App **installation** must grant `issues: write` and
 `pull-requests: write` — those are App permissions, not the caller's
 `pull-requests: read` job grant. Token minting fails if the installation
@@ -2604,7 +2605,9 @@ the raw values and cannot fold case.
 - **Exit-code contract.** lintro exit `2` is "no review produced" (error
   envelope on stdout), not a crash. Exit `1` is a produced review with P1 /
   changes-requested. Default `blocking: false` keeps those outcomes
-  non-blocking. **INCOMPLETE** coverage-at-HEAD always reddens the check.
+  non-blocking. **INCOMPLETE** coverage-at-HEAD and reported authentication failures always
+  redden the check. Expired/revoked sessions require renewal; no billing fallback
+  is attempted.
 - **Timed-out is neutral.** The review call runs under GNU `timeout` with
   a budget of whatever remains of `timeout-minutes` — measured from the
   preflight step, so the CLI and lintro installs are already counted —

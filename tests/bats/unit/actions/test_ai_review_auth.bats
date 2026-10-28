@@ -28,6 +28,19 @@ set -eu
 [[ -z "${BASH_ENV+x}${PYTHONPATH+x}${OPENAI_BASE_URL+x}" ]]
 [[ "$HOME" == *'.lgtm-ci-review-'* ]]
 [[ "$(cat .lintro-config.yaml)" == '{}' ]]
+credential_count=0
+for credential in ANTHROPIC_API_KEY CLAUDE_CODE_OAUTH_TOKEN OPENAI_API_KEY CODEX_API_KEY CURSOR_API_KEY; do
+    if printenv "$credential" >/dev/null; then credential_count=$((credential_count + 1)); fi
+done
+if [[ -f "$CODEX_HOME/auth.json" ]]; then credential_count=$((credential_count + 1)); fi
+[[ "$credential_count" -eq 1 ]]
+if [[ "$LINTRO_AI_PROVIDER/$LINTRO_AI_TRANSPORT" == anthropic/cli ]]; then
+    if printenv ANTHROPIC_API_KEY >/dev/null; then
+        [[ "$LINTRO_CLI_BARE" == always ]]
+    else
+        [[ "$LINTRO_CLI_BARE" == never ]]
+    fi
+fi
 if [[ "$LINTRO_AI_PROVIDER/$LINTRO_AI_TRANSPORT" == openai/cli && -f "$CODEX_HOME/auth.json" ]]; then
     [[ -z "${CODEX_API_KEY+x}" ]]
     python3 -I -c 'import os, stat; assert stat.S_IMODE(os.stat(os.environ["CODEX_HOME"]+"/auth.json").st_mode) == 0o600'
@@ -79,7 +92,9 @@ teardown() { teardown_temp_dir; }
 }
 
 @test "review auth: malformed, non-session and embedded-key snapshots are refused without leakage" {
-    for payload in invalid-base64 e30= W10=; do
+	local utf16
+	utf16="$(python3 -I -c 'import base64, os; raw=base64.b64decode(os.environ["CODEX_AUTH_JSON"]); print(base64.b64encode(raw.decode().encode("utf-16")).decode())')"
+	for payload in invalid-base64 e30= W10= "$utf16"; do
         CODEX_AUTH_JSON="$payload" run python3 -I "$SCRIPT"
         assert_failure
         assert_output --partial 'CODEX_AUTH_JSON'
@@ -108,6 +123,15 @@ teardown() { teardown_temp_dir; }
     run env -u CODEX_AUTH_JSON LINTRO_AI_PROVIDER=anthropic AI_REVIEW_AUTH=oauth LINTRO_CLI_BARE=always CLAUDE_CODE_OAUTH_TOKEN=fixture python3 -I "$SCRIPT"
     assert_failure
     assert_output --partial 'LINTRO_CLI_BARE conflicts'
+}
+
+@test "review auth: selected Anthropic auth overrides conflicting repository bare settings" {
+    printf 'ai: {providers: {anthropic: {cli_bare: always}}}\n' >.lintro-config.yaml
+    run env -u CODEX_AUTH_JSON LINTRO_AI_PROVIDER=anthropic AI_REVIEW_AUTH=oauth LINTRO_CLI_BARE=never CLAUDE_CODE_OAUTH_TOKEN=fixture python3 -I "$SCRIPT"
+    assert_success
+    printf 'ai: {providers: {anthropic: {cli_bare: never}}}\n' >.lintro-config.yaml
+    run env -u CODEX_AUTH_JSON LINTRO_AI_PROVIDER=anthropic AI_REVIEW_AUTH=api_key LINTRO_CLI_BARE=always ANTHROPIC_API_KEY=fixture python3 -I "$SCRIPT"
+    assert_success
 }
 
 @test "review auth: ordinary provider failure still removes the session" {

@@ -16,7 +16,8 @@
 #                1  review produced, P1 findings / changes-requested
 #                2  no review produced (provider/lintro failure)
 #              Coverage-at-HEAD below 100% is INCOMPLETE and always
-#              reddens the check (lintro exit codes stay 0/1/2).
+#              reddens the check, as do reported authentication failures
+#              (lintro exit codes stay 0/1/2).
 #              The call is bounded by GNU timeout to the cap's remainder; a
 #              review the bound ended (124, or 137 after --kill-after) is
 #              `timed-out` and neutral unless BLOCKING (#1098); so is a run
@@ -184,6 +185,35 @@ conclude_not_completed() {
 	exit 0
 }
 
+# Shared by the credential-free job-start gate and standalone runner callers.
+# Sets diff_lines/max_diff_lines for the caller's notice without invoking lintro.
+review_size_exceeded() {
+	max_diff_lines="${MAX_DIFF_LINES:-0}"
+	diff_lines=""
+	if [[ "$max_diff_lines" =~ ^[0-9]+$ && "$max_diff_lines" -gt 0 ]]; then
+		diff_lines="$(pr_diff_lines)"
+		if [[ ! "$diff_lines" =~ ^[0-9]+$ ]]; then
+			echo "::notice::size gate: could not read the PR diff size; reviewing anyway"
+		elif [[ "$diff_lines" -gt "$max_diff_lines" ]]; then
+			return 0
+		fi
+	fi
+	return 1
+}
+
+if [[ "$STEP" == size ]]; then
+	skip_size=false
+	if review_size_exceeded; then skip_size=true; fi
+	emit_output skip-size "$skip_size"
+	emit_output diff-lines "$diff_lines"
+	exit 0
+fi
+if [[ "$STEP" == skipped-size ]]; then
+	conclude_not_completed skipped-size \
+		"the diff exceeds max-diff-lines=${MAX_DIFF_LINES:-0}" \
+		"${DIFF_LINES:-}" "${BLOCKING:-false}"
+fi
+
 # -----------------------------------------------------------------------------
 # STEP: preflight
 # -----------------------------------------------------------------------------
@@ -314,19 +344,10 @@ if [[ "$STEP" == "run" ]]; then
 
 	blocking="${BLOCKING:-false}"
 
-	# Size gate before any install or spend: the model will not finish a
-	# diff this large inside the bound anyway (#1098). Opt-in via input;
-	# the blocking rule applies as for any other no-review outcome, so the
-	# author cannot dodge a blocking review by inflating the diff.
-	max_diff_lines="${MAX_DIFF_LINES:-0}"
-	if [[ "$max_diff_lines" =~ ^[0-9]+$ && "$max_diff_lines" -gt 0 ]]; then
-		diff_lines="$(pr_diff_lines)"
-		if [[ ! "$diff_lines" =~ ^[0-9]+$ ]]; then
-			echo "::notice::size gate: could not read the PR diff size; reviewing anyway"
-		elif [[ "$diff_lines" -gt "$max_diff_lines" ]]; then
-			conclude_not_completed "skipped-size" \
-				"the diff exceeds max-diff-lines=${max_diff_lines}" "$diff_lines" "$blocking"
-		fi
+	# Recheck for direct script callers; the workflow gates installations first.
+	if review_size_exceeded; then
+		conclude_not_completed skipped-size \
+			"the diff exceeds max-diff-lines=${max_diff_lines}" "$diff_lines" "$blocking"
 	fi
 
 	lintro_bin="${LINTRO_BIN:-${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}/bin/lintro}"
@@ -448,7 +469,10 @@ if [[ "$STEP" == "run" ]]; then
 		fail_job=true
 	elif [[ "$outcome" == "no-review" ]]; then
 		echo "::warning::lintro review produced no review (exit 2${error_kind:+; kind=${error_kind}})"
-		if [[ "$blocking" == "true" ]]; then
+		if [[ "$error_kind" == auth_failed ]]; then
+			echo "::error::Selected review authentication failed. Renew the selected session or review key; no credential or billing fallback was attempted."
+			fail_job=true
+		elif [[ "$blocking" == "true" ]]; then
 			fail_job=true
 		fi
 	elif [[ "$outcome" == "timed-out" ]]; then

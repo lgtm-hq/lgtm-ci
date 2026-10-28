@@ -158,14 +158,22 @@ run_review() {
 	assert_output "1"
 }
 
-@test "run: exit 2 is no-review and succeeds when non-blocking" {
+@test "run: authentication failure is red even when non-blocking" {
 	local bin
 	bin="$(write_fake_lintro "$(error_json)" "" 2)"
 	run run_review LINTRO_BIN="$bin" BLOCKING=false
-	assert_success
+	assert_failure
+	assert_output --partial "Renew the selected session or review key"
 	run cat "$GITHUB_OUTPUT"
 	assert_output --partial "outcome=no-review"
 	assert_output --partial "error-kind=auth_failed"
+}
+
+@test "run: other no-review outcomes preserve the non-blocking policy" {
+	local bin
+	bin="$(write_fake_lintro '{"error":{"kind":"rate_limited"}}' "" 2)"
+	run run_review LINTRO_BIN="$bin" BLOCKING=false
+	assert_success
 }
 
 @test "run: exit 2 fails when blocking" {
@@ -690,4 +698,24 @@ JSON
         assert_failure
         assert_output --partial 'lintro-version must be'
     done
+}
+
+@test "size: oversized diff skips before installs or provider credentials are needed" {
+    _mock_gh_comment 2500
+    STEP=size GITHUB_REPOSITORY=x/y PR_NUMBER=1 MAX_DIFF_LINES=2000 GH_TOKEN=workflow-token run bash "$SCRIPT"
+    assert_success
+    run cat "$GITHUB_OUTPUT"
+    assert_line 'skip-size=true'
+    assert_line 'diff-lines=2500'
+    run cat "${BATS_TEST_TMPDIR}/gh-calls"
+    refute_output --partial '--method'
+}
+
+@test "size: disabled gate does not fetch a diff" {
+    _mock_gh_comment 2500
+    STEP=size MAX_DIFF_LINES=0 run bash "$SCRIPT"
+    assert_success
+    run cat "$GITHUB_OUTPUT"
+    assert_line 'skip-size=false'
+    [[ ! -s "${BATS_TEST_TMPDIR}/gh-calls" ]]
 }

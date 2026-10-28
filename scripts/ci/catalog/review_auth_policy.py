@@ -11,6 +11,7 @@ from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 # Standalone script library is added to the search path above.
+# pylint: disable-next=wrong-import-position
 from ai_review_capabilities import matrix_rows  # noqa: E402
 
 REVIEW_SOURCES = {
@@ -34,18 +35,18 @@ def findings(passed: Any, secrets: Any) -> set[str]:
     """Report smoke mappings, unsupported inherit and statically unverified routing."""
     config = passed if isinstance(passed, dict) else {}
     keys = ("provider", "transport", "auth")
-    provider, transport, auth = (config.get(key, "") for key in keys)
+    selection = [config.get(key, "") for key in keys]
     rows = matrix_rows()
-    if not auth:
+    if not selection[2]:
         defaults = {"/".join(row[:2]): row[2] for row in rows if row[3] == "yes"}
-        auth = defaults.get(f"{provider}/{transport}", "")
-    row = next((row for row in rows if row[:3] == [provider, transport, auth]), None)
+        selection[2] = defaults.get("/".join(selection[:2]), "")
+    row = next((row for row in rows if row[:3] == selection), None)
     result: set[str] = set()
     if row is None:
         detail = "Actions-variable/config inspection"
         result.add(f"unverified: review auth selectors require {detail}")
     if secrets == "inherit":
-        if auth == "api_key":
+        if selection[2] == "api_key":
             result.add(
                 "error: api_key reviews require explicit review-source mappings; "
                 "secrets: inherit is unsupported"

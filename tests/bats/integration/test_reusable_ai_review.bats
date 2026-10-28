@@ -236,12 +236,12 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 }
 
-@test "reusable-ai-review: App token is minted and scoped to the run step" {
+@test "reusable-ai-review: App token is scoped to review and oversized notice steps" {
 	run grep -F "actions/create-github-app-token" "$WORKFLOW"
 	assert_success
 	run grep -c "GITHUB_TOKEN: \${{ steps.lintro-review-app.outputs.token }}" "$WORKFLOW"
 	assert_success
-	[[ "$output" -eq 2 ]]
+	[[ "$output" -eq 3 ]]
 }
 
 @test "reusable-ai-review: fails early when App credentials are missing" {
@@ -365,4 +365,18 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	run grep -c "persist-credentials: false" "$WORKFLOW"
 	assert_success
 	[[ "$output" -ge 2 ]]
+}
+
+@test "reusable-ai-review: size gate precedes all installations and skips credentialed invocation" {
+    run awk '
+        /- name: Check review size before installations/ { size = NR }
+        /- name: Set up uv/ { if (!size || size >= NR) exit 1; found = 1 }
+        END { if (!found) exit 1 }
+    ' "$WORKFLOW"
+    assert_success
+    run awk '/- name: Run OAuth AI review/{f=1} f&&/ai-review-steps:end/{exit} f' "$WORKFLOW"
+    assert_output --partial "steps.size.outputs.skip-size != 'true'"
+    run awk '/- name: Report oversized review/{f=1} f&&/- name: Remove isolated/{exit} f' "$WORKFLOW"
+    refute_output --partial 'secrets.'
+    assert_output --partial 'STEP: skipped-size'
 }
