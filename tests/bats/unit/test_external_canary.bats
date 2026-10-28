@@ -34,6 +34,9 @@ setup() {
 	export CANARY_POLL_SECONDS=0
 	export CANARY_WRITE_RETRY_SECONDS=0
 	export CANARY_TIMEOUT_SECONDS=60
+	export CANARY_CLEANUP_POLL_SECONDS=0
+	export CANARY_QUEUE_TIMEOUT_SECONDS=60
+	export CANARY_STATE_DIR="${BATS_TEST_TMPDIR}/state"
 	# The fake fixture exposes one gate; the default expected-gate list would
 	# report every other gate as not_dispatchable.
 	export CANARY_EXPECTED_GATES="python"
@@ -219,6 +222,23 @@ case "$args" in
 	if [[ -n "${MOCK_DISPATCH_FAIL:-}" && "$args" == *"/actions/workflows/${MOCK_DISPATCH_FAIL}/dispatches"* ]]; then
 		echo "gh: HTTP 422" >&2
 		exit 1
+	fi
+	;;
+*"/actions/runs/"*"/jobs?"*)
+	if [[ "${MOCK_JOBS_FAIL:-}" == 1 ]]; then exit 1; fi
+	if [[ "${MOCK_JOBS_QUEUED:-}" != 1 ]]; then date +%s; fi
+	;;
+*"/actions/runs/"*"/cancel"*)
+	;;
+*"/actions/runs?branch="*"&event=workflow_dispatch&per_page=100"*)
+	if [[ "${MOCK_CLEANUP_FAIL:-}" == 1 ]]; then exit 1; fi
+	if [[ -f "$MOCK_RUNS_DIR/cleanup" ]]; then
+		cat "$MOCK_RUNS_DIR/cleanup"
+	else
+		# Cleanup observes the latest fixture state without advancing polling.
+		n="$(cat "$MOCK_RUNS_DIR/.count" 2>/dev/null || echo 1)"
+		while [[ $n -gt 1 && ! -f "$MOCK_RUNS_DIR/runs.$n" ]]; do n=$((n - 1)); done
+		if [[ -f "$MOCK_RUNS_DIR/runs.$n" ]]; then cat "$MOCK_RUNS_DIR/runs.$n"; fi
 	fi
 	;;
 *"/actions/runs?branch="*)
@@ -546,7 +566,7 @@ call_fn() {
 	run_row verify-negative.yml completed failure 12 >"$MOCK_RUNS_DIR/runs.1"
 	run env MOCK_DISPATCH_FAIL=python.yml CANARY_TIMEOUT_SECONDS=600 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
-	assert_output --partial "dispatch python.yml failed on owner/fixture: gh: HTTP 422"
+	assert_output --partial "dispatch python.yml failed on owner/fixture"
 	assert_output --partial "| \`python.yml\` | gate | \`success\` | \`dispatch_failed\` | ❌ **gate failed** | — |"
 	assert_output --partial "::error title=external canary::gate python.yml concluded 'dispatch_failed'"
 	# Only the dispatched workflow is polled, and the snapshot completes it at once.
@@ -593,12 +613,12 @@ call_fn() {
 	assert_output "1"
 }
 
-@test "external-canary: poll_runs terminates at the bound with timeout and missing rows" {
+@test "external-canary: poll_runs terminates at the bounds with execution timeout and undiscovered queue timeout" {
 	run_row python.yml in_progress "" 11 >"$MOCK_RUNS_DIR/runs.1"
-	run env CANARY_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml rust.yml"
+	run env CANARY_TIMEOUT_SECONDS=0 CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml rust.yml"
 	assert_success
 	assert_line "$(printf 'python.yml\ttimeout\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
-	assert_line "$(printf 'rust.yml\tmissing\t\t')"
+	assert_line "$(printf 'rust.yml\tqueued-timeout\t\t')"
 }
 
 @test "external-canary: poll_runs uses the latest run when a workflow has several" {
@@ -1339,4 +1359,188 @@ EOF
 	run call_fn "reference_verdict '$MOCK_FIXTURE_DIR/vuln-suppression.yml' '$CANDIDATE'"
 	assert_failure
 	assert_output --partial "cannot read block-style on.workflow_call inputs in"
+}
+
+@test "external-canary: queue expiry is informational for gates and marks unexercised work" {
+	run_row python.yml queued "" 11 >"$MOCK_RUNS_DIR/runs.1"
+	run env MOCK_JOBS_QUEUED=1 CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" \
+		"poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml rust.yml"
+	assert_success
+	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
+	assert_line "$(printf 'rust.yml\tqueued-timeout\t\t')"
+	ROWS="$output" run bash "$CANARY_EVAL" 'failed_gates <<<"$ROWS"'
+	assert_success
+	assert_output ""
+	run bash "$CANARY_EVAL" "printf 'python.yml\tqueued-timeout\t\t\n' | render_summary '$CANDIDATE'"
+	assert_output --partial 'queue budget exhausted (not exercised)'
+}
+
+@test "external-canary: queue budget covers admission and prevents dispatch after expiry" {
+	run env CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'queued-timeout'
+	run grep '/dispatches' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: job start gets its full execution budget after the queue budget expires" {
+	# Both clocks are deterministic: queue deadline 101, first job starts at
+	# 100, next poll at 102. Execution budget is still available at that point.
+	run bash "$CANARY_EVAL" '
+		clock="$CANARY_STATE_DIR.clock"; echo 99 >"$clock"
+		date() { local n; n=$(cat "$clock"); echo $((n + 1)) >"$clock"; echo "$n"; }
+		first_job_start() { echo 100; }
+		list_canary_runs() {
+			if (($(cat "$clock") < 104)); then
+				printf "python.yml\tin_progress\t\thttps://example/runs/11\tpython\n"
+			else
+				printf "python.yml\tcompleted\tsuccess\thttps://example/runs/11\tpython\n"
+			fi
+		}
+		CANARY_QUEUE_TIMEOUT_SECONDS=2 CANARY_TIMEOUT_SECONDS=20 poll_runs canary/test since python.yml
+	'
+	assert_success
+	assert_line "$(printf 'python.yml\tsuccess\thttps://example/runs/11\tpython')"
+	refute_output --partial queued-timeout
+	refute_output --partial "python.yml$(printf '\t')timeout"
+}
+
+@test "external-canary: rolling admission never exceeds the configured in-flight bound" {
+	run bash "$CANARY_EVAL" '
+		CANARY_STATE_DIR=""
+		state="$MOCK_RUNS_DIR/scheduler"; mkdir -p "$state"
+		dispatch_workflow() {
+			local active; active=$(find "$state" -name "*.active" | wc -l)
+			((active < CANARY_MAX_IN_FLIGHT)) || exit 91
+			touch "$state/$1.active"
+			echo "dispatch $1"
+		}
+		list_canary_runs() {
+			local path file
+			for path in "$state"/*.active; do
+				file=${path##*/}; file=${file%.active}
+				# Free one slot per snapshot; other workflows stay queued.
+				if [[ ! -f "$state/freed" ]]; then
+					mv "$path" "$state/$file.done"; touch "$state/freed"
+				fi
+				break
+			done
+			for path in "$state"/*.done; do
+				[[ -f "$path" ]] || continue
+				file=${path##*/}; file=${file%.done}
+				printf "%s\tcompleted\tsuccess\thttps://example/runs/11\tname\n" "$file"
+			done
+			for path in "$state"/*.active; do
+				[[ -f "$path" ]] || continue
+				file=${path##*/}; file=${file%.active}
+				printf "%s\tqueued\t\thttps://example/runs/11\tname\n" "$file"
+			done
+			rm -f "$state/freed"
+		}
+		first_job_start() { :; }
+		CANARY_MAX_IN_FLIGHT=2 CANARY_DISPATCH=true poll_runs canary/test since one.yml two.yml three.yml four.yml
+	'
+	assert_success
+	assert_line 'dispatch four.yml'
+	assert_line "$(printf 'four.yml\tsuccess\thttps://example/runs/11\tname')"
+}
+
+@test "external-canary: failed job lookup cannot be reclassified as queue pressure" {
+	run_row python.yml queued "" 11 >"$MOCK_RUNS_DIR/runs.1"
+	run env MOCK_JOBS_FAIL=1 CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" \
+		"poll_runs canary/$CANDIDATE since python.yml"
+	assert_success
+	assert_line "$(printf 'python.yml\tmonitoring_failed\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
+}
+
+_prepare_cleanup() {
+	mkdir -p "$CANARY_STATE_DIR"
+	printf 'canary/%s\n' "$CANDIDATE" >"$CANARY_STATE_DIR/branch"
+	printf 'python.yml\n' >"$CANARY_STATE_DIR/attempted"
+}
+
+@test "external-canary: always-run cleanup cancels queued runs and probe children and retains unsettled ref" {
+	_prepare_cleanup
+	{
+		run_row python.yml queued "" 11
+		run_row verify-negative.yml in_progress "" 12
+		run_row rust.yml completed success 13
+	} >"$MOCK_RUNS_DIR/cleanup"
+	run bash "$SCRIPT" --cleanup
+	assert_success
+	assert_output --partial "retained owner/fixture@canary/$CANDIDATE"
+	run grep -F 'actions/runs/11/cancel' "$MOCK_CALLS"
+	assert_success
+	run grep -F 'actions/runs/12/cancel' "$MOCK_CALLS"
+	assert_success
+	run grep -E 'actions/runs/13/cancel|-X DELETE' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: cleanup retains ref when a dispatch is not yet visible or run listing fails" {
+	_prepare_cleanup
+	: >"$MOCK_RUNS_DIR/cleanup"
+	run bash "$SCRIPT" --cleanup
+	assert_success
+	assert_output --partial 'retained owner/fixture@'
+	run env MOCK_CLEANUP_FAIL=1 bash "$SCRIPT" --cleanup
+	assert_success
+	assert_output --partial 'cannot verify fixture runs'
+	run grep -F -- '-X DELETE' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: cleanup deletes ref only after cancellation is observed complete" {
+	_prepare_cleanup
+	all_green_snapshot
+	run bash "$SCRIPT" --cleanup
+	assert_success
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/canary/$CANDIDATE" "$MOCK_CALLS"
+	assert_success
+}
+
+@test "external-canary: cleanup without ownership journal touches no fixture runs" {
+	run bash "$SCRIPT" --cleanup
+	assert_success
+	run cat "$MOCK_CALLS"
+	assert_output ""
+}
+
+@test "external-canary: dispatch writes are not retried after an ambiguous failure" {
+	all_green_snapshot
+	run env MOCK_DISPATCH_FAIL=python.yml bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	run grep -c '/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+}
+
+@test "external-canary: rejects an invalid in-flight limit before creating a ref" {
+	run env CANARY_MAX_IN_FLIGHT=0 bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial 'CANARY_MAX_IN_FLIGHT must be a positive integer'
+	run grep -F 'git/refs' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: execution clock uses earliest started job across pages and ignores queued or skipped jobs" {
+	run bash "$CANARY_EVAL" '
+		fixture_api() {
+			local filter="${@: -1}"
+			printf "%s\n" \
+				'"'"'{"jobs":[{"status":"queued","started_at":"2026-01-01T00:00:00Z"},{"status":"completed","conclusion":"skipped","started_at":"2026-01-01T00:00:01Z"},{"status":"in_progress","started_at":"2026-01-01T00:00:20Z"}]}'"'"' \
+				'"'"'{"jobs":[{"status":"completed","conclusion":"success","started_at":"2026-01-01T00:00:10Z"}]}'"'"' | jq -r "$filter"
+		}
+		first_job_start 11
+	'
+	assert_success
+	assert_output "$(date -u -j -f '%Y-%m-%dT%H:%M:%SZ' '2026-01-01T00:00:10Z' +%s 2>/dev/null || date -u -d '2026-01-01T00:00:10Z' +%s)"
+}
+
+@test "external-canary: a run-list outage is not reported as queue pressure" {
+	run env CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" '
+		list_canary_runs() { return 1; }
+		poll_runs canary/test since python.yml
+	'
+	assert_success
+	assert_line "$(printf 'python.yml\tmonitoring_failed\t\t')"
 }

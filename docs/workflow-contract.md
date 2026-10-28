@@ -2867,13 +2867,31 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    verdict from its negative, and a negative whose probe is not dispatched
    is dispatched directly. A run that dispatches nothing at all (every
    workflow `not_applicable`) warns that nothing was exercised;
-5. polls the fixture's run list until each dispatched workflow has a
-   completed run, bounded at 25 minutes; a workflow whose dispatch was
-   rejected is reported `dispatch_failed` at once instead of waiting;
+5. admits workflows with a rolling limit of six dispatched workflows,
+   including queued ones (`CANARY_MAX_IN_FLIGHT`). A 1,500-second queue
+   budget (`CANARY_QUEUE_TIMEOUT_SECONDS`) starts before admission: workflows
+   still awaiting admission, run discovery, or their first actual job start
+   when it expires are `queued-timeout`, informational even for gates.
+   These rows mean the candidate was **not exercised**, not that it passed.
+   Each started workflow gets a separate 1,500-second execution budget
+   (`CANARY_TIMEOUT_SECONDS`) from its earliest job's `started_at`, queried
+   through the jobs API; workflow `run_started_at` includes queue time and
+   is not used. Execution expiry remains `timeout` and fails gates. This
+   bounds scheduling plus execution to about 50 minutes with the defaults,
+   within the 55-minute job timeout and one-hour fixture token lifetime.
+   A rejected dispatch is `dispatch_failed`; dispatch writes are not retried
+   because an ambiguous response could create duplicate runs;
 6. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
-   the job summary, deletes the branch it created on every exit path, and
-   fails when any **gate** workflow did not succeed (a `not_applicable` gate
-   is not a failure) or any workflow is `removed_by_candidate`. Informational rows are
+   the job summary, requests cancellation of its own unfinished fixture
+   runs on every exit path (including probe children), and deletes its branch
+   only after every attempted dispatch is visible and all runs on the owned
+   ref are terminal. Unsettled, late-visible, or unqueryable runs retain the
+   ref with a warning so pending jobs can still resolve it. A journal under
+   `runner.temp` lets an `if: always()` cleanup step retry after cancellation.
+   New pushes cancel the previous canary for the same PR; different PRs keep
+   separate concurrency groups. The canary fails when any **gate** workflow
+   did not succeed (a `not_applicable` or `queued-timeout` gate is not a failure)
+   or any workflow is `removed_by_candidate`. Informational rows are
    compared with their expected conclusion and flagged `unexpected`, but
    never fail the run. The gate set is a fixed list in the script: a gate the
    fixture no longer exposes for dispatch is reported `not_dispatchable` and

@@ -78,8 +78,10 @@ _header_list() {
 }
 
 @test "external-canary workflow: shell logic lives in the script, not inline" {
-	run grep -cE '^        run: ' "$WORKFLOW"
-	assert_output "1"
+	run grep -E '^        run: ' "$WORKFLOW"
+	assert_output "$(printf '%s\n' \
+		'        run: bash scripts/ci/actions/external-canary.sh "$CANDIDATE_REF"' \
+		'        run: bash scripts/ci/actions/external-canary.sh --cleanup')"
 	run grep -F 'run: bash scripts/ci/actions/external-canary.sh "$CANDIDATE_REF"' "$WORKFLOW"
 	assert_success
 	assert_file_exists "$SCRIPT"
@@ -170,8 +172,8 @@ _header_list() {
 	assert_success
 	run grep -F "EVENT_LABEL: \${{ github.event.label.name }}" "$WORKFLOW"
 	assert_success
-	# The concurrency key is the candidate, on dispatch too.
-	run grep -F "group: external-consumer-canary-\${{ inputs.ref || github.event.pull_request.head.sha || github.sha }}" "$WORKFLOW"
+	# Supersede older PR heads; manual dispatches are grouped by ref.
+	run grep -F "external-consumer-canary-\${{ github.event.pull_request.number || inputs.ref || github.ref }}" "$WORKFLOW"
 	assert_success
 	# The two labels the script honours are named in the header.
 	run grep -F "needs-external-canary" "$WORKFLOW"
@@ -212,4 +214,13 @@ _header_list() {
 	[[ -n "$expected" ]]
 	run diff <(printf '%s\n' "$expected") <(printf '%s\n' "$listed")
 	assert_output ""
+}
+
+@test "external-canary workflow: cancels superseded PR heads with always-run fixture cleanup" {
+	run grep -F 'cancel-in-progress: true' "$WORKFLOW"
+	assert_success
+	run grep -F "if: always() && steps.fixture-token.outputs.token != ''" "$WORKFLOW"
+	assert_success
+	run grep -F 'run: bash scripts/ci/actions/external-canary.sh --cleanup' "$WORKFLOW"
+	assert_success
 }
