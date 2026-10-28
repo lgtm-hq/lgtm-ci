@@ -1558,7 +1558,6 @@ allowed-endpoints: >
   upload.pypi.org:443
   files.pythonhosted.org:443
   test.pypi.org:443
-  upload.test.pypi.org:443
   fulcio.sigstore.dev:443
   rekor.sigstore.dev:443
   tuf-repo-cdn.sigstore.dev:443
@@ -2820,7 +2819,7 @@ before/after run. What each workflow proves:
 fixture's own pushes and has no `workflow_dispatch`, so the canary does not
 dispatch it. `build-python-direct.yml` enforces the on-default-branch
 preflight only on the fixture's `main` and tags: a canary branch commit is
-by construction not on `main`, so on `canary/<sha>` the probe proves the
+by construction not on `main`, so on `canary/<sha>-<run-id>-<attempt>` the probe proves the
 direct build path and the shallow-checkout handling, and the on-main check
 is proven by the fixture's own pushes.
 
@@ -2836,7 +2835,10 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    lgtm-ci pin to the candidate (the same pattern as the fixture's
    `scripts/pin.sh`), refuses any lgtm-ci reference that is not then pinned
    to the candidate, and commits the result through the git data API as the
-   branch `canary/<sha>`. The fixture's `main` is never written;
+   branch `canary/<sha>-<run-id>-<attempt>`, using `GITHUB_RUN_ID` and
+   `GITHUB_RUN_ATTEMPT` so retained refs never block a retry of the same SHA.
+   Local invocations use a timestamp and PID in place of the run ID.
+   The fixture's `main` is never written;
 3. looks up every lgtm-ci path each dispatchable fixture workflow
    references (`.github/workflows/<file>.yml`, `.github/actions/<name>`;
    push-only `starter-python.yml` is not checked) at the candidate through
@@ -2867,13 +2869,47 @@ expressions in `uses:`, the fixture cannot take the candidate as an input;
    verdict from its negative, and a negative whose probe is not dispatched
    is dispatched directly. A run that dispatches nothing at all (every
    workflow `not_applicable`) warns that nothing was exercised;
-5. polls the fixture's run list until each dispatched workflow has a
-   completed run, bounded at 25 minutes; a workflow whose dispatch was
-   rejected is reported `dispatch_failed` at once instead of waiting;
+5. admits workflows with a rolling limit of six dispatched workflows,
+   including queued ones (`CANARY_MAX_IN_FLIGHT`). A 1,500-second queue
+   budget (`CANARY_QUEUE_TIMEOUT_SECONDS`) starts before admission: workflows
+   still awaiting admission, run discovery, or their first actual job start
+   when it expires are `queued-timeout`, informational even for gates.
+   These rows mean the candidate was **not exercised**, not that it passed.
+   For dispatched workflows, this classification requires the latest run-list
+   fetch to succeed; an outage at the queue deadline is `monitoring_failed`,
+   which fails gates and remains informational for informational workflows.
+   Each started workflow gets a separate 1,500-second execution budget
+   (`CANARY_TIMEOUT_SECONDS`) from its earliest job's `started_at`, queried
+   through the jobs API; workflow `run_started_at` includes queue time and
+   is not used. Execution expiry remains `timeout` and fails gates. This
+   bounds scheduling plus execution to about 50 minutes with the defaults,
+   within the 55-minute job timeout and one-hour fixture token lifetime.
+   A rejected dispatch is `dispatch_failed`; dispatch writes are not retried
+   because an ambiguous response could create duplicate runs;
 6. writes a table (workflow, role, expected, conclusion, verdict, run URL) to
-   the job summary, deletes the branch it created on every exit path, and
-   fails when any **gate** workflow did not succeed (a `not_applicable` gate
-   is not a failure) or any workflow is `removed_by_candidate`. Informational rows are
+   the job summary, requests cancellation of its own unfinished fixture
+   runs on every exit path (including probe children), and deletes its branch
+   only after every attempted dispatch is visible and all runs on the owned
+   ref are terminal. Unsettled, late-visible, or unqueryable runs retain the
+   ref with a warning so pending jobs can still resolve it. A journal under
+   `runner.temp` lets an `if: always()` cleanup step retry after cancellation.
+   Cleanup also best-effort prunes other `canary/<sha>-*` refs for the same
+   candidate, without cancelling their runs: the owning lgtm-ci workflow run ID
+   and attempt are parsed from `canary/<sha>-<run-id>-<attempt>`. The exact attempt
+   must have `status: completed` from
+   `repos/lgtm-hq/lgtm-ci/actions/runs/<run-id>/attempts/<attempt>`; fixture run
+   visibility alone cannot establish that the owner is finished. At least one
+   fixture run must also be visible, and every fixture run on that exact ref
+   (including probe children) must be terminal. Active owning attempts,
+   unparsable refs, empty listings, failed lookups, and refs for other SHAs are
+   left untouched. The owned ref still uses the dispatch journal rule above.
+   `CANARY_KEEP_BRANCH=true` disables deletion of both owned and stale refs.
+   The fixture uses the full ref for dispatch, probe children, and concurrency;
+   no exact `canary/<sha>` name is assumed.
+   New pushes cancel the previous canary for the same PR; different PRs keep
+   separate concurrency groups. The canary fails when any **gate** workflow
+   did not succeed (a `not_applicable` or `queued-timeout` gate is not a failure)
+   or any workflow is `removed_by_candidate`. Informational rows are
    compared with their expected conclusion and flagged `unexpected`, but
    never fail the run. The gate set is a fixed list in the script: a gate the
    fixture no longer exposes for dispatch is reported `not_dispatchable` and
@@ -2928,12 +2964,13 @@ include the three permissions below: GitHub refuses the mint (HTTP 422,
 "The permissions requested are not granted to this installation") when the
 App or its installation lacks one. The mint step names that repository and
 requests **Actions: write** (dispatch and poll),
-**Contents: write** (create and delete the `canary/<sha>` branch) and
+**Contents: write** (create and delete the `canary/<sha>-<run-id>-<attempt>` branch) and
 **Workflows: write** (GitHub refuses to write anything under
 `.github/workflows/` without it, through the git data API too; a token
 without it fails at "create tree" with HTTP 403). The token has no access to
-any lgtm-hq repository; the candidate ref and the PR file list are read with
-the job's own `github.token`. The mint step is skipped on fork PRs and
+any lgtm-hq repository; the candidate ref, PR file list, and stale canary
+owners' run status are read with the job's own `github.token` (`contents: read`,
+`pull-requests: read`, and `actions: read`). The mint step is skipped on fork PRs and
 runs with `continue-on-error`, so a failed mint never turns a skip run red;
 a full run then fails with "GH_TOKEN is required for a full run". The
 token reaches the canary step as one named env value, there is no

@@ -1,20 +1,23 @@
-"""Synthetic API regressions for same-run retry and dynamic job obligations.
+"""API regressions for same-run retry and dynamic job obligations.
 
-Names and graph model spotify-curator run 39800719692; IDs and receipts are
-deliberately synthetic, not captured CI output.
+Captured runner headers reproduce spotify-curator run 39800719692. Synthetic
+API records and receipts exercise rejected evidence and alternate job graphs.
 """
 
 import base64
 import json
 import os
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from types import ModuleType
 from typing import Any
 
 import pytest
 from assertpy import assert_that
 
 ROOT = Path(__file__).resolve().parents[2]
+CAPTURED = Path(__file__).resolve().parent / "fixtures" / "gate_retry"
 REPO = "lgtm-hq/example"
 REPO_URL = f"https://github.com/{REPO}"
 CHECK_URL = f"https://api.github.com/repos/{REPO}/check-runs"
@@ -129,7 +132,9 @@ def gate(tmp_path: Path, responses: dict[str, Any]) -> subprocess.CompletedProce
     ):
         urls[f"repos/lgtm-hq/lgtm-ci/contents/{source}?ref={WORKFLOW_SHA}"] = {
             "encoding": "base64",
-            "content": base64.b64encode((ROOT / source).read_bytes()).decode(),
+            "content": base64.b64encode(
+                (CAPTURED / f"{Path(source).name}.txt").read_bytes(),
+            ).decode(),
         }
     urls.update(responses["overrides"])
     fixture_path = tmp_path / "responses.json"
@@ -194,6 +199,79 @@ def test_retry_recovers_placeholder(tmp_path: Path, responses: dict[str, Any]) -
     assert_that(result.stdout).contains("All 2 other check(s) passed")
     assert_that((tmp_path / "output").read_text()).contains("status=passed")
     assert_that((tmp_path / "summary").read_text()).does_not_contain(PLACEHOLDER)
+
+
+@pytest.mark.parametrize(
+    ("job_id", "name"),
+    [
+        (119900303171, SETUP),
+        (119914396811, SETUP),
+        (119914588071, ANALYSIS),
+    ],
+    ids=["cancelled-setup", "retry-setup", "retry-analysis"],
+)
+def test_header_parses_captured_runner_bytes(
+    tmp_path: Path,
+    load_script: Callable[[str], ModuleType],
+    job_id: int,
+    name: str,
+) -> None:
+    """Parse real BOMs, timestamps, runner preamble and blank continuations."""
+    reducer = load_script("scripts/ci/actions/reconcile_check_retries.py")
+    (tmp_path / f"receipt-{job_id}.txt").write_bytes(
+        (CAPTURED / f"{job_id}-header.txt").read_bytes(),
+    )
+    parsed = reducer.header(job={"id": job_id, "name": name}, work=tmp_path)
+    assert_that(parsed).is_not_none()
+    uses, inputs = parsed
+    assert_that(uses).is_equal_to(f"{WORKFLOW}@{WORKFLOW_SHA}")
+    assert_that(inputs).is_equal_to(
+        {
+            "languages": "actions",
+            "build-mode": "none",
+            "language-build-modes": "",
+            "config-file": "",
+            "category": "/language:all",
+            "tooling-ref": WORKFLOW_SHA,
+            "egress-policy": "block",
+            "allowed-endpoints": (
+                "github.com:443 api.github.com:443 codeload.github.com:443 "
+                "objects.githubusercontent.com:443 raw.githubusercontent.com:443 "
+                "uploads.github.com:443 pipelines.actions.githubusercontent.com:443 "
+                "release-assets.githubusercontent.com:443"
+            ),
+            "allowed-endpoints-mode": "replace",
+            "egress-preset": "github-tooling",
+            "job-name": "🔬 CodeQL Analysis",
+            "timeout-minutes": "60",
+        },
+    )
+
+
+def test_captured_retry_retires_placeholder(
+    tmp_path: Path,
+    responses: dict[str, Any],
+) -> None:
+    """Real incident receipts prove recovery through the complete Bash/jq gate."""
+    responses["logs"] = {
+        str(job_id): (CAPTURED / f"{captured_id}-header.txt").read_text()
+        for job_id, captured_id in (
+            (11, 119900303171),
+            (21, 119914396811),
+            (22, 119914588071),
+        )
+    }
+    # The runnerless placeholder has no log; its cancelled setup supplies proof.
+    responses["logs"]["12"] = {"error": "HTTP 404"}
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.returncode).described_as(result.stdout + result.stderr).is_zero()
+    assert_that(result.stdout).contains("All 2 other check(s) passed")
+    assert_that((tmp_path / "output").read_text()).contains("status=passed")
+    assert_that((tmp_path / "summary").read_text()).does_not_contain(PLACEHOLDER)
+    calls = (tmp_path / "gh-calls").read_text()
+    for job_id in (11, 21, 22):
+        assert_that(calls).contains(f"repos/{REPO}/actions/jobs/{job_id}/logs")
+    assert_that(calls).does_not_contain(f"repos/{REPO}/actions/jobs/12/logs")
 
 
 @pytest.mark.parametrize("conclusion", ["cancelled", "failure", "skipped", "neutral"])

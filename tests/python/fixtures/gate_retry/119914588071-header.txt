@@ -1,0 +1,52 @@
+﻿2026-10-22T15:25:25.9438451Z Current runner version: '2.338.0'
+2026-10-22T15:25:25.9461636Z ##[group]Runner Image Provisioner
+2026-10-22T15:25:25.9462389Z Hosted Compute Agent
+2026-10-22T15:25:25.9462843Z Version: 20261015.610
+2026-10-22T15:25:25.9463348Z Commit: 267fdb4e8bbec4ab5ea31367f3a00d5c480c7656
+2026-10-22T15:25:25.9463938Z Build Date: 2026-10-14T17:06:54Z
+2026-10-22T15:25:25.9464450Z Worker ID: {3b6daec5-fd5c-4b25-b766-768699fbf7e0}
+2026-10-22T15:25:25.9465025Z Region: centralus
+2026-10-22T15:25:25.9465770Z Cloud: Azure
+2026-10-22T15:25:25.9466279Z ##[endgroup]
+2026-10-22T15:25:25.9467614Z ##[group]Operating System
+2026-10-22T15:25:25.9468087Z Ubuntu
+2026-10-22T15:25:25.9468526Z 24.04.5
+2026-10-22T15:25:25.9468923Z LTS
+2026-10-22T15:25:25.9469320Z ##[endgroup]
+2026-10-22T15:25:25.9469777Z ##[group]Runner Image
+2026-10-22T15:25:25.9470244Z Image: ubuntu-24.04
+2026-10-22T15:25:25.9470690Z Version: 20261018.339.1
+2026-10-22T15:25:25.9471687Z Included Software: https://github.com/actions/runner-images/blob/ubuntu24/20261018.339/images/ubuntu/Ubuntu2404-Readme.md
+2026-10-22T15:25:25.9472970Z Image Release: https://github.com/actions/runner-images/releases/tag/ubuntu24%2F20261018.339
+2026-10-22T15:25:25.9473647Z ##[endgroup]
+2026-10-22T15:25:25.9474547Z ##[group]GITHUB_TOKEN Permissions
+2026-10-22T15:25:25.9476533Z Contents: read
+2026-10-22T15:25:25.9477027Z Metadata: read
+2026-10-22T15:25:25.9477463Z SecurityEvents: write
+2026-10-22T15:25:25.9477890Z ##[endgroup]
+2026-10-22T15:25:25.9479422Z Secret source: Actions
+2026-10-22T15:25:25.9480038Z Cache mode: write
+2026-10-22T15:25:25.9480586Z Prepare workflow directory
+2026-10-22T15:25:25.9793136Z Prepare all required actions
+2026-10-22T15:25:25.9831039Z Getting action download info
+2026-10-22T15:25:26.2464794Z Download action repository 'step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25' (SHA:ccd8616d44fd3846e67624a50d5aad6d37bf2d25)
+2026-10-22T15:25:26.9375260Z Download action repository 'actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1' (SHA:3d3c42e5aac5ba805825da76410c181273ba90b1)
+2026-10-22T15:25:26.9739765Z Download action repository 'github/codeql-action@24c54180a607b1449ed407dd24f251e4e9147c8d' (SHA:24c54180a607b1449ed407dd24f251e4e9147c8d)
+2026-10-22T15:25:27.3471127Z Uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-codeql.yml@9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb
+2026-10-22T15:25:27.3475287Z ##[group] Inputs
+2026-10-22T15:25:27.3476457Z   languages: actions
+2026-10-22T15:25:27.3477205Z   build-mode: none
+2026-10-22T15:25:27.3477926Z   language-build-modes: 
+2026-10-22T15:25:27.3478689Z   config-file: 
+2026-10-22T15:25:27.3479406Z   category: /language:all
+2026-10-22T15:25:27.3480311Z   tooling-ref: 9ea778eb4e6b876d60b7b3d7d0d0aee5182717bb
+2026-10-22T15:25:27.3481336Z   egress-policy: block
+2026-10-22T15:25:27.3484017Z   allowed-endpoints: github.com:443 api.github.com:443 codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443 uploads.github.com:443 pipelines.actions.githubusercontent.com:443 release-assets.githubusercontent.com:443
+
+2026-10-22T15:25:27.3487022Z   allowed-endpoints-mode: replace
+2026-10-22T15:25:27.3487887Z   egress-preset: github-tooling
+2026-10-22T15:25:27.3488734Z   job-name: 🔬 CodeQL Analysis
+2026-10-22T15:25:27.3490209Z   timeout-minutes: 60
+2026-10-22T15:25:27.3490920Z ##[endgroup]
+2026-10-22T15:25:27.3491740Z Complete job name: codeql / 🔬 CodeQL Analysis
+2026-10-22T15:25:27.4243553Z ##[group]Run step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25
