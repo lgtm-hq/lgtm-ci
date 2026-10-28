@@ -271,7 +271,27 @@ def test_write_registry_round_trips_through_the_validator(
         (
             {"provider": "openai", "transport": "cli"},
             {"CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"},
+            "unverified: review auth selectors",
+        ),
+        (
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            {"CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"},
             None,
+        ),
+        (
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            "inherit",
+            None,
+        ),
+        (
+            {"provider": None, "transport": "cli"},
+            "inherit",
+            "unverified: review auth selectors",
+        ),
+        (
+            {"provider": "openai", "transport": "cli"},
+            "inherit",
+            "unverified: inherit requires a confirmed OAuth tuple",
         ),
         (
             {"provider": "openai", "transport": "api"},
@@ -302,7 +322,7 @@ def test_write_registry_round_trips_through_the_validator(
 )
 def test_review_auth_source_policy(
     consumer_scan: ModuleType,
-    passed: dict[str, str],
+    passed: dict[str, str | None],
     secrets: dict[str, str] | str,
     expected: str | None,
 ) -> None:

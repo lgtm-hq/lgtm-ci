@@ -35,11 +35,13 @@ def findings(passed: Any, secrets: Any) -> set[str]:
     """Report smoke mappings, unsupported inherit and statically unverified routing."""
     config = passed if isinstance(passed, dict) else {}
     keys = ("provider", "transport", "auth")
-    selection = [config.get(key, "") for key in keys]
+    selection = [str(config.get(key) or "") for key in keys]
     rows = matrix_rows()
     if not selection[2]:
-        defaults = {"/".join(row[:2]): row[2] for row in rows if row[3] == "yes"}
-        selection[2] = defaults.get("/".join(selection[:2]), "")
+        # A variable can override an omitted auth input. Only a pair with one
+        # supported auth can be inferred without reading the consumer's vars.
+        auths = {row[2] for row in rows if row[:2] == selection[:2]}
+        selection[2] = next(iter(auths)) if len(auths) == 1 else ""
     row = next((row for row in rows if row[:3] == selection), None)
     result: set[str] = set()
     if row is None:

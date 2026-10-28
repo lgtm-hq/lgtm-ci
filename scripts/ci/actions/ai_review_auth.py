@@ -211,7 +211,7 @@ def invoke(home: Path, env: dict[str, str], redactions: list[str]) -> int:
     # Buffer inside the owned home, then redact before any log emission. This
     # also avoids a detached CLI holding a pipe open after its parent exits.
     with (
-        (home / "review.log").open("w+", encoding="utf-8") as log,
+        (home / "review.log").open("w+", encoding="utf-8", errors="replace") as log,
         subprocess.Popen(
             ["/bin/bash", str(SCRIPT_DIR / "run-ai-review.sh")],
             cwd=home / "work",

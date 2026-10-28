@@ -192,3 +192,16 @@ FAKE
     refute_output --partial 'fixture-access'
     [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
 }
+
+@test "review auth: invalid UTF-8 child diagnostics preserve the review outcome" {
+    cat >"$VENV_DIR/bin/lintro" <<'FAKE'
+#!/bin/bash
+printf '\377' >&2
+printf '{"verdict":"approve","coverage":{"complete":true}}\n'
+FAKE
+    run python3 -I "$SCRIPT"
+    assert_success
+    assert_output --partial 'outcome=reviewed'
+    refute_output --partial 'Review auth refused'
+    [[ ! -e "$HOME/.lgtm-ci-review-1196-1-review" ]]
+}
