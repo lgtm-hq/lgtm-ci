@@ -263,3 +263,76 @@ def test_write_registry_round_trips_through_the_validator(
     )
     assert_that(report.errors).is_empty()
     assert_that(report.notices).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("passed", "secrets", "expected"),
+    [
+        (
+            {"provider": "openai", "transport": "cli"},
+            {"CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"},
+            None,
+        ),
+        (
+            {"provider": "openai", "transport": "api"},
+            "inherit",
+            "error: api_key reviews require explicit",
+        ),
+        (
+            {"provider": "openai", "transport": "api"},
+            {"OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}"},
+            "found secrets.OPENAI_API_KEY",
+        ),
+        (
+            {"provider": "anthropic", "transport": "cli", "auth": "api_key"},
+            {"ANTHROPIC_API_KEY": "${{ secrets.ANTHROPIC_REVIEW_API_KEY }}"},
+            None,
+        ),
+        (
+            {"provider": "openai", "transport": "cli", "auth": "api_key"},
+            {"CODEX_API_KEY": "${{ secrets.OPENAI_REVIEW_API_KEY }}"},
+            None,
+        ),
+        (
+            {"provider": "${{ vars.LINTRO_AI_PROVIDER }}"},
+            "inherit",
+            "unverified: review auth selectors",
+        ),
+    ],
+)
+def test_review_auth_source_policy(
+    consumer_scan: ModuleType,
+    passed: dict[str, str],
+    secrets: dict[str, str] | str,
+    expected: str | None,
+) -> None:
+    """Distinguish unknown auth selectors from verified source expressions."""
+    usage = consumer_scan.Usage()
+    consumer_scan.record_call(
+        usage=usage,
+        uses="lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@abc",
+        passed=passed,
+        reads=[],
+        secrets=secrets,
+    )
+    if expected is None:
+        assert_that(usage.review_auth_findings).is_empty()
+    else:
+        assert_that("\n".join(usage.review_auth_findings)).contains(expected)
+
+
+def test_refresh_rows_flags_review_auth_policy_errors(
+    consumer_scan: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep adoption evidence while returning a failing scan for known bad mappings."""
+    usage = consumer_scan.Usage(review_auth_findings={"error: smoke source mapping"})
+    monkeypatch.setattr(consumer_scan, "scan_repository", lambda repository: usage)
+    rows, failed = consumer_scan.refresh_rows(
+        rows=[{"repository": "o/a", "tracking-issues": []}],
+        repositories=[],
+        head=None,
+        today=TODAY,
+    )
+    assert_that(failed).is_equal_to(1)
+    assert_that(rows[0]["review-auth-findings"]).contains("error: smoke source mapping")

@@ -9,7 +9,8 @@
 #              lintro-review-state-pr-<N>-* artifact. Conclusion is
 #              irrelevant (an INCOMPLETE red round is the resume source).
 #              Empty run-id is a no-op, not a failure (#893).
-#   run        Install pinned lintro[ai] from PyPI and run
+#   install    Install pinned lintro[ai] from PyPI, without credentials.
+#   run        Run the already-installed trusted binary through ai_review_auth.py.
 #              `lintro review --pr --post`. Exit-code contract (lintro):
 #                0  review produced, no P1 findings
 #                1  review produced, P1 findings / changes-requested
@@ -50,7 +51,7 @@
 #   GITHUB_TOKEN       App token for `--post` (lintro-review[bot] only).
 #   BLOCKING           "true" when a no-review or changes-requested outcome
 #                      should fail the job.
-#   VENV_DIR           Scratch venv (default: $RUNNER_TEMP/ai-review-venv).
+#   VENV_DIR           Credential-free install destination / trusted scratch venv.
 #   LINTRO_BIN         Test hook: use this binary instead of installing.
 #   LINTRO_AI_*        Pass-through overlays (set by the workflow).
 #   LINTRO_REVIEW_STATE_DIR  Coverage artifact directory (default:
@@ -279,6 +280,31 @@ if [[ "$STEP" == "locate" ]]; then
 	exit 0
 fi
 
+# Credential-free installation. The auth wrapper never permits this dispatch.
+if [[ "$STEP" == install ]]; then
+	if [[ -z "${LINTRO_VERSION:-}" ]]; then
+		# shellcheck source=../versions.env
+		source "$SCRIPT_DIR/../versions.env"
+		LINTRO_VERSION="$DEFAULT_LINTRO_VERSION"
+	fi
+	if [[ ! "$LINTRO_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+		echo "::error::lintro-version must be an exact release >= 0.173.1" >&2
+		exit 1
+	fi
+	IFS=. read -r major minor patch <<<"$LINTRO_VERSION"
+	if ((10#$major == 0 && (10#$minor < 173 || (10#$minor == 173 && 10#$patch < 1)))); then
+		echo "::error::lintro-version must be >= 0.173.1 (review auth/provenance floor)" >&2
+		exit 1
+	fi
+	venv_dir="${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}"
+	uv --no-config venv --python "${PYTHON_VERSION:-3.12}" "$venv_dir"
+	uv --no-config pip install --python "$venv_dir" "lintro[ai]==${LINTRO_VERSION}"
+	if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
+		set_github_output node-bin "$(command -v node || true)"
+	fi
+	exit 0
+fi
+
 # -----------------------------------------------------------------------------
 # STEP: run
 # -----------------------------------------------------------------------------
@@ -303,19 +329,10 @@ if [[ "$STEP" == "run" ]]; then
 		fi
 	fi
 
-	lintro_bin="${LINTRO_BIN:-}"
-	if [[ -z "$lintro_bin" ]]; then
-		if [[ -z "${LINTRO_VERSION:-}" ]]; then
-			# shellcheck source=../versions.env
-			source "$SCRIPT_DIR/../versions.env"
-			LINTRO_VERSION="$DEFAULT_LINTRO_VERSION"
-		fi
-		venv_dir="${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}"
-		python_version="${PYTHON_VERSION:-3.12}"
-		echo "Installing lintro[ai]==${LINTRO_VERSION} from PyPI (pinned, trusted)…"
-		uv venv --python "$python_version" "$venv_dir" >/dev/null
-		uv pip install --python "$venv_dir" "lintro[ai]==${LINTRO_VERSION}" >/dev/null
-		lintro_bin="$venv_dir/bin/lintro"
+	lintro_bin="${LINTRO_BIN:-${VENV_DIR:-${RUNNER_TEMP:-/tmp}/ai-review-venv}/bin/lintro}"
+	if [[ ! -x "$lintro_bin" ]]; then
+		echo "::error::Install pinned lintro in the credential-free install step first" >&2
+		exit 1
 	fi
 
 	# Resume coverage is read from (and written to) this directory. The
@@ -362,7 +379,7 @@ if [[ "$STEP" == "run" ]]; then
 		# -v: the "sending signal" diagnostic is the evidence the deadline
 		# fired (lintro's own 124/137 would otherwise look identical). LC_ALL=C
 		# pins its English text; the shim below restores lintro's own locale.
-		runner=(env LC_ALL=C timeout -v --kill-after="$kill_after" "$review_timeout")
+		runner=(env LC_ALL=C timeout --foreground -v --kill-after="$kill_after" "$review_timeout")
 		echo "ai-review: review-timeout=${review_timeout}s (${bound_source})"
 	else
 		echo "::warning::GNU timeout not found; the review is bounded only by the job cap"

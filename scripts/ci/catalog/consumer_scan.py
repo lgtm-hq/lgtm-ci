@@ -28,6 +28,7 @@ from typing import Any
 # catalog_lib lives next to this module.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_lib  # noqa: E402  # pylint: disable=wrong-import-position
+import review_auth_policy  # noqa: E402  # pylint: disable=wrong-import-position
 from catalog_lib import (  # noqa: E402  # pylint: disable=wrong-import-position
     DeprecationKind,
     entry_of,
@@ -57,6 +58,7 @@ class Usage:
         keys: Removal keys it uses: entries, inputs passed, outputs read.
     """
 
+    review_auth_findings: set[str] = field(default_factory=set)
     pins: set[str] = field(default_factory=set)
     entries: set[str] = field(default_factory=set)
     keys: set[str] = field(default_factory=set)
@@ -136,6 +138,10 @@ def record_call(
     if match is None:
         return
     entry_id = match.group("workflow") or match.group("action")
+    if entry_id == "reusable-ai-review":
+        usage.review_auth_findings.update(
+            review_auth_policy.findings(passed=passed, secrets=secrets)
+        )
     usage.pins.add(match.group("ref"))
     usage.entries.add(entry_id)
     usage.keys.add(
@@ -313,7 +319,7 @@ def refreshed_row(
         or catalog_lib.removal_key(entry_of(key), DeprecationKind.ENTRY) in deprecated
         or key not in live
     }
-    return {
+    result = {
         "repository": row["repository"],
         "tracking-issues": list(row.get("tracking-issues") or []),
         "last-verified": today.isoformat(),
@@ -321,6 +327,9 @@ def refreshed_row(
         "uses": sorted(usage.entries),
         "deprecated-in-use": sorted(kept),
     }
+    if usage.review_auth_findings:
+        result["review-auth-findings"] = sorted(usage.review_auth_findings)
+    return result
 
 
 def flow_list(
@@ -363,6 +372,10 @@ def write_registry(
                 continue
             lines.append(f"    {key}:")
             lines += [f'      - "{value}"' for value in row[key]]
+        if row.get("review-auth-findings"):
+            lines.append("    review-auth-findings:")
+            for value in row["review-auth-findings"]:
+                lines.append(f"      - {json.dumps(value)}")
         lines.append("")
     if not rows:
         lines[-1] = "consumers: []"
@@ -384,7 +397,7 @@ def refresh_rows(
         today: Verification date.
 
     Returns:
-        ``(rows, number of repositories that could not be read)``.
+        ``(rows, number of repositories with read or review-source policy errors)``.
     """
     failed = 0
     refreshed = []
@@ -415,6 +428,10 @@ def refresh_rows(
             f"pins {flow_list(new['pins'])}, "
             f"deprecated in use {flow_list(new['deprecated-in-use'])}",
         )
+        for finding in new.get("review-auth-findings", []):
+            print(f"{repository}: review auth: {finding}")
+        if any(item.startswith("error:") for item in usage.review_auth_findings):
+            failed += 1
         refreshed.append(new)
     return refreshed, failed
 
@@ -434,7 +451,7 @@ def scan(
         today: Verification date.
 
     Returns:
-        Process exit code: 1 when a repository could not be read.
+        Process exit code: 1 on unreadable repositories or review-source policy errors.
     """
     rows = load_rows(
         repo_root=repo_root,

@@ -1,30 +1,16 @@
 #!/usr/bin/env bash
 # SPDX-License-Identifier: MIT
-# Purpose: Resolve the (provider, transport) pair for reusable-ai-review.yml.
+# Purpose: Resolve the (provider, transport, auth) tuple for reusable-ai-review.yml.
 #
-# Resolution order (no baked-in default):
-#   input env → Actions variable env → consuming repo .lintro-config.yaml
-# If nothing resolves, outputs stay empty and `resolved=false`. The workflow
-# still maps inputs onto LINTRO_AI_* and lets lintro fail with its own
-# guidance — this script only gates binary install and credential injection,
-# and guards egress visibility (below).
+# Provider/transport: input → Actions variable → consuming repo config.
+# Auth: AUTH_INPUT → VAR_AUTH → static tuple default (no product ai.auth).
+# Secrets are never inspected here. Empty/unsupported tuples fail closed.
 #
-# Egress visibility guard: harden-runner hardens as the FIRST job step, before
-# any checkout, so only the input/var pair can reach its allowlist. A provider
-# resolved solely from the repo config is therefore never allowlisted; under
-# egress-policy "block" the review would die net-blocked mid-call. That is a
-# caller misconfiguration, not a review outcome — this script fails loudly
-# (mirroring the unconditional App-credential guard) instead of letting a
-# doomed provider call burn spend and report "no review".
-#
-# Environment:
-#   PROVIDER_INPUT     workflow `provider` input (may be empty)
-#   TRANSPORT_INPUT    workflow `transport` input (may be empty)
-#   VAR_PROVIDER       vars.LINTRO_AI_PROVIDER (may be empty)
-#   VAR_TRANSPORT      vars.LINTRO_AI_TRANSPORT (may be empty)
-#   EGRESS_POLICY      harden-runner egress policy; the guard fires on "block"
-#   CONFIG_PATH        lintro config to read (default: .lintro-config.yaml)
-#   GITHUB_OUTPUT      Actions output file (optional; always prints a summary)
+# Harden-runner's first-step allowlist sees only inputs, variables and static
+# defaults. Under block egress, config-only tuple components fail visibly.
+# MODEL_INPUT/VAR_MODEL and MAX_COST_INPUT/VAR_MAX_COST preserve scalar overlays;
+# arbitrary PR configuration does not cross into the credentialed invocation.
+# CONFIG_PATH defaults to .lintro-config.yaml; GITHUB_OUTPUT is optional.
 
 set -euo pipefail
 
@@ -163,6 +149,8 @@ require_lowercase_overlay() {
 	fi
 }
 
+require_lowercase_overlay AUTH_INPUT "${AUTH_INPUT:-}"
+require_lowercase_overlay VAR_AUTH "${VAR_AUTH:-}"
 require_lowercase_overlay PROVIDER_INPUT "${PROVIDER_INPUT:-}"
 require_lowercase_overlay TRANSPORT_INPUT "${TRANSPORT_INPUT:-}"
 require_lowercase_overlay VAR_PROVIDER "${VAR_PROVIDER:-}"
@@ -179,28 +167,49 @@ fi
 provider="$(first_nonempty "${PROVIDER_INPUT:-}" "${VAR_PROVIDER:-}" "$config_provider")"
 transport="$(first_nonempty "${TRANSPORT_INPUT:-}" "${VAR_TRANSPORT:-}" "$config_transport")"
 
-credential_env="$(ai_review_credential_env "$provider" "$transport")"
-cli_binary="$(ai_review_cli_binary "$provider" "$transport")"
-needs_cli="false"
-if [[ -n "$cli_binary" ]]; then
-	needs_cli="true"
+auth="${AUTH_INPUT:-${VAR_AUTH:-$(ai_review_default_auth "$provider" "$transport")}}"
+auth_source=default
+if [[ -n "${AUTH_INPUT:-}" ]]; then
+	auth_source=input
+elif [[ -n "${VAR_AUTH:-}" ]]; then
+	auth_source=var
 fi
-
-resolved="false"
-if [[ -n "$provider" && -n "$credential_env" ]]; then
-	resolved="true"
+credential_env="$(ai_review_credential_env "$provider" "$transport" "$auth")"
+if [[ -z "$credential_env" ]]; then
+	echo "::error::Unsupported review tuple '${provider:-<empty>}/${transport:-<empty>}/${auth:-<empty>}'. Supported choices: $(ai_review_supported_choices)" >&2
+	exit 1
 fi
+cli_binary="$(ai_review_cli_binary "$provider" "$transport" "$auth")"
+needs_cli=false
+[[ -z "$cli_binary" ]] || needs_cli=true
+resolved=true
 
-# Egress visibility guard (see header). Fires only when the workflow says the
-# runner egress is blocked AND the provider came solely from the repo config.
-if [[ "$resolved" == "true" && "${EGRESS_POLICY:-}" == "block" ]]; then
-	visible_provider="$(first_nonempty "${PROVIDER_INPUT:-}" "${VAR_PROVIDER:-}")"
-	if [[ -z "$visible_provider" ]]; then
-		echo "::error::ai-review resolve: provider '${provider}' comes only from ${config_path}, which harden-runner cannot see (it hardens before any checkout). Under egress-policy 'block' the provider hosts were not allowlisted, so the review cannot reach ${provider}. Set the LINTRO_AI_PROVIDER Actions variable or the workflow provider input; egress-policy 'audit' also lifts this."
+# Every component that changes egress must be visible before checkout.
+if [[ "${EGRESS_POLICY:-}" == block ]]; then
+	visible_provider="${PROVIDER_INPUT:-${VAR_PROVIDER:-}}"
+	visible_transport="${TRANSPORT_INPUT:-${VAR_TRANSPORT:-}}"
+	visible_auth="${AUTH_INPUT:-${VAR_AUTH:-$(ai_review_default_auth "$visible_provider" "$visible_transport")}}"
+	if [[ "$provider/$transport/$auth" != "$visible_provider/$visible_transport/$visible_auth" ]]; then
+		echo "::error::harden-runner cannot see the config-only tuple '$provider/$transport/$auth'. Set LINTRO_AI_PROVIDER and LINTRO_AI_TRANSPORT Actions variables or workflow inputs before using block egress." >&2
 		exit 1
 	fi
 fi
-
+model="${MODEL_INPUT:-${VAR_MODEL:-$(_ai_review_config_field model "$config_path")}}"
+model_source=default
+if [[ -n "${MODEL_INPUT:-}" ]]; then
+	model_source=input
+elif [[ -n "${VAR_MODEL:-}" ]]; then
+	model_source=var
+elif [[ -n "$model" ]]; then
+	model_source=config
+fi
+max_cost="${MAX_COST_INPUT:-${VAR_MAX_COST:-$(_ai_review_config_field max_cost_usd "$config_path")}}"
+set_github_output auth "$auth"
+set_github_output auth-source "$auth_source"
+set_github_output cli-bare "$(ai_review_matrix_field "$provider" "$transport" "$auth" 7)"
+set_github_output model "$model"
+set_github_output model-source "$model_source"
+set_github_output max-cost-usd "$max_cost"
 set_github_output "provider" "$provider"
 set_github_output "transport" "$transport"
 set_github_output "credential-env" "$credential_env"
@@ -208,11 +217,6 @@ set_github_output "needs-cli" "$needs_cli"
 set_github_output "cli-binary" "$cli_binary"
 set_github_output "resolved" "$resolved"
 
-echo "ai-review resolve: provider=${provider:-<unset>} transport=${transport:-<unset>} credential=${credential_env:-<none>} needs-cli=${needs_cli}"
-if [[ "$resolved" != "true" ]]; then
-	if [[ -n "$provider" ]]; then
-		echo "ai-review resolve: unsupported pair provider=${provider} transport=${transport:-<unset>}. Supported pairs: anthropic/api, anthropic/cli, cursor/cli, openai/api, openai/cli."
-	else
-		echo "ai-review resolve: provider unset. Set the workflow provider input, the LINTRO_AI_PROVIDER Actions variable, or ai.provider in the repo lintro config."
-	fi
-fi
+summary="ai-review resolve: requested=${PROVIDER_INPUT:-${VAR_PROVIDER:-<config>}}/${TRANSPORT_INPUT:-${VAR_TRANSPORT:-<config>}}/${AUTH_INPUT:-${VAR_AUTH:-<default>}} resolved=$provider/$transport/$auth auth-source=$auth_source model=${model:-<CLI/provider default>} model-source=$model_source credential=$credential_env purpose=review"
+echo "$summary"
+if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then printf '%s\n' "$summary" >>"$GITHUB_STEP_SUMMARY"; fi

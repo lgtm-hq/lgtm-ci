@@ -683,3 +683,11 @@ JSON
 	assert_output --partial "--output"
 	assert_output --partial "json"
 }
+
+@test "install: refuses versions below the auth provenance floor and non-release inputs" {
+    for version in 0.173.0 0.130.0 latest '0.173.1;echo injected'; do
+        STEP=install LINTRO_VERSION="$version" run bash "$SCRIPT"
+        assert_failure
+        assert_output --partial 'lintro-version must be'
+    done
+}

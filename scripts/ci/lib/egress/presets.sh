@@ -477,53 +477,11 @@ egress_preset_endpoints() {
 # Canonical harden-runner host matrix for one (provider, transport) pair.
 # This function is NOT on the production harden path: harden-runner runs
 # before any checkout, so reusable-ai-review.yml appends provider hosts via
-# inline YAML expressions instead. Integration bats cross-check those inline
-# lists against this function — edit them together, never one side alone.
-# Empty provider prints nothing — no provider's hosts belong in the baseline.
-# When transport is empty but provider is set, both that provider's api and
-# cli hosts are included so an unresolved transport cannot silently block.
-# A rotated Cursor shard (e.g. repo43.cursor.sh) is named in the failed run's
-# harden-runner summary; add it here and in the workflow env list together.
+# generated literal workflow expressions instead. ai_review_matrix.sh owns all
+# tuple capabilities and hosts; sync_ai_review_matrix.py renders job-start egress.
+# Incomplete/unsupported tuples grant no provider egress.
 egress_ai_review_provider_endpoints() {
-	local provider="${1:-}"
-	local transport="${2:-}"
-	provider="$(printf '%s' "$provider" | tr '[:upper:]' '[:lower:]')"
-	transport="$(printf '%s' "$transport" | tr '[:upper:]' '[:lower:]')"
-
-	case "$provider" in
-	anthropic)
-		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
-			return 0
-		fi
-		printf '%s\n' api.anthropic.com:443
-		if [[ -z "$transport" || "$transport" == "cli" ]]; then
-			printf '%s\n' \
-				nodejs.org:443 \
-				registry.npmjs.org:443
-		fi
-		;;
-	cursor)
-		# Cursor has no api transport. Empty transport keeps the fallback.
-		if [[ -n "$transport" && "$transport" != "cli" ]]; then
-			return 0
-		fi
-		printf '%s\n' \
-			downloads.cursor.com:443 \
-			api2.cursor.sh:443 \
-			api3.cursor.sh:443 \
-			agentn.global.api5.cursor.sh:443 \
-			repo42.cursor.sh:443
-		;;
-	openai)
-		if [[ -n "$transport" && "$transport" != "api" && "$transport" != "cli" ]]; then
-			return 0
-		fi
-		printf '%s\n' api.openai.com:443
-		if [[ -z "$transport" || "$transport" == "cli" ]]; then
-			printf '%s\n' \
-				nodejs.org:443 \
-				registry.npmjs.org:443
-		fi
-		;;
-	esac
+	# shellcheck source=../ai_review_matrix.sh
+	source "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/ai_review_matrix.sh"
+	ai_review_matrix_field "${1:-}" "${2:-}" "${3-$(ai_review_default_auth "${1:-}" "${2:-}")}" 8 | tr ' ' '\n'
 }
