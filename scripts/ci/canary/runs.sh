@@ -65,6 +65,7 @@ poll_runs() {
 			runs="$fresh"
 			list_ok=1
 		else
+			list_ok=0
 			log_warn "run list fetch failed; keeping the previous snapshot"
 		fi
 		active=0
@@ -109,6 +110,38 @@ poll_runs() {
 	for file in "${files[@]}"; do printf '%s\n' "${results[$file]}"; done
 }
 
+# Never prune an active owner's ref between dispatch waves. Empty listings
+# cannot prove that an ambiguous dispatch was rejected, so retain those too.
+# Only terminal, visible runs on a completed canary's ref are safe to prune.
+cleanup_stale_canary_branches() {
+	local owned="${1:?owned branch required}" sha refs ref branch owner_status runs
+	[[ "$CANARY_KEEP_BRANCH" != true ]] || return 0
+	sha="${owned#canary/}"
+	sha="${sha%%-*}"
+	[[ "$sha" =~ ^[0-9a-f]{40}$ ]] || return 0
+	if ! refs="$(fixture_api -X GET "repos/${FIXTURE_REPO}/git/matching-refs/heads/canary/${sha}-" --paginate --jq '.[].ref')"; then
+		log_warn "cannot list stale canary refs for ${sha}; leaving them untouched"
+		return 0
+	fi
+	while IFS= read -r ref; do
+		branch="${ref#refs/heads/}"
+		[[ "$branch" != "$owned" && "$branch" =~ ^canary/${sha}-([0-9]+)-[0-9]+$ ]] || continue
+		if ! owner_status="$(lgtm_ci_api -X GET "repos/${GITHUB_REPOSITORY}/actions/runs/${BASH_REMATCH[1]}" --jq .status)"; then
+			log_warn "cannot verify owner of ${branch}; leaving it untouched"
+			continue
+		fi
+		[[ "$owner_status" == completed ]] || continue
+		if ! runs="$(list_canary_runs "$branch")"; then
+			log_warn "cannot verify fixture runs on ${branch}; leaving it untouched"
+			continue
+		fi
+		[[ -n "$runs" ]] || continue
+		if awk -F'\t' '$2 != "completed" { exit 1 }' <<<"$runs"; then
+			delete_canary_branch "$branch" || true
+		fi
+	done <<<"$refs"
+}
+
 # The journal is private to this Actions run. It exists only after this process
 # created the ref, so a failed create never cancels another canary's runs.
 cleanup_fixture_runs() {
@@ -116,6 +149,7 @@ cleanup_fixture_runs() {
 	local branch runs file status url id name conclusion attempt missing
 	branch="$(cat "$CANARY_STATE_DIR/branch")"
 	[[ "$branch" == canary/* ]] || return 1
+	cleanup_stale_canary_branches "$branch"
 	for attempt in 1 2 3; do
 		if ! runs="$(list_canary_runs "$branch")"; then
 			log_warn "retained ${FIXTURE_REPO}@${branch}: cannot verify fixture runs"

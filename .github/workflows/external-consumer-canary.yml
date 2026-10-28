@@ -3,7 +3,7 @@
 #
 # External consumer canary (#1074). Pins every workflow of the external
 # fixture TurboCoder13/lgtm-ci-consumer-fixture to one lgtm-ci candidate SHA
-# on a throwaway fixture branch `canary/<sha>`, dispatches the gate and
+# on a throwaway fixture branch `canary/<sha>-<run-id>-<attempt>`, dispatches the gate and
 # informational workflows there, waits with separate queue and execution budgets,
 # writes the table, cancels unfinished runs and deletes the ref once settled. The
 # fixture's main is never written. Shell logic lives in
@@ -204,6 +204,8 @@ jobs:
       contents: read
       # List the pull request's changed files for the run/skip decision.
       pull-requests: read
+      # Verify stale refs belong to completed canaries before pruning them.
+      actions: read
     steps:
       - name: Harden runner
         # Pinned to SHA for supply chain security
@@ -264,5 +266,6 @@ jobs:
         if: always() && steps.fixture-token.outputs.token != ''
         env:
           GH_TOKEN: ${{ steps.fixture-token.outputs.token }}
+          LGTM_CI_TOKEN: ${{ github.token }}
           CANARY_STATE_DIR: ${{ runner.temp }}/external-canary
         run: bash scripts/ci/actions/external-canary.sh --cleanup

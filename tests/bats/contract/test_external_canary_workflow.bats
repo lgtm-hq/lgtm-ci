@@ -139,9 +139,9 @@ _header_list() {
 	run grep -cE '^permissions: \{\}$' "$WORKFLOW"
 	assert_output "1"
 	# Job permission block is read-only: contents (ref, script) and
-	# pull-requests (changed-file list for the run/skip decision).
+	# pull-requests (changed-file list) and actions (stale-ref owner status).
 	run awk '/^    permissions:/ { on = 1; next } on && /^      [a-z-]+:/ { print } on && !/^      / { on = 0 }' "$WORKFLOW"
-	assert_output "$(printf '      contents: read\n      pull-requests: read')"
+	assert_output "$(printf '      contents: read\n      pull-requests: read\n      actions: read')"
 }
 
 @test "external-canary workflow: runs on every pull_request and on workflow_dispatch(ref), with no job-level guard" {
@@ -223,4 +223,7 @@ _header_list() {
 	assert_success
 	run grep -F 'run: bash scripts/ci/actions/external-canary.sh --cleanup' "$WORKFLOW"
 	assert_success
+	# Cleanup uses the fixture token for refs and github.token for owner runs.
+	run sed -n '/      - name: Cancel unfinished fixture runs and clean up ref/,$p' "$WORKFLOW"
+	assert_output --partial 'LGTM_CI_TOKEN: ${{ github.token }}'
 }

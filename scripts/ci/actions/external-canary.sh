@@ -22,7 +22,7 @@
 #      rewrites each lgtm-ci pin to the candidate (same regex as the fixture's
 #      scripts/pin.sh), refuses any lgtm-ci reference that is not then pinned
 #      to the candidate, and commits the result through the git data API as
-#      branch `canary/<sha>` — never touching the fixture's base branch,
+#      branch `canary/<sha>-<run-id>-<attempt>` — never touching the base branch,
 #   3. checks every lgtm-ci path each workflow references, and every input
 #      it passes to an lgtm-ci reusable (#1134), against the
 #      candidate (`reference_verdict`, #1128): a path missing at the candidate
@@ -104,7 +104,9 @@
 #   CANARY_SINCE_SLACK_SECONDS  clock slack subtracted from the run-list
 #                            `created>=` filter, default 120
 #   CANARY_WRITE_RETRY_SECONDS  pause before the single retry of a failed write, default 10
-#   CANARY_KEEP_BRANCH       "true" keeps canary/<sha> for inspection
+#   GITHUB_RUN_ID            canary owner (local runs use a timestamp and PID)
+#   GITHUB_RUN_ATTEMPT       rerun attempt (default 1)
+#   CANARY_KEEP_BRANCH       "true" keeps this run's canary ref for inspection
 #   CANARY_SOURCE_URL        lgtm-ci run/PR URL recorded in the branch commit
 #   GITHUB_STEP_SUMMARY      summary file (optional)
 #   GITHUB_OUTPUT            receives `mode`, `branch`, `gate-failures`, `table` (optional)
@@ -142,6 +144,9 @@ CANARY_SINCE_SLACK_SECONDS="${CANARY_SINCE_SLACK_SECONDS:-120}"
 CANARY_WRITE_RETRY_SECONDS="${CANARY_WRITE_RETRY_SECONDS:-10}"
 CANARY_KEEP_BRANCH="${CANARY_KEEP_BRANCH:-false}"
 CANARY_SOURCE_URL="${CANARY_SOURCE_URL:-}"
+# Resolve once so branch creation and dispatch agree even in local invocations.
+CANARY_RUN_ID="${GITHUB_RUN_ID:-local-$(date +%s)-$$}"
+CANARY_RUN_ATTEMPT="${GITHUB_RUN_ATTEMPT:-1}"
 
 # Same pattern as the fixture's scripts/pin.sh: reusable workflow or direct
 # composite action reference, followed by a 40-hex pin.
@@ -343,7 +348,7 @@ resolve_candidate_sha() {
 }
 
 canary_branch_name() {
-	printf 'canary/%s\n' "${1:?sha required}"
+	printf 'canary/%s-%s-%s\n' "${1:?sha required}" "$CANARY_RUN_ID" "$CANARY_RUN_ATTEMPT"
 }
 
 # ISO-8601 UTC timestamp CANARY_SINCE_SLACK_SECONDS in the past (GNU or BSD date).
@@ -623,11 +628,11 @@ build_tree_payload() {
 	rm -f "$entries"
 }
 
-# Create branch canary/<sha> on the fixture with every workflow re-pinned.
+# Create a run-specific canary/<sha>-<run-id>-<attempt> ref with re-pinned workflows.
 # Fetches the base branch's workflow files (direct .yml children of
 # .github/workflows/ only) into <workdir>, rewrites them,
-# and commits via the git data API. Sets CANARY_BRANCH_CREATED=1 once the
-# ref exists. Prints the new commit SHA.
+# and commits via the git data API. Journals ownership once the ref exists.
+# Prints the new commit SHA.
 create_canary_branch() {
 	local sha="${1:?sha required}" workdir="${2:?workdir required}"
 	local branch base_sha base_tree path commit_sha tree_sha message payload
@@ -668,7 +673,7 @@ create_canary_branch() {
 
 	fixture_write "create branch ${branch}" -X POST "repos/${FIXTURE_REPO}/git/refs" \
 		-f ref="refs/heads/${branch}" -f sha="$commit_sha" --jq .ref >/dev/null ||
-		die "cannot create ${FIXTURE_REPO}@${branch} (another canary for this SHA may hold it; it is left untouched)"
+		die "cannot create ${FIXTURE_REPO}@${branch} (this run's ref may already exist; it is left untouched)"
 	printf '%s\n' "$branch" >"$CANARY_STATE_DIR/branch"
 	log_info "created ${FIXTURE_REPO}@${branch} (${commit_sha})"
 	printf '%s\n' "$commit_sha"
@@ -729,7 +734,7 @@ render_summary() {
 	local -a notes=()
 	echo "## External consumer canary"
 	echo
-	echo "Fixture: \`${FIXTURE_REPO}\` at branch \`${branch:-canary/${sha}}\`, every lgtm-ci reference pinned to \`${sha}\`."
+	echo "Fixture: \`${FIXTURE_REPO}\` at branch \`${branch:-$(canary_branch_name "$sha")}\`, every lgtm-ci reference pinned to \`${sha}\`."
 	echo
 	echo "Queue budget: ${CANARY_QUEUE_TIMEOUT_SECONDS}s (including admission); execution budget: ${CANARY_TIMEOUT_SECONDS}s from first job start; max in flight: ${CANARY_MAX_IN_FLIGHT}. Queue expiry is informational and does not prove the candidate passed."
 	echo

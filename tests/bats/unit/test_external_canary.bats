@@ -27,6 +27,8 @@ setup() {
 	setup_temp_dir
 	save_path
 	export SCRIPT CANDIDATE OLD_PIN
+	export GITHUB_RUN_ID=12345 GITHUB_RUN_ATTEMPT=1
+	export CANARY_TEST_BRANCH="canary/${CANDIDATE}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
 	export GH_TOKEN=fixture-token
 	export LGTM_CI_TOKEN=lgtm-ci-token
 	export FIXTURE_REPO=owner/fixture
@@ -216,13 +218,21 @@ case "$args" in
 		echo "gh: Reference already exists (HTTP 422)" >&2
 		exit 1
 	fi
-	echo "refs/heads/canary/$CANDIDATE"
+	ref="${args##*ref=}"
+	ref="${ref%% *}"
+	if [[ "${MOCK_REF_REJECT_DUPLICATE:-}" == 1 ]]; then
+		if grep -qxF "$ref" "$MOCK_RUNS_DIR/refs" 2>/dev/null; then exit 1; fi
+		printf '%s\n' "$ref" >>"$MOCK_RUNS_DIR/refs"
+	fi
+	echo "$ref"
 	;;
 *"/actions/workflows/"*"/dispatches -f ref="*)
 	if [[ -n "${MOCK_DISPATCH_FAIL:-}" && "$args" == *"/actions/workflows/${MOCK_DISPATCH_FAIL}/dispatches"* ]]; then
 		echo "gh: HTTP 422" >&2
 		exit 1
 	fi
+	;;
+*"git/matching-refs/heads/canary/"*)
 	;;
 *"/actions/runs/"*"/jobs?"*)
 	if [[ "${MOCK_JOBS_FAIL:-}" == 1 ]]; then exit 1; fi
@@ -494,12 +504,12 @@ call_fn() {
 	assert_failure
 	assert_output --partial "refusing to delete"
 	run call_fn canary_branch_name "$CANDIDATE"
-	assert_output "canary/$CANDIDATE"
+	assert_output "$CANARY_TEST_BRANCH"
 }
 
 # --- dispatch arg building ------------------------------------------------
 
-@test "external-canary: main creates canary/<sha> from base and dispatches every gate and informational workflow on it" {
+@test "external-canary: main creates a run-specific canary ref from base and dispatches every gate and informational workflow on it" {
 	all_green_snapshot
 	run bash "$SCRIPT" "$CANDIDATE"
 	assert_success
@@ -507,7 +517,7 @@ call_fn() {
 	# Branch created from the base branch's commit and tree, never on main.
 	run grep -F "git/ref/heads/main --jq .object.sha" "$MOCK_CALLS"
 	assert_success
-	run grep -F -- "-X POST repos/owner/fixture/git/refs -f ref=refs/heads/canary/${CANDIDATE} -f sha=cafecafe" "$MOCK_CALLS"
+	run grep -F -- "-X POST repos/owner/fixture/git/refs -f ref=refs/heads/${CANARY_TEST_BRANCH} -f sha=cafecafe" "$MOCK_CALLS"
 	assert_success
 	run grep -E -- "-X (POST|PATCH|PUT|DELETE) [^ ]*(heads/main|git/refs/heads/main)" "$MOCK_CALLS"
 	refute_output
@@ -525,9 +535,9 @@ call_fn() {
 	assert_output "0"
 
 	# One dispatch per gate/informational workflow; manual and push-only not dispatched.
-	run grep -c -- "/actions/workflows/[a-z-]*.yml/dispatches -f ref=canary/${CANDIDATE}" "$MOCK_CALLS"
+	run grep -c -- "/actions/workflows/[a-z-]*.yml/dispatches -f ref=${CANARY_TEST_BRANCH}" "$MOCK_CALLS"
 	assert_output "2"
-	run grep -F "actions/workflows/python.yml/dispatches -f ref=canary/${CANDIDATE}" "$MOCK_CALLS"
+	run grep -F "actions/workflows/python.yml/dispatches -f ref=${CANARY_TEST_BRANCH}" "$MOCK_CALLS"
 	assert_success
 	run grep -F "actions/workflows/verify-negative.yml/dispatches" "$MOCK_CALLS"
 	assert_success
@@ -535,16 +545,16 @@ call_fn() {
 	refute_output
 
 	# Poll filters to the branch, the dispatch event, and runs created since dispatch.
-	run grep -E "actions/runs\?branch=canary/${CANDIDATE}&event=workflow_dispatch&created=%3E%3D[0-9T:Z-]+&per_page=100" "$MOCK_CALLS"
+	run grep -E "actions/runs\?branch=${CANARY_TEST_BRANCH}&event=workflow_dispatch&created=%3E%3D[0-9T:Z-]+&per_page=100" "$MOCK_CALLS"
 	assert_success
 
 	# Branch deleted at the end, successfully; the manual row is listed.
-	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/canary/${CANDIDATE}" "$MOCK_CALLS"
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/${CANARY_TEST_BRANCH}" "$MOCK_CALLS"
 	assert_success
 	run bash "$SCRIPT" "$CANDIDATE"
-	assert_output --partial "dispatched python.yml on canary/${CANDIDATE}"
+	assert_output --partial "dispatched python.yml on ${CANARY_TEST_BRANCH}"
 	assert_output --partial "| \`release-version-pr.yml\` | manual | \`success\` | \`not_dispatched\` | ➖ not dispatched | — |"
-	assert_output --partial "deleted owner/fixture@canary/${CANDIDATE}"
+	assert_output --partial "deleted owner/fixture@${CANARY_TEST_BRANCH}"
 	refute_output --partial "could not delete"
 }
 
@@ -556,7 +566,7 @@ call_fn() {
 	} >"$MOCK_RUNS_DIR/runs.1"
 	run env CANARY_INCLUDE_MANUAL=true bash "$SCRIPT" "$CANDIDATE"
 	assert_success
-	run grep -c -- "/dispatches -f ref=canary/${CANDIDATE}" "$MOCK_CALLS"
+	run grep -c -- "/dispatches -f ref=${CANARY_TEST_BRANCH}" "$MOCK_CALLS"
 	assert_output "3"
 	run grep -F "| \`release-version-pr.yml\` | manual | \`success\` | \`success\` | ✅ pass |" "$GITHUB_STEP_SUMMARY"
 	assert_success
@@ -596,7 +606,7 @@ call_fn() {
 		run_row python.yml completed success 11
 		run_row verify-negative.yml completed failure 12
 	} >"$MOCK_RUNS_DIR/runs.3"
-	run call_fn poll_runs "canary/$CANDIDATE" 2026-10-08T00:00:00Z python.yml verify-negative.yml
+	run call_fn poll_runs "$CANARY_TEST_BRANCH" 2026-10-08T00:00:00Z python.yml verify-negative.yml
 	assert_success
 	assert_line "$(printf 'python.yml\tsuccess\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 	assert_line "$(printf 'verify-negative.yml\tfailure\thttps://github.com/owner/fixture/actions/runs/12\tfixture-verify-negative')"
@@ -606,7 +616,7 @@ call_fn() {
 
 @test "external-canary: poll_runs terminates on a failed run" {
 	run_row python.yml completed failure 11 >"$MOCK_RUNS_DIR/runs.1"
-	run call_fn poll_runs "canary/$CANDIDATE" 2026-10-08T00:00:00Z python.yml
+	run call_fn poll_runs "$CANARY_TEST_BRANCH" 2026-10-08T00:00:00Z python.yml
 	assert_success
 	assert_output "$(printf 'python.yml\tfailure\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 	run cat "$MOCK_RUNS_DIR/.count"
@@ -615,7 +625,7 @@ call_fn() {
 
 @test "external-canary: poll_runs terminates at the bounds with execution timeout and undiscovered queue timeout" {
 	run_row python.yml in_progress "" 11 >"$MOCK_RUNS_DIR/runs.1"
-	run env CANARY_TIMEOUT_SECONDS=0 CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml rust.yml"
+	run env CANARY_TIMEOUT_SECONDS=0 CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs $CANARY_TEST_BRANCH 2026-10-08T00:00:00Z python.yml rust.yml"
 	assert_success
 	assert_line "$(printf 'python.yml\ttimeout\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 	assert_line "$(printf 'rust.yml\tqueued-timeout\t\t')"
@@ -626,7 +636,7 @@ call_fn() {
 		run_row python.yml completed success 22
 		run_row python.yml completed failure 11
 	} >"$MOCK_RUNS_DIR/runs.1"
-	run call_fn poll_runs "canary/$CANDIDATE" 2026-10-08T00:00:00Z python.yml
+	run call_fn poll_runs "$CANARY_TEST_BRANCH" 2026-10-08T00:00:00Z python.yml
 	assert_output --partial "runs/22"
 	refute_output --partial "runs/11"
 }
@@ -635,13 +645,13 @@ call_fn() {
 	run_row python.yml in_progress "" 11 >"$MOCK_RUNS_DIR/runs.1"
 	run_row python.yml completed success 11 >"$MOCK_RUNS_DIR/runs.2"
 	# Call 2 fails; call 3 serves the completed snapshot.
-	run env MOCK_RUNS_FAIL_AT=2 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml"
+	run env MOCK_RUNS_FAIL_AT=2 bash "$CANARY_EVAL" "poll_runs $CANARY_TEST_BRANCH 2026-10-08T00:00:00Z python.yml"
 	assert_success
 	assert_output --partial "run list fetch failed; keeping the previous snapshot"
 	assert_line "$(printf 'python.yml\tsuccess\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 	# A failure on the final poll at the bound still reports the last good rows.
 	rm -f "$MOCK_RUNS_DIR/.count" "$MOCK_RUNS_DIR/runs.2"
-	run env MOCK_RUNS_FAIL_AT=2 CANARY_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml"
+	run env MOCK_RUNS_FAIL_AT=2 CANARY_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" "poll_runs $CANARY_TEST_BRANCH 2026-10-08T00:00:00Z python.yml"
 	assert_success
 	assert_line "$(printf 'python.yml\ttimeout\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 }
@@ -657,7 +667,7 @@ call_fn() {
 		printf 'release-version-pr.yml\tnot_dispatched\t\t\n'
 		printf 'rust.yml\tmissing\t\t\n'
 	)"
-	ROWS="$rows" run bash "$CANARY_EVAL" "render_summary '$CANDIDATE' 'canary/$CANDIDATE' <<<\"\$ROWS\""
+	ROWS="$rows" run bash "$CANARY_EVAL" "render_summary '$CANDIDATE' '$CANARY_TEST_BRANCH' <<<\"\$ROWS\""
 	assert_success
 	assert_line "## External consumer canary"
 	assert_line "| Workflow | Role | Expected | Conclusion | Verdict | Run |"
@@ -689,10 +699,10 @@ call_fn() {
 	assert_success
 	run grep -F "gate-failures=1" "$GITHUB_OUTPUT"
 	assert_success
-	run grep -F "branch=canary/${CANDIDATE}" "$GITHUB_OUTPUT"
+	run grep -F "branch=${CANARY_TEST_BRANCH}" "$GITHUB_OUTPUT"
 	assert_success
 	# Branch is still cleaned up on failure.
-	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/canary/${CANDIDATE}" "$MOCK_CALLS"
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/${CANARY_TEST_BRANCH}" "$MOCK_CALLS"
 	assert_success
 }
 
@@ -894,18 +904,40 @@ call_fn() {
 	all_green_snapshot
 	run env MOCK_REF_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
 	assert_failure
-	assert_output --partial "another canary for this SHA may hold it; it is left untouched"
+	assert_output --partial "this run's ref may already exist; it is left untouched"
 	run grep -F -- "-X DELETE" "$MOCK_CALLS"
 	refute_output
 	run grep -c -- "/dispatches" "$MOCK_CALLS"
 	assert_output "0"
 }
 
+@test "external-canary: retained refs allow a new attempt and another run of the same SHA" {
+	all_green_snapshot
+	run env CANARY_KEEP_BRANCH=true MOCK_REF_REJECT_DUPLICATE=1 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run env CANARY_KEEP_BRANCH=true MOCK_REF_REJECT_DUPLICATE=1 GITHUB_RUN_ATTEMPT=2 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run env CANARY_KEEP_BRANCH=true MOCK_REF_REJECT_DUPLICATE=1 GITHUB_RUN_ID=67890 bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	run cat "$MOCK_RUNS_DIR/refs"
+	assert_output "$(printf 'refs/heads/canary/%s-%s\n' "$CANDIDATE" 12345-1 "$CANDIDATE" 12345-2 "$CANDIDATE" 67890-1)"
+	run grep -F -- '-X DELETE' "$MOCK_CALLS"
+	refute_output
+}
+
+@test "external-canary: monitoring failure fails gates but remains informational for informational workflows" {
+	run bash "$CANARY_EVAL" '
+		printf "python.yml\tmonitoring_failed\t\t\nverify-negative.yml\tmonitoring_failed\t\t\n" | failed_gates
+	'
+	assert_success
+	assert_output "$(printf 'python.yml\tmonitoring_failed')"
+}
+
 @test "external-canary: a failed branch deletion is a warning, not a failure" {
 	all_green_snapshot
 	run env MOCK_DELETE_FAIL=1 bash "$SCRIPT" "$CANDIDATE"
 	assert_success
-	assert_output --partial "could not delete owner/fixture@canary/${CANDIDATE}"
+	assert_output --partial "could not delete owner/fixture@${CANARY_TEST_BRANCH}"
 }
 
 # --- negative probes ---------------------------------------------------------
@@ -1072,7 +1104,7 @@ EOF
 	assert_output --partial "cannot check the lgtm-ci references of"
 	run grep -c -- "/dispatches" "$MOCK_CALLS"
 	assert_output "0"
-	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/canary/${CANDIDATE}" "$MOCK_CALLS"
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/${CANARY_TEST_BRANCH}" "$MOCK_CALLS"
 	assert_success
 }
 
@@ -1364,7 +1396,7 @@ EOF
 @test "external-canary: queue expiry is informational for gates and marks unexercised work" {
 	run_row python.yml queued "" 11 >"$MOCK_RUNS_DIR/runs.1"
 	run env MOCK_JOBS_QUEUED=1 CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" \
-		"poll_runs canary/$CANDIDATE 2026-10-08T00:00:00Z python.yml rust.yml"
+		"poll_runs $CANARY_TEST_BRANCH 2026-10-08T00:00:00Z python.yml rust.yml"
 	assert_success
 	assert_line "$(printf 'python.yml\tqueued-timeout\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 	assert_line "$(printf 'rust.yml\tqueued-timeout\t\t')"
@@ -1448,14 +1480,14 @@ EOF
 @test "external-canary: failed job lookup cannot be reclassified as queue pressure" {
 	run_row python.yml queued "" 11 >"$MOCK_RUNS_DIR/runs.1"
 	run env MOCK_JOBS_FAIL=1 CANARY_QUEUE_TIMEOUT_SECONDS=0 bash "$CANARY_EVAL" \
-		"poll_runs canary/$CANDIDATE since python.yml"
+		"poll_runs $CANARY_TEST_BRANCH since python.yml"
 	assert_success
 	assert_line "$(printf 'python.yml\tmonitoring_failed\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
 }
 
 _prepare_cleanup() {
 	mkdir -p "$CANARY_STATE_DIR"
-	printf 'canary/%s\n' "$CANDIDATE" >"$CANARY_STATE_DIR/branch"
+	printf '%s\n' "$CANARY_TEST_BRANCH" >"$CANARY_STATE_DIR/branch"
 	printf 'python.yml\n' >"$CANARY_STATE_DIR/attempted"
 }
 
@@ -1468,7 +1500,7 @@ _prepare_cleanup() {
 	} >"$MOCK_RUNS_DIR/cleanup"
 	run bash "$SCRIPT" --cleanup
 	assert_success
-	assert_output --partial "retained owner/fixture@canary/$CANDIDATE"
+	assert_output --partial "retained owner/fixture@$CANARY_TEST_BRANCH"
 	run grep -F 'actions/runs/11/cancel' "$MOCK_CALLS"
 	assert_success
 	run grep -F 'actions/runs/12/cancel' "$MOCK_CALLS"
@@ -1495,7 +1527,7 @@ _prepare_cleanup() {
 	all_green_snapshot
 	run bash "$SCRIPT" --cleanup
 	assert_success
-	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/canary/$CANDIDATE" "$MOCK_CALLS"
+	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/$CANARY_TEST_BRANCH" "$MOCK_CALLS"
 	assert_success
 }
 

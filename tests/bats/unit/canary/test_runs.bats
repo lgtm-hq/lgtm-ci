@@ -14,17 +14,30 @@ setup() {
 	export FIXTURE_REPO=owner/fixture CANARY_DISPATCH=false CANARY_KEEP_BRANCH=false
 	export CANARY_MAX_IN_FLIGHT=2 CANARY_QUEUE_TIMEOUT_SECONDS=10 CANARY_TIMEOUT_SECONDS=20
 	export CANARY_POLL_SECONDS=0 CANARY_CLEANUP_POLL_SECONDS=0
-	mkdir -p "$MOCK_DIR/bin" "$CANARY_STATE_DIR"
+	export STALE_SHA=1111111111111111111111111111111111111111
+	export OWNED_BRANCH="canary/${STALE_SHA}-12345-2"
+	mkdir -p "$MOCK_DIR/bin" "$CANARY_STATE_DIR" "$MOCK_DIR/stale-runs/canary" "$MOCK_DIR/owners"
 	printf '100\n' >"$MOCK_DIR/clock"
 	printf '0\n' >"$MOCK_DIR/poll"
 	: >"$MOCK_DIR/calls"
 	: >"$MOCK_DIR/runs.1"
 	: >"$MOCK_DIR/jobs"
+	: >"$MOCK_DIR/refs"
 	cat >"$MOCK_DIR/bin/gh" <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 printf '%s\n' "$*" >>"$MOCK_DIR/calls"
+args="$*"
 case "$*" in
+*'/git/matching-refs/'*)
+	[[ "${MOCK_REFS_FAIL:-false}" != true ]] || exit 1
+	cat "$MOCK_DIR/refs"
+	;;
+*'/actions/runs/'*' --jq .status')
+	id="${args##*/runs/}"
+	id="${id%% *}"
+	cat "$MOCK_DIR/owners/$id"
+	;;
 *'/dispatches'*)
 	[[ "$*" != *"/${MOCK_DISPATCH_FAIL:-none}/dispatches"* ]]
 	;;
@@ -37,13 +50,20 @@ case "$*" in
 	;;
 *'/actions/runs?branch='*)
 	[[ "${MOCK_LIST_FAIL:-false}" != true ]] || exit 1
+	branch="${args##*branch=}"
+	branch="${branch%%&*}"
+	if [[ "$branch" == "canary/${STALE_SHA}-"* ]]; then
+		cat "$MOCK_DIR/stale-runs/$branch"
+		exit 0
+	fi
 	n=$(cat "$MOCK_DIR/poll")
 	n=$((n + 1))
 	printf '%s\n' "$n" >"$MOCK_DIR/poll"
+	[[ -z "${MOCK_LIST_FAIL_FROM:-}" || "$n" -lt "$MOCK_LIST_FAIL_FROM" ]] || exit 1
 	while [[ ! -f "$MOCK_DIR/runs.$n" && "$n" -gt 1 ]]; do n=$((n - 1)); done
 	cat "$MOCK_DIR/runs.$n"
 	;;
-*'-X DELETE '*) ;;
+*'-X DELETE '*) [[ "${MOCK_DELETE_FAIL:-false}" != true ]] ;;
 *) echo "unexpected gh call: $*" >&2; exit 99 ;;
 esac
 EOF
@@ -56,6 +76,8 @@ set -euo pipefail
 # shellcheck disable=SC1090 -- source the helper under test from the checkout.
 source "$RUNS_SCRIPT"
 fixture_api() { gh api "$@"; }
+lgtm_ci_api() { gh api "$@"; }
+GITHUB_REPOSITORY=lgtm-hq/lgtm-ci
 dispatch_workflow() { fixture_api -X POST "repos/$FIXTURE_REPO/actions/workflows/$1/dispatches" -f "ref=$2"; }
 delete_canary_branch() { fixture_api -X DELETE "repos/$FIXTURE_REPO/git/refs/heads/$1"; }
 log_info() { :; }
@@ -182,6 +204,23 @@ run_row() {
 	assert_line "$(printf 'one.yml\tmonitoring_failed\t\t')"
 }
 
+@test "runs: successful empty fetch followed by outage is monitoring failure" {
+	export CANARY_QUEUE_TIMEOUT_SECONDS=2 MOCK_LIST_FAIL_FROM=2
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_line "$(printf 'one.yml\tmonitoring_failed\t\t')"
+	refute_output --partial queued-timeout
+}
+
+@test "runs: repeated successful empty fetches establish queue timeout" {
+	export CANARY_QUEUE_TIMEOUT_SECONDS=2
+	run call_fn 'poll_runs canary/test since one.yml'
+	assert_success
+	assert_output "$(printf 'one.yml\tqueued-timeout\t\t')"
+	run cat "$MOCK_DIR/poll"
+	assert_output 3
+}
+
 @test "runs: cleanup cancels queued and running children but retains unfinished branch" {
 	printf 'canary/test\n' >"$CANARY_STATE_DIR/branch"
 	printf 'one.yml\n' >"$CANARY_STATE_DIR/attempted"
@@ -226,4 +265,84 @@ run_row() {
 	run call_fn 'cancel_canary_run 11'
 	assert_success
 	assert_output --partial 'could not cancel fixture run 11'
+}
+
+stale_ref() {
+	local branch="canary/${STALE_SHA}-${1}-1"
+	printf 'refs/heads/%s\n' "$branch" >>"$MOCK_DIR/refs"
+	printf '%s\n' "${3:-completed}" >"$MOCK_DIR/owners/$1"
+	if [[ -n "$2" ]]; then
+		run_row one.yml "$2" success 11 >"$MOCK_DIR/stale-runs/$branch"
+	else
+		: >"$MOCK_DIR/stale-runs/$branch"
+	fi
+}
+
+@test "runs: stale cleanup prunes completed prior attempts including terminal probe children" {
+	stale_ref 12345 completed
+	run_row child.yml completed failure 12 >>"$MOCK_DIR/stale-runs/canary/${STALE_SHA}-12345-1"
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run grep -E '/cancel|-X DELETE' "$MOCK_DIR/calls"
+	assert_output "api -X DELETE repos/owner/fixture/git/refs/heads/canary/${STALE_SHA}-12345-1"
+	run grep 'git/matching-refs' "$MOCK_DIR/calls"
+	assert_output --partial "matching-refs/heads/canary/${STALE_SHA}- --paginate"
+	run grep '/actions/runs?branch=' "$MOCK_DIR/calls"
+	assert_output --partial '--paginate'
+	refute_output --partial 'created='
+}
+
+@test "runs: stale cleanup retains unfinished probe children and empty listings" {
+	stale_ref 100 completed
+	run_row child.yml queued '' 12 >>"$MOCK_DIR/stale-runs/canary/${STALE_SHA}-100-1"
+	stale_ref 101 ''
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run grep -E '/cancel|-X DELETE' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: stale cleanup retains refs owned by active or unqueryable canaries" {
+	stale_ref 100 completed in_progress
+	stale_ref 101 completed
+	rm "$MOCK_DIR/owners/101"
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial 'cannot verify owner'
+	run grep -E '/actions/runs\?|-X DELETE|/cancel' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: stale cleanup does not touch owned refs other SHAs or malformed refs" {
+	printf '%s\n' "refs/heads/$OWNED_BRANCH" \
+		'refs/heads/canary/2222222222222222222222222222222222222222-100-1' \
+		"refs/heads/canary/${STALE_SHA}-100-1/child" \
+		"refs/heads/canary/${STALE_SHA}" >"$MOCK_DIR/refs"
+	run call_fn 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run wc -l <"$MOCK_DIR/calls"
+	assert_output --regexp '^[[:space:]]*1$'
+}
+
+@test "runs: stale cleanup leaves refs on failed ref or run listings" {
+	stale_ref 100 completed
+	run env MOCK_REFS_FAIL=true bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial 'cannot list stale canary refs'
+	run env MOCK_LIST_FAIL=true bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	assert_output --partial 'cannot verify fixture runs'
+	run grep -E '/cancel|-X DELETE' "$MOCK_DIR/calls"
+	assert_failure
+}
+
+@test "runs: stale cleanup tolerates deletion failures and honors keep branch" {
+	stale_ref 100 completed
+	run env MOCK_DELETE_FAIL=true bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	: >"$MOCK_DIR/calls"
+	run env CANARY_KEEP_BRANCH=true bash "$MOCK_DIR/eval.sh" 'cleanup_stale_canary_branches "$OWNED_BRANCH"'
+	assert_success
+	run cat "$MOCK_DIR/calls"
+	assert_output ''
 }
