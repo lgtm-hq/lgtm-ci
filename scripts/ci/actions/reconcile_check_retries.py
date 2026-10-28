@@ -282,9 +282,11 @@ def bind_jobs(
         # Actions job IDs and check IDs are distinct API identities.
         job["check_id"] = check_id
         by_check[check_id]["attempt"] = job["run_attempt"]
+    job_url_prefix = f"https://github.com/{repo}/actions/runs/{run['id']}/job/"
     if any(
         c["app"] == "github-actions"
         and c["suite"] == run["check_suite_id"]
+        and c["url"].startswith(job_url_prefix)
         and c["id"] not in bound
         for c in checks
     ):

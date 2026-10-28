@@ -107,7 +107,10 @@ def gate(tmp_path: Path, responses: dict[str, Any]) -> subprocess.CompletedProce
             "head_sha": SHA,
             "app": {"slug": "github-actions"},
             "check_suite": {"id": j.get("suite", 50)},
-            "html_url": f"{REPO_URL}/actions/runs/{j['run_id']}/job/{j['id']}",
+            "html_url": j.get(
+                "html_url",
+                f"{REPO_URL}/actions/runs/{j['run_id']}/job/{j['id']}",
+            ),
         }
         for j in responses.get("checks", jobs)
     ]
@@ -391,6 +394,7 @@ def invalidate_receipt(responses: dict[str, Any], case: str) -> None:
         "wrong-head",
         "missing-check",
         "wrong-check-binding",
+        "job-check-absent-from-jobs",
     ],
 )
 def test_incomplete_api_evidence_fails_the_poll(
@@ -429,6 +433,8 @@ def test_incomplete_api_evidence_fails_the_poll(
         responses["checks"] = jobs[:3]
     elif case == "wrong-check-binding":
         jobs[-1]["check_run_url"] = f"https://api.github.com/repos/{REPO}/check-runs/21"
+    elif case == "job-check-absent-from-jobs":
+        responses["checks"] = jobs + [job(23, "Missing API job", 2, "success")]
     result = gate(tmp_path=tmp_path, responses=responses)
     assert_that(result.returncode).is_not_zero()
     assert_that(result.stdout).contains("consecutive API polls failed")
@@ -519,6 +525,26 @@ def test_distinct_job_and_check_ids(
     result = gate(tmp_path=tmp_path, responses=responses)
     assert_that(result.returncode).described_as(result.stdout + result.stderr).is_zero()
     assert_that(result.stdout).contains("All 2 other check(s) passed")
+
+
+@pytest.mark.parametrize("conclusion", ["success", "failure"])
+def test_separate_suite_check_keeps_its_verdict(
+    tmp_path: Path,
+    responses: dict[str, Any],
+    conclusion: str,
+) -> None:
+    """Checks API reports sharing the suite need no Actions job membership."""
+    report = job(99, "Published test report", 2, conclusion)
+    report["html_url"] = f"{REPO_URL}/checks/99"
+    responses["checks"] = responses["jobs"] + [report]
+    result = gate(tmp_path=tmp_path, responses=responses)
+    assert_that(result.stdout).does_not_contain("API poll failed")
+    if conclusion == "success":
+        assert_that(result.returncode).is_zero()
+        assert_that(result.stdout).contains("All 3 other check(s) passed")
+    else:
+        assert_that(result.returncode).is_not_zero()
+        assert_that(result.stdout).contains("check Published test report: failure")
 
 
 def test_carried_success_is_kept(
