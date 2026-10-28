@@ -259,13 +259,15 @@ def bind_jobs(
 ) -> None:
     """Bind every observed job to its exact check, retaining current matrix IDs."""
     repo = os.environ["GITHUB_REPOSITORY"]
+    api_url = os.environ.get("GITHUB_API_URL", "https://api.github.com").rstrip("/")
+    server_url = os.environ.get("GITHUB_SERVER_URL", "https://github.com").rstrip("/")
+    url_prefix = f"{api_url}/repos/{repo}/check-runs/"
+    job_url_prefix = f"{server_url}/{repo}/actions/runs/{run['id']}/job/"
     by_check = {c["id"]: c for c in checks}
     bound: set[int] = set()
     for job in jobs:
-        url_prefix = f"https://api.github.com/repos/{repo}/check-runs/"
-        url = job["check_run_url"]
-        suffix = url.removeprefix(url_prefix)
-        if not url.startswith(url_prefix) or not suffix.isdigit():
+        suffix = job["check_run_url"].removeprefix(url_prefix)
+        if not job["check_run_url"].startswith(url_prefix) or not suffix.isdigit():
             raise ValueError("invalid job/check association")
         check_id = int(suffix)
         expected = {k: job[k] for k in ("name", "status", "conclusion")}
@@ -273,7 +275,7 @@ def bind_jobs(
             app="github-actions",
             suite=run["check_suite_id"],
             head_sha=run["head_sha"],
-            url=f"https://github.com/{repo}/actions/runs/{run['id']}/job/{job['id']}",
+            url=f"{job_url_prefix}{job['id']}",
         )
         matches = all(by_check[check_id][k] == v for k, v in expected.items())
         if check_id in bound or not matches:
@@ -282,7 +284,6 @@ def bind_jobs(
         # Actions job IDs and check IDs are distinct API identities.
         job["check_id"] = check_id
         by_check[check_id]["attempt"] = job["run_attempt"]
-    job_url_prefix = f"https://github.com/{repo}/actions/runs/{run['id']}/job/"
     if any(
         c["app"] == "github-actions"
         and c["suite"] == run["check_suite_id"]

@@ -12,6 +12,7 @@ from collections.abc import Callable
 from pathlib import Path
 from types import ModuleType
 from typing import Any
+from urllib.parse import urlsplit
 
 import pytest
 from assertpy import assert_that
@@ -182,7 +183,14 @@ def gate(tmp_path: Path, responses: dict[str, Any]) -> subprocess.CompletedProce
         "GITHUB_OUTPUT": str(tmp_path / "output"),
         "GITHUB_STEP_SUMMARY": str(tmp_path / "summary"),
     }
-    for key in ("IGNORE_PATTERN", "ALLOW_EMPTY", "FAIL_ON_DRAFT", "PR_DRAFT"):
+    for key in (
+        "IGNORE_PATTERN",
+        "ALLOW_EMPTY",
+        "FAIL_ON_DRAFT",
+        "PR_DRAFT",
+        "GITHUB_API_URL",
+        "GITHUB_SERVER_URL",
+    ):
         env.pop(key, None)
     env.update(responses.get("env", {}))
     return subprocess.run(
@@ -202,6 +210,49 @@ def test_retry_recovers_placeholder(tmp_path: Path, responses: dict[str, Any]) -
     assert_that(result.stdout).contains("All 2 other check(s) passed")
     assert_that((tmp_path / "output").read_text()).contains("status=passed")
     assert_that((tmp_path / "summary").read_text()).does_not_contain(PLACEHOLDER)
+
+
+@pytest.mark.parametrize(
+    ("api_url", "server_url"),
+    [
+        ("https://api.github.com", "https://github.com"),
+        ("https://ghe.example.com/api/v3", "https://ghe.example.com"),
+        ("https://ghe.example.com/api/v3/", "https://ghe.example.com/"),
+    ],
+    ids=["github", "ghes", "ghes-trailing-slash"],
+)
+@pytest.mark.parametrize(
+    "scenario",
+    ["valid", "foreign-check-host", "foreign-html-host", "unbound-check"],
+)
+def test_retry_respects_configured_server_urls(
+    tmp_path: Path,
+    responses: dict[str, Any],
+    api_url: str,
+    server_url: str,
+    scenario: str,
+) -> None:
+    """Accept configured origins while rejecting foreign or unbound checks."""
+    responses["env"] = {"GITHUB_API_URL": api_url, "GITHUB_SERVER_URL": server_url}
+    jobs = responses["jobs"]
+    if scenario == "unbound-check":
+        responses["checks"] = jobs + [job(23, "Missing API job", 2, "success")]
+    check_url = f"{api_url.rstrip('/')}/repos/{REPO}/check-runs/"
+    job_url = f"{server_url.rstrip('/')}/{REPO}/actions/runs/1/job/"
+    for record in responses.get("checks", jobs):
+        record["check_run_url"] = f"{check_url}{record['id']}"
+        record["html_url"] = f"{job_url}{record['id']}"
+    if scenario.startswith("foreign-"):
+        field = "check_run_url" if scenario == "foreign-check-host" else "html_url"
+        url = jobs[-1][field]
+        jobs[-1][field] = url.replace(urlsplit(url).netloc, "other.example.com")
+    result = gate(tmp_path=tmp_path, responses=responses)
+    if scenario == "valid":
+        assert_that(result.returncode).described_as(str(result)).is_zero()
+        assert_that(result.stdout).contains("All 2 other check(s) passed")
+    else:
+        assert_that(result.returncode).is_not_zero()
+        assert_that(result.stdout).contains("consecutive API polls failed")
 
 
 @pytest.mark.parametrize(
