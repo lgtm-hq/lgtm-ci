@@ -22,7 +22,6 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: ./.github/workflows/reusable-release-auto-tag.yml
     with:
-      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       version: ${{ github.event_name == 'workflow_dispatch' && inputs.version || '' }}
     secrets:
       RELEASE_APP_ID: ${{ secrets.RELEASE_APP_ID }}

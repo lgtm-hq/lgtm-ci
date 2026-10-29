@@ -15,7 +15,6 @@ jobs:
     # yamllint disable-line rule:line-length
     uses: ./.github/workflows/reusable-release-version-pr.yml
     with:
-      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       max-bump: minor
       # Tier changes, deprecations and removals from catalog/catalog.yml (#1082).
       catalog-release-notes: true

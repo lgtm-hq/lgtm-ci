@@ -6,7 +6,7 @@ on:
   workflow_call:
     inputs:
       egress-policy:
-        description: "harden-runner egress policy (audit or block)"
+        description: "harden-runner egress policy (block only; audit rejected)"
         required: false
         type: string
         default: "block"
@@ -246,8 +246,7 @@ jobs:
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
-          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
-          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+          egress-policy: block
           # Fixed preset from the literal map in env (not caller-selectable).
           allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-minimal'] }}
       - name: Checkout repository
@@ -275,27 +274,12 @@ jobs:
           TOOLING_REF_OVERRIDE: ${{ inputs.tooling-ref }}
           WORKFLOW_SHA: ${{ job.workflow_sha }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/warn-tooling-ref-override.sh
-      # TEMP: lgtm-hq/lgtm-ci#1207 — older tooling overrides reject strict + audit.
-      - name: Checkout workflow runner policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-          path: .lgtm-ci-runner-policy
-          # GHES lacks job.workflow_sha; it still needs a compatible explicit pin.
-          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
-          sparse-checkout: |
-            .github/actions/validate-runner-policy
-            scripts/ci/actions/validate-runner-policy.sh
-            scripts/ci/lib/github/
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
       - name: Validate runner policy
         id: policy
-        uses: ./.lgtm-ci-runner-policy/.github/actions/validate-runner-policy
+        uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
         with:
           tier: strict
-          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
-          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+          egress-policy: block
           runner-environment: ${{ runner.environment }}
           runner-os: ${{ runner.os }}
       - name: Read Cargo version
@@ -358,9 +342,9 @@ jobs:
         if: runner.os == 'Linux' || runner.environment == 'self-hosted'
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
-          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
-          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+          egress-policy: block
           # Fixed preset from the literal map in env (not caller-selectable).
+          # GitHub artifact transfers use harden-runner's implicit endpoints.
           allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['github-tooling'] }}
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -377,27 +361,12 @@ jobs:
             scripts/ci/
           sparse-checkout-cone-mode: true
           persist-credentials: false
-      # TEMP: lgtm-hq/lgtm-ci#1207 — older tooling overrides reject strict + audit.
-      - name: Checkout workflow runner policy
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: ${{ job.workflow_repository || 'lgtm-hq/lgtm-ci' }}
-          path: .lgtm-ci-runner-policy
-          # GHES lacks job.workflow_sha; it still needs a compatible explicit pin.
-          ref: ${{ job.workflow_sha || inputs.tooling-ref || 'tooling-ref-required' }}
-          sparse-checkout: |
-            .github/actions/validate-runner-policy
-            scripts/ci/actions/validate-runner-policy.sh
-            scripts/ci/lib/github/
-          sparse-checkout-cone-mode: false
-          persist-credentials: false
       - name: Validate runner policy
         id: policy
-        uses: ./.lgtm-ci-runner-policy/.github/actions/validate-runner-policy
+        uses: ./.lgtm-ci-tooling/.github/actions/validate-runner-policy
         with:
           tier: strict
-          # TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
-          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+          egress-policy: block
           runner-environment: ${{ runner.environment }}
           runner-os: ${{ runner.os }}
       - name: Download binary artifacts

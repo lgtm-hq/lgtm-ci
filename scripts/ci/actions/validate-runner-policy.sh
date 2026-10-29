@@ -75,11 +75,7 @@ if [[ "$EGRESS_POLICY" == "audit" ]]; then
 		_enforce_egress="false"
 		echo "::warning::$_tier_warning"
 	else
-		# TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix
-		_tier_warning="$TIER tier: audit is temporarily permitted per lgtm-hq/lgtm-ci#1207"
-		_effective_policy="audit"
-		_enforce_egress="false"
-		echo "::warning::$_tier_warning"
+		_fail "validate-runner-policy: egress-policy 'audit' is not permitted (org requires block). Use egress-policy: block or choose permissive tier only for exotic builds with documented justification."
 	fi
 elif _can_enforce_block; then
 	case "$TIER" in

@@ -178,7 +178,7 @@ trusted publisher — not `lgtm-hq/lgtm-ci`. See
 [python-release-publish.md](python-release-publish.md), "PyPI trusted
 publishing".
 
-## 3. Egress: audit first, then block
+## 3. Egress: verify the allowlist
 
 Reusable workflows default to `egress-policy: block` with a per-workflow
 `egress-preset` baseline (canonical definitions:
@@ -186,7 +186,7 @@ Reusable workflows default to `egress-policy: block` with a per-workflow
 workflow-contract.md ["Egress presets"](workflow-contract.md#egress-presets)).
 Repositories with standard toolchains usually pass on the preset alone. If
 your build pulls from hosts outside the preset, the first run fails with
-blocked connections. Recommended flow:
+blocked connections. For workflows that permit audit, use this flow:
 
 1. **Onboard in audit mode.** Set `egress-policy: audit` on the reusable
    `with:` block. Nothing is blocked; all outbound calls are recorded.
@@ -211,14 +211,15 @@ blocked connections. Recommended flow:
 4. **Flip to block.** Set `egress-policy: block` (or remove the input — block
    is the default) and re-run. Repeat 2–3 if a host was missed.
 
-Audit mode is a bring-up tool; production callers should normally run `block`.
-<!-- TEMP: lgtm-hq/lgtm-ci#1207 — revert when harden-runner ships the westus2 fix -->
+Workflows with [`strict` or `hardened` runner tiers](workflow-contract.md#runner-policy-tiers)
+reject audit. Start these in `block` with the default preset, inspect denied
+connections in the StepSecurity report, then append required hosts as in
+step 3 and re-run.
+
+Audit mode is a bring-up tool; production callers should run `block`.
 `reusable-publish-rust-release.yml` accepts `egress-policy` (default `block`)
-and forwards it to the nested binary build. Set `egress-policy: audit` to
-select the temporary mitigation tracked in [#1207](https://github.com/lgtm-hq/lgtm-ci/issues/1207).
-Tag verification and GitHub release jobs temporarily use fixed `audit`
-with the marked strict-tier carve-out. Their runner-policy validator tracks
-the workflow revision independently of any `tooling-ref` override.
+and forwards it to the nested binary build. Tag verification and GitHub
+release jobs enforce a fixed `block` policy at tier `strict`.
 
 ## 4. Resolve the release commit SHA
 

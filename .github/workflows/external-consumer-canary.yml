@@ -210,7 +210,7 @@ jobs:
         # Pinned to SHA for supply chain security
         uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
         with:
-          egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+          egress-policy: block
           # Literal map in env only: harden-runner's pre hook runs before any
           # step, so the allowlist cannot come from anything computed later.
           allowed-endpoints: >-

@@ -16,8 +16,6 @@ permissions:
 jobs:
   assign:
     uses: ./.github/workflows/reusable-pr-auto-assign.yml
-    with:
-      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
     permissions:
       contents: read
       pull-requests: write
