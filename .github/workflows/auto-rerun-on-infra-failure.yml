@@ -29,7 +29,6 @@ jobs:
       checks: read
       contents: read
     with:
-      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       # run id/attempt are numbers in the event payload; format() passes them
       # as the strings the reusable workflow inputs expect.
       run-id: ${{ format('{0}', github.event.workflow_run.id) }}

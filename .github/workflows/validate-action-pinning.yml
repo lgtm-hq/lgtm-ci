@@ -30,7 +30,7 @@ jobs:
       fail-on-error: true
       verify-tags: true
       audit-transitive: true
-      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+      egress-policy: block
       egress-preset: github-tooling
     permissions:
       contents: read

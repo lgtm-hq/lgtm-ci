@@ -19,7 +19,7 @@ jobs:
     uses: ./.github/workflows/reusable-dependency-review.yml
     with:
       fail-on-severity: high
-      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
+      egress-policy: block
       egress-preset: scorecard
       allowed-endpoints-mode: replace
       allowed-endpoints: >
