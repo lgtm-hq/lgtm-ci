@@ -236,7 +236,9 @@ case "$args" in
 	;;
 *"/actions/runs/"*"/jobs?"*)
 	if [[ "${MOCK_JOBS_FAIL:-}" == 1 ]]; then exit 1; fi
-	if [[ "${MOCK_JOBS_QUEUED:-}" != 1 ]]; then date +%s; fi
+	if [[ "$args" != *--jq* ]]; then
+		if [[ -n "${MOCK_JOBS_JSON:-}" ]]; then cat "$MOCK_JOBS_JSON"; else echo '{"jobs":[]}'; fi
+	elif [[ "${MOCK_JOBS_QUEUED:-}" != 1 ]]; then date +%s; fi
 	;;
 *"/actions/runs/"*"/cancel"*)
 	;;
@@ -551,7 +553,8 @@ call_fn() {
 	# Branch deleted at the end, successfully; the manual row is listed.
 	run grep -F -- "-X DELETE repos/owner/fixture/git/refs/heads/${CANARY_TEST_BRANCH}" "$MOCK_CALLS"
 	assert_success
-	run bash "$SCRIPT" "$CANDIDATE"
+	# This second independent invocation owns a separate dispatch journal.
+	run env CANARY_STATE_DIR="${BATS_TEST_TMPDIR}/second-state" bash "$SCRIPT" "$CANDIDATE"
 	assert_output --partial "dispatched python.yml on ${CANARY_TEST_BRANCH}"
 	assert_output --partial "| \`release-version-pr.yml\` | manual | \`success\` | \`not_dispatched\` | ➖ not dispatched | — |"
 	assert_output --partial "deleted owner/fixture@${CANARY_TEST_BRANCH}"
@@ -1575,4 +1578,272 @@ _prepare_cleanup() {
 	'
 	assert_success
 	assert_line "$(printf 'python.yml\tmonitoring_failed\t\t')"
+}
+
+# A terminal setup failure, one stale snapshot after re-dispatch, then the
+# newer run followed by the original. Exercise retry polling through gh stubs.
+retry_snapshots() {
+	run_row python.yml completed "$1" 11 >"$MOCK_RUNS_DIR/runs.1"
+	run_row verify-negative.yml completed failure 12 >>"$MOCK_RUNS_DIR/runs.1"
+	cp "$MOCK_RUNS_DIR/runs.1" "$MOCK_RUNS_DIR/runs.2"
+	cp "$MOCK_RUNS_DIR/runs.1" "$MOCK_RUNS_DIR/runs.3"
+	{
+		run_row python.yml completed "$2" 21
+		run_row python.yml completed "$1" 11
+		run_row verify-negative.yml completed failure 12
+	} >"$MOCK_RUNS_DIR/runs.4"
+}
+
+setup_failure_jobs() {
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json"
+	jq -n --arg step "${1:-Harden runner}" --arg later "${2:-skipped}" \
+		'{jobs: [{conclusion: "failure", steps: [
+		{name: "Set up job", conclusion: "success"},
+		{name: $step, conclusion: "failure"},
+		{name: "Run tests", conclusion: $later}]}]}' >"$MOCK_JOBS_JSON"
+}
+
+@test "external-canary: startup failure retries once with the second verdict and first run note" {
+	retry_snapshots startup_failure success
+	run bash "$CANARY_EVAL" '
+		mkdir -p "$CANARY_STATE_DIR"
+		CANARY_DISPATCH=true poll_runs "$CANARY_TEST_BRANCH" since python.yml >"$MOCK_RUNS_DIR/results"
+		render_summary "$CANDIDATE" <"$MOCK_RUNS_DIR/results"
+	'
+	assert_success
+	assert_output --partial '| `success` | ✅ pass | [run](https://github.com/owner/fixture/actions/runs/21)'
+	assert_output --partial 'retried once (startup_failure); first run: https://github.com/owner/fixture/actions/runs/11'
+	run cat "$CANARY_STATE_DIR/attempted"
+	assert_output "$(printf 'python.yml\npython.yml')"
+	run grep 'created=' "$MOCK_CALLS"
+	assert_output --partial "created=%3E%3D$(date -u +%Y-%m-%d)"
+}
+
+@test "external-canary: jobs-proven Harden runner failure retries and main renders the sidecar" {
+	retry_snapshots failure success
+	setup_failure_jobs
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial 'retried once (infra); first run: https://github.com/owner/fixture/actions/runs/11'
+	run cat "$GITHUB_STEP_SUMMARY"
+	assert_output --partial '| `success` | ✅ pass | [run](https://github.com/owner/fixture/actions/runs/21)'
+	run grep '/runs/11/jobs?' "$MOCK_CALLS"
+	assert_output --partial '--paginate'
+}
+
+@test "external-canary: failure in Run tests never retries" {
+	retry_snapshots failure success
+	setup_failure_jobs 'Run tests'
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	refute_output --partial 'retried once'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+}
+
+@test "external-canary: informational startup failures and gate probes never retry" {
+	run bash "$CANARY_EVAL" '
+		for file in sbom-release-upload.yml app-token-probe.yml verify-negative.yml release-version-pr.yml docker-scan-failure-probe.yml unknown-probe.yml; do
+			if retry_eligible "$file" startup_failure https://example/runs/11; then exit 91; fi
+		done
+	'
+	assert_success
+	run cat "$MOCK_CALLS"
+	assert_output ''
+}
+
+@test "external-canary: second failure is a gate failure without a third dispatch" {
+	retry_snapshots startup_failure failure
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	assert_output --partial '| `failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/21)'
+	assert_output --partial 'retried once (startup_failure); first run: https://github.com/owner/fixture/actions/runs/11'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 2
+}
+
+@test "external-canary: CANARY_RETRY_INFRA=false never re-dispatches" {
+	retry_snapshots startup_failure success
+	run env CANARY_RETRY_INFRA=false bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	refute_output --partial 'retried once'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+}
+
+@test "external-canary: jobs API error makes failure ineligible" {
+	retry_snapshots failure success
+	export MOCK_JOBS_FAIL=1
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_failure
+	refute_output --partial 'retried once'
+	run grep -c '/actions/workflows/python.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+}
+
+@test "external-canary: all setup step names accept only skipped or null later steps" {
+	local step
+	for step in 'Set up job' 'Pre Harden runner' 'Harden runner' 'Checkout sources' 'Prepare Python Matrix'; do
+		setup_failure_jobs "$step"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_success
+		assert_output infra
+	done
+	setup_failure_jobs 'Harden runner' success
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	setup_failure_jobs 'Harden runner'
+	jq '.jobs[0].steps[2].conclusion = null' "$MOCK_JOBS_JSON" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+}
+
+@test "external-canary: every failed job across all pages must prove setup failure" {
+	setup_failure_jobs
+	cp "$MOCK_JOBS_JSON" "$MOCK_JOBS_JSON.page1"
+	setup_failure_jobs 'Run tests'
+	cat "$MOCK_JOBS_JSON.page1" >>"$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_failure
+	setup_failure_jobs
+	cat "$MOCK_JOBS_JSON" "$MOCK_JOBS_JSON.page1" >"$MOCK_JOBS_JSON.tmp"
+	mv "$MOCK_JOBS_JSON.tmp" "$MOCK_JOBS_JSON"
+	run call_fn retry_eligible python.yml failure https://example/runs/11
+	assert_success
+	assert_output infra
+}
+
+@test "external-canary: missing failure evidence and unrelated conclusions never retry" {
+	export MOCK_JOBS_JSON="$BATS_TEST_TMPDIR/jobs.json"
+	local jobs conclusion
+	for jobs in '{"jobs":[]}' '{"jobs":[{"conclusion":"failure","steps":[]}]}' '{"jobs":[{"conclusion":"failure"}]}' 'invalid'; do
+		printf '%s\n' "$jobs" >"$MOCK_JOBS_JSON"
+		run call_fn retry_eligible python.yml failure https://example/runs/11
+		assert_failure
+	done
+	for conclusion in timeout queued-timeout dispatch_failed missing via_probe monitoring_failed; do
+		run call_fn retry_eligible python.yml "$conclusion" https://example/runs/11
+		assert_failure
+	done
+}
+
+@test "external-canary: failed retry dispatch preserves the first result and reports the failure" {
+	retry_snapshots startup_failure success
+	run bash "$CANARY_EVAL" '
+		mkdir -p "$CANARY_STATE_DIR"
+		dispatch_workflow() {
+			printf "%s\n" "$1" >>"$MOCK_RUNS_DIR/dispatches"
+			[[ $(wc -l <"$MOCK_RUNS_DIR/dispatches") -eq 1 ]]
+		}
+		CANARY_DISPATCH=true poll_runs "$CANARY_TEST_BRANCH" since python.yml >"$MOCK_RUNS_DIR/results"
+		render_summary "$CANDIDATE" <"$MOCK_RUNS_DIR/results"
+	'
+	assert_success
+	assert_output --partial '| `startup_failure` | ❌ **gate failed** | [run](https://github.com/owner/fixture/actions/runs/11)'
+	assert_output --partial 'retry dispatch failed'
+	refute_output --partial 'retried once'
+}
+
+@test "external-canary: retry admission shares the queue deadline" {
+	run bash "$CANARY_EVAL" '
+		CANARY_STATE_DIR=""
+		date() { echo 100; }
+		list_canary_runs() { printf "python.yml\tcompleted\tstartup_failure\thttps://example/runs/11\tname\n"; }
+		dispatch_workflow() { exit 91; }
+		CANARY_QUEUE_TIMEOUT_SECONDS=0 poll_runs canary/test since python.yml
+	'
+	assert_success
+	assert_line "$(printf 'python.yml\tstartup_failure\thttps://example/runs/11\tname')"
+}
+
+@test "external-canary: retry shares in-flight slots with queued first attempts" {
+	run bash "$CANARY_EVAL" '
+		mkdir -p "$CANARY_STATE_DIR"
+		state="$MOCK_RUNS_DIR/scheduler"; mkdir -p "$state"
+		dispatch_workflow() {
+			local active; active=$(find "$state" -name "*.active" | wc -l)
+			((active < CANARY_MAX_IN_FLIGHT)) || return 91
+			touch "$state/$1.active"
+			printf "%s\n" "$1" >>"$state/dispatches"
+		}
+		list_canary_runs() {
+			local file id result
+			for file in "$state"/*.active; do
+				[[ -f "$file" ]] || continue
+				file=${file##*/}; file=${file%.active}
+				id=12; result=success
+				if [[ "$file" == one.yml ]]; then
+					id=11
+					if [[ ! -f "$state/failed" ]]; then
+						touch "$state/failed"; result=startup_failure
+					else id=21; fi
+				fi
+				mv "$state/$file.active" "$state/$file.done"
+				printf "%s\tcompleted\t%s\thttps://example/runs/%s\tname\n" "$file" "$result" "$id" >"$state/$file.row"
+				# Free just one slot per fetch; queued workflows still use slots.
+				break
+			done
+			cat "$state"/*.row
+			for file in "$state"/*.active; do
+				[[ -f "$file" ]] || continue
+				file=${file##*/}; file=${file%.active}
+				printf "%s\tqueued\t\thttps://example/runs/12\tname\n" "$file"
+			done
+		}
+		first_job_start() { :; }
+		CANARY_MAX_IN_FLIGHT=2 CANARY_DISPATCH=true poll_runs canary/test since one.yml two.yml
+		cat "$state/dispatches"
+	'
+	assert_success
+	assert_line "$(printf 'one.yml\tsuccess\thttps://example/runs/21\tname')"
+	assert_line "$(printf 'two.yml\tsuccess\thttps://example/runs/12\tname')"
+	assert_output --partial "$(printf 'one.yml\ntwo.yml\none.yml')"
+}
+
+@test "external-canary: cleanup retains ref until both journaled attempts are visible" {
+	mkdir -p "$CANARY_STATE_DIR"
+	printf '%s\n' "$CANARY_TEST_BRANCH" >"$CANARY_STATE_DIR/branch"
+	printf 'python.yml\npython.yml\n' >"$CANARY_STATE_DIR/attempted"
+	run_row python.yml completed startup_failure 11 >"$MOCK_RUNS_DIR/cleanup"
+	run call_fn cleanup_fixture_runs
+	assert_success
+	assert_output --partial 'retained owner/fixture@'
+	assert_file_exists "$CANARY_STATE_DIR/branch"
+	run grep -- '-X DELETE' "$MOCK_CALLS"
+	assert_failure
+}
+
+@test "external-canary: informational startup failure stays informational without a second dispatch" {
+	{
+		run_row python.yml completed success 11
+		run_row verify-negative.yml completed startup_failure 12
+	} >"$MOCK_RUNS_DIR/runs.1"
+	run bash "$SCRIPT" "$CANDIDATE"
+	assert_success
+	assert_output --partial '| `verify-negative.yml` | informational | `failure` | `startup_failure` | ⚠️ unexpected |'
+	refute_output --partial 'retried once'
+	run grep -c '/actions/workflows/verify-negative.yml/dispatches' "$MOCK_CALLS"
+	assert_output 1
+}
+
+@test "external-canary: partial jobs evidence followed by an API error cannot trigger retry" {
+	run bash "$CANARY_EVAL" '
+		fixture_api() {
+			printf "%s\n" '\''{"jobs":[{"conclusion":"failure","steps":[{"name":"Harden runner","conclusion":"failure"}]}]}'\''
+			return 1
+		}
+		retry_eligible python.yml failure https://example/runs/11
+	'
+	assert_failure
+	assert_output ''
+}
+
+@test "external-canary: polling-only mode never dispatches an eligible startup failure" {
+	retry_snapshots startup_failure success
+	run call_fn poll_runs "$CANARY_TEST_BRANCH" since python.yml
+	assert_success
+	assert_output "$(printf 'python.yml\tstartup_failure\thttps://github.com/owner/fixture/actions/runs/11\tfixture-python')"
+	run grep '/dispatches' "$MOCK_CALLS"
+	assert_failure
 }
