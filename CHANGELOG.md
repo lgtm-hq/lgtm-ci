@@ -19,6 +19,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.79.1] - 2026-10-29
+
+### Changed
+
+- **deps**: update dependency nextest-rs/nextest (#1217) (5619288)
+
+### Fixed
+
+- **deps**: update dependency @openai/codex to 0.164.0 (minor) (#1162) (11b0c1d)
+
 ## [0.79.0] - 2026-10-29
 
 ### Added
@@ -2942,7 +2952,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.1...HEAD
+[0.79.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.0...v0.79.1
 [0.79.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.1...v0.79.0
 [0.78.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.0...v0.78.1
 [0.78.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.7...v0.78.0
