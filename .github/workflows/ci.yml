@@ -16,6 +16,7 @@ jobs:
   quality:
     uses: ./.github/workflows/reusable-quality-lint.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "🛠️ Lintro Code Quality"
     permissions:
       contents: read
@@ -29,6 +30,7 @@ jobs:
       && github.event.pull_request.head.repo.fork == false
     uses: ./.github/workflows/reusable-publish-quality-summary.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       exit-code: ${{ needs.quality.outputs.exit-code }}
     permissions:
       contents: read
@@ -42,6 +44,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "🐚 Shell Tests"
       test-path: tests/bats
       coverage: true
@@ -56,6 +59,7 @@ jobs:
       contents: read
       pull-requests: write
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "🐍 Python Tests"
       test-path: tests/python
       extras: test
@@ -65,6 +69,7 @@ jobs:
   caller-permissions:
     uses: ./.github/workflows/reusable-validate.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "📜 Caller Permissions"
       script: scripts/ci/docs/validate-caller-permissions.py
       publish-validation-report: true
@@ -76,6 +81,7 @@ jobs:
   support-catalog:
     uses: ./.github/workflows/reusable-validate.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "📚 Support Catalog"
       script: scripts/ci/catalog/validate.py
       # Stable evidence commits must be on origin/main and in HEAD's history
@@ -95,6 +101,7 @@ jobs:
   deprecation-gate:
     uses: ./.github/workflows/reusable-validate.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "🧭 Deprecation Gate"
       script: scripts/ci/catalog/check-deprecations.sh
       # The gate compares the checkout with its first parent, HEAD^1 (#1082):
@@ -113,6 +120,7 @@ jobs:
   doc-pins:
     uses: ./.github/workflows/reusable-validate.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       job-name: "📌 Doc Pins"
       script: scripts/ci/docs/validate-doc-pins.py
       publish-validation-report: true
@@ -126,6 +134,8 @@ jobs:
       github.event_name == 'pull_request'
       && github.event.pull_request.head.repo.fork == false
     uses: ./.github/workflows/reusable-publish-file-breakdown.yml
+    with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
     permissions:
       contents: read
       pull-requests: write
@@ -136,6 +146,7 @@ jobs:
     if: failure() && github.ref == 'refs/heads/main'
     uses: ./.github/workflows/reusable-main-failure-notifier.yml
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       workflow-key: ci
     permissions:
       actions: read

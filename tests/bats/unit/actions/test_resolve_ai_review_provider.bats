@@ -17,18 +17,11 @@ teardown() {
 	teardown_temp_dir
 }
 
-@test "resolve: empty inputs stay unresolved (no default provider)" {
-	PROVIDER_INPUT="" TRANSPORT_INPUT="" VAR_PROVIDER="" VAR_TRANSPORT="" \
-		CONFIG_PATH="${BATS_TEST_TMPDIR}/missing.yaml" \
-		run bash "$SCRIPT"
-	assert_success
-	run cat "$GITHUB_OUTPUT"
-	assert_output --partial "resolved=false"
-	assert_line "provider="
-	assert_line "transport="
-	assert_line "credential-env="
-	assert_output --partial "needs-cli=false"
-	refute_output --partial "provider=anthropic"
+@test "resolve: empty tuple is rejected before invocation" {
+    PROVIDER_INPUT="" TRANSPORT_INPUT="" VAR_PROVIDER="" VAR_TRANSPORT="" \
+        CONFIG_PATH="${BATS_TEST_TMPDIR}/missing.yaml" run bash "$SCRIPT"
+    assert_failure
+    assert_output --partial "Supported choices:"
 }
 
 @test "resolve: input wins over var and config" {
@@ -240,17 +233,10 @@ YAML
 	assert_output --partial "PROVIDER_INPUT must be lowercase"
 }
 
-@test "resolve: unsupported pair stays unresolved" {
-	PROVIDER_INPUT="cursor" TRANSPORT_INPUT="api" \
-		CONFIG_PATH="${BATS_TEST_TMPDIR}/missing.yaml" \
-		run bash "$SCRIPT"
-	assert_success
-	run cat "$GITHUB_OUTPUT"
-	assert_output --partial "resolved=false"
-	assert_line "provider=cursor"
-	assert_line "transport=api"
-	assert_line "credential-env="
-	assert_output --partial "needs-cli=false"
+@test "resolve: unsupported tuple fails with supported choices" {
+    PROVIDER_INPUT=cursor TRANSPORT_INPUT=api run bash "$SCRIPT"
+    assert_failure
+    assert_output --partial "Supported choices:"
 }
 
 @test "resolve: block ai heading with trailing comment" {
@@ -267,4 +253,59 @@ YAML
 	assert_output --partial "provider=cursor"
 	assert_output --partial "transport=cli"
 	assert_output --partial "credential-env=CURSOR_API_KEY"
+}
+
+@test "resolve: OpenAI CLI defaults to OAuth regardless of API key presence" {
+    PROVIDER_INPUT=openai TRANSPORT_INPUT=cli CODEX_API_KEY=smoke \
+        OPENAI_API_KEY=smoke run bash "$SCRIPT"
+    assert_success
+    run cat "$GITHUB_OUTPUT"
+    assert_line "auth=oauth"
+    assert_line "auth-source=default"
+    assert_line "credential-env=CODEX_AUTH_JSON"
+}
+
+@test "resolve: auth input overrides var and no product ai.auth is read" {
+    printf 'ai: {provider: openai, transport: cli, auth: invalid}\n' >cfg.yaml
+    AUTH_INPUT=oauth VAR_AUTH=api_key CONFIG_PATH=cfg.yaml run bash "$SCRIPT"
+    assert_success
+    run cat "$GITHUB_OUTPUT"
+    assert_line "auth=oauth"
+    assert_line "auth-source=input"
+}
+
+@test "resolve: auth variable overrides static default" {
+    PROVIDER_INPUT=openai TRANSPORT_INPUT=cli VAR_AUTH=api_key run bash "$SCRIPT"
+    assert_success
+    run cat "$GITHUB_OUTPUT"
+    assert_line "auth=api_key"
+    assert_line "auth-source=var"
+    assert_line "credential-env=CODEX_API_KEY"
+}
+
+@test "resolve: unsupported OAuth API and whitespace auth fail" {
+    for tuple in 'openai api oauth' 'anthropic api oauth' 'cursor cli oauth'; do
+        read -r provider transport auth <<<"$tuple"
+        PROVIDER_INPUT="$provider" TRANSPORT_INPUT="$transport" AUTH_INPUT="$auth" run bash "$SCRIPT"
+        assert_failure
+        assert_output --partial "Supported choices:"
+    done
+    PROVIDER_INPUT=openai TRANSPORT_INPUT=cli AUTH_INPUT=' ' run bash "$SCRIPT"
+    assert_failure
+}
+
+@test "resolve: config-only transport is refused before OAuth egress can diverge" {
+    printf 'ai: {transport: cli}\n' >cfg.yaml
+    PROVIDER_INPUT=openai EGRESS_POLICY=block CONFIG_PATH=cfg.yaml run bash "$SCRIPT"
+    assert_failure
+    assert_output --partial "harden-runner cannot see"
+}
+
+@test "resolve: selected auth overrides conflicting repo cli_bare config" {
+    printf 'ai:\n  providers:\n    anthropic:\n      cli_bare: always\n' >cfg.yaml
+    PROVIDER_INPUT=anthropic TRANSPORT_INPUT=cli CONFIG_PATH=cfg.yaml run bash "$SCRIPT"
+    assert_success
+    run cat "$GITHUB_OUTPUT"
+    assert_line "auth=oauth"
+    assert_line "cli-bare=never"
 }

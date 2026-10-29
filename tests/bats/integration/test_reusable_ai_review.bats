@@ -27,10 +27,11 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 # --- Interface / inputs -------------------------------------------------------
 
 @test "reusable-ai-review: exposes the documented inputs" {
-	run grep -E '^      (provider|transport|lintro-version|python-version|model|max-cost-usd|blocking):' "$WORKFLOW"
+	run grep -E '^      (provider|transport|auth|lintro-version|python-version|model|max-cost-usd|blocking):' "$WORKFLOW"
 	assert_success
 	assert_line --partial "provider:"
 	assert_line --partial "transport:"
+	assert_line --partial "auth:"
 	assert_line --partial "lintro-version:"
 	assert_line --partial "python-version:"
 	assert_line --partial "model:"
@@ -85,6 +86,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output --partial "CLAUDE_CODE_OAUTH_TOKEN:"
 	assert_output --partial "OPENAI_API_KEY:"
 	assert_output --partial "CODEX_API_KEY:"
+	assert_output --partial "CODEX_AUTH_JSON:"
 	assert_output --partial "CURSOR_API_KEY:"
 }
 
@@ -176,8 +178,8 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_output --partial "LINTRO_AI_TRANSPORT:"
 	assert_output --partial "LINTRO_AI_MODEL:"
 	assert_output --partial "LINTRO_AI_MAX_COST_USD:"
-	assert_output --partial "inputs.model || vars.LINTRO_AI_MODEL"
-	assert_output --partial "inputs.max-cost-usd || vars.LINTRO_AI_MAX_COST_USD"
+	assert_output --partial "steps.resolve.outputs.model"
+	assert_output --partial "steps.resolve.outputs.max-cost-usd"
 	assert_output --partial "LINTRO_AI_ENABLED:"
 	assert_output --partial "LINTRO_AI_REVIEW:"
 }
@@ -234,12 +236,12 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	assert_success
 }
 
-@test "reusable-ai-review: App token is minted and scoped to the run step" {
+@test "reusable-ai-review: App token is scoped to review and oversized notice steps" {
 	run grep -F "actions/create-github-app-token" "$WORKFLOW"
 	assert_success
 	run grep -c "GITHUB_TOKEN: \${{ steps.lintro-review-app.outputs.token }}" "$WORKFLOW"
 	assert_success
-	assert_output "1"
+	[[ "$output" -eq 3 ]]
 }
 
 @test "reusable-ai-review: fails early when App credentials are missing" {
@@ -260,53 +262,41 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 @test "reusable-ai-review: run step is gated on preflight should-run" {
 	run awk '
 		/- name: Run AI review/ { seen = 1 }
-		seen && /if: steps.preflight.outputs.should-run == .true./ { found = 1; exit }
+		seen && /steps.preflight.outputs.should-run == .true./ { found = 1; exit }
 		seen && /- name:/ && !/Run AI review/ { exit }
 		END { exit !found }
 	' "$WORKFLOW"
 	assert_success
 }
 
-@test "reusable-ai-review: harden inline provider hosts match the canonical matrix" {
-	# The harden step cannot run scripts (no checkout yet), so provider hosts
-	# are inline YAML. Assert every host the canonical matrix knows for the
-	# supported pairs appears verbatim in the workflow, so the two cannot drift.
-	local host
-	while IFS= read -r host; do
-		run grep -F "$host" "$WORKFLOW"
-		assert_success
-	done < <(bash -c "source '${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh' && {
-		egress_ai_review_provider_endpoints anthropic api
-		egress_ai_review_provider_endpoints anthropic cli
-		egress_ai_review_provider_endpoints cursor cli
-		egress_ai_review_provider_endpoints openai api
-		egress_ai_review_provider_endpoints openai cli
-	} | sort -u")
+@test "reusable-ai-review: canonical tuple bindings, defaults, docs and egress regenerate cleanly" {
+    run python3 "${PROJECT_ROOT}/scripts/ci/workflows/sync_ai_review_matrix.py" --check
+    assert_success
 }
 
-@test "reusable-ai-review: each provider host is bound to its provider condition" {
-	# Presence alone is not enough — a host attached to the wrong provider
-	# condition (or appended unconditionally) must fail. Assert the exact
-	# gating expression for each provider's hosts.
-	run grep -F "AI_REVIEW_PROVIDER == 'anthropic' && 'api.anthropic.com:443'" "$WORKFLOW"
-	assert_success
-	run grep -F "AI_REVIEW_PROVIDER == 'openai' && 'api.openai.com:443'" "$WORKFLOW"
-	assert_success
-	run grep -F "AI_REVIEW_PROVIDER == 'cursor' && env.AI_REVIEW_CURSOR_EGRESS" "$WORKFLOW"
-	assert_success
-	# Cursor shards live only in the gated env var, npm hosts only in the
-	# anthropic/openai-conditioned env var — never in an unconditional list.
-	run bash -c "grep -F 'downloads.cursor.com:443' '$WORKFLOW' | grep -vc AI_REVIEW_CURSOR_EGRESS"
-	assert_output "0"
-	# The embedded preset map (quality, npm-publish, …) legitimately lists the
-	# npm registry; only lines outside the generated block count here.
-	run bash -c "awk '/lgtm-ci-egress-presets:begin/ { skip = 1 } /lgtm-ci-egress-presets:end/ { skip = 0; next } !skip' '$WORKFLOW' | grep -F 'registry.npmjs.org:443' | grep -vc AI_REVIEW_NPM_EGRESS"
-	assert_output "0"
-	# And the npm env var's own definition must carry the anthropic/openai
-	# gate — an unconditional definition would grant npm egress to cursor.
-	# yamllint disable-line rule:line-length
-	run grep -F "== 'anthropic' || (inputs.provider || vars.LINTRO_AI_PROVIDER) == 'openai') && 'nodejs.org:443 registry.npmjs.org:443'" "$WORKFLOW"
-	assert_success
+@test "reusable-ai-review: OAuth invocation has no API-key environment slots" {
+    run awk '/- name: Run OAuth AI review/{f=1} f&&/ai-review-steps:end/{exit} f{print}' "$WORKFLOW"
+    assert_output --partial "CODEX_AUTH_JSON:"
+    assert_output --partial "CLAUDE_CODE_OAUTH_TOKEN:"
+    refute_output --partial "CODEX_API_KEY:"
+    refute_output --partial "OPENAI_API_KEY:"
+    refute_output --partial "ANTHROPIC_API_KEY:"
+}
+
+@test "reusable-ai-review: installs are credential-free and cleanup always runs" {
+    run awk '/- name: Install provider CLI/{f=1} f&&/- name: Locate prior/{exit} f{print}' "$WORKFLOW"
+    refute_output --partial 'secrets.'
+    run awk '/- name: Remove isolated review credentials/{f=1} f&&/- name: Upload/{exit} f{print}' "$WORKFLOW"
+    assert_output --partial 'if: always()'
+    assert_output --partial 'ai_review_auth.py --cleanup'
+}
+
+@test "reusable-ai-review: pilot API slots map only dedicated review sources" {
+    run cat "${PROJECT_ROOT}/.github/workflows/ai-review.yml"
+    assert_output --partial 'ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}'
+    assert_output --partial 'OPENAI_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}'
+    assert_output --partial 'CODEX_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}'
+    assert_output --partial 'CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}'
 }
 
 @test "reusable-ai-review: resolve step receives the egress policy for the visibility guard" {
@@ -375,4 +365,18 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-ai-review.yml"
 	run grep -c "persist-credentials: false" "$WORKFLOW"
 	assert_success
 	[[ "$output" -ge 2 ]]
+}
+
+@test "reusable-ai-review: size gate precedes all installations and skips credentialed invocation" {
+    run awk '
+        /- name: Check review size before installations/ { size = NR }
+        /- name: Set up uv/ { if (!size || size >= NR) exit 1; found = 1 }
+        END { if (!found) exit 1 }
+    ' "$WORKFLOW"
+    assert_success
+    run awk '/- name: Run OAuth AI review/{f=1} f&&/ai-review-steps:end/{exit} f' "$WORKFLOW"
+    assert_output --partial "steps.size.outputs.skip-size != 'true'"
+    run awk '/- name: Report oversized review/{f=1} f&&/- name: Remove isolated/{exit} f' "$WORKFLOW"
+    refute_output --partial 'secrets.'
+    assert_output --partial 'STEP: skipped-size'
 }

@@ -23,11 +23,12 @@ import sys
 import urllib.parse
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, TypedDict, Unpack
 
 # catalog_lib lives next to this module.
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import catalog_lib  # noqa: E402  # pylint: disable=wrong-import-position
+import review_auth_policy  # noqa: E402  # pylint: disable=wrong-import-position
 from catalog_lib import (  # noqa: E402  # pylint: disable=wrong-import-position
     DeprecationKind,
     entry_of,
@@ -47,6 +48,13 @@ REGISTRY_HEADER_END = "---\n"
 EVERY = "*"
 
 
+class ReviewAuthOptions(TypedDict, total=False):
+    """Optional caller context for checking review credential provenance."""
+
+    secrets: Any
+    variables: dict[str, str] | None
+
+
 @dataclass
 class Usage:
     """What one consumer repository uses from lgtm-ci.
@@ -57,6 +65,7 @@ class Usage:
         keys: Removal keys it uses: entries, inputs passed, outputs read.
     """
 
+    review_auth_findings: set[str] = field(default_factory=set)
     pins: set[str] = field(default_factory=set)
     entries: set[str] = field(default_factory=set)
     keys: set[str] = field(default_factory=set)
@@ -121,7 +130,7 @@ def record_call(
     uses: str,
     passed: Any,
     reads: list[str],
-    secrets: Any = None,
+    **options: Unpack[ReviewAuthOptions],
 ) -> None:
     """Record one ``uses:`` of an lgtm-ci entry point.
 
@@ -130,12 +139,22 @@ def record_call(
         uses: The ``uses:`` value.
         passed: The ``with:`` mapping.
         reads: Output names the file reads from this call; ``*`` for all.
-        secrets: The job's ``secrets:`` mapping, or ``inherit`` (all).
+        **options: The job's ``secrets`` mapping (or ``inherit``) and known
+            repository Actions ``variables``, when readable.
     """
     match = LGTM_CI_USES.match(uses.strip())
     if match is None:
         return
+    secrets = options.get("secrets")
     entry_id = match.group("workflow") or match.group("action")
+    if entry_id == "reusable-ai-review":
+        usage.review_auth_findings.update(
+            review_auth_policy.findings(
+                passed=passed,
+                secrets=secrets,
+                variables=options.get("variables"),
+            )
+        )
     usage.pins.add(match.group("ref"))
     usage.entries.add(entry_id)
     usage.keys.add(
@@ -223,6 +242,7 @@ def scan_file(
     usage: Usage,
     path: str,
     text: str,
+    variables: dict[str, str] | None = None,
 ) -> None:
     """Record the lgtm-ci calls in one workflow or action file.
 
@@ -230,6 +250,7 @@ def scan_file(
         usage: Accumulator for the repository.
         path: Repository-relative path.
         text: File text.
+        variables: Known repository Actions variables, when readable.
     """
     try:
         document = catalog_lib.yaml.safe_load(text)
@@ -254,6 +275,7 @@ def scan_file(
                 passed=job.get("with"),
                 reads=outputs_read(text=text, context="needs", ident=job_id),
                 secrets=job.get("secrets"),
+                variables=variables,
             )
         scan_steps(usage=usage, steps=job.get("steps"), text=text)
 
@@ -270,8 +292,30 @@ def scan_repository(
         What it uses from lgtm-ci.
     """
     usage = Usage()
-    for path, text in sorted(consumer_files(repository=repository).items()):
-        scan_file(usage=usage, path=path, text=text)
+    files = consumer_files(repository=repository)
+    variables: dict[str, str] | None = None
+    if any("reusable-ai-review" in text.lower() for text in files.values()):
+        try:
+            variables = {}
+            # Repository values take precedence over shared organization values.
+            for scope in ("organization-variables", "variables"):
+                pages = json.loads(
+                    gh(
+                        "api",
+                        f"repos/{repository}/actions/{scope}",
+                        "--paginate",
+                        "--slurp",
+                    ),
+                )
+                for page in pages:
+                    items = page.get("variables", [])
+                    variables.update({item["name"]: item["value"] for item in items})
+        except (RuntimeError, json.JSONDecodeError):
+            # Public source may be readable without permission to inspect vars.
+            # Unreadable variables may override every omitted selector.
+            variables = None
+    for path, text in sorted(files.items()):
+        scan_file(usage=usage, path=path, text=text, variables=variables)
     return usage
 
 
@@ -313,7 +357,7 @@ def refreshed_row(
         or catalog_lib.removal_key(entry_of(key), DeprecationKind.ENTRY) in deprecated
         or key not in live
     }
-    return {
+    result = {
         "repository": row["repository"],
         "tracking-issues": list(row.get("tracking-issues") or []),
         "last-verified": today.isoformat(),
@@ -321,6 +365,9 @@ def refreshed_row(
         "uses": sorted(usage.entries),
         "deprecated-in-use": sorted(kept),
     }
+    if usage.review_auth_findings:
+        result["review-auth-findings"] = sorted(usage.review_auth_findings)
+    return result
 
 
 def flow_list(
@@ -363,6 +410,10 @@ def write_registry(
                 continue
             lines.append(f"    {key}:")
             lines += [f'      - "{value}"' for value in row[key]]
+        if row.get("review-auth-findings"):
+            lines.append("    review-auth-findings:")
+            for value in row["review-auth-findings"]:
+                lines.append(f"      - {json.dumps(value)}")
         lines.append("")
     if not rows:
         lines[-1] = "consumers: []"
@@ -384,7 +435,7 @@ def refresh_rows(
         today: Verification date.
 
     Returns:
-        ``(rows, number of repositories that could not be read)``.
+        ``(rows, number of repositories with read or review-source policy errors)``.
     """
     failed = 0
     refreshed = []
@@ -415,6 +466,10 @@ def refresh_rows(
             f"pins {flow_list(new['pins'])}, "
             f"deprecated in use {flow_list(new['deprecated-in-use'])}",
         )
+        for finding in new.get("review-auth-findings", []):
+            print(f"{repository}: review auth: {finding}")
+        if any(item.startswith("error:") for item in usage.review_auth_findings):
+            failed += 1
         refreshed.append(new)
     return refreshed, failed
 
@@ -434,7 +489,7 @@ def scan(
         today: Verification date.
 
     Returns:
-        Process exit code: 1 when a repository could not be read.
+        Process exit code: 1 on unreadable repositories or review-source policy errors.
     """
     rows = load_rows(
         repo_root=repo_root,

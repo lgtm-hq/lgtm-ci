@@ -723,6 +723,16 @@ concluded `success`, `skipped` or `neutral`:
   `stale`, `startup_failure`, or no conclusion) fails the gate. Actions check runs are
   judged per workflow run and job name (the newest re-run attempt counts),
   so jobs that share a name in different workflows are judged separately.
+  Retried Actions runs additionally use complete job-to-check attempt membership,
+  preserving every current matrix job ID and retaining ambiguous historical
+  failures. A cancelled, never-started `inputs.job-name` placeholder is retired
+  only for the audited CodeQL source contract, after both attempts' runner
+  headers attest the same immutable reusable revision and evaluated inputs and
+  the later setup and analysis actually succeed. This currently supports one
+  explicit language and the exact workflow/generator bytes recognized by
+  `reconcile_check_retries.py`; auto-detect, multiple languages, other dynamic
+  graphs and unavailable evidence keep the cancellation. No sibling-name or
+  successful-run heuristic is used to prove replacement.
 - **Commit statuses**: `pending` (CodeRabbit, `renovate/stability-days`)
   counts as not finished; `failure` and `error` fail the gate.
 
@@ -769,7 +779,13 @@ jobs:
 | `fail-on-draft` | `false` | Fail draft PRs at once instead of gating them |
 | `head-sha` | `""` | Override the gated commit |
 
-The standard `egress-policy`, `egress-preset` (default `github-minimal`),
+Choose `timeout-minutes` above the longest dependency path plus setup, queue,
+settle time and the three-minute reporting margin. A caller with a 120-minute
+Docker job needs a larger gate budget, for example 130 minutes; the reducer
+derives its wait budget from that input rather than imposing a one-hour cap.
+
+The standard `egress-policy`, `egress-preset` (default `github-results`, for
+Actions log downloads as well as the API),
 `allowed-endpoints`, `allowed-endpoints-mode` and `runner-image` inputs
 apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 (`passed`/`failed`) and `exit-code`.
@@ -777,12 +793,14 @@ apply as in [workflow-contract.md](workflow-contract.md). Outputs: `status`
 Limitations:
 
 - **Request budget.** While a workflow run is in progress a poll costs one
-  request, otherwise three (more when a list passes 100 entries); while
+  request, otherwise three plus one jobs listing per retried run (more when
+  a list passes 100 entries). Placeholder reconciliation also fetches immutable
+  source and completed job logs once, caching them for the remaining polls. While
   nothing changes the interval grows to 4x `poll-interval-seconds`.
   `GITHUB_TOKEN` allows 1,000 requests per hour per repository, shared by
   every workflow. At the default 60 s a gate waiting on workflows uses
   about 15–60 requests an hour, one waiting on a status or another app's
-  check about 45–180, so raise `poll-interval-seconds` where many PRs wait
+  check about 45–180 before retry lookups, so raise `poll-interval-seconds` where many PRs wait
   at once. A rate-limited poll waits instead of failing.
 - **Jobs a cancelled run never started** (still waiting on `needs:`, so
   skipped or without a check run) are not compared against newer runs: if
@@ -2444,26 +2462,36 @@ sticky PR comment as **`lintro-review[bot]`**. Posting, round state, and the
 verdict legend live in the published CLI — this reusable does not re-implement
 comment markup.
 
-**Trust model.** The reviewer binary comes from a release, so the consuming PR
-cannot control it. Use a plain `pull_request` trigger (same-repo gate
-recommended). `pull_request_target` / base-ref trusted-install reasoning from
-py-lintro's dogfood does **not** transfer here.
+**Trust model.** Use `pull_request` with the same-repo guard below. Forks skip.
+The pinned published reviewer and tooling are trusted; the PR checkout is data.
+Installation runs without provider credentials. The invocation runs from a clean
+working directory and owner-only home: PR lintro settings, dotenv, CLI settings,
+hooks, helpers, PATH entries and ambient runner sessions cannot execute or redirect
+requests in credential scope. Only resolved provider/transport, model and cost-cap
+scalars cross from the reviewed config; custom agents and other repo settings do
+not. This is distinct from py-lintro's `pull_request_target` trusted-base workflow.
 
-**Provider-agnostic.** The workflow never hardcodes a provider. Resolution is
-`provider` / `transport` input → `LINTRO_AI_PROVIDER` / `LINTRO_AI_TRANSPORT`
-Actions variable → the consuming repo's lintro config → lintro's own validation
-error. Inputs map onto that env overlay surface; there is no workflow fallback.
+**Selection.** Provider and transport keep input → Actions variable → repo config
+precedence, with no default. `auth` resolves input → `LINTRO_AI_AUTH` Actions
+variable → the static tuple default below. There is no product `ai.auth` key and
+secret presence never chooses authentication. Both Anthropic and OpenAI CLI
+**default to OAuth subscription sessions**. In particular, OpenAI CLI does not
+fall back to metered `CODEX_API_KEY` billing when a session is missing or expired.
+API transports and Cursor CLI default to `api_key`. Unsupported/empty tuples fail
+before provider invocation, listing supported choices. Selection outputs and the
+job summary name requested/resolved tuples, auth/model sources and credential
+purpose (`review`); these are selected policy, not observed billing or model facts.
+Lintro 0.173.1+ supplies its existing credential/endpoint/model/cost provenance.
 
-**Caller snippet** (same shape for every provider; listed alphabetically, none
-recommended). Enumerate the secrets explicitly — least privilege: `secrets:
-inherit` would hand the reusable the caller's entire secret set, while it
-only ever declares the seven below — the two App secrets reach only the
-credential-guard and token-minting steps, and of the five provider
-credentials the run step receives only the one for the resolved
-`(provider, transport)` pair:
+**Caller contract.** Keep the compatible generic reusable **slot** names. Map
+metered slots from dedicated **review source secrets**, never the generic
+`ANTHROPIC_API_KEY` / `OPENAI_API_KEY` GitHub secrets used by smoke tests. The
+SDK/CLI's generic **environment variable** name is a separate layer. Provisioning
+review sources in the consumer or a scoped org secret is an operator gate: a
+py-lintro repository secret is not inherited by lgtm-ci or Podex. Missing sources
+are hard failures, with no smoke-key fallback.
 
 ```yaml
-# any lgtm-hq repo: .github/workflows/ai-review.yml
 'on':
   pull_request:
 
@@ -2476,42 +2504,106 @@ jobs:
       pull-requests: read
       actions: read
     secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}
+      CODEX_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}
+      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
       LINTRO_REVIEW_APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
       LINTRO_REVIEW_APP_PRIVATE_KEY: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-      CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
-      tooling-ref: "<sha>"
-      # provider/transport/model/max-cost-usd empty = Actions var
-      # (vars.LINTRO_AI_PROVIDER / _TRANSPORT / _MODEL / _MAX_COST_USD),
-      # then repo lintro config
+      # Match the workflow release pin when a tooling override is needed.
+      tooling-ref: '<sha>'
+      # provider/transport/model/max-cost-usd: input → Actions var → repo config
+      # auth: input → LINTRO_AI_AUTH → static default (no repo ai.auth key)
 ```
 
-`secrets: inherit` also works (all seven are org-wide, so it is the
-zero-maintenance shape) but is discouraged: it grants the called workflow
-access to every secret the caller can see, not just these seven.
+Exactly one selected provider credential reaches the invocation, gated by literal
+expressions on the full `(provider, transport, auth)` tuple. OAuth has a separate
+invocation step with no API-key env slots, so `CODEX_API_KEY` is absent entirely.
+Even its presence with an empty value under OAuth is refused. Competing effective
+credentials and whitespace/missing credentials fail before invocation.
 
-| provider | transport | binary | credential (env) |
-| -------- | --------- | ------ | ---------------- |
-| anthropic | cli | `claude` | `CLAUDE_CODE_OAUTH_TOKEN` |
-| anthropic | api | — | `ANTHROPIC_API_KEY` |
-| cursor | cli | `agent` | `CURSOR_API_KEY` |
-| openai | cli | `codex` | `CODEX_API_KEY` |
-| openai | api | — | `OPENAI_API_KEY` |
+`secrets: inherit` remains compatible **only for OAuth-only callers** that pin or
+verify an OAuth tuple. Only that tuple's OAuth slot is injected; inherited API keys
+remain outside the invocation. API-key callers must use explicit source remapping;
+inherit cannot express this contract. A called workflow cannot inspect an encrypted
+value's original secret name: caller review and the known-consumer scan enforce
+source policy, not a runtime provenance claim.
+
+The known-consumer scan resolves each selector component (`provider`, `transport`,
+`auth`) to either `KNOWN(value, source)` or `UNKNOWN`. Only a nonempty literal
+workflow input or a readable Actions variable that is set establishes `KNOWN`.
+Empty literals, dynamic expressions, readable-but-unset variables, unreadable
+variables, and lookup errors leave the component `UNKNOWN`; repository lintro
+config and matrix defaults do not establish a known selection. The scan filters
+possible tuples using only known components. If any component is unknown, it
+accepts a forwarded credential slot for any compatible tuple and emits an
+informational "auth selection unverified" note listing those tuples. Forwarding
+no compatible credential still fails. An exact missing-slot finding requires all
+three components known; a fully known unsupported tuple also fails. API-key source
+mappings are checked independently; dynamic source expressions remain unverified.
+
+<!-- markdownlint-disable MD013 -- generated capability table -->
+
+<!-- ai-review-capabilities:begin -->
+| Provider | Transport | Auth | Default | Secret slot / child binding | CLI |
+| --- | --- | --- | --- | --- | --- |
+| anthropic | api | api_key | yes | `ANTHROPIC_API_KEY` | — |
+| anthropic | cli | oauth | yes | `CLAUDE_CODE_OAUTH_TOKEN` + `LINTRO_CLI_BARE=never` | claude |
+| anthropic | cli | api_key | — | `ANTHROPIC_API_KEY` + `LINTRO_CLI_BARE=always` | claude |
+| cursor | cli | api_key | yes | `CURSOR_API_KEY` | agent |
+| openai | api | api_key | yes | `OPENAI_API_KEY` | — |
+| openai | cli | oauth | yes | `CODEX_AUTH_JSON` → isolated `CODEX_HOME/auth.json` | codex |
+| openai | cli | api_key | — | `CODEX_API_KEY` | codex |
+<!-- ai-review-capabilities:end -->
+
+<!-- markdownlint-enable MD013 -->
+
+The auth selector pins Anthropic CLI `LINTRO_CLI_BARE=never` for OAuth and `always`
+for API-key auth. This overrides conflicting repo `cli_bare` settings; a conflicting
+final environment policy refuses execution. Config files and cached credentials
+are isolated for every tuple, including API-key CLI.
+
+**Codex session operations.** On a trusted workstation, use `codex login` with
+file-based credential storage and provision the base64 of its complete `auth.json`
+as `CODEX_AUTH_JSON` through your normal secret manager. Never paste session data
+into logs or issues. The workflow validates base64, size, JSON and nonempty OAuth
+tokens, and rejects an API-key login object. It exclusively creates
+`$HOME/.lgtm-ci-review-<run>-<attempt>-<job>/codex/auth.json` with directory mode
+0700/file mode 0600. This avoids temporary CODEX_HOME bootstrap limitations of the
+pinned Codex version and never overwrites `$HOME/.codex`. It sets file-only auth
+storage and the selected login method. No container is used; container consumers
+must mount this same isolated directory as `CODEX_HOME`, not an ambient home.
+
+The review is bounded by GNU timeout. Cancellation forwards signals to the child
+process group and reaps it before deleting the session; `finally` cleanup and a
+separate `always()` step remove owned material on success, failure, timeout and
+ordinary cancellation. Pre-existing paths/symlinks refuse creation or cleanup.
+Abrupt runner loss/SIGKILL can prevent cleanup: discard hosted runners; on a
+self-hosted runner, an operator removes the abandoned owned directory before reuse.
+Session material is never cached, uploaded or written back to secrets.
+
+Choose and record one authoritative consumer/org `CODEX_AUTH_JSON` source before
+adoption. A base64 snapshot does not update when the disposable CLI refreshes its
+copy. Concurrent jobs may race to refresh the same snapshot; serialize affected
+reviews or provision separately managed sessions if refresh rotation invalidates
+siblings. Missing/expired/revoked sessions require operator renewal of the
+authoritative secret and a new completed review. A restored file, login-status
+check or API health smoke does not prove the subscription review succeeded.
 
 `LINTRO_REVIEW_APP_ID` / `LINTRO_REVIEW_APP_PRIVATE_KEY` are org-wide (all-repo)
 and mint the posting token. That token is in scope **only** for the review
-step (`GITHUB_TOKEN`); `GH_TOKEN` stays the workflow token for fetching the
+invocation or credential-free size-notice step (`GITHUB_TOKEN`); `GH_TOKEN`
+stays the workflow token for fetching the
 diff. The GitHub App **installation** must grant `issues: write` and
 `pull-requests: write` — those are App permissions, not the caller's
 `pull-requests: read` job grant. Token minting fails if the installation
 lacks them.
 
 `provider` / `transport` inputs and `LINTRO_AI_PROVIDER` /
-`LINTRO_AI_TRANSPORT` variables must be lowercase. Harden-runner compares
+`LINTRO_AI_TRANSPORT` and `LINTRO_AI_AUTH` variables must be lowercase. Harden-runner compares
 the raw values and cannot fold case.
 
 <!-- markdownlint-disable MD013 -- wide input reference table -->
@@ -2520,7 +2612,8 @@ the raw values and cannot fold case.
 | ----------------- | ------- | ----- |
 | `provider`        | `""`    | Overlay → `LINTRO_AI_PROVIDER`. No default. |
 | `transport`       | `""`    | Overlay → `LINTRO_AI_TRANSPORT`. No default. |
-| `lintro-version`  | `""`    | Empty resolves `DEFAULT_LINTRO_VERSION` from `scripts/ci/versions.env` (Renovate-managed, #1096). Floor = 0.130.0 (py-lintro#2159). |
+| `auth`            | `""` | Input → `LINTRO_AI_AUTH` → tuple default; `oauth` or `api_key`. |
+| `lintro-version`  | `""`    | Empty resolves `DEFAULT_LINTRO_VERSION` from `scripts/ci/versions.env` (Renovate-managed, #1096). Floor = 0.173.1 for isolated auth and provenance. |
 | `python-version`  | `3.12`  | Scratch venv for the pinned lintro install. |
 | `model`           | `""`    | Overlay → `LINTRO_AI_MODEL` (input → `vars.LINTRO_AI_MODEL`). |
 | `max-cost-usd`    | `""`    | Overlay → `LINTRO_AI_MAX_COST_USD` (input → `vars.LINTRO_AI_MAX_COST_USD`). |
@@ -2536,13 +2629,15 @@ the raw values and cannot fold case.
 
 - **Trusted install.** Pinned lintro from PyPI only. The job never installs or
   executes the PR's own code, so inference credentials and the App token are
-  scoped to the single "Run AI review" step.
+  scoped to one mutually exclusive review invocation step.
 - **Same-repo / fork skip.** Fork PRs skip (exit 0) because they cannot read
   org secrets. Put the same-repo `if:` on the caller as well.
 - **Exit-code contract.** lintro exit `2` is "no review produced" (error
   envelope on stdout), not a crash. Exit `1` is a produced review with P1 /
   changes-requested. Default `blocking: false` keeps those outcomes
-  non-blocking. **INCOMPLETE** coverage-at-HEAD always reddens the check.
+  non-blocking. **INCOMPLETE** coverage-at-HEAD and reported authentication failures always
+  redden the check. Expired/revoked sessions require renewal; no billing fallback
+  is attempted.
 - **Timed-out is neutral.** The review call runs under GNU `timeout` with
   a budget of whatever remains of `timeout-minutes` — measured from the
   preflight step, so the CLI and lintro installs are already counted —
@@ -2573,21 +2668,27 @@ the raw values and cannot fold case.
   so a same-attempt retry does not 409. The App token is minted immediately
   before the review step. No `*.blob.core.windows.net` wildcard.
 - **Egress.** The `ai-review` preset has no provider hosts. Extra hosts come
-  from the `(provider, transport)` pair visible at harden time (input or
+  from the full `(provider, transport, auth)` tuple visible at harden time (input or
   `LINTRO_AI_*` variable). Repo-config-only resolution cannot expand that list
   before harden-runner, so under the default `egress-policy: block` the
   resolve step **fails the job with guidance** when the provider comes only
   from the repo config — set the input or the variable so the matching hosts
   are allowlisted (`egress-policy: audit` lifts the guard). A rotated Cursor
   shard appears in the failed run's harden-runner summary; add it to
-  `egress_ai_review_provider_endpoints` and
-  `AI_REVIEW_CURSOR_EGRESS` together. No wildcards.
+  `ai_review_matrix.sh`, then regenerate workflow blocks with
+  `scripts/ci/workflows/sync_ai_review_matrix.py`. No wildcards.
 
 **The sticky comment.** `lintro review --post` owns the `<!-- lintro-ai-review -->`
 marker, in-place updates, and telemetry. Author is `lintro-review[bot]`.
 
-**Rollout.** First consumer is a follow-up PR (one repo). py-lintro keeps its
-own dogfood workflow (different trust model).
+**Rollout.** The local pilot uses explicit review-source mappings. Review and release
+this workflow through the normal process, then adopt it through separate consumer
+PRs. Podex is the named adoption proof: update both workflow/tooling SHA pins,
+verify actual selected-secret availability and obtain a completed posted review.
+This implementation changes no variables, secrets, external pins or release gates.
+Live canaries require provisioned credentials and operator approval; offline tests
+alone do not prove live OAuth refresh, billing, endpoint or posted-review behavior.
+See [the migration guide](migration/v0.79.md).
 
 ### Vulnerability suppression check (osv-scanner)
 

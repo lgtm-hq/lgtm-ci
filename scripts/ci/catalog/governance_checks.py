@@ -308,6 +308,22 @@ def is_issue_list(
     )
 
 
+def check_review_auth_findings(
+    report: Report,
+    row: dict[str, Any],
+    where: str,
+) -> None:
+    """Validate optional auth adoption evidence without migrating released pins."""
+    findings = row.get("review-auth-findings", [])
+    if not isinstance(findings, list):
+        report.error(where, "`review-auth-findings` must be a list")
+    elif any(not is_one_line(item) for item in findings):
+        report.error(where, "`review-auth-findings` must contain one-line findings")
+    else:
+        for item in findings:
+            report.notices.append(f"{where}: review auth adoption: {item}")
+
+
 def check_consumer(
     report: Report,
     row: dict[str, Any],
@@ -323,8 +339,9 @@ def check_consumer(
         covered: Removal keys the deprecation records cover.
     """
     where = f"consumers[{row.get('repository', '?')}]"
-    for key in sorted(set(row) - CONSUMER_KEYS):
+    for key in sorted(set(row) - CONSUMER_KEYS - {"review-auth-findings"}):
         report.error(where, f"unknown key `{key}`")
+    check_review_auth_findings(report=report, row=row, where=where)
     for key in sorted(CONSUMER_KEYS - set(row)):
         report.error(where, f"missing required key `{key}`")
     if not REPOSITORY.fullmatch(str(row.get("repository", ""))):

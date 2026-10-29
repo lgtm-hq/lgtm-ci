@@ -44,16 +44,18 @@ jobs:
       pull-requests: read
       actions: read
     # Explicit enumeration instead of `secrets: inherit`: the PR-ref workflow
-    # sees exactly the seven secrets the reusable declares (the docs'
+    # sees exactly the eight secrets the reusable declares (the docs'
     # "equivalent explicit secrets" block) and nothing else in the org set.
     secrets:
       LINTRO_REVIEW_APP_ID: ${{ secrets.LINTRO_REVIEW_APP_ID }}
       LINTRO_REVIEW_APP_PRIVATE_KEY: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
-      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_REVIEW_API_KEY }}
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-      CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}
+      CODEX_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}
+      CODEX_AUTH_JSON: ${{ secrets.CODEX_AUTH_JSON }}
       CURSOR_API_KEY: ${{ secrets.CURSOR_API_KEY }}
     with:
+      egress-policy: audit # TEMP: lgtm-hq/lgtm-ci#1207
       model: ${{ vars.LINTRO_AI_MODEL }}
       max-cost-usd: ${{ vars.LINTRO_AI_MAX_COST_USD }}

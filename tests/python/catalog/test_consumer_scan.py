@@ -8,6 +8,7 @@ rebuilt and written.
 # pylint: disable=redefined-outer-name
 from __future__ import annotations
 
+import json
 import textwrap
 from pathlib import Path
 from types import ModuleType
@@ -263,3 +264,442 @@ def test_write_registry_round_trips_through_the_validator(
     )
     assert_that(report.errors).is_empty()
     assert_that(report.notices).is_empty()
+
+
+@pytest.mark.parametrize(
+    ("passed", "secrets", "expected"),
+    [
+        (
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            {"CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"},
+            None,
+        ),
+        (
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            {"CODEX_AUTH_JSON": "${{ secrets.CODEX_AUTH_JSON }}"},
+            None,
+        ),
+        (
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            "inherit",
+            None,
+        ),
+        (
+            {"provider": None, "transport": "cli"},
+            "inherit",
+            "auth selection unverified",
+        ),
+        (
+            {"provider": "openai", "transport": "cli"},
+            "inherit",
+            "auth selection unverified",
+        ),
+        (
+            {"provider": "openai", "transport": "api", "auth": "api_key"},
+            "inherit",
+            "error: api_key reviews require explicit",
+        ),
+        (
+            {"provider": "openai", "transport": "api"},
+            {"OPENAI_API_KEY": "${{ secrets.OPENAI_API_KEY }}"},
+            "found secrets.OPENAI_API_KEY",
+        ),
+        (
+            {"provider": "anthropic", "transport": "cli", "auth": "api_key"},
+            {"ANTHROPIC_API_KEY": "${{ secrets.ANTHROPIC_REVIEW_API_KEY }}"},
+            None,
+        ),
+        (
+            {"provider": "openai", "transport": "cli", "auth": "api_key"},
+            {"CODEX_API_KEY": "${{ secrets.OPENAI_REVIEW_API_KEY }}"},
+            None,
+        ),
+        (
+            {"provider": "${{ vars.LINTRO_AI_PROVIDER }}"},
+            "inherit",
+            "auth selection unverified",
+        ),
+    ],
+)
+def test_review_auth_source_policy(
+    consumer_scan: ModuleType,
+    passed: dict[str, str | None],
+    secrets: dict[str, str] | str,
+    expected: str | None,
+) -> None:
+    """Distinguish unknown auth selectors from verified source expressions."""
+    usage = consumer_scan.Usage()
+    consumer_scan.record_call(
+        usage=usage,
+        uses="lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@abc",
+        passed=passed,
+        reads=[],
+        secrets=secrets,
+        variables={},
+    )
+    if expected is None:
+        assert_that(usage.review_auth_findings).is_empty()
+    else:
+        assert_that("\n".join(usage.review_auth_findings)).contains(expected)
+
+
+@pytest.mark.parametrize(
+    ("passed", "slot"),
+    [
+        pytest.param(
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            "CODEX_AUTH_JSON",
+            id="openai-oauth",
+        ),
+        pytest.param(
+            {"provider": "anthropic", "transport": "cli", "auth": "oauth"},
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            id="anthropic-oauth",
+        ),
+        pytest.param(
+            {"provider": "cursor", "transport": "cli"},
+            "CURSOR_API_KEY",
+            id="cursor-default",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            "CODEX_AUTH_JSON",
+            id="openai-default",
+        ),
+        pytest.param(
+            {"provider": "anthropic", "transport": "cli", "auth": ""},
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            id="anthropic-empty-auth-default",
+        ),
+    ],
+)
+@pytest.mark.parametrize("mapping", ["missing", "present", "inherit"])
+def test_review_auth_requires_selected_credential(
+    consumer_scan: ModuleType,
+    passed: dict[str, str],
+    slot: str,
+    mapping: str,
+) -> None:
+    """Every selected matrix slot must be forwarded explicitly or inherited."""
+    secrets: dict[str, str] | str = {}
+    if mapping == "present":
+        secrets = {slot: f"${{{{ secrets.{slot} }}}}"}
+    elif mapping == "inherit":
+        secrets = "inherit"
+    usage = consumer_scan.Usage()
+    consumer_scan.record_call(
+        usage=usage,
+        uses="lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@abc",
+        passed=passed,
+        reads=[],
+        secrets=secrets,
+        variables={},
+    )
+    errors = {item for item in usage.review_auth_findings if item.startswith("error:")}
+    if mapping == "missing":
+        if passed.get("auth"):
+            assert_that(errors).is_equal_to(
+                {f"error: selected review slot {slot} is missing"},
+            )
+        else:
+            assert_that(errors).is_length(1)
+            assert_that(next(iter(errors))).contains("no credential for any possible")
+    else:
+        assert_that(errors).is_empty()
+    notes = usage.review_auth_findings - errors
+    if passed.get("auth"):
+        assert_that(notes).is_empty()
+    else:
+        assert_that("\n".join(notes)).contains("auth selection unverified")
+
+
+@pytest.mark.parametrize(
+    ("passed", "variables", "slot"),
+    [
+        (
+            {},
+            {
+                "LINTRO_AI_PROVIDER": "openai",
+                "LINTRO_AI_TRANSPORT": "cli",
+                "LINTRO_AI_AUTH": "oauth",
+            },
+            "CODEX_AUTH_JSON",
+        ),
+        (
+            {"provider": "openai", "transport": "cli"},
+            {
+                "LINTRO_AI_PROVIDER": "anthropic",
+                "LINTRO_AI_AUTH": "api_key",
+            },
+            "CODEX_API_KEY",
+        ),
+        (
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            {"LINTRO_AI_AUTH": "api_key"},
+            "CODEX_AUTH_JSON",
+        ),
+        (
+            {
+                "provider": "${{ vars.review_provider }}",
+                "transport": "${{ vars['REVIEW_TRANSPORT'] }}",
+            },
+            {
+                "REVIEW_PROVIDER": "anthropic",
+                "REVIEW_TRANSPORT": "cli",
+                "LINTRO_AI_AUTH": "oauth",
+            },
+            "CLAUDE_CODE_OAUTH_TOKEN",
+        ),
+        (
+            {"provider": "cursor", "transport": "", "auth": None},
+            {"LINTRO_AI_TRANSPORT": "cli", "LINTRO_AI_AUTH": "api_key"},
+            "CURSOR_API_KEY",
+        ),
+        (
+            {
+                "provider": "openai",
+                "transport": "cli",
+                "auth": "${{ vars.REVIEW_AUTH }}",
+            },
+            {"LINTRO_AI_AUTH": "api_key"},
+            "CODEX_API_KEY",
+        ),
+    ],
+)
+def test_review_auth_resolves_input_then_variable(
+    consumer_scan: ModuleType,
+    passed: dict[str, str | None],
+    variables: dict[str, str],
+    slot: str,
+) -> None:
+    """Resolve literal inputs and set Actions variables without inferring defaults."""
+    usage = consumer_scan.Usage()
+    consumer_scan.record_call(
+        usage=usage,
+        uses="lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@abc",
+        passed=passed,
+        reads=[],
+        secrets={},
+        variables=variables,
+    )
+    assert_that(usage.review_auth_findings).is_equal_to(
+        {f"error: selected review slot {slot} is missing"},
+    )
+
+
+@pytest.mark.parametrize("failure_scope", [None, "organization-variables", "variables"])
+@pytest.mark.parametrize("forwarded", [False, True])
+@pytest.mark.parametrize("repo_auth", [None, "oauth"])
+def test_scan_repository_reads_review_auth_variables(
+    consumer_scan: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_scope: str | None,
+    forwarded: bool,
+    repo_auth: str | None,
+) -> None:
+    """Respect org/repo precedence and keep either unreadable scope unverified."""
+    text = textwrap.dedent(
+        """\
+        jobs:
+          review:
+            uses: lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@abc
+            with:
+              provider: openai
+              transport: cli
+            secrets: {}
+        """,
+    )
+    if forwarded:
+        text = text.replace(
+            "secrets: {}",
+            "secrets:\n      CODEX_API_KEY: ${{ secrets.OPENAI_REVIEW_API_KEY }}",
+        )
+    monkeypatch.setattr(
+        consumer_scan,
+        "consumer_files",
+        lambda repository: {".github/workflows/ci.yml": text},
+    )
+    calls = []
+
+    def read_variables(*args: str) -> str:
+        """Return org/repository variable pages or simulate missing permissions."""
+        scope = args[1].rsplit("/", maxsplit=1)[1]
+        assert_that(args).is_equal_to(
+            ("api", f"repos/o/a/actions/{scope}", "--paginate", "--slurp"),
+        )
+        calls.append(scope)
+        if scope == failure_scope:
+            raise RuntimeError("variables are not readable")
+        auth = "api_key" if scope == "organization-variables" else repo_auth
+        variables = [{"name": "LINTRO_AI_AUTH", "value": auth}] if auth else []
+        return json.dumps([{"variables": []}, {"variables": variables}])
+
+    monkeypatch.setattr(consumer_scan, "gh", read_variables)
+    usage = consumer_scan.scan_repository(repository="o/a")
+    expected_calls = ["organization-variables"]
+    if failure_scope != "organization-variables":
+        expected_calls.append("variables")
+    assert_that(calls).is_equal_to(expected_calls)
+    if failure_scope is None:
+        slot = "CODEX_AUTH_JSON" if repo_auth else "CODEX_API_KEY"
+        expected = set()
+        if not forwarded or repo_auth:
+            expected.add(f"error: selected review slot {slot} is missing")
+        assert_that(usage.review_auth_findings).is_equal_to(expected)
+    else:
+        findings = "\n".join(usage.review_auth_findings)
+        assert_that(findings).contains("auth selection unverified")
+        assert_that(findings).does_not_contain("selected review slot")
+        if forwarded:
+            assert_that(findings).does_not_contain("error:")
+            assert_that(findings).contains("caller forwards CODEX_API_KEY")
+        else:
+            assert_that(findings).contains("error: caller forwards no credential")
+
+
+def test_refresh_rows_flags_review_auth_policy_errors(
+    consumer_scan: ModuleType,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Keep adoption evidence while returning a failing scan for known bad mappings."""
+    usage = consumer_scan.Usage(review_auth_findings={"error: smoke source mapping"})
+    monkeypatch.setattr(consumer_scan, "scan_repository", lambda repository: usage)
+    rows, failed = consumer_scan.refresh_rows(
+        rows=[{"repository": "o/a", "tracking-issues": []}],
+        repositories=[],
+        head=None,
+        today=TODAY,
+    )
+    assert_that(failed).is_equal_to(1)
+    assert_that(rows[0]["review-auth-findings"]).contains("error: smoke source mapping")
+
+
+@pytest.mark.parametrize(
+    ("passed", "variables", "slot", "expected"),
+    [
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            None,
+            "CODEX_API_KEY",
+            (None, True),
+            id="unreadable-api-key",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            None,
+            None,
+            ("no credential", True),
+            id="unreadable-no-credential",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            None,
+            "OPENAI_API_KEY",
+            ("no credential", True),
+            id="unreadable-wrong-transport-slot",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            {"LINTRO_AI_AUTH": "api_key"},
+            "CODEX_API_KEY",
+            (None, False),
+            id="readable-api-key",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli"},
+            {},
+            "CODEX_API_KEY",
+            (None, True),
+            id="readable-absent-auth-unknown",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "cli", "auth": "oauth"},
+            None,
+            "CODEX_API_KEY",
+            ("selected review slot CODEX_AUTH_JSON is missing", False),
+            id="explicit-input-strict",
+        ),
+        pytest.param(
+            {"transport": "cli", "auth": "api_key"},
+            None,
+            "CODEX_API_KEY",
+            (None, True),
+            id="unreadable-provider",
+        ),
+        pytest.param(
+            {"provider": "openai", "auth": "api_key"},
+            None,
+            "OPENAI_API_KEY",
+            (None, True),
+            id="unreadable-transport",
+        ),
+        pytest.param(
+            {"provider": "${{ vars.REVIEW_PROVIDER }}", "transport": "cli"},
+            None,
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            (None, True),
+            id="unreadable-input-variable",
+        ),
+        pytest.param(
+            {"provider": "openai", "transport": "${{ vars.REVIEW_TRANSPORT }}"},
+            None,
+            "CODEX_API_KEY",
+            (None, True),
+            id="unreadable-transport-variable",
+        ),
+        pytest.param(
+            {
+                "provider": "anthropic",
+                "transport": "cli",
+                "auth": "${{ vars.REVIEW_AUTH }}",
+            },
+            None,
+            "CLAUDE_CODE_OAUTH_TOKEN",
+            (None, True),
+            id="unreadable-auth-variable",
+        ),
+    ],
+)
+def test_review_auth_uncertain_selection(
+    consumer_scan: ModuleType,
+    passed: dict[str, str],
+    variables: dict[str, str] | None,
+    slot: str | None,
+    expected: tuple[str | None, bool],
+) -> None:
+    """Only require an exact slot when all credential selectors are known."""
+    error, unverified = expected
+    mapping = {}
+    if slot:
+        source = {
+            "CODEX_API_KEY": "OPENAI_REVIEW_API_KEY",
+            "OPENAI_API_KEY": "OPENAI_REVIEW_API_KEY",
+        }.get(slot, slot)
+        mapping[slot] = f"${{{{ secrets.{source} }}}}"
+    usage = consumer_scan.Usage()
+    consumer_scan.record_call(
+        usage=usage,
+        uses="lgtm-hq/lgtm-ci/.github/workflows/reusable-ai-review.yml@abc",
+        passed=passed,
+        reads=[],
+        secrets=mapping,
+        variables=variables,
+    )
+    errors = [item for item in usage.review_auth_findings if item.startswith("error:")]
+    if error:
+        assert_that(errors).is_length(1)
+        assert_that(errors[0]).contains(error)
+    else:
+        assert_that(errors).is_empty()
+    notes = sorted(usage.review_auth_findings - set(errors))
+    if unverified:
+        assert_that(notes).is_length(1)
+        assert_that(notes[0]).contains(
+            "auth selection unverified:",
+            "caller forwards",
+            slot or "no slots",
+            "compatible tuples:",
+        )
+        assert_that("\n".join(errors)).does_not_contain("selected review slot")
+    else:
+        assert_that(notes).is_empty()

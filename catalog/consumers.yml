@@ -20,16 +20,19 @@
 #   deprecated-in-use  removal keys (<entry>:input:<name>, <entry>:output:<name>,
 #                      <entry>:entry) of deprecated or already removed
 #                      items it still uses
+#   review-auth-findings optional source-expression/auth adoption findings;
+#                      unresolved variable/config selection is unverified
 ---
 schema-version: 1
 consumers:
   - repository: lgtm-hq/.github
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-10-28"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "2097a900753e3e5ad0e336483501b278e99855ae"
     uses:
       - "reusable-ai-review"
+      - "reusable-all-checks-gate"
       - "reusable-pr-auto-assign"
       - "reusable-quality-lint"
       - "reusable-validate"
@@ -38,6 +41,11 @@ consumers:
       - "reusable-pr-auto-assign:input:tooling-ref"
       - "reusable-quality-lint:input:tooling-ref"
       - "reusable-validate:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
+      - "unverified: review auth selectors require Actions-variable/config inspection"
 
   - repository: lgtm-hq/agent-infra
     tracking-issues: []
@@ -208,9 +216,9 @@ consumers:
 
   - repository: lgtm-hq/podex
     tracking-issues: []
-    last-verified: "2026-10-08"
+    last-verified: "2026-10-28"
     pins:
-      - "e10242e81ebb34ceb796efeff39ba9824178f46e"
+      - "2097a900753e3e5ad0e336483501b278e99855ae"
     uses:
       - "reusable-ai-review"
       - "reusable-auto-rerun-on-infra-failure"
@@ -257,6 +265,11 @@ consumers:
       - "reusable-test-shell:input:tooling-ref"
       - "reusable-validate-action-pinning:input:tooling-ref"
       - "reusable-vuln-suppression-check:input:tooling-ref"
+    review-auth-findings:
+      - "error: ANTHROPIC_API_KEY must map secrets.ANTHROPIC_REVIEW_API_KEY; found secrets.ANTHROPIC_API_KEY"
+      - "error: CODEX_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.CODEX_API_KEY"
+      - "error: OPENAI_API_KEY must map secrets.OPENAI_REVIEW_API_KEY; found secrets.OPENAI_API_KEY"
+      - "unverified: review auth selectors require Actions-variable/config inspection"
 
   - repository: lgtm-hq/podex-ops
     tracking-issues: []
@@ -287,9 +300,9 @@ consumers:
 
   - repository: lgtm-hq/py-lintro
     tracking-issues: [1054]
-    last-verified: "2026-10-08"
+    last-verified: "2026-10-28"
     pins:
-      - "22bb159287eb23a812d533090615525eccb839ac"
+      - "2097a900753e3e5ad0e336483501b278e99855ae"
     uses:
       - "create-signed-commit"
       - "detect-changes"

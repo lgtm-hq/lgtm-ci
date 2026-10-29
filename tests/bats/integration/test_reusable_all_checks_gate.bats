@@ -40,6 +40,26 @@ statuses:read"
 	assert_failure
 }
 
+@test "reusable-all-checks-gate: default egress permits Actions log receipt downloads" {
+	# Observed redirect of the jobs/{id}/logs API, without its signed URL/query.
+	require_python_yaml
+	run "$PY" - "$WORKFLOW" <<'PY'
+import fnmatch
+import json
+import sys
+
+import yaml
+
+with open(sys.argv[1], encoding="utf-8") as stream:
+    workflow = yaml.safe_load(stream)
+preset = workflow["on"]["workflow_call"]["inputs"]["egress-preset"]["default"]
+endpoints = json.loads(workflow["env"]["LGTM_CI_EGRESS_PRESETS"])[preset].split()
+log_host = "productionresultssa13.blob.core.windows.net:443"
+sys.exit(not any(fnmatch.fnmatchcase(log_host, endpoint) for endpoint in endpoints))
+PY
+	assert_success
+}
+
 @test "reusable-all-checks-gate: gates the PR head on pull_request and the queue head on merge_group" {
 	run grep -F 'HEAD_SHA: ${{ inputs.head-sha || github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}' "$WORKFLOW"
 	assert_success

@@ -226,3 +226,15 @@ python3 scripts/ci/catalog/validate.py
 # Pins in README, docs and examples
 python3 scripts/ci/docs/validate-doc-pins.py
 ```
+
+### Review authentication adoption inventory
+
+The consumer scan also records optional `review-auth-findings` in
+`catalog/consumers.yml`. It inspects literal secret **source expressions**, including
+bracket syntax, rather than just reusable slot names. Generic smoke sources and
+API-key `secrets: inherit` produce errors (a nonzero scan result); unresolved
+Actions-variable/config selectors or dynamic sources remain explicitly unverified.
+Existing released pins are not silently migrated: catalog validation surfaces
+these findings as adoption notices. Review the explicit mappings and actual secret
+availability before adopting the new auth interface. The reusable cannot recover
+a source secret's name from its encrypted value.

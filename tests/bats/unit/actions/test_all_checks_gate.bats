@@ -79,6 +79,7 @@ rate_limit)
 	;;
 */check-runs\?*) kind=checks ;;
 */status\?*) kind=statuses ;;
+*/actions/runs/*/jobs\?*) kind=jobs ;;
 *) echo "unexpected gh call: $*" >&2; exit 2 ;;
 esac
 poll="$(cat "$POLL_FILE")"
@@ -129,14 +130,23 @@ check() { # id name status conclusion [app] [run-id] [suite]
 	jq -cn --argjson id "$1" --arg name "$2" --arg status "$3" \
 		--argjson conclusion "$conclusion" --arg app "${5:-github-actions}" \
 		--arg url "$url" --argjson suite "${7:-0}" \
-		'{id: $id, name: $name, status: $status, conclusion: $conclusion, app: $app, suite: $suite, url: $url}'
+		--arg head_sha "$SHA" \
+		'{id: $id, name: $name, status: $status, conclusion: $conclusion, app: $app, suite: $suite, url: $url, head_sha: $head_sha}'
 }
 
-run_() { # id name path status conclusion [event]
+run_() { # id name path status conclusion [event] [attempt]
 	local conclusion="null"
 	[[ "$5" != "null" ]] && conclusion="\"$5\""
-	printf '{"id":%s,"name":"%s","path":"%s","event":"%s","status":"%s","conclusion":%s}' \
-		"$1" "$2" "$3" "${6:-pull_request}" "$4" "$conclusion"
+	printf '{"id":%s,"name":"%s","path":"%s","event":"%s","status":"%s","conclusion":%s,"run_attempt":%s,"head_sha":"%s","check_suite_id":0}' \
+		"$1" "$2" "$3" "${6:-pull_request}" "$4" "$conclusion" "${7:-1}" "$SHA"
+}
+
+job_() { # id name attempt conclusion — synthetic raw jobs API row
+	jq -cn --argjson id "$1" --arg name "$2" --argjson attempt "$3" \
+		--arg conclusion "$4" --arg sha "$SHA" --arg repo "$GITHUB_REPOSITORY" \
+		'{id: $id, name: $name, run_id: 1, run_attempt: $attempt, head_sha: $sha,
+		status: "completed", conclusion: $conclusion, runner_id: 1, steps: [],
+		check_run_url: ("https://api.github.com/repos/" + $repo + "/check-runs/" + ($id|tostring))}'
 }
 
 status_() { # context state
@@ -272,6 +282,31 @@ status_() { # context state
 	run bash "$SCRIPT"
 	assert_failure
 	assert_output --partial "check test (3.11): cancelled"
+}
+
+@test "all-checks-gate: same-run retry retains a real cancellation with no replacement" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed success pull_request 2)"
+	poll 1 checks "$(check 11 'Required test' completed cancelled github-actions 1)" \
+		"$(check 22 'Unrelated job' completed success github-actions 1)"
+	poll 1 jobs "$(jq -cn --argjson old "$(job_ 11 'Required test' 1 cancelled)" \
+		--argjson new "$(job_ 22 'Unrelated job' 2 success)" '{total_count: 2, jobs: [$old, $new]}')"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check Required test: cancelled"
+}
+
+@test "all-checks-gate: every current shared-name matrix leg is evaluated after retry" {
+	poll 1 runs "$(run_ 1 CI .github/workflows/ci.yml completed success pull_request 2)"
+	poll 1 checks "$(check 21 'Matrix' completed failure github-actions 1)" \
+		"$(check 22 'Matrix' completed success github-actions 1)"
+	poll 1 jobs "$(jq -cn --argjson failed "$(job_ 21 Matrix 2 failure)" \
+		--argjson passed "$(job_ 22 Matrix 2 success)" '{total_count: 2, jobs: [$failed, $passed]}')"
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "check Matrix: failure"
+	assert_output --partial "check Matrix: success"
 }
 
 @test "all-checks-gate: a later run whose jobs skip cannot hide an earlier failure" {
@@ -683,6 +718,18 @@ status_() { # context state
 	assert_failure
 	assert_output --partial "timeout 120s"
 	assert_output --partial "Timed out after 120s"
+}
+
+@test "all-checks-gate: an extended caller timeout covers a 120-minute dependency" {
+	# Rustume#1067: this is a caller budget contract, not a fixed reducer cap.
+	poll 1 statuses "$(status_ Docker pending)"
+	unset TIMEOUT_SECONDS
+	export TIMEOUT_MINUTES=130
+
+	run bash "$SCRIPT"
+	assert_failure
+	assert_output --partial "timeout 7620s"
+	assert_output --partial "Timed out after 7620s"
 }
 
 @test "all-checks-gate: the wait budget derived from TIMEOUT_MINUTES has a 60s floor" {
