@@ -940,7 +940,7 @@ the shared `checkout-and-harden` composite (#379) to check out tooling:
     persist-credentials: false
 
 - name: Harden runner
-  uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+  uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
   with:
     egress-policy: ${{ inputs.egress-policy }}
     # Composed from inputs and the literal map in env only: harden-runner's
@@ -1098,7 +1098,7 @@ step (its `if:` gates the platforms the tier supports), then call
 
 - name: Harden runner
   if: steps.policy.outputs['enforce-egress'] == 'true'
-  uses: step-security/harden-runner@ccd8616d44fd3846e67624a50d5aad6d37bf2d25 # v2.22.1
+  uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
   with:
     egress-policy: block
     allowed-endpoints: ${{ inputs.allowed-endpoints }}
