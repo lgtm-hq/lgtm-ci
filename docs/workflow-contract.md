@@ -3010,3 +3010,18 @@ else is affected because the App is installed on the fixture only.
   build-then-publish ordering, blocking failures and recovery for every publish
 - [python-release-publish.md](python-release-publish.md) — Python tag-push layout
 - [reusable-workflows.md](reusable-workflows.md) — per-workflow inputs and outputs
+
+## AI review authentication
+
+`reusable-ai-review.yml` adds optional `auth` / `LINTRO_AI_AUTH` and
+`CODEX_AUTH_JSON` without retiring generic reusable secret slots. Auth resolves
+input → variable → static tuple default: Anthropic/OpenAI CLI use OAuth; API
+transports and Cursor CLI use API keys. The full capability matrix, explicit
+review-source mappings, session renewal and cleanup contract are in
+[AI code review](reusable-workflows.md#ai-code-review-reusable-ai-reviewyml).
+
+Auth, provider and transport must be visible at harden-runner job start under
+block egress. No later resolver widens that allowlist. Empty/unsupported tuples,
+missing/competing credentials and conflicting effective bare policy fail before
+provider invocation. Credential-free installation precedes an isolated review
+invocation; PR settings/hooks/dotenv/helper/PATH additions do not enter that scope.

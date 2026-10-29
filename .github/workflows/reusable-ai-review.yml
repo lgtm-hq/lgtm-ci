@@ -19,17 +19,13 @@ name: Reusable AI Review
 #   No baked-in default provider or transport. Inputs map onto LINTRO_AI_*
 #   (input → Actions variable → repo lintro config → lintro's own error).
 #   Credentials, CLI installs, and extra egress are keyed on the resolved
-#   (provider, transport) pair. Adding a provider is one matrix row.
+#   (provider, transport, auth) tuple. Both first-party CLIs default to OAuth.
 #
-# lintro-version floor: 0.130.0 (py-lintro#2159, LINTRO_AI_REVIEW override;
-#   supersedes the 0.127.0 floor from py-lintro#2144's provider no-default).
-#   Below it, LINTRO_AI_REVIEW is ignored and repos without `ai.review: true`
-#   in their lintro config silently produce no review; below 0.127.0 an unset
-#   provider silently resolves to anthropic. File-level resume and INCOMPLETE
-#   need 0.131.0+ (py-lintro#2154). Persist-on-timeout is 0.131.2+
-#   (py-lintro#2167); Renovate can bump when a caller wants it. Artifact
-#   steps no-op until that pin lands. Renovate bumps the pin forward; never
-#   lower it below the floor, and do not add a workflow fallback to compensate.
+# lintro-version floor: 0.173.1 for the credential/endpoint/model/cost provenance
+# used by this auth contract. Installations run without credentials; invocation
+# isolates PR config, dotenv, CLI settings, helpers, PATH and runner sessions.
+# Auth defaults, literal bindings, egress and docs are generated from the matrix
+# by scripts/ci/workflows/sync_ai_review_matrix.py (Bats checks drift).
 #
 # Egress:
 #   The ai-review preset is GitHub + PyPI/uv only. Provider hosts are
@@ -40,8 +36,7 @@ name: Reusable AI Review
 #   config — set the input or the Actions variable so the matching hosts are
 #   allowlisted (egress-policy `audit` lifts this). A rotated Cursor shard (e.g.
 #   repo43.cursor.sh) is named in the failed run's harden-runner summary —
-#   add it to egress_ai_review_provider_endpoints and AI_REVIEW_CURSOR_EGRESS
-#   together. No wildcards.
+#   update ai_review_matrix.sh and run sync_ai_review_matrix.py. No wildcards.
 
 on:
   workflow_call:
@@ -57,6 +52,13 @@ on:
         description: >-
           Transport overlay (cli or api). Empty resolves via
           LINTRO_AI_TRANSPORT then the repo lintro config. No default.
+        required: false
+        type: string
+        default: ""
+      auth:
+        description: >-
+          Review authentication (oauth or api_key). Input then LINTRO_AI_AUTH
+          then static tuple default; both Anthropic and OpenAI CLI default to oauth.
         required: false
         type: string
         default: ""
@@ -91,8 +93,8 @@ on:
       blocking:
         description: >-
           When true, a no-review outcome (exit 2) or a changes-requested
-          verdict fails the job. Default is non-blocking. INCOMPLETE
-          coverage-at-HEAD always reddens the check.
+          verdict fails the job. Default is non-blocking. Authentication
+          failures and INCOMPLETE coverage-at-HEAD always redden the check.
         required: false
         type: boolean
         default: false
@@ -180,7 +182,10 @@ on:
         description: "openai + api credential"
         required: false
       CODEX_API_KEY:
-        description: "openai + cli credential"
+        description: "openai + cli + api_key review credential (explicit caller mapping required)"
+        required: false
+      CODEX_AUTH_JSON:
+        description: "openai + cli + oauth: base64 of a complete ChatGPT auth.json session"
         required: false
       CURSOR_API_KEY:
         description: "cursor + cli credential"
@@ -330,13 +335,15 @@ jobs:
       # `Anthropic` would inject a credential and then block provider egress.
       AI_REVIEW_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
       AI_REVIEW_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
-      # Keep in sync with egress_ai_review_provider_endpoints cursor row.
-      # yamllint disable-line rule:line-length
-      AI_REVIEW_CURSOR_EGRESS: downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443 agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443
-      # npm/node hosts for anthropic|openai CLI install. Extra on api-only
-      # rows is harmless and keeps this expression from reading sibling env.
-      # yamllint disable-line rule:line-length
-      AI_REVIEW_NPM_EGRESS: ${{ ((inputs.provider || vars.LINTRO_AI_PROVIDER) == 'anthropic' || (inputs.provider || vars.LINTRO_AI_PROVIDER) == 'openai') && 'nodejs.org:443 registry.npmjs.org:443' || '' }}
+      # ai-review-defaults:begin
+      AI_REVIEW_AUTH: >-
+        ${{ inputs.auth || vars.LINTRO_AI_AUTH || fromJSON('{"anthropic/api": "api_key",
+        "anthropic/cli": "oauth", "cursor/cli": "api_key", "openai/api": "api_key", "openai/cli":
+        "oauth"}')[format('{0}/{1}', inputs.provider || vars.LINTRO_AI_PROVIDER, inputs.transport ||
+        vars.LINTRO_AI_TRANSPORT)] }}
+      AI_REVIEW_AUTH_SOURCE: >-
+        ${{ inputs.auth != '' && 'input' || vars.LINTRO_AI_AUTH != '' && 'var' || 'default' }}
+      # ai-review-defaults:end
 
     steps:
       - name: Harden runner
@@ -350,19 +357,32 @@ jobs:
           # visible here — never the union. These inline lists are the
           # production append (no checkout exists yet, so no script can
           # compute them); egress_ai_review_provider_endpoints in
-          # scripts/ci/lib/egress/presets.sh is the canonical matrix, and
-          # integration bats cross-check these expressions against it — edit
-          # them together.
-          allowed-endpoints: >
-            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '')
-            && inputs.allowed-endpoints
-            || format('{0} {1}',
+          # scripts/ci/lib/ai_review_matrix.sh is canonical. The sync generator
+          # renders these literal expressions and integration Bats checks drift.
+          # ai-review-egress:begin
+          allowed-endpoints: >-
+            ${{ (inputs.allowed-endpoints-mode != 'append' && inputs.allowed-endpoints != '') &&
+            inputs.allowed-endpoints || format('{0} {1}',
             fromJSON(env.LGTM_CI_EGRESS_PRESETS)[inputs.egress-preset || 'ai-review'],
-            inputs.allowed-endpoints) }}
-            ${{ env.AI_REVIEW_PROVIDER == 'anthropic' && 'api.anthropic.com:443' || '' }}
-            ${{ env.AI_REVIEW_PROVIDER == 'openai' && 'api.openai.com:443' || '' }}
-            ${{ env.AI_REVIEW_PROVIDER == 'cursor' && env.AI_REVIEW_CURSOR_EGRESS || '' }}
-            ${{ env.AI_REVIEW_NPM_EGRESS }}
+            inputs.allowed-endpoints) }} ${{ env.AI_REVIEW_PROVIDER == 'anthropic' &&
+            env.AI_REVIEW_TRANSPORT == 'api' && env.AI_REVIEW_AUTH == 'api_key' &&
+            'api.anthropic.com:443' || '' }} ${{ env.AI_REVIEW_PROVIDER == 'anthropic' &&
+            env.AI_REVIEW_TRANSPORT == 'cli' && env.AI_REVIEW_AUTH == 'oauth' &&
+            'api.anthropic.com:443 nodejs.org:443 registry.npmjs.org:443' || '' }} ${{
+            env.AI_REVIEW_PROVIDER == 'anthropic' && env.AI_REVIEW_TRANSPORT == 'cli' &&
+            env.AI_REVIEW_AUTH == 'api_key' && 'api.anthropic.com:443 nodejs.org:443
+            registry.npmjs.org:443' || '' }} ${{ env.AI_REVIEW_PROVIDER == 'cursor' &&
+            env.AI_REVIEW_TRANSPORT == 'cli' && env.AI_REVIEW_AUTH == 'api_key' &&
+            'downloads.cursor.com:443 api2.cursor.sh:443 api3.cursor.sh:443
+            agentn.global.api5.cursor.sh:443 repo42.cursor.sh:443' || '' }} ${{ env.AI_REVIEW_PROVIDER
+            == 'openai' && env.AI_REVIEW_TRANSPORT == 'api' && env.AI_REVIEW_AUTH == 'api_key' &&
+            'api.openai.com:443' || '' }} ${{ env.AI_REVIEW_PROVIDER == 'openai' &&
+            env.AI_REVIEW_TRANSPORT == 'cli' && env.AI_REVIEW_AUTH == 'oauth' && 'chatgpt.com:443
+            auth.openai.com:443 nodejs.org:443 registry.npmjs.org:443' || '' }} ${{
+            env.AI_REVIEW_PROVIDER == 'openai' && env.AI_REVIEW_TRANSPORT == 'cli' &&
+            env.AI_REVIEW_AUTH == 'api_key' && 'api.openai.com:443 nodejs.org:443
+            registry.npmjs.org:443' || '' }}
+          # ai-review-egress:end
       - name: Fail on unknown egress-preset
         # harden-runner's pre hook already ran with whatever the selector
         # resolved; an unknown name yields an empty baseline, which would
@@ -420,7 +440,7 @@ jobs:
           if [[ -z "${APP_ID}" || "${APP_KEY_PRESENT}" != "true" ]]; then
             echo "::error::LINTRO_REVIEW_APP_ID and LINTRO_REVIEW_APP_PRIVATE_KEY"
             echo "::error::are required to post as lintro-review[bot]."
-            echo "::error::They are org-wide all-repo secrets; pass them with secrets: inherit."
+            echo "::error::Explicitly forward both posting App secrets to the reusable workflow."
             exit 1
           fi
       - name: Resolve provider matrix
@@ -430,6 +450,12 @@ jobs:
         env:
           PROVIDER_INPUT: ${{ inputs.provider }}
           TRANSPORT_INPUT: ${{ inputs.transport }}
+          AUTH_INPUT: ${{ inputs.auth }}
+          VAR_AUTH: ${{ vars.LINTRO_AI_AUTH }}
+          MODEL_INPUT: ${{ inputs.model }}
+          VAR_MODEL: ${{ vars.LINTRO_AI_MODEL }}
+          MAX_COST_INPUT: ${{ inputs.max-cost-usd }}
+          VAR_MAX_COST: ${{ vars.LINTRO_AI_MAX_COST_USD }}
           VAR_PROVIDER: ${{ vars.LINTRO_AI_PROVIDER }}
           VAR_TRANSPORT: ${{ vars.LINTRO_AI_TRANSPORT }}
           # Egress visibility guard: a provider resolved only from the repo
@@ -439,13 +465,27 @@ jobs:
           EGRESS_POLICY: ${{ inputs.egress-policy }}
           CONFIG_PATH: .lintro-config.yaml
         run: .lgtm-ci-tooling/scripts/ci/actions/resolve-ai-review-provider.sh
-      - name: Set up uv
+      - name: Check review size before installations
+        id: size
         if: steps.preflight.outputs.should-run == 'true'
+        shell: bash
+        env:
+          STEP: size
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
+        run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
+      - name: Set up uv
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.size.outputs.skip-size != 'true'
         uses: astral-sh/setup-uv@c18668ad3cf93ea998bef934396af7bb5c839dc7 # v10.2.0
       - name: Set up Node
         if: >-
           steps.preflight.outputs.should-run == 'true'
           && steps.resolve.outputs.needs-cli == 'true'
+          && steps.size.outputs.skip-size != 'true'
         uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24"
@@ -453,18 +493,33 @@ jobs:
         if: >-
           steps.preflight.outputs.should-run == 'true'
           && steps.resolve.outputs.needs-cli == 'true'
+          && steps.size.outputs.skip-size != 'true'
         shell: bash
         env:
           PROVIDER: ${{ steps.resolve.outputs.provider }}
           TRANSPORT: ${{ steps.resolve.outputs.transport }}
         run: .lgtm-ci-tooling/scripts/ci/actions/install-ai-review-cli.sh
+      - name: Install pinned lintro without review credentials
+        id: install-lintro
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.size.outputs.skip-size != 'true'
+        shell: bash
+        env:
+          STEP: install
+          LINTRO_VERSION: ${{ inputs.lintro-version }}
+          PYTHON_VERSION: ${{ inputs.python-version }}
+          VENV_DIR: ${{ runner.temp }}/ai-review-venv
+        run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
       - name: Locate prior review-state
         # Newest completed trusted run with a valid artifact. Conclusion is
         # irrelevant (#893). Empty run-id is the no-op (first review, or
         # no valid prior). continue-on-error keeps a locator failure from
         # skipping the review.
         id: prior-state
-        if: steps.preflight.outputs.should-run == 'true'
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.size.outputs.skip-size != 'true'
         continue-on-error: true
         shell: bash
         env:
@@ -500,53 +555,102 @@ jobs:
           private-key: ${{ secrets.LINTRO_REVIEW_APP_PRIVATE_KEY }}
           permission-issues: write
           permission-pull-requests: write
+      # ai-review-steps:begin
       - name: Run AI review
         id: review
-        if: steps.preflight.outputs.should-run == 'true'
-        # No continue-on-error here on purpose: the script bounds the review
-        # with GNU timeout below the job cap and exits 0 itself on a timed-out
-        # (or size-skipped) review, so the job never reaches the runner's
-        # cancel-at-cap path that flips the PR to UNSTABLE (#1098). Adding
-        # continue-on-error would only green real failures (INCOMPLETE,
-        # unexpected exit codes, blocking verdicts), which must stay red.
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.resolve.outputs.auth == 'api_key'
+          && steps.size.outputs.skip-size != 'true'
         shell: bash
         env:
-          STEP: run
-          # Workflow token fetches the PR diff. App token posts as the bot.
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}
           GITHUB_REPOSITORY: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
-          LINTRO_VERSION: ${{ inputs.lintro-version }}
-          PYTHON_VERSION: ${{ inputs.python-version }}
           BLOCKING: ${{ inputs.blocking }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
           JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}
           MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
           VENV_DIR: ${{ runner.temp }}/ai-review-venv
+          AI_TOOLS_PREFIX: ${{ runner.temp }}/ai-tools
+          REVIEW_NODE_BIN: ${{ steps.install-lintro.outputs.node-bin }}
+          LINTRO_AI_PROVIDER: ${{ steps.resolve.outputs.provider }}
+          LINTRO_AI_TRANSPORT: ${{ steps.resolve.outputs.transport }}
+          AI_REVIEW_AUTH: ${{ steps.resolve.outputs.auth }}
+          LINTRO_CLI_BARE: ${{ steps.resolve.outputs.cli-bare }}
+          LINTRO_AI_MODEL: ${{ steps.resolve.outputs.model }}
+          LINTRO_AI_MAX_COST_USD: ${{ steps.resolve.outputs.max-cost-usd }}
           LINTRO_AI_ENABLED: "1"
-          # Requires the 0.130.0 floor (py-lintro#2159): forces ai.review on
-          # so consuming repos need no ai block in their lintro config.
           LINTRO_AI_REVIEW: "1"
-          LINTRO_REVIEW_STATE_DIR: ai-review-state
-          LINTRO_AI_PROVIDER: ${{ inputs.provider || vars.LINTRO_AI_PROVIDER }}
-          LINTRO_AI_TRANSPORT: ${{ inputs.transport || vars.LINTRO_AI_TRANSPORT }}
-          LINTRO_AI_MODEL: ${{ inputs.model || vars.LINTRO_AI_MODEL }}
-          LINTRO_AI_MAX_COST_USD: ${{ inputs.max-cost-usd || vars.LINTRO_AI_MAX_COST_USD }}
-          # Only the credential for the resolved pair — never the union.
-          # yamllint disable-line rule:line-length
-          ANTHROPIC_API_KEY: ${{ steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport == 'api' && secrets.ANTHROPIC_API_KEY || '' }}
-          # yamllint disable-line rule:line-length
-          CLAUDE_CODE_OAUTH_TOKEN: ${{ steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport == 'cli' && secrets.CLAUDE_CODE_OAUTH_TOKEN || '' }}
-          # yamllint disable-line rule:line-length
-          OPENAI_API_KEY: ${{ steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport == 'api' && secrets.OPENAI_API_KEY || '' }}
-          # yamllint disable-line rule:line-length
-          CODEX_API_KEY: ${{ steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport == 'cli' && secrets.CODEX_API_KEY || '' }}
-          # yamllint disable-line rule:line-length
-          CURSOR_API_KEY: ${{ steps.resolve.outputs.provider == 'cursor' && steps.resolve.outputs.transport == 'cli' && secrets.CURSOR_API_KEY || '' }}
-          CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: "1"
-          DISABLE_AUTOUPDATER: "1"
+          ANTHROPIC_API_KEY: >-
+            ${{ ((steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport ==
+            'api' && steps.resolve.outputs.auth == 'api_key') || (steps.resolve.outputs.provider ==
+            'anthropic' && steps.resolve.outputs.transport == 'cli' && steps.resolve.outputs.auth ==
+            'api_key')) && secrets.ANTHROPIC_API_KEY || '' }}
+          CURSOR_API_KEY: >-
+            ${{ ((steps.resolve.outputs.provider == 'cursor' && steps.resolve.outputs.transport ==
+            'cli' && steps.resolve.outputs.auth == 'api_key')) && secrets.CURSOR_API_KEY || '' }}
+          OPENAI_API_KEY: >-
+            ${{ ((steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport ==
+            'api' && steps.resolve.outputs.auth == 'api_key')) && secrets.OPENAI_API_KEY || '' }}
+          CODEX_API_KEY: >-
+            ${{ ((steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport ==
+            'cli' && steps.resolve.outputs.auth == 'api_key')) && secrets.CODEX_API_KEY || '' }}
+        run: python3 -I .lgtm-ci-tooling/scripts/ci/actions/ai_review_auth.py
+      - name: Run OAuth AI review
+        id: review-oauth
+        if: >-
+          steps.preflight.outputs.should-run == 'true'
+          && steps.resolve.outputs.auth == 'oauth'
+          && steps.size.outputs.skip-size != 'true'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BLOCKING: ${{ inputs.blocking }}
+          JOB_TIMEOUT_MINUTES: ${{ inputs.timeout-minutes }}
+          JOB_STARTED_AT: ${{ steps.preflight.outputs.started-at }}
+          MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
+          VENV_DIR: ${{ runner.temp }}/ai-review-venv
+          AI_TOOLS_PREFIX: ${{ runner.temp }}/ai-tools
+          REVIEW_NODE_BIN: ${{ steps.install-lintro.outputs.node-bin }}
+          LINTRO_AI_PROVIDER: ${{ steps.resolve.outputs.provider }}
+          LINTRO_AI_TRANSPORT: ${{ steps.resolve.outputs.transport }}
+          AI_REVIEW_AUTH: ${{ steps.resolve.outputs.auth }}
+          LINTRO_CLI_BARE: ${{ steps.resolve.outputs.cli-bare }}
+          LINTRO_AI_MODEL: ${{ steps.resolve.outputs.model }}
+          LINTRO_AI_MAX_COST_USD: ${{ steps.resolve.outputs.max-cost-usd }}
+          LINTRO_AI_ENABLED: "1"
+          LINTRO_AI_REVIEW: "1"
+          CLAUDE_CODE_OAUTH_TOKEN: >-
+            ${{ ((steps.resolve.outputs.provider == 'anthropic' && steps.resolve.outputs.transport ==
+            'cli' && steps.resolve.outputs.auth == 'oauth')) && secrets.CLAUDE_CODE_OAUTH_TOKEN || ''
+            }}
+          CODEX_AUTH_JSON: >-
+            ${{ ((steps.resolve.outputs.provider == 'openai' && steps.resolve.outputs.transport ==
+            'cli' && steps.resolve.outputs.auth == 'oauth')) && secrets.CODEX_AUTH_JSON || '' }}
+        run: python3 -I .lgtm-ci-tooling/scripts/ci/actions/ai_review_auth.py
+      # ai-review-steps:end
+      - name: Report oversized review without provider credentials
+        if: steps.preflight.outputs.should-run == 'true' && steps.size.outputs.skip-size == 'true'
+        shell: bash
+        env:
+          STEP: skipped-size
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ steps.lintro-review-app.outputs.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BLOCKING: ${{ inputs.blocking }}
+          MAX_DIFF_LINES: ${{ inputs.max-diff-lines }}
+          DIFF_LINES: ${{ steps.size.outputs.diff-lines }}
         run: .lgtm-ci-tooling/scripts/ci/actions/run-ai-review.sh
+      - name: Remove isolated review credentials
+        if: always() && steps.preflight.outputs.should-run == 'true'
+        shell: bash
+        run: python3 -I .lgtm-ci-tooling/scripts/ci/actions/ai_review_auth.py --cleanup
       - name: Upload review-state artifacts
         # Best-effort final upload. if-no-files-found: ignore so pre-0.131.0
         # pins no-op. Provenance is this consuming-repo run (#893). No
