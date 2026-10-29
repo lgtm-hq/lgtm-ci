@@ -19,6 +19,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.79.0] - 2026-10-29
+
+### Added
+
+- **ai**: select review auth and default CLI reviews to subscription sessions (#1212)
+  (ed296d1)
+
+### Fixed
+
+- **ci**: reconcile cancelled dynamic jobs after same-run retry (#1211) (b9b8f9b)
+- **egress**: remove invalid TestPyPI upload host (#1209) (763695f)
+- **canary**: bound fan-out and split deadlines (#1213) (e13a7a3)
+
 ## [0.78.1] - 2026-10-27
 
 ### Changed
@@ -2929,7 +2942,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.1...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.0...HEAD
+[0.79.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.1...v0.79.0
 [0.78.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.0...v0.78.1
 [0.78.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.7...v0.78.0
 [0.77.7]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.77.6...v0.77.7
