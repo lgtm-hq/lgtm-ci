@@ -133,6 +133,9 @@ YAML
 	# The known-consumer registry and the exceptions file are required (#1082).
 	printf -- '---\nschema-version: 1\nconsumers: []\n' >"${root}/catalog/consumers.yml"
 	printf -- '---\nschema-version: 1\nexceptions: []\n' >"${root}/catalog/deprecation-exceptions.yml"
+	printf -- '---\nschema-version: 1\nexceptions: []\n' >"${root}/catalog/local-exceptions.yml"
+	mkdir -p "${root}/schemas"
+	cp "${PROJECT_ROOT}/schemas/local-exceptions.schema.json" "${root}/schemas/"
 	cat >"${root}/README.md" <<'MD'
 # Demo
 
@@ -654,4 +657,133 @@ data['entries'].insert(1, {
 	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "reusable-demo: \`results\` must be a one-line string"
+}
+
+# A valid fixture includes both whole-file and single-job exceptions. Mutations
+# below exercise the same catalog entry point the Support Catalog CI job runs.
+_local_exceptions_fixture() {
+	local root="$1"
+	cat >"${root}/catalog/local-exceptions.yml" <<'YAML'
+---
+schema-version: 1
+exceptions:
+  - repo: lgtm-hq/demo
+    path: .github/actions/product-build/action.yml
+    reason: Product-specific binary packaging.
+    link: https://github.com/lgtm-hq/demo/issues/1
+  - repo: lgtm-hq/demo
+    path: .github/workflows/release.yml
+    job: release
+    reason: Requires product toolchain setup inside the job.
+    link: https://github.com/lgtm-hq/demo/pull/2#issuecomment-123
+YAML
+}
+
+_edit_local_exceptions() {
+	local root="$1" code="$2"
+	"${PY}" - "${root}/catalog/local-exceptions.yml" "${code}" <<'PY'
+import sys, yaml
+path, code = sys.argv[1], sys.argv[2]
+data = yaml.safe_load(open(path, encoding="utf-8"))
+rows = data["exceptions"]
+exec(code)
+open(path, "w", encoding="utf-8").write(yaml.safe_dump(data, sort_keys=False))
+PY
+}
+
+@test "catalog: local exceptions accept whole-file and job scopes" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+}
+
+@test "catalog: missing or malformed local-exception files fail closed" {
+	local root
+	root="$(_fixture_root)"
+	rm "${root}/catalog/local-exceptions.yml"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "unreadable allowlist or schema"
+	printf '%s\n' 'exceptions: [' >"${root}/catalog/local-exceptions.yml"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "unreadable allowlist or schema"
+}
+
+@test "catalog: local-exception envelope requires version and an exception list" {
+	local root code
+	root="$(_fixture_root)"
+	for code in 'data["schema-version"] = True' 'data["schema-version"] = 2' \
+		'del data["exceptions"]' 'data["exceptions"] = {}' \
+		'data["exceptions"] = ["not a mapping"]' 'data["typo"] = []'; do
+		_local_exceptions_fixture "${root}"
+		_edit_local_exceptions "${root}" "${code}"
+		run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+		assert_failure
+		assert_output --partial "catalog/local-exceptions.yml"
+	done
+}
+
+@test "catalog: local exceptions require every documented field and reject unknown keys" {
+	local root field
+	root="$(_fixture_root)"
+	for field in repo path reason link; do
+		_local_exceptions_fixture "${root}"
+		_edit_local_exceptions "${root}" "del rows[0]['${field}']"
+		run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+		assert_failure
+		assert_output --partial "missing required key \`${field}\`"
+	done
+	_local_exceptions_fixture "${root}"
+	_edit_local_exceptions "${root}" 'rows[0]["jobs"] = "release"'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial 'unknown key `jobs`'
+}
+
+@test "catalog: local exceptions reject invalid repositories, paths, jobs, reasons and links" {
+	local root code
+	root="$(_fixture_root)"
+	for code in 'rows[0]["repo"] = "demo"' 'rows[0]["repo"] = "lgtm-hq/demo\n"' \
+		'rows[0]["path"] = "/absolute.yml"' 'rows[0]["path"] = "../escape.yml"' \
+		'rows[0]["path"] = ".github/../escape.yml"' \
+		'rows[0]["path"] = ".github/workflows/*.yml"' \
+		'rows[0]["path"] = ".github\\workflows\\release.yml"' \
+		'rows[0]["reason"] = ""' 'rows[0]["reason"] = "   "' \
+		'rows[0]["reason"] = "two\nlines"' 'rows[0]["reason"] = "reason\n"' \
+		'rows[0]["reason"] = 123' 'rows[0]["link"] = "https://example.com/decision"' \
+		'rows[0]["link"] = "https://github.com/lgtm-hq/demo"' \
+		'rows[1]["job"] = ""' 'rows[1]["job"] = "release job"' \
+		'rows[1]["job"] = False'; do
+		_local_exceptions_fixture "${root}"
+		_edit_local_exceptions "${root}" "${code}"
+		run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+		assert_failure
+		assert_output --partial "catalog/local-exceptions.yml.exceptions["
+	done
+}
+
+@test "catalog: local exceptions reject duplicate scopes regardless of repository case" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	_edit_local_exceptions "${root}" 'rows.insert(1, dict(rows[0], repo="LGTM-HQ/Demo"))'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "duplicate repo/path/job scope"
+}
+
+@test "catalog: local exceptions require sorted scopes and allow distinct jobs" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	_edit_local_exceptions "${root}" 'rows.append(dict(rows[1], job="upload"))'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+	_edit_local_exceptions "${root}" 'rows.reverse()'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial "sort by repo (case-insensitive), then path and job"
 }
