@@ -58,11 +58,11 @@ scripts:
    Re-check the default branch when adding or reviewing an exception, and
    remove it after the local logic is deleted or replaced with a shared call.
 5. **Size does not matter.** A five-line script copied to three repositories
-   qualifies just like a whole workflow. For example, the small suppression
-   cleanup PR-label behavior in
-   [#363](https://github.com/lgtm-hq/lgtm-ci/issues/363) belongs in lgtm-ci's
-   existing suppression checker too; a short consumer patch is still shared
-   CI logic.
+   qualifies just like a whole workflow. For example,
+   [#1238](https://github.com/lgtm-hq/lgtm-ci/issues/1238) identifies GHCR tag
+   sweeps shared by py-lintro and Rustume: a small snippet that lists tags and
+   deletes those outside the retention policy belongs in lgtm-ci when its
+   differences fit in inputs.
 
 ### Local exception allowlist
 
@@ -70,19 +70,23 @@ The allowlist uses `schema-version: 1` and an `exceptions` list. Every entry
 has `repo` (`owner/name`), `path` (an exact repository-relative file path),
 `reason` (one line) and `link` (the GitHub issue or PR recording the decision).
 An optional `job` narrows a workflow exception to one job ID. Sort entries by
-repository case-insensitively, then path and job; list each scope once.
+repository case-insensitively, then path and job; list each scope once. Do not
+add job scopes for a repository/path already covered by a whole-file entry.
 
-The duplication scanner's suppression contract is an exact repository/path
-match, plus an exact job match when `job` is present. Omit `job` only when the
-whole file needs to remain local. There are no glob or repository-wide
-exemptions; an allowlisted job does not exempt its neighbors. The scanner
-skips only matching scopes. New local product-specific logic needs no
-exception under rule 3; the allowlist also records the established keep-local
-decisions requested by the consumer adoption issues.
+The future duplication scanner
+([#1237](https://github.com/lgtm-hq/lgtm-ci/issues/1237)) must suppress only an
+exact repository/path match, plus an exact job match when `job` is present.
+Omit `job` only when the whole file needs to remain local. There are no glob
+or repository-wide exemptions; an allowlisted job must not exempt its neighbors.
 
-The existing CI **Support Catalog** job validates the allowlist against
+Product-specific logic under rule 3 needs no exception in principle. The
+seeded entries also record established keep-local decisions from the consumer
+adoption issues so the future scanner (#1237) will not re-flag them.
+
+Today's only reader is the catalog validator in the CI **Support Catalog**
+job. It checks shape and ordering against
 [`schemas/local-exceptions.schema.json`](../schemas/local-exceptions.schema.json)
-and rejects duplicate or unsorted scopes. This is separate from
+and rejects duplicate or redundant scopes. This is separate from
 [`deprecation-exceptions.yml`](../catalog/deprecation-exceptions.yml), which
 authorizes removals from lgtm-ci's public interface. Schema validation is
 offline: maintainers re-check the linked consumer files and technical reasons

@@ -713,16 +713,23 @@ PY
 }
 
 @test "catalog: local-exception envelope requires version and an exception list" {
-	local root code
+	local root case_spec code expected
 	root="$(_fixture_root)"
-	for code in 'data["schema-version"] = True' 'data["schema-version"] = 2' \
-		'del data["exceptions"]' 'data["exceptions"] = {}' \
-		'data["exceptions"] = ["not a mapping"]' 'data["typo"] = []'; do
+	for case_spec in \
+		'data["schema-version"] = True|`schema-version` must be 1' \
+		'data["schema-version"] = 2|`schema-version` must be 1' \
+		'del data["schema-version"]|missing required key `schema-version`' \
+		'del data["exceptions"]|missing required key `exceptions`' \
+		'data["exceptions"] = {}|`exceptions` must be a list of mappings' \
+		'data["exceptions"] = ["not a mapping"]|`exceptions` must be a list of mappings' \
+		'data["typo"] = []|unknown key `typo`'; do
+		code="${case_spec%%|*}"
+		expected="${case_spec#*|}"
 		_local_exceptions_fixture "${root}"
 		_edit_local_exceptions "${root}" "${code}"
 		run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 		assert_failure
-		assert_output --partial "catalog/local-exceptions.yml"
+		assert_output --partial "${expected}"
 	done
 }
 
@@ -765,6 +772,26 @@ PY
 	done
 }
 
+@test "catalog: local-exception pattern errors include the offending value" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	_edit_local_exceptions "${root}" 'rows[0]["repo"] = "demo\n"'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial '`repo`: GitHub repository as owner/name.'
+	assert_output --partial "(got 'demo\\n')"
+}
+
+@test "catalog: local exceptions accept case-insensitive repository ordering" {
+	local root
+	root="$(_fixture_root)"
+	_local_exceptions_fixture "${root}"
+	_edit_local_exceptions "${root}" 'rows[0]["repo"] = "lgtm-hq/alpha"; rows[1]["repo"] = "LGTM-HQ/Zulu"'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+}
+
 @test "catalog: local exceptions reject duplicate scopes regardless of repository case" {
 	local root
 	root="$(_fixture_root)"
@@ -773,6 +800,47 @@ PY
 	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
 	assert_failure
 	assert_output --partial "duplicate repo/path/job scope"
+}
+
+@test "catalog: local exceptions reject job scopes covered by whole-file entries" {
+	local root code
+	root="$(_fixture_root)"
+	for code in \
+		'rows.append(dict(rows[1], repo="LGTM-HQ/Demo")); del rows[1]["job"]' \
+		'rows.append(dict(rows[1], repo="LGTM-HQ/Demo")); del rows[2]["job"]'; do
+		_local_exceptions_fixture "${root}"
+		_edit_local_exceptions "${root}" "${code}"
+		run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+		assert_failure
+		assert_output --partial "redundant job scope: repo/path already has a whole-file entry"
+	done
+}
+
+@test "catalog: local exceptions reject unsupported schema keywords" {
+	local root case_spec code keyword
+	root="$(_fixture_root)"
+	for case_spec in \
+		'data["minProperties"] = 1|minProperties' \
+		'data["properties"]["schema-version"]["minimum"] = 1|minimum' \
+		'data["properties"]["exceptions"]["minItems"] = 1|minItems' \
+		'data["properties"]["exceptions"]["items"]["minProperties"] = 1|minProperties' \
+		'data["properties"]["exceptions"]["items"]["properties"]["reason"]["minLength"] = 1|minLength'; do
+		code="${case_spec%%|*}"
+		keyword="${case_spec#*|}"
+		cp "${PROJECT_ROOT}/schemas/local-exceptions.schema.json" "${root}/schemas/"
+		"${PY}" - "${root}/schemas/local-exceptions.schema.json" "${code}" <<'PY'
+import json, sys
+path, code = sys.argv[1], sys.argv[2]
+with open(path, encoding="utf-8") as source:
+    data = json.load(source)
+exec(code)
+with open(path, "w", encoding="utf-8") as target:
+    json.dump(data, target)
+PY
+		run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+		assert_failure
+		assert_output --partial "unsupported schema keyword \`${keyword}\`"
+	done
 }
 
 @test "catalog: local exceptions require sorted scopes and allow distinct jobs" {
