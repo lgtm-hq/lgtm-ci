@@ -16,8 +16,8 @@ name: Reusable npm Publishing Workflow (deprecated)
 # has not migrated. Removal target: not before 2026-10-15.
 #
 # Migration notes for callers of this wrapper:
-#   - The publish job runs on the set workflow's `runner-image` (default
-#     ubuntu-24.04, GitHub-hosted only) instead of ubuntu-latest; pass
+#   - The publish job runs on the set workflow's `runner-image` (default:
+#     the standard runner, GitHub-hosted only); pass
 #     `runner-image` to pin another hosted label.
 #   - The GitHub check name defaults to "Publish to npm (deprecated wrapper)"
 #     instead of "Publish to npm"; callers with a required status check on
@@ -97,7 +97,7 @@ name: Reusable npm Publishing Workflow (deprecated)
       runner-image:
         description: >-
           GitHub-hosted runner image label for the publish job (forwarded;
-          default ubuntu-24.04)
+          default: the standard runner)
         required: false
         type: string
         default: ubuntu-26.04

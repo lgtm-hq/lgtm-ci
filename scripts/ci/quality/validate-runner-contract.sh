@@ -23,6 +23,8 @@ import re
 import sys
 from pathlib import Path
 
+import yaml
+
 workflows_dir = Path(sys.argv[1])
 
 RUNNER_PINNING_EXCEPTIONS = {
@@ -127,8 +129,15 @@ def jobs_missing_timeout(content: str, rel: str) -> list[str]:
     return missing
 
 
-def has_runner_image_input(content: str) -> bool:
-    return bool(re.search(r"^      runner-image:", content, re.M))
+def workflow_inputs(content: str) -> dict:
+    document = yaml.safe_load(content)
+    events = document.get(True, document.get("on", {})) or {}
+    workflow_call = events.get("workflow_call") or {}
+    return workflow_call.get("inputs", {})
+
+
+def has_runner_image_input(inputs: dict) -> bool:
+    return "runner-image" in inputs
 
 
 def has_runner_map_input(content: str) -> bool:
@@ -158,16 +167,8 @@ def is_script_backed(content: str) -> bool:
     return "scripts/ci/" in content
 
 
-def runner_image_default(content: str) -> str | None:
-    match = re.search(
-        r"^      runner-image:\n(?:        [^\n]*\n|\n)*?"
-        r"        default: (?:\"([^\"]+)\"|'([^']+)'|([^\s#]+))",
-        content,
-        re.M,
-    )
-    if not match:
-        return None
-    return match.group(1) or match.group(2) or match.group(3)
+def runner_image_default(inputs: dict) -> str | None:
+    return (inputs.get("runner-image") or {}).get("default")
 
 
 violations: list[str] = []
@@ -176,7 +177,8 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     content = workflow.read_text()
     rel = workflow.name
     jobs = parse_jobs(content)
-    has_runner = has_runner_image_input(content)
+    inputs = workflow_inputs(content)
+    has_runner = has_runner_image_input(inputs)
 
     if rel not in TIMEOUT_MINUTES_EXCEPTIONS:
         if not has_timeout_minutes_input(content):
@@ -197,11 +199,12 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
         )
 
     if has_runner:
-        default = runner_image_default(content)
+        default = runner_image_default(inputs)
         if default != STANDARD_RUNNER:
+            found = "missing" if default is None else repr(default)
             violations.append(
                 f"{rel}: runner-image default must be {STANDARD_RUNNER} "
-                f"(found {default!r})",
+                f"(found {found})",
             )
 
     if rel in DOCKER_FAMILY:

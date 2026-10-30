@@ -28,10 +28,13 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-smoke-test.yml"
 	assert_success
 }
 
-@test "reusable-docker-smoke-test: exposes runner-image with ubuntu-26.04 default" {
+@test "reusable-docker-smoke-test: exposes runner-image with the standard default" {
 	run grep -E '^      runner-image:$' "$WORKFLOW"
 	assert_success
-	run grep -F 'default: "ubuntu-26.04"' "$WORKFLOW"
+	local standard_runner
+	standard_runner="$(sed -n 's/^STANDARD_RUNNER = "\([^"]*\)"$/\1/p' "${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh")"
+	[[ -n "${standard_runner}" ]]
+	run grep -F "default: \"${standard_runner}\"" "$WORKFLOW"
 	assert_success
 	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
 	assert_success

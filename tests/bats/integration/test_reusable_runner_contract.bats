@@ -5,24 +5,25 @@
 load "../../helpers/common"
 
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh"
+STANDARD_RUNNER="$(sed -n 's/^STANDARD_RUNNER = "\([^"]*\)"$/\1/p' "${VALIDATOR}")"
 
 _runner_default_fixture() {
 	local path="$1"
 	mkdir -p "$(dirname "${path}")"
-	cat >"${path}" <<'YAML'
+	cat >"${path}" <<YAML
 on:
   workflow_call:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: \${{ inputs.runner-image }}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
 YAML
@@ -50,7 +51,7 @@ path.write_text(re.sub(r'^        default: .*$', f'        default: {sys.argv[2]
 PY
 		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 		assert_failure
-		assert_output --partial "reusable-stale-default.yml: runner-image default must be ubuntu-26.04 (found 'ubuntu-24.04')"
+		assert_output --partial "reusable-stale-default.yml: runner-image default must be ${STANDARD_RUNNER} (found 'ubuntu-24.04')"
 		assert_output --partial "ERROR: 1 reusable workflow runner contract violation(s)"
 	done
 }
@@ -60,7 +61,7 @@ PY
 	local workflow="${workflows_dir}/reusable-standard-default.yml"
 	_runner_default_fixture "${workflow}"
 	local default
-	for default in '"ubuntu-26.04"' "'ubuntu-26.04'" 'ubuntu-26.04'; do
+	for default in "\"${STANDARD_RUNNER}\"" "'${STANDARD_RUNNER}'" "${STANDARD_RUNNER}"; do
 		python3 - "${workflow}" "${default}" <<'PY'
 from pathlib import Path
 import re
@@ -74,24 +75,49 @@ PY
 	done
 }
 
+@test "validate-runner-contract: accepts commented declarations and indented multiline descriptions with either on key" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local workflow="${workflows_dir}/reusable-commented-input.yml"
+	local on_key
+	for on_key in on '"on"'; do
+		_runner_default_fixture "${workflow}"
+		python3 - "${workflow}" "${on_key}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+content = path.read_text().replace('on:', f'{sys.argv[2]}:', 1)
+content = content.replace('      runner-image:\n', '''      runner-image: # note
+        description: |-
+          Runner label for every job.
+            Indented details stay in the description.
+          default: ubuntu-24.04 is just description text.
+''', 1)
+path.write_text(content)
+PY
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_success
+	done
+}
+
 @test "validate-runner-contract: does not borrow a missing default from another input" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	local workflow="${workflows_dir}/reusable-missing-default.yml"
 	_runner_default_fixture "${workflow}"
-	python3 - "${workflow}" <<'PY'
+	python3 - "${workflow}" "${STANDARD_RUNNER}" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 path.write_text(path.read_text().replace(
-    '        default: "ubuntu-26.04"',
-    '      other-image:\n        type: string\n        default: "ubuntu-26.04"',
+    f'        default: "{sys.argv[2]}"',
+    f'      other-image:\n        type: string\n        default: "{sys.argv[2]}"',
     1,
 ))
 PY
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "reusable-missing-default.yml: runner-image default must be ubuntu-26.04 (found None)"
+	assert_output --partial "reusable-missing-default.yml: runner-image default must be ${STANDARD_RUNNER} (found missing)"
 }
 
 @test "validate-runner-contract: checks defaults even in Docker and action-only exceptions" {
@@ -99,10 +125,10 @@ PY
 	local name
 	for name in reusable-codeql.yml reusable-docker-build.yml; do
 		_runner_default_fixture "${workflows_dir}/${name}"
-		sed -i 's/default: "ubuntu-26.04"/default: "ubuntu-24.04"/' "${workflows_dir}/${name}"
+		sed -i "s/default: \"${STANDARD_RUNNER}\"/default: \"ubuntu-24.04\"/" "${workflows_dir}/${name}"
 		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 		assert_failure
-		assert_output --partial "${name}: runner-image default must be ubuntu-26.04 (found 'ubuntu-24.04')"
+		assert_output --partial "${name}: runner-image default must be ${STANDARD_RUNNER} (found 'ubuntu-24.04')"
 		rm "${workflows_dir}/${name}"
 	done
 }
@@ -110,18 +136,22 @@ PY
 @test "validate-runner-contract: rejects a Docker coordinator on a different runner" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	sed 's/runs-on: ubuntu-26.04/runs-on: ubuntu-24.04/' \
+	sed "s/runs-on: ${STANDARD_RUNNER}/runs-on: ubuntu-24.04/" \
 		"${PROJECT_ROOT}/.github/workflows/reusable-docker.yml" >"${workflows_dir}/reusable-docker.yml"
+	run cmp -s "${PROJECT_ROOT}/.github/workflows/reusable-docker.yml" "${workflows_dir}/reusable-docker.yml"
+	assert_failure 1
+	run grep -F 'runs-on: ubuntu-24.04' "${workflows_dir}/reusable-docker.yml"
+	assert_success
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "reusable-docker.yml: job classify must use ubuntu-26.04 coordinator runner (found 'ubuntu-24.04')"
+	assert_output --partial "reusable-docker.yml: job classify must use ${STANDARD_RUNNER} coordinator runner (found 'ubuntu-24.04')"
 	assert_output --partial "ERROR: 1 reusable workflow runner contract violation(s)"
 }
 
 @test "validate-runner-contract: flags script-backed reusable without runner-image" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-script-backed-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-script-backed-bad.yml" <<YAML
 ---
 name: Script backed bad example
 on:
@@ -153,7 +183,7 @@ YAML
 @test "validate-runner-contract: flags incomplete runner-image wiring" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-partial-wiring-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-partial-wiring-bad.yml" <<YAML
 ---
 name: Partial wiring bad example
 on:
@@ -161,10 +191,10 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     steps:
       - run: echo ok
   aggregate:
@@ -181,7 +211,7 @@ YAML
 @test "validate-runner-contract: flags reusable without timeout-minutes input" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-no-timeout-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-no-timeout-bad.yml" <<YAML
 ---
 name: No timeout bad example
 on:
@@ -189,10 +219,10 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     steps:
       - run: echo ok
 YAML
@@ -205,7 +235,7 @@ YAML
 @test "validate-runner-contract: accepts reusable with timeout-minutes input" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-with-timeout-good.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-with-timeout-good.yml" <<YAML
 ---
 name: With timeout good example
 on:
@@ -213,14 +243,14 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: \${{ inputs.runner-image }}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
 YAML
@@ -232,7 +262,7 @@ YAML
 @test "validate-runner-contract: flags timeout-minutes input that is not type number" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-with-timeout-string.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-with-timeout-string.yml" <<YAML
 ---
 name: With timeout string example
 on:
@@ -240,14 +270,14 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
       timeout-minutes:
         type: string
         default: "10"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: \${{ inputs.runner-image }}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
 YAML
@@ -260,7 +290,7 @@ YAML
 @test "validate-runner-contract: flags timeout-minutes input never applied to a job" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-with-timeout-unused.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-with-timeout-unused.yml" <<YAML
 ---
 name: With timeout unused example
 on:
@@ -268,13 +298,13 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     timeout-minutes: 30
     steps:
       - run: echo ok
@@ -288,7 +318,7 @@ YAML
 @test "validate-runner-contract: flags runs-on job without job-level timeout-minutes" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<YAML
 ---
 name: Uncapped job bad example
 on:
@@ -296,18 +326,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: \${{ inputs.runner-image }}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     steps:
       - run: echo aggregate
 YAML
@@ -321,7 +351,7 @@ YAML
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	local validator_copy="${BATS_TEST_TMPDIR}/validate-runner-contract.sh"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<YAML
 ---
 name: Uncapped job bad example
 on:
@@ -329,18 +359,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: \${{ inputs.runner-image }}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     steps:
       - run: echo aggregate
 YAML
@@ -372,7 +402,7 @@ PY
 @test "validate-runner-contract: accepts job with independent literal timeout cap" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-literal-cap-good.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-literal-cap-good.yml" <<YAML
 ---
 name: Literal cap good example
 on:
@@ -380,18 +410,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "ubuntu-26.04"
+        default: "${STANDARD_RUNNER}"
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: \${{ inputs.runner-image }}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   report-failure:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     timeout-minutes: 10
     steps:
       - run: echo report
@@ -427,7 +457,7 @@ YAML
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (double quotes)" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-latest-default-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-latest-default-bad.yml" <<YAML
 ---
 name: Latest default bad example
 on:
@@ -438,20 +468,20 @@ on:
         default: "ubuntu-latest"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ubuntu-26.04"
+	assert_output --partial "runner-image default must be ${STANDARD_RUNNER}"
 }
 
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (single quotes)" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-latest-default-single-quote-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-latest-default-single-quote-bad.yml" <<YAML
 ---
 name: Latest default single quote bad example
 on:
@@ -462,20 +492,20 @@ on:
         default: 'ubuntu-latest'
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ubuntu-26.04"
+	assert_output --partial "runner-image default must be ${STANDARD_RUNNER}"
 }
 
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (unquoted)" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-latest-default-unquoted-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-latest-default-unquoted-bad.yml" <<YAML
 ---
 name: Latest default unquoted bad example
 on:
@@ -486,14 +516,14 @@ on:
         default: ubuntu-latest
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: \${{ inputs.runner-image }}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ubuntu-26.04"
+	assert_output --partial "runner-image default must be ${STANDARD_RUNNER}"
 }
 
 @test "reusable-release-version-pr: exposes runner-image on all jobs" {
@@ -512,7 +542,7 @@ YAML
 
 @test "reusable-quality-lint: wires runner-image input" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
-	run grep -F 'default: "ubuntu-26.04"' "$workflow"
+	run grep -F "default: \"${STANDARD_RUNNER}\"" "$workflow"
 	assert_success
 	run awk '
 		/^  quality:/ { in_job = 1 }

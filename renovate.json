@@ -17,10 +17,18 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track runner-image input defaults alongside literal runs-on labels so Ubuntu runner updates share one Renovate PR (#1230)",
-      "managerFilePatterns": ["/^\\.github/workflows/reusable-.*\\.yml$/"],
+      "description": "Track runner-image defaults, the runner contract and catalog runner labels alongside literal runs-on labels (#1230). Catalog and rendered docs match the final label in each reusable's runner list, preserving the Docker runner-map fallback and composite-action evidence.",
+      "managerFilePatterns": [
+        "/^\\.github/workflows/reusable-.*\\.yml$/",
+        "/^scripts/ci/quality/validate-runner-contract\\.sh$/",
+        "/^catalog/catalog\\.yml$/",
+        "/^docs/catalog\\.md$/"
+      ],
       "matchStrings": [
-        "(?:^|\\n)      runner-image:\\r?\\n(?:        [^\\r\\n]*\\r?\\n|\\r?\\n)*?        default: [\"']?ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)[\"']?[ \\t]*(?:#[^\\r\\n]*)?(?:\\r?\\n|$)"
+        "(?:^|\\n)      runner-image:[ \\t]*(?:#[^\\r\\n]*)?\\r?\\n(?:        [^\\r\\n]*\\r?\\n|\\r?\\n)*?        default: [\"']?ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)[\"']?[ \\t]*(?:#[^\\r\\n]*)?(?:\\r?\\n|$)",
+        "(?:^|\\n)STANDARD_RUNNER = [\"']ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)[\"']",
+        "(?:^|\\n)  - id: reusable-[^\\r\\n]+\\r?\\n(?:    [^\\r\\n]*\\r?\\n|\\r?\\n)*?    runners: \\[(?:[^\\]\\r\\n]*, )?ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)\\]",
+        "(?:^|\\n)#### `reusable-[^`\\r\\n]+`\\r?\\n(?:[^#\\r\\n][^\\r\\n]*\\r?\\n|\\r?\\n)*?- \\*\\*Runners:\\*\\* (?:`[^`\\r\\n]+`, )*`ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)`[ \\t]*(?:\\r?\\n|$)"
       ],
       "datasourceTemplate": "github-runners",
       "depNameTemplate": "ubuntu"
@@ -125,6 +133,11 @@
     }
   ],
   "packageRules": [
+    {
+      "matchDatasources": ["github-runners"],
+      "groupName": "github runner images",
+      "groupSlug": "github-runner-images"
+    },
     {
       "description": "Group harden-runner SHA pins so workflow and non-workflow copies update together",
       "groupName": "step-security/harden-runner",

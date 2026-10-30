@@ -192,7 +192,11 @@ pin OS reproducibility (for example `ubuntu-26.04`). Defaults are
 
 Renovate tracks these input defaults with the `github-runners` datasource and
 the same `ubuntu` dependency as literal `runs-on:` labels, so runner bumps share
-one PR. `scripts/ci/quality/validate-runner-contract.sh` requires every
+one PR. The custom manager also tracks `STANDARD_RUNNER`, the final runner
+label in each reusable's `catalog/catalog.yml` runner list, and its rendered
+`docs/catalog.md` copy. Earlier labels in those lists retain the Docker
+runner-map fallback; composite-action evidence stays fixed.
+`scripts/ci/quality/validate-runner-contract.sh` requires every
 `runner-image` default and fixed Docker coordinator to match `STANDARD_RUNNER`.
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
