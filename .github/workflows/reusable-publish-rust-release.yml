@@ -92,7 +92,7 @@ on:
         description: "GitHub-hosted runner image for verify/release jobs"
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "ubuntu-26.04"
       timeout-minutes:
         description: "Timeout for verify and release jobs"
         required: false

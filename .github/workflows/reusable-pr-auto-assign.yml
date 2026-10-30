@@ -59,7 +59,7 @@ name: Reusable PR Auto Assign
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "ubuntu-26.04"
 
       timeout-minutes:
         description: "Job timeout in minutes"

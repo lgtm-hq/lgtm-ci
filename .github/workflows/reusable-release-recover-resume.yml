@@ -155,7 +155,7 @@ name: Reusable Release Recovery (resume)
           GitHub-hosted: the npm resume needs trusted publishing/provenance.
         required: false
         type: string
-        default: ubuntu-24.04
+        default: ubuntu-26.04
       egress-policy:
         description: harden-runner egress policy (audit or block)
         required: false

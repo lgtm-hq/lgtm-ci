@@ -100,7 +100,7 @@ name: Reusable npm Publishing Workflow (deprecated)
           default ubuntu-24.04)
         required: false
         type: string
-        default: ubuntu-24.04
+        default: ubuntu-26.04
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin

@@ -76,7 +76,7 @@ on:
         description: "Runner image for the validation job"
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "ubuntu-26.04"
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: >-

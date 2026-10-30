@@ -119,7 +119,7 @@ name: Reusable Release Recovery (plan)
           npm trusted publishing and provenance.
         required: false
         type: string
-        default: ubuntu-24.04
+        default: ubuntu-26.04
       timeout-minutes:
         description: Timeout for the resolve job (the resume jobs keep their own caps)
         required: false

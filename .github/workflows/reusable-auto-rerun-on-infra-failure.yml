@@ -106,7 +106,7 @@ name: Reusable - Auto Re-run on Infra Failure
         description: "GitHub-hosted runner image label"
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: "ubuntu-26.04"
       timeout-minutes:
         # Kept at 10 deliberately (#743). The script now bounds itself:
         # LOG_FETCH_DEADLINE (180s) for the refetch loop, plus one in-flight

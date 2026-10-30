@@ -238,7 +238,7 @@ name: Reusable npm Package-Set Publishing
           runners, and a live publish refuses to run on one.
         required: false
         type: string
-        default: ubuntu-24.04
+        default: ubuntu-26.04
       timeout-minutes:
         description: >-
           Job timeout in minutes. Leave room for the propagation wait
