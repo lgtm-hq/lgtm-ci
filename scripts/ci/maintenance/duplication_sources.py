@@ -335,7 +335,8 @@ class SourceResolver:
                 return self.unknown("script", path)
             # An explicit interpreter (including source/.) ignores a shebang.
             # Direct execution must retain the exact interpreter and arguments.
-            interpreter = INTERPRETER + INTERPRETER_FLAGS + r"$"
+            # Do not mistake an assignment suffix for an interpreter word.
+            interpreter = r"(?:^|\s)" + INTERPRETER + INTERPRETER_FLAGS + r"$"
             direct = re.search(interpreter, match["prefix"]) is None
             body = self.script(path, directory, visited, direct=direct)
             digest = hashlib.sha256(str(body).encode()).hexdigest()
@@ -403,6 +404,7 @@ class SourceResolver:
                 # Treat any runpy reference conservatively: indirect attribute
                 # access and imported aliases need no separate data-flow parser.
                 # Dynamic imports may load runpy under a computed name as well.
+                # Dynamic evaluation also treats normalized strings as code.
                 names = (
                     item.string  # Inspect code names, never string contents.
                     for item in tokens
@@ -410,7 +412,7 @@ class SourceResolver:
                 )
                 if any(
                     re.fullmatch(
-                        r"subprocess|system|popen|exec\w*|spawn\w*|"
+                        r"subprocess|system|popen|exec\w*|eval|compile|spawn\w*|"
                         r"posix_spawn\w*|create_subprocess_\w+|"
                         r"runpy|run_path|run_module|"
                         r"__import__|importlib|import_module",

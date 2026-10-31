@@ -124,8 +124,9 @@ reopening and creation. Independent privacy redactions remain permitted and are
 counted separately, with zero writes in dry-run mode. Dry-runs emit the partial
 report; live runs emit it and fail. Existing membership is preserved until a
 complete scan. Empty repos are skipped only when a tree request returns 409 and
-repository metadata reports zero size. Authentication errors, inaccessible repositories, GraphQL errors and
-truncated trees abort the scan rather than presenting an incomplete inventory.
+repository metadata reports zero size. Authentication errors, inaccessible
+repositories, GraphQL errors and truncated trees abort the scan rather than
+presenting an incomplete inventory.
 
 ## Setup and rollout
 

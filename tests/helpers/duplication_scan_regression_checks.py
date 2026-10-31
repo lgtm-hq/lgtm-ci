@@ -102,18 +102,35 @@ class ShellCases(FixtureCase):
         for header in ("#!/bin/sh", "#!/bin/bash -e", "#!/usr/bin/env bash", ""):
             right_files = {path: header + "\n" + body}
             with self.subTest(header=header):
-                for command in (f"./{path}", f"env MODE=check ./{path}"):
-                    block = {"steps": [{"run": command}]}
-                    left = job_unit("org/left", block, files=left_files)
-                    right = job_unit("org/right", block, files=right_files)
-                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
-                    same = job_unit("org/right", block, files=left_files)
-                    self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                for command in (
+                    f"./{path}",
+                    f"env MODE=check ./{path}",
+                    f"SHELL=bash ./{path}",
+                    f"PYTHON=python3 ./{path}",
+                    f"env SH=sh {path}",
+                    f"VERSION=a. ./{path}",
+                ):
+                    with self.subTest(command=command):
+                        block = {"steps": [{"run": command}]}
+                        left = job_unit("org/left", block, files=left_files)
+                        right = job_unit("org/right", block, files=right_files)
+                        self.assertEqual(model.clusters([left, right], [], 0.8), [])
+                        same = job_unit("org/right", block, files=left_files)
+                        self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
                 self.assertNotEqual(
                     syntax.script_shape(path, left_files[path], "org/left", {}),
                     syntax.script_shape(path, right_files[path], "org/right", {}),
                 )
-                for prefix in ("bash", "bash -u", "sh", "source", "env bash"):
+                for prefix in (
+                    "bash",
+                    "bash -u",
+                    "sh",
+                    "source",
+                    ".",
+                    "env bash",
+                    "env SH=sh bash",
+                    "SHELL=bash sh",
+                ):
                     command = f"{prefix} {path}"
                     self.assertEqual(
                         syntax.command_shape(command, "org/left", left_files),
@@ -227,6 +244,32 @@ class Cases(FixtureCase):
                     right = model.units("org/right", False, {path: other})[0]
                     self.assertEqual(model.clusters([left, right], [], 0.8), [])
         ordinary = 'from pathlib import Path\noutput = Path("subprocess/run")\n'
+        self.assertEqual(
+            syntax.script_shape(path, ordinary, "org/left", {}),
+            syntax.script_shape(path, ordinary, "org/right", {}),
+        )
+
+    def test_python_dynamic_evaluation(self) -> None:
+        """Dynamic Python expressions cannot become interchangeable path inputs."""
+        path = "scripts/check.py"
+        for template in (
+            'print(eval("{expression}"))\n',
+            'evaluate = eval\nprint(evaluate("{expression}"))\n',
+            'code = compile("{expression}", "<expression>", "eval")\n',
+            'build = compile\ncode = build("{expression}", "<expression>", "eval")\n',
+        ):
+            with self.subTest(template=template):
+                source = template.format(expression="8/2")
+                changed = template.format(expression="9/3")
+                left = model.units("org/left", False, {path: source})[0]
+                self.assertNotEqual(
+                    left.fingerprint,
+                    model.units("org/left", False, {path: changed})[0].fingerprint,
+                )
+                for other in (source, changed):
+                    right = model.units("org/right", False, {path: other})[0]
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        ordinary = 'print("eval", "compile", "build/output")\n'
         self.assertEqual(
             syntax.script_shape(path, ordinary, "org/left", {}),
             syntax.script_shape(path, ordinary, "org/right", {}),

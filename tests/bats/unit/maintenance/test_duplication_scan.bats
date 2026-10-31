@@ -239,6 +239,10 @@ check_case() {
 	check_case test_python_process_commands "$REGRESSION_CHECKS"
 }
 
+@test "duplication scan keeps Python eval and compile execution repository-specific" {
+	check_case test_python_dynamic_evaluation "$REGRESSION_CHECKS"
+}
+
 @test "duplication scan keeps uninspected local Python imports repository-specific" {
 	check_case test_python_local_imports "$PYTHON_CHECKS"
 }
