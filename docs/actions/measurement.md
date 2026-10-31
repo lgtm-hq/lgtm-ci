@@ -59,7 +59,14 @@ selection exactly matches the stored repositories (or the inventory is empty).
 Ambiguous legacy scopes require a new output directory or checkpoint-only modes.
 
 Online discovery bypasses cached repository metadata and updates visibility for
-explicit repositories and the organization inventory. Previously observed private
+explicit repositories and the organization inventory. Interrupted organization
+discovery retains its pages and cursor until the pass completes; the next normal
+resume starts a fresh pass. A successful pass reconciles prior organization
+members, including older checkpoints without membership fields. Missing repositories
+retain their observed runs and jobs, but lose trusted visibility and metadata
+provenance. Their billing becomes unknown and coverage stays incomplete, including
+offline and jobs-only resumes, until they reappear or an explicit repository
+metadata request succeeds. Previously observed private
 repositories remain in the cohort if they become public, with their usage
 reclassified as public execution. Inventory reports the currently visible private
 count. Add `--jobs-only` to use the existing run inventory; this cannot
@@ -79,7 +86,9 @@ archived repositories; token visibility cannot prove organization-wide access.
 The collector lists runs before collecting jobs, recursively splitting time
 ranges when GitHub's 1,000-result search cap is reached. Half the remaining
 budget is reserved for jobs; interrupted listings retain observed runs from
-cached pages and remain explicitly incomplete. Jobs are fetched round-robin
+cached pages and remain explicitly incomplete. Unfinished repository listings
+finish across invocations before completed listings start another refresh;
+legacy listings without cursor provenance also need a pass. Jobs are fetched round-robin
 across repositories and workflows, newest first within each workflow, using
 four workers and a global limit of four requests per second. At fewer than 100
 remaining primary requests, or any

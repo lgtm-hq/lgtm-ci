@@ -654,9 +654,19 @@ def collect(api: API, state: ROW, checkpoint: Path, jobs_only: bool = False) -> 
     if not jobs_only:
         # Reserve half the remaining time for jobs even if a repo has a run storm.
         api.deadline = time.monotonic() + (api.deadline - time.monotonic()) / 2
+        repositories = list(state["repositories"].items())
+        unfinished = [
+            item
+            for item in repositories
+            if not item[1].get("listing_complete")
+            or item[1].get("listing_in_progress") is not False
+        ]
         try:
             with ThreadPoolExecutor(max_workers=4) as pool:
-                list(pool.map(inventory, state["repositories"].items()))
+                # Finish this generation across bounded invocations before
+                # reopening completed listings, even if this pass has time left.
+                # Legacy listings without cursor provenance also need a pass.
+                list(pool.map(inventory, unfinished or repositories))
         finally:
             api.deadline = original_deadline
     for data in state["repositories"].values():
@@ -688,13 +698,45 @@ def collect(api: API, state: ROW, checkpoint: Path, jobs_only: bool = False) -> 
     save(checkpoint, state)
 
 
+def reconcile_org(
+    state: ROW,
+    org: str,
+    repos: list[ROW],
+    explicit: list[str],
+) -> set[str]:
+    """Refresh selected members and distrust prior members missing from a full pass."""
+    refreshed = set()
+    for repo in repos:
+        name = repo["full_name"].lower()
+        if repo["private"] or name in explicit or name in state["repositories"]:
+            data = state["repositories"].setdefault(name, {})
+            data.update(
+                private=repo["private"],
+                inventory_org=org,
+                metadata_source=f"/orgs/{org}/repos",
+                inventory_missing=False,
+            )
+            refreshed.add(name)
+    for name, data in state["repositories"].items():
+        # Owner matching also reconciles checkpoints predating membership fields.
+        if name not in refreshed and (
+            data.get("inventory_org") == org or name.partition("/")[0] == org
+        ):
+            data.update(private=None, inventory_missing=True)
+            data.pop("metadata_source", None)
+    return refreshed
+
+
 def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
     """Record optional inventory gaps while continuing independent repositories."""
     errors = []
     refreshed = set()
     if args.private_org:
         try:
-            api.invalidate(f"/orgs/{args.private_org}/repos?")
+            # Keep the durable cursor until a pass finishes; only a subsequent
+            # discovery starts a refresh, as with repository run listings.
+            if state.get("org_inventory", {}).get("complete"):
+                api.invalidate(f"/orgs/{args.private_org}/repos?")
             repos = api.pages(f"/orgs/{args.private_org}/repos?type=all")
             if any(
                 not isinstance(repo.get(key), kind)
@@ -709,13 +751,7 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
                 "private_repositories": sum(repo["private"] for repo in repos),
                 "visibility_note": "Only repositories visible to the credential",
             }
-            for repo in repos:
-                name = repo["full_name"].lower()
-                selected = name in args.repo or name in state["repositories"]
-                if repo["private"] or selected:
-                    data = state["repositories"].setdefault(name, {})
-                    data["private"] = repo["private"]
-                    refreshed.add(name)
+            refreshed = reconcile_org(state, args.private_org, repos, args.repo)
         except BudgetExceeded as error:
             errors.append(str(error))
             state["org_inventory"] = {
@@ -731,7 +767,11 @@ def discover(api: API, state: ROW, args: argparse.Namespace) -> None:
                 private = info.get("private") if isinstance(info, dict) else None
                 if not isinstance(private, bool):
                     raise BudgetExceeded("invalid API repository metadata")
-                state["repositories"].setdefault(repo, {})["private"] = private
+                state["repositories"].setdefault(repo, {}).update(
+                    private=private,
+                    metadata_source=f"/repos/{repo}",
+                    inventory_missing=False,
+                )
             except BudgetExceeded as error:
                 errors.append(str(error))
     if errors:
@@ -746,6 +786,8 @@ def coverage_complete(state: ROW) -> bool:
         and bool(state["repositories"])
         and all(
             data.get("listing_complete")
+            and isinstance(data.get("private"), bool)
+            and not data.get("inventory_missing")
             and not data.get("error")
             and not data.get("jobs_error")
             and all(

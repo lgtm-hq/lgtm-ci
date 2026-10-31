@@ -1578,6 +1578,209 @@ def test_interrupted_mutable_jobs_restart_once_before_terminal_progress(
     assert workflow["rounded_job_minutes"] == 402
 
 
+@pytest.mark.parametrize("refresh", [False, True])
+def test_org_discovery_resumes_pages_until_complete_then_refreshes(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    refresh: bool,
+) -> None:
+    """One org page per invocation eventually finishes a fresh or refresh pass."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    state["repositories"] = {}
+    state["scope"] = {"repos": [], "private_org": "example"}
+    if refresh:
+        state["org_inventory"] = {"org": "example", "complete": True}
+        api = measurement.API(tmp_path, 30)
+        monkeypatch.setattr(api, "get", lambda _endpoint: [])
+        assert api.pages("/orgs/example/repos?type=all") == []
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    pages = []
+    allowance = 0
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        nonlocal allowance
+        endpoint = command[-1]
+        assert endpoint.startswith("/orgs/example/repos?")
+        if allowance == 0:
+            raise measurement.BudgetExceeded("deterministic page budget")
+        allowance -= 1
+        page = int(endpoint.rsplit("page=", 1)[1])
+        pages.append(page)
+        size = 100 if page < 3 else 1
+        rows = [
+            {
+                "full_name": f"example/repo-{page}-{i}",
+                "private": page == 3,
+            }
+            for i in range(size)
+        ]
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(rows),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    monkeypatch.setattr(measurement, "list_runs", lambda *_args: [])
+    for invocation in range(3):
+        allowance = 1
+        assert invoke("--private-org", "example") == (0 if invocation == 2 else 2)
+        stored = json.loads(checkpoint.read_text())
+        assert stored["org_inventory"]["complete"] is (invocation == 2)
+    assert pages == [1, 2, 3]
+    assert stored["org_inventory"]["visible_repositories"] == 201
+    assert stored["org_inventory"]["private_repositories"] == 1
+    allowance = 1
+    assert invoke("--private-org", "example") == 2
+    assert pages == [1, 2, 3, 1]
+    assert invoke("--offline") == 2
+
+
+@pytest.mark.parametrize("initial_private", [False, True])
+@pytest.mark.parametrize("resolution", ["reappears", "explicit"])
+@pytest.mark.parametrize("legacy", [False, True])
+def test_missing_org_repository_loses_trusted_metadata_until_resolved(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    invoke: Callable[..., int],
+    initial_private: bool,
+    resolution: str,
+    legacy: bool,
+) -> None:
+    """Checkpoint modes cannot certify a missing repo or bill stale visibility."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    # pylint: disable=too-many-statements  # Cover disappearance, resume and recovery.
+    public = state["repositories"]["example/public"]
+    public["private"] = initial_private
+    run = public["runs"][0]
+    run["created_at"] = "2026-10-02T00:00:00Z"
+    public["attempts"]["3"]["1"] = [
+        {**public["attempts"]["3"]["1"][0], "labels": ["ubuntu-latest"]}
+    ]
+    state["repositories"] = {"example/public": public}
+    explicit = ["example/public"] if resolution == "explicit" else []
+    state["scope"] = {"repos": explicit, "private_org": "example"}
+    # No membership fields: an existing pre-upgrade org checkpoint must reconcile too.
+    state["org_inventory"] = {"org": "example", "complete": True}
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    visible = True
+    metadata_allowed = False
+
+    def pages(_api: Any, endpoint: str, *_args: Any) -> list[dict[str, Any]]:
+        assert endpoint.startswith("/orgs/example/repos?")
+        if not visible:
+            return []
+        return [{"full_name": "example/public", "private": initial_private}]
+
+    def get(_api: Any, endpoint: str) -> dict[str, Any]:
+        assert endpoint == "/repos/example/public"
+        if not metadata_allowed:
+            raise measurement.BudgetExceeded("repository no longer accessible")
+        return {"private": not initial_private}
+
+    monkeypatch.setattr(measurement.API, "pages", pages)
+    monkeypatch.setattr(measurement.API, "get", get)
+    monkeypatch.setattr(measurement, "list_runs", lambda *_args: [run])
+    flags = ["--private-org", "example"]
+    if explicit:
+        flags.extend(["--repo", "example/public"])
+    if not legacy:
+        assert invoke(*flags) == 0
+        observed = json.loads(checkpoint.read_text())["repositories"]["example/public"]
+        assert observed["metadata_source"] == "/orgs/example/repos"
+        assert observed["inventory_org"] == "example"
+    visible = False
+    assert invoke(*flags) == 2
+    stored = json.loads(checkpoint.read_text())
+    missing = stored["repositories"]["example/public"]
+    assert stored["org_inventory"]["complete"] is True
+    assert missing["inventory_missing"] is True
+    assert missing["private"] is None
+    assert "metadata_source" not in missing
+    assert missing["attempts"] == public["attempts"]
+    assert not measurement.coverage_complete(stored)
+    # Restored visibility and completed listings/attempts cannot hide the gap.
+    missing["private"] = initial_private
+    assert not measurement.coverage_complete(stored)
+    for mode in ("--offline", "--jobs-only"):
+        assert invoke(mode) == 2
+        result = json.loads((tmp_path / "measurements.json").read_text())
+        workflow = result["workflows"][0]
+        assert workflow["private"] is None
+        assert workflow["estimated_private_plan_minutes"] == 0
+        assert workflow["public_free_rounded_minutes"] == 0
+        assert workflow["unknown_billing_rounded_minutes"] == 2
+    visible = resolution == "reappears"
+    metadata_allowed = True
+    assert invoke(*flags) == 0
+    resolved = json.loads(checkpoint.read_text())["repositories"]["example/public"]
+    assert not resolved.get("inventory_missing")
+    assert resolved["private"] is (initial_private if visible else not initial_private)
+    assert resolved["metadata_source"] == (
+        "/orgs/example/repos" if visible else "/repos/example/public"
+    )
+    assert invoke("--offline") == 0
+
+
+@pytest.mark.parametrize("completed", [0, 4, 9])
+def test_unfinished_listings_finish_before_completed_refreshes_with_low_budget(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    completed: int,
+) -> None:
+    """Nine repos finish across two-request invocations without restarting."""
+    state["repositories"] = {
+        f"example/repo-{i}": {
+            "private": False,
+            "listing_complete": i < completed,
+            "listing_in_progress": False,
+        }
+        for i in range(9)
+    }
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    allowance = 0
+    calls: list[str] = []
+    request_lock = threading.Lock()
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        nonlocal allowance
+        with request_lock:
+            if allowance == 0:
+                raise measurement.BudgetExceeded("deterministic request budget")
+            allowance -= 1
+            calls.append(command[-1].split("/actions/", 1)[0])
+        return SimpleNamespace(
+            returncode=0,
+            stdout='HTTP/2.0 200 OK\n\n{"total_count": 0, "workflow_runs": []}',
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    pending = 9 - completed if completed < 9 else 9
+    invocations = (pending + 1) // 2
+    for invocation in range(invocations):
+        allowance = 2
+        stored = json.loads(checkpoint.read_text())
+        measurement.collect(measurement.API(tmp_path, 30), stored, checkpoint)
+        assert measurement.coverage_complete(stored) is (invocation == invocations - 1)
+        assert all(
+            stored["repositories"][route.removeprefix("/repos/")]["listing_complete"]
+            for route in calls
+        )
+    expected = range(completed, 9) if completed < 9 else range(9)
+    assert sorted(calls) == [f"/repos/example/repo-{i}" for i in expected]
+
+
 @pytest.mark.parametrize("legacy_org", [None, "example"])
 @pytest.mark.parametrize("exact_repos", [False, True])
 def test_legacy_scope_adoption_is_bounded_to_unambiguous_explicit_inventory(
