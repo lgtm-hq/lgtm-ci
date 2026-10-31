@@ -180,6 +180,65 @@ _pin() {
 	[[ "$matched" -ge "$expected" ]]
 }
 
+# Match places that select an installation version, rather than every quoted
+# occurrence: a compatibility comparison (e.g. kcov's v43-only patch) is not a pin.
+_installer_version_literal() {
+	local version literal
+	version="$(printf '%s\n' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"
+	literal="([\"']${version}[\"']|${version}([[:space:];}]|$))"
+	local assignment='(^|[[:space:];])[[:alpha:]_][[:alnum:]_]*='
+	local fallback='\$\{[[:alnum:]_]+:?[=-]'
+	grep -nE "(${assignment}|${fallback})${literal}" "$2"
+}
+
+@test "tool pins: installer scan rejects literal assignments and default fallbacks" {
+	local snippet
+	while IFS= read -r snippet; do
+		run _installer_version_literal v43 /dev/stdin <<<"$snippet"
+		assert_success
+		assert_output --partial "$snippet"
+	done <<'EOF'
+KCOV_VERSION="v43"
+export KCOV_VERSION='v43'
+local version=v43
+KCOV_VERSION="${KCOV_VERSION:-v43}"
+KCOV_VERSION="${KCOV_VERSION:-"v43"}"
+KCOV_VERSION=${KCOV_VERSION:-'v43'}
+KCOV_VERSION="${1:-${KCOV_VERSION:-v43}}"
+: "${KCOV_VERSION:=v43}"
+: "${KCOV_VERSION:="v43"}"
+KCOV_VERSION="${KCOV_VERSION-v43}"
+if [[ "$KCOV_VERSION" == "v43" ]]; then KCOV_VERSION="v43"; fi
+EOF
+}
+
+@test "tool pins: installer scan permits shared defaults and compatibility comparisons" {
+	run _installer_version_literal v43 /dev/stdin <<'EOF'
+KCOV_VERSION="${KCOV_VERSION:-$DEFAULT_KCOV_VERSION}"
+KCOV_VERSION="${1:-${KCOV_VERSION:-$DEFAULT_KCOV_VERSION}}"
+: "${KCOV_VERSION:=$DEFAULT_KCOV_VERSION}"
+if [[ "$KCOV_VERSION" == "v43" ]]; then
+if [[ "$KCOV_VERSION" != "v43" ]]; then
+if [[ "v43" == "$KCOV_VERSION" ]]; then
+if [ "$KCOV_VERSION" = "v43" ]; then
+EOF
+	assert_failure 1
+	assert_output ""
+}
+
+@test "tool pins: installer scan matches complete literal versions" {
+	run _installer_version_literal 1.14.0 /dev/stdin <<<'BATS_VERSION="1.14.0"'
+	assert_success
+	run _installer_version_literal 1.14.0 /dev/stdin <<'EOF'
+BATS_VERSION="1x14x0"
+BATS_VERSION="1.14.00"
+BATS_VERSION=1.14.00
+BATS_VERSION="${BATS_VERSION:-1.14.00}"
+EOF
+	assert_failure 1
+	assert_output ""
+}
+
 @test "tool pins: no installer under scripts/ci carries its own version literal" {
 	local f v
 	for f in scripts/ci/security/install-osv-scanner.sh \
@@ -191,8 +250,8 @@ _pin() {
 		scripts/ci/actions/install-ai-review-cli.sh \
 		scripts/ci/actions/run-bats-tests.sh; do
 		while IFS= read -r v; do
-			run grep -F "\"$v\"" "${PROJECT_ROOT}/${f}"
-			assert_failure
+			run _installer_version_literal "$v" "${PROJECT_ROOT}/${f}"
+			assert_failure 1
 		done < <(sed -n 's/^DEFAULT_[A-Z0-9_]*_VERSION="\([^"]*\)".*/\1/p' "$VERSIONS_ENV")
 	done
 }
