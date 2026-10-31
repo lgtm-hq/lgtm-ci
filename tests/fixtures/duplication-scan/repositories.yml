@@ -45,6 +45,7 @@ repositories:
       .github/workflows/internal.yml: |
         jobs:
           SECRET_JOB_CANARY:
+            runs-on: ubuntu-26.04
             steps:
               - uses: actions/checkout@eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
               - uses: actions/setup-python@ffffffffffffffffffffffffffffffffffffffff

@@ -1,10 +1,11 @@
 # Initial duplication audit: 2026-10-31
 
 Read-only audit for [#1237](https://github.com/lgtm-hq/lgtm-ci/issues/1237).
-**Provisional:** prerequisite #1236 is still open, so its local-exceptions
-allowlist could not be applied. No GitHub issues, comments or other remote
-state were changed. The session prohibited live API writes; this document is
-the summary to review and post on #1237 before live reporting is enabled.
+**Historical and provisional:** the allowlist was absent during this audit, so
+local exceptions were not applied. No GitHub issues, comments or other remote
+state were changed. Later review fixes changed normalization and fingerprints;
+these counts and identifiers describe only the original audit. Rerun and triage
+a fresh report before enabling live reporting or posting results on #1237.
 
 The final scan read **21 non-archived consumer repositories**, including the
 six private repositories visible to the local login. It considered **699 units**
@@ -21,7 +22,7 @@ included jobs already calling shared lgtm-ci actions; those are now skipped.
 | Fingerprint | Members | Proposed adoption and inputs | Tracker decision |
 | --- | --- | --- | --- |
 | `2a01acce15d589486113dcb2` | `lgtm-hq/holy-grail`: `scripts/ci/fail-audit.sh` | Already matches the helper shipped through `reusable-security-audit`; adopt that implementation rather than introduce another reusable. No additional input is evident from the exact copy. | None of the five named trackers directly tracks this holy-grail copy. A new adoption candidate after #1236 exceptions are applied. |
-| `be07b2bf712a9bd5738d7046` | `lgtm-hq/podex-ops`: `scripts/install-tflint.sh`; `lgtm-hq/rustume-ops`: `scripts/ci/terraform/install-tflint.sh` | Shared TFLint installer, with tool version, platform and checksum as candidate inputs; review the technical exception policy first. | None of the five named trackers directly covers these two paths. Review Terraform scope before adding a component; #1083 explicitly leaves new Terraform products out of its repair scope. |
+| `be07b2bf712a9bd5738d7046` | `lgtm-hq/podex-ops`: `scripts/install-tflint.sh`; `lgtm-hq/rustume-ops`: `scripts/ci/terraform/install-tflint.sh` | Owner triage required. | Owner triage required. |
 | `c85aac82335c4e01cc8d1ebd` | `lgtm-hq/holy-grail`: `.github/workflows/pr-labeler.yml` (job `label`); `lgtm-hq/turbo-themes`: `.github/workflows/pr-labeler.yml` (job `label`) | Adopt the existing `reusable-pr-labeler` workflow. Candidate parameters: token source and `sync-labels`, retaining the shared egress policy. This catalog association was identified during manual triage. | Existing turbo-themes trackers #1051, #1021 and #1066 address different paths/behavior, so link them as context without duplicating their tasks. |
 
 <!-- markdownlint-enable MD013 -->
@@ -50,7 +51,7 @@ All five required trackers were read and were open at the time of this audit:
   retain the existing removal issue.
 
 These are initial triage recommendations. Merge/apply #1236, configure the
-org-wide read App, rerun the scan, review the candidates and post the summary
+org-wide read App, rerun the scan, review the candidates and post a fresh summary
 before setting `DUPLICATION_SCAN_LIVE_ENABLED=true`. The scan does not establish
 that repositories without findings are free of duplication: extra steps,
 renamed variables and indirect dependencies can prevent a conservative match.
@@ -68,5 +69,4 @@ PYTHONDONTWRITEBYTECODE=1 /usr/bin/python3 scripts/ci/maintenance/duplication_sc
 Exit status **0**: one completed final audit, zero API writes, three candidates.
 The generated public-safe report was inspected and summarized above. Earlier
 dry-runs informed the false-positive fixes; only the final inventory is quoted
-here. Temporary reports and locally created lint caches are removed after
-verification.
+here. No scanned source was persisted.

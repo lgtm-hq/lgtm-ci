@@ -110,3 +110,56 @@ check_case() {
 @test "duplication scan dry-run integrates enumeration exceptions redaction and summary" {
 	check_case test_end_to_end_dry_run
 }
+
+@test "duplication scan retains executable inputs environments and job metadata" {
+	check_case test_execution_inputs_and_metadata
+}
+
+@test "duplication scan resolves exact nested extensionless and cyclic scripts" {
+	check_case test_exact_nested_and_extensionless_scripts
+}
+
+@test "duplication scan preserves shell substitution and arithmetic operators" {
+	check_case test_shell_expansions
+}
+
+@test "duplication scan prevents markers in snippets from spoofing cluster identity" {
+	check_case test_marker_spoofing
+}
+
+@test "duplication scan preserves human edits and ignores pin-only body changes" {
+	check_case test_preserves_human_edits_and_pin_bumps
+}
+
+@test "duplication scan rejects GraphQL errors and inaccessible repositories" {
+	check_case test_graphql_errors_and_missing_repository
+}
+
+@test "duplication scan batches blob reads and skips only known empty repositories" {
+	check_case test_files_batches_and_empty_repositories
+}
+
+@test "duplication scan continues with partial coverage for invalid oversized or binary source" {
+	check_case test_partial_scan
+}
+
+@test "duplication scan threshold controls public near-match suggestions" {
+	check_case test_threshold_controls_near_matches
+}
+
+@test "duplication scan skips until App secrets and the allowlist exist" {
+	check_case test_readiness_skips_missing_setup
+}
+
+@test "duplication scan App must cover all repositories with read-only contents" {
+	check_case test_readiness_requires_all_repositories
+}
+
+@test "duplication scan live transport uses the issue token and tolerates empty repos" {
+	check_case test_live_transport_end_to_end
+}
+
+@test "duplication scan and other generated workflow preset maps stay in sync" {
+	run bash "${PROJECT_ROOT}/scripts/ci/egress/sync-workflow-presets.sh" --check
+	assert_success
+}
