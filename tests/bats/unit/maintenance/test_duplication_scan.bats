@@ -14,8 +14,20 @@ setup() {
 }
 
 check_case() {
-	run "$PY" "${2:-$CHECKS}" "Cases.$1"
+	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan keeps concatenated shell words distinct from separate arguments" {
+	check_case test_shell_word_concatenation "$REGRESSION_CHECKS" ShellCases
+}
+
+@test "duplication scan preserves shebang identity for directly executed scripts" {
+	check_case test_direct_script_shebangs "$REGRESSION_CHECKS" ShellCases
+}
+
+@test "duplication scan cleans historical privacy independently of clusters and source coverage" {
+	check_case test_independent_privacy_cleanup "$TRANSPORT_CHECKS"
 }
 
 @test "duplication scan cleans suppressed issue source without changing adoption decisions" {

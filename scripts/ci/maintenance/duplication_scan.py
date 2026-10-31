@@ -48,6 +48,11 @@ from duplication_sources import (  # noqa: E402  # pylint: disable=wrong-import-
 ROOT = Path(__file__).resolve().parents[3]
 TARGET = "lgtm-hq/lgtm-ci"
 MAX_BLOB = 256 * 1024
+PUBLIC_EXAMPLE = re.compile(
+    r"^Public example from `(?P<repository>[^`\r\n]+)`:\r?\n\r?\n"
+    r"(?P<fence>`{3,})\r?\n[\s\S]*?^(?P=fence)\r?$",
+    re.MULTILINE,
+)
 
 
 class GitHubError(RuntimeError):
@@ -285,12 +290,7 @@ def refresh_public_source(existing: str, generated: str) -> str:
     """Retain historical source only when its origin is still publicly rendered."""
     # Recognize the original generated format, including web-edited CRLF and
     # fences longer than source backtick runs. Leave surrounding human text alone.
-    example = re.compile(
-        r"^Public example from `(?P<repository>[^`\r\n]+)`:\r?\n\r?\n"
-        r"(?P<fence>`{3,})\r?\n[\s\S]*?^(?P=fence)\r?$",
-        re.MULTILINE,
-    )
-    old, new = example.search(existing), example.search(generated)
+    old, new = PUBLIC_EXAMPLE.search(existing), PUBLIC_EXAMPLE.search(generated)
     if old is None or (new and old["repository"] == new["repository"]):
         return existing
     # Input names came from the same public example and need the same recheck.
@@ -319,8 +319,80 @@ def has_marker(body: str, marker: str) -> bool:
     return False
 
 
+def redact_historical_body(
+    existing: str,
+    public_repositories: set[str],
+    generated: str,
+) -> str:
+    """Keep source and job details only for verifiably public repositories."""
+
+    def redact_job(match: re.Match[str]) -> str:
+        if match[2].casefold() in public_repositories:
+            return match.group()
+        return match[1]
+
+    refreshed = existing
+    example = PUBLIC_EXAMPLE.search(existing)
+    origin = example["repository"].casefold() if example else ""
+    if origin not in public_repositories:
+        refreshed = refresh_public_source(existing, generated)
+        if example is None:
+            inputs = r"(?m)^Action input names: [^\r\n]*\r?\n"
+            refreshed = re.sub(inputs, "", refreshed)
+    # Retain historical membership even when source coverage is partial.
+    # Remove only job names whose repository is no longer provably public.
+    section = member_section(refreshed)
+    redacted = re.sub(
+        r"(?m)^(- `([^`\r\n]+)`: `[^`\r\n]+`) \(job `[^`\r\n]+`\)",
+        redact_job,
+        section,
+    )
+    return refreshed.replace(section, redacted, 1) if section else refreshed
+
+
+def historical_issues(
+    api: GitHub,
+    findings: list[tuple[str, str, str]],
+    *,
+    public_repositories: set[str] | None,
+    dry_run: bool,
+) -> tuple[list[dict[str, Any]], Counter[str]]:
+    """Read every issue page and apply visibility-based cleanup before matching."""
+    counts: Counter[str] = Counter()
+    if public_repositories is None and api.partial:
+        return [], counts
+    # Listing avoids search-index delays and includes open/closed issues.
+    issues = api.api(f"repos/{TARGET}/issues?state=all&per_page=100", source=False)
+    issues = [issue for issue in issues if "pull_request" not in issue]
+    if public_repositories is None:
+        return issues, counts
+    public = {safe_text(repo).casefold() for repo in public_repositories}
+    generated = {}
+    for fingerprint, _, body in findings:
+        generated[f"<!-- lgtm-ci:dup-scan:{fingerprint} -->"] = body
+    for issue in issues:
+        existing = issue.get("body") or ""
+        markers = re.findall(r"<!-- lgtm-ci:dup-scan:[a-f0-9]{24} -->", existing)
+        marker = next((item for item in markers if has_marker(existing, item)), "")
+        if not marker:
+            continue
+        refreshed = redact_historical_body(existing, public, generated.get(marker, ""))
+        if refreshed == existing:
+            continue
+        counts["redacted"] += 1
+        if not dry_run:
+            api.api(
+                f"repos/{TARGET}/issues/{issue['number']}",
+                read=False,
+                payload={"_method": "PATCH", "body": refreshed},
+            )
+        # Reconciliation should reason from the sanitized body in both modes.
+        issue["body"] = refreshed
+    return issues, counts
+
+
 # Keep coverage and create/update/reopen policy together to review mutations.
-# pylint: disable-next=too-many-locals,too-many-branches
+# pylint: disable-next=too-many-locals,too-many-branches,too-many-arguments
 def reconcile(
     api: GitHub,
     findings: list[tuple[str, str, str]],
@@ -328,16 +400,17 @@ def reconcile(
     dry_run: bool,
     cap: int,
     decisions: dict[str, str] | None = None,
+    public_repositories: set[str] | None = None,
 ) -> Counter[str]:
     """Search open AND closed issues; apply the create/update/closure policy."""
+    issues, counts = historical_issues(
+        api, findings, public_repositories=public_repositories, dry_run=dry_run
+    )
     if api.partial:
         if decisions is not None:
             decisions.update((fingerprint, "blocked") for fingerprint, _, _ in findings)
-        return Counter({"blocked": len(findings)})
-    # Listing avoids search-index delays, and pagination avoids a 100-issue cap.
-    issues = api.api(f"repos/{TARGET}/issues?state=all&per_page=100", source=False)
-    issues = [issue for issue in issues if "pull_request" not in issue]
-    counts: Counter[str] = Counter()
+        counts["blocked"] = len(findings)
+        return counts
     for fingerprint, title, body in findings:
         marker = f"<!-- lgtm-ci:dup-scan:{fingerprint} -->"
         bodies = ((issue, issue.get("body") or "") for issue in issues)
@@ -578,12 +651,15 @@ def main() -> int:
         for group in grouped
     ]
     decisions: dict[str, str] = {}
+    # Missing visibility is never evidence that historical source remains public.
+    public = {repo["full_name"] for repo in repos if repo.get("private") is False}
     counts = reconcile(
         api,
         findings,
         dry_run=dry_run,
         cap=args.max_new_issues,
         decisions=decisions,
+        public_repositories=public,
     )
     lines = [
         "# Cross-repository CI duplication scan",
@@ -610,7 +686,8 @@ def main() -> int:
         lines += ["Skipped: " + json.dumps(skipped) + ".", ""]
         if api.partial:
             lines += [
-                "Partial scan: omitted source; all issue mutations are blocked.",
+                "Partial scan: omitted source; cluster reconciliation is blocked. "
+                "Only independent privacy redactions are permitted.",
                 "",
             ]
     if provisional:

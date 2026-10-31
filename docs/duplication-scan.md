@@ -27,7 +27,12 @@ composite actions are read as additional immutable blobs. Suffix lookup expands
 the blob inventory only; matching always resolves an exact execution path.
 Step `working-directory` and workflow/job `defaults.run` remain significant;
 relative script paths resolve against their effective directory. Quoted string
-whitespace also remains significant. Script-looking arguments such as
+whitespace also remains significant. Adjacent quoted/unquoted fragments within a
+shell word stay repository-specific, including empty quoted fragments: the bounded
+recognizer does not interpret shell concatenation. Separate quoted data arguments
+remain comparable. Direct script execution retains the exact shebang interpreter
+and arguments; supported explicit interpreter invocations ignore that declaration.
+Script-looking arguments such as
 `echo scripts/missing.sh` are data, not executable dependencies. The scanner
 recognizes common keyword/group positions, simple `uv run`, `bun run`, `timeout`,
 interpreter flags and option-free `sudo`, `nohup`, `command`, `env`, `exec` and
@@ -91,6 +96,12 @@ reopens refresh the count only on generated titles, preserving human titles.
 Catalog matches use "adopt … from lgtm-ci" and singular "1 repo" wording.
 Privacy cleanup also applies to every matched closed or rejected issue and any
 duplicate matches, preserving their state, rejection decision and human notes.
+An independent pass checks all scanner-owned issues against current repository
+visibility, including historical clusters that no longer qualify. It removes
+generated examples, their input names, and member job names when their repository
+is private or cannot be verified public. Repository/path membership remains intact,
+and human titles and notes remain unchanged. This pass also runs with partial
+source coverage; repository enumeration errors still abort before any writes.
 Suppressed matches receive only a body patch when cleanup is needed, counted as
 `redacted`; dry-runs count these without writing. Not-planned closures otherwise
 stay silent; completed closures reopen with a comment when the copy is found again.
@@ -108,11 +119,12 @@ and job/input names remain excluded from public output.
 The inventory lists public repository names and only a count for private repos.
 Malformed, oversized and binary files are skipped with aggregate counts and a
 partial-scan notice; no private names or parser source are logged. Partial
-coverage blocks all issue reconciliation, including membership updates,
-reopening and creation. Dry-runs still emit the partial report; live runs emit
-it and fail. Existing membership is preserved until a complete scan. Empty repos
-are skipped only when a tree request returns 409 and repository metadata reports
-zero size. Authentication errors, inaccessible repositories, GraphQL errors and
+coverage blocks cluster reconciliation, including membership updates,
+reopening and creation. Independent privacy redactions remain permitted and are
+counted separately, with zero writes in dry-run mode. Dry-runs emit the partial
+report; live runs emit it and fail. Existing membership is preserved until a
+complete scan. Empty repos are skipped only when a tree request returns 409 and
+repository metadata reports zero size. Authentication errors, inaccessible repositories, GraphQL errors and
 truncated trees abort the scan rather than presenting an incomplete inventory.
 
 ## Setup and rollout

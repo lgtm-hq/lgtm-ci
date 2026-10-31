@@ -152,6 +152,20 @@ def ambiguous_executable(source: str) -> bool:
     return bool(wrappers or UNRESOLVED_PATH.search(source))
 
 
+def concatenated_shell_word(source: str) -> bool:
+    """Keep adjacent quoted/unquoted fragments opaque without interpreting them."""
+    for match in LEXEME.finditer(source):
+        if not match.group().startswith(("'", '"')):
+            continue
+        # Whitespace and shell operators delimit words. Quotes next to any
+        # other character may concatenate, including empty quoted fragments.
+        neighbors = source[max(0, match.start() - 1) : match.start()]
+        neighbors += source[match.end() : match.end() + 1]
+        if any(not char.isspace() and char not in ";&|()<>" for char in neighbors):
+            return True
+    return False
+
+
 def normalize(source: str, repository: str, *, version_parameter: bool = False) -> str:
     """Remove comments/spacing and mask repository, image, path and version literals.
 
@@ -249,7 +263,7 @@ class SourceResolver:
     def __init__(self, repository: str, files: dict[str, str]) -> None:
         self.repository = repository
         self.files = files
-        self.scripts: dict[tuple[str, str], tuple[str, ...]] = {}
+        self.scripts: dict[tuple[str, str, bool], tuple[str, ...]] = {}
         self.actions: dict[str, Any] = {}
 
     def unknown(self, kind: str, path: str) -> str:
@@ -294,6 +308,8 @@ class SourceResolver:
         self, source: str, directory: str = "", visited: frozenset[str] = frozenset()
     ) -> str:
         """Resolve explicit executable paths before masking literal path inputs."""
+        if concatenated_shell_word(source):
+            return self.unknown("shell-word", source)
         # Directory-changing shell control flow is not modeled. Keep the whole
         # block opaque rather than inspecting a script from the wrong directory.
         if executable_matches(DIRECTORY_CHANGE, source):
@@ -308,7 +324,8 @@ class SourceResolver:
         if substitutions or executable_matches(INLINE_PROGRAM, source):
             return self.unknown("shell-command", source)
 
-        def replace(name: str) -> str:
+        def replace(match: re.Match[str]) -> str:
+            name = match["path"]
             workspace = ("${GITHUB_WORKSPACE}/", "$GITHUB_WORKSPACE/")
             rooted = name.startswith(workspace)
             for prefix in workspace:
@@ -316,7 +333,11 @@ class SourceResolver:
             path = posixpath.normpath(posixpath.join("" if rooted else directory, name))
             if path not in self.files or path in visited:
                 return self.unknown("script", path)
-            body = self.script(path, directory, visited)
+            # An explicit interpreter (including source/.) ignores a shebang.
+            # Direct execution must retain the exact interpreter and arguments.
+            interpreter = INTERPRETER + INTERPRETER_FLAGS + r"$"
+            direct = re.search(interpreter, match["prefix"]) is None
+            body = self.script(path, directory, visited, direct=direct)
             digest = hashlib.sha256(str(body).encode()).hexdigest()
             return f"<script:{digest}>"
 
@@ -326,7 +347,7 @@ class SourceResolver:
                 source = (
                     source[: match.start()]
                     + match["prefix"]
-                    + replace(match["path"])
+                    + replace(match)
                     + source[match.end() :]
                 )
         if ambiguous_executable(source):
@@ -334,10 +355,15 @@ class SourceResolver:
         return normalize(source, self.repository)
 
     def script(
-        self, path: str, directory: str = "", visited: frozenset[str] = frozenset()
+        self,
+        path: str,
+        directory: str = "",
+        visited: frozenset[str] = frozenset(),
+        *,
+        direct: bool = True,
     ) -> tuple[str, ...]:
         """Keep quoted whitespace, Python indentation and shell boundaries."""
-        key = (path, directory)
+        key = (path, directory, direct)
         if key in self.scripts:
             return self.scripts[key]
         source = self.files[path]
@@ -402,6 +428,10 @@ class SourceResolver:
                 for match in LEXEME.finditer(normalized)
                 if not match.group().isspace()
             )
+        if direct and source.startswith("#!"):
+            # Preserve the declaration literally; do not resolve env or execute
+            # an interpreter to infer its behavior. It is not a path parameter.
+            shape = (source.split("\n", 1)[0], *shape)
         self.scripts[key] = shape
         return shape
 

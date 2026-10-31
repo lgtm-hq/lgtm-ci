@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Regressions for the two independent reviews of PR #1244 at 0d0182e."""
+"""Offline source and issue-lifecycle regressions for PR #1244."""
 
 from __future__ import annotations
 
@@ -38,6 +38,95 @@ def job_unit(
     return model.file_units(
         repository, False, WORKFLOW, source, {WORKFLOW: source, **(files or {})}, ""
     )[0]
+
+
+class ShellCases(FixtureCase):
+    """Bounded shell recognition must preserve execution and word identities."""
+
+    def test_shell_word_concatenation(self) -> None:
+        """Adjacent quoted fragments must not become separate shell arguments."""
+        for joined, separate in (
+            ('"a""b"', '"a" "b"'),
+            ("'a''b'", "'a' 'b'"),
+            ("\"a\"'b'", "\"a\" 'b'"),
+            ('a"b"', 'a "b"'),
+            ('"a"b', '"a" b'),
+            ('a""', 'a ""'),
+            ('""a', '"" a'),
+        ):
+            left_command = f"printf '%s\\n' {joined}"
+            right_command = f"printf '%s\\n' {separate}"
+            with self.subTest(joined=joined):
+                left = job_unit("org/left", {"steps": [{"run": left_command}]})
+                right = job_unit("org/right", {"steps": [{"run": right_command}]})
+                self.assertNotEqual(left.fingerprint, right.fingerprint)
+                self.assertEqual(model.clusters([left, right], [], 0.8), [])
+                left_script = syntax.script_shape(
+                    "scripts/check.sh",
+                    left_command,
+                    "org/left",
+                    {},
+                )
+                right_script = syntax.script_shape(
+                    "scripts/check.sh",
+                    right_command,
+                    "org/right",
+                    {},
+                )
+                self.assertNotEqual(left_script, right_script)
+                # Unsupported concatenation must not match a copy in another repo.
+                other = job_unit("org/right", {"steps": [{"run": left_command}]})
+                self.assertEqual(model.clusters([left, other], [], 0.8), [])
+        for command in (
+            'printf \'%s\\n\' "a" "b"',
+            "echo 'a  b'",
+            'echo "a"; echo b',
+            'cat "scripts/data.txt"',
+            "gh api 'repos/org/project'",
+        ):
+            with self.subTest(command=command):
+                left = job_unit("org/left", {"steps": [{"run": command}]})
+                right = job_unit("org/right", {"steps": [{"run": command}]})
+                self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+                tabbed = command.replace(" ", "\t", 1)
+                self.assertEqual(
+                    syntax.command_shape(command, "org/left", {}),
+                    syntax.command_shape(tabbed, "org/right", {}),
+                )
+
+    def test_direct_script_shebangs(self) -> None:
+        """Direct execution retains interpreter/flags; explicit shells override it."""
+        path = "scripts/check.sh"
+        body = '[[ "$MODE" == check ]] && echo ready\n'
+        left_files = {path: "#!/bin/bash\n" + body}
+        for header in ("#!/bin/sh", "#!/bin/bash -e", "#!/usr/bin/env bash", ""):
+            right_files = {path: header + "\n" + body}
+            with self.subTest(header=header):
+                for command in (f"./{path}", f"env MODE=check ./{path}"):
+                    block = {"steps": [{"run": command}]}
+                    left = job_unit("org/left", block, files=left_files)
+                    right = job_unit("org/right", block, files=right_files)
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+                    same = job_unit("org/right", block, files=left_files)
+                    self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                self.assertNotEqual(
+                    syntax.script_shape(path, left_files[path], "org/left", {}),
+                    syntax.script_shape(path, right_files[path], "org/right", {}),
+                )
+                for prefix in ("bash", "bash -u", "sh", "source", "env bash"):
+                    command = f"{prefix} {path}"
+                    self.assertEqual(
+                        syntax.command_shape(command, "org/left", left_files),
+                        syntax.command_shape(command, "org/right", right_files),
+                    )
+        # A resolver may cache both explicit and direct execution of one file.
+        for prefix in ("", f"bash {path}; "):
+            command = prefix + f"./{path}"
+            changed = {path: "#!/bin/sh\n" + body}
+            self.assertNotEqual(
+                syntax.command_shape(command, "org/left", left_files),
+                syntax.command_shape(command, "org/right", changed),
+            )
 
 
 class Cases(FixtureCase):

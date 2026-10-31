@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import io
+import itertools
 import json
 import os
 import re
@@ -24,6 +25,134 @@ from gha_expr import evaluate
 
 class Cases(FixtureCase):
     """Select one transport or workflow scenario by its BATS case name."""
+
+    def test_independent_privacy_cleanup(self) -> None:
+        """Historical issues redact private/unverifiable origins without a cluster."""
+        for visibility, partial, dry_run, crlf in itertools.product(
+            ("private", "missing", "public"),
+            (False, True),
+            (False, True),
+            (False, True),
+        ):
+            with self.subTest(
+                visibility=visibility,
+                partial=partial,
+                dry_run=dry_run,
+                crlf=crlf,
+            ):
+                self.check_independent_cleanup(visibility, partial, dry_run, crlf)
+
+    # The scenario checks payload privacy, human edits, issue state and idempotence.
+    # pylint: disable-next=too-many-locals
+    def check_independent_cleanup(
+        self, visibility: str, partial: bool, dry_run: bool, crlf: bool
+    ) -> None:
+        """Check privacy cleanup without introducing cluster membership writes."""
+        original = model.Unit(
+            "org/previously-public",
+            ".github/workflows/ci.yml",
+            "PRIVATE_JOB_CANARY",
+            False,
+            "steps",
+            ("old logic",),
+            "echo PRIVATE_SOURCE_CANARY",
+            ("PRIVATE_INPUT_CANARY",),
+        )
+        _, body = model.render(([original], [], 1.0), 0.8)
+        body = "Owner notes before.\n\n" + body + "\nOwner notes after.\n"
+        repos = (
+            []
+            if visibility == "missing"
+            else [
+                {
+                    "full_name": original.repository,
+                    "private": visibility == "private",
+                    "archived": False,
+                    "files": {"scripts/new.sh": "echo unrelated"},
+                }
+            ]
+        )
+        existing = body.replace("\n", "\r\n") if crlf else body
+        issues = [
+            {
+                "number": index + 1,
+                "state": state,
+                "state_reason": reason,
+                "title": "Owner's adoption plan",
+                "body": existing,
+            }
+            for index, (state, reason) in enumerate(
+                (
+                    ("open", None),
+                    ("closed", "completed"),
+                    ("closed", "not_planned"),
+                )
+            )
+        ]
+        # Neither an incidental marker in a code fence nor
+        # a PR body authorizes scanner issue cleanup.
+        issues += [
+            {"number": 4, "body": "```\n" + existing + "```\n"},
+            {"number": 5, "body": existing, "pull_request": {}},
+        ]
+        api = FakeGitHub(issues, repositories=repos)
+        if partial:
+            api.skipped["oversized source"] = 1
+        argv = ["scan", f"--dry-run={str(dry_run).lower()}"]
+        output = io.StringIO()
+        with (
+            patch.object(sys, "argv", argv),
+            patch.object(scan, "GitHub", return_value=api),
+            patch.object(scan, "references", return_value=[]),
+            patch.object(scan, "load_exceptions", return_value=[]),
+            patch.dict(
+                os.environ,
+                {
+                    "GH_TOKEN": "fixture",
+                    "GITHUB_STEP_SUMMARY": "",
+                },
+            ),
+            redirect_stdout(output),
+        ):
+            self.assertEqual(scan.main(), int(partial and not dry_run))
+        self.assertNotIn("PRIVATE_", output.getvalue())
+        redacted = visibility != "public"
+        self.assertIn(
+            '"redacted": 3' if redacted else "Issue actions",
+            output.getvalue(),
+        )
+        if dry_run or not redacted:
+            self.assertEqual(api.writes, [])
+            self.assertEqual(api.issues, issues)
+            return
+        self.assertEqual(len(api.writes), 3)
+        for old, current, (_, payload) in zip(
+            issues[:3],
+            api.issues[:3],
+            api.writes,
+            strict=True,
+        ):
+            self.assertEqual(set(payload), {"_method", "body"})
+            self.assertEqual(payload["_method"], "PATCH")
+            self.assertEqual({**old, "body": ""}, {**current, "body": ""})
+            self.assertNotIn("PRIVATE_", current["body"])
+            self.assertEqual(
+                scan.membership(current["body"]),
+                (f"- `{original.repository}`: `{original.path}`",),
+            )
+            normalized = current["body"].replace("\r\n", "\n")
+            self.assertTrue(normalized.startswith("Owner notes before.\n"))
+            self.assertTrue(normalized.endswith("\nOwner notes after.\n"))
+        self.assertEqual(api.issues[3:], issues[3:])
+        api.writes.clear()
+        scan.reconcile(
+            api,
+            [],
+            dry_run=False,
+            cap=5,
+            public_repositories=set(),
+        )
+        self.assertEqual(api.writes, [])
 
     # Exercise the synthetic CLI lifecycle, including duplicate matching issues.
     # pylint: disable-next=too-many-locals,too-many-nested-blocks
