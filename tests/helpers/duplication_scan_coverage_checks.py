@@ -31,7 +31,8 @@ class CoverageResponses:
     raw: dict[str, str] = data_field(default_factory=dict)
 
 
-class Transport:
+# Keep independent transport fault controls explicit in this offline test fake.
+class Transport:  # pylint: disable=too-many-instance-attributes
     """Exercise real gh parsing, source reads and persistent issue mutations."""
 
     def __init__(self) -> None:
