@@ -11,15 +11,19 @@ keep the output directory outside the repository. No logs or secrets are fetched
 from __future__ import annotations
 
 import argparse
+import fcntl
 import hashlib
 import json
 import math
 import os
 import subprocess
+import tempfile
 import threading
 import time
 from collections import Counter
+from collections.abc import Iterator
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, TypeGuard
@@ -66,23 +70,57 @@ def stamp(value: str) -> datetime:
 
 def save(path: Path, value: Any) -> None:
     """Atomically checkpoint JSON in a caller-owned, local directory."""
-    temporary = path.with_suffix(".tmp")
-    with os.fdopen(
-        os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600),
-        "w",
-        encoding="utf-8",
-    ) as stream:
-        os.fchmod(stream.fileno(), 0o600)
-        stream.write(json.dumps(value, indent=2) + "\n")
-    temporary.replace(path)
+    descriptor, name = tempfile.mkstemp(
+        dir=path.parent,
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+    )
+    temporary = Path(name)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            stream.write(json.dumps(value, indent=2) + "\n")
+        temporary.replace(path)
+    finally:
+        temporary.unlink(missing_ok=True)
 
 
-def prepare_output(output: Path) -> Path:
-    """Keep private metadata out of checkouts and restrict existing outputs too."""
+def output_directory(output: Path) -> Path:
+    """Create only the output root before taking ownership of its contents."""
     output = output.resolve()
     if any((parent / ".git").exists() for parent in (output, *output.parents)):
         raise ValueError("output must be outside every git checkout")
     output.mkdir(parents=True, exist_ok=True, mode=0o700)
+    return output
+
+
+class OutputInUse(RuntimeError):
+    """Another process owns this output; its collection status is unknown."""
+
+
+@contextmanager
+def output_ownership(output: Path) -> Iterator[None]:
+    """Fail immediately on contention; closing the descriptor releases ownership."""
+    # Keep this inode across invocations: unlinking it could let a new process
+    # lock a replacement while another process still owns the original inode.
+    with os.fdopen(
+        os.open(output / ".collector.lock", os.O_WRONLY | os.O_CREAT, 0o600),
+        "w",
+        encoding="utf-8",
+    ) as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise OutputInUse(
+                "output directory is already in use; collection status unknown; "
+                "retry after the owning invocation exits"
+            ) from error
+        os.fchmod(lock.fileno(), 0o600)
+        yield
+
+
+def prepare_output(output: Path) -> Path:
+    """Keep private metadata out of checkouts and restrict existing outputs too."""
+    output = output_directory(output)
     output.chmod(0o700)
     for name in ("checkpoint.json", "measurements.json"):
         if (output / name).exists():
@@ -919,9 +957,24 @@ def main() -> int:
     if end > datetime.now(timezone.utc):
         parser.error("end must be in the past; open snapshot windows are unsupported")
     try:
-        args.output = prepare_output(args.output)
+        args.output = output_directory(args.output)
     except ValueError as error:
         parser.error(str(error))
+    try:
+        with output_ownership(args.output):
+            prepare_output(args.output)
+            return measure_output(args, start, end, parser)
+    except OutputInUse as error:
+        parser.error(str(error))
+
+
+def measure_output(
+    args: argparse.Namespace,
+    start: datetime,
+    end: datetime,
+    parser: argparse.ArgumentParser,
+) -> int:
+    """Read and update checkpoints and caches only while owning the output."""
     checkpoint = args.output / "checkpoint.json"
     state: ROW = (
         json.loads(checkpoint.read_text())

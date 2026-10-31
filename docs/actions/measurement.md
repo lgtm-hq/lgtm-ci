@@ -10,6 +10,14 @@ the live measurement, publishing a reviewed public-safe report, and validating
 savings remain separate work. A bounded sample does not establish complete
 organization coverage.
 
+Each invocation takes an exclusive process lock before accessing checkpoints or
+caches and keeps it through aggregation, including in offline and jobs-only modes.
+A concurrent invocation exits immediately with code 2 and reports unknown
+collection status on stderr, leaving the owner's checkpoints, caches and summary
+unchanged. Retry after the owner exits. The empty `.collector.lock` file persists;
+ownership is released automatically on process exit, including errors. Keep the
+lock file in place. Atomic JSON saves use unique private temporary files.
+
 ```sh
 python3 scripts/ci/maintenance/measure-actions.py \
   --repo example/project --private-org example \

@@ -4,8 +4,11 @@
 # pylint: disable=too-many-lines  # Keep the focused CLI regressions together.
 
 import json
+import os
+import subprocess
 import sys
 import threading
+import time
 from collections.abc import Callable
 from datetime import datetime, timezone
 from itertools import permutations
@@ -14,6 +17,15 @@ from types import ModuleType, SimpleNamespace
 from typing import Any
 
 import pytest
+
+
+def wait_for_marker(path: Path, process: subprocess.Popen[str]) -> None:
+    """Bound subprocess barriers and fail if the writer exits before reaching one."""
+    deadline = time.monotonic() + 10
+    while not path.exists():
+        assert process.poll() is None, "writer exited before the barrier"
+        assert time.monotonic() < deadline, "writer did not reach the barrier"
+        time.sleep(0.01)
 
 
 @pytest.fixture(name="measurement")
@@ -2187,3 +2199,259 @@ def test_deleted_runs_cannot_hide_unseen_rows_across_bounded_resumes(
     assert 100 in ids
     assert requested == [*range(1, (total - 1) // 100 + 2)] * 2
     assert len(jobs) == total + 1, "terminal attempts refetched during reconciliation"
+
+
+@pytest.fixture(name="cli_command")
+def cli_command_fixture(
+    measurement: ModuleType, state: dict[str, Any], tmp_path: Path
+) -> list[str]:
+    """Run the actual entry point with synthetic public data and bounded requests."""
+    return [
+        sys.executable,
+        str(measurement.__file__),
+        "--start",
+        state["start"],
+        "--end",
+        state["end"],
+        "--repo",
+        "example/public",
+        "--output",
+        str(tmp_path / "output"),
+        "--api-seconds",
+        "30",
+    ]
+
+
+@pytest.mark.parametrize("mode", ["normal", "--offline", "--jobs-only"])
+@pytest.mark.parametrize("api_failure", [False, True])
+def test_cli_process_contention_preserves_owner_and_releases_lock(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    cli_command: list[str],
+    mode: str,
+    api_failure: bool,
+) -> None:
+    """All CLI modes reject a live owner, then resume after success or API failure."""
+    output = tmp_path / "output"
+    output.mkdir()
+    state["repositories"].pop("example/private")
+    state["scope"]["repos"] = ["example/public"]
+    measurement.save(output / "checkpoint.json", state)
+    measurement.save(output / "measurements.json", {"previous": "summary"})
+    cache = output / "cache"
+    cache.mkdir()
+    measurement.save(cache / "legacy.json", {"body": {"synthetic": True}})
+    ready, release, calls = (tmp_path / name for name in ("ready", "release", "calls"))
+    fake_gh = tmp_path / "gh"
+    fake_gh.write_text(
+        f"#!{sys.executable}\n"
+        """import json
+import os
+import sys
+import time
+from pathlib import Path
+
+with open(os.environ['COLLECTOR_TEST_CALLS'], 'a', encoding='utf-8') as stream:
+    stream.write(sys.argv[-1] + '\\n')
+if os.environ.get('COLLECTOR_TEST_OWNER'):
+    Path(os.environ['COLLECTOR_TEST_READY']).touch()
+    deadline = time.monotonic() + 15
+    while not Path(os.environ['COLLECTOR_TEST_RELEASE']).exists():
+        if time.monotonic() >= deadline:
+            raise SystemExit('test barrier timed out')
+        time.sleep(0.01)
+    if os.environ.get('COLLECTOR_TEST_FAIL'):
+        print('HTTP/2.0 403 Forbidden\\n\\n{}')
+        raise SystemExit(1)
+endpoint = sys.argv[-1]
+if endpoint == '/repos/example/public':
+    body = {'private': False}
+elif endpoint.startswith('/repos/example/public/actions/runs?'):
+    body = {'total_count': 0, 'workflow_runs': []}
+else:
+    raise SystemExit('unexpected test endpoint: ' + endpoint)
+print('HTTP/2.0 200 OK\\n\\n' + json.dumps(body))
+""",
+        encoding="utf-8",
+    )
+    fake_gh.chmod(0o700)
+    env = {
+        **os.environ,
+        "PATH": str(tmp_path) + os.pathsep + os.environ["PATH"],
+        "COLLECTOR_TEST_READY": str(ready),
+        "COLLECTOR_TEST_RELEASE": str(release),
+        "COLLECTOR_TEST_CALLS": str(calls),
+    }
+    owner_env = {**env, "COLLECTOR_TEST_OWNER": "1"}
+    if api_failure:
+        owner_env["COLLECTOR_TEST_FAIL"] = "1"
+    owner = subprocess.Popen(
+        cli_command,
+        env=owner_env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_for_marker(ready, owner)
+        if mode == "--offline":
+            # The owner already loaded its state. A contender must reject
+            # ownership before even trying to parse the checkpoint.
+            (output / "checkpoint.json").write_text("{unreadable", encoding="utf-8")
+        before = {path: path.read_bytes() for path in output.rglob("*.json")}
+        before_calls = calls.read_bytes()
+        # Resolve aliases to the same ownership lock, including checkpoint modes.
+        alias = tmp_path / "alias"
+        alias.symlink_to(output, target_is_directory=True)
+        extra = [] if mode == "normal" else [mode]
+        contender = subprocess.run(
+            [*cli_command, "--output", str(alias), *extra],
+            env=env,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
+        assert contender.returncode == 2
+        assert "output directory is already in use" in contender.stderr
+        assert "unknown" in contender.stderr
+        assert contender.stdout == ""
+        assert {path: path.read_bytes() for path in output.rglob("*.json")} == before
+        assert calls.read_bytes() == before_calls, "contender made an API request"
+        assert owner.poll() is None
+    finally:
+        release.touch()
+        try:
+            owner_stdout, owner_stderr = owner.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            owner.kill()
+            owner.communicate()
+            raise
+    assert owner.returncode == (2 if api_failure else 0), owner_stderr
+    assert json.loads(owner_stdout)["complete"] is not api_failure
+    assert json.loads((output / "checkpoint.json").read_text())["repositories"]
+    resumed = subprocess.run(
+        [*cli_command, "--offline"],
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert resumed.returncode == owner.returncode, resumed.stderr
+    assert json.loads(resumed.stdout)["complete"] is not api_failure
+
+
+@pytest.mark.parametrize("failure", ["invalid-json", "window"])
+def test_cli_process_errors_release_output_ownership(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    cli_command: list[str],
+    failure: str,
+) -> None:
+    """Both uncaught read failures and parser exits release the process lock."""
+    output = tmp_path / "output"
+    output.mkdir()
+    checkpoint = output / "checkpoint.json"
+    state["repositories"].pop("example/private")
+    if failure == "invalid-json":
+        checkpoint.write_text("{broken", encoding="utf-8")
+    else:
+        measurement.save(checkpoint, {**state, "start": state["end"]})
+    failed = subprocess.run(
+        [*cli_command, "--offline"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert failed.returncode != 0
+    expected_error = (
+        "JSONDecodeError" if failure == "invalid-json" else "checkpoint date window differs"
+    )
+    assert expected_error in failed.stderr
+    measurement.save(checkpoint, state)
+    resumed = subprocess.run(
+        [*cli_command, "--offline"],
+        capture_output=True,
+        text=True,
+        check=False,
+        timeout=5,
+    )
+    assert resumed.returncode == 0, resumed.stderr
+    assert json.loads(resumed.stdout)["complete"] is True
+
+
+def test_atomic_save_processes_use_independent_temporary_files(
+    measurement: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """Even outside CLI ownership, overlapping atomic saves cannot share a temp."""
+    ready, release = (tmp_path / name for name in ("ready", "release"))
+    target = tmp_path / "saved.json"
+    script = """import runpy
+import sys
+import time
+from pathlib import Path
+
+module = runpy.run_path(sys.argv[1])
+original = module['json'].dumps
+def paused(value, **kwargs):
+    Path(sys.argv[3]).touch()
+    deadline = time.monotonic() + 15
+    while not Path(sys.argv[4]).exists():
+        if time.monotonic() >= deadline:
+            raise RuntimeError('test barrier timed out')
+        time.sleep(0.01)
+    return original(value, **kwargs)
+module['json'].dumps = paused
+module['save'](Path(sys.argv[2]), {'writer': 'first'})
+"""
+    first = subprocess.Popen(
+        [
+            sys.executable,
+            "-c",
+            script,
+            str(measurement.__file__),
+            str(target),
+            str(ready),
+            str(release),
+        ],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+    try:
+        wait_for_marker(ready, first)
+        measurement.save(target, {"writer": "second", "longer": "synthetic"})
+    finally:
+        release.touch()
+        try:
+            _, stderr = first.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            first.kill()
+            first.communicate()
+            raise
+    assert first.returncode == 0, stderr
+    assert json.loads(target.read_text()) == {"writer": "first"}
+    assert target.stat().st_mode & 0o777 == 0o600
+    assert sorted(path.name for path in tmp_path.iterdir()) == [
+        "ready",
+        "release",
+        "saved.json",
+    ]
+
+
+def test_atomic_save_failure_preserves_previous_json_and_cleans_temporary(
+    measurement: ModuleType,
+    tmp_path: Path,
+) -> None:
+    """A failed serialization leaves the prior checkpoint and no private temp."""
+    target = tmp_path / "checkpoint.json"
+    measurement.save(target, {"previous": True})
+    with pytest.raises(TypeError):
+        measurement.save(target, {"unserializable": object()})
+    assert json.loads(target.read_text()) == {"previous": True}
+    assert list(tmp_path.iterdir()) == [target]
