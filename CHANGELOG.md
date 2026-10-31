@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.82.1] - 2026-10-31
+
+### Fixed
+
+- **runners**: route generic control-plane jobs through runner selection (#1254)
+  (df2a502)
+
 ## [0.82.0] - 2026-10-31
 
 ### Added
@@ -3004,7 +3011,8 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.0...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.1...HEAD
+[0.82.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.0...v0.82.1
 [0.82.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.81.0...v0.82.0
 [0.81.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.80.0...v0.81.0
 [0.80.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.3...v0.80.0
