@@ -165,9 +165,7 @@ class Cases(FixtureCase):
                     block,
                     files={**files, nested: "# comment\necho dist/result\n"},
                 )
-                self.assertNotIn("<unresolved-", " ".join(left.shape))
-                self.assertEqual(left.fingerprint, right.fingerprint)
-                self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+                self.assert_units_equivalent(left, right)
                 changed = job_unit(
                     "org/right",
                     block,
@@ -301,9 +299,7 @@ class Cases(FixtureCase):
                 block = {"steps": [{"run": f"{prefix} {path}"}]}
                 left = job_unit("org/left", block, files={path: original})
                 right = job_unit("org/right", block, files={path: changed})
-                self.assertNotIn("<unresolved-", " ".join(left.shape))
-                self.assertEqual(left.fingerprint, right.fingerprint)
-                self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+                self.assert_units_equivalent(left, right)
 
 
 if __name__ == "__main__":

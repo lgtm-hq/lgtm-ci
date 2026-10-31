@@ -203,6 +203,12 @@ def failed_source_inventory(api: FakeGitHub, failure: str) -> Iterator[None]:
 class FixtureCase(unittest.TestCase):
     """Load fixture units without any network activity."""
 
+    def assert_units_equivalent(self, left: model.Unit, right: model.Unit) -> None:
+        """Require resolved units with equal fingerprints to form one cluster."""
+        self.assertNotIn("<unresolved-", " ".join(left.shape))
+        self.assertEqual(left.fingerprint, right.fingerprint)
+        self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+
     def setUp(self) -> None:
         """Build the public and private fixture inventory."""
         self.repositories = yaml.safe_load((FIXTURES / "repositories.yml").read_text())[

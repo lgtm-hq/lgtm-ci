@@ -63,9 +63,7 @@ class Cases(FixtureCase):
                 with self.subTest(scope=scope, shell=shell):
                     left = inline_job("org/left", original, shell, scope)
                     right = inline_job("org/right", changed, shell, scope)
-                    self.assertNotIn("<unresolved-", " ".join(left.shape))
-                    self.assertEqual(left.fingerprint, right.fingerprint)
-                    self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+                    self.assert_units_equivalent(left, right)
 
     def test_effective_shell_precedence(self) -> None:
         """Step settings override job defaults, which override workflow defaults."""
@@ -233,9 +231,7 @@ class Cases(FixtureCase):
                         shell,
                         scope,
                     )
-                    self.assertNotIn("<unresolved-", " ".join(left.shape))
-                    self.assertEqual(left.fingerprint, right.fingerprint)
-                    self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+                    self.assert_units_equivalent(left, right)
 
 
 if __name__ == "__main__":
