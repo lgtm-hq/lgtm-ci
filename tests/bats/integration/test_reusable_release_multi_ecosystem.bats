@@ -74,7 +74,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-multi-ecosystem.yml
 		/^  version-pr:/ { in_job = 1 }
 		/^  report-release-failure:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  version-pr:/ && !/^  report-release-failure:/ { in_job = 0 }
-		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \}\}$/ { found++ }
+		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \|\| vars\.LGTM_CI_RUNNER \|\| '\''ubuntu-[0-9.]+'\'' \}\}$/ { found++ }
 		END { exit found != 2 }
 	' "$WORKFLOW"
 	assert_success
