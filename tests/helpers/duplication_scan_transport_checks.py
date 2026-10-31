@@ -21,6 +21,7 @@ from unittest.mock import patch
 import yaml
 from duplication_scan_support import (
     FIXTURES,
+    MALFORMED_SOURCE_RESPONSES,
     FakeGitHub,
     FixtureCase,
     failed_source_inventory,
@@ -55,6 +56,22 @@ class Cases(FixtureCase):
             ("private", "missing", "unverified", "public"),
             (False, True),
             ("enumeration", "tree", "truncated", "blob", "graphql", "missing-blob"),
+        ):
+            with self.subTest(visibility=visibility, dry_run=dry_run, failure=failure):
+                self.check_independent_cleanup(
+                    visibility,
+                    False,
+                    dry_run,
+                    False,
+                    failure=failure,
+                )
+
+    def test_malformed_inventory_privacy_cleanup(self) -> None:
+        """Malformed transport payloads clean history and preserve their failure."""
+        for visibility, dry_run, failure in itertools.product(
+            ("private", "missing", "unverified", "public"),
+            (False, True),
+            MALFORMED_SOURCE_RESPONSES,
         ):
             with self.subTest(visibility=visibility, dry_run=dry_run, failure=failure):
                 self.check_independent_cleanup(
@@ -157,13 +174,17 @@ class Cases(FixtureCase):
             redirect_stdout(output),
         ):
             if failure:
-                with self.assertRaises(RuntimeError) as raised:
+                error = MALFORMED_SOURCE_RESPONSES.get(
+                    failure,
+                    ("", None, RuntimeError),
+                )[2]
+                with self.assertRaises(error) as raised:
                     scan.main()
                 self.assertNotIn("PRIVATE_", str(raised.exception))
                 self.assertEqual(output.getvalue(), "")
                 # A second failed scan must not repeat privacy mutations.
                 writes = list(api.writes)
-                with self.assertRaises(RuntimeError):
+                with self.assertRaises(error):
                     scan.main()
                 self.assertEqual(api.writes, writes)
                 reconciler.assert_not_called()

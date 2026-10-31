@@ -34,8 +34,20 @@ check_case() {
 	check_case test_failed_inventory_privacy_cleanup "$TRANSPORT_CHECKS"
 }
 
+@test "duplication scan cleans historical privacy after malformed source API responses" {
+	check_case test_malformed_inventory_privacy_cleanup "$TRANSPORT_CHECKS"
+}
+
 @test "duplication scan keeps computed Python process launchers opaque" {
 	check_case test_python_computed_process_launchers "$PYTHON_CHECKS"
+}
+
+@test "duplication scan keeps Windows startfile process launchers opaque" {
+	check_case test_python_startfile_launchers "$PYTHON_CHECKS"
+}
+
+@test "duplication scan still compares ordinary Python launcher strings and data paths" {
+	check_case test_python_launcher_data_controls "$PYTHON_CHECKS"
 }
 
 @test "duplication scan cleans suppressed issue source without changing adoption decisions" {

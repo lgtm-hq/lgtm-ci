@@ -14,7 +14,6 @@ class Cases(FixtureCase):
 
     def test_python_computed_process_launchers(self) -> None:
         """Literal/computed attribute names cannot erase process identities."""
-        path = "scripts/check.py"
         for source in (
             'import os\ngetattr(os, "system")("tools/release")\n',
             'import os\ngetattr(os, "sys" + "tem")("tools/release")\n',
@@ -24,47 +23,120 @@ class Cases(FixtureCase):
             'import os\nlookup = getattr\nlookup(os, name)("tools/release")\n',
             'import posix\ngetattr(posix, "system")("tools/release")\n',
             'import nt\ngetattr(nt, name)("tools/release")\n',
+            'import os\nvars(os)["system"]("tools/release")\n',
+            'import os\nos.__dict__["system"]("tools/release")\n',
+            'import os as ops\nlookup = vars\nname = "sys" + "tem"\n'
+            'lookup(ops)[name]("tools/release")\n',
+            'import os as ops\nops.__dict__["sys" + "tem"]("tools/release")\n',
+            'import operator, os\noperator.attrgetter("system")(os)("tools/release")\n',
+            "import os as ops\nfrom operator import attrgetter as lookup\n"
+            'lookup("sys" + "tem")(ops)("tools/release")\n',
+            'import operator as o, os\no.methodcaller("system", "tools/release")(os)\n',
+            "import os as ops\nfrom operator import methodcaller as lookup\n"
+            'lookup("sys" + "tem", "tools/release")(ops)\n',
+            'import pty\ngetattr(pty, "spawn")(["tools/release"])\n',
+            "import pty as terminal\nlookup = getattr\n"
+            'lookup(terminal, "sp" + "awn")(["tools/release"])\n',
+            'from os import *\nglobals()["sys" + "tem"]("tools/release")\n',
+            'from os import *\nlocals()["sys" + "tem"]("tools/release")\n',
+            "from os import *\nfrom builtins import globals as scope\n"
+            'scope()["sys" + "tem"]("tools/release")\n',
+            'from os import *\nlookup = locals\nlookup()[name]("tools/release")\n',
             "import asyncio as aio\nasync def main():\n"
             '    await getattr(aio, "create_" + "subprocess_shell")("tools/release")\n'
             "aio.run(main())\n",
         ):
-            changed = source.replace("tools/release", "tools/check")
-            repos = ("org/left", "org/right", "org/left")
-            sources = (source, source, changed)
-            scripts = [
-                model.units(repo, False, {path: text})[0]
-                for repo, text in zip(repos, sources, strict=True)
-            ]
+            with self.subTest(source=source):
+                self.check_opaque_python_launcher(source)
+
+    def test_python_startfile_launchers(self) -> None:
+        """Windows executable paths stay opaque, including imported aliases."""
+        for source in (
+            'import os\nos.startfile("tools/release.exe")\n',
+            'import os as ops\nops.startfile("tools/release.exe")\n',
+            'from os import startfile\nstartfile("tools/release.exe")\n',
+            'from os import startfile as launch\nlaunch("tools/release.exe")\n',
+            'import os\nlaunch = os.startfile\nlaunch("tools/release.exe")\n',
+        ):
+            with self.subTest(source=source):
+                self.check_opaque_python_launcher(source)
+
+    def check_opaque_python_launcher(self, source: str) -> None:
+        """Compare script/job pairs without importing or running their source."""
+        path = "scripts/check.py"
+        changed = source.replace("tools/release", "tools/check")
+        pairs = (
+            ("org/left", source),
+            ("org/right", source),
+            ("org/left", changed),
+            ("org/right", changed),
+        )
+        scripts = [model.units(repo, False, {path: text})[0] for repo, text in pairs]
+        jobs = [
+            job_unit(
+                repo,
+                {"steps": [{"run": f"python {path}"}]},
+                files={path: text},
+            )
+            for repo, text in pairs
+        ]
+        for left, *others in (scripts, jobs):
+            with self.subTest(kind=left.kind):
+                for right in others:
+                    self.assertNotEqual(left.fingerprint, right.fingerprint)
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        self.assertIn("<unresolved-python-command:", " ".join(scripts[0].shape))
+
+    def test_python_launcher_data_controls(self) -> None:
+        """Ordinary lookup/data paths and literal launcher names still compare."""
+        # Launcher/lookup words inside data strings are still ordinary inputs.
+        sources = [
+            f'import os\nprint("{word}", "build/output")\n'
+            for word in (
+                "getattr",
+                "__getattribute__",
+                "vars",
+                "__dict__",
+                "attrgetter",
+                "methodcaller",
+                "globals",
+                "locals",
+                "pty",
+                "system",
+                "sys",
+                "tem",
+                "startfile",
+                "tools/release.exe",
+            )
+        ]
+        sources += [
+            'import os\nprint(os.path.join("build/output", "system"))\n',
+            'import pathlib\nfactory = getattr(pathlib, "Path")\n'
+            'print(factory("build/output"))\n',
+            'import types\nsettings = types.SimpleNamespace(output="build/output")\n'
+            'print(vars(settings)["output"])\n',
+        ]
+        path = "scripts/check.py"
+        for source in sources:
+            changed = source.replace("build/output", "dist/result").replace(
+                "tools/release.exe",
+                "tools/check.exe",
+            )
+            pairs = (("org/left", source), ("org/right", changed))
+            units = [model.units(repo, False, {path: text})[0] for repo, text in pairs]
             jobs = [
                 job_unit(
                     repo,
                     {"steps": [{"run": f"python {path}"}]},
                     files={path: text},
                 )
-                for repo, text in zip(repos, sources, strict=True)
+                for repo, text in pairs
             ]
-            self.assertIn("<unresolved-python-command:", " ".join(scripts[0].shape))
-            for left, copy, different in (scripts, jobs):
-                with self.subTest(source=source, kind=left.kind):
-                    for right in (copy, different):
-                        self.assertNotEqual(left.fingerprint, right.fingerprint)
-                        self.assertEqual(model.clusters([left, right], [], 0.8), [])
-        # Launcher/lookup words inside data strings are still ordinary inputs.
-        for word in ("getattr", "__getattribute__", "system", "sys", "tem"):
-            scripts = [
-                model.units(
-                    repo,
-                    False,
-                    {path: f'import os\nprint("{word}", "{output}")\n'},
-                )[0]
-                for repo, output in (
-                    ("org/left", "build/output"),
-                    ("org/right", "dist/result"),
-                )
-            ]
-            self.assertNotIn("<unresolved-", " ".join(scripts[0].shape))
-            self.assertEqual(scripts[0].fingerprint, scripts[1].fingerprint)
-            self.assertEqual(len(model.clusters(scripts, [], 0.8)), 1)
+            with self.subTest(source=source):
+                self.assertNotIn("<unresolved-", " ".join(units[0].shape))
+                for pair in (units, jobs):
+                    self.assertEqual(pair[0].fingerprint, pair[1].fingerprint)
+                    self.assertEqual(len(model.clusters(pair, [], 0.8)), 1)
 
     def test_python_runpy_execution(self) -> None:
         """Uninspected file/module execution cannot establish equivalence."""

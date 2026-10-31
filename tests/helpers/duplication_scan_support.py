@@ -27,6 +27,7 @@ import duplication_sources as syntax  # noqa: E402
 __all__ = [
     "FIXTURES",
     "ROOT",
+    "MALFORMED_SOURCE_RESPONSES",
     "FakeGitHub",
     "FixtureCase",
     "failed_source_inventory",
@@ -36,6 +37,35 @@ __all__ = [
 ]
 
 FIXTURES = ROOT / "tests/fixtures/duplication-scan"
+
+# Endpoint, JSON payload, and expected original source-inventory failure.
+MALFORMED_SOURCE_RESPONSES: dict[str, tuple[str, Any, type[Exception]]] = {
+    "missing-tree": ("tree", {"truncated": False}, KeyError),
+    "null-tree": ("tree", {"tree": None}, TypeError),
+    "missing-tree-type": ("tree", {"tree": [{"path": "scripts/check.sh"}]}, KeyError),
+    "null-tree-item": ("tree", {"tree": [None]}, TypeError),
+    "missing-data": ("graphql", {}, KeyError),
+    "missing-repository": ("graphql", {"data": {}}, KeyError),
+    "missing-alias": ("graphql", {"data": {"repository": {}}}, KeyError),
+    "null-data": ("graphql", {"data": None}, TypeError),
+    "list-data": ("graphql", {"data": []}, TypeError),
+    "list-repository": ("graphql", {"data": {"repository": []}}, RuntimeError),
+    "missing-binary": (
+        "graphql",
+        {"data": {"repository": {"f0": {"text": "echo fixture"}}}},
+        KeyError,
+    ),
+    "missing-text": (
+        "graphql",
+        {"data": {"repository": {"f0": {"isBinary": False}}}},
+        KeyError,
+    ),
+    "list-blob": (
+        "graphql",
+        {"data": {"repository": {"f0": ["PRIVATE_BLOB_CANARY"]}}},
+        TypeError,
+    ),
+}
 
 
 class FakeGitHub(scan.GitHub):
@@ -131,13 +161,19 @@ def failed_source_inventory(api: FakeGitHub, failure: str) -> Iterator[None]:
                 if failure == "graphql"
                 else {"data": {"repository": {"f0": None}}}
             )
+        if failure in MALFORMED_SOURCE_RESPONSES:
+            boundary, malformed, _ = MALFORMED_SOURCE_RESPONSES[failure]
+            if boundary == ("graphql" if endpoint == "graphql" else "tree"):
+                result = malformed
         return subprocess.CompletedProcess(args, 0, json.dumps(result), "")
 
     def request(endpoint: str, **kwargs: Any) -> Any:
         if failure == "enumeration" and endpoint.startswith("orgs/"):
             raise scan.GitHubError(True, 403)
         if "git/trees" in endpoint or endpoint == "graphql":
-            return github.api(api, endpoint, **kwargs)
+            # Only source transport is real; issue reads/writes remain offline.
+            with patch.object(subprocess, "run", side_effect=transport):
+                return github.api(api, endpoint, **kwargs)
         return FakeGitHub.api(api, endpoint, **kwargs)
 
     def inventory(repository: dict[str, Any]) -> dict[str, str]:
@@ -148,7 +184,6 @@ def failed_source_inventory(api: FakeGitHub, failure: str) -> Iterator[None]:
     with (
         patch.object(api, "files", side_effect=inventory),
         patch.object(api, "api", side_effect=request),
-        patch.object(subprocess, "run", side_effect=transport),
     ):
         yield
 

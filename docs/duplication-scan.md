@@ -41,10 +41,13 @@ stay repository-specific; this bounded recognition does not parse arbitrary
 shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. Python process launchers,
-including asyncio's subprocess helpers and computed attribute access in scripts
-importing process-launching modules, also stay unknown until command
-identities can be compared. The same conservative rule covers runpy file/module
-execution and dynamic imports, including imported aliases and computed targets.
+including `os.startfile`, asyncio's subprocess helpers and `pty.spawn`, also stay
+unknown until command identities can be compared. Reflective lookup names
+(`getattr`, `__getattribute__`, `vars`, `__dict__`, `attrgetter`, `methodcaller`,
+`globals` and `locals`) alongside process-module names conservatively keep scripts
+unknown, including imported aliases and computed targets. This bounded token guard
+does not model arbitrary Python data flow. The same conservative rule covers runpy
+file/module execution and dynamic imports, including imported aliases and computed targets.
 Local, relative and third-party Python imports
 keep the entrypoint repository-specific, even when helper source is available:
 their implementations are not inspected. Standard-library imports remain
@@ -102,8 +105,8 @@ visibility, including historical clusters that no longer qualify. It removes
 generated examples, their input names, and member job names when their repository
 is private or cannot be verified public. Repository/path membership remains intact,
 and human titles and notes remain unchanged. This pass also runs with partial
-source coverage and failed tree/blob reads; source-read errors still fail the
-scan and block ordinary reconciliation. Repository enumeration errors abort
+source coverage and failed or malformed tree/blob responses; source-read errors
+still fail the scan and block ordinary reconciliation. Repository enumeration errors abort
 before any writes.
 Suppressed matches receive only a body patch when cleanup is needed, counted as
 `redacted`; dry-runs count these without writing. Not-planned closures otherwise

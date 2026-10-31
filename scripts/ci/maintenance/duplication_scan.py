@@ -635,7 +635,7 @@ def main() -> int:
             continue
         try:
             files = api.files(repo)
-        except RuntimeError:
+        except (RuntimeError, KeyError, TypeError):
             # Source inventory errors block reconciliation, but visibility is
             # already known. Sanitize historical issues, then fail the scan.
             historical_issues(api, [], public_repositories=public, dry_run=dry_run)
