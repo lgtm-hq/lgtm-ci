@@ -10,6 +10,7 @@ setup() {
 	CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_checks.py"
 	TRANSPORT_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_transport_checks.py"
 	REGRESSION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_regression_checks.py"
+	PYTHON_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_python_checks.py"
 }
 
 check_case() {
@@ -180,6 +181,14 @@ check_case() {
 
 @test "duplication scan keeps Python process commands conservative" {
 	check_case test_python_process_commands "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan keeps uninspected local Python imports repository-specific" {
+	check_case test_python_local_imports "$PYTHON_CHECKS"
+}
+
+@test "duplication scan compares unshadowed stdlib imports and retains Python control flow" {
+	check_case test_python_stdlib_imports "$PYTHON_CHECKS"
 }
 
 @test "duplication scan resolves executable positions and treats script arguments as data" {

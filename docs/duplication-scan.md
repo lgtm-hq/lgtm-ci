@@ -31,7 +31,10 @@ shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. Python process launchers,
 including asyncio's subprocess helpers, also stay unknown until command
-identities can be compared.
+identities can be compared. Local, relative and third-party Python imports
+keep the entrypoint repository-specific, even when helper source is available:
+their implementations are not inspected. Standard-library imports remain
+comparable unless an inventoried Python module or package could shadow them.
 Local JavaScript/Docker actions, shell command substitutions, inline programs,
 unresolved dynamic paths and cycles stay unknown. Bare names never use basename fallback.
 Absence of findings does not establish absence of duplication.
@@ -105,8 +108,10 @@ lgtm-ci repository secrets `DUPLICATION_SCAN_APP_ID` and
 A prerequisite job checks for both secrets and `catalog/local-exceptions.yml`.
 If any are absent, it succeeds with a skip notice and the scan job is skipped.
 When present, it uses an App JWT to verify the installation has
-`repository_selection: all` and Contents: read before minting the source token.
-A partially installed App fails this check. The temporary signing key is deleted
+`repository_selection: all`, Contents: read and read-only values for every
+installation permission before minting the source token. Additional write
+permissions and malformed permission mappings fail this check, as does a
+partially installed App. The temporary signing key is deleted
 immediately after signing; credentials and installation responses are not logged.
 
 `GH_READ_TOKEN` reads source. Issue reads and writes use the job's separate

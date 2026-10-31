@@ -426,12 +426,23 @@ def verify_installation(app_id: str, private_key: str) -> None:
     )
     if response.returncode:
         raise RuntimeError("could not verify the source App installation")
-    installation = json.loads(response.stdout)
+    try:
+        installation = json.loads(response.stdout)
+    except json.JSONDecodeError:
+        raise RuntimeError("invalid source App installation response") from None
+    if not isinstance(installation, dict):
+        raise RuntimeError("invalid source App installation response")
     if installation.get("repository_selection") != "all":
         raise RuntimeError(
             "source App must be installed on all organization repositories",
         )
-    if installation.get("permissions", {}).get("contents") != "read":
+    permissions = installation.get("permissions")
+    if not isinstance(permissions, dict) or any(
+        not isinstance(name, str) or not name or level != "read"
+        for name, level in permissions.items()
+    ):
+        raise RuntimeError("source App permissions must be a read-only mapping")
+    if permissions.get("contents") != "read":
         raise RuntimeError("source App must have Contents: read")
 
 

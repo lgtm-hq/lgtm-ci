@@ -234,7 +234,7 @@ class Cases(FixtureCase):
                         }
                         if skip_reason == "oversized":
                             blob["size"] = scan.MAX_BLOB + 1
-                        return client.read_blobs("org/missing", [blob])
+                        return dict(client.read_blobs("org/missing", [blob]))
 
                     output = io.StringIO()
                     with (
@@ -356,13 +356,32 @@ class Cases(FixtureCase):
                 )
 
     def test_readiness_requires_all_repositories(self) -> None:
-        """Readiness requires all repositories."""
-        for selection, permission, valid in [
-            ("all", "read", True),
-            ("selected", "read", False),
-            ("all", "write", False),
+        """Readiness requires all repositories and strictly read-only permissions."""
+        read_only = {"contents": "read", "metadata": "read"}
+        for selection, permissions, valid in [
+            ("all", {"contents": "read"}, True),
+            ("all", {**read_only, "issues": "read", "administration": "read"}, True),
+            ("selected", read_only, False),
+            ("all", {"contents": "write"}, False),
+            ("all", {**read_only, "issues": "write"}, False),
+            ("all", {**read_only, "administration": "write"}, False),
+            ("all", {**read_only, "administration": "admin"}, False),
+            ("all", {**read_only, "issues": None}, False),
+            ("all", {**read_only, "issues": True}, False),
+            ("all", {**read_only, "issues": ["read"]}, False),
+            ("all", {**read_only, "issues": {"access": "read"}}, False),
+            ("all", {**read_only, "": "read"}, False),
+            ("all", {"metadata": "read"}, False),
+            ("all", {}, False),
+            ("all", None, False),
+            ("all", [], False),
+            ("all", "read", False),
+            ("all", True, False),
         ]:
-            with patch.object(subprocess, "run") as run:
+            with (
+                self.subTest(selection=selection, permissions=permissions),
+                patch.object(subprocess, "run") as run,
+            ):
                 run.side_effect = [
                     subprocess.CompletedProcess([], 0, b"signature", b""),
                     subprocess.CompletedProcess(
@@ -371,7 +390,7 @@ class Cases(FixtureCase):
                         json.dumps(
                             {
                                 "repository_selection": selection,
-                                "permissions": {"contents": permission},
+                                "permissions": permissions,
                             }
                         ),
                         "",

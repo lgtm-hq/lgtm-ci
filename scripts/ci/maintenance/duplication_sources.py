@@ -3,11 +3,13 @@
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import io
 import json
 import posixpath
 import re
+import sys
 import tokenize
 from typing import Any
 
@@ -253,6 +255,37 @@ class SourceResolver:
         ).hexdigest()
         return f"<unresolved-{kind}:{digest}>"
 
+    def uninspected_python_imports(self, source: str) -> bool:
+        """Only unshadowed stdlib imports have known external implementations.
+
+        Local and third-party modules are not expanded. Even if their source
+        is in the inventory, tokenizing the entrypoint alone cannot establish
+        their behavior. Relative imports always depend on repository code.
+        """
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            # Tokenizable fragments may lack a complete syntax tree. Their
+            # import behavior is unknown, too; keep the existing token shape.
+            return True
+        modules: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                modules.update(alias.name.split(".", 1)[0] for alias in node.names)
+            elif isinstance(node, ast.ImportFrom):
+                if node.level:
+                    return True
+                modules.add((node.module or "").split(".", 1)[0])
+        # Any inventoried Python module/package with this name might shadow
+        # stdlib resolution; do not infer sys.path or package execution context.
+        local_names = {
+            part
+            for path in self.files
+            if path.endswith(".py")
+            for part in path.removesuffix(".py").split("/")
+        }
+        return bool(modules - sys.stdlib_module_names or modules & local_names)
+
     def command(
         self, source: str, directory: str = "", visited: frozenset[str] = frozenset()
     ) -> str:
@@ -322,6 +355,8 @@ class SourceResolver:
                     ":".join((str(item.type), normalize(item.string, self.repository)))
                     for item in tokens
                 )
+                if self.uninspected_python_imports(source):
+                    shape += (self.unknown("python-import", path),)
                 # Python strings are parameters, not shell command positions.
                 # Keep process-launching scripts opaque until their commands can
                 # be resolved safely, including aliases and computed arguments.
