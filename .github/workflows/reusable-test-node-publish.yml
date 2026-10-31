@@ -71,10 +71,12 @@ on:
         type: string
         default: "Publish Results"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -206,13 +208,16 @@ env:
     pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
     static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
     "external-canary":"github.com:443 api.github.com:443",
-    "duplication-scan":"github.com:443 api.github.com:443"}
+    "duplication-scan":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:
   publish:
     name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     environment:
       name: github-pages

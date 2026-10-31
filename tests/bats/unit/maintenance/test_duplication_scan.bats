@@ -30,6 +30,14 @@ check_case() {
 	check_case test_independent_privacy_cleanup "$TRANSPORT_CHECKS"
 }
 
+@test "duplication scan cleans historical privacy after failed tree and blob API reads" {
+	check_case test_failed_inventory_privacy_cleanup "$TRANSPORT_CHECKS"
+}
+
+@test "duplication scan keeps computed Python process launchers opaque" {
+	check_case test_python_computed_process_launchers "$PYTHON_CHECKS"
+}
+
 @test "duplication scan cleans suppressed issue source without changing adoption decisions" {
 	check_case test_suppressed_source_privacy "$TRANSPORT_CHECKS"
 }

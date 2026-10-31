@@ -1,0 +1,211 @@
+# SPDX-License-Identifier: MIT
+---
+name: Maintenance - Runner Governor
+
+'on':
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Compute and summarize without any writes
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: runner-governor
+  cancel-in-progress: false
+
+env:
+  # lgtm-ci-egress-presets:begin
+  LGTM_CI_EGRESS_PRESETS: >-
+    {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443",
+    "github-results":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443",
+    "github-tooling":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "github-pages":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "docker":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 get.trivy.dev:443
+    mirror.gcr.io:443 check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443
+    timestamp.githubapp.com:443",
+    "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
+    playwright.azureedge.net:443 playwright-akamai.azureedge.net:443 storage.googleapis.com:443
+    archive.ubuntu.com:80 azure.archive.ubuntu.com:80 security.ubuntu.com:80",
+    "pypi":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443",
+    "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    rubygems.org:443 api.rubygems.org:443 index.rubygems.org:443",
+    "npm-publish":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    token.actions.githubusercontent.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 registry.npmjs.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443",
+    "quality":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 bun.sh:443 astral.sh:443 releases.astral.sh:443 sh.rustup.rs:443
+    deb.debian.org:80 registry.npmjs.org:443 crates.io:443 static.crates.io:443 index.crates.io:443
+    semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443 api.deps.dev:443",
+    "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 bun.sh:443 nodejs.org:443 registry.npmjs.org:443
+    pypi.org:443 files.pythonhosted.org:443 astral.sh:443 releases.astral.sh:443
+    static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 security.ubuntu.com:443",
+    "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
+    toolbox-data.anchore.io:443 grype.anchore.io:443 pipelines.actions.githubusercontent.com:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "scorecard":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 gcr.io:443 api.osv.dev:443 api.scorecard.dev:443
+    api.securityscorecards.dev:443",
+    "osv-scanner":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 api.osv.dev:443 api.deps.dev:443",
+    "ai-review":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443 astral.sh:443
+    releases.astral.sh:443",
+    "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
+    actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443",
+    "release-version-pr":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "external-canary":"github.com:443 api.github.com:443",
+    "duplication-scan":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
+  # lgtm-ci-egress-presets:end
+
+jobs:
+  governor:
+    # Scheduling is opt-in only after the documented acceptance evidence.
+    if: >-
+      github.ref == 'refs/heads/main'
+      && (github.event_name == 'workflow_dispatch'
+      || vars.LGTM_CI_RUNNER_GOVERNOR_ENABLED == 'true')
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+      # Separate repository token for the status issue; the App owns org writes.
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          # Manual dry-runs audit the candidate allowlist before activation.
+          egress-policy: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run && 'audit' || 'block' }}
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['runner-governor'] }}
+
+      - name: Checkout governor
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/ci
+
+      - name: Install pinned Blacksmith CLI
+        id: install
+        run: bash scripts/ci/runners/install-blacksmith.sh
+
+      - name: Create governor App token
+        id: token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.RUNNER_GOVERNOR_APP_ID }}
+          private-key: ${{ secrets.RUNNER_GOVERNOR_APP_PRIVATE_KEY }}
+          owner: lgtm-hq
+          # This action has no organization Variables permission input. Omit
+          # permission-* so that scope is retained from the App installation.
+          # The App must have only Variables write, Administration read and
+          # repository metadata read. See the runbook for visibility coverage.
+
+      - name: Decide and apply runner value
+        # Also summarize setup failures; all reads must succeed before a write.
+        if: always() && !cancelled()
+        env:
+          GH_TOKEN: ${{ steps.token.outputs.token }}
+          STATUS_TOKEN: ${{ (github.event_name != 'workflow_dispatch' || !inputs.dry-run) && github.token || '' }}
+          BLACKSMITH_ORG_TOKEN: ${{ secrets.BLACKSMITH_ORG_TOKEN }}
+          BLACKSMITH_ORG: ${{ vars.BLACKSMITH_ORG }}
+          BLACKSMITH_DISABLE_AUTO_UPDATE: '1'
+          LGTM_CI_RUNNER_GOVERNOR_ENABLED: ${{ vars.LGTM_CI_RUNNER_GOVERNOR_ENABLED }}
+          LGTM_CI_RUNNER_MODE: ${{ vars.LGTM_CI_RUNNER_MODE }}
+          LGTM_CI_RUNNER_BLACKSMITH_LABEL: ${{ vars.LGTM_CI_RUNNER_BLACKSMITH_LABEL }}
+          LGTM_CI_RUNNER_BUDGET_MINUTES: ${{ vars.LGTM_CI_RUNNER_BUDGET_MINUTES }}
+          LGTM_CI_RUNNER_GITHUB_INCLUDED_MINUTES: ${{ vars.LGTM_CI_RUNNER_GITHUB_INCLUDED_MINUTES }}
+          LGTM_CI_RUNNER_OVERAGE: ${{ vars.LGTM_CI_RUNNER_OVERAGE }}
+          LGTM_CI_RUNNER_CYCLE_DAY: ${{ vars.LGTM_CI_RUNNER_CYCLE_DAY }}
+          SETUP_READY: >-
+            ${{ steps.install.outcome == 'success' && steps.token.outcome == 'success' }}
+          DRY_RUN: ${{ github.event_name == 'workflow_dispatch' && inputs.dry-run && 'true' || 'false' }}
+        run: python3 scripts/ci/runners/runner_governor.py --dry-run "$DRY_RUN"
+
+  notify-failure:
+    needs: [governor]
+    if: >-
+      failure() && github.ref == 'refs/heads/main'
+      && !(github.event_name == 'workflow_dispatch' && inputs.dry-run)
+    uses: ./.github/workflows/reusable-main-failure-notifier.yml
+    with:
+      workflow-key: runner-governor
+      runner-image: ubuntu-26.04
+    permissions:
+      actions: read
+      contents: read
+      issues: write

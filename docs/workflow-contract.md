@@ -22,7 +22,7 @@ Where applicable, workflows accept:
 | `allowed-endpoints`                | `host:port` list, default empty (see `allowed-endpoints-mode`)         |
 | `allowed-endpoints-mode`           | `replace` (default): non-empty list replaces the preset; `append`      |
 | `job-name`                         | Check name on always-run jobs; test summary suite title                |
-| `runner-image`                     | GitHub-hosted runner OS label (default `ubuntu-24.04`)                 |
+| `runner-image`                     | Override → `LGTM_CI_RUNNER` → `ubuntu-26.04`; default empty            |
 | `runner-map`                       | JSON platform→runner map for multi-arch Docker (default `{}`)          |
 | `timeout-minutes`                  | Job timeout                                                            |
 | `publish-test-summary`             | Publish test/coverage summary comment on the pull request              |
@@ -184,11 +184,77 @@ commit (`job.workflow_sha`), so `tooling-ref` is only needed on GHES or when
 testing unreleased tooling from a branch; passing it otherwise emits a
 deprecation warning.
 
+## Runner selection
+
+Runner-pinnable reusables resolve their runner in this order:
+
+1. A non-empty `runner-image` input supplied by the caller.
+2. `vars.LGTM_CI_RUNNER`, visible to the caller repository.
+3. The standard GitHub-hosted label, `ubuntu-26.04`.
+
+The input defaults to `""`. In a called workflow, `vars` comes from the
+caller repository and organization. An unset or invisible variable therefore
+uses `ubuntu-26.04`. The catalog lists this resolved default rather than the
+empty input. Existing explicit overrides keep taking precedence.
+
+Org administrators can switch consumers by changing `LGTM_CI_RUNNER` or its
+selected-repositories access list. A consumer removed from that list falls
+back to GitHub-hosted runners when it has no repository variable or explicit
+input overriding the selection.
+
+This switch also selects the runner for release, signing, attestation and
+write-enabled jobs. The selected runner receives those jobs' credentials and
+can request OIDC tokens where permitted. Administrators must trust the runner
+provider for those operations before changing the variable or expanding its
+access. Callers requiring GitHub-hosted infrastructure should pin
+`runner-image`; live npm trusted publishing enforces that requirement.
+
+Consumer-owned jobs can use the same org switch:
+
+```yaml
+runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+```
+
+The [runner governor runbook](runner-governor.md) describes automatic free-pool
+selection, opt-in readiness, manual overrides, and activation evidence. The
+governor changes only the org variable value; administrators own repository
+selection and visibility. Live scheduling remains disabled until usage
+accounting and dry-run acceptance have been verified.
+
 ### Runner pinning
 
-Script-backed reusables expose `runner-image` on **every** job so callers can
-pin OS reproducibility (for example `ubuntu-24.04`). Defaults are
-`ubuntu-24.04`; production callers **should** pass an explicit pin.
+Pin `runner-image` only when a job needs a specific runner (for example an
+ARM label, a larger image, or an npm trusted-publishing job that requires
+GitHub-hosted runners). Otherwise leave it empty so the org switch applies.
+Matrix runner selections, macOS/Windows/ARM jobs, the action-only exceptions,
+and fixed Docker coordinator jobs keep their existing runner rules.
+
+Renovate tracks the expression fallbacks (including the consumer snippet above),
+`STANDARD_RUNNER`, and the final reusable runner labels in `catalog/catalog.yml`
+and `docs/catalog.md` with the `github-runners` datasource. They share the
+`ubuntu` dependency and one update PR with literal `runs-on:` labels. Earlier
+Docker runner-map fallbacks and composite-action evidence stay fixed. The runner
+contract requires every `runner-image` default to be empty and fixed Docker
+coordinators to match `STANDARD_RUNNER`.
+
+Before enabling Blacksmith for a consumer, run a small reusable pinned to the
+candidate lgtm-ci commit with `egress-policy: audit`. Use a reusable without
+the runner-policy tier check, such as `reusable-test-shell-run.yml`.
+`validate-runner-policy.sh` rejects audit mode for strict and hardened tiers;
+the Rust binary build and release workflows therefore cannot use audit mode
+with their default tier. The pinned harden-runner supports Blacksmith
+(supported since v2.19.0). Record its observed endpoints; add any required
+hosts to the relevant presets in
+`scripts/ci/lib/egress/presets.sh`, then run
+`bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
+
+The auto-rerun matcher already recognizes `The runner has received a shutdown
+signal` and `lost communication with the server`, independent of the runner
+provider. It also checks acquisition-failure annotations for jobs that ran no
+steps. A Blacksmith loss matches if it emits one of those exact log strings.
+Empty or late logs remain inconclusive (#794); provider-specific annotations or a
+mid-job disappearance without a matching log are not covered by the current
+matcher. Capture that evidence before adding another signature.
 
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
@@ -1127,7 +1193,7 @@ MSVC toolchain and never compiled (#1076).
 
 | Tier (strict Linux unless noted) | Target / builder                                   | What it proves                                                                                   |
 | -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-24.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
+| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-26.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
 | Alternative, strict              | `x86_64-pc-windows-gnu` / `cross`                  | MinGW binary from the `cross` Docker image; no Microsoft SDK download                            |
 | Opt-in, hardened (`reusable-build-artifact.yml`) | `x86_64-pc-windows-msvc` / `native` on `windows-latest` via `runner-map` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
 
@@ -2165,7 +2231,7 @@ again with an empty config, which already scans the `go` directive there.
 | `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
 | `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
 | `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
-| `runner-image`           | `ubuntu-24.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
+| `runner-image`           | `ubuntu-26.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
 
 <!-- markdownlint-enable MD013 MD060 -->
 
@@ -2217,7 +2283,7 @@ are kept forever. See
 | `allowed-endpoints` | `""` | Custom endpoints |
 | `allowed-endpoints-mode` | `replace` | `replace` / `append` |
 | `tooling-ref` | `""` | lgtm-ci git ref |
-| `runner-image` | `ubuntu-24.04` | Runner image label |
+| `runner-image` | `""` | Explicit override, else `LGTM_CI_RUNNER`, else `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward
 `secrets.token` with `packages:write` scope (or `secrets: inherit`).

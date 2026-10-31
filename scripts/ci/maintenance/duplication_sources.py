@@ -405,12 +405,18 @@ class SourceResolver:
                 # access and imported aliases need no separate data-flow parser.
                 # Dynamic imports may load runpy under a computed name as well.
                 # Dynamic evaluation also treats normalized strings as code.
-                names = (
+                names = {
                     item.string  # Inspect code names, never string contents.
                     for item in tokens
                     if item.type == tokenize.NAME
-                )
-                if any(
+                }
+                # Attribute names may be literal strings, expressions or aliases.
+                # Without data-flow resolution, keep computed access opaque in
+                # scripts importing modules that can launch processes.
+                if (
+                    names & {"os", "posix", "nt", "asyncio"}
+                    and names & {"getattr", "__getattribute__"}
+                ) or any(
                     re.fullmatch(
                         r"subprocess|system|popen|exec\w*|eval|compile|spawn\w*|"
                         r"posix_spawn\w*|create_subprocess_\w+|"

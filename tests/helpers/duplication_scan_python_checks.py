@@ -12,6 +12,60 @@ from duplication_scan_support import FixtureCase, model, syntax
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
 
+    def test_python_computed_process_launchers(self) -> None:
+        """Literal/computed attribute names cannot erase process identities."""
+        path = "scripts/check.py"
+        for source in (
+            'import os\ngetattr(os, "system")("tools/release")\n',
+            'import os\ngetattr(os, "sys" + "tem")("tools/release")\n',
+            'import os as ops\ngetattr(ops, name)("tools/release")\n',
+            'import os\nlaunch = getattr(os, "system")\nlaunch("tools/release")\n',
+            'import os\nos.__getattribute__("system")("tools/release")\n',
+            'import os\nlookup = getattr\nlookup(os, name)("tools/release")\n',
+            'import posix\ngetattr(posix, "system")("tools/release")\n',
+            'import nt\ngetattr(nt, name)("tools/release")\n',
+            "import asyncio as aio\nasync def main():\n"
+            '    await getattr(aio, "create_" + "subprocess_shell")("tools/release")\n'
+            "aio.run(main())\n",
+        ):
+            changed = source.replace("tools/release", "tools/check")
+            repos = ("org/left", "org/right", "org/left")
+            sources = (source, source, changed)
+            scripts = [
+                model.units(repo, False, {path: text})[0]
+                for repo, text in zip(repos, sources, strict=True)
+            ]
+            jobs = [
+                job_unit(
+                    repo,
+                    {"steps": [{"run": f"python {path}"}]},
+                    files={path: text},
+                )
+                for repo, text in zip(repos, sources, strict=True)
+            ]
+            self.assertIn("<unresolved-python-command:", " ".join(scripts[0].shape))
+            for left, copy, different in (scripts, jobs):
+                with self.subTest(source=source, kind=left.kind):
+                    for right in (copy, different):
+                        self.assertNotEqual(left.fingerprint, right.fingerprint)
+                        self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        # Launcher/lookup words inside data strings are still ordinary inputs.
+        for word in ("getattr", "__getattribute__", "system", "sys", "tem"):
+            scripts = [
+                model.units(
+                    repo,
+                    False,
+                    {path: f'import os\nprint("{word}", "{output}")\n'},
+                )[0]
+                for repo, output in (
+                    ("org/left", "build/output"),
+                    ("org/right", "dist/result"),
+                )
+            ]
+            self.assertNotIn("<unresolved-", " ".join(scripts[0].shape))
+            self.assertEqual(scripts[0].fingerprint, scripts[1].fingerprint)
+            self.assertEqual(len(model.clusters(scripts, [], 0.8)), 1)
+
     def test_python_runpy_execution(self) -> None:
         """Uninspected file/module execution cannot establish equivalence."""
         path = "scripts/check.py"

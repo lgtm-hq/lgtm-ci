@@ -4,6 +4,7 @@
 #          validation reusable, #381)
 
 load "../../helpers/common"
+load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-smoke-test.yml"
 
@@ -28,10 +29,10 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-docker-smoke-test.yml"
 	assert_success
 }
 
-@test "reusable-docker-smoke-test: exposes runner-image with ubuntu-24.04 default" {
+@test "reusable-docker-smoke-test: exposes runner-image with org-variable fallback" {
 	run grep -E '^      runner-image:$' "$WORKFLOW"
 	assert_success
-	run grep -F 'runs-on: ${{ inputs.runner-image }}' "$WORKFLOW"
+	run grep -F "runs-on: ${RUNNER_IMAGE_RUNS_ON}" "$WORKFLOW"
 	assert_success
 }
 

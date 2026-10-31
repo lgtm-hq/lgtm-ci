@@ -130,10 +130,12 @@ on:
         default: "SBOM & Supply Chain"
 
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
 
       timeout-minutes:
         description: "Job timeout in minutes"
@@ -267,13 +269,16 @@ env:
     pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
     static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
     "external-canary":"github.com:443 api.github.com:443",
-    "duplication-scan":"github.com:443 api.github.com:443"}
+    "duplication-scan":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:
   validate:
     name: Validate SBOM inputs
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -339,7 +344,7 @@ jobs:
     name: ${{ inputs.job-name }}
     needs: [validate]
     if: inputs.mode != 'release-assets'
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Generation/scan/attest only need read for contents. Release asset upload
@@ -442,7 +447,7 @@ jobs:
     name: ${{ inputs.job-name }}
     needs: [validate]
     if: inputs.mode == 'release-assets'
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Read, not write (#770): this job generates and signs, then hands the

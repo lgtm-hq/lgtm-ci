@@ -84,10 +84,10 @@ _pin() {
 
 @test "versions.env: every version line and every digest line is annotated" {
 	# A DEFAULT_*_VERSION / _SHA256_* / _COMMIT line must be preceded by a
-	# `# renovate:` line, except the cursor-agent pins (no registry datasource).
+	# `# renovate:` line, except Cursor and Blacksmith (no documented registry datasource).
 	run awk '
 		/^# renovate:/ { annotated = 1; next }
-		/^DEFAULT_CURSOR_AGENT_/ { annotated = 0; next }
+		/^DEFAULT_(CURSOR_AGENT|BLACKSMITH)_/ { annotated = 0; next }
 		/^DEFAULT_[A-Z0-9_]+_(VERSION|SHA256|COMMIT)/ {
 			if (!annotated) { print "unannotated: " $0; bad = 1 }
 			annotated = 0; next
@@ -102,8 +102,8 @@ _pin() {
 	run awk '
 		/^# renovate:/ { ds = $0; next }
 		/^DEFAULT_[A-Z0-9_]+_SHA256/ {
-			if (ds !~ /datasource=github-release-attachments/ && $0 !~ /CURSOR_AGENT/) { print "bad datasource: " $0; bad = 1 }
-			if ($0 !~ /" # [^ ]+$/ && $0 !~ /CURSOR_AGENT/) { print "no tag comment: " $0; bad = 1 }
+			if (ds !~ /datasource=github-release-attachments/ && $0 !~ /CURSOR_AGENT|BLACKSMITH/) { print "bad datasource: " $0; bad = 1 }
+			if ($0 !~ /" # [^ ]+$/ && $0 !~ /CURSOR_AGENT|BLACKSMITH/) { print "no tag comment: " $0; bad = 1 }
 		}
 		/^DEFAULT_[A-Z0-9_]+_COMMIT=/ {
 			if (ds !~ /datasource=github-tags/) { print "bad datasource: " $0; bad = 1 }
@@ -166,7 +166,7 @@ _pin() {
 			echo "manager did not extract $dep $value from $var" >&2
 			return 1
 		}
-	done < <(grep -E '^DEFAULT_[A-Z0-9_]+_VERSION=' "$VERSIONS_ENV" | grep -v CURSOR_AGENT)
+	done < <(grep -E '^DEFAULT_[A-Z0-9_]+_VERSION=' "$VERSIONS_ENV" | grep -vE 'CURSOR_AGENT|BLACKSMITH')
 	grep -qF "cargo-nextest-" <<<"$matches"
 }
 
@@ -180,6 +180,65 @@ _pin() {
 	[[ "$matched" -ge "$expected" ]]
 }
 
+# Match places that select an installation version, rather than every quoted
+# occurrence: a compatibility comparison (e.g. kcov's v43-only patch) is not a pin.
+_installer_version_literal() {
+	local version literal
+	version="$(printf '%s\n' "$1" | sed 's/[][\\.^$*+?(){}|]/\\&/g')"
+	literal="([\"']${version}[\"']|${version}([[:space:];}]|$))"
+	local assignment='(^|[[:space:];])[[:alpha:]_][[:alnum:]_]*='
+	local fallback='\$\{[[:alnum:]_]+:?[=-]'
+	grep -nE "(${assignment}|${fallback})${literal}" "$2"
+}
+
+@test "tool pins: installer scan rejects literal assignments and default fallbacks" {
+	local snippet
+	while IFS= read -r snippet; do
+		run _installer_version_literal v43 /dev/stdin <<<"$snippet"
+		assert_success
+		assert_output --partial "$snippet"
+	done <<'EOF'
+KCOV_VERSION="v43"
+export KCOV_VERSION='v43'
+local version=v43
+KCOV_VERSION="${KCOV_VERSION:-v43}"
+KCOV_VERSION="${KCOV_VERSION:-"v43"}"
+KCOV_VERSION=${KCOV_VERSION:-'v43'}
+KCOV_VERSION="${1:-${KCOV_VERSION:-v43}}"
+: "${KCOV_VERSION:=v43}"
+: "${KCOV_VERSION:="v43"}"
+KCOV_VERSION="${KCOV_VERSION-v43}"
+if [[ "$KCOV_VERSION" == "v43" ]]; then KCOV_VERSION="v43"; fi
+EOF
+}
+
+@test "tool pins: installer scan permits shared defaults and compatibility comparisons" {
+	run _installer_version_literal v43 /dev/stdin <<'EOF'
+KCOV_VERSION="${KCOV_VERSION:-$DEFAULT_KCOV_VERSION}"
+KCOV_VERSION="${1:-${KCOV_VERSION:-$DEFAULT_KCOV_VERSION}}"
+: "${KCOV_VERSION:=$DEFAULT_KCOV_VERSION}"
+if [[ "$KCOV_VERSION" == "v43" ]]; then
+if [[ "$KCOV_VERSION" != "v43" ]]; then
+if [[ "v43" == "$KCOV_VERSION" ]]; then
+if [ "$KCOV_VERSION" = "v43" ]; then
+EOF
+	assert_failure 1
+	assert_output ""
+}
+
+@test "tool pins: installer scan matches complete literal versions" {
+	run _installer_version_literal 1.14.0 /dev/stdin <<<'BATS_VERSION="1.14.0"'
+	assert_success
+	run _installer_version_literal 1.14.0 /dev/stdin <<'EOF'
+BATS_VERSION="1x14x0"
+BATS_VERSION="1.14.00"
+BATS_VERSION=1.14.00
+BATS_VERSION="${BATS_VERSION:-1.14.00}"
+EOF
+	assert_failure 1
+	assert_output ""
+}
+
 @test "tool pins: no installer under scripts/ci carries its own version literal" {
 	local f v
 	for f in scripts/ci/security/install-osv-scanner.sh \
@@ -191,8 +250,8 @@ _pin() {
 		scripts/ci/actions/install-ai-review-cli.sh \
 		scripts/ci/actions/run-bats-tests.sh; do
 		while IFS= read -r v; do
-			run grep -F "\"$v\"" "${PROJECT_ROOT}/${f}"
-			assert_failure
+			run _installer_version_literal "$v" "${PROJECT_ROOT}/${f}"
+			assert_failure 1
 		done < <(sed -n 's/^DEFAULT_[A-Z0-9_]*_VERSION="\([^"]*\)".*/\1/p' "$VERSIONS_ENV")
 	done
 }
@@ -323,4 +382,15 @@ _install_bats_clone_args() {
 @test "run-bats-tests: a bare BATS_VERSION override clones its v tag" {
 	_install_bats_clone_args "9.8.7"
 	assert_output "clone --depth 1 --branch v9.8.7 https://github.com/bats-core/bats-core.git ${BATS_TEST_TMPDIR}/src/bats-core"
+}
+
+@test "Blacksmith manual pins have a versioned checksum and a documented bump procedure" {
+	[[ -n "$(_pin DEFAULT_BLACKSMITH_VERSION)" ]]
+	[[ "$(_pin DEFAULT_BLACKSMITH_SHA256_LINUX_AMD64)" =~ ^[a-f0-9]{64}$ ]]
+	run grep -F 'renovate: manual; no documented version feed' "$VERSIONS_ENV"
+	assert_success
+	run grep -F 'Verified artifact and manual pin updates' "${PROJECT_ROOT}/docs/runner-governor.md"
+	assert_success
+	run grep -F 'DEFAULT_BLACKSMITH_VERSION' "${PROJECT_ROOT}/scripts/ci/runners/install-blacksmith.sh"
+	assert_success
 }

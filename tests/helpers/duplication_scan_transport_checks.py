@@ -19,7 +19,14 @@ from typing import Any
 from unittest.mock import patch
 
 import yaml
-from duplication_scan_support import FIXTURES, FakeGitHub, FixtureCase, model, scan
+from duplication_scan_support import (
+    FIXTURES,
+    FakeGitHub,
+    FixtureCase,
+    failed_source_inventory,
+    model,
+    scan,
+)
 from gha_expr import evaluate
 
 
@@ -29,7 +36,7 @@ class Cases(FixtureCase):
     def test_independent_privacy_cleanup(self) -> None:
         """Historical issues redact private/unverifiable origins without a cluster."""
         for visibility, partial, dry_run, crlf in itertools.product(
-            ("private", "missing", "public"),
+            ("private", "missing", "unverified", "public"),
             (False, True),
             (False, True),
             (False, True),
@@ -42,10 +49,32 @@ class Cases(FixtureCase):
             ):
                 self.check_independent_cleanup(visibility, partial, dry_run, crlf)
 
+    def test_failed_inventory_privacy_cleanup(self) -> None:
+        """Real tree/blob read failures still permit independent privacy patches."""
+        for visibility, dry_run, failure in itertools.product(
+            ("private", "missing", "unverified", "public"),
+            (False, True),
+            ("enumeration", "tree", "truncated", "blob", "graphql", "missing-blob"),
+        ):
+            with self.subTest(visibility=visibility, dry_run=dry_run, failure=failure):
+                self.check_independent_cleanup(
+                    visibility,
+                    False,
+                    dry_run,
+                    False,
+                    failure=failure,
+                )
+
     # The scenario checks payload privacy, human edits, issue state and idempotence.
-    # pylint: disable-next=too-many-locals
+    # pylint: disable-next=too-many-locals,too-many-arguments
     def check_independent_cleanup(
-        self, visibility: str, partial: bool, dry_run: bool, crlf: bool
+        self,
+        visibility: str,
+        partial: bool,
+        dry_run: bool,
+        crlf: bool,
+        *,
+        failure: str = "",
     ) -> None:
         """Check privacy cleanup without introducing cluster membership writes."""
         original = model.Unit(
@@ -60,18 +89,29 @@ class Cases(FixtureCase):
         )
         _, body = model.render(([original], [], 1.0), 0.8)
         body = "Owner notes before.\n\n" + body + "\nOwner notes after.\n"
+        private = None if visibility == "unverified" else visibility == "private"
         repos = (
             []
             if visibility == "missing"
             else [
                 {
                     "full_name": original.repository,
-                    "private": visibility == "private",
+                    "private": private,
                     "archived": False,
                     "files": {"scripts/new.sh": "echo unrelated"},
                 }
             ]
         )
+        if failure:
+            # Fail an unrelated public repository after visibility enumeration.
+            repos.append(
+                {
+                    "full_name": "org/unrelated",
+                    "private": False,
+                    "archived": False,
+                    "default_branch": "main",
+                }
+            )
         existing = body.replace("\n", "\r\n") if crlf else body
         issues = [
             {
@@ -101,9 +141,11 @@ class Cases(FixtureCase):
         argv = ["scan", f"--dry-run={str(dry_run).lower()}"]
         output = io.StringIO()
         with (
+            failed_source_inventory(api, failure),
             patch.object(sys, "argv", argv),
             patch.object(scan, "GitHub", return_value=api),
             patch.object(scan, "references", return_value=[]),
+            patch.object(scan, "reconcile", wraps=scan.reconcile) as reconciler,
             patch.object(scan, "load_exceptions", return_value=[]),
             patch.dict(
                 os.environ,
@@ -114,13 +156,26 @@ class Cases(FixtureCase):
             ),
             redirect_stdout(output),
         ):
-            self.assertEqual(scan.main(), int(partial and not dry_run))
+            if failure:
+                with self.assertRaises(RuntimeError) as raised:
+                    scan.main()
+                self.assertNotIn("PRIVATE_", str(raised.exception))
+                self.assertEqual(output.getvalue(), "")
+                # A second failed scan must not repeat privacy mutations.
+                writes = list(api.writes)
+                with self.assertRaises(RuntimeError):
+                    scan.main()
+                self.assertEqual(api.writes, writes)
+                reconciler.assert_not_called()
+            else:
+                self.assertEqual(scan.main(), int(partial and not dry_run))
         self.assertNotIn("PRIVATE_", output.getvalue())
-        redacted = visibility != "public"
-        self.assertIn(
-            '"redacted": 3' if redacted else "Issue actions",
-            output.getvalue(),
-        )
+        redacted = visibility != "public" and failure != "enumeration"
+        if not failure:
+            self.assertIn(
+                '"redacted": 3' if redacted else "Issue actions",
+                output.getvalue(),
+            )
         if dry_run or not redacted:
             self.assertEqual(api.writes, [])
             self.assertEqual(api.issues, issues)

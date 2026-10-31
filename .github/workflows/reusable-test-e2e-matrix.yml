@@ -145,10 +145,12 @@ on:
         type: string
         default: ""
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-24.04"
+        default: ""
 
     outputs:
       total-passed:
@@ -277,14 +279,17 @@ env:
     pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
     static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
     "external-canary":"github.com:443 api.github.com:443",
-    "duplication-scan":"github.com:443 api.github.com:443"}
+    "duplication-scan":"github.com:443 api.github.com:443",
+    "runner-governor":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    clireleases.blacksmith.sh:443 backend.blacksmith.sh:443"}
   # lgtm-ci-egress-presets:end
 
 jobs:
   # Generate matrix from inputs
   setup:
     name: Setup Matrix
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     # Independent short cap: the caller's timeout-minutes bounds the main
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10
@@ -413,7 +418,7 @@ jobs:
     # Static name per issue #168; GitHub appends matrix (suite/browser) to each leg.
     name: E2E tests
     needs: setup
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -529,7 +534,7 @@ jobs:
     # purpose — a report is still wanted when tests fail.
     needs: [setup, test]
     if: always() && inputs.upload-report && needs.setup.result == 'success'
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     # Independent short cap: the caller's timeout-minutes bounds the main
     # test job; this coordinator leg keeps its own fixed cap.
     timeout-minutes: 10

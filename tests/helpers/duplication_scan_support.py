@@ -4,10 +4,15 @@
 from __future__ import annotations
 
 import copy
+import json
+import subprocess
 import sys
 import unittest
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
+from unittest.mock import patch
 
 import yaml
 
@@ -24,6 +29,7 @@ __all__ = [
     "ROOT",
     "FakeGitHub",
     "FixtureCase",
+    "failed_source_inventory",
     "model",
     "scan",
     "syntax",
@@ -86,6 +92,65 @@ class FakeGitHub(scan.GitHub):
                 },
             )
         return {}
+
+
+@contextmanager
+def failed_source_inventory(api: FakeGitHub, failure: str) -> Iterator[None]:
+    """Exercise real source reads while retaining stateful offline issue writes."""
+    github = scan.GitHub
+
+    def transport(
+        args: list[str],
+        **_kwargs: Any,
+    ) -> subprocess.CompletedProcess[str]:
+        endpoint = args[2]
+        if (failure == "tree" and "git/trees" in endpoint) or (
+            failure == "blob" and endpoint == "graphql"
+        ):
+            return subprocess.CompletedProcess(
+                args,
+                1,
+                "",
+                "PRIVATE_TRANSPORT_CANARY (HTTP 403)",
+            )
+        if "git/trees" in endpoint:
+            result = {
+                "truncated": failure == "truncated",
+                "tree": [
+                    {
+                        "type": "blob",
+                        "path": "scripts/check.sh",
+                        "sha": "a" * 40,
+                    }
+                ],
+            }
+        else:
+            assert endpoint == "graphql"
+            result = (
+                {"errors": [{"message": "PRIVATE_GRAPHQL_CANARY"}]}
+                if failure == "graphql"
+                else {"data": {"repository": {"f0": None}}}
+            )
+        return subprocess.CompletedProcess(args, 0, json.dumps(result), "")
+
+    def request(endpoint: str, **kwargs: Any) -> Any:
+        if failure == "enumeration" and endpoint.startswith("orgs/"):
+            raise scan.GitHubError(True, 403)
+        if "git/trees" in endpoint or endpoint == "graphql":
+            return github.api(api, endpoint, **kwargs)
+        return FakeGitHub.api(api, endpoint, **kwargs)
+
+    def inventory(repository: dict[str, Any]) -> dict[str, str]:
+        if repository["full_name"] == "org/unrelated":
+            return dict(github.files(api, repository))
+        return dict(FakeGitHub.files(api, repository))
+
+    with (
+        patch.object(api, "files", side_effect=inventory),
+        patch.object(api, "api", side_effect=request),
+        patch.object(subprocess, "run", side_effect=transport),
+    ):
+        yield
 
 
 class FixtureCase(unittest.TestCase):

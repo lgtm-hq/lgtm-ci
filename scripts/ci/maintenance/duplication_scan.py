@@ -625,16 +625,25 @@ def main() -> int:
     exceptions = [] if provisional else load_exceptions(args.exceptions)
     api = GitHub()
     repos = api.api("orgs/lgtm-hq/repos?type=all&per_page=100")
+    # Missing visibility is never evidence that historical source remains public.
+    public = {repo["full_name"] for repo in repos if repo.get("private") is False}
     consumers: list[Unit] = []
     scanned: list[str | None] = []
     private_count = 0
     for repo in sorted(repos, key=lambda item: item["full_name"].lower()):
         if repo["archived"] or repo.get("fork") or repo["full_name"].lower() == TARGET:
             continue
+        try:
+            files = api.files(repo)
+        except RuntimeError:
+            # Source inventory errors block reconciliation, but visibility is
+            # already known. Sanitize historical issues, then fail the scan.
+            historical_issues(api, [], public_repositories=public, dry_run=dry_run)
+            raise
         found = units(
             repo["full_name"],
             bool(repo["private"]),
-            api.files(repo),
+            files,
             skipped=api.skipped,
         )
         consumers.extend(unit for unit in found if not excepted(unit, exceptions))
@@ -651,8 +660,6 @@ def main() -> int:
         for group in grouped
     ]
     decisions: dict[str, str] = {}
-    # Missing visibility is never evidence that historical source remains public.
-    public = {repo["full_name"] for repo in repos if repo.get("private") is False}
     counts = reconcile(
         api,
         findings,

@@ -356,8 +356,11 @@ that issue #1081 covers, and the split chosen for each, is in
 
 ## Runner pinning
 
-Script-backed reusables accept `runner-image` on every job. Pin explicitly in
-production so runner OS does not drift with GitHub's `ubuntu-latest` alias:
+Runner-pinnable reusables default `runner-image` to `""`: an explicit input
+wins, then the caller's `vars.LGTM_CI_RUNNER`, then `ubuntu-26.04`. Leave it
+empty so the org switch applies. Pin only when a job needs a specific runner;
+see [Runner selection](workflow-contract.md#runner-selection). This example
+follows the org switch:
 
 ```yaml
 jobs:
@@ -366,8 +369,6 @@ jobs:
     permissions:
       contents: read
       packages: read
-    with:
-      runner-image: ubuntu-24.04
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
@@ -1965,7 +1966,6 @@ jobs:
       matrix: '[{"node-version":"20"},{"node-version":"22"}]'
       artifact-name: js-dist
       artifact-path: dist
-      runner-image: ubuntu-24.04
 
   validate-examples:
     needs: build
@@ -2710,7 +2710,7 @@ so on that error the probe runs again with an empty config.
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
-| `runner-image`           | `ubuntu-24.04`          | Linux runners only (install script)        |
+| `runner-image`           | `""`                    | Runner override; Linux only                |
 | `concurrency-scope`      | empty                   | Suffix for the cleanup group (see below)   |
 
 The cleanup commit is created through the GitHub API
@@ -2790,7 +2790,7 @@ collection is incomplete.
 | `allowed-endpoints` | `""` | Custom endpoints |
 | `allowed-endpoints-mode` | `replace` | `replace` or `append` |
 | `tooling-ref` | `""` | lgtm-ci tooling git ref |
-| `runner-image` | `ubuntu-24.04` | Runner image label |
+| `runner-image` | `""` | Explicit override → `LGTM_CI_RUNNER` → `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward a token with
 `packages:write` via `secrets.token` (or `secrets: inherit`).
@@ -2903,7 +2903,7 @@ transient registry error can never orphan a live index. Dry-run is the default.
 | `allowed-endpoints` | `""` | Custom endpoints |
 | `allowed-endpoints-mode` | `replace` | `replace` or `append` |
 | `tooling-ref` | `""` | lgtm-ci tooling git ref |
-| `runner-image` | `ubuntu-24.04` | Runner image label |
+| `runner-image` | `""` | Explicit override → `LGTM_CI_RUNNER` → `ubuntu-26.04` |
 
 Grant `contents: read` and `packages: write` on the caller job. Forward a token
 with `packages:write` via `secrets.token`. Scheduled callers should stay in

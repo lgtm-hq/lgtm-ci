@@ -19,6 +19,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
+## [0.82.0] - 2026-10-31
+
+### Added
+
+- **runners**: add gated free-tier runner governor (#1232) (#1249) (00c8cf6)
+
+## [0.81.0] - 2026-10-31
+
+### Added
+
+- **maintenance**: add bounded Actions usage measurement (#1235) (#1245) (1fcb935)
+
+## [0.80.0] - 2026-10-31
+
+### Added
+
+- **runners**: resolve reusable runners via org variable (#1231) (#1243) (d743aff)
+
+### Changed
+
+- **governance**: codify CI inclusion and local exceptions (#1236) (#1240) (d00fa4d)
+- **runners**: `runner-image` now defaults to empty. Reusables use an explicit
+  override, then the caller's `LGTM_CI_RUNNER` variable, then `ubuntu-26.04`.
+  Leave it empty to follow the org runner switch; existing explicit values
+  keep taking precedence (#1231).
+
+## [0.79.3] - 2026-10-31
+
+### Changed
+
+- **deps**: update dependency lgtm-hq/lgtm-ci to 0.79.2 (minor) (#1229) (8f7269a)
+- **deps**: update dependency cargo-bins/cargo-binstall to v1.26.1 (minor) (#1228)
+  (4905950)
+- **deps**: update dependency anchore/syft to v1.55.0 (minor) (#1227) (a469f31)
+- **deps**: update dependency anchore/grype to 0.121.0 (minor) (#1225) (011c1c8)
+- **deps**: update dependency taiki-e/cargo-llvm-cov to v0.9.1 (minor) (#1122) (a5f21ef)
+
+### Fixed
+
+- **renovate**: track reusable runner-image defaults (#1230) (#1239) (a004492)
+
 ## [0.79.2] - 2026-10-29
 
 ### Changed
@@ -2963,7 +3004,11 @@ twine check` when only uv is present; `validate_pypi_package` warns and skips
 - Setup composite actions for Python, Node, Rust, and environment ([#2])
 - Foundation structure and core shell libraries ([#1])
 
-[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.2...HEAD
+[Unreleased]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.82.0...HEAD
+[0.82.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.81.0...v0.82.0
+[0.81.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.80.0...v0.81.0
+[0.80.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.3...v0.80.0
+[0.79.3]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.2...v0.79.3
 [0.79.2]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.1...v0.79.2
 [0.79.1]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.79.0...v0.79.1
 [0.79.0]: https://github.com/lgtm-hq/lgtm-ci/compare/v0.78.1...v0.79.0
