@@ -12,6 +12,33 @@ from duplication_scan_support import FixtureCase, model, syntax
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
 
+    def test_python_multiprocessing_executable_selection(self) -> None:
+        """Spawn executable selection stays opaque through imports and aliases."""
+        resolver = syntax.SourceResolver("org/left", {})
+        for selection in (
+            "import multiprocessing\nmultiprocessing.set_executable('tools/release')\n",
+            "import multiprocessing as mp\nmp.set_executable('tools/release')\n",
+            "from multiprocessing import set_executable\n"
+            "set_executable(\n    'tools/release'\n)\n",
+            "from multiprocessing import set_executable as select_program\n"
+            "select_program('tools/release')\n",
+            "import multiprocessing as mp\nselect_program = mp.set_executable\n"
+            "select_program('tools/release')\n",
+            "import multiprocessing as mp\n"
+            "getattr(mp, 'set_' + 'executable')('tools/release')\n",
+        ):
+            source = (
+                selection + "from multiprocessing import get_context\n"
+                "process = get_context('spawn').Process(target=print)\n"
+                "process.start()\nprocess.join()\n"
+            )
+            with self.subTest(selection=selection):
+                self.assertNotEqual(
+                    resolver.python(source),
+                    resolver.python(source.replace("tools/release", "tools/check")),
+                )
+                self.check_opaque_python_launcher(source)
+
     def test_python_loop_subprocess_launchers(self) -> None:
         """Loop methods and aliases must not mask different executable paths."""
         for method in ("subprocess_exec", "subprocess_shell"):
@@ -151,6 +178,7 @@ class Cases(FixtureCase):
                 "methodcaller",
                 "modules",
                 "pty",
+                "set_executable",
                 "startfile",
                 "subprocess_exec",
                 "subprocess_shell",

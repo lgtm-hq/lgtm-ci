@@ -11,6 +11,7 @@ import posixpath
 import re
 import sys
 import tokenize
+from dataclasses import dataclass
 from typing import Any
 
 import yaml
@@ -265,6 +266,15 @@ def script_shape(
     )
 
 
+@dataclass(frozen=True)
+class ScriptExecution:
+    """Keep direct, interpreter and runner identity together for script caching."""
+
+    direct: bool = True
+    interpreter: str | None = None
+    runner: str | None = None
+
+
 class SourceResolver:
     """Resolve local dependencies in memory, with per-inventory memoization."""
 
@@ -272,7 +282,7 @@ class SourceResolver:
         self.repository = repository
         self.files = files
         self.scripts: dict[
-            tuple[str, str, bool, str | None, str | None],
+            tuple[str, str, ScriptExecution],
             tuple[str, ...],
         ] = {}
         self.actions: dict[str, Any] = {}
@@ -376,9 +386,11 @@ class SourceResolver:
                 path,
                 directory,
                 visited,
-                direct=interpreter is None and match["runner"] is None,
-                interpreter=effective,
-                runner=match["runner"],
+                execution=ScriptExecution(
+                    direct=interpreter is None and match["runner"] is None,
+                    interpreter=effective,
+                    runner=match["runner"],
+                ),
             )
             digest = hashlib.sha256(str(body).encode()).hexdigest()
             return f"<script:{digest}>"
@@ -427,7 +439,7 @@ class SourceResolver:
             if self.uninspected_python_imports(source):
                 shape += (self.unknown("python-import", path),)
             # Python strings are not shell command positions.
-            # Keep process launchers and runpy execution opaque until their
+            # Keep launchers, executable selection and runpy opaque until their
             # dependencies can be resolved, including aliases/computed targets.
             # Treat any runpy reference conservatively: indirect attribute
             # access and imported aliases need no separate data-flow parser.
@@ -450,6 +462,7 @@ class SourceResolver:
                         "posix",
                         "nt",
                         "asyncio",
+                        "multiprocessing",
                         "pty",
                         "sys",
                         "modules",
@@ -472,7 +485,7 @@ class SourceResolver:
                 or any(
                     re.fullmatch(
                         r"\w*subprocess\w*|system|popen|startfile|exec\w*|"
-                        r"eval|compile|spawn\w*|"
+                        r"eval|compile|spawn\w*|set_executable|"
                         r"posix_spawn\w*|"
                         r"runpy|run_path|run_module|"
                         r"__import__|importlib|import_module",
@@ -492,14 +505,16 @@ class SourceResolver:
         directory: str = "",
         visited: frozenset[str] = frozenset(),
         *,
-        direct: bool = True,
-        interpreter: str | None = None,
-        runner: str | None = None,
+        execution: ScriptExecution | None = None,
     ) -> tuple[str, ...]:
         """Keep quoted whitespace, Python indentation and shell boundaries."""
-        key = (path, directory, direct, interpreter, runner)
+        execution = execution or ScriptExecution()
+        key = (path, directory, execution)
         if key in self.scripts:
             return self.scripts[key]
+        direct = execution.direct
+        interpreter = execution.interpreter
+        runner = execution.runner
         # A bare runner can dispatch by suffix, shebang or package metadata;
         # none establishes shell execution. Bun can also select package scripts
         # ahead of an explicit interpreter word. Keep these contexts opaque.

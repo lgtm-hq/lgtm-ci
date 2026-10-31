@@ -97,6 +97,10 @@ check_case() {
 	check_case test_supported_shell_templates "$INLINE_CHECKS"
 }
 
+@test "duplication scan keeps multiprocessing executable selection opaque" {
+	check_case test_python_multiprocessing_executable_selection "$PYTHON_CHECKS"
+}
+
 @test "duplication scan keeps event-loop subprocess methods opaque" {
 	check_case test_python_loop_subprocess_launchers "$PYTHON_CHECKS"
 }
