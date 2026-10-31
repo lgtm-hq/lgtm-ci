@@ -162,10 +162,15 @@ merge_istanbul_files() {
 		local temp_dir
 		temp_dir=$(mktemp -d)
 		local i=0
+		local copy_exit_code=0
 		for file in "${files[@]}"; do
 			if [[ -f "$file" ]]; then
-				cp "$file" "$temp_dir/coverage-$i.json"
-				((i++))
+				cp "$file" "$temp_dir/coverage-$i.json" || {
+					copy_exit_code=$?
+					rm -rf "$temp_dir"
+					return "$copy_exit_code"
+				}
+				i=$((i + 1))
 			fi
 		done
 		local nyc_exit_code=0
