@@ -281,9 +281,9 @@ class API:
         joiner = "&" if "?" in endpoint else "?"
         if field == "workflow_runs" and page > 1 and "total_count" not in cursor:
             # Adopt older cursors using their original, cached inventory count.
-            cursor["total_count"] = self.get(
-                f"{endpoint}{joiner}per_page=100&page=1"
-            )["total_count"]
+            cursor["total_count"] = self.get(f"{endpoint}{joiner}per_page=100&page=1")[
+                "total_count"
+            ]
         while True:
             page_endpoint = f"{endpoint}{joiner}per_page=100&page={page}"
             data = self.get(page_endpoint)
@@ -303,8 +303,10 @@ class API:
             rows.extend(batch)
             progress.parent.mkdir(mode=0o700, exist_ok=True)
             cursor.update(rows=rows, page=page + 1, complete=len(batch) < 100)
-            if cursor["complete"] and field == "workflow_runs" and (
-                cursor["changed"] or len(rows) != cursor["total_count"]
+            if (
+                cursor["complete"]
+                and field == "workflow_runs"
+                and (cursor["changed"] or len(rows) != cursor["total_count"])
             ):
                 # Past creation bounds exclude new runs, but deletions shift
                 # unseen rows behind saved offsets. Reconcile against a fresh
@@ -315,9 +317,7 @@ class API:
                     {"endpoint": endpoint, "body": {"workflow_runs": rows}},
                 )
                 for old_page in range(1, page + 1):
-                    self.discard_page(
-                        f"{endpoint}{joiner}per_page=100&page={old_page}"
-                    )
+                    self.discard_page(f"{endpoint}{joiner}per_page=100&page={old_page}")
                 save(progress, {"rows": [], "page": 1, "complete": False})
                 raise BudgetExceeded("run inventory changed; reconciliation pending")
             save(progress, cursor)

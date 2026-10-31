@@ -2040,9 +2040,7 @@ def test_discovery_reserves_collection_time_across_persisted_resumes(
             assert "/jobs?" in endpoint
             advance(1)
             body = {"jobs": [job]}
-        return SimpleNamespace(
-            returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body)
-        )
+        return SimpleNamespace(returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body))
 
     monkeypatch.setattr(measurement.time, "monotonic", lambda: now)
     monkeypatch.setattr(measurement.time, "sleep", advance)
@@ -2092,9 +2090,7 @@ def test_explicit_metadata_failure_distrusts_persisted_visibility_until_refresh(
             )
         else:
             body = {"private": initial_private if phase == 0 else not initial_private}
-        return SimpleNamespace(
-            returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body)
-        )
+        return SimpleNamespace(returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body))
 
     monkeypatch.setattr(measurement.subprocess, "run", response)
     monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
@@ -2169,9 +2165,7 @@ def test_deleted_runs_cannot_hide_unseen_rows_across_bounded_resumes(
         else:
             jobs.append(endpoint)
             body = {"jobs": []}
-        return SimpleNamespace(
-            returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body)
-        )
+        return SimpleNamespace(returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body))
 
     monkeypatch.setattr(measurement.subprocess, "run", response)
     monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
@@ -2245,8 +2239,7 @@ def test_cli_process_contention_preserves_owner_and_releases_lock(
     ready, release, calls = (tmp_path / name for name in ("ready", "release", "calls"))
     fake_gh = tmp_path / "gh"
     fake_gh.write_text(
-        f"#!{sys.executable}\n"
-        """import json
+        f"#!{sys.executable}\n" """import json
 import os
 import sys
 import time
