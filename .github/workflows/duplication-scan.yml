@@ -1,0 +1,203 @@
+# SPDX-License-Identifier: MIT
+---
+name: Maintenance - Cross-repository Duplication Scan
+
+'on':
+  schedule:
+    - cron: '37 3 * * 1'
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: Report candidates without changing issues
+        type: boolean
+        default: true
+
+permissions: {}
+
+concurrency:
+  group: duplication-scan
+  cancel-in-progress: false
+
+env:
+  # Dedicated preset: the scanner only reads GitHub blobs and reconciles issues.
+  # No package downloads, raw-content hosts or scanned-repository execution.
+  # Generated from scripts/ci/lib/egress/presets.sh.
+  # lgtm-ci-egress-presets:begin
+  LGTM_CI_EGRESS_PRESETS: >-
+    {"github-minimal":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443",
+    "github-results":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443",
+    "github-tooling":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "github-pages":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 release-assets.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443",
+    "docker":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 github-releases.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443 docker.io:443 registry-1.docker.io:443 auth.docker.io:443
+    production.cloudflare.docker.com:443 production.cloudfront.docker.com:443 get.trivy.dev:443
+    mirror.gcr.io:443 check.trivy.dev:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    timestamp.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 fulcio.githubapp.com:443
+    timestamp.githubapp.com:443",
+    "playwright":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 registry.npmjs.org:443 bun.sh:443 cdn.playwright.dev:443
+    playwright.azureedge.net:443 playwright-akamai.azureedge.net:443 storage.googleapis.com:443
+    archive.ubuntu.com:80 azure.archive.ubuntu.com:80 security.ubuntu.com:80",
+    "pypi":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443",
+    "python-dist":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443 pypi.org:443
+    files.pythonhosted.org:443 releases.astral.sh:443 test.pypi.org:443 upload.pypi.org:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "rubygems":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    codeload.github.com:443 objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    rubygems.org:443 api.rubygems.org:443 index.rubygems.org:443",
+    "npm-publish":"github.com:443 api.github.com:443 actions.githubusercontent.com:443
+    token.actions.githubusercontent.com:443 codeload.github.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 registry.npmjs.org:443 fulcio.sigstore.dev:443 rekor.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443",
+    "quality":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 bun.sh:443 astral.sh:443 releases.astral.sh:443 sh.rustup.rs:443
+    deb.debian.org:80 registry.npmjs.org:443 crates.io:443 static.crates.io:443 index.crates.io:443
+    semgrep.dev:443 metrics.semgrep.dev:443 api.osv.dev:443 api.deps.dev:443",
+    "build-artifact":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    github-releases.githubusercontent.com:443 bun.sh:443 nodejs.org:443 registry.npmjs.org:443
+    pypi.org:443 files.pythonhosted.org:443 astral.sh:443 releases.astral.sh:443
+    static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "shell-test":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 security.ubuntu.com:443",
+    "sbom":"github.com:443 api.github.com:443 codeload.github.com:443
+    release-assets.githubusercontent.com:443 objects.githubusercontent.com:443
+    raw.githubusercontent.com:443 uploads.github.com:443 anchore.io:443 get.anchore.io:443
+    toolbox-data.anchore.io:443 grype.anchore.io:443 pipelines.actions.githubusercontent.com:443
+    fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443 oauth2.sigstore.dev:443",
+    "scorecard":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    pipelines.actions.githubusercontent.com:443 gcr.io:443 api.osv.dev:443 api.scorecard.dev:443
+    api.securityscorecards.dev:443",
+    "osv-scanner":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 api.osv.dev:443 api.deps.dev:443",
+    "ai-review":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443 astral.sh:443
+    releases.astral.sh:443",
+    "rust-release":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    raw.githubusercontent.com:443 release-assets.githubusercontent.com:443 aka.ms:443
+    download.visualstudio.microsoft.com:443 static.rust-lang.org:443 sh.rustup.rs:443 crates.io:443
+    static.crates.io:443 index.crates.io:443 ghcr.io:443 pkg-containers.githubusercontent.com:443
+    docker.io:443 registry-1.docker.io:443 auth.docker.io:443 production.cloudflare.docker.com:443
+    production.cloudfront.docker.com:443 archive.ubuntu.com:80 azure.archive.ubuntu.com:80
+    security.ubuntu.com:80 fulcio.sigstore.dev:443 rekor.sigstore.dev:443 timestamp.sigstore.dev:443
+    tuf-repo-cdn.sigstore.dev:443 sigstore-tuf-root.storage.googleapis.com:443",
+    "release-recover":"github.com:443 api.github.com:443 uploads.github.com:443
+    actions.githubusercontent.com:443 token.actions.githubusercontent.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 pipelines.actions.githubusercontent.com:443
+    *.blob.core.windows.net:443 pypi.org:443 registry.npmjs.org:443 fulcio.sigstore.dev:443
+    rekor.sigstore.dev:443 tuf-repo-cdn.sigstore.dev:443 oauth2.sigstore.dev:443 ghcr.io:443
+    pkg-containers.githubusercontent.com:443",
+    "release-version-pr":"github.com:443 api.github.com:443 codeload.github.com:443
+    objects.githubusercontent.com:443 raw.githubusercontent.com:443
+    release-assets.githubusercontent.com:443 uploads.github.com:443
+    pipelines.actions.githubusercontent.com:443 pypi.org:443 files.pythonhosted.org:443
+    static.rust-lang.org:443 crates.io:443 static.crates.io:443 index.crates.io:443",
+    "external-canary":"github.com:443 api.github.com:443",
+    "duplication-scan":"github.com:443 api.github.com:443"}
+  # lgtm-ci-egress-presets:end
+
+jobs:
+  prerequisites:
+    name: Check scan prerequisites
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      ready: ${{ steps.readiness.outputs.ready }}
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['duplication-scan'] }}
+
+      - name: Checkout scanner and reference catalog
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check source App and allowlist readiness
+        id: readiness
+        env:
+          DUPLICATION_SCAN_APP_ID: ${{ secrets.DUPLICATION_SCAN_APP_ID }}
+          DUPLICATION_SCAN_APP_PRIVATE_KEY: ${{ secrets.DUPLICATION_SCAN_APP_PRIVATE_KEY }}
+        run: /usr/bin/python3 scripts/ci/maintenance/duplication_scan.py --check-readiness
+
+  duplication-scan:
+    name: Cross-repository duplication scan
+    needs: prerequisites
+    if: needs.prerequisites.outputs.ready == 'true'
+    runs-on: ubuntu-26.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Harden runner
+        uses: step-security/harden-runner@46b06cea07f9e64621fdf066ba77ac6915163d43 # v2.22.3
+        with:
+          egress-policy: block
+          allowed-endpoints: ${{ fromJSON(env.LGTM_CI_EGRESS_PRESETS)['duplication-scan'] }}
+
+      - name: Checkout scanner and reference catalog
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # Configure an org-wide read-only App first; see docs/duplication-scan.md.
+      - name: Create org read token
+        id: read-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ secrets.DUPLICATION_SCAN_APP_ID }}
+          private-key: ${{ secrets.DUPLICATION_SCAN_APP_PRIVATE_KEY }}
+          owner: lgtm-hq
+          permission-contents: read
+
+      - name: Scan and report
+        # Live reporting stays off until the first audit is triaged and #1236
+        # merges. The owner then sets DUPLICATION_SCAN_LIVE_ENABLED=true.
+        env:
+          GH_READ_TOKEN: ${{ steps.read-token.outputs.token }}
+          GH_TOKEN: ${{ github.token }}
+          SCAN_DRY_RUN: >-
+            ${{ vars.DUPLICATION_SCAN_LIVE_ENABLED != 'true' ||
+            (github.event_name == 'workflow_dispatch' && inputs.dry-run) }}
+        run: /usr/bin/python3 scripts/ci/maintenance/duplication_scan.py --dry-run="$SCAN_DRY_RUN"

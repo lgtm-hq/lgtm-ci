@@ -1,0 +1,8 @@
+# SPDX-License-Identifier: MIT
+schema-version: 1
+exceptions:
+  - repo: lgtm-hq/beta
+    path: .github/workflows/release.yaml
+    job: ship
+    reason: Caller needs product-specific setup that cannot be injected.
+    link: https://github.com/lgtm-hq/lgtm-ci/issues/1236
