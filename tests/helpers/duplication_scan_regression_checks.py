@@ -372,9 +372,7 @@ class Cases(FixtureCase):
     def test_wrapped_script_identity(self) -> None:
         """Supported wrappers and shell positions compare actual called bodies."""
         commands = [
-            ("uv run {path}", "py"),
             ("uv run python {path}", "py"),
-            ("bun run {path}", "ts"),
             ("timeout 60 {path}", "sh"),
             ("exec {path}", "sh"),
             ("time bash {path}", "sh"),

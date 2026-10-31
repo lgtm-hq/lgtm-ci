@@ -21,6 +21,26 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan bare runner Python retains conditional suite membership" {
+	check_case test_bare_runner_python_flow "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan bare runner Python retains floor division operands" {
+	check_case test_bare_runner_python_operators "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan keeps unsupported runner dispatch repository-specific" {
+	check_case test_runner_execution_opaque "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan caches runner execution independently of direct interpreters" {
+	check_case test_runner_execution_memoization "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan runner identity survives nested actions and Python imports" {
+	check_case test_runner_nested_actions_and_dependencies "$INTERPRETER_CHECKS"
+}
+
 @test "duplication scan script interpreters preserve Python flow in non-Python filenames" {
 	check_case test_python_non_python_suffix_flow "$INTERPRETER_CHECKS"
 }

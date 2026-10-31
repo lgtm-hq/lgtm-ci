@@ -28,7 +28,7 @@ COMMAND_START = (
     SHELL_POSITION + r"(?:(?:sudo|nohup|command|builtin|env|exec|time)\s+"
     r"|[A-Za-z_]\w*=[^\s;&|]+\s+)*"
 )
-RUNNER = r"(?:(?:uv|bun)\s+run\s+|timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?"
+RUNNER = r"(?:(?P<runner>uv|bun)\s+run\s+|timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?"
 INTERPRETER = r"(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)\s+"
 INTERPRETER_FLAGS = (
     r"(?:(?:-[efuvxn]*o\s+(?:pipefail|errexit|nounset)"
@@ -271,7 +271,10 @@ class SourceResolver:
     def __init__(self, repository: str, files: dict[str, str]) -> None:
         self.repository = repository
         self.files = files
-        self.scripts: dict[tuple[str, str, bool, str | None], tuple[str, ...]] = {}
+        self.scripts: dict[
+            tuple[str, str, bool, str | None, str | None],
+            tuple[str, ...],
+        ] = {}
         self.actions: dict[str, Any] = {}
 
     def unknown(self, kind: str, path: str) -> str:
@@ -360,7 +363,7 @@ class SourceResolver:
             if path not in self.files or path in visited:
                 return self.unknown("script", path)
             # An explicit interpreter (including source/.) ignores a shebang.
-            # Direct execution must retain the exact interpreter and arguments.
+            # Runner dispatch is distinct from direct kernel/shell execution.
             # Do not mistake an assignment suffix for an interpreter word.
             interpreter = re.search(
                 r"(?:^|\s)(?P<interpreter>" + INTERPRETER + INTERPRETER_FLAGS + r")$",
@@ -373,8 +376,9 @@ class SourceResolver:
                 path,
                 directory,
                 visited,
-                direct=interpreter is None,
+                direct=interpreter is None and match["runner"] is None,
                 interpreter=effective,
+                runner=match["runner"],
             )
             digest = hashlib.sha256(str(body).encode()).hexdigest()
             return f"<script:{digest}>"
@@ -490,11 +494,22 @@ class SourceResolver:
         *,
         direct: bool = True,
         interpreter: str | None = None,
+        runner: str | None = None,
     ) -> tuple[str, ...]:
         """Keep quoted whitespace, Python indentation and shell boundaries."""
-        key = (path, directory, direct, interpreter)
+        key = (path, directory, direct, interpreter, runner)
         if key in self.scripts:
             return self.scripts[key]
+        # A bare runner can dispatch by suffix, shebang or package metadata;
+        # none establishes shell execution. Bun can also select package scripts
+        # ahead of an explicit interpreter word. Keep these contexts opaque.
+        # uv with an explicit interpreter uses the existing bounded templates.
+        if runner and (runner != "uv" or interpreter in {None, "<implicit-shell>"}):
+            shape: tuple[str, ...] = (
+                self.unknown("script-runner", str((path, runner, interpreter))),
+            )
+            self.scripts[key] = shape
+            return shape
         source = self.files[path]
         visited = visited | {path}
         shebang = source.split("\n", 1)[0] if direct and source.startswith("#!") else ""

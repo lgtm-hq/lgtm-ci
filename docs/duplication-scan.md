@@ -40,9 +40,14 @@ templates are recognized; unsupported languages, dynamic shell expressions and
 ambiguous custom commands remain repository-specific.
 Script-looking arguments such as
 `echo scripts/missing.sh` are data, not executable dependencies. The scanner
-recognizes common keyword/group positions, simple `uv run`, `bun run`, `timeout`,
-interpreter flags and option-free `sudo`, `nohup`, `command`, `env`, `exec` and
-`time` wrappers. Unrecognized wrappers or options with possible executable paths
+recognizes common keyword/group positions, `timeout`, interpreter flags and
+option-free `sudo`, `nohup`, `command`, `env`, `exec` and `time` wrappers.
+Explicit `uv run python3 scripts/check.py` uses the named interpreter and its
+dependency guards. Bare `uv run scripts/check.py`, other bare uv file forms,
+and all `bun run` forms stay repository-specific, even with a shebang: runner
+dispatch and package-script dependencies are not inspected. Runner identity is
+part of the script normalization cache context.
+Unrecognized wrappers or options with possible executable paths
 stay repository-specific; this bounded recognition does not parse arbitrary
 shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
