@@ -35,6 +35,8 @@ RUN_FIELDS = (
     "head_sha",
     "head_branch",
     "created_at",
+    "updated_at",
+    "_observed_at",
     "run_attempt",
     "status",
     "conclusion",
@@ -192,6 +194,12 @@ class API:
             parsed = json.loads(body)
         except ValueError as error:
             raise BudgetExceeded("invalid API response or quota header") from error
+        # Persist observation time with each run, never the time a cached page
+        # is replayed. Legacy rows may still have only the API's updated_at.
+        if isinstance(parsed, dict) and isinstance(parsed.get("workflow_runs"), list):
+            for row in parsed["workflow_runs"]:
+                if isinstance(row, dict):
+                    row["_observed_at"] = datetime.now(timezone.utc).isoformat()
         path.parent.mkdir(mode=0o700, exist_ok=True)
         save(path, {"endpoint": endpoint, "body": parsed})
         return parsed
@@ -224,6 +232,36 @@ class API:
             page += 1
 
 
+def run_snapshot_key(row: ROW) -> tuple[int, datetime, bool, str]:
+    """Order attempts, API freshness (observation fallback), then cautious status."""
+    freshness = datetime.min.replace(tzinfo=timezone.utc)
+    for field in ("updated_at", "_observed_at"):
+        try:
+            freshness = stamp(row[field])
+            break
+        except (KeyError, TypeError, ValueError):
+            continue
+    # With tied/unknown freshness, active evidence must not become terminal
+    # merely because its page was enumerated first. Canonical JSON breaks any
+    # remaining metadata ties without relying on page/file iteration order.
+    return (
+        row.get("run_attempt", 1),
+        freshness,
+        row.get("status") != "completed",
+        json.dumps(row, sort_keys=True),
+    )
+
+
+def merge_runs(rows: list[ROW]) -> list[ROW]:
+    """Keep each run's highest attempt and freshest snapshot deterministically."""
+    runs: dict[int, ROW] = {}
+    for row in rows:
+        previous = runs.get(row["id"])
+        if previous is None or run_snapshot_key(row) > run_snapshot_key(previous):
+            runs[row["id"]] = row
+    return list(runs.values())
+
+
 def list_runs(api: API, repo: str, start: datetime, end: datetime) -> list[ROW]:
     """Split capped searches recursively; never silently accept the 1,000 cap."""
     query = urlencode({"created": f"{start.isoformat()}..{end.isoformat()}"})
@@ -243,15 +281,15 @@ def list_runs(api: API, repo: str, start: datetime, end: datetime) -> list[ROW]:
     else:
         rows = api.pages(endpoint, "workflow_runs")
     try:
-        runs = {}
+        runs = []
         for row in rows:
             if start <= stamp(row["created_at"]) < end:
-                runs[row["id"]] = row
-        if any(not valid_count(row.get("run_attempt"), 1) for row in runs.values()):
+                runs.append(row)
+        if any(not valid_count(row.get("run_attempt"), 1) for row in runs):
             raise ValueError("invalid run attempt")
+        return merge_runs(runs)
     except (KeyError, TypeError, ValueError) as error:
         raise BudgetExceeded("invalid API run list") from error
-    return list(runs.values())
 
 
 def runner_kind(job: ROW) -> tuple[str, int | None]:
@@ -277,9 +315,9 @@ def runner_kind(job: ROW) -> tuple[str, int | None]:
         "macos-15-intel": ("macos", 10),
         "macos-26": ("macos", 10),
     }
-    for label in labels:
-        if label in standard:
-            return standard[label]
+    kinds = {standard[label] for label in labels if label in standard}
+    if len(kinds) == 1 and all(label in standard for label in labels):
+        return kinds.pop()
     return "unknown", None
 
 
@@ -489,8 +527,8 @@ def recover_runs(api: API, repo: str, start: datetime, end: datetime) -> list[RO
                     if not valid_count(attempt, 1):
                         continue
                     if start <= stamp(row["created_at"]) < end:
-                        previous = rows.get(row["id"], {})
-                        if attempt >= previous.get("run_attempt", 1):
+                        prior = rows.get(row["id"], {})
+                        if not prior or run_snapshot_key(row) > run_snapshot_key(prior):
                             rows[row["id"]] = row
             except (BudgetExceeded, KeyError, TypeError, ValueError):
                 # Recovery is best effort; malformed pages cannot restore coverage.
@@ -598,15 +636,8 @@ def collect(api: API, state: ROW, checkpoint: Path, jobs_only: bool = False) -> 
             update["listing_in_progress"] = False
         except BudgetExceeded as error:
             update["error"] = str(error)
-            rows = list(
-                {
-                    row["id"]: row
-                    for row in [
-                        *data.get("runs", []),
-                        *recover_runs(api, repo, start, end),
-                    ]
-                }.values()
-            )
+            rows = recover_runs(api, repo, start, end)
+        rows = merge_runs([*data.get("runs", []), *rows])
         update["runs"] = [
             {
                 **{key: row.get(key) for key in RUN_FIELDS},

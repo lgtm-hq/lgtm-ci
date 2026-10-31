@@ -8,6 +8,7 @@ import sys
 import threading
 from collections.abc import Callable
 from datetime import datetime, timezone
+from itertools import permutations
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 from typing import Any
@@ -78,6 +79,88 @@ def test_public_free_larger_unknown_and_self_hosted(
 
 
 @pytest.mark.parametrize(
+    "labels,kind,multiplier",
+    [
+        (["ubuntu-latest", "custom-large"], "unknown", None),
+        (["ubuntu-latest", "windows-latest"], "unknown", None),
+        (["windows-2025", "macos-15"], "unknown", None),
+        (["ubuntu-latest", "ubuntu-latest-16-cores"], "unknown", None),
+        (["ubuntu-latest", "blacksmith-4vcpu-ubuntu-2404"], "unknown", None),
+        (["blacksmith-4vcpu-ubuntu-2404"], "unknown", None),
+        (["ubuntu-latest", "Linux", "X64"], "unknown", None),
+        (["self-hosted", "ubuntu-latest", "custom-large"], "self-hosted", None),
+        (["self-hosted", "blacksmith-4vcpu-ubuntu-2404"], "self-hosted", None),
+        (["ubuntu-latest", "ubuntu-24.04"], "linux", 1),
+        (["windows-latest", "windows-2025"], "windows", 2),
+        (["macos-latest", "macos-15"], "macos", 10),
+    ],
+)
+def test_runner_evidence_is_order_independent(
+    measurement: ModuleType,
+    labels: list[str],
+    kind: str,
+    multiplier: int | None,
+) -> None:
+    """All evidence must support one hosted OS; explicit self-hosted stays separate."""
+    for order in permutations(labels):
+        job = {
+            "labels": list(order),
+            "started_at": "2026-10-02T00:00:00Z",
+            "completed_at": "2026-10-02T00:01:01Z",
+        }
+        assert measurement.runner_kind(job) == (kind, multiplier)
+        for private in (True, False, None):
+            metrics = measurement.job_metrics(
+                job, private, measurement.stamp("2026-10-31T00:00:00Z")
+            )
+            assert metrics["rounded_job_minutes"] == 2
+            if kind == "unknown":
+                assert metrics["unknown_billing_rounded_minutes"] == 2
+                assert metrics["estimated_private_plan_minutes"] == 0
+                assert metrics["public_free_rounded_minutes"] == 0
+            elif kind == "self-hosted":
+                assert metrics["self_hosted_rounded_minutes"] == 2
+                assert metrics["unknown_billing_rounded_minutes"] == 0
+
+
+@pytest.mark.parametrize(
+    "labels,expected",
+    [
+        (
+            [
+                "ubuntu-latest",
+                "ubuntu-22.04",
+                "ubuntu-24.04",
+                "ubuntu-26.04",
+                "ubuntu-22.04-arm",
+                "ubuntu-24.04-arm",
+                "ubuntu-26.04-arm",
+            ],
+            ("linux", 1),
+        ),
+        (["windows-latest", "windows-2022", "windows-2025"], ("windows", 2)),
+        (
+            [
+                "macos-latest",
+                "macos-13",
+                "macos-14",
+                "macos-15",
+                "macos-15-intel",
+                "macos-26",
+            ],
+            ("macos", 10),
+        ),
+    ],
+)
+def test_supported_hosted_labels(
+    measurement: ModuleType, labels: list[str], expected: tuple[str, int]
+) -> None:
+    """Known standard images, including ARM and Intel, retain their OS multiplier."""
+    for label in labels:
+        assert measurement.runner_kind({"labels": [label.upper()]}) == expected
+
+
+@pytest.mark.parametrize(
     "change",
     [
         {"completed_at": None},
@@ -127,6 +210,37 @@ def test_client_get_cache_and_rate_reserve(
     with pytest.raises(measurement.BudgetExceeded, match="quota"):
         api.get("/two")
     assert calls == [["gh", "api", "--method", "GET", "--include", "/one"]]
+
+
+def test_run_snapshot_observation_time_survives_cache_replay(
+    measurement: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Replaying an old page must not give its rows a new observation timestamp."""
+    observed = datetime(2026, 10, 2, tzinfo=timezone.utc)
+    clock = SimpleNamespace(now=lambda _tz: observed)
+    calls = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        calls.append(command[-1])
+        return SimpleNamespace(
+            returncode=0,
+            stdout='HTTP/2.0 200 OK\n\n{"workflow_runs": [{"id": 1}]}',
+        )
+
+    monkeypatch.setattr(measurement, "datetime", clock)
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    endpoint = "/repos/example/repo/actions/runs?per_page=100&page=1"
+    first = measurement.API(tmp_path, 30).get(endpoint)
+    assert first["workflow_runs"][0]["_observed_at"] == observed.isoformat()
+    observed = datetime(2026, 10, 3, tzinfo=timezone.utc)
+    api = measurement.API(tmp_path, 30)
+    assert api.get(endpoint) == first
+    assert calls == [endpoint]
+    api.invalidate(endpoint)
+    refreshed = api.get(endpoint)
+    assert refreshed["workflow_runs"][0]["_observed_at"] == observed.isoformat()
+    assert refreshed != first
+    assert calls == [endpoint, endpoint]
 
 
 @pytest.mark.parametrize("listing", [False, True])
@@ -239,6 +353,33 @@ def test_search_cap_split_and_half_open_dedup(
     assert measurement.list_runs(FakeAPI(), "example/repo", start, end) == [boundary]
 
 
+def test_run_listing_deduplicates_attempts_and_snapshots_monotonically(
+    measurement: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Overlapping listing pages cannot hide retries or revive stale terminal rows."""
+    api = measurement.API(tmp_path, 30)
+    base = {"id": 1, "created_at": "2026-10-02T00:00:00Z", "run_attempt": 2}
+    newest = {**base, "status": "in_progress", "updated_at": "2026-10-02T00:02:00Z"}
+    rows = [
+        newest,
+        {**base, "status": "completed", "updated_at": "2026-10-02T00:01:00Z"},
+        {**newest, "run_attempt": 1, "updated_at": "2026-10-02T00:03:00Z"},
+    ]
+    monkeypatch.setattr(
+        api,
+        "get",
+        lambda _endpoint: {"total_count": 3, "workflow_runs": []},
+    )
+    for order in permutations(rows):
+        monkeypatch.setattr(api, "pages", lambda *_args, order=order: list(order))
+        assert measurement.list_runs(
+            api,
+            "example/repo",
+            measurement.stamp(base["created_at"]),
+            measurement.stamp("2026-10-31T00:00:00Z"),
+        ) == [newest]
+
+
 def test_expired_budget_makes_no_request(
     measurement: ModuleType, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -287,6 +428,169 @@ def test_interrupted_listing_retains_observed_runs(
     )
     assert len(rows) == 1
     assert rows[0]["run_attempt"] == 3
+
+
+@pytest.mark.parametrize("listing_finishes", [False, True])
+def test_inventory_preserves_newer_checkpoint_attempts_and_retry_totals(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    listing_finishes: bool,
+) -> None:
+    """Even a fresher attempt-1 page cannot erase checkpointed attempt-2 usage."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    private = state["repositories"]["example/private"]
+    run = {
+        **private["runs"][0],
+        "created_at": "2026-10-02T00:00:00Z",
+        "updated_at": "2026-10-02T00:02:00Z",
+    }
+    private["runs"] = [run]
+    private["attempts"]["1"]["2"] = private["attempts"]["1"]["2"][:1]
+    state["repositories"] = {"example/private": private}
+    before = measurement.aggregate(state)["workflows"][0]
+    older = {**run, "run_attempt": 1, "updated_at": "2026-10-02T00:03:00Z"}
+
+    def listing(api: Any, *_args: Any) -> list[dict[str, Any]]:
+        if listing_finishes:
+            return [older]
+        group = api.cache_group("/repos/example/private/actions/runs")
+        group.mkdir(exist_ok=True)
+        measurement.save(group / "page.json", {"body": {"workflow_runs": [older]}})
+        raise measurement.BudgetExceeded("interrupted listing")
+
+    def unexpected(*_args: Any, **_kwargs: Any) -> None:
+        pytest.fail("immutable checkpoint attempts must be reused")
+
+    monkeypatch.setattr(measurement, "list_runs", listing)
+    monkeypatch.setattr(measurement.subprocess, "run", unexpected)
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.collect(measurement.API(tmp_path, 30), state, checkpoint)
+    stored = json.loads(checkpoint.read_text())
+    assert stored["repositories"]["example/private"]["runs"][0]["run_attempt"] == 2
+    result = measurement.aggregate(stored)
+    workflow = result["workflows"][0]
+    assert workflow["expected_attempts"] == workflow["fetched_attempts"] == 2
+    for metric in measurement.empty_metrics():
+        assert workflow[metric] == before[metric]
+        partitioned = workflow["first"][metric] + workflow["retries"][metric]
+        assert workflow[metric] == partitioned
+        assert workflow[metric] == sum(job[metric] for job in result["jobs"])
+    assert workflow["retries"]["wall_seconds"] == 60
+    assert measurement.coverage_complete(stored) is listing_finishes
+
+
+@pytest.mark.parametrize(
+    "freshness,status",
+    [
+        ("updated_at", "in_progress"),
+        ("updated_at", "completed"),
+        ("api_priority", "in_progress"),
+        ("offset", "in_progress"),
+        ("_observed_at", "in_progress"),
+        ("_observed_at", "completed"),
+        ("missing", "in_progress"),
+        ("invalid", "in_progress"),
+        ("tied", "in_progress"),
+    ],
+)
+def test_recovery_uses_freshness_and_conservative_status_independent_of_page_order(
+    measurement: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    freshness: str,
+    status: str,
+) -> None:
+    """Stale terminal rows cannot win over newer or equally fresh active evidence."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    api = measurement.API(tmp_path, 30)
+    group = api.cache_group("/repos/example/repo/actions/runs")
+    group.mkdir()
+    base = {"id": 1, "created_at": "2026-10-02T00:00:00Z", "run_attempt": 2}
+    rows = [
+        {**base, "status": "completed", "name": "old"},
+        {**base, "status": "in_progress", "name": "active"},
+        {**base, "status": status, "name": "new"},
+    ]
+    for index, row in enumerate(rows):
+        if freshness in ("updated_at", "_observed_at"):
+            row[freshness] = f"2026-10-02T00:0{index}:00Z"
+        elif freshness == "api_priority":
+            row["updated_at"] = f"2026-10-02T00:0{index}:00Z"
+            row["_observed_at"] = f"2026-10-03T00:0{2 - index}:00Z"
+        elif freshness == "offset":
+            row["updated_at"] = f"2026-10-02T00:0{index}:00Z"
+            if index == 2:
+                row["updated_at"] = "2026-10-01T21:02:00-03:00"
+        elif freshness == "invalid":
+            row["updated_at"] = "invalid"
+        elif freshness == "tied":
+            row["updated_at"] = "2026-10-02T00:00:00Z"
+        measurement.save(group / f"{index}.json", {"body": {"workflow_runs": [row]}})
+    paths = list(group.glob("*.json"))
+    selected = []
+    for order in permutations(paths):
+        with monkeypatch.context() as patch:
+            patch.setattr(Path, "glob", lambda *_args, order=order: iter(order))
+            recovered = measurement.recover_runs(
+                api,
+                "example/repo",
+                measurement.stamp(base["created_at"]),
+                measurement.stamp("2026-10-31T00:00:00Z"),
+            )
+        assert len(recovered) == 1
+        assert recovered[0]["status"] == status
+        selected.append(recovered[0])
+        if freshness in ("updated_at", "_observed_at", "api_priority", "offset"):
+            assert recovered[0] == rows[-1]
+    assert all(row == selected[0] for row in selected)
+
+
+@pytest.mark.parametrize("checkpoint_is_newer", [False, True])
+def test_interrupted_inventory_retains_fresh_active_snapshot_without_terminal_coverage(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    checkpoint_is_newer: bool,
+) -> None:
+    """A stale completed listing must not certify partial jobs as terminal."""
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    active = {**run, "status": "in_progress", "updated_at": "2026-10-02T00:02:00Z"}
+    terminal = {**run, "status": "completed", "updated_at": "2026-10-02T00:01:00Z"}
+    public["runs"] = [active if checkpoint_is_newer else terminal]
+    public["terminal_attempts"] = {}
+    state["repositories"] = {"example/public": public}
+    jobs: list[dict[str, Any]] = public["attempts"]["3"]["1"]
+
+    def listing(api: Any, *_args: Any) -> None:
+        group = api.cache_group("/repos/example/public/actions/runs")
+        group.mkdir(exist_ok=True)
+        row = terminal if checkpoint_is_newer else active
+        measurement.save(group / "page.json", {"body": {"workflow_runs": [row]}})
+        raise measurement.BudgetExceeded("interrupted listing")
+
+    def pages(_endpoint: str, field: str) -> list[dict[str, Any]]:
+        assert field == "jobs"
+        return jobs
+
+    monkeypatch.setattr(measurement, "list_runs", listing)
+    api = measurement.API(tmp_path, 30)
+    monkeypatch.setattr(api, "pages", pages)
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.collect(api, state, checkpoint)
+    stored = json.loads(checkpoint.read_text())
+    public = stored["repositories"]["example/public"]
+    assert public["runs"][0]["status"] == "in_progress"
+    assert public["runs"][0]["updated_at"] == active["updated_at"]
+    assert public["terminal_attempts"]["3"]["1"] is False
+    workflow = measurement.aggregate(stored)["workflows"][0]
+    assert workflow["complete_runs"] == 0
+    assert workflow["wall_minutes_per_run"] is None
+    assert not measurement.coverage_complete(stored)
 
 
 def test_job_pagination_does_not_stop_at_one_hundred(
