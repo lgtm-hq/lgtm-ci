@@ -10,6 +10,7 @@ setup() {
 	CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_checks.py"
 	TRANSPORT_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_transport_checks.py"
 	REGRESSION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_regression_checks.py"
+	SHELL_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_shell_checks.py"
 	PYTHON_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_python_checks.py"
 	COVERAGE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_coverage_checks.py"
 	INLINE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_inline_checks.py"
@@ -154,23 +155,55 @@ check_case() {
 }
 
 @test "duplication scan keeps concatenated shell words distinct from separate arguments" {
-	check_case test_shell_word_concatenation "$REGRESSION_CHECKS" ShellCases
+	check_case test_shell_word_concatenation "$SHELL_CHECKS" ShellCases
 }
 
 @test "duplication scan keeps heredoc payloads opaque in command shapes" {
-	check_case test_heredoc_command_shapes "$REGRESSION_CHECKS" ShellCases
+	check_case test_heredoc_command_shapes "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression guards parameter hash heredocs" {
+	check_case test_parameter_hash_heredocs "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression guards parameter hash executables" {
+	check_case test_parameter_hash_executables "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression keeps parameter substitutions opaque" {
+	check_case test_parameter_substitutions_opaque "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression guards POSIX nested subshell heredocs" {
+	check_case test_posix_nested_subshell_heredocs "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression guards escaped quotes before heredocs" {
+	check_case test_escaped_quotes_heredocs "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression preserves shell comment words before executables" {
+	check_case test_shell_comment_words_executables "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression guards continued directory commands" {
+	check_case test_continued_directory_commands "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan regression preserves shell lexing controls" {
+	check_case test_shell_lexing_controls "$SHELL_CHECKS" ShellCases
 }
 
 @test "duplication scan keeps heredoc workflow and script inventories repository-scoped" {
-	check_case test_heredoc_inventory "$REGRESSION_CHECKS" ShellCases
+	check_case test_heredoc_inventory "$SHELL_CHECKS" ShellCases
 }
 
 @test "duplication scan preserves heredoc-like quoted data and comment boundaries" {
-	check_case test_heredoc_literal_boundaries "$REGRESSION_CHECKS" ShellCases
+	check_case test_heredoc_literal_boundaries "$SHELL_CHECKS" ShellCases
 }
 
 @test "duplication scan preserves shebang identity for directly executed scripts" {
-	check_case test_direct_script_shebangs "$REGRESSION_CHECKS" ShellCases
+	check_case test_direct_script_shebangs "$SHELL_CHECKS" ShellCases
 }
 
 @test "duplication scan cleans historical privacy independently of clusters and source coverage" {

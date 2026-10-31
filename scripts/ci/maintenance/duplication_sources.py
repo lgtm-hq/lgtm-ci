@@ -87,11 +87,15 @@ INLINE_PROGRAM = re.compile(
     COMMAND_START + RUNNER + r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
     r"(?:-\w+\s+)*-\w*[ce]\b|eval\b)"
 )
-# Skip shell quotes/comments, but not the C-style comments in the shared lexer:
-# // and /* are ordinary shell words and must not hide a following operator.
-# Simple arithmetic with no nested syntax can contain shifts, not redirections.
+# Only bounded, data-only parameter expansions can be skipped as literals.
+# Nested syntax, escapes, quotes and substitutions require shell parsing.
+SHELL_PARAMETER = r"""\$\{[^{}\n\\'"`$]*\}"""
+# // and /* are ordinary shell words. Only $(( proves arithmetic under both
+# sh and bash: bare (( may instead open two POSIX subshells with a heredoc.
+# Escaped-quote desync is also guarded by concatenated_shell_word below.
 HEREDOC = re.compile(
-    r"""(?P<literal>\(\([\w \t+*/%<>=!&|^~?:.-]*\)\)|"(?:\\.|[^"\\])*"|"""
+    r"(?P<literal>" + SHELL_PARAMETER + r"|\$\(\([\w \t+*/%<>=!&|^~?:.-]*\)\)|"
+    r""""(?:\\.|[^"\\])*"|"""
     r"""'[^']*'|(?<!\\\s)(?<!\S)\#[^\n]*)|<<""",
     re.S,
 )
@@ -135,8 +139,18 @@ SAFE_INPUTS = {
 
 
 LEXEME = re.compile(
-    r"""("(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?<!\S)\#[^\n]*|"""
-    r"""//[^\n]*|/\*.*?\*/|[^\S\n]+|\n|[^\s'"]+)""",
+    r""""(?:\\.|[^"\\])*"|'(?:\\.|[^'\\])*'|(?P<comment>(?<!\S)\#[^\n]*|"""
+    r"""//[^\n]*|/\*.*?\*/)|[^\S\n]+|\n|[^\s'"]+""",
+    re.S,
+)
+# Keep non-shell comment semantics above. Shell expansions must start a token
+# even inside an assignment; otherwise its whitespace-# could start a comment.
+# Unsupported expansions fail closed before any shell source is transformed.
+SHELL_LEXEME = re.compile(
+    r"(?P<parameter>" + EXPRESSION.pattern + "|" + SHELL_PARAMETER + r")|"
+    r"""(?P<quoted>"(?:\\.|[^"\\])*"|'[^']*')|"""
+    r"(?P<comment>(?<!\\\s)(?<!\S)\#[^\n]*)|(?P<unsupported>\$\{)|"
+    r"""[^\S\n]+|\n|(?:(?!\$\{)[^\s'"])+""",
     re.S,
 )
 
@@ -145,8 +159,8 @@ def executable_matches(pattern: re.Pattern[str], source: str) -> list[re.Match[s
     """Exclude command-like text inside quoted arguments and comments."""
     literals = [
         (match.start(), match.end())
-        for match in LEXEME.finditer(source)
-        if match.group().startswith(("'", '"', "#", "/*", "//"))
+        for match in SHELL_LEXEME.finditer(source)
+        if match.lastgroup in {"quoted", "parameter", "comment"}
     ]
     return [
         match
@@ -157,11 +171,8 @@ def executable_matches(pattern: re.Pattern[str], source: str) -> list[re.Match[s
 
 def ambiguous_executable(source: str) -> bool:
     """Fail closed when bounded recognition leaves a possible executable path."""
-    source = "".join(
-        match.group()
-        for match in LEXEME.finditer(source)
-        if not match.group().startswith(("#", "/*", "//"))
-    )
+    lexemes = SHELL_LEXEME.finditer(source)
+    source = "".join(match.group() for match in lexemes if match.lastgroup != "comment")
     for pattern in (DATA_COMMAND, RESOLVED_COMMAND):
         for match in reversed(executable_matches(pattern, source)):
             source = source[: match.start()] + "\n" + source[match.end() :]
@@ -171,8 +182,8 @@ def ambiguous_executable(source: str) -> bool:
 
 def concatenated_shell_word(source: str) -> bool:
     """Keep adjacent quoted/unquoted fragments opaque without interpreting them."""
-    for match in LEXEME.finditer(source):
-        if not match.group().startswith(("'", '"')):
+    for match in SHELL_LEXEME.finditer(source):
+        if match.lastgroup != "quoted":
             continue
         # Whitespace and shell operators delimit words. Quotes next to any
         # other character may concatenate, including empty quoted fragments.
@@ -183,7 +194,13 @@ def concatenated_shell_word(source: str) -> bool:
     return False
 
 
-def normalize(source: str, repository: str, *, version_parameter: bool = False) -> str:
+def normalize(
+    source: str,
+    repository: str,
+    *,
+    version_parameter: bool = False,
+    shell_source: bool = False,
+) -> str:
     """Remove comments/spacing and mask repository, image, path and version literals.
 
     Keep command names, flags, operators, conditions and string contents unless
@@ -191,11 +208,9 @@ def normalize(source: str, repository: str, *, version_parameter: bool = False) 
     parameter context; decimal command arguments, including quoted ones, are
     executable behavior. Quoted shell programs are not collapsed.
     """
-    source = "".join(
-        match.group()
-        for match in LEXEME.finditer(source)
-        if not match.group().startswith(("#", "/*", "//"))
-    )
+    lexer = SHELL_LEXEME if shell_source else LEXEME
+    lexemes = lexer.finditer(source)
+    source = "".join(match.group() for match in lexemes if match.lastgroup != "comment")
     # A direct value is a parameter. Embedded selectors/conditions are logic;
     # masking the whole expression would hide different command branches.
     source = EXPRESSION.sub(
@@ -227,13 +242,13 @@ def normalize(source: str, repository: str, *, version_parameter: bool = False) 
     if version_parameter:
         source = re.sub(r"\b\d+(?:\.\d+)+(?:[\w.+-]*)\b", "<version>", source)
     tokens: list[str] = []
-    for match in LEXEME.finditer(source):
+    for match in lexer.finditer(source):
         lexeme = match.group()
         if lexeme == "\n":
             if tokens and tokens[-1] != "<newline>":
                 tokens.append("<newline>")
             continue
-        if lexeme.isspace() or lexeme.startswith(("#", "/*", "//")):
+        if lexeme.isspace() or match.lastgroup == "comment":
             continue
         tokens.append(lexeme)
     if tokens and tokens[-1] == "<newline>":
@@ -355,15 +370,19 @@ class SourceResolver:
         self, source: str, directory: str = "", visited: frozenset[str] = frozenset()
     ) -> str:
         """Resolve explicit executable paths before masking literal path inputs."""
+        # Continuation removal depends on quote/comment context. Until that is
+        # parsed, no guard or dependency lookup may use the physical lines.
+        if "\\\n" in source:
+            return self.unknown("shell-continuation", source)
+        lexemes = SHELL_LEXEME.finditer(source)
+        if any(match.lastgroup == "unsupported" for match in lexemes):
+            return self.unknown("shell-expansion", source)
         # Heredoc payloads are literal data, even when they look like comments
         # or script calls. Reject unquoted operators before any transformation;
-        # delimiter parsing is outside this bounded scanner. Shell line
-        # continuations may split the operator across physical lines. Check
-        # both forms so a trailing backslash in a comment cannot hide a header.
-        for text in (source, source.replace("\\\n", "")):
-            for match in HEREDOC.finditer(text):
-                if match["literal"] is None:
-                    return self.unknown("heredoc", source)
+        # delimiter parsing is outside this bounded scanner.
+        for match in HEREDOC.finditer(source):
+            if match["literal"] is None:
+                return self.unknown("heredoc", source)
         if concatenated_shell_word(source):
             return self.unknown("shell-word", source)
         # Directory-changing shell control flow is not modeled. Keep the whole
@@ -374,8 +393,8 @@ class SourceResolver:
         # passed to an interpreter. Their command positions need a shell parser.
         substitutions = any(
             re.search(r"\$\((?!\()|`", match.group())
-            for match in LEXEME.finditer(source)
-            if not match.group().startswith(("'", "#", "/*", "//"))
+            for match in SHELL_LEXEME.finditer(source)
+            if match.lastgroup != "comment" and not match.group().startswith("'")
         )
         if substitutions or executable_matches(INLINE_PROGRAM, source):
             return self.unknown("shell-command", source)
@@ -423,7 +442,7 @@ class SourceResolver:
                 )
         if ambiguous_executable(source):
             return self.unknown("shell-command", source)
-        return normalize(source, self.repository)
+        return normalize(source, self.repository, shell_source=True)
 
     def python(self, source: str, path: str = "<inline>") -> tuple[str, ...]:
         """Retain Python tokens and reuse bounded dependency guards for run blocks."""
@@ -567,7 +586,7 @@ class SourceResolver:
             normalized = self.command(source, directory, visited)
             shape = tuple(
                 match.group()
-                for match in LEXEME.finditer(normalized)
+                for match in SHELL_LEXEME.finditer(normalized)
                 if not match.group().isspace()
             )
         else:

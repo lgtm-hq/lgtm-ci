@@ -51,7 +51,14 @@ Unrecognized wrappers or options with possible executable paths
 stay repository-specific; this bounded recognition does not parse arbitrary
 shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
-repository-specific; their control flow is not modeled. Python process launchers,
+repository-specific; their control flow is not modeled. Shell heredocs and
+here-strings also stay opaque and repository-specific, preserving payloads that
+look like comments or commands. Simple arithmetic shifts inside `$((...))` remain
+comparable; bare `((...))` with `<<` stays opaque because POSIX sh can interpret
+it as nested subshells with a heredoc. Backslash-newline continuations and parameter
+expansions beyond the bounded data-only form stay repository-specific. Only shell
+comments hide subsequent shell text; `//` and `/*...*/` remain ordinary words.
+Python process launchers,
 including `os.startfile`, asyncio's subprocess helpers and event-loop
 `subprocess_exec`/`subprocess_shell` methods, and `pty.spawn`, also stay
 unknown until command identities can be compared. Reflective lookup names
