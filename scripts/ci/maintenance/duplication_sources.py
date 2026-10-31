@@ -271,7 +271,7 @@ class SourceResolver:
     def __init__(self, repository: str, files: dict[str, str]) -> None:
         self.repository = repository
         self.files = files
-        self.scripts: dict[tuple[str, str, bool], tuple[str, ...]] = {}
+        self.scripts: dict[tuple[str, str, bool, str | None], tuple[str, ...]] = {}
         self.actions: dict[str, Any] = {}
 
     def unknown(self, kind: str, path: str) -> str:
@@ -362,9 +362,20 @@ class SourceResolver:
             # An explicit interpreter (including source/.) ignores a shebang.
             # Direct execution must retain the exact interpreter and arguments.
             # Do not mistake an assignment suffix for an interpreter word.
-            interpreter = r"(?:^|\s)" + INTERPRETER + INTERPRETER_FLAGS + r"$"
-            direct = re.search(interpreter, match["prefix"]) is None
-            body = self.script(path, directory, visited, direct=direct)
+            interpreter = re.search(
+                r"(?:^|\s)(?P<interpreter>" + INTERPRETER + INTERPRETER_FLAGS + r")$",
+                match["prefix"],
+            )
+            effective = "<implicit-shell>"
+            if interpreter:
+                effective = interpreter["interpreter"].strip()
+            body = self.script(
+                path,
+                directory,
+                visited,
+                direct=interpreter is None,
+                interpreter=effective,
+            )
             digest = hashlib.sha256(str(body).encode()).hexdigest()
             return f"<script:{digest}>"
 
@@ -478,26 +489,46 @@ class SourceResolver:
         visited: frozenset[str] = frozenset(),
         *,
         direct: bool = True,
+        interpreter: str | None = None,
     ) -> tuple[str, ...]:
         """Keep quoted whitespace, Python indentation and shell boundaries."""
-        key = (path, directory, direct)
+        key = (path, directory, direct, interpreter)
         if key in self.scripts:
             return self.scripts[key]
         source = self.files[path]
         visited = visited | {path}
-        if path.endswith(".py"):
+        shebang = source.split("\n", 1)[0] if direct and source.startswith("#!") else ""
+        if shebang:
+            interpreter = shebang[2:].strip()
+            # env receives a single kernel argument. Options or multiple words
+            # require semantics outside our bounded file-execution templates.
+            env = re.fullmatch(r"/(?:usr/)?bin/env\s+(\w[\w.]*)", interpreter)
+            if env:
+                interpreter = env[1]
+            elif not re.fullmatch(r"/(?:usr/)?bin/\w[\w.]*(?:\s+\S+)?", interpreter):
+                interpreter = "<unknown-shebang>"
+        elif interpreter is None:
+            # Standalone inventory units have no invocation. Preserve their
+            # conventional suffix inference only when no shebang overrides it;
+            # command() always supplies the actual execution context instead.
+            interpreter = "python" if path.endswith(".py") else "sh"
+        if interpreter and PYTHON_TEMPLATE.fullmatch(interpreter + " {0}"):
             shape = self.python(source, path)
-        else:
+        elif interpreter in {"<implicit-shell>", "source", "."} or (
+            interpreter and SHELL_TEMPLATE.fullmatch(interpreter + " {0}")
+        ):
             normalized = self.command(source, directory, visited)
             shape = tuple(
                 match.group()
                 for match in LEXEME.finditer(normalized)
                 if not match.group().isspace()
             )
-        if direct and source.startswith("#!"):
+        else:
+            shape = (self.unknown("script-interpreter", str((path, interpreter))),)
+        if shebang:
             # Preserve the declaration literally; do not resolve env or execute
             # an interpreter to infer its behavior. It is not a path parameter.
-            shape = (source.split("\n", 1)[0], *shape)
+            shape = (shebang, *shape)
         self.scripts[key] = shape
         return shape
 

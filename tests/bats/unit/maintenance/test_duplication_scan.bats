@@ -13,11 +13,36 @@ setup() {
 	PYTHON_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_python_checks.py"
 	COVERAGE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_coverage_checks.py"
 	INLINE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_inline_checks.py"
+	INTERPRETER_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_interpreter_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan script interpreters preserve Python flow in non-Python filenames" {
+	check_case test_python_non_python_suffix_flow "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan script interpreters normalize shell code in Python filenames" {
+	check_case test_shell_python_suffix "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan script interpreters follow direct shebangs before suffixes" {
+	check_case test_direct_shebang_parser "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan script interpreters memoize each execution identity separately" {
+	check_case test_interpreter_memoization "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan script interpreters keep unsupported and ambiguous execution opaque" {
+	check_case test_unsupported_script_interpreters "$INTERPRETER_CHECKS"
+}
+
+@test "duplication scan script interpreters still compare safe equivalent Python" {
+	check_case test_interpreter_safe_equivalence "$INTERPRETER_CHECKS"
 }
 
 @test "duplication scan inline Python preserves indentation under effective shells" {
