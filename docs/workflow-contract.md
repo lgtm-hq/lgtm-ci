@@ -198,11 +198,16 @@ uses `ubuntu-26.04`. The catalog lists this resolved default rather than the
 empty input. Existing explicit overrides keep taking precedence.
 
 Org administrators can switch consumers by changing `LGTM_CI_RUNNER` or its
-selected-repositories access list. The org variable currently contains
-`ubuntu-26.04` and is visible only to `agent-infra`. The Blacksmith 2-vCPU
-label for a trial is `blacksmith-2vcpu-ubuntu-2604`. A consumer removed from
-that list falls back to GitHub-hosted runners when it has no repository
-variable or explicit input overriding the selection.
+selected-repositories access list. A consumer removed from that list falls
+back to GitHub-hosted runners when it has no repository variable or explicit
+input overriding the selection.
+
+This switch also selects the runner for release, signing, attestation and
+write-enabled jobs. The selected runner receives those jobs' credentials and
+can request OIDC tokens where permitted. Administrators must trust the runner
+provider for those operations before changing the variable or expanding its
+access. Callers requiring GitHub-hosted infrastructure should pin
+`runner-image`; live npm trusted publishing enforces that requirement.
 
 Consumer-owned jobs can use the same org switch:
 
@@ -219,31 +224,21 @@ Matrix runner selections, macOS/Windows/ARM jobs, the action-only exceptions,
 and fixed Docker coordinator jobs keep their existing runner rules.
 
 Before enabling Blacksmith for a consumer, run a small reusable pinned to the
-candidate lgtm-ci commit with `egress-policy: audit`. The pinned harden-runner
-supports Blacksmith (supported since v2.19.0). Record its observed endpoints;
-add any required hosts to the relevant presets in
+candidate lgtm-ci commit with `egress-policy: audit`. Use a reusable without
+the runner-policy tier check, such as `reusable-test-shell-run.yml`.
+`validate-runner-policy.sh` rejects audit mode for strict and hardened tiers;
+the Rust binary build and release workflows therefore cannot use audit mode
+with their default tier. The pinned harden-runner supports Blacksmith
+(supported since v2.19.0). Record its observed endpoints; add any required
+hosts to the relevant presets in
 `scripts/ci/lib/egress/presets.sh`, then run
 `bash scripts/ci/egress/sync-workflow-presets.sh` before enabling block mode.
-No Blacksmith-specific hosts have been added without an observed audit run.
-
-Rollout evidence still required from the owner:
-
-- [ ] Run `external-consumer-canary.yml` with the variable unset or invisible;
-      record a green run on `ubuntu-26.04`.
-- [ ] Temporarily select `blacksmith-2vcpu-ubuntu-2604` for `agent-infra`;
-      run a reusable pinned to the candidate commit with egress audit enabled,
-      record its runner and observed endpoints, then restore `ubuntu-26.04`.
-- [ ] Remove variable access and confirm a run falls back to `ubuntu-26.04`.
-- [ ] Add any observed Blacksmith endpoints to the shared presets and sync them.
-- [ ] Record the Blacksmith runner-loss evidence on
-      [#794](https://github.com/lgtm-hq/lgtm-ci/issues/794).
 
 The auto-rerun matcher already recognizes `The runner has received a shutdown
 signal` and `lost communication with the server`, independent of the runner
 provider. It also checks acquisition-failure annotations for jobs that ran no
-steps. A Blacksmith loss matches if it emits one of those exact log strings;
-this has not yet been verified with a recorded Blacksmith loss. Empty or
-late logs remain inconclusive (#794); provider-specific annotations or a
+steps. A Blacksmith loss matches if it emits one of those exact log strings.
+Empty or late logs remain inconclusive (#794); provider-specific annotations or a
 mid-job disappearance without a matching log are not covered by the current
 matcher. Capture that evidence before adding another signature.
 

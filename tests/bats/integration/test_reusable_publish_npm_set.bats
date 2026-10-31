@@ -3,6 +3,7 @@
 # Purpose: Contract tests for reusable-publish-npm-set.yml (#965)
 
 load "../../helpers/common"
+load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-publish-npm-set.yml"
 WRAPPER="${PROJECT_ROOT}/.github/workflows/reusable-publish-npm.yml"
@@ -126,7 +127,7 @@ step_block() {
 }
 
 @test "reusable-publish-npm-set: exposes runner-image and downloads the staged artifact into packages-dir" {
-	run grep -F "runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" "$WORKFLOW"
+	run grep -F "runs-on: ${RUNNER_IMAGE_RUNS_ON}" "$WORKFLOW"
 	assert_success
 	run grep -F "if: inputs.artifact-name != ''" "$WORKFLOW"
 	assert_success

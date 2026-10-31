@@ -3,6 +3,7 @@
 # Purpose: Contract tests for the deploy-only reusable-deploy-pages workflow
 
 load "../../helpers/common"
+load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-deploy-pages.yml"
 
@@ -81,7 +82,7 @@ WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-deploy-pages.yml"
 }
 
 @test "reusable-deploy-pages: deploy job follows runner selection" {
-	run grep -F "runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" "$WORKFLOW"
+	run grep -F "runs-on: ${RUNNER_IMAGE_RUNS_ON}" "$WORKFLOW"
 	assert_success
 }
 

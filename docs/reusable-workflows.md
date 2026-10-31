@@ -2713,7 +2713,7 @@ so on that error the probe runs again with an empty config.
 | `egress-preset`          | `osv-scanner`           | Includes GitHub tooling + OSV API hosts    |
 | `allowed-endpoints-mode` | `append`                | Merge preset with caller endpoints         |
 | `workflow-file`          | empty                   | Caller workflow filename for PR footer     |
-| `runner-image`           | `""`                   | Runner override; Linux only               |
+| `runner-image`           | `""`                    | Runner override; Linux only                |
 | `concurrency-scope`      | empty                   | Suffix for the cleanup group (see below)   |
 
 The cleanup commit is created through the GitHub API

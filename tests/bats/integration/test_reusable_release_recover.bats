@@ -7,6 +7,7 @@
 #          asserted on the file that now holds the job.
 
 load "../../helpers/common"
+load_runner_contract
 
 WORKFLOW="${PROJECT_ROOT}/.github/workflows/reusable-release-recover.yml"
 PLAN="${PROJECT_ROOT}/.github/workflows/reusable-release-recover-plan.yml"
@@ -223,7 +224,7 @@ contents: read"
 	# Every runs-on job follows the shared runner selection expression.
 	run bash -c 'cat "$0" "$1" | grep -cE "^    runs-on: "' "$PLAN" "$RESUME"
 	assert_output 5
-	run awk -v "expected=runs-on: \${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}" \
+	run awk -v "expected=runs-on: ${RUNNER_IMAGE_RUNS_ON}" \
 		'index($0, expected) { count++ } END { print count }' "$PLAN" "$RESUME"
 	assert_output 5
 	run bash -c 'cat "$0" "$1" | grep -cE "^    timeout-minutes: "' "$PLAN" "$RESUME"

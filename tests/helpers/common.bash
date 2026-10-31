@@ -157,6 +157,15 @@ require_python_yaml() {
 	fi
 }
 
+# Read Renovate-managed runner expectations for workflow contract tests.
+load_runner_contract() {
+	STANDARD_RUNNER="$(sed -n 's/^STANDARD_RUNNER = "\(ubuntu-[0-9][0-9]*\.[0-9][0-9]*\)"$/\1/p' \
+		"${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh")"
+	: "${STANDARD_RUNNER:?STANDARD_RUNNER missing from the runner contract}"
+	RUNNER_IMAGE_RUNS_ON="\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || '${STANDARD_RUNNER}' }}"
+	export STANDARD_RUNNER="${STANDARD_RUNNER}" RUNNER_IMAGE_RUNS_ON="${RUNNER_IMAGE_RUNS_ON}"
+}
+
 run_with_modern_bash() {
 	if bash4_available; then
 		run "$MODERN_BASH" -c "$1"

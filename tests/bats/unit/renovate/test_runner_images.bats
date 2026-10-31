@@ -28,6 +28,7 @@ RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
 }
 
 @test "runner-image manager: JavaScript regex extracts only the fallback version" {
+	command -v node >/dev/null 2>&1 || skip "node is required for the JavaScript regex check"
 	run node - "${RENOVATE_JSON}" <<'JS'
 const fs = require('node:fs')
 const assert = require('node:assert/strict')
@@ -202,10 +203,11 @@ PY
 	assert_success
 }
 
-@test "runner-image manager: a future bump satisfies the runner contract and catalog render check" {
+@test "runner-image manager: a future bump satisfies the contract, catalog and workflow tests" {
 	require_python_yaml
 	run "${PY}" - "${RENOVATE_JSON}" "${PROJECT_ROOT}" <<'PY'
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -231,9 +233,10 @@ future = f"{int(major) + 2}.{minor}"
 
 with tempfile.TemporaryDirectory() as directory:
     fixture = Path(directory)
-    for rel in (".github/workflows", ".github/actions", "catalog"):
-        shutil.copytree(root / rel, fixture / rel)
-    for rel in (contract_path, Path("docs/catalog.md"), Path("README.md")):
+    for rel in (".github/workflows", ".github/actions", "catalog", "scripts/ci"):
+        shutil.copytree(root / rel, fixture / rel,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for rel in (Path("docs/catalog.md"), Path("README.md")):
         (fixture / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / rel, fixture / rel)
 
@@ -242,6 +245,8 @@ with tempfile.TemporaryDirectory() as directory:
         if not path.is_file():
             continue
         rel = path.relative_to(fixture).as_posix()
+        if not (any(p.search(rel) for p in file_patterns) or rel.startswith(".github/workflows/")):
+            continue
         content = path.read_text(encoding="utf-8")
         if any(p.search(rel) for p in file_patterns):
             count = sum(len(list(p.finditer(content))) for p in patterns)
@@ -265,9 +270,35 @@ with tempfile.TemporaryDirectory() as directory:
             workflows_dir=fixture / ".github/workflows", name=f'{entry["id"]}.yml',
         )
         assert set(facts.runners) <= set(entry["runners"]), (entry["id"], facts.runners)
-    subprocess.run(["bash", str(fixture / contract_path)], check=True)
+    environment = {
+        **os.environ, "PROJECT_ROOT": str(fixture), "PYTHON": sys.executable,
+        "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+    }
+    subprocess.run(["bash", str(fixture / contract_path)], check=True, env=environment)
     subprocess.run([sys.executable, str(root / "scripts/ci/catalog/render.py"),
                     "--check", "--repo-root", str(fixture)], check=True)
+
+    # Tests are deliberately not Renovate targets: their expectations must
+    # follow the contract without editing the copied test source.
+    shutil.copytree(root / "tests/helpers", fixture / "tests/helpers")
+    suite_names = (
+        "test_reusable_build_artifact.bats", "test_reusable_deploy_pages.bats",
+        "test_reusable_docker_smoke_test_workflow.bats",
+        "test_reusable_publish_artifact_preview.bats",
+        "test_reusable_publish_file_breakdown.bats", "test_reusable_publish_npm_set.bats",
+        "test_reusable_release_recover.bats", "test_reusable_runner_contract.bats",
+    )
+    suites = []
+    for name in suite_names:
+        relative = Path("tests/bats/integration") / name
+        target = fixture / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, target)
+        suites.append(str(target))
+    subprocess.run(
+        ["bats", "--filter", "runner|prepare forwards the toolchain inputs", *suites],
+        check=True, env=environment,
+    )
     print(f"Simulated runner bump {current} -> {future}: {sum(tracked.values())} custom matches")
 PY
 	assert_success

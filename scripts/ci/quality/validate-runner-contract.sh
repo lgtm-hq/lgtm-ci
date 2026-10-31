@@ -15,7 +15,8 @@ if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 	exit 1
 fi
 
-python3 - "${WORKFLOWS_DIR}" <<'PY'
+# Callers with PyYAML in a virtual environment can select that interpreter.
+"${PYTHON:-python3}" - "${WORKFLOWS_DIR}" <<'PY'
 """Validate runner-image wiring across lgtm-ci reusable workflows."""
 from __future__ import annotations
 
@@ -135,9 +136,17 @@ def jobs_missing_timeout(content: str, rel: str) -> list[str]:
 
 def workflow_inputs(content: str) -> dict:
     document = yaml.safe_load(content)
+    if not isinstance(document, dict):
+        return {}
     events = document.get(True, document.get("on", {})) or {}
+    # The string/list event syntax declares no workflow_call inputs.
+    if not isinstance(events, dict):
+        return {}
     workflow_call = events.get("workflow_call") or {}
-    return workflow_call.get("inputs", {})
+    if not isinstance(workflow_call, dict):
+        return {}
+    inputs = workflow_call.get("inputs", {})
+    return inputs if isinstance(inputs, dict) else {}
 
 
 def has_runner_map_input(content: str) -> bool:

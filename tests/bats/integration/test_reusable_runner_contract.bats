@@ -3,17 +3,54 @@
 # Purpose: Contract tests for runner-image and runner-map reusable workflow policy
 
 load "../../helpers/common"
+load_runner_contract
 
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh"
 
 setup() {
 	require_python_yaml
+	export PYTHON="${PY}"
 }
 
 @test "validate-runner-contract: passes on repository reusables" {
 	run "${VALIDATOR}"
 	assert_success
 	assert_output --partial "OK:"
+}
+
+@test "validate-runner-contract: honors the selected Python interpreter" {
+	local interpreter="${BATS_TEST_TMPDIR}/selected-python"
+	cat >"${interpreter}" <<'SH'
+#!/usr/bin/env bash
+touch "${RUNNER_TEST_MARKER}"
+exec "${RUNNER_TEST_PYTHON}" "$@"
+SH
+	chmod +x "${interpreter}"
+	PYTHON="${interpreter}" RUNNER_TEST_PYTHON="${PY}" \
+		RUNNER_TEST_MARKER="${BATS_TEST_TMPDIR}/python-used" run "${VALIDATOR}"
+	assert_success
+	[[ -f "${BATS_TEST_TMPDIR}/python-used" ]]
+}
+
+@test "validate-runner-contract: short event syntax reports missing inputs" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/workflows" events
+	mkdir -p "${workflows_dir}"
+	for events in '[workflow_call]' 'workflow_call'; do
+		cat >"${workflows_dir}/reusable-short-events.yml" <<YAML
+on: ${events}
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: bash scripts/ci/example.sh
+YAML
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial 'missing timeout-minutes input'
+		assert_output --partial 'without runner-image input'
+		[[ "${output}" != *Traceback* ]]
+	done
 }
 
 @test "validate-runner-contract: flags script-backed reusable without runner-image" {
@@ -51,7 +88,7 @@ YAML
 @test "validate-runner-contract: flags incomplete runner-image wiring" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-partial-wiring-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-partial-wiring-bad.yml" <<YAML
 ---
 name: Partial wiring bad example
 on:
@@ -62,7 +99,7 @@ on:
         default: ""
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
   aggregate:
@@ -79,7 +116,7 @@ YAML
 @test "validate-runner-contract: flags reusable without timeout-minutes input" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-no-timeout-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-no-timeout-bad.yml" <<YAML
 ---
 name: No timeout bad example
 on:
@@ -90,7 +127,7 @@ on:
         default: ""
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
@@ -103,7 +140,7 @@ YAML
 @test "validate-runner-contract: accepts reusable with timeout-minutes input" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-with-timeout-good.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-with-timeout-good.yml" <<YAML
 ---
 name: With timeout good example
 on:
@@ -117,8 +154,8 @@ on:
         default: 10
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
 YAML
@@ -130,7 +167,7 @@ YAML
 @test "validate-runner-contract: flags timeout-minutes input that is not type number" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-with-timeout-string.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-with-timeout-string.yml" <<YAML
 ---
 name: With timeout string example
 on:
@@ -144,8 +181,8 @@ on:
         default: "10"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
 YAML
@@ -158,7 +195,7 @@ YAML
 @test "validate-runner-contract: flags timeout-minutes input never applied to a job" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-with-timeout-unused.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-with-timeout-unused.yml" <<YAML
 ---
 name: With timeout unused example
 on:
@@ -172,7 +209,7 @@ on:
         default: 10
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: 30
     steps:
       - run: echo ok
@@ -186,7 +223,7 @@ YAML
 @test "validate-runner-contract: flags runs-on job without job-level timeout-minutes" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<YAML
 ---
 name: Uncapped job bad example
 on:
@@ -200,12 +237,12 @@ on:
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo aggregate
 YAML
@@ -219,7 +256,7 @@ YAML
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	local validator_copy="${BATS_TEST_TMPDIR}/validate-runner-contract.sh"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-uncapped-job-bad.yml" <<YAML
 ---
 name: Uncapped job bad example
 on:
@@ -233,12 +270,12 @@ on:
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo aggregate
 YAML
@@ -246,7 +283,7 @@ YAML
 	# Patch a throwaway copy of the validator so the exception key format is
 	# exercised without mutating the repo-owned empty set.
 	cp "${VALIDATOR}" "${validator_copy}"
-	python3 - "${validator_copy}" <<'PY'
+	"${PY}" - "${validator_copy}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -270,7 +307,7 @@ PY
 @test "validate-runner-contract: accepts job with independent literal timeout cap" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-literal-cap-good.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-literal-cap-good.yml" <<YAML
 ---
 name: Literal cap good example
 on:
@@ -284,12 +321,12 @@ on:
         default: 10
 jobs:
   test:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
-    timeout-minutes: ${{ inputs.timeout-minutes }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   report-failure:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: 10
     steps:
       - run: echo report
@@ -325,7 +362,7 @@ YAML
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (double quotes)" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-latest-default-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-latest-default-bad.yml" <<YAML
 ---
 name: Latest default bad example
 on:
@@ -336,7 +373,7 @@ on:
         default: "ubuntu-latest"
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
@@ -349,7 +386,7 @@ YAML
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (single quotes)" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-latest-default-single-quote-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-latest-default-single-quote-bad.yml" <<YAML
 ---
 name: Latest default single quote bad example
 on:
@@ -360,7 +397,7 @@ on:
         default: 'ubuntu-latest'
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
@@ -373,7 +410,7 @@ YAML
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (unquoted)" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-latest-default-unquoted-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-latest-default-unquoted-bad.yml" <<YAML
 ---
 name: Latest default unquoted bad example
 on:
@@ -384,7 +421,7 @@ on:
         default: ubuntu-latest
 jobs:
   work:
-    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
@@ -445,7 +482,7 @@ YAML
 }
 
 @test "validate-runner-contract: accepts the exact runner expression with an empty default" {
-	_runner_fixture 'default: ""' "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+	_runner_fixture 'default: ""' "${RUNNER_IMAGE_RUNS_ON}"
 	run "${VALIDATOR}"
 	assert_success
 }
@@ -453,7 +490,7 @@ YAML
 @test "validate-runner-contract: rejects every non-empty runner-image default" {
 	local default
 	for default in '"ubuntu-26.04"' "'ubuntu-26.04'" ubuntu-26.04 '"blacksmith-2vcpu-ubuntu-2604"' '" "'; do
-		_runner_fixture "default: ${default}" "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+		_runner_fixture "default: ${default}" "${RUNNER_IMAGE_RUNS_ON}"
 		run "${VALIDATOR}"
 		assert_failure
 		assert_output --partial 'runner-image default must be ""'
@@ -463,7 +500,7 @@ YAML
 @test "validate-runner-contract: missing or null default cannot inherit the next input default" {
 	local declaration
 	for declaration in '# omitted' 'default:' 'default: null'; do
-		_runner_fixture "${declaration}" "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+		_runner_fixture "${declaration}" "${RUNNER_IMAGE_RUNS_ON}"
 		run "${VALIDATOR}"
 		assert_failure
 		assert_output --partial 'runner-image default must be ""'
@@ -471,7 +508,7 @@ YAML
 }
 
 @test "validate-runner-contract: accepts a single-quoted empty default with an inline comment" {
-	_runner_fixture "default: '' # follow the org switch" "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}"
+	_runner_fixture "default: '' # follow the org switch" "${RUNNER_IMAGE_RUNS_ON}"
 	run "${VALIDATOR}"
 	assert_success
 }
@@ -481,7 +518,7 @@ YAML
 	run "${VALIDATOR}"
 	assert_failure
 	assert_output --partial "must use"
-	assert_output --partial "ubuntu-26.04"
+	assert_output --partial "${STANDARD_RUNNER}"
 }
 
 @test "validate-runner-contract: rejects a plain runner-image expression" {
