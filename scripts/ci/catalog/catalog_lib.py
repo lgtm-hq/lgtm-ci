@@ -54,8 +54,7 @@ INPUT_OR_LITERAL = re.compile(
     r"^inputs\.(?P<name>[\w-]+)\s*\|\|\s*'(?P<literal>[^']*)'$",
 )
 RUNNER_SELECTION = re.compile(
-    r"^inputs\.runner-image\s*\|\|\s*vars\.LGTM_CI_RUNNER"
-    r"\s*\|\|\s*'(?P<literal>[^']+)'$",
+    r"^inputs\.runner-image\s*\|\|\s*vars\.LGTM_CI_RUNNER" r"\s*\|\|\s*'(?P<literal>[^']+)'$",
 )
 INPUT_GUARDED_OR_LITERAL = re.compile(
     r"^inputs\.(?P<name>[\w-]+)\s*!=\s*''\s*&&"
