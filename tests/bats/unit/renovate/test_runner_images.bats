@@ -51,7 +51,8 @@ for (const text of ["runs-on: ubuntu-26.04", "default: \"ubuntu-26.04\"",
 const filePatterns = manager.managerFilePatterns.map(p => new RegExp(p.slice(1, -1)))
 for (const [path, expected] of [
   ['.github/workflows/reusable-quality-lint.yml', true],
-  ['scripts/ci/quality/validate-runner-contract.sh', true],
+  ['scripts/ci/lib/standard-runner.sh', true],
+  ['scripts/ci/quality/validate-runner-contract.sh', false],
   ['catalog/catalog.yml', true], ['docs/catalog.md', true],
   ['docs/workflow-contract.md', true],
   ['.github/workflows/ci.yml', false],
@@ -108,8 +109,8 @@ manager, = [m for m in config["customManagers"] if m.get("datasourceTemplate") =
 pattern = manager["matchStrings"][0]
 pattern = re.sub(r"\(\?<([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", pattern)
 root = Path(sys.argv[2])
-contract = (root / "scripts/ci/quality/validate-runner-contract.sh").read_text(encoding="utf-8")
-standard_runner, = re.findall(r'^STANDARD_RUNNER = "(ubuntu-[0-9]+\.[0-9]+)"$', contract, re.M)
+contract = (root / "scripts/ci/lib/standard-runner.sh").read_text(encoding="utf-8")
+standard_runner, = re.findall(r'^STANDARD_RUNNER="(ubuntu-[0-9]+\.[0-9]+)"$', contract, re.M)
 tracked = 0
 for path in sorted((root / ".github/workflows").glob("reusable-*.yml")):
     content = path.read_text(encoding="utf-8")
@@ -145,7 +146,7 @@ manager, = [m for m in config["customManagers"] if m.get("datasourceTemplate") =
 patterns = [re.compile(re.sub(r"\(\?<([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", p))
             for p in manager["matchStrings"]]
 file_patterns = [re.compile(p[1:-1]) for p in manager["managerFilePatterns"]]
-contract = (root / "scripts/ci/quality/validate-runner-contract.sh").read_text()
+contract = (root / "scripts/ci/lib/standard-runner.sh").read_text()
 version, = [m.group("currentValue") for m in patterns[1].finditer(contract)]
 for name in ("semantic-pr-title", "pr-labeler", "dependency-review"):
     workflow = f"reusable-{name}"
@@ -175,14 +176,15 @@ with open(sys.argv[1], encoding="utf-8") as config_file:
 manager, = [m for m in config["customManagers"] if m.get("datasourceTemplate") == "github-runners"]
 pattern = re.sub(r"\(\?<([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", manager["matchStrings"][1])
 for quote in ('"', "'"):
-    content = f'\nSTANDARD_RUNNER = {quote}ubuntu-28.04{quote}\n'
+    content = f'\nSTANDARD_RUNNER={quote}ubuntu-28.04{quote}\n'
     assert [m.group("currentValue") for m in re.finditer(pattern, content)] == ["28.04"]
-assert re.search(pattern, 'OTHER_RUNNER = "ubuntu-28.04"') is None
+for content in ('OTHER_RUNNER="ubuntu-28.04"', 'STANDARD_RUNNER="ubuntu-28.04-arm"'):
+    assert re.search(pattern, content) is None
 PY
 	assert_success
 }
 
-@test "runner-image manager: extracts catalog labels while preserving Docker fallback and action evidence" {
+@test "runner-image manager: extracts catalog labels while preserving explicit runners and action evidence" {
 	run python3 - "${RENOVATE_JSON}" <<'PY'
 import json
 import re
@@ -211,7 +213,7 @@ PY
 	assert_success
 }
 
-@test "runner-image manager: extracts rendered catalog labels while preserving Docker fallback and action evidence" {
+@test "runner-image manager: extracts rendered catalog labels while preserving explicit runners and action evidence" {
 	run python3 - "${RENOVATE_JSON}" <<'PY'
 import json
 import re
@@ -269,7 +271,8 @@ patterns = [re.compile(re.sub(r"\(\?<([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", p))
             for p in manager["matchStrings"]]
 file_patterns = [re.compile(p[1:-1]) for p in manager["managerFilePatterns"]]
 contract_path = Path("scripts/ci/quality/validate-runner-contract.sh")
-contract = (root / contract_path).read_text(encoding="utf-8")
+standard_path = Path("scripts/ci/lib/standard-runner.sh")
+contract = (root / standard_path).read_text(encoding="utf-8")
 current, = [m.group("currentValue") for m in patterns[1].finditer(contract)]
 major, minor = current.split(".")
 future = f"{int(major) + 2}.{minor}"
@@ -303,7 +306,7 @@ with tempfile.TemporaryDirectory() as directory:
                              lambda m: m.group(1) + future, content)
         path.write_text(content, encoding="utf-8")
 
-    assert tracked[contract_path.as_posix()] == 1
+    assert tracked[standard_path.as_posix()] == 1
     assert tracked["docs/workflow-contract.md"] == 1
     consumer_contract = (fixture / "docs/workflow-contract.md").read_text()
     assert "${{ vars.LGTM_CI_RUNNER || 'ubuntu-" + future + "' }}" in consumer_contract
@@ -327,22 +330,23 @@ with tempfile.TemporaryDirectory() as directory:
     # Tests are deliberately not Renovate targets: their expectations must
     # follow the contract without editing the copied test source.
     shutil.copytree(root / "tests/helpers", fixture / "tests/helpers")
-    suite_names = (
-        "test_reusable_build_artifact.bats", "test_reusable_deploy_pages.bats",
-        "test_reusable_docker_smoke_test_workflow.bats",
-        "test_reusable_publish_artifact_preview.bats",
-        "test_reusable_publish_file_breakdown.bats", "test_reusable_publish_npm_set.bats",
-        "test_reusable_release_recover.bats", "test_reusable_runner_contract.bats",
+    suite_paths = (
+        "tests/bats/unit/actions/docker/test_classify.bats",
+        "tests/bats/integration/test_reusable_docker_workflow.bats",
+        "tests/bats/integration/test_reusable_docker_build_workflow.bats",
+        "tests/bats/integration/test_reusable_docker_multiplatform_workflow.bats",
+        "tests/bats/integration/test_reusable_docker_smoke_test_workflow.bats",
+        "tests/bats/integration/test_reusable_runner_contract.bats",
     )
     suites = []
-    for name in suite_names:
-        relative = Path("tests/bats/integration") / name
+    for name in suite_paths:
+        relative = Path(name)
         target = fixture / relative
         target.parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / relative, target)
         suites.append(str(target))
     run_bats(
-        ["--filter", "runner|prepare forwards the toolchain inputs", *suites],
+        ["--filter", "runner|unmapped platforms use|single.*platform|disables split|enables split", *suites],
         environment,
     )
     print(f"Simulated runner bump {current} -> {future}: {sum(tracked.values())} custom matches")

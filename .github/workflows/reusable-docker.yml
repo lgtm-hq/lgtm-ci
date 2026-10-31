@@ -128,7 +128,7 @@ on:
       runner-map:
         description: >-
           JSON object mapping platform to runner label.
-          Platforms not in the map default to ubuntu-24.04 with QEMU.
+          Unmapped split platforms use ubuntu-26.04; non-amd64 platforms use QEMU.
           Example: {"linux/arm64":"ubuntu-24.04-arm"}
         required: false
         type: string

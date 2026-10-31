@@ -267,8 +267,12 @@ matcher. Capture that evidence before adding another signature.
 Multi-arch Docker builds use `runner-map` instead of `runner-image`. Pass a JSON
 object mapping platform to runner label (for example
 `{"linux/arm64":"ubuntu-24.04-arm"}`). On the per-platform (split) path,
-platforms not in the map build on `ubuntu-24.04`, with QEMU for non-amd64
-platforms. The Docker family's fixed jobs run on `ubuntu-26.04` and are not
+platforms not in the map build on the fixed standard `ubuntu-26.04`, with QEMU
+for non-amd64 platforms. The shared shell value in
+`scripts/ci/lib/standard-runner.sh` is tracked by Renovate and used by both
+`classify.sh` (via jq `--arg`) and `validate-runner-contract.sh`. The classifier's
+fallback does not use `LGTM_CI_RUNNER`. Explicit mappings, including ARM labels, are
+unchanged. The Docker family's fixed jobs run on `ubuntu-26.04` and are not
 caller-pinnable (#1183; `ubuntu-24.04` before): the coordinators (`classify`,
 `merge`, summaries, scan) and the `build` job of `reusable-docker-build.yml`,
 which builds a single platform that has no `runner-map` entry, and builds
@@ -278,8 +282,8 @@ QEMU multi-platform when neither `push` nor `validate-on-pr` is set.
 
 Since #381 `reusable-docker.yml` is a thin orchestrator: its `classify` job
 resolves the build strategy from `platforms`/`push`/`validate-on-pr` and
-`runner-map`, then delegates to the focused reusables. Existing callers keep
-working unchanged.
+`runner-map`, then delegates to the focused reusables. See the runner fallback
+rename below when upgrading across #1241.
 
 <!-- markdownlint-disable MD013 -->
 
@@ -313,12 +317,57 @@ protection / merge-queue required checks accordingly when upgrading across
 the #381 split. Since #1081 the multi-platform facade nests its jobs one
 level deeper: `Docker multi-platform / Validate / …` on `push: false`,
 `Docker multi-platform / Publish / …` on `push: true`, plus `Docker
-multi-platform / Upload Trivy scan results (<platform>, <slug>, <runner>,
+multi-platform / Upload Trivy scan results (<platform>, <runner>, <slug>,
 <qemu>)` for the validate-path SARIF. A
 direct caller of the facade sees `<job> / Validate / Docker build per
-platform (linux/amd64, linux-amd64, ubuntu-24.04, false)` where it used to see
-`<job> / Docker build per platform (linux/amd64, linux-amd64, ubuntu-24.04,
+platform (linux/amd64, ubuntu-24.04, linux-amd64, false)` where it used to see
+`<job> / Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64,
 false)` (all four matrix values are appended).
+
+#### Docker runner fallback rename (#1241)
+
+Upgrading to #1241 changes each unmapped split leg from `ubuntu-24.04` to
+`ubuntu-26.04`. The emitted tuple order is `(platform, runner, slug, qemu)`.
+For the observed Rustume publish check, the prefix stays
+`🐳 Docker Build & Publish / Docker multi-platform / Publish /`. Its leaf
+changes exactly from:
+
+```text
+Docker build per platform (linux/amd64, ubuntu-24.04, linux-amd64, false)
+```
+
+to:
+
+```text
+Docker build per platform (linux/amd64, ubuntu-26.04, linux-amd64, false)
+```
+
+Winnow's observed equivalent has the prefix `🐳 Docker Image` and the same
+tuple replacement. Publish verify checks also rename; health checks and
+validate-path SARIF matrix checks rename when emitted. The orchestrator
+nests `<caller> / Docker multi-platform / Validate|Publish / <leaf>`; direct
+facade callers omit `Docker multi-platform`, and direct leaf callers omit
+both intermediate levels. A release wrapper adds its own outer prefix.
+Coordinators, summaries, merge, scan and non-split build names stay stable.
+
+The 2026-10-31 prerequisite inventory found eleven caller job definitions
+across four public repositories that can use the old AMD64 fallback:
+py-lintro (seven), Rustume (one), podex (two), and winnow (one). All explicitly
+map ARM to `ubuntu-24.04-arm`; that mapping stays unchanged. Podex reaches
+the split fallback only on version tags; its single-platform PR,
+merge-group and ordinary main checks stay unchanged. Empty-map multi-platform
+callers also move unmapped ARM legs to the standard with QEMU. Single
+unmapped platforms still use the non-split path, and split builds still
+require `push` or `validate-on-pr`.
+
+That snapshot found zero affected required contexts among 101 definitions
+across 22 repositories, so it indicated no required-check edits. The operator
+must repeat the protection and consumer-pin inventory immediately before
+merge and coordinate any newly affected required context before the rename.
+Live canary validation of emitted contexts is still required. Immutable
+consumer pins retain their old behavior until adoption; upgrade `uses` and
+explicit `tooling-ref` together. No protection or consumer change is part of
+this implementation.
 
 #### Opt-in runner disk and resource observability
 

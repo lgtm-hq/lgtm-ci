@@ -9,6 +9,8 @@ if [[ -z "${REPO_ROOT:-}" ]]; then
 	REPO_ROOT="$(cd "${SCRIPT_DIR}/../../.." && pwd)"
 fi
 WORKFLOWS_DIR="${WORKFLOWS_DIR:-${REPO_ROOT}/.github/workflows}"
+# shellcheck source=../lib/standard-runner.sh
+source "${REPO_ROOT}/scripts/ci/lib/standard-runner.sh"
 
 if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 	echo "ERROR: workflows directory not found: ${WORKFLOWS_DIR}" >&2
@@ -16,7 +18,7 @@ if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 fi
 
 # Callers with PyYAML in a virtual environment can select that interpreter.
-"${PYTHON:-python3}" - "${WORKFLOWS_DIR}" <<'PY'
+"${PYTHON:-python3}" - "${WORKFLOWS_DIR}" "${REPO_ROOT}" "${STANDARD_RUNNER}" <<'PY'
 """Validate runner-image wiring across lgtm-ci reusable workflows."""
 from __future__ import annotations
 
@@ -77,8 +79,8 @@ DOCKER_FAMILY: dict[str, set[str]] = {
 # receive the already-resolved matrix from the classify job.
 DOCKER_RUNNER_MAP_FILES = {"reusable-docker.yml"}
 DOCKER_MATRIX_RUNS_ON = {"${{ matrix.runner }}"}
-# Shared with fixed Docker coordinator jobs; tracked by Renovate (#1230).
-STANDARD_RUNNER = "ubuntu-26.04"
+# Shared with the Docker classifier; the shell assignment is tracked by Renovate.
+STANDARD_RUNNER = sys.argv[3]
 RUNNER_IMAGE_RUNS_ON = (
     "${{ inputs.runner-image || vars.LGTM_CI_RUNNER || '"
     + STANDARD_RUNNER
@@ -178,6 +180,25 @@ def is_script_backed(content: str) -> bool:
 
 
 violations: list[str] = []
+
+# Keep the classifier's jq fallback wired to the same fixed standard, including
+# its --arg value. Checking the assignment also rejects a stale literal even if
+# a correct example remains elsewhere in the file.
+classify_path = Path(sys.argv[2]) / "scripts/ci/actions/docker/classify.sh"
+classify = classify_path.read_text()
+classify = re.sub(r"\\\n[ \t]*", " ", classify)
+runner_assignment = re.search(r"^\s*runner=.+$", classify, re.M)
+if (
+    'source "$SCRIPT_DIR/../../lib/standard-runner.sh"' not in classify.splitlines()
+    or runner_assignment is None
+    or '--arg standard_runner "$STANDARD_RUNNER"' not in runner_assignment[0]
+    or "'.[$p] // $standard_runner'" not in runner_assignment[0]
+    or re.search(r"^\s*(?:export\s+)?STANDARD_RUNNER=", classify, re.M)
+):
+    violations.append(
+        "classify.sh: runner-map fallback must use STANDARD_RUNNER "
+        "from scripts/ci/lib/standard-runner.sh via jq --arg",
+    )
 
 for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     content = workflow.read_text()

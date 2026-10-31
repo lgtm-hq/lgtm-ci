@@ -17,17 +17,17 @@
   "customManagers": [
     {
       "customType": "regex",
-      "description": "Track runner selection expression fallbacks, the shared runner contract and catalog labels alongside literal runs-on labels (#1230, #1231). Preserve Docker runner-map fallbacks and composite-action evidence.",
+      "description": "Track runner selection expression fallbacks, the shared Docker/contract standard and catalog labels alongside literal runs-on labels (#1230, #1231, #1241). Preserve explicit runner mappings and composite-action evidence.",
       "managerFilePatterns": [
         "/^\\.github/workflows/reusable-.*\\.yml$/",
-        "/^scripts/ci/quality/validate-runner-contract\\.sh$/",
+        "/^scripts/ci/lib/standard-runner\\.sh$/",
         "/^catalog/catalog\\.yml$/",
         "/^docs/catalog\\.md$/",
         "/^docs/workflow-contract\\.md$/"
       ],
       "matchStrings": [
         "\\|\\| 'ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)' \\}\\}",
-        "(?:^|\\n)STANDARD_RUNNER = [\"']ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)[\"']",
+        "(?:^|\\n)STANDARD_RUNNER=[\"']ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)[\"'](?:\\r?\\n|$)",
         "(?:^|\\n)  - id: reusable-[^\\r\\n]+\\r?\\n(?:    [^\\r\\n]*\\r?\\n|\\r?\\n)*?    runners: \\[(?:[^\\]\\r\\n]*, )?ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)\\]",
         "(?:^|\\n)#### `reusable-[^`\\r\\n]+`\\r?\\n(?:[^#\\r\\n][^\\r\\n]*\\r?\\n|\\r?\\n)*?- \\*\\*Runners:\\*\\* (?:`[^`\\r\\n]+`, )*`ubuntu-(?<currentValue>[0-9]+\\.[0-9]+)`[ \\t]*(?:\\r?\\n|$)"
       ],

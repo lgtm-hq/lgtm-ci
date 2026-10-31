@@ -5,6 +5,7 @@
 load "../../../../helpers/common"
 load "../../../../helpers/mocks"
 load "../../../../helpers/github_env"
+load_runner_contract
 
 SCRIPT="${PROJECT_ROOT}/scripts/ci/actions/docker/classify.sh"
 
@@ -17,6 +18,7 @@ setup() {
 	# Defaults; individual tests override as needed
 	export PLATFORMS="linux/amd64,linux/arm64"
 	export PUSH="true"
+	export VALIDATE_ON_PR="false"
 	export RUNNER_MAP='{"linux/arm64":"ubuntu-24.04-arm"}'
 	unset SMOKE_TEST SMOKE_TEST_SCRIPT HEALTH_CHECK_CMD HEALTH_CHECK_PORT HEALTH_CHECK_TIMEOUT || true
 }
@@ -125,6 +127,60 @@ _run_script() {
 	[[ "$matrix" == *"linux/arm64"* ]]
 }
 
+@test "classify: unmapped platforms use the standard runner on push and validation" {
+	export RUNNER_MAP="{}"
+	# Docker's fixed standard must ignore the org switch and inherited values.
+	export LGTM_CI_RUNNER="custom-org-runner"
+	local expected_runner="${STANDARD_RUNNER}" mode
+	export STANDARD_RUNNER="custom-inherited-runner"
+	for mode in push validate; do
+		: >"${GITHUB_OUTPUT}"
+		if [[ "$mode" == push ]]; then
+			export PUSH="true" VALIDATE_ON_PR="false"
+		else
+			export PUSH="false" VALIDATE_ON_PR="true"
+		fi
+		_run_script
+		assert_success
+		assert_github_output "use-split" "true"
+		run jq -e --arg runner "$expected_runner" '. == [
+			{platform: "linux/amd64", runner: $runner, slug: "linux-amd64", qemu: false},
+			{platform: "linux/arm64", runner: $runner, slug: "linux-arm64", qemu: true}
+		]' <<<"$(get_github_output "matrix")"
+		assert_success
+	done
+}
+
+@test "classify: omitted runner map defaults to an empty map" {
+	unset RUNNER_MAP
+	_run_script
+	assert_success
+	run jq -e --arg runner "${STANDARD_RUNNER}" 'length == 2 and all(.[]; .runner == $runner)' \
+		<<<"$(get_github_output "matrix")"
+	assert_success
+}
+
+@test "classify: partial runner map keeps explicit ARM and uses the standard for AMD64" {
+	_run_script
+	assert_success
+	run jq -e --arg runner "${STANDARD_RUNNER}" '. == [
+		{platform: "linux/amd64", runner: $runner, slug: "linux-amd64", qemu: false},
+		{platform: "linux/arm64", runner: "ubuntu-24.04-arm", slug: "linux-arm64", qemu: false}
+	]' <<<"$(get_github_output "matrix")"
+	assert_success
+}
+
+@test "classify: full runner map preserves explicit labels and native architectures" {
+	export RUNNER_MAP='{"linux/amd64":"ubuntu-22.04","linux/arm64":"ubuntu-24.04-arm"}'
+	_run_script
+	assert_success
+	run jq -e '. == [
+		{platform: "linux/amd64", runner: "ubuntu-22.04", slug: "linux-amd64", qemu: false},
+		{platform: "linux/arm64", runner: "ubuntu-24.04-arm", slug: "linux-arm64", qemu: false}
+	]' <<<"$(get_github_output "matrix")"
+	assert_success
+}
+
 @test "classify: single mapped platform enables split with native runner" {
 	export PLATFORMS="linux/arm64"
 	export PUSH="false"
@@ -144,13 +200,23 @@ _run_script() {
 }
 
 @test "classify: single unmapped platform disables split" {
-	export PLATFORMS="linux/amd64"
 	export RUNNER_MAP="{}"
-
-	_run_script
-	assert_success
-	assert_github_output "use-split" "false"
-	assert_github_output "matrix" "[]"
+	local platform mode
+	for platform in linux/amd64 linux/arm64; do
+		export PLATFORMS="$platform"
+		for mode in push validate; do
+			: >"${GITHUB_OUTPUT}"
+			if [[ "$mode" == push ]]; then
+				export PUSH="true" VALIDATE_ON_PR="false"
+			else
+				export PUSH="false" VALIDATE_ON_PR="true"
+			fi
+			_run_script
+			assert_success
+			assert_github_output "use-split" "false"
+			assert_github_output "matrix" "[]"
+		done
+	done
 }
 
 @test "classify: deduplicates repeated platforms" {
