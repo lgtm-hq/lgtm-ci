@@ -1,0 +1,39 @@
+{
+  "start": "2026-10-01T00:00:00+00:00",
+  "end": "2026-10-31T00:00:00+00:00",
+  "repositories": {
+    "example/private": {
+      "private": true,
+      "listing_complete": true,
+      "runs": [
+        {"id": 1, "name": "CI", "workflow_id": 5, "event": "push", "head_sha": "abc", "head_branch": "renovate/tool", "run_attempt": 2},
+        {"id": 2, "name": "CI", "workflow_id": 5, "event": "pull_request", "head_sha": "abc", "head_branch": "renovate/tool", "run_attempt": 1}
+      ],
+      "attempts": {
+        "1": {
+          "1": [
+            {"id": 11, "name": "linux", "started_at": "2026-10-02T00:00:00Z", "completed_at": "2026-10-02T00:01:01Z", "labels": ["ubuntu-26.04"]},
+            {"id": 12, "name": "windows", "started_at": "2026-10-02T00:00:00Z", "completed_at": "2026-10-02T00:00:01Z", "labels": ["windows-latest"]},
+            {"id": 13, "name": "skip", "conclusion": "skipped", "started_at": "2026-10-02T00:00:00Z", "completed_at": "2026-10-02T00:00:01Z", "labels": ["ubuntu-latest"]}
+          ],
+          "2": [
+            {"id": 14, "name": "macos", "started_at": "2026-10-02T00:00:00Z", "completed_at": "2026-10-02T00:01:00Z", "labels": ["macos-latest"]},
+            {"id": 15, "name": "missing", "started_at": null, "completed_at": null, "labels": ["ubuntu-latest"]}
+          ]
+        }
+      }
+    },
+    "example/public": {
+      "private": false,
+      "listing_complete": true,
+      "runs": [{"id": 3, "name": "CI", "workflow_id": 6, "event": "schedule", "head_sha": "xyz", "run_attempt": 1}],
+      "attempts": {
+        "3": {"1": [
+          {"id": 31, "name": "macos", "started_at": "2026-10-02T00:00:00Z", "completed_at": "2026-10-02T00:01:01Z", "labels": ["macos-latest"]},
+          {"id": 32, "name": "large", "started_at": "2026-10-02T00:00:00Z", "completed_at": "2026-10-02T00:01:01Z", "labels": ["ubuntu-latest-16-cores"]},
+          {"id": 33, "name": "own", "started_at": "2026-10-02T00:00:00Z", "completed_at": "2026-10-02T00:00:01Z", "labels": ["self-hosted", "ubuntu-latest"]}
+        ]}
+      }
+    }
+  }
+}
