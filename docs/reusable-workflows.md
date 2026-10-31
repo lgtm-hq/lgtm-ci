@@ -359,8 +359,8 @@ that issue #1081 covers, and the split chosen for each, is in
 Runner-pinnable reusables default `runner-image` to `""`: an explicit input
 wins, then the caller's `vars.LGTM_CI_RUNNER`, then `ubuntu-26.04`. Leave it
 empty so the org switch applies. Pin only when a job needs a specific runner;
-see [Runner selection](workflow-contract.md#runner-selection). For example,
-a job requiring the standard GitHub-hosted image can override the org switch:
+see [Runner selection](workflow-contract.md#runner-selection). This example
+follows the org switch:
 
 ```yaml
 jobs:
@@ -369,8 +369,6 @@ jobs:
     permissions:
       contents: read
       packages: read
-    with:
-      runner-image: ubuntu-26.04
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
@@ -1968,7 +1966,6 @@ jobs:
       matrix: '[{"node-version":"20"},{"node-version":"22"}]'
       artifact-name: js-dist
       artifact-path: dist
-      runner-image: ubuntu-26.04
 
   validate-examples:
     needs: build

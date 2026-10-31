@@ -223,6 +223,14 @@ GitHub-hosted runners). Otherwise leave it empty so the org switch applies.
 Matrix runner selections, macOS/Windows/ARM jobs, the action-only exceptions,
 and fixed Docker coordinator jobs keep their existing runner rules.
 
+Renovate tracks the expression fallbacks (including the consumer snippet above),
+`STANDARD_RUNNER`, and the final reusable runner labels in `catalog/catalog.yml`
+and `docs/catalog.md` with the `github-runners` datasource. They share the
+`ubuntu` dependency and one update PR with literal `runs-on:` labels. Earlier
+Docker runner-map fallbacks and composite-action evidence stay fixed. The runner
+contract requires every `runner-image` default to be empty and fixed Docker
+coordinators to match `STANDARD_RUNNER`.
+
 Before enabling Blacksmith for a consumer, run a small reusable pinned to the
 candidate lgtm-ci commit with `egress-policy: audit`. Use a reusable without
 the runner-policy tier check, such as `reusable-test-shell-run.yml`.
@@ -1179,7 +1187,7 @@ MSVC toolchain and never compiled (#1076).
 
 | Tier (strict Linux unless noted) | Target / builder                                   | What it proves                                                                                   |
 | -------------------------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------ |
-| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-24.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
+| Default                          | `x86_64-pc-windows-msvc` / `xwin` on `ubuntu-26.04` | Block-mode egress, digest-verified `cargo-xwin`, attested archive; the consumer fixture's `rust-release-build.yml` executes the `.exe` on `windows-latest` on every lgtm-ci pin (#1076) |
 | Alternative, strict              | `x86_64-pc-windows-gnu` / `cross`                  | MinGW binary from the `cross` Docker image; no Microsoft SDK download                            |
 | Opt-in, hardened (`reusable-build-artifact.yml`) | `x86_64-pc-windows-msvc` / `native` on `windows-latest` via `runner-map` | Native MSVC link; `harden-runner` cannot block egress on Windows, so the leg runs without block-mode egress and is never the silent default (#313) |
 
@@ -2217,7 +2225,7 @@ again with an empty config, which already scans the `go` directive there.
 | `egress-preset`          | `osv-scanner`                                        | `github-tooling` + release assets + OSV APIs    |
 | `allowed-endpoints-mode` | `append`                                             | Merge preset with caller-specific endpoints     |
 | `workflow-file`          | empty                                                | Caller workflow filename for auto-PR footer     |
-| `runner-image`           | `ubuntu-24.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
+| `runner-image`           | `ubuntu-26.04`                                       | Linux runners only (`install-osv-scanner.sh`)   |
 
 <!-- markdownlint-enable MD013 MD060 -->
 

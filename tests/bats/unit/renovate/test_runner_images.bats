@@ -37,7 +37,7 @@ const managers = config.customManagers.filter(m => m.datasourceTemplate === 'git
 assert.equal(managers.length, 1)
 const manager = managers[0]
 const pattern = new RegExp(manager.matchStrings[0], 'g')
-for (const prefix of ["inputs.runner-image || vars.LGTM_CI_RUNNER", "matrix.runner || inputs.runner-image || vars.LGTM_CI_RUNNER"]) {
+for (const prefix of ["vars.LGTM_CI_RUNNER", "inputs.runner-image || vars.LGTM_CI_RUNNER", "matrix.runner || inputs.runner-image || vars.LGTM_CI_RUNNER"]) {
   const text = "    runs-on: ${{ " + prefix + " || 'ubuntu-26.04' }}\r\n"
   const matches = [...text.matchAll(pattern)]
   assert.deepEqual(matches.map(m => m.groups.currentValue), ['26.04'])
@@ -53,6 +53,7 @@ for (const [path, expected] of [
   ['.github/workflows/reusable-quality-lint.yml', true],
   ['scripts/ci/quality/validate-runner-contract.sh', true],
   ['catalog/catalog.yml', true], ['docs/catalog.md', true],
+  ['docs/workflow-contract.md', true],
   ['.github/workflows/ci.yml', false],
   ['scripts/ci/actions/docker/classify.sh', false],
   ['examples/reusable-example.yml', false],
@@ -123,7 +124,9 @@ for path in sorted((root / ".github/workflows").glob("reusable-*.yml")):
     assert [m.group("currentValue") for m in matches] == [standard_runner.removeprefix("ubuntu-")] * expected, path
     tracked += expected
 assert tracked > 0
-print(f"Tracked {tracked} runner fallbacks")
+consumer_contract = (root / "docs/workflow-contract.md").read_text(encoding="utf-8")
+assert [m.group("currentValue") for m in re.finditer(pattern, consumer_contract)] == [standard_runner.removeprefix("ubuntu-")]
+print(f"Tracked {tracked} runner fallbacks and the consumer snippet")
 PY
 	assert_success
 }
@@ -236,7 +239,7 @@ with tempfile.TemporaryDirectory() as directory:
     for rel in (".github/workflows", ".github/actions", "catalog", "scripts/ci"):
         shutil.copytree(root / rel, fixture / rel,
                         ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
-    for rel in (Path("docs/catalog.md"), Path("README.md")):
+    for rel in (Path("docs/catalog.md"), Path("docs/workflow-contract.md"), Path("README.md")):
         (fixture / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / rel, fixture / rel)
 
@@ -261,6 +264,9 @@ with tempfile.TemporaryDirectory() as directory:
         path.write_text(content, encoding="utf-8")
 
     assert tracked[contract_path.as_posix()] == 1
+    assert tracked["docs/workflow-contract.md"] == 1
+    consumer_contract = (fixture / "docs/workflow-contract.md").read_text()
+    assert "${{ vars.LGTM_CI_RUNNER || 'ubuntu-" + future + "' }}" in consumer_contract
     assert tracked["catalog/catalog.yml"] == tracked["docs/catalog.md"] > 0
     catalog = catalog_lib.load_catalog(path=fixture / "catalog/catalog.yml")
     for entry in catalog["entries"]:

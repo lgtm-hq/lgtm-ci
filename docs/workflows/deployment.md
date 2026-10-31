@@ -92,9 +92,9 @@ The caller builds and uploads via `actions/upload-pages-artifact` in a
 prior job; this workflow deploys that named artifact.
 
 **Inputs:** `artifact-name` (default 'github-pages'), `environment`
-(default 'github-pages'), `runner-image` (default empty: explicit override, then `LGTM_CI_RUNNER`,
-then `ubuntu-26.04`),
-`tooling-ref`, `egress-policy`, `egress-preset` (default 'github-pages'),
+(default 'github-pages'), `runner-image` (default empty: explicit override,
+then `LGTM_CI_RUNNER`, then `ubuntu-26.04`), `tooling-ref`, `egress-policy`,
+`egress-preset` (default 'github-pages'),
 `allowed-endpoints`, `allowed-endpoints-mode`, `timeout-minutes` (default
 10).
 

@@ -149,6 +149,10 @@ def workflow_inputs(content: str) -> dict:
     return inputs if isinstance(inputs, dict) else {}
 
 
+def runner_image_default(inputs: dict) -> str | None:
+    return (inputs.get("runner-image") or {}).get("default")
+
+
 def has_runner_map_input(content: str) -> bool:
     return bool(re.search(r"^\s+runner-map:", content, re.M))
 
@@ -203,6 +207,14 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
             f"{rel}: job {job_id} runs-on without timeout-minutes",
         )
 
+    if has_runner:
+        default = runner_image_default(inputs)
+        if default != "":
+            found = "missing" if default is None else repr(default)
+            violations.append(
+                f'{rel}: runner-image default must be "" (found {found})',
+            )
+
     if rel in DOCKER_FAMILY:
         if rel in DOCKER_RUNNER_MAP_FILES and not has_runner_map_input(content):
             violations.append(f"{rel}: missing runner-map input")
@@ -226,11 +238,6 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
         continue
 
     if has_runner:
-        default = inputs["runner-image"].get("default")
-        if default != "":
-            violations.append(
-                f'{rel}: runner-image default must be "" (found {default!r})',
-            )
         for job_id, runs_on in jobs.items():
             if runs_on != RUNNER_IMAGE_RUNS_ON:
                 if re.fullmatch(r"ubuntu-[\w.-]+", runs_on):

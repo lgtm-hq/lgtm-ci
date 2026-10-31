@@ -7,6 +7,28 @@ load_runner_contract
 
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh"
 
+_runner_default_fixture() {
+	local path="$1"
+	mkdir -p "$(dirname "${path}")"
+	cat >"${path}" <<YAML
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        default: ""
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  work:
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
+    steps:
+      - run: echo ok
+YAML
+}
+
 setup() {
 	require_python_yaml
 	export PYTHON="${PY}"
@@ -53,10 +75,123 @@ YAML
 	done
 }
 
+@test "validate-runner-contract: rejects stale defaults and reports file and label" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local workflow="${workflows_dir}/reusable-stale-default.yml"
+	_runner_default_fixture "${workflow}"
+	local default
+	for default in '"ubuntu-24.04"' "'ubuntu-24.04'" 'ubuntu-24.04'; do
+		"${PY}" - "${workflow}" "${default}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+path.write_text(re.sub(r'^        default: .*$', f'        default: {sys.argv[2]}', path.read_text(), count=1, flags=re.M))
+PY
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial "reusable-stale-default.yml: runner-image default must be \"\" (found 'ubuntu-24.04')"
+		assert_output --partial "ERROR: 1 reusable workflow runner contract violation(s)"
+	done
+}
+
+@test "validate-runner-contract: accepts an empty default in either quote style" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local workflow="${workflows_dir}/reusable-standard-default.yml"
+	_runner_default_fixture "${workflow}"
+	local default
+	for default in '""' "''"; do
+		"${PY}" - "${workflow}" "${default}" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+path.write_text(re.sub(r'^        default: .*$', f'        default: {sys.argv[2]}', path.read_text(), count=1, flags=re.M))
+PY
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_success
+	done
+}
+
+@test "validate-runner-contract: accepts commented declarations and indented multiline descriptions with either on key" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local workflow="${workflows_dir}/reusable-commented-input.yml"
+	local on_key
+	for on_key in on '"on"'; do
+		_runner_default_fixture "${workflow}"
+		"${PY}" - "${workflow}" "${on_key}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+content = path.read_text().replace('on:', f'{sys.argv[2]}:', 1)
+content = content.replace('      runner-image:\n', '''      runner-image: # note
+        description: |-
+          Runner label for every job.
+            Indented details stay in the description.
+          default: ubuntu-24.04 is just description text.
+''', 1)
+path.write_text(content)
+PY
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_success
+	done
+}
+
+@test "validate-runner-contract: does not borrow a missing default from another input" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local workflow="${workflows_dir}/reusable-missing-default.yml"
+	_runner_default_fixture "${workflow}"
+	"${PY}" - "${workflow}" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+path.write_text(path.read_text().replace(
+    '        default: ""',
+    '      other-image:\n        type: string\n        default: ""',
+    1,
+))
+PY
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "reusable-missing-default.yml: runner-image default must be \"\" (found missing)"
+}
+
+@test "validate-runner-contract: checks defaults even in Docker and action-only exceptions" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	local name
+	for name in reusable-codeql.yml reusable-docker-build.yml; do
+		_runner_default_fixture "${workflows_dir}/${name}"
+		sed -i 's/default: ""/default: "ubuntu-24.04"/' "${workflows_dir}/${name}"
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial "${name}: runner-image default must be \"\" (found 'ubuntu-24.04')"
+		rm "${workflows_dir}/${name}"
+	done
+}
+
+@test "validate-runner-contract: rejects a Docker coordinator on a different runner" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
+	mkdir -p "${workflows_dir}"
+	sed "s/runs-on: ${STANDARD_RUNNER}/runs-on: ubuntu-24.04/" \
+		"${PROJECT_ROOT}/.github/workflows/reusable-docker.yml" >"${workflows_dir}/reusable-docker.yml"
+	run cmp -s "${PROJECT_ROOT}/.github/workflows/reusable-docker.yml" "${workflows_dir}/reusable-docker.yml"
+	assert_failure 1
+	run grep -F 'runs-on: ubuntu-24.04' "${workflows_dir}/reusable-docker.yml"
+	assert_success
+	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "reusable-docker.yml: job classify must use ${STANDARD_RUNNER} coordinator runner (found 'ubuntu-24.04')"
+	assert_output --partial "ERROR: 1 reusable workflow runner contract violation(s)"
+}
+
 @test "validate-runner-contract: flags script-backed reusable without runner-image" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	mkdir -p "${workflows_dir}"
-	cat >"${workflows_dir}/reusable-script-backed-bad.yml" <<'YAML'
+	cat >"${workflows_dir}/reusable-script-backed-bad.yml" <<YAML
 ---
 name: Script backed bad example
 on:

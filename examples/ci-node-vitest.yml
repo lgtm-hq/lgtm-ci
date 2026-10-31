@@ -64,6 +64,5 @@ jobs:
       package-manager: npm
       coverage: true
       publish-test-summary: true
-      runner-image: ubuntu-24.04
       egress-policy: block
       egress-preset: quality
