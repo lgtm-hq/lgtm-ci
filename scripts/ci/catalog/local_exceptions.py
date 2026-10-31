@@ -45,9 +45,8 @@ def _check_definition(
     if not isinstance(definition, dict):
         report.error(where, "schema definition must be a mapping")
         return False
-    for keyword in sorted(
-        set(definition) - (keywords | ANNOTATIONS | {"type"}), key=str
-    ):
+    supported = keywords | ANNOTATIONS | {"type"}
+    for keyword in sorted(set(definition) - supported, key=str):
         report.error(where, f"unsupported schema keyword `{keyword}`")
     for keyword in sorted((keywords | {"type"}) - set(definition)):
         report.error(where, f"missing schema keyword `{keyword}`")
@@ -63,9 +62,8 @@ def _check_definition(
             or not all(isinstance(v, int) and not isinstance(v, bool) for v in values)
             or len(set(values)) != len(values)
         ):
-            report.error(
-                where, "schema `enum` must be a non-empty list of unique integers"
-            )
+            message = "schema `enum` must be a non-empty list of unique integers"
+            report.error(where, message)
     if kind == "string":
         pattern = definition.get("pattern")
         if not isinstance(pattern, str):
@@ -251,9 +249,8 @@ def check_local_exceptions(
         or version not in schema["properties"]["schema-version"]["enum"]
     ):
         allowed = schema["properties"]["schema-version"]["enum"]
-        report.error(
-            where, f"`schema-version` must be {' or '.join(map(str, allowed))}"
-        )
+        choices = " or ".join(map(str, allowed))
+        report.error(where, f"`schema-version` must be {choices}")
     rows = data.get("exceptions")
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         report.error(where, "`exceptions` must be a list of mappings")
