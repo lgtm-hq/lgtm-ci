@@ -36,7 +36,9 @@
 #      negative-by-design workflow with a `<name>-probe.yml` companion is
 #      reached only through that probe (`via_probe`),
 #   5. polls the fixture's run list until each dispatched workflow has a
-#      completed run with separate queue and execution budgets,
+#      completed run with separate queue and execution budgets; a gate that
+#      dies at startup or demonstrably in fixture setup is re-dispatched once
+#      within the same admission limit and queue budget (probes excluded),
 #   6. writes a markdown table (workflow, role, expected, conclusion,
 #      verdict, run URL) to $GITHUB_STEP_SUMMARY,
 #   7. cancels owned unfinished runs; deletes the ref only once runs settle, and
@@ -98,6 +100,9 @@
 #   CANARY_TIMEOUT_SECONDS   execution bound from first job start, default 1500
 #   CANARY_QUEUE_TIMEOUT_SECONDS  admission/queue budget, default 1500 (informational)
 #   CANARY_MAX_IN_FLIGHT     dispatched workflow limit (including queued), default 6
+#   CANARY_RETRY_INFRA       "true" (default) re-dispatches a gate once after
+#                            startup_failure or jobs-API-proven setup failure;
+#                            never retries probes or lgtm-ci-step failures
 #   CANARY_STATE_DIR         owned-ref journal shared with the always-run cleanup step
 #   CANARY_CLEANUP_POLL_SECONDS  cancellation settle interval, default 5
 #   CANARY_POLL_SECONDS      poll interval, default 30
@@ -136,6 +141,7 @@ CANARY_EXPECTED_GATES="${CANARY_EXPECTED_GATES:-actions-direct build-python-dire
 CANARY_INCLUDE_MANUAL="${CANARY_INCLUDE_MANUAL:-false}"
 CANARY_TIMEOUT_SECONDS="${CANARY_TIMEOUT_SECONDS:-1500}"
 CANARY_MAX_IN_FLIGHT="${CANARY_MAX_IN_FLIGHT:-6}"
+CANARY_RETRY_INFRA="${CANARY_RETRY_INFRA:-true}"
 CANARY_QUEUE_TIMEOUT_SECONDS="${CANARY_QUEUE_TIMEOUT_SECONDS:-1500}"
 CANARY_STATE_DIR="${CANARY_STATE_DIR:-}"
 CANARY_CLEANUP_POLL_SECONDS="${CANARY_CLEANUP_POLL_SECONDS:-5}"
@@ -731,6 +737,7 @@ verdict_for() {
 # or removed_by_candidate row.
 render_summary() {
 	local sha="${1:?sha required}" branch="${2:-}" file conclusion url name role expected verdict mark link
+	local retry_reason first_url retry_status
 	local -a notes=()
 	echo "## External consumer canary"
 	echo
@@ -770,6 +777,14 @@ render_summary() {
 		link="—"
 		[[ -z "$url" ]] || link="[run](${url})"
 		echo "| \`${file}\` | ${role} | \`${expected}\` | \`${conclusion}\` | ${mark} | ${link} |"
+		if [[ -n "$CANARY_STATE_DIR" && -f "$CANARY_STATE_DIR/retries/$file" ]]; then
+			IFS=$'\t' read -r retry_reason first_url retry_status <"$CANARY_STATE_DIR/retries/$file"
+			if [[ "$retry_status" == failed ]]; then
+				notes+=("> \`${file}\`: retry dispatch failed; first run: ${first_url}")
+			else
+				notes+=("> \`${file}\`: retried once (${retry_reason}); first run: ${first_url}")
+			fi
+		fi
 	done < <(tr '\t' '\037')
 	if ((${#notes[@]})); then
 		echo
