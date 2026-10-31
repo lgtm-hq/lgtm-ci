@@ -194,6 +194,22 @@ def concatenated_shell_word(source: str) -> bool:
     return False
 
 
+def shell_opacity(source: str) -> str | None:
+    """Identify unsupported syntax before transforming shell source."""
+    # Continuation removal depends on quote/comment context. Until that is
+    # parsed, no guard or dependency lookup may use the physical lines.
+    if "\\\n" in source:
+        return "shell-continuation"
+    lexemes = SHELL_LEXEME.finditer(source)
+    if any(match.lastgroup == "unsupported" for match in lexemes):
+        return "shell-expansion"
+    # Heredoc payloads are literal data, even when they look like comments
+    # or script calls. Delimiter parsing is outside this bounded scanner.
+    if any(match["literal"] is None for match in HEREDOC.finditer(source)):
+        return "heredoc"
+    return None
+
+
 def normalize(
     source: str,
     repository: str,
@@ -370,19 +386,9 @@ class SourceResolver:
         self, source: str, directory: str = "", visited: frozenset[str] = frozenset()
     ) -> str:
         """Resolve explicit executable paths before masking literal path inputs."""
-        # Continuation removal depends on quote/comment context. Until that is
-        # parsed, no guard or dependency lookup may use the physical lines.
-        if "\\\n" in source:
-            return self.unknown("shell-continuation", source)
-        lexemes = SHELL_LEXEME.finditer(source)
-        if any(match.lastgroup == "unsupported" for match in lexemes):
-            return self.unknown("shell-expansion", source)
-        # Heredoc payloads are literal data, even when they look like comments
-        # or script calls. Reject unquoted operators before any transformation;
-        # delimiter parsing is outside this bounded scanner.
-        for match in HEREDOC.finditer(source):
-            if match["literal"] is None:
-                return self.unknown("heredoc", source)
+        opacity = shell_opacity(source)
+        if opacity is not None:
+            return self.unknown(opacity, source)
         if concatenated_shell_word(source):
             return self.unknown("shell-word", source)
         # Directory-changing shell control flow is not modeled. Keep the whole
