@@ -30,10 +30,7 @@ workflows_dir = Path(sys.argv[1])
 
 RUNNER_PINNING_EXCEPTIONS = {
     "reusable-codeql.yml",
-    "reusable-dependency-review.yml",
     "reusable-scorecards.yml",
-    "reusable-semantic-pr-title.yml",
-    "reusable-pr-labeler.yml",
     "reusable-publish-gem.yml",
 }
 

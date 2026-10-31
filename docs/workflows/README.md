@@ -104,8 +104,10 @@ standard summary comment when callers grant `pull-requests: write`.
 
 ## Runner and tooling pinning
 
-Script-backed reusables accept `runner-image` on every job; pin explicitly
-in production. Pass `tooling-ref` when testing an unreleased lgtm-ci branch.
+Runner-pinnable reusables, including semantic PR title, labeler and dependency
+review, accept an empty `runner-image` override: explicit input, then the caller's
+`LGTM_CI_RUNNER`, then `ubuntu-26.04`. Pin only when a specific runner is required.
+Pass `tooling-ref` when testing an unreleased lgtm-ci branch.
 Multi-arch Docker builds use `runner-map` instead. Action-only reusables
 (labeler, dependency review, semantic PR title, CodeQL, Scorecard) do not
 run the full `scripts/ci/` suite, so `tooling-ref` mainly pins egress

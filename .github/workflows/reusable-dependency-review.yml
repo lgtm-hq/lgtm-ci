@@ -73,6 +73,14 @@ on:
         type: string
         default: "Dependency Review"
 
+      runner-image:
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+        required: false
+        type: string
+        default: ""
+
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -200,7 +208,7 @@ env:
 jobs:
   dependency-review:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: github.event_name == 'pull_request' || github.event_name == 'merge_group'
     permissions:

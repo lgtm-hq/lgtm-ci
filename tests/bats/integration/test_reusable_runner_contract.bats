@@ -40,6 +40,52 @@ setup() {
 	assert_output --partial "OK:"
 }
 
+@test "control-plane runners: preserve job identities, permissions and event guards" {
+	run "${PY}" - "${PROJECT_ROOT}" "${RUNNER_IMAGE_RUNS_ON}" <<'PY'
+import sys
+from pathlib import Path
+
+import yaml
+
+root = Path(sys.argv[1])
+for workflow, job_id, check_name, pull_requests, guard in (
+    ("semantic-pr-title", "semantic-title", "Semantic PR Title", "write", None),
+    ("pr-labeler", "label", "PR Labeler", "write", None),
+    ("dependency-review", "dependency-review", "Dependency Review", "read",
+     "github.event_name == 'pull_request' || github.event_name == 'merge_group'"),
+):
+    doc = yaml.safe_load((root / f".github/workflows/reusable-{workflow}.yml").read_text())
+    inputs = doc.get(True, doc.get("on"))["workflow_call"]["inputs"]
+    runner = inputs["runner-image"]
+    assert runner["type"] == "string" and runner["required"] is False, workflow
+    assert runner["default"] == "", workflow
+    assert list(doc["jobs"]) == [job_id], workflow
+    job = doc["jobs"][job_id]
+    assert job["runs-on"] == sys.argv[2], workflow
+    assert job["name"] == "${{ inputs.job-name }}", workflow
+    assert inputs["job-name"]["default"] == check_name, workflow
+    assert job["permissions"] == {"contents": "read", "pull-requests": pull_requests}, workflow
+    assert job.get("if") == guard, workflow
+    assert job["steps"][0]["uses"].startswith("step-security/harden-runner@"), workflow
+PY
+	assert_success
+}
+
+@test "control-plane runners: validator rejects regression to a fixed runner" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/workflows" name
+	mkdir -p "${workflows_dir}"
+	for name in semantic-pr-title pr-labeler dependency-review; do
+		local workflow="reusable-${name}.yml"
+		sed 's/^    runs-on: .*/    runs-on: ubuntu-latest/' \
+			"${PROJECT_ROOT}/.github/workflows/${workflow}" >"${workflows_dir}/${workflow}"
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial "${workflow}: job"
+		assert_output --partial "hardcodes runs-on 'ubuntu-latest' but runner-image input is defined"
+		rm "${workflows_dir}/${workflow}"
+	done
+}
+
 @test "validate-runner-contract: honors the selected Python interpreter" {
 	local interpreter="${BATS_TEST_TMPDIR}/selected-python"
 	cat >"${interpreter}" <<'SH'

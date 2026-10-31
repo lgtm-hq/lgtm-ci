@@ -60,6 +60,14 @@ name: Reusable PR Auto Label
         type: string
         default: "github-tooling"
 
+      runner-image:
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+        required: false
+        type: string
+        default: ""
+
       timeout-minutes:
         description: "Job timeout in minutes"
         required: false
@@ -187,7 +195,7 @@ env:
 jobs:
   label:
     name: ${{ inputs.job-name }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read

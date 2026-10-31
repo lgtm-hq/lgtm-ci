@@ -131,6 +131,39 @@ PY
 	assert_success
 }
 
+@test "runner-image manager: covers control-plane fallbacks and resolved catalog labels" {
+	require_python_yaml
+	run "${PY}" - "${RENOVATE_JSON}" "${PROJECT_ROOT}" <<'PY'
+import json
+import re
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[2])
+config = json.loads(Path(sys.argv[1]).read_text())
+manager, = [m for m in config["customManagers"] if m.get("datasourceTemplate") == "github-runners"]
+patterns = [re.compile(re.sub(r"\(\?<([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", p))
+            for p in manager["matchStrings"]]
+file_patterns = [re.compile(p[1:-1]) for p in manager["managerFilePatterns"]]
+contract = (root / "scripts/ci/quality/validate-runner-contract.sh").read_text()
+version, = [m.group("currentValue") for m in patterns[1].finditer(contract)]
+for name in ("semantic-pr-title", "pr-labeler", "dependency-review"):
+    workflow = f"reusable-{name}"
+    for relative, pattern, section in (
+        (f".github/workflows/{workflow}.yml", patterns[0], None),
+        ("catalog/catalog.yml", patterns[2], rf"  - id: {workflow}\n.*?(?=\n  - id:|\Z)"),
+        ("docs/catalog.md", patterns[3], rf"#### `{workflow}`\n.*?(?=\n#### |\Z)"),
+    ):
+        assert any(p.search(relative) for p in file_patterns), relative
+        content = (root / relative).read_text()
+        if section:
+            content = re.search(section, content, re.S)[0]
+        assert [m.group("currentValue") for m in pattern.finditer(content)] == [version], (workflow, relative)
+print("Tracked all three control-plane fallbacks and both catalog representations")
+PY
+	assert_success
+}
+
 @test "runner-image manager: extracts the contract standard in every quote style" {
 	run python3 - "${RENOVATE_JSON}" <<'PY'
 import json

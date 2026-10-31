@@ -197,6 +197,14 @@ caller repository and organization. An unset or invisible variable therefore
 uses `ubuntu-26.04`. The catalog lists this resolved default rather than the
 empty input. Existing explicit overrides keep taking precedence.
 
+The generic control-plane workflows `reusable-semantic-pr-title.yml`,
+`reusable-pr-labeler.yml`, and `reusable-dependency-review.yml` follow this
+same contract. Their job IDs, check names, permissions, event guards and
+steps are unchanged. Older immutable workflow pins still use their original
+runner; consumers must upgrade to a release containing this repair. See the
+[control-plane consumer inventory](control-plane-runner-inventory.md) for
+verified pins and the remaining rollout acceptance.
+
 Org administrators can switch consumers by changing `LGTM_CI_RUNNER` or its
 selected-repositories access list. A consumer removed from that list falls
 back to GitHub-hosted runners when it has no repository variable or explicit
@@ -345,10 +353,7 @@ These reusables intentionally omit `runner-image`:
 | Reusable                             | Rationale                                              |
 | ------------------------------------ | ------------------------------------------------------ |
 | `reusable-codeql.yml`                | Action-only wrapper (`github/codeql-action/*`)         |
-| `reusable-dependency-review.yml`     | Action-only wrapper                                    |
 | `reusable-scorecards.yml`            | Action-only wrapper                                    |
-| `reusable-semantic-pr-title.yml`     | Action-only wrapper                                    |
-| `reusable-pr-labeler.yml`            | Action-only wrapper                                    |
 | `reusable-publish-gem.yml`           | OIDC publish; runner pin under attestation review      |
 
 <!-- markdownlint-enable MD013 -->

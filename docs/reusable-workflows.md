@@ -372,8 +372,10 @@ jobs:
 ```
 
 Multi-arch Docker builds use `runner-map` instead — see
-[Docker workflow inputs](#docker-workflow-inputs) below. Action-only reusables
-and the gem publish workflow do not expose `runner-image`;
+[Docker workflow inputs](#docker-workflow-inputs) below. The generic
+control-plane workflows (semantic PR title, labeler and dependency review)
+accept the same empty `runner-image` override and org switch. CodeQL,
+Scorecard and the gem publish workflow do not expose `runner-image`;
 `reusable-publish-npm-set.yml` and the deprecated `reusable-publish-npm.yml`
 wrapper (which forwards it) do, GitHub-hosted labels only, since npm
 provenance needs a hosted runner; see

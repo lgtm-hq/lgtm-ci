@@ -590,7 +590,7 @@ Dependency Review
 - **Path:** [`.github/workflows/reusable-dependency-review.yml`](../.github/workflows/reusable-dependency-review.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: read`
-- **Runners:** `ubuntu-latest`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Dependency Review`
 
@@ -724,7 +724,7 @@ PR Auto Label
 - **Path:** [`.github/workflows/reusable-pr-labeler.yml`](../.github/workflows/reusable-pr-labeler.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-latest`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `PR Labeler`
 
@@ -1009,7 +1009,7 @@ Semantic PR Title
 - **Path:** [`.github/workflows/reusable-semantic-pr-title.yml`](../.github/workflows/reusable-semantic-pr-title.yml)
 - **Tier:** preview
 - **Permissions:** `contents: read`, `pull-requests: write`
-- **Runners:** `ubuntu-latest`
+- **Runners:** `ubuntu-26.04`
 - **Package managers:** —
 - **Check names:** `Semantic PR Title`
 
