@@ -40,6 +40,10 @@ FIXTURES = ROOT / "tests/fixtures/duplication-scan"
 
 # Endpoint, JSON payload, and expected original source-inventory failure.
 MALFORMED_SOURCE_RESPONSES: dict[str, tuple[str, Any, type[Exception]]] = {
+    "raw-tree-html": ("tree", "<html>PRIVATE_TREE_CANARY</html>", ValueError),
+    "raw-tree-trailing": ("tree", "{}\nPRIVATE_TREE_CANARY", ValueError),
+    "raw-blob-html": ("graphql", "<html>PRIVATE_BLOB_CANARY</html>", ValueError),
+    "raw-blob-incomplete": ("graphql", '{"PRIVATE_BLOB_CANARY":', ValueError),
     "missing-tree": ("tree", {"truncated": False}, KeyError),
     "null-tree": ("tree", {"tree": None}, TypeError),
     "missing-tree-type": ("tree", {"tree": [{"path": "scripts/check.sh"}]}, KeyError),
@@ -86,6 +90,9 @@ class FakeGitHub(scan.GitHub):
         """Return only in-memory fixture source."""
         files: dict[str, str] = repository["files"]
         return files
+
+    def verify_source_coverage(self, repositories: list[dict[str, Any]]) -> None:
+        """Trust only this in-memory fixture; real coverage has transport tests."""
 
     def api(
         self,
@@ -164,6 +171,8 @@ def failed_source_inventory(api: FakeGitHub, failure: str) -> Iterator[None]:
         if failure in MALFORMED_SOURCE_RESPONSES:
             boundary, malformed, _ = MALFORMED_SOURCE_RESPONSES[failure]
             if boundary == ("graphql" if endpoint == "graphql" else "tree"):
+                if failure.startswith("raw-"):
+                    return subprocess.CompletedProcess(args, 0, malformed, "")
                 result = malformed
         return subprocess.CompletedProcess(args, 0, json.dumps(result), "")
 

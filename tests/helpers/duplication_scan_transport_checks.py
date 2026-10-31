@@ -900,19 +900,25 @@ class Cases(FixtureCase):
         """Live transport end to end."""
         repos = [
             {
-                "full_name": "org/left",
+                "id": 1,
+                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
+                "full_name": "lgtm-hq/left",
                 "private": False,
                 "archived": False,
                 "default_branch": "main",
             },
             {
-                "full_name": "org/right",
+                "id": 2,
+                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
+                "full_name": "lgtm-hq/right",
                 "private": False,
                 "archived": False,
                 "default_branch": "main",
             },
             {
-                "full_name": "org/empty",
+                "id": 3,
+                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
+                "full_name": "lgtm-hq/empty",
                 "private": False,
                 "archived": False,
                 "default_branch": "main",
@@ -932,9 +938,16 @@ class Cases(FixtureCase):
             if endpoint.startswith("orgs/"):
                 self.assertEqual(token, "read")
                 result = repos
+            elif endpoint.startswith("installation/repositories"):
+                self.assertEqual(token, "read")
+                result = {
+                    "repository_selection": "all",
+                    "total_count": 3,
+                    "repositories": repos,
+                }
             elif "git/trees" in endpoint:
                 self.assertEqual(token, "read")
-                if "org/empty/" in endpoint:
+                if "lgtm-hq/empty/" in endpoint:
                     return subprocess.CompletedProcess(
                         args, 1, "", "Git Repository is empty (HTTP 409)"
                     )

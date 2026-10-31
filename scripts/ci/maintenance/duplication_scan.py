@@ -70,6 +70,8 @@ class GitHub:
 
     def __init__(self) -> None:
         self.skipped: Counter[str] = Counter()
+        # Freeze the credential used for both coverage proof and source reads.
+        self.source_token = os.environ.get("GH_READ_TOKEN")
 
     @property
     def partial(self) -> bool:
@@ -83,14 +85,15 @@ class GitHub:
         payload: Any = None,
         read: bool = True,
         source: bool = True,
+        all_pages: bool = False,
     ) -> Any:
         """Read pages or send one mutation; never print response error content."""
         env = os.environ.copy()
         if read and source:
             env.pop("GITHUB_TOKEN", None)
             env.pop("GH_TOKEN", None)
-            if os.environ.get("GH_READ_TOKEN"):
-                env["GH_TOKEN"] = os.environ["GH_READ_TOKEN"]
+            if self.source_token:
+                env["GH_TOKEN"] = self.source_token
         args = ["gh", "api", endpoint]
         if payload is not None:
             payload = dict(payload)
@@ -124,9 +127,47 @@ class GitHub:
             raise RuntimeError(
                 "GitHub GraphQL returned errors; refusing a partial scan",
             )
+        if all_pages:
+            return pages
         if payload is None and all(isinstance(page, list) for page in pages):
             return [item for page in pages for item in page]
+        if len(pages) != 1:
+            raise RuntimeError("GitHub returned inconsistent pagination metadata")
         return pages[0]
+
+    def verify_source_coverage(self, repositories: list[dict[str, Any]]) -> None:
+        """Require all-repository grants reported for this scan's source token.
+
+        A successful org listing alone proves only visibility. The installation
+        endpoint authenticates the actual source credential, independently of
+        optional readiness or the App JWT. Missing selection metadata is not
+        evidence of complete coverage. Check every page and compare inventories
+        so missing pages, narrowed grants and concurrent inventory changes fail.
+        """
+        self.skipped["unverified repository coverage"] += 1
+        pages = self.api("installation/repositories?per_page=100", all_pages=True)
+        inventory: list[dict[str, Any]] = []
+        total: int | None = None
+        for page in pages:
+            if (
+                not isinstance(page, dict)
+                or page.get("repository_selection") != "all"
+                or type(page.get("total_count")) is not int
+                or page["total_count"] <= 0
+                or not isinstance(page.get("repositories"), list)
+                or (total is not None and total != page["total_count"])
+            ):
+                raise RuntimeError(
+                    "source credential lacks verified all-repository coverage",
+                )
+            total = page["total_count"]
+            inventory.extend(page["repositories"])
+        identities = repository_identities(inventory)
+        if len(inventory) != total or identities != repository_identities(repositories):
+            raise RuntimeError(
+                "source installation and organization inventories disagree",
+            )
+        del self.skipped["unverified repository coverage"]
 
     def files(self, repository: dict[str, Any]) -> dict[str, str]:
         """Pin the default-branch tree, then batch immutable blob reads."""
@@ -200,6 +241,47 @@ class GitHub:
                     continue
                 found[item["path"]] = blob["text"]
         return found
+
+
+def repository_identities(
+    repositories: list[dict[str, Any]],
+) -> set[tuple[int, str, int]]:
+    """Validate org ownership and reject duplicate or unusable inventory rows."""
+    identities: set[tuple[int, str, int]] = set()
+    names: set[str] = set()
+    identifiers: set[int] = set()
+    owners: set[int] = set()
+    for repo in repositories:
+        owner = repo.get("owner") if isinstance(repo, dict) else None
+        if (
+            not isinstance(repo, dict)
+            or type(repo.get("id")) is not int
+            or repo["id"] <= 0
+            or not isinstance(repo.get("full_name"), str)
+            or not re.fullmatch(r"lgtm-hq/[\w.-]+", repo["full_name"], re.IGNORECASE)
+            or not isinstance(owner, dict)
+            or type(owner.get("id")) is not int
+            or owner["id"] <= 0
+            or not isinstance(owner.get("login"), str)
+            or owner["login"].casefold() != "lgtm-hq"
+            or owner.get("type") != "Organization"
+            or type(repo.get("private")) is not bool
+            or type(repo.get("archived")) is not bool
+            or type(repo.get("fork", False)) is not bool
+            or not isinstance(repo.get("default_branch"), str)
+            or not repo["default_branch"]
+        ):
+            raise RuntimeError("invalid source organization repository metadata")
+        name = repo["full_name"].casefold()
+        if repo["id"] in identifiers or name in names:
+            raise RuntimeError("duplicate source organization repository metadata")
+        identifiers.add(repo["id"])
+        names.add(name)
+        owners.add(owner["id"])
+        identities.add((repo["id"], name, owner["id"]))
+    if len(owners) != 1:
+        raise RuntimeError("unverified source organization ownership")
+    return identities
 
 
 def references(root: Path) -> list[Unit]:
@@ -625,8 +707,19 @@ def main() -> int:
     exceptions = [] if provisional else load_exceptions(args.exceptions)
     api = GitHub()
     repos = api.api("orgs/lgtm-hq/repos?type=all&per_page=100")
+    if not isinstance(repos, list) or any(not isinstance(repo, dict) for repo in repos):
+        raise RuntimeError("invalid organization repository inventory")
     # Missing visibility is never evidence that historical source remains public.
-    public = {repo["full_name"] for repo in repos if repo.get("private") is False}
+    public = {
+        repo["full_name"]
+        for repo in repos
+        if repo.get("private") is False and isinstance(repo.get("full_name"), str)
+    }
+    try:
+        api.verify_source_coverage(repos)
+    except (RuntimeError, ValueError, KeyError, TypeError):
+        historical_issues(api, [], public_repositories=public, dry_run=dry_run)
+        raise
     consumers: list[Unit] = []
     scanned: list[str | None] = []
     private_count = 0
@@ -635,7 +728,7 @@ def main() -> int:
             continue
         try:
             files = api.files(repo)
-        except (RuntimeError, KeyError, TypeError):
+        except (RuntimeError, ValueError, KeyError, TypeError):
             # Source inventory errors block reconciliation, but visibility is
             # already known. Sanitize historical issues, then fail the scan.
             historical_issues(api, [], public_repositories=public, dry_run=dry_run)

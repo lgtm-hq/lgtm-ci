@@ -11,11 +11,36 @@ setup() {
 	TRANSPORT_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_transport_checks.py"
 	REGRESSION_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_regression_checks.py"
 	PYTHON_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_python_checks.py"
+	COVERAGE_CHECKS="${PROJECT_ROOT}/tests/helpers/duplication_scan_coverage_checks.py"
 }
 
 check_case() {
 	run "$PY" "${2:-$CHECKS}" "${3:-Cases}.$1"
 	assert_success
+}
+
+@test "duplication scan keeps event-loop subprocess methods opaque" {
+	check_case test_python_loop_subprocess_launchers "$PYTHON_CHECKS"
+}
+
+@test "duplication scan keeps computed namespace and native launchers opaque" {
+	check_case test_python_namespace_launchers "$PYTHON_CHECKS"
+}
+
+@test "duplication scan proves source installation coverage before normal mutations" {
+	check_case test_source_installation_coverage "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan blocks malformed or unreadable source coverage metadata" {
+	check_case test_invalid_coverage_metadata "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan verifies every installation and inventory page" {
+	check_case test_coverage_pagination "$COVERAGE_CHECKS"
+}
+
+@test "duplication scan coverage failures preserve historical privacy and membership" {
+	check_case test_coverage_privacy_cleanup "$COVERAGE_CHECKS"
 }
 
 @test "duplication scan keeps concatenated shell words distinct from separate arguments" {

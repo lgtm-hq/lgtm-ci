@@ -12,6 +12,47 @@ from duplication_scan_support import FixtureCase, model, syntax
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
 
+    def test_python_loop_subprocess_launchers(self) -> None:
+        """Loop methods and aliases must not mask different executable paths."""
+        for method in ("subprocess_exec", "subprocess_shell"):
+            expressions = (
+                f"await loop.{method}",
+                f"launch = loop.{method}\n    await launch",
+            )
+            for expression in expressions:
+                source = (
+                    "import asyncio as aio\nasync def main():\n"
+                    "    loop = aio.get_running_loop()\n"
+                    f"    {expression}(aio.SubprocessProtocol, 'tools/release')\n"
+                )
+                with self.subTest(method=method, expression=expression):
+                    self.check_opaque_python_launcher(source)
+
+    def test_python_namespace_launchers(self) -> None:
+        """Computed namespaces, builtins and native/browser APIs stay unknown."""
+        for source in (
+            'import sys\nmodule = sys.modules["o" + "s"]\n'
+            'getattr(module, "sys" + "tem")("tools/release")\n',
+            'import sys as s\ngetattr(s.modules["os"], name)("tools/release")\n',
+            "from sys import modules as registry\n"
+            'getattr(registry["os"], name)("tools/release")\n',
+            'import builtins\ngetattr(builtins, "ex" + "ec")("tools/release")\n',
+            "import builtins as b\nlookup = getattr\nlaunch = lookup(b, name)\n"
+            'launch("tools/release")\n',
+            'getattr(__builtins__, "ev" + "al")("8/2")\n',
+            '__builtins__["ev" + "al"]("8/2")\n',
+            'import ctypes\ngetattr(ctypes.CDLL(None), name)(b"tools/release")\n',
+            'from ctypes import CDLL as native\nnative("tools/release")\n',
+            'import webbrowser as browser\nbrowser.open("tools/release")\n',
+            'from webbrowser import open as launch\nlaunch("tools/release")\n',
+        ):
+            with self.subTest(source=source):
+                changed = source.replace("tools/release", "tools/check").replace(
+                    "8/2",
+                    "9/3",
+                )
+                self.check_opaque_python_launcher(source, changed)
+
     def test_python_computed_process_launchers(self) -> None:
         """Literal/computed attribute names cannot erase process identities."""
         for source in (
@@ -61,10 +102,15 @@ class Cases(FixtureCase):
             with self.subTest(source=source):
                 self.check_opaque_python_launcher(source)
 
-    def check_opaque_python_launcher(self, source: str) -> None:
+    def check_opaque_python_launcher(
+        self,
+        source: str,
+        changed: str | None = None,
+    ) -> None:
         """Compare script/job pairs without importing or running their source."""
         path = "scripts/check.py"
-        changed = source.replace("tools/release", "tools/check")
+        if changed is None:
+            changed = source.replace("tools/release", "tools/check")
         pairs = (
             ("org/left", source),
             ("org/right", source),
@@ -106,6 +152,13 @@ class Cases(FixtureCase):
                 "sys",
                 "tem",
                 "startfile",
+                "subprocess_exec",
+                "subprocess_shell",
+                "modules",
+                "builtins",
+                "__builtins__",
+                "ctypes",
+                "webbrowser",
                 "tools/release.exe",
             )
         ]

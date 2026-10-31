@@ -41,12 +41,18 @@ stay repository-specific; this bounded recognition does not parse arbitrary
 shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. Python process launchers,
-including `os.startfile`, asyncio's subprocess helpers and `pty.spawn`, also stay
+including `os.startfile`, asyncio's subprocess helpers and event-loop
+`subprocess_exec`/`subprocess_shell` methods, and `pty.spawn`, also stay
 unknown until command identities can be compared. Reflective lookup names
 (`getattr`, `__getattribute__`, `vars`, `__dict__`, `attrgetter`, `methodcaller`,
 `globals` and `locals`) alongside process-module names conservatively keep scripts
-unknown, including imported aliases and computed targets. This bounded token guard
-does not model arbitrary Python data flow. The same conservative rule covers runpy
+unknown, including imported aliases and computed targets reached through
+`sys.modules`, `builtins` or `__builtins__`. References to `__builtins__`,
+`ctypes` and `webbrowser` also stay unknown, including imported aliases:
+native calls and browser commands are not inspected. Launcher detection examines
+code names, so strings containing those words remain ordinary data.
+This bounded token guard does not model arbitrary Python data flow or promise
+to identify every indirect execution mechanism. The same conservative rule covers runpy
 file/module execution and dynamic imports, including imported aliases and computed targets.
 Local, relative and third-party Python imports
 keep the entrypoint repository-specific, even when helper source is available:
@@ -108,6 +114,10 @@ and human titles and notes remain unchanged. This pass also runs with partial
 source coverage and failed or malformed tree/blob responses; source-read errors
 still fail the scan and block ordinary reconciliation. Repository enumeration errors abort
 before any writes.
+After successful enumeration, source-credential coverage failures also run this
+privacy pass using only explicitly public visibility from the returned listing;
+unseen repositories remain unverifiable. These failures preserve all historical
+membership and adoption decisions and then fail the scan.
 Suppressed matches receive only a body patch when cleanup is needed, counted as
 `redacted`; dry-runs count these without writing. Not-planned closures otherwise
 stay silent; completed closures reopen with a comment when the copy is found again.
@@ -152,6 +162,17 @@ permissions and malformed permission mappings fail this check, as does a
 partially installed App. The temporary signing key is deleted
 immediately after signing; credentials and installation responses are not logged.
 
+Every scan independently checks the **actual source credential**, including local
+dry-runs. `GET /installation/repositories` must report `repository_selection: all`
+on every page. All pages must agree on a positive integer `total_count`, contain
+unique repository IDs/names owned by the same lgtm-hq organization, and exactly
+match the organization listing. Missing/malformed metadata, unreadable pages,
+selected-repository credentials and inventory gaps fail closed before normal
+issue mutations. The source token is held fixed for coverage and blob reads.
+The optional readiness check, environment readiness flags and a different App's
+installation cannot substitute for this proof. Verification uses read endpoints
+only and requires no additional secrets or permissions.
+
 `GH_READ_TOKEN` reads source. Issue reads and writes use the job's separate
 repository-scoped `GH_TOKEN` with Contents: read and Issues: write. Both jobs use
 the literal `ubuntu-26.04` runner, pinned actions and block-mode harden-runner.
@@ -180,8 +201,9 @@ Before enabling it:
 
 Source reads use `GH_READ_TOKEN` or the local `gh` login, discarding `GH_TOKEN`
 and `GITHUB_TOKEN` so a repository-only Actions token cannot narrow the source
-inventory. Local login visibility must be checked separately; the App
-installation check runs in the workflow. Issue reads use `GH_TOKEN` or the local
+inventory. That credential must pass the installation coverage check described
+above; a general local login cannot establish all-repository App coverage.
+Issue reads use `GH_TOKEN` or the local
 login. The system Python needs PyYAML, as do the catalog scripts. No scanned
 source is cached.
 

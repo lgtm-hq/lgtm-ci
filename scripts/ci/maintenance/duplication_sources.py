@@ -415,27 +415,43 @@ class SourceResolver:
                 # suffice to fail closed; this bounded guard does not attempt
                 # arbitrary Python data-flow resolution.
                 if (
-                    names & {"os", "posix", "nt", "asyncio", "pty"}
-                    and names
-                    & {
-                        "getattr",
-                        "__getattribute__",
-                        "vars",
-                        "__dict__",
-                        "attrgetter",
-                        "methodcaller",
-                        "globals",
-                        "locals",
-                    }
-                ) or any(
-                    re.fullmatch(
-                        r"subprocess|system|popen|startfile|exec\w*|eval|compile|spawn\w*|"
-                        r"posix_spawn\w*|create_subprocess_\w+|"
-                        r"runpy|run_path|run_module|"
-                        r"__import__|importlib|import_module",
-                        name,
+                    (
+                        names
+                        & {
+                            "os",
+                            "posix",
+                            "nt",
+                            "asyncio",
+                            "pty",
+                            "sys",
+                            "modules",
+                            "builtins",
+                            "__builtins__",
+                        }
+                        and names
+                        & {
+                            "getattr",
+                            "__getattribute__",
+                            "vars",
+                            "__dict__",
+                            "attrgetter",
+                            "methodcaller",
+                            "globals",
+                            "locals",
+                        }
                     )
-                    for name in names
+                    or names & {"__builtins__", "ctypes", "webbrowser"}
+                    or any(
+                        re.fullmatch(
+                            r"\w*subprocess\w*|system|popen|startfile|exec\w*|"
+                            r"eval|compile|spawn\w*|"
+                            r"posix_spawn\w*|"
+                            r"runpy|run_path|run_module|"
+                            r"__import__|importlib|import_module",
+                            name,
+                        )
+                        for name in names
+                    )
                 ):
                     shape += (self.unknown("python-command", source),)
             except (SyntaxError, tokenize.TokenError):
