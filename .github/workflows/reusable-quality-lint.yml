@@ -98,10 +98,12 @@ on:
         # yamllint disable-line rule:line-length
         default: "ghcr.io/lgtm-hq/py-lintro@sha256:116e60912a8c7a2002349ef096cfa93644314492751746aacdd5ef228c74306f"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-26.04"
+        default: ""
 
       timeout-minutes:
         description: "Job timeout in minutes for Docker lintro quality checks"
@@ -247,7 +249,7 @@ env:
 jobs:
   quality:
     name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read

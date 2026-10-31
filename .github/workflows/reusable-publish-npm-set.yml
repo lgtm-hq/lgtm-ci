@@ -233,12 +233,13 @@ name: Reusable npm Package-Set Publishing
         default: ""
       runner-image:
         description: >-
-          GitHub-hosted runner image label. Must stay GitHub-hosted: npm
-          trusted publishing and provenance are not available on self-hosted
-          runners, and a live publish refuses to run on one.
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          npm trusted publishing and provenance require a GitHub-hosted runner;
+          pin runner-image when the org variable selects a self-hosted runner.
         required: false
         type: string
-        default: ubuntu-26.04
+        default: ""
       timeout-minutes:
         description: >-
           Job timeout in minutes. Leave room for the propagation wait
@@ -380,7 +381,7 @@ jobs:
   publish:
     name: ${{ inputs.job-name }}
     # GitHub-hosted runner only: provenance attestation requires it.
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # An empty name is "no environment"; a `uses:` caller cannot set this
     # key itself, so it is the only way to keep an approval gate on the

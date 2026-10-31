@@ -73,10 +73,12 @@ on:
         type: string
         default: ""
       runner-image:
-        description: "Runner image for the validation job"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-26.04"
+        default: ""
       tooling-ref:
         # yamllint disable-line rule:line-length
         description: >-
@@ -246,7 +248,7 @@ env:
 jobs:
   smoke-test:
     name: Docker Smoke Test
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read

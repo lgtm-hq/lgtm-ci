@@ -151,11 +151,13 @@ name: Reusable Release Recovery (resume)
         default: release-publish
       runner-image:
         description: >-
-          GitHub-hosted runner image label for every job. Must stay
-          GitHub-hosted: the npm resume needs trusted publishing/provenance.
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          npm trusted publishing and provenance require a GitHub-hosted runner;
+          pin runner-image when the org variable selects a self-hosted runner.
         required: false
         type: string
-        default: ubuntu-26.04
+        default: ""
       egress-policy:
         description: harden-runner egress policy (audit or block)
         required: false
@@ -338,7 +340,7 @@ jobs:
       inputs.npm-artifact-name != '' &&
       inputs.npm-order != '' &&
       contains(fromJSON(inputs.missing), 'npm')
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     # Publish plus the post-publish propagation wait (up to fifteen minutes).
     timeout-minutes: 35
     environment: npm # the caller's approval gate, same as the tag path
@@ -474,7 +476,7 @@ jobs:
       inputs.resolve-result == 'success' &&
       inputs.release-artifact-name != '' &&
       contains(fromJSON(inputs.missing), 'github-release')
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 15
     permissions:
       contents: write
@@ -561,7 +563,7 @@ jobs:
       inputs.resolve-result == 'success' &&
       inputs.homebrew-dispatch-repo != '' &&
       contains(fromJSON(inputs.missing), 'homebrew')
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
       contents: read
@@ -621,7 +623,7 @@ jobs:
     name: Record recovery outcome
     needs: [resume-npm, resume-github-release, resume-homebrew]
     if: always()
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     permissions:
       # Read run metadata for the run link

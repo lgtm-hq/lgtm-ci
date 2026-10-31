@@ -1,6 +1,6 @@
 #!/usr/bin/env bats
 # SPDX-License-Identifier: MIT
-# Purpose: Prove Renovate tracks reusable runner-image defaults (#1230).
+# Purpose: Prove Renovate tracks runner selection fallbacks (#1230, #1231).
 
 load "../../../helpers/common"
 
@@ -27,46 +27,39 @@ RENOVATE_JSON="${PROJECT_ROOT}/renovate.json"
 	assert_success
 }
 
-@test "runner-image manager: extracts 26.04 from reusable input defaults" {
-	run python3 - "${RENOVATE_JSON}" <<'PY'
-import json
-import re
-import sys
-
-with open(sys.argv[1], encoding="utf-8") as config_file:
-    config = json.load(config_file)
-manager, = [m for m in config["customManagers"] if m.get("datasourceTemplate") == "github-runners"]
-pattern = manager["matchStrings"][0]
-pattern = re.sub(r"\(\?<([A-Za-z_][A-Za-z0-9_]*)>", r"(?P<\1>", pattern)
-for quote in ('"', "'", ""):
-    for newline in ("\n", "\r\n"):
-        for comment in ("", " # note"):
-            snippet = newline.join([
-                "on:", "  workflow_call:", "    inputs:",
-                f"      runner-image:{comment}",
-                "        description: >-", "          Runner label for every job.",
-                "          default: ubuntu-24.04 is just description text.",
-                "        required: false", "        type: string",
-                f"        default: {quote}ubuntu-26.04{quote} # pinned",
-                "      timeout-minutes:", "        default: 10", "",
-            ])
-            matches = list(re.finditer(pattern, snippet))
-            assert [m.group("currentValue") for m in matches] == ["26.04"], snippet
-
-file_patterns = [re.compile(p[1:-1]) for p in manager["managerFilePatterns"]]
-for path, expected in [
-    (".github/workflows/reusable-quality-lint.yml", True),
-    (".github/workflows/reusable-release-recover.yml", True),
-    ("scripts/ci/quality/validate-runner-contract.sh", True),
-    ("catalog/catalog.yml", True),
-    ("docs/catalog.md", True),
-    (".github/workflows/ci.yml", False),
-    ("scripts/ci/actions/docker/classify.sh", False),
-    ("examples/reusable-example.yml", False),
-    ("tests/fixtures/.github/workflows/reusable-example.yml", False),
-]:
-    assert any(p.search(path) for p in file_patterns) == expected, path
-PY
+@test "runner-image manager: JavaScript regex extracts only the fallback version" {
+	command -v node >/dev/null 2>&1 || skip "node is required for the JavaScript regex check"
+	run node - "${RENOVATE_JSON}" <<'JS'
+const fs = require('node:fs')
+const assert = require('node:assert/strict')
+const config = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'))
+const managers = config.customManagers.filter(m => m.datasourceTemplate === 'github-runners')
+assert.equal(managers.length, 1)
+const manager = managers[0]
+const pattern = new RegExp(manager.matchStrings[0], 'g')
+for (const prefix of ["vars.LGTM_CI_RUNNER", "inputs.runner-image || vars.LGTM_CI_RUNNER", "matrix.runner || inputs.runner-image || vars.LGTM_CI_RUNNER"]) {
+  const text = "    runs-on: ${{ " + prefix + " || 'ubuntu-26.04' }}\r\n"
+  const matches = [...text.matchAll(pattern)]
+  assert.deepEqual(matches.map(m => m.groups.currentValue), ['26.04'])
+  assert.equal(text.replace(pattern, m => m.replace('26.04', '28.04')),
+    text.replace("'ubuntu-26.04'", "'ubuntu-28.04'"))
+}
+for (const text of ["runs-on: ubuntu-26.04", "default: \"ubuntu-26.04\"",
+  "${{ inputs.runner-image }}", "${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04-arm' }}"]) {
+  assert.equal([...text.matchAll(pattern)].length, 0, text)
+}
+const filePatterns = manager.managerFilePatterns.map(p => new RegExp(p.slice(1, -1)))
+for (const [path, expected] of [
+  ['.github/workflows/reusable-quality-lint.yml', true],
+  ['scripts/ci/quality/validate-runner-contract.sh', true],
+  ['catalog/catalog.yml', true], ['docs/catalog.md', true],
+  ['docs/workflow-contract.md', true],
+  ['.github/workflows/ci.yml', false],
+  ['scripts/ci/actions/docker/classify.sh', false],
+  ['examples/reusable-example.yml', false],
+  ['tests/fixtures/.github/workflows/reusable-example.yml', false],
+]) assert.equal(filePatterns.some(p => p.test(path)), expected, path)
+JS
 	assert_success
 }
 
@@ -99,7 +92,7 @@ PY
 	assert_success
 }
 
-@test "runner-image manager: tracks every repository reusable input default" {
+@test "runner-image manager: tracks every repository reusable runner fallback" {
 	require_python_yaml
 	run "${PY}" - "${RENOVATE_JSON}" "${PROJECT_ROOT}" <<'PY'
 import json
@@ -125,12 +118,15 @@ for path in sorted((root / ".github/workflows").glob("reusable-*.yml")):
     if "runner-image" not in inputs:
         continue
     default = inputs["runner-image"]["default"]
-    assert default == standard_runner, (path, default, standard_runner)
+    assert default == "", (path, default)
     matches = list(re.finditer(pattern, content))
-    assert [m.group("currentValue") for m in matches] == [default.removeprefix("ubuntu-")], path
-    tracked += 1
+    expected = content.count("|| vars.LGTM_CI_RUNNER || '")
+    assert [m.group("currentValue") for m in matches] == [standard_runner.removeprefix("ubuntu-")] * expected, path
+    tracked += expected
 assert tracked > 0
-print(f"Tracked {tracked} runner-image defaults")
+consumer_contract = (root / "docs/workflow-contract.md").read_text(encoding="utf-8")
+assert [m.group("currentValue") for m in re.finditer(pattern, consumer_contract)] == [standard_runner.removeprefix("ubuntu-")]
+print(f"Tracked {tracked} runner fallbacks and the consumer snippet")
 PY
 	assert_success
 }
@@ -210,10 +206,16 @@ PY
 	assert_success
 }
 
-@test "runner-image manager: a future bump satisfies the runner contract and catalog render check" {
+@test "runner-image manager: nested BATS preserves tracing and failure propagation" {
+	run python3 "${PROJECT_ROOT}/tests/python/test_bats_subprocess.py"
+	assert_success
+}
+
+@test "runner-image manager: a future bump satisfies the contract, catalog and workflow tests" {
 	require_python_yaml
 	run "${PY}" - "${RENOVATE_JSON}" "${PROJECT_ROOT}" <<'PY'
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -224,6 +226,8 @@ from pathlib import Path
 root = Path(sys.argv[2])
 sys.path.insert(0, str(root / "scripts/ci/catalog"))
 import catalog_lib
+sys.path.insert(0, str(root / "tests/helpers"))
+from bats_subprocess import run_bats
 
 with open(sys.argv[1], encoding="utf-8") as config_file:
     config = json.load(config_file)
@@ -239,9 +243,10 @@ future = f"{int(major) + 2}.{minor}"
 
 with tempfile.TemporaryDirectory() as directory:
     fixture = Path(directory)
-    for rel in (".github/workflows", ".github/actions", "catalog"):
-        shutil.copytree(root / rel, fixture / rel)
-    for rel in (contract_path, Path("docs/catalog.md"), Path("README.md")):
+    for rel in (".github/workflows", ".github/actions", "catalog", "scripts/ci"):
+        shutil.copytree(root / rel, fixture / rel,
+                        ignore=shutil.ignore_patterns("__pycache__", "*.pyc"))
+    for rel in (Path("docs/catalog.md"), Path("docs/workflow-contract.md"), Path("README.md")):
         (fixture / rel).parent.mkdir(parents=True, exist_ok=True)
         shutil.copy2(root / rel, fixture / rel)
 
@@ -250,6 +255,8 @@ with tempfile.TemporaryDirectory() as directory:
         if not path.is_file():
             continue
         rel = path.relative_to(fixture).as_posix()
+        if not (any(p.search(rel) for p in file_patterns) or rel.startswith(".github/workflows/")):
+            continue
         content = path.read_text(encoding="utf-8")
         if any(p.search(rel) for p in file_patterns):
             count = sum(len(list(p.finditer(content))) for p in patterns)
@@ -264,6 +271,9 @@ with tempfile.TemporaryDirectory() as directory:
         path.write_text(content, encoding="utf-8")
 
     assert tracked[contract_path.as_posix()] == 1
+    assert tracked["docs/workflow-contract.md"] == 1
+    consumer_contract = (fixture / "docs/workflow-contract.md").read_text()
+    assert "${{ vars.LGTM_CI_RUNNER || 'ubuntu-" + future + "' }}" in consumer_contract
     assert tracked["catalog/catalog.yml"] == tracked["docs/catalog.md"] > 0
     catalog = catalog_lib.load_catalog(path=fixture / "catalog/catalog.yml")
     for entry in catalog["entries"]:
@@ -273,9 +283,35 @@ with tempfile.TemporaryDirectory() as directory:
             workflows_dir=fixture / ".github/workflows", name=f'{entry["id"]}.yml',
         )
         assert set(facts.runners) <= set(entry["runners"]), (entry["id"], facts.runners)
-    subprocess.run(["bash", str(fixture / contract_path)], check=True)
+    environment = {
+        **os.environ, "PROJECT_ROOT": str(fixture), "PYTHON": sys.executable,
+        "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+    }
+    subprocess.run(["bash", str(fixture / contract_path)], check=True, env=environment)
     subprocess.run([sys.executable, str(root / "scripts/ci/catalog/render.py"),
                     "--check", "--repo-root", str(fixture)], check=True)
+
+    # Tests are deliberately not Renovate targets: their expectations must
+    # follow the contract without editing the copied test source.
+    shutil.copytree(root / "tests/helpers", fixture / "tests/helpers")
+    suite_names = (
+        "test_reusable_build_artifact.bats", "test_reusable_deploy_pages.bats",
+        "test_reusable_docker_smoke_test_workflow.bats",
+        "test_reusable_publish_artifact_preview.bats",
+        "test_reusable_publish_file_breakdown.bats", "test_reusable_publish_npm_set.bats",
+        "test_reusable_release_recover.bats", "test_reusable_runner_contract.bats",
+    )
+    suites = []
+    for name in suite_names:
+        relative = Path("tests/bats/integration") / name
+        target = fixture / relative
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(root / relative, target)
+        suites.append(str(target))
+    run_bats(
+        ["--filter", "runner|prepare forwards the toolchain inputs", *suites],
+        environment,
+    )
     print(f"Simulated runner bump {current} -> {future}: {sum(tracked.values())} custom matches")
 PY
 	assert_success

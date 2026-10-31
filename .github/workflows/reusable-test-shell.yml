@@ -117,10 +117,12 @@ on:
         type: string
         default: "Shell Tests"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-26.04"
+        default: ""
       draft-pr-skip:
         description: "Skip jobs on draft pull requests"
         required: false
@@ -312,7 +314,7 @@ env:
 jobs:
   test:
     name: ${{ inputs.job-name }}
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       (!inputs.coverage || inputs.coverage-shards <= 1)
@@ -552,7 +554,7 @@ jobs:
 
   shard-setup:
     name: Coverage shard matrix
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     if: >-
       inputs.coverage && inputs.coverage-shards > 1
@@ -636,7 +638,7 @@ jobs:
   test-sharded:
     name: ${{ inputs.job-name }} (shard ${{ matrix.shard }}/${{ inputs.coverage-shards }})
     needs: shard-setup
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     if: >-
       inputs.coverage && inputs.coverage-shards > 1
@@ -795,7 +797,7 @@ jobs:
     # The test-sharded dependency stays loose so results still aggregate (and
     # the required check still fails closed) when a shard fails.
     needs: [shard-setup, test-sharded]
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 10
     if: >-
       always()

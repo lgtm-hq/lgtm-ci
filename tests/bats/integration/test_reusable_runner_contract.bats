@@ -3,9 +3,9 @@
 # Purpose: Contract tests for runner-image and runner-map reusable workflow policy
 
 load "../../helpers/common"
+load_runner_contract
 
 VALIDATOR="${PROJECT_ROOT}/scripts/ci/quality/validate-runner-contract.sh"
-STANDARD_RUNNER="$(sed -n 's/^STANDARD_RUNNER = "\([^"]*\)"$/\1/p' "${VALIDATOR}")"
 
 _runner_default_fixture() {
 	local path="$1"
@@ -16,17 +16,22 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
 YAML
+}
+
+setup() {
+	require_python_yaml
+	export PYTHON="${PY}"
 }
 
 @test "validate-runner-contract: passes on repository reusables" {
@@ -35,13 +40,48 @@ YAML
 	assert_output --partial "OK:"
 }
 
+@test "validate-runner-contract: honors the selected Python interpreter" {
+	local interpreter="${BATS_TEST_TMPDIR}/selected-python"
+	cat >"${interpreter}" <<'SH'
+#!/usr/bin/env bash
+touch "${RUNNER_TEST_MARKER}"
+exec "${RUNNER_TEST_PYTHON}" "$@"
+SH
+	chmod +x "${interpreter}"
+	PYTHON="${interpreter}" RUNNER_TEST_PYTHON="${PY}" \
+		RUNNER_TEST_MARKER="${BATS_TEST_TMPDIR}/python-used" run "${VALIDATOR}"
+	assert_success
+	[[ -f "${BATS_TEST_TMPDIR}/python-used" ]]
+}
+
+@test "validate-runner-contract: short event syntax reports missing inputs" {
+	local workflows_dir="${BATS_TEST_TMPDIR}/workflows" events
+	mkdir -p "${workflows_dir}"
+	for events in '[workflow_call]' 'workflow_call'; do
+		cat >"${workflows_dir}/reusable-short-events.yml" <<YAML
+on: ${events}
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - run: bash scripts/ci/example.sh
+YAML
+		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial 'missing timeout-minutes input'
+		assert_output --partial 'without runner-image input'
+		[[ "${output}" != *Traceback* ]]
+	done
+}
+
 @test "validate-runner-contract: rejects stale defaults and reports file and label" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	local workflow="${workflows_dir}/reusable-stale-default.yml"
 	_runner_default_fixture "${workflow}"
 	local default
 	for default in '"ubuntu-24.04"' "'ubuntu-24.04'" 'ubuntu-24.04'; do
-		python3 - "${workflow}" "${default}" <<'PY'
+		"${PY}" - "${workflow}" "${default}" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -51,18 +91,18 @@ path.write_text(re.sub(r'^        default: .*$', f'        default: {sys.argv[2]
 PY
 		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 		assert_failure
-		assert_output --partial "reusable-stale-default.yml: runner-image default must be ${STANDARD_RUNNER} (found 'ubuntu-24.04')"
+		assert_output --partial "reusable-stale-default.yml: runner-image default must be \"\" (found 'ubuntu-24.04')"
 		assert_output --partial "ERROR: 1 reusable workflow runner contract violation(s)"
 	done
 }
 
-@test "validate-runner-contract: accepts the standard default in every quote style" {
+@test "validate-runner-contract: accepts an empty default in either quote style" {
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	local workflow="${workflows_dir}/reusable-standard-default.yml"
 	_runner_default_fixture "${workflow}"
 	local default
-	for default in "\"${STANDARD_RUNNER}\"" "'${STANDARD_RUNNER}'" "${STANDARD_RUNNER}"; do
-		python3 - "${workflow}" "${default}" <<'PY'
+	for default in '""' "''"; do
+		"${PY}" - "${workflow}" "${default}" <<'PY'
 from pathlib import Path
 import re
 import sys
@@ -81,7 +121,7 @@ PY
 	local on_key
 	for on_key in on '"on"'; do
 		_runner_default_fixture "${workflow}"
-		python3 - "${workflow}" "${on_key}" <<'PY'
+		"${PY}" - "${workflow}" "${on_key}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -104,20 +144,20 @@ PY
 	local workflows_dir="${BATS_TEST_TMPDIR}/.github/workflows"
 	local workflow="${workflows_dir}/reusable-missing-default.yml"
 	_runner_default_fixture "${workflow}"
-	python3 - "${workflow}" "${STANDARD_RUNNER}" <<'PY'
+	"${PY}" - "${workflow}" <<'PY'
 from pathlib import Path
 import sys
 
 path = Path(sys.argv[1])
 path.write_text(path.read_text().replace(
-    f'        default: "{sys.argv[2]}"',
-    f'      other-image:\n        type: string\n        default: "{sys.argv[2]}"',
+    '        default: ""',
+    '      other-image:\n        type: string\n        default: ""',
     1,
 ))
 PY
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "reusable-missing-default.yml: runner-image default must be ${STANDARD_RUNNER} (found missing)"
+	assert_output --partial "reusable-missing-default.yml: runner-image default must be \"\" (found missing)"
 }
 
 @test "validate-runner-contract: checks defaults even in Docker and action-only exceptions" {
@@ -125,10 +165,10 @@ PY
 	local name
 	for name in reusable-codeql.yml reusable-docker-build.yml; do
 		_runner_default_fixture "${workflows_dir}/${name}"
-		sed -i "s/default: \"${STANDARD_RUNNER}\"/default: \"ubuntu-24.04\"/" "${workflows_dir}/${name}"
+		sed -i 's/default: ""/default: "ubuntu-24.04"/' "${workflows_dir}/${name}"
 		WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 		assert_failure
-		assert_output --partial "${name}: runner-image default must be ${STANDARD_RUNNER} (found 'ubuntu-24.04')"
+		assert_output --partial "${name}: runner-image default must be \"\" (found 'ubuntu-24.04')"
 		rm "${workflows_dir}/${name}"
 	done
 }
@@ -191,10 +231,10 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
   aggregate:
@@ -219,10 +259,10 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
@@ -243,13 +283,13 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
@@ -270,13 +310,13 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
       timeout-minutes:
         type: string
         default: "10"
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
@@ -298,13 +338,13 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: 30
     steps:
       - run: echo ok
@@ -326,18 +366,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo aggregate
 YAML
@@ -359,18 +399,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   aggregate:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo aggregate
 YAML
@@ -378,7 +418,7 @@ YAML
 	# Patch a throwaway copy of the validator so the exception key format is
 	# exercised without mutating the repo-owned empty set.
 	cp "${VALIDATOR}" "${validator_copy}"
-	python3 - "${validator_copy}" <<'PY'
+	"${PY}" - "${validator_copy}" <<'PY'
 from pathlib import Path
 import sys
 
@@ -410,18 +450,18 @@ on:
     inputs:
       runner-image:
         type: string
-        default: "${STANDARD_RUNNER}"
+        default: ""
       timeout-minutes:
         type: number
         default: 10
 jobs:
   test:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: \${{ inputs.timeout-minutes }}
     steps:
       - run: echo ok
   report-failure:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     timeout-minutes: 10
     steps:
       - run: echo report
@@ -468,14 +508,14 @@ on:
         default: "ubuntu-latest"
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ${STANDARD_RUNNER}"
+	assert_output --partial "runner-image default must be \"\""
 }
 
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (single quotes)" {
@@ -492,14 +532,14 @@ on:
         default: 'ubuntu-latest'
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ${STANDARD_RUNNER}"
+	assert_output --partial "runner-image default must be \"\""
 }
 
 @test "validate-runner-contract: flags ubuntu-latest runner-image default (unquoted)" {
@@ -516,14 +556,14 @@ on:
         default: ubuntu-latest
 jobs:
   work:
-    runs-on: \${{ inputs.runner-image }}
+    runs-on: ${RUNNER_IMAGE_RUNS_ON}
     steps:
       - run: echo ok
 YAML
 
 	WORKFLOWS_DIR="${workflows_dir}" run "${VALIDATOR}"
 	assert_failure
-	assert_output --partial "runner-image default must be ${STANDARD_RUNNER}"
+	assert_output --partial "runner-image default must be \"\""
 }
 
 @test "reusable-release-version-pr: exposes runner-image on all jobs" {
@@ -534,7 +574,7 @@ YAML
 		/^  version-pr:/ { in_job = 1 }
 		/^  report-release-failure:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  version-pr:/ && !/^  report-release-failure:/ { in_job = 0 }
-		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \}\}$/ { found++ }
+		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \|\| vars\.LGTM_CI_RUNNER \|\| / { found++ }
 		END { exit found != 2 }
 	' "$workflow"
 	assert_success
@@ -542,13 +582,97 @@ YAML
 
 @test "reusable-quality-lint: wires runner-image input" {
 	local workflow="${PROJECT_ROOT}/.github/workflows/reusable-quality-lint.yml"
-	run grep -F "default: \"${STANDARD_RUNNER}\"" "$workflow"
+	run grep -F 'default: ""' "$workflow"
 	assert_success
 	run awk '
 		/^  quality:/ { in_job = 1 }
 		/^  [a-zA-Z0-9_-]+:/ && !/^  quality:/ { in_job = 0 }
-		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \}\}$/ { found = 1 }
+		in_job && /^    runs-on: \$\{\{ inputs\.runner-image \|\| vars\.LGTM_CI_RUNNER \|\| / { found = 1 }
 		END { exit !found }
 	' "$workflow"
 	assert_success
+}
+
+# A minimal fixture isolates runner validation from the timeout contract.
+_runner_fixture() {
+	local default_line="$1" runs_on="$2"
+	WORKFLOWS_DIR="${BATS_TEST_TMPDIR}/workflows"
+	export WORKFLOWS_DIR
+	mkdir -p "${WORKFLOWS_DIR}"
+	cat >"${WORKFLOWS_DIR}/reusable-runner.yml" <<YAML
+on:
+  workflow_call:
+    inputs:
+      runner-image:
+        type: string
+        ${default_line}
+      timeout-minutes:
+        type: number
+        default: 10
+jobs:
+  work:
+    runs-on: ${runs_on}
+    timeout-minutes: \${{ inputs.timeout-minutes }}
+YAML
+}
+
+@test "validate-runner-contract: accepts the exact runner expression with an empty default" {
+	_runner_fixture 'default: ""' "${RUNNER_IMAGE_RUNS_ON}"
+	run "${VALIDATOR}"
+	assert_success
+}
+
+@test "validate-runner-contract: rejects every non-empty runner-image default" {
+	local default
+	for default in '"ubuntu-26.04"' "'ubuntu-26.04'" ubuntu-26.04 '"blacksmith-2vcpu-ubuntu-2604"' '" "'; do
+		_runner_fixture "default: ${default}" "${RUNNER_IMAGE_RUNS_ON}"
+		run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial 'runner-image default must be ""'
+	done
+}
+
+@test "validate-runner-contract: missing or null default cannot inherit the next input default" {
+	local declaration
+	for declaration in '# omitted' 'default:' 'default: null'; do
+		_runner_fixture "${declaration}" "${RUNNER_IMAGE_RUNS_ON}"
+		run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial 'runner-image default must be ""'
+	done
+}
+
+@test "validate-runner-contract: accepts a single-quoted empty default with an inline comment" {
+	_runner_fixture "default: '' # follow the org switch" "${RUNNER_IMAGE_RUNS_ON}"
+	run "${VALIDATOR}"
+	assert_success
+}
+
+@test "validate-runner-contract: rejects a fallback different from STANDARD_RUNNER" {
+	_runner_fixture 'default: ""' "\${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-24.04' }}"
+	run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "must use"
+	assert_output --partial "${STANDARD_RUNNER}"
+}
+
+@test "validate-runner-contract: rejects a plain runner-image expression" {
+	_runner_fixture 'default: ""' '${{ inputs.runner-image }}'
+	run "${VALIDATOR}"
+	assert_failure
+	assert_output --partial "must use"
+}
+
+@test "validate-runner-contract: rejects missing org fallback or reversed runner precedence" {
+	local runs_on
+	for runs_on in \
+		"\${{ vars.LGTM_CI_RUNNER || inputs.runner-image || '${STANDARD_RUNNER}' }}" \
+		"\${{ inputs.runner-image || '${STANDARD_RUNNER}' || vars.LGTM_CI_RUNNER }}" \
+		"\${{ inputs.runner-image || '${STANDARD_RUNNER}' }}"; do
+		_runner_fixture 'default: ""' "${runs_on}"
+		run "${VALIDATOR}"
+		assert_failure
+		assert_output --partial "job work runs-on"
+		assert_output --partial "must use ${RUNNER_IMAGE_RUNS_ON}"
+	done
 }

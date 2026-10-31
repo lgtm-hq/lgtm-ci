@@ -114,12 +114,13 @@ name: Reusable Release Recovery (plan)
         default: ""
       runner-image:
         description: >-
-          GitHub-hosted runner image label for the plan job. Pass the same
-          value as the facade: its resume stage must stay GitHub-hosted for
-          npm trusted publishing and provenance.
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          npm trusted publishing and provenance require a GitHub-hosted runner;
+          pin runner-image when the org variable selects a self-hosted runner.
         required: false
         type: string
-        default: ubuntu-26.04
+        default: ""
       timeout-minutes:
         description: Timeout for the resolve job (the resume jobs keep their own caps)
         required: false
@@ -297,7 +298,7 @@ env:
 jobs:
   resolve:
     name: Resolve tag, artifacts, and channels
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Read the source run and download its artifacts

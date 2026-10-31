@@ -42,10 +42,12 @@ name: Reusable - Main Failure Notifier
         type: string
         default: ""
       runner-image:
-        description: Runner image for the notifier job
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: ubuntu-26.04
+        default: ""
       timeout-minutes:
         description: Timeout for the notifier job
         required: false
@@ -185,7 +187,7 @@ env:
 jobs:
   notify:
     name: Report main workflow failure
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       # Read workflow/job metadata to generate failure context

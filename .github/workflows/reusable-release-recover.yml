@@ -213,11 +213,13 @@ name: Reusable Release Recovery
         default: release-publish
       runner-image:
         description: >-
-          GitHub-hosted runner image label for every job. Must stay
-          GitHub-hosted: the npm resume needs trusted publishing/provenance.
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          npm trusted publishing and provenance require a GitHub-hosted runner;
+          pin runner-image when the org variable selects a self-hosted runner.
         required: false
         type: string
-        default: ubuntu-26.04
+        default: ""
       timeout-minutes:
         description: Timeout for the resolve job (the resume jobs keep their own caps)
         required: false

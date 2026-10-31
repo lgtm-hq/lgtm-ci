@@ -148,10 +148,12 @@ on:
         type: string
         default: "build-artifact"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-26.04"
+        default: ""
       timeout-minutes:
         description: "Timeout for build jobs in minutes"
         required: false
@@ -290,7 +292,7 @@ env:
 jobs:
   prepare:
     name: Prepare Build Matrix
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     # Independent short cap: the caller's timeout-minutes bounds the build job.
     timeout-minutes: 10
     permissions:
@@ -377,15 +379,16 @@ jobs:
           MATRIX: ${{ inputs.matrix }}
           RUNNER_MAP: ${{ inputs.runner-map }}
           RUNNER_MAP_KEY: ${{ inputs.runner-map-key }}
-          DEFAULT_RUNNER: ${{ inputs.runner-image }}
+          DEFAULT_RUNNER: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
         run: bash .lgtm-ci-tooling/scripts/ci/actions/generate-build-matrix.sh
 
   build:
     name: ${{ inputs.job-name }}
     needs: prepare
     # runner-map legs carry their own runner; every other leg (including every
-    # legacy Node caller, which never gets a runner field) uses runner-image.
-    runs-on: ${{ matrix.runner || inputs.runner-image }}
+    # legacy Node caller, which never gets a runner field) follows the default
+    # runner selection: explicit input, org variable, then GitHub-hosted.
+    runs-on: ${{ matrix.runner || inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read

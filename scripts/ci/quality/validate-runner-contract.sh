@@ -15,7 +15,8 @@ if [[ ! -d "${WORKFLOWS_DIR}" ]]; then
 	exit 1
 fi
 
-python3 - "${WORKFLOWS_DIR}" <<'PY'
+# Callers with PyYAML in a virtual environment can select that interpreter.
+"${PYTHON:-python3}" - "${WORKFLOWS_DIR}" <<'PY'
 """Validate runner-image wiring across lgtm-ci reusable workflows."""
 from __future__ import annotations
 
@@ -79,9 +80,13 @@ DOCKER_FAMILY: dict[str, set[str]] = {
 # receive the already-resolved matrix from the classify job.
 DOCKER_RUNNER_MAP_FILES = {"reusable-docker.yml"}
 DOCKER_MATRIX_RUNS_ON = {"${{ matrix.runner }}"}
-# One standard for runner-image defaults and fixed Docker coordinator jobs.
+# Shared with fixed Docker coordinator jobs; tracked by Renovate (#1230).
 STANDARD_RUNNER = "ubuntu-26.04"
-RUNNER_IMAGE_RUNS_ON = "${{ inputs.runner-image }}"
+RUNNER_IMAGE_RUNS_ON = (
+    "${{ inputs.runner-image || vars.LGTM_CI_RUNNER || '"
+    + STANDARD_RUNNER
+    + "' }}"
+)
 
 
 def iter_job_blocks(content: str) -> list[tuple[str, str]]:
@@ -131,13 +136,21 @@ def jobs_missing_timeout(content: str, rel: str) -> list[str]:
 
 def workflow_inputs(content: str) -> dict:
     document = yaml.safe_load(content)
+    if not isinstance(document, dict):
+        return {}
     events = document.get(True, document.get("on", {})) or {}
+    # The string/list event syntax declares no workflow_call inputs.
+    if not isinstance(events, dict):
+        return {}
     workflow_call = events.get("workflow_call") or {}
-    return workflow_call.get("inputs", {})
+    if not isinstance(workflow_call, dict):
+        return {}
+    inputs = workflow_call.get("inputs", {})
+    return inputs if isinstance(inputs, dict) else {}
 
 
-def has_runner_image_input(inputs: dict) -> bool:
-    return "runner-image" in inputs
+def runner_image_default(inputs: dict) -> str | None:
+    return (inputs.get("runner-image") or {}).get("default")
 
 
 def has_runner_map_input(content: str) -> bool:
@@ -167,10 +180,6 @@ def is_script_backed(content: str) -> bool:
     return "scripts/ci/" in content
 
 
-def runner_image_default(inputs: dict) -> str | None:
-    return (inputs.get("runner-image") or {}).get("default")
-
-
 violations: list[str] = []
 
 for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
@@ -178,7 +187,7 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
     rel = workflow.name
     jobs = parse_jobs(content)
     inputs = workflow_inputs(content)
-    has_runner = has_runner_image_input(inputs)
+    has_runner = "runner-image" in inputs
 
     if rel not in TIMEOUT_MINUTES_EXCEPTIONS:
         if not has_timeout_minutes_input(content):
@@ -200,11 +209,10 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
 
     if has_runner:
         default = runner_image_default(inputs)
-        if default != STANDARD_RUNNER:
+        if default != "":
             found = "missing" if default is None else repr(default)
             violations.append(
-                f"{rel}: runner-image default must be {STANDARD_RUNNER} "
-                f"(found {found})",
+                f'{rel}: runner-image default must be "" (found {found})',
             )
 
     if rel in DOCKER_FAMILY:
@@ -240,7 +248,7 @@ for workflow in sorted(workflows_dir.glob("reusable-*.yml")):
                 elif "${{ matrix." not in runs_on:
                     violations.append(
                         f"{rel}: job {job_id} runs-on {runs_on!r} "
-                        f"must use ${{ inputs.runner-image }}",
+                        f"must use {RUNNER_IMAGE_RUNS_ON}",
                     )
         continue
 

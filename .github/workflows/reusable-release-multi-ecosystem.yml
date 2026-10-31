@@ -173,10 +173,12 @@ name: "Reusable: Release Multi-Ecosystem Version PR"
         default: ""
 
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-26.04"
+        default: ""
 
       timeout-minutes:
         description: "Job timeout in minutes"
@@ -318,7 +320,7 @@ jobs:
   prepare:
     name: Prepare version update hook
     if: inputs.version-update-script != ''
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read
@@ -474,7 +476,7 @@ jobs:
     name: Run version update hook
     needs: [prepare]
     if: needs.prepare.outputs.hook-needed == 'true'
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # The only job that executes caller code. No secrets are referenced, no
     # App token is minted, and no step exports the workflow token.
@@ -592,7 +594,7 @@ jobs:
       !cancelled()
       && (needs.prepare.result == 'success' || needs.prepare.result == 'skipped')
       && (needs.version-update-hook.result == 'success' || needs.version-update-hook.result == 'skipped')
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     concurrency:
       # Distinct from the caller's workflow-level group to avoid
@@ -972,7 +974,7 @@ jobs:
       (needs.prepare.result == 'failure'
       || needs.version-update-hook.result == 'failure'
       || needs.version-pr.result == 'failure')
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     # Keep an independent short cap: the caller's timeout-minutes bounds the
     # main version-pr job, and lowering it must not cancel failure reporting.
     timeout-minutes: 10

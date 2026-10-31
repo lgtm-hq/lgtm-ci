@@ -659,6 +659,45 @@ data['entries'].insert(1, {
 	assert_output --partial "reusable-demo: \`results\` must be a one-line string"
 }
 
+
+# Switch the demo to the org-variable contract without changing the older
+# literal-input fixtures, which still exercise supported explicit overrides.
+_org_runner_fixture() {
+	local root="$1"
+	"${PY}" - "${root}/.github/workflows/reusable-demo.yml" <<'PYTHON'
+from pathlib import Path
+import sys
+path = Path(sys.argv[1])
+text = path.read_text().replace('default: "ubuntu-24.04"', 'default: ""')
+text = text.replace('${{ inputs.runner-image }}', "${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}")
+path.write_text(text)
+PYTHON
+	_edit_catalog "${root}" 'entries["reusable-demo"]["runners"] = ["ubuntu-26.04"]'
+	"${PY}" "${RENDER}" --write --repo-root "${root}" >/dev/null
+}
+
+@test "catalog: org runner selection records the literal fallback with an empty input" {
+	local root
+	root="$(_fixture_root)"
+	_org_runner_fixture "${root}"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+
+	_edit_catalog "${root}" 'entries["reusable-demo"]["runners"] = ["ubuntu-24.04"]'
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_failure
+	assert_output --partial 'must include the default runner(s) ubuntu-26.04'
+}
+
+@test "catalog: nested runner overrides still win over org runner selection" {
+	local root
+	root="$(_fixture_root)"
+	_org_runner_fixture "${root}"
+	_add_wrapper "${root}" "['macos-15', 'ubuntu-22.04']"
+	run "${PY}" "${VALIDATE}" --repo-root "${root}" --main-ref main
+	assert_success
+}
+
 # A valid fixture includes both whole-file and single-job exceptions. Mutations
 # below exercise the same catalog entry point the Support Catalog CI job runs.
 _local_exceptions_fixture() {

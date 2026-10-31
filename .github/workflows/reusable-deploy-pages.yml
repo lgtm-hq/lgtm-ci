@@ -20,10 +20,12 @@ on:
         type: string
         default: "github-pages"
       runner-image:
-        description: "GitHub-hosted runner image label"
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: "ubuntu-26.04"
+        default: ""
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -200,7 +202,7 @@ env:
 jobs:
   deploy:
     name: Deploy to GitHub Pages
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     permissions:
       contents: read

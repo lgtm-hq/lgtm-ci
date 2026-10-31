@@ -16,9 +16,9 @@ name: Reusable npm Publishing Workflow (deprecated)
 # has not migrated. Removal target: not before 2026-10-15.
 #
 # Migration notes for callers of this wrapper:
-#   - The publish job runs on the set workflow's `runner-image` (default:
-#     the standard runner, GitHub-hosted only); pass
-#     `runner-image` to pin another hosted label.
+#   - The publish job resolves runner-image, then LGTM_CI_RUNNER, then
+#     ubuntu-26.04. npm trusted publishing requires GitHub-hosted runners;
+#     pin runner-image when the org switch selects a self-hosted runner.
 #   - The GitHub check name defaults to "Publish to npm (deprecated wrapper)"
 #     instead of "Publish to npm"; callers with a required status check on
 #     the old name must pass `job-name: Publish to npm` until they migrate.
@@ -96,11 +96,13 @@ name: Reusable npm Publishing Workflow (deprecated)
         default: ""
       runner-image:
         description: >-
-          GitHub-hosted runner image label for the publish job (forwarded;
-          default: the standard runner)
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
+          npm trusted publishing and provenance require a GitHub-hosted runner;
+          pin runner-image when the org variable selects a self-hosted runner.
         required: false
         type: string
-        default: ubuntu-26.04
+        default: ""
       tooling-ref:
         description: >-
           Optional lgtm-ci tooling override; unset tracks the workflow pin
@@ -315,7 +317,7 @@ env:
 jobs:
   deprecation-notice:
     name: Deprecation notice
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: 5
     permissions:
       contents: read

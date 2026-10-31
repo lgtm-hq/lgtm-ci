@@ -83,10 +83,12 @@ name: Reusable - Release Failure Notifier
         type: string
         default: "bug,ci,release,automation,infrastructure"
       runner-image:
-        description: Runner image for the notifier job
+        description: >-
+          Runner label override. Empty (default) resolves to the org variable
+          LGTM_CI_RUNNER, else the standard GitHub-hosted label.
         required: false
         type: string
-        default: ubuntu-26.04
+        default: ""
       timeout-minutes:
         description: Timeout for the notifier job
         required: false
@@ -226,7 +228,7 @@ env:
 jobs:
   notify:
     name: Report release tag publish outcome
-    runs-on: ${{ inputs.runner-image }}
+    runs-on: ${{ inputs.runner-image || vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
     timeout-minutes: ${{ inputs.timeout-minutes }}
     # always(): the job both files on failure and closes on success, so the
     # caller wires one call with needs covering every publish job and never
