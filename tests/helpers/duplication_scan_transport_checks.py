@@ -34,9 +34,7 @@ class Cases(FixtureCase):
                         model.file_units("org/private", True, path, source, {}, "")
                     self.assertNotIn("PRIVATE_", str(error.exception))
                     api = FakeGitHub()
-                    found = model.units(
-                        "org/private", True, {path: source}, skipped=api.skipped
-                    )
+                    found = model.units("org/private", True, {path: source}, skipped=api.skipped)
                     self.assertEqual(found, [])
                     self.assertEqual(api.skipped["invalid source"], 1)
                     self.assertTrue(api.partial)

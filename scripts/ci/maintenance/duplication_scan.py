@@ -365,8 +365,7 @@ def reconcile(
         elif (
             membership(issue.get("body") or "") != membership(body)
             or refreshed_title(issue.get("title", ""), title) != issue.get("title", "")
-            or refresh_public_source(issue.get("body") or "", body)
-            != (issue.get("body") or "")
+            or refresh_public_source(issue.get("body") or "", body) != (issue.get("body") or "")
         ):
             action = "updated"
         counts[action] += 1
@@ -390,9 +389,7 @@ def reconcile(
             payload = {
                 "_method": "PATCH",
                 "title": refreshed_title(issue.get("title", ""), title),
-                "body": refresh_members(
-                    refresh_public_source(issue.get("body") or "", body), body
-                ),
+                "body": refresh_members(refresh_public_source(issue.get("body") or "", body), body),
             }
             if action == "reopened":
                 payload["state"] = "open"

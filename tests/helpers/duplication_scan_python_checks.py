@@ -53,9 +53,7 @@ class Cases(FixtureCase):
                     self.assertNotEqual(left.fingerprint, right.fingerprint)
                     self.assertEqual(model.clusters([left, right], [], 0.8), [])
         self.assertEqual(
-            syntax.normalize(
-                "echo --outdir build/output --image ghcr.io/org/left:1.0", "org/left"
-            ),
+            syntax.normalize("echo --outdir build/output --image ghcr.io/org/left:1.0", "org/left"),
             syntax.normalize(
                 "echo --outdir dist/result --image ghcr.io/org/right:2.0", "org/right"
             ),
@@ -79,15 +77,11 @@ class Cases(FixtureCase):
                     )
                     jobs = [
                         job_unit(repo, {"steps": [{"run": command}]}, files=files)
-                        for repo, files in zip(
-                            ("org/left", "org/right"), inventories, strict=True
-                        )
+                        for repo, files in zip(("org/left", "org/right"), inventories, strict=True)
                     ]
                     scripts = [
                         model.file_units(repo, False, path, command, files, "")[0]
-                        for repo, files in zip(
-                            ("org/left", "org/right"), inventories, strict=True
-                        )
+                        for repo, files in zip(("org/left", "org/right"), inventories, strict=True)
                     ]
                     for left, right in (jobs, scripts):
                         self.assertIn("<unresolved-", " ".join(left.shape))

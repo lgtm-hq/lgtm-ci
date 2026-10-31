@@ -65,9 +65,7 @@ class Cases(FixtureCase):  # pylint: disable=too-many-public-methods
                                 {
                                     "number": 1,
                                     "state": state,
-                                    "state_reason": (
-                                        "completed" if state == "closed" else None
-                                    ),
+                                    "state_reason": ("completed" if state == "closed" else None),
                                     "title": human_title,
                                     "body": existing,
                                 }

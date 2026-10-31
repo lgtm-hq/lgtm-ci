@@ -152,9 +152,7 @@ def ambiguous_executable(source: str) -> bool:
     return bool(wrappers or UNRESOLVED_PATH.search(source))
 
 
-def normalize(
-    source: str, repository: str, *, version_parameter: bool = False
-) -> str:
+def normalize(source: str, repository: str, *, version_parameter: bool = False) -> str:
     """Remove comments/spacing and mask repository, image, path and version literals.
 
     Keep command names, flags, operators, conditions and string contents unless
