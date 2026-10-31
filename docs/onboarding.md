@@ -9,6 +9,11 @@ Reference material lives in [workflow-contract.md](workflow-contract.md)
 [reusable-workflows.md](reusable-workflows.md) (per-workflow details). This
 guide covers only the setup path around the starter examples.
 
+Before copying CI logic, apply
+[Inclusion: what belongs in lgtm-ci](governance.md#inclusion-what-belongs-in-lgtm-ci)
+to decide what to upstream, consume or keep local, and when a documented
+exception is required.
+
 ## 1. Pick a starter example
 
 Choose by repository type and copy the example into your repository's

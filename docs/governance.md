@@ -1,4 +1,4 @@
-# Governance: tiers, pinning, deprecation and removal
+# Governance: inclusion, tiers, pinning, deprecation and removal
 
 How lgtm-ci changes what callers depend on, and what a caller can rely on in
 return. The rules exist because a June breaking rename (#281/#282) was still
@@ -9,6 +9,7 @@ a checked condition: an input, output or entry point leaves lgtm-ci when
 every known consumer has stopped using it, or when an exception naming the
 approving issue is recorded. **Time alone is never enough.**
 
+- [Inclusion: what belongs in lgtm-ci](#inclusion-what-belongs-in-lgtm-ci)
 - [Support tiers](#support-tiers)
 - [Pinning](#pinning)
 - [Deprecation lifecycle](#deprecation-lifecycle)
@@ -16,6 +17,81 @@ approving issue is recorded. **Time alone is never enough.**
 - [Removal gate](#removal-gate)
 - [Release notes](#release-notes)
 - [Commands](#commands)
+
+## Inclusion: what belongs in lgtm-ci
+
+lgtm-ci is where shared CI is maintained; other lgtm-hq repositories consume
+it. Apply these rules to workflows, individual jobs, composite actions and
+scripts:
+
+1. **Moves to lgtm-ci.** The same logic exists in **two or more repositories**,
+   and its differences can be expressed as inputs: paths, versions, flags or
+   capability toggles. Maintain one shared implementation and replace the
+   copies with callers. Inputs must describe capabilities, without per-repo
+   control-flow branches such as `if: github.repository == 'owner/repo'`.
+   For example, [#520](https://github.com/lgtm-hq/lgtm-ci/issues/520) moved
+   turbo-themes and holy-grail's Node build and Playwright capabilities into
+   shared reusables with configurable commands and paths.
+2. **Also moves: re-implementations of shipped capabilities.** When a consumer
+   duplicates something lgtm-ci already provides, adopt that reusable or
+   composite even if no second consumer has the copy. If an input or behavior
+   is missing, upstream it, release it, then migrate the consumer. For example,
+   [#363](https://github.com/lgtm-hq/lgtm-ci/issues/363) ported py-lintro's GHCR
+   referenced-digest protection and build-cache pruning into the existing
+   cleanup capability instead of maintaining parallel implementations.
+3. **Stays local.** Product-specific logic used by one repository, or logic
+   whose unification would need per-repo branches inside the reusable, stays
+   with the product. Examples include turbo-themes' theme synchronization and
+   py-lintro's Docker dogfood lanes, the permanent exception recorded in
+   [#520](https://github.com/lgtm-hq/lgtm-ci/issues/520). Local jobs still use
+   full SHA-pinned actions, `step-security/harden-runner` on supported runners,
+   and the shared runner expression
+   `runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}` for Linux jobs.
+   Platform-specific jobs retain their required runner OS.
+4. **Document concrete exceptions.** A copy that qualifies under rule 1 or 2
+   but must remain local for a technical reason needs an entry in
+   [`catalog/local-exceptions.yml`](../catalog/local-exceptions.yml), with the
+   reason and a link to the decision. For example,
+   [turbo-themes#647](https://github.com/lgtm-hq/turbo-themes/issues/647) defers
+   release-workflow adoption because callers cannot inject the Bun/Node setup
+   needed to regenerate version-stamped artifacts inside the reusable job.
+   Re-check the default branch when adding or reviewing an exception, and
+   remove it after the local logic is deleted or replaced with a shared call.
+5. **Size does not matter.** A five-line script copied to three repositories
+   qualifies just like a whole workflow. For example,
+   [#1238](https://github.com/lgtm-hq/lgtm-ci/issues/1238) identifies GHCR tag
+   sweeps shared by py-lintro and Rustume: a small snippet that lists tags and
+   deletes those outside the retention policy belongs in lgtm-ci when its
+   differences fit in inputs.
+
+### Local exception allowlist
+
+The allowlist uses `schema-version: 1` and an `exceptions` list. Every entry
+has `repo` (`owner/name`), `path` (an exact repository-relative file path),
+`reason` (one line) and `link` (the GitHub issue or PR recording the decision).
+An optional `job` narrows a workflow exception to one job ID. Sort entries by
+repository case-insensitively, then path and job; list each scope once. Do not
+add job scopes for a repository/path already covered by a whole-file entry.
+
+The future duplication scanner
+([#1237](https://github.com/lgtm-hq/lgtm-ci/issues/1237)) must suppress only an
+exact repository/path match, plus an exact job match when `job` is present.
+Omit `job` only when the whole file needs to remain local. There are no glob
+or repository-wide exemptions; an allowlisted job must not exempt its neighbors.
+
+Product-specific logic under rule 3 needs no exception in principle. The
+seeded entries also record established keep-local decisions from the consumer
+adoption issues so the future scanner (#1237) will not re-flag them.
+
+Today's only reader is the catalog validator in the CI **Support Catalog**
+job. It checks shape and ordering against
+[`schemas/local-exceptions.schema.json`](../schemas/local-exceptions.schema.json)
+and rejects duplicate or redundant scopes. This is separate from
+[`deprecation-exceptions.yml`](../catalog/deprecation-exceptions.yml), which
+authorizes removals from lgtm-ci's public interface. Schema validation is
+offline: maintainers re-check the linked consumer files and technical reasons
+when reviewing an exception; it does not assert that every consumer already
+follows the local-job conventions above.
 
 ## Support tiers
 
@@ -220,7 +296,7 @@ scripts/ci/catalog/check-deprecations.sh report
 scripts/ci/catalog/check-deprecations.sh scan --write
 scripts/ci/catalog/check-deprecations.sh scan --write --repository owner/new-consumer
 
-# Catalog, deprecation records and registry schema
+# Catalog, deprecation records, consumer registry and local-exception schema
 python3 scripts/ci/catalog/validate.py
 
 # Pins in README, docs and examples
