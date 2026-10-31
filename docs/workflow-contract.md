@@ -215,6 +215,12 @@ Consumer-owned jobs can use the same org switch:
 runs-on: ${{ vars.LGTM_CI_RUNNER || 'ubuntu-26.04' }}
 ```
 
+The [runner governor runbook](runner-governor.md) describes automatic free-pool
+selection, opt-in readiness, manual overrides, and activation evidence. The
+governor changes only the org variable value; administrators own repository
+selection and visibility. Live scheduling remains disabled until usage
+accounting and dry-run acceptance have been verified.
+
 ### Runner pinning
 
 Pin `runner-image` only when a job needs a specific runner (for example an

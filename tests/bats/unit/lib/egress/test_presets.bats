@@ -460,3 +460,12 @@ PRESETS="${PROJECT_ROOT}/scripts/ci/lib/egress/presets.sh"
     refute_output --partial 'chatgpt.com'
     refute_output --partial 'auth.openai.com'
 }
+
+@test "runner governor preset extends GitHub minimal with pinned release and backend hosts" {
+	run bash -c "source '$PRESETS' && egress_preset_endpoints runner-governor"
+	assert_success
+	assert_output --partial 'api.github.com:443'
+	assert_output --partial 'clireleases.blacksmith.sh:443'
+	assert_output --partial 'backend.blacksmith.sh:443'
+	refute_output --partial 'get.blacksmith.sh'
+}

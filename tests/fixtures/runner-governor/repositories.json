@@ -1,0 +1,8 @@
+{
+  "lgtm-hq/fixture-private": {
+    "full_name": "lgtm-hq/fixture-private", "private": true, "visibility": "private"
+  },
+  "lgtm-hq/fixture-public": {
+    "full_name": "lgtm-hq/fixture-public", "private": false, "visibility": "public"
+  }
+}
