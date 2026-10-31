@@ -616,7 +616,10 @@ def test_job_pagination_does_not_stop_at_one_hundred(
         calls.append(endpoint)
         assert len(calls) <= 2, "pagination failed to terminate"
         count = 100 if endpoint.endswith("&page=1") else 1
-        return {"jobs": [{"id": i} for i in range(count)]}
+        return {
+            "total_count": 101,
+            "jobs": [{"id": i + (100 if count == 1 else 0)} for i in range(count)],
+        }
 
     monkeypatch.setattr(api, "get", get)
     assert len(api.pages("/attempts/1/jobs", "jobs")) == 101
@@ -1075,6 +1078,7 @@ def test_resume_refreshes_listings_retries_and_unfinished_attempt_pages(
         else:
             assert "/attempts/" in endpoint
             body = {
+                "total_count": 1,
                 "jobs": [
                     {
                         "id": 31,
@@ -1084,7 +1088,7 @@ def test_resume_refreshes_listings_retries_and_unfinished_attempt_pages(
                         "status": "in_progress" if active else "completed",
                         "labels": None,
                     }
-                ]
+                ],
             }
         return SimpleNamespace(
             returncode=0,
@@ -1161,7 +1165,7 @@ def test_persisted_resume_requires_terminal_fetch_provenance(
             # The parent can finish after listing but before fetching these jobs.
             finished = phase > 0 or finishes_before_fetch
             batch = [first, downstream] if finished else [first]
-            body = {"jobs": batch}
+            body = {"total_count": len(batch), "jobs": batch}
         return SimpleNamespace(
             returncode=0,
             stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
@@ -1388,9 +1392,17 @@ def test_normal_resume_recovers_from_malformed_cached_page(
             body: Any = [{"full_name": "example/public", "private": True}] * size
         elif kind == "runs":
             count = 101 if target and defect != "runs-count" else 1
-            body = {"total_count": count, "workflow_runs": [run] * size}
+            body = {
+                "total_count": count,
+                "workflow_runs": [
+                    {**run, "id": run["id"] + (page - 1) * 100 + i} for i in range(size)
+                ],
+            }
         else:
-            body = {"jobs": [job] * size}
+            body = {
+                "total_count": 101 if target else 1,
+                "jobs": [{**job, "id": (page - 1) * 100 + i} for i in range(size)],
+            }
         bad_page = 1 if defect == "runs-count" else 2
         if target and not corrected and page == bad_page:
             body = {
@@ -1422,8 +1434,8 @@ def test_normal_resume_recovers_from_malformed_cached_page(
     corrected = True
     assert invoke(*flags) == 0
     assert measurement.coverage_complete(json.loads(checkpoint.read_text()))
-    # Semantic checks rebuild an aggregate cursor; envelope checks keep page 1.
-    expected = [1, 2, 1, 2] if defect.endswith("row") else [1, 2, 2]
+    # Org metadata validation rebuilds the cursor; page validation keeps page 1.
+    expected = [1, 2, 1, 2] if defect == "org-row" else [1, 2, 2]
     assert requested == ([1, 1] if defect == "runs-count" else expected)
 
 
@@ -1516,7 +1528,10 @@ def test_persisted_pagination_finishes_with_one_page_per_invocation(
         body = (
             {"total_count": 201, "workflow_runs": rows}
             if "/actions/runs?" in endpoint
-            else {"jobs": rows if kind == "jobs" else [job]}
+            else {
+                "total_count": 201 if kind == "jobs" else 1,
+                "jobs": rows if kind == "jobs" else [job],
+            }
         )
         return SimpleNamespace(
             returncode=0,
@@ -1585,7 +1600,7 @@ def test_normal_resume_refreshes_visibility_and_classification(
         if "/actions/runs?" in endpoint:
             body: Any = {"total_count": 1, "workflow_runs": [run]}
         elif "/jobs?" in endpoint:
-            body = {"jobs": [job]}
+            body = {"total_count": 1, "jobs": [job]}
         else:
             metadata_calls.append(private)
             info = {"private": private, "full_name": "example/public"}
@@ -1730,7 +1745,7 @@ def test_interrupted_mutable_jobs_restart_once_before_terminal_progress(
                 }
                 for i in range(100 if page < 3 else 1)
             ]
-            body = {"jobs": batch}
+            body = {"total_count": 201, "jobs": batch}
         return SimpleNamespace(
             returncode=0,
             stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
@@ -2039,8 +2054,11 @@ def test_discovery_reserves_collection_time_across_persisted_resumes(
         else:
             assert "/jobs?" in endpoint
             advance(1)
-            body = {"jobs": [job]}
-        return SimpleNamespace(returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body))
+            body = {"total_count": 1, "jobs": [job]}
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
 
     monkeypatch.setattr(measurement.time, "monotonic", lambda: now)
     monkeypatch.setattr(measurement.time, "sleep", advance)
@@ -2082,7 +2100,7 @@ def test_explicit_metadata_failure_distrusts_persisted_visibility_until_refresh(
         if "/actions/runs?" in endpoint:
             body: Any = {"total_count": 1, "workflow_runs": [run]}
         elif "/jobs?" in endpoint:
-            body = {"jobs": [job]}
+            body = {"total_count": 1, "jobs": [job]}
         elif phase == 1:
             return SimpleNamespace(
                 returncode=1 if failure == "http" else 0,
@@ -2090,7 +2108,10 @@ def test_explicit_metadata_failure_distrusts_persisted_visibility_until_refresh(
             )
         else:
             body = {"private": initial_private if phase == 0 else not initial_private}
-        return SimpleNamespace(returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body))
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
 
     monkeypatch.setattr(measurement.subprocess, "run", response)
     monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
@@ -2164,8 +2185,11 @@ def test_deleted_runs_cannot_hide_unseen_rows_across_bounded_resumes(
                 rows.pop(0)
         else:
             jobs.append(endpoint)
-            body = {"jobs": []}
-        return SimpleNamespace(returncode=0, stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body))
+            body = {"total_count": 0, "jobs": []}
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
 
     monkeypatch.setattr(measurement.subprocess, "run", response)
     monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
@@ -2193,6 +2217,148 @@ def test_deleted_runs_cannot_hide_unseen_rows_across_bounded_resumes(
     assert 100 in ids
     assert requested == [*range(1, (total - 1) // 100 + 2)] * 2
     assert len(jobs) == total + 1, "terminal attempts refetched during reconciliation"
+
+
+def shifted_inventory_page(
+    field: str, template: dict[str, Any], page: int, defect: str | None
+) -> dict[str, Any]:
+    """Build a two-page inventory whose second page may conceal a missing ID."""
+    offset = (page - 1) * 100
+    rows = [{**template, "id": i} for i in range(offset, min(offset + 100, 101))]
+    count = 101
+    if page == 2:
+        if defect == "duplicate":
+            rows[0]["id"] = 99
+        elif defect == "short":
+            rows = []
+        elif defect == "count-change":
+            count = 102
+    return {"total_count": count, field: rows}
+
+
+@pytest.mark.parametrize("kind", ["runs", "jobs"])
+@pytest.mark.parametrize("defect", ["duplicate", "short", "count-change"])
+def test_counted_inventory_reconciles_before_claiming_coverage(
+    measurement: ModuleType,
+    state: dict[str, Any],
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    kind: str,
+    defect: str,
+) -> None:
+    """Reconcile shifted inventories across bounded persisted resumes."""
+    # Fixtures and both inventory phases share explicit request-budget evidence.
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
+    public = state["repositories"]["example/public"]
+    run = {**public["runs"][0], "created_at": "2026-10-02T00:00:00Z"}
+    job = {**public["attempts"]["3"]["1"][0], "status": "completed"}
+    state["repositories"] = {"example/public": {"private": False}}
+    if kind == "jobs":
+        state["repositories"]["example/public"].update(
+            runs=[run],
+            listing_complete=True,
+        )
+    checkpoint = tmp_path / "checkpoint.json"
+    measurement.save(checkpoint, state)
+    requested = []
+    allowance = 0
+    corrected = False
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        nonlocal allowance
+        endpoint = command[-1]
+        page = int(endpoint.rsplit("page=", 1)[1])
+        paginated = ("/actions/runs?" in endpoint) == (kind == "runs")
+        if paginated:
+            if allowance == 0:
+                raise measurement.BudgetExceeded("deterministic page budget")
+            allowance -= 1
+            requested.append(page)
+            body = shifted_inventory_page(
+                "workflow_runs" if kind == "runs" else "jobs",
+                run if kind == "runs" else job,
+                page,
+                None if corrected else defect,
+            )
+        else:
+            body = {"total_count": 1, "jobs": [job]}
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    for phase in range(3):
+        corrected = phase > 0
+        allowance = 2 if phase == 0 else 1
+        state = json.loads(checkpoint.read_text())
+        measurement.collect(
+            measurement.API(tmp_path, 30), state, checkpoint, jobs_only=kind == "jobs"
+        )
+        stored = json.loads(checkpoint.read_text())
+        assert measurement.coverage_complete(stored) is (phase == 2)
+        data = stored["repositories"]["example/public"]
+        if phase < 2:
+            if kind == "jobs":
+                assert not data["attempts"]["3"]
+                assert not data["terminal_attempts"]["3"]
+            else:
+                assert not data["listing_complete"]
+                assert set(range(100)) <= {row["id"] for row in data["runs"]}
+    assert requested == [1, 2, 1, 2]
+    workflow = measurement.aggregate(stored)["workflows"][0]
+    assert workflow["jobs"] == 101
+    assert workflow["runs"] == (101 if kind == "runs" else 1)
+    assert workflow["wall_seconds"] == 101 * 61
+    # Verified terminal attempts remain reusable after a reconciled inventory.
+    measurement.collect(
+        measurement.API(tmp_path, 30),
+        stored,
+        checkpoint,
+        jobs_only=True,
+    )
+    assert requested == [1, 2, 1, 2]
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"jobs": []},
+        {"total_count": True, "jobs": []},
+        {"total_count": -1, "jobs": []},
+        {"total_count": 1.0, "jobs": []},
+        {"total_count": "1", "jobs": []},
+        {"total_count": 1, "jobs": [{}]},
+        {"total_count": 1, "jobs": [{"id": True}]},
+        {"total_count": 1, "jobs": [{"id": []}]},
+        {"total_count": 1, "jobs": [{"id": "1"}]},
+    ],
+)
+def test_invalid_job_inventory_page_is_refetchable(
+    measurement: ModuleType,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    payload: dict[str, Any],
+) -> None:
+    """Malformed counts and IDs fail closed without poisoning the durable cache."""
+    calls = []
+
+    def response(command: list[str], **_kwargs: Any) -> SimpleNamespace:
+        calls.append(command[-1])
+        body = payload if len(calls) == 1 else {"total_count": 1, "jobs": [{"id": 1}]}
+        return SimpleNamespace(
+            returncode=0,
+            stdout="HTTP/2.0 200 OK\n\n" + json.dumps(body),
+        )
+
+    monkeypatch.setattr(measurement.subprocess, "run", response)
+    monkeypatch.setattr(measurement.time, "sleep", lambda _delay: None)
+    api = measurement.API(tmp_path, 30)
+    with pytest.raises(measurement.BudgetExceeded, match="invalid API"):
+        api.pages("/attempts/1/jobs", "jobs")
+    assert api.pages("/attempts/1/jobs", "jobs") == [{"id": 1}]
+    assert len(calls) == 2
 
 
 @pytest.fixture(name="cli_command")
@@ -2227,6 +2393,8 @@ def test_cli_process_contention_preserves_owner_and_releases_lock(
     api_failure: bool,
 ) -> None:
     """All CLI modes reject a live owner, then resume after success or API failure."""
+    # Fixtures, two process barriers and before/after snapshots stay in one scenario.
+    # pylint: disable=too-many-arguments,too-many-positional-arguments,too-many-locals
     output = tmp_path / "output"
     output.mkdir()
     state["repositories"].pop("example/private")
@@ -2279,48 +2447,49 @@ print('HTTP/2.0 200 OK\\n\\n' + json.dumps(body))
     owner_env = {**env, "COLLECTOR_TEST_OWNER": "1"}
     if api_failure:
         owner_env["COLLECTOR_TEST_FAIL"] = "1"
-    owner = subprocess.Popen(
+    with subprocess.Popen(
         cli_command,
         env=owner_env,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-    )
-    try:
-        wait_for_marker(ready, owner)
-        if mode == "--offline":
-            # The owner already loaded its state. A contender must reject
-            # ownership before even trying to parse the checkpoint.
-            (output / "checkpoint.json").write_text("{unreadable", encoding="utf-8")
-        before = {path: path.read_bytes() for path in output.rglob("*.json")}
-        before_calls = calls.read_bytes()
-        # Resolve aliases to the same ownership lock, including checkpoint modes.
-        alias = tmp_path / "alias"
-        alias.symlink_to(output, target_is_directory=True)
-        extra = [] if mode == "normal" else [mode]
-        contender = subprocess.run(
-            [*cli_command, "--output", str(alias), *extra],
-            env=env,
-            capture_output=True,
-            text=True,
-            check=False,
-            timeout=5,
-        )
-        assert contender.returncode == 2
-        assert "output directory is already in use" in contender.stderr
-        assert "unknown" in contender.stderr
-        assert contender.stdout == ""
-        assert {path: path.read_bytes() for path in output.rglob("*.json")} == before
-        assert calls.read_bytes() == before_calls, "contender made an API request"
-        assert owner.poll() is None
-    finally:
-        release.touch()
+    ) as owner:
         try:
-            owner_stdout, owner_stderr = owner.communicate(timeout=10)
-        except subprocess.TimeoutExpired:
-            owner.kill()
-            owner.communicate()
-            raise
+            wait_for_marker(ready, owner)
+            if mode == "--offline":
+                # The owner already loaded its state. A contender must reject
+                # ownership before even trying to parse the checkpoint.
+                (output / "checkpoint.json").write_text("{unreadable", encoding="utf-8")
+            before = {path: path.read_bytes() for path in output.rglob("*.json")}
+            before_calls = calls.read_bytes()
+            # Resolve aliases to the same ownership lock, including checkpoint modes.
+            alias = tmp_path / "alias"
+            alias.symlink_to(output, target_is_directory=True)
+            extra = [] if mode == "normal" else [mode]
+            contender = subprocess.run(
+                [*cli_command, "--output", str(alias), *extra],
+                env=env,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=5,
+            )
+            assert contender.returncode == 2
+            assert "output directory is already in use" in contender.stderr
+            assert "unknown" in contender.stderr
+            assert contender.stdout == ""
+            after = {path: path.read_bytes() for path in output.rglob("*.json")}
+            assert after == before
+            assert calls.read_bytes() == before_calls, "contender made an API request"
+            assert owner.poll() is None
+        finally:
+            release.touch()
+            try:
+                owner_stdout, owner_stderr = owner.communicate(timeout=10)
+            except subprocess.TimeoutExpired:
+                owner.kill()
+                owner.communicate(timeout=5)
+                raise
     assert owner.returncode == (2 if api_failure else 0), owner_stderr
     assert json.loads(owner_stdout)["complete"] is not api_failure
     assert json.loads((output / "checkpoint.json").read_text())["repositories"]
@@ -2361,9 +2530,10 @@ def test_cli_process_errors_release_output_ownership(
         timeout=5,
     )
     assert failed.returncode != 0
-    expected_error = (
-        "JSONDecodeError" if failure == "invalid-json" else "checkpoint date window differs"
-    )
+    expected_error = {
+        "invalid-json": "JSONDecodeError",
+        "window": "checkpoint date window differs",
+    }[failure]
     assert expected_error in failed.stderr
     measurement.save(checkpoint, state)
     resumed = subprocess.run(
@@ -2402,7 +2572,7 @@ def paused(value, **kwargs):
 module['json'].dumps = paused
 module['save'](Path(sys.argv[2]), {'writer': 'first'})
 """
-    first = subprocess.Popen(
+    with subprocess.Popen(
         [
             sys.executable,
             "-c",
@@ -2415,18 +2585,18 @@ module['save'](Path(sys.argv[2]), {'writer': 'first'})
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
-    )
-    try:
-        wait_for_marker(ready, first)
-        measurement.save(target, {"writer": "second", "longer": "synthetic"})
-    finally:
-        release.touch()
+    ) as first:
         try:
-            _, stderr = first.communicate(timeout=5)
-        except subprocess.TimeoutExpired:
-            first.kill()
-            first.communicate()
-            raise
+            wait_for_marker(ready, first)
+            measurement.save(target, {"writer": "second", "longer": "synthetic"})
+        finally:
+            release.touch()
+            try:
+                _, stderr = first.communicate(timeout=5)
+            except subprocess.TimeoutExpired:
+                first.kill()
+                first.communicate(timeout=5)
+                raise
     assert first.returncode == 0, stderr
     assert json.loads(target.read_text()) == {"writer": "first"}
     assert target.stat().st_mode & 0o777 == 0o600

@@ -14,9 +14,9 @@ import argparse
 import fcntl
 import hashlib
 import json
-import math
 import os
 import subprocess
+import sys
 import tempfile
 import threading
 import time
@@ -28,6 +28,17 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, TypeGuard
 from urllib.parse import urlencode
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
+# Standalone script library is added to the search path above.
+# pylint: disable-next=wrong-import-position
+from actions_metrics import (  # noqa: E402
+    add_metrics,
+    empty_metrics,
+    job_metrics,
+    runner_kind,
+    stamp,
+)
 
 ROW = dict[str, Any]
 RUN_FIELDS = (
@@ -56,16 +67,6 @@ JOB_FIELDS = (
     "runner_name",
     "runner_group_name",
 )
-
-
-def stamp(value: str) -> datetime:
-    """Parse an ISO timestamp; require an explicit timezone."""
-    if not isinstance(value, str):
-        raise TypeError("timestamp must be a string")
-    result = datetime.fromisoformat(value.replace("Z", "+00:00"))
-    if result.tzinfo is None:
-        raise ValueError("timestamps must include a timezone")
-    return result.astimezone(timezone.utc)
 
 
 def save(path: Path, value: Any) -> None:
@@ -159,6 +160,20 @@ def page_rows(data: Any, field: str | None = None) -> list[ROW]:
 def valid_count(value: Any, minimum: int = 0) -> TypeGuard[int]:
     """Accept integer API counts, excluding booleans despite their int ancestry."""
     return isinstance(value, int) and not isinstance(value, bool) and value >= minimum
+
+
+def inventory_page(data: Any, field: str | None, cursor: ROW) -> list[ROW]:
+    """Validate counted inventories before advancing a durable pagination cursor."""
+    batch = page_rows(data, field)
+    if field in ("workflow_runs", "jobs"):
+        count = data.get("total_count")
+        if not valid_count(count):
+            raise BudgetExceeded(f"invalid API {field} total_count")
+        if any(not valid_count(row.get("id")) for row in batch):
+            raise BudgetExceeded(f"invalid API {field} id")
+        previous_count = cursor.setdefault("total_count", count)
+        cursor["changed"] = cursor.get("changed", False) or previous_count != count
+    return batch
 
 
 class API:
@@ -279,24 +294,20 @@ class API:
         if cursor["complete"]:
             return rows
         joiner = "&" if "?" in endpoint else "?"
-        if field == "workflow_runs" and page > 1 and "total_count" not in cursor:
+        counted_inventory = field in ("workflow_runs", "jobs")
+        if counted_inventory and page > 1 and "total_count" not in cursor:
             # Adopt older cursors using their original, cached inventory count.
-            cursor["total_count"] = self.get(f"{endpoint}{joiner}per_page=100&page=1")[
-                "total_count"
-            ]
+            first_endpoint = f"{endpoint}{joiner}per_page=100&page=1"
+            try:
+                inventory_page(self.get(first_endpoint), field, cursor)
+            except BudgetExceeded:
+                self.discard_page(first_endpoint)
+                raise
         while True:
             page_endpoint = f"{endpoint}{joiner}per_page=100&page={page}"
             data = self.get(page_endpoint)
             try:
-                batch = page_rows(data, field)
-                if field == "workflow_runs":
-                    count = data.get("total_count")
-                    if not valid_count(count):
-                        raise BudgetExceeded("invalid API run total_count")
-                    cursor["changed"] = (
-                        cursor.get("changed", False)
-                        or cursor.setdefault("total_count", count) != count
-                    )
+                batch = inventory_page(data, field, cursor)
             except BudgetExceeded:
                 self.discard_page(page_endpoint)
                 raise
@@ -305,21 +316,27 @@ class API:
             cursor.update(rows=rows, page=page + 1, complete=len(batch) < 100)
             if (
                 cursor["complete"]
-                and field == "workflow_runs"
-                and (cursor["changed"] or len(rows) != cursor["total_count"])
+                and counted_inventory
+                and (
+                    cursor["changed"]
+                    or len({row["id"] for row in rows}) != cursor["total_count"]
+                    or len(rows) != cursor["total_count"]
+                )
             ):
-                # Past creation bounds exclude new runs, but deletions shift
-                # unseen rows behind saved offsets. Reconcile against a fresh
+                # Mutable inventories can shift unseen rows behind saved offsets
+                # or repeat observed IDs. Reconcile against a fresh
                 # inventory before claiming coverage. Its cursor is durable too;
                 # stable inventories never repeat pages just because time ran out.
                 save(
                     progress.with_suffix(".observed.json"),
-                    {"endpoint": endpoint, "body": {"workflow_runs": rows}},
+                    {"endpoint": endpoint, "body": {field: rows}},
                 )
                 for old_page in range(1, page + 1):
                     self.discard_page(f"{endpoint}{joiner}per_page=100&page={old_page}")
                 save(progress, {"rows": [], "page": 1, "complete": False})
-                raise BudgetExceeded("run inventory changed; reconciliation pending")
+                raise BudgetExceeded(
+                    f"{field} inventory changed; reconciliation pending",
+                )
             save(progress, cursor)
             if len(batch) < 100:
                 return rows
@@ -391,87 +408,6 @@ def list_runs(api: API, repo: str, start: datetime, end: datetime) -> list[ROW]:
         # Row validation sees the aggregate cursor, so rebuild this listing.
         api.invalidate(endpoint)
         raise BudgetExceeded("invalid API run list") from error
-
-
-def runner_kind(job: ROW) -> tuple[str, int | None]:
-    """Classify standard hosted labels conservatively; larger/custom is unknown."""
-    labels = [str(label).lower() for label in job.get("labels") or []]
-    if "self-hosted" in labels:
-        return "self-hosted", None
-    standard = {
-        "ubuntu-latest": ("linux", 1),
-        "ubuntu-22.04": ("linux", 1),
-        "ubuntu-24.04": ("linux", 1),
-        "ubuntu-26.04": ("linux", 1),
-        "ubuntu-22.04-arm": ("linux", 1),
-        "ubuntu-24.04-arm": ("linux", 1),
-        "ubuntu-26.04-arm": ("linux", 1),
-        "windows-latest": ("windows", 2),
-        "windows-2022": ("windows", 2),
-        "windows-2025": ("windows", 2),
-        "macos-latest": ("macos", 10),
-        "macos-13": ("macos", 10),
-        "macos-14": ("macos", 10),
-        "macos-15": ("macos", 10),
-        "macos-15-intel": ("macos", 10),
-        "macos-26": ("macos", 10),
-    }
-    kinds = {standard[label] for label in labels if label in standard}
-    if len(kinds) == 1 and all(label in standard for label in labels):
-        return kinds.pop()
-    return "unknown", None
-
-
-def empty_metrics() -> ROW:
-    """Create independent aggregation counters."""
-    return {
-        "jobs": 0,
-        "timed_jobs": 0,
-        "skipped_jobs": 0,
-        "unknown_time_jobs": 0,
-        "wall_seconds": 0.0,
-        "rounded_job_minutes": 0,
-        "estimated_private_plan_minutes": 0,
-        "public_free_rounded_minutes": 0,
-        "unknown_billing_rounded_minutes": 0,
-        "self_hosted_rounded_minutes": 0,
-    }
-
-
-def job_metrics(job: ROW, private: bool | None, end: datetime) -> ROW:
-    """Separate elapsed, rounded, free and estimated plan minutes; never invoice."""
-    metrics = empty_metrics()
-    metrics["jobs"] = 1
-    if job.get("conclusion") == "skipped":
-        metrics["skipped_jobs"] = 1
-        return metrics
-    try:
-        started = stamp(job["started_at"])
-        completed = stamp(job["completed_at"])
-        if completed < started or completed > end:
-            raise ValueError("invalid or post-snapshot interval")
-    except (KeyError, TypeError, ValueError):
-        metrics["unknown_time_jobs"] = 1
-        return metrics
-    seconds = (completed - started).total_seconds()
-    rounded = math.ceil(seconds / 60)
-    metrics.update(timed_jobs=1, wall_seconds=seconds, rounded_job_minutes=rounded)
-    kind, multiplier = runner_kind(job)
-    if kind == "self-hosted":
-        metrics["self_hosted_rounded_minutes"] = rounded
-    elif multiplier is None or private is None:
-        metrics["unknown_billing_rounded_minutes"] = rounded
-    elif private:
-        metrics["estimated_private_plan_minutes"] = rounded * multiplier
-    else:
-        metrics["public_free_rounded_minutes"] = rounded
-    return metrics
-
-
-def add_metrics(target: ROW, source: ROW) -> None:
-    """Sum only measurement counters."""
-    for key in empty_metrics():
-        target[key] += source[key]
 
 
 def attempt_finished(jobs: list[ROW]) -> bool:
@@ -963,9 +899,10 @@ def main() -> int:
     try:
         with output_ownership(args.output):
             prepare_output(args.output)
-            return measure_output(args, start, end, parser)
+            status = measure_output(args, start, end, parser)
     except OutputInUse as error:
         parser.error(str(error))
+    return status
 
 
 def measure_output(
@@ -1015,7 +952,6 @@ def measure_output(
     save(args.output / "measurements.json", result)
     complete = coverage_complete(state)
     workflows = result["workflows"]
-    unknown_time = sum(row["unknown_time_jobs"] for row in workflows)
     unknown_billing = sum(row["unknown_billing_rounded_minutes"] for row in workflows)
     scope = "checkpoint" if args.offline or args.jobs_only else "requested"
     print(
@@ -1023,7 +959,7 @@ def measure_output(
             {
                 "complete": complete,
                 "workflows": len(result["workflows"]),
-                "unknown_time_jobs": unknown_time,
+                "unknown_time_jobs": sum(row["unknown_time_jobs"] for row in workflows),
                 "unknown_billing_rounded_minutes": unknown_billing,
                 "scope": scope,
                 "output": str(args.output),
