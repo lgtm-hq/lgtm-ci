@@ -12,6 +12,107 @@ from duplication_scan_support import FixtureCase, model, syntax
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
 
+    def test_python_runpy_execution(self) -> None:
+        """Uninspected file/module execution cannot establish equivalence."""
+        path = "scripts/check.py"
+        sources = (
+            'import runpy\nrunpy.run_path("tools/release.py")\n',
+            'import runpy as runner\nrunner.run_path("tools/release.py")\n',
+            'from runpy import run_path as launch\nlaunch("tools/release.py")\n',
+            'from runpy import (run_path as launch,)\nlaunch("tools/release.py")\n',
+            'import runpy\nlaunch = runpy.run_path\nlaunch("tools/release.py")\n',
+            "import runpy\nrunpy.run_path(target)\n",
+            'import runpy\nrunpy.run_path("tools/" + name + ".py")\n',
+            "import runpy as runner\ngetattr(runner, api)(target)\n",
+            "from runpy import *\nrun_path(target)\n",
+            'import runpy\nrunpy.run_module("tools.release")\n',
+            "from runpy import run_module as launch\nlaunch(module)\n",
+            'import runpy as runner\nrunner._run_module_as_main("tools.release")\n',
+            "from runpy import _run_code as launch\nlaunch(code, {})\n",
+            'getattr(__import__("runpy"), api)(target)\n',
+            "from importlib import import_module as f\ngetattr(f(name), api)(target)\n",
+            "import importlib as lib\ngetattr(lib, load)(name).run_path(target)\n",
+        )
+        for source in sources:
+            for changed in (source, source.replace("release", "check")):
+                for implementation in ("raise SystemExit(7)\n", None):
+                    with self.subTest(
+                        source=source,
+                        changed=changed,
+                        body=implementation,
+                    ):
+                        inventories = [
+                            {path: source, "tools/release.py": "print('safe')\n"},
+                        ]
+                        other = {path: changed}
+                        if implementation is not None:
+                            other["tools/release.py"] = implementation
+                            other["tools/check.py"] = implementation
+                        inventories.append(other)
+                        scripts = [
+                            model.file_units(
+                                repo,
+                                False,
+                                path,
+                                files[path],
+                                files,
+                                "",
+                            )[0]
+                            for repo, files in zip(
+                                ("org/left", "org/right"), inventories, strict=True
+                            )
+                        ]
+                        jobs = [
+                            job_unit(
+                                repo,
+                                {"steps": [{"run": f"python {path}"}]},
+                                files=files,
+                            )
+                            for repo, files in zip(
+                                ("org/left", "org/right"), inventories, strict=True
+                            )
+                        ]
+                        self.assertIn(
+                            "<unresolved-python-command:",
+                            " ".join(scripts[0].shape),
+                        )
+                        for left, right in (scripts, jobs):
+                            self.assertNotEqual(left.fingerprint, right.fingerprint)
+                            self.assertEqual(model.clusters([left, right], [], 0.8), [])
+
+    def test_python_numeric_strings(self) -> None:
+        """String tokens alone never establish that a decimal is a version."""
+        path = "scripts/check.py"
+        for template, original, changed in (
+            ('from decimal import Decimal\nvalue = Decimal("{}")\n', "1.5", "9.5"),
+            ('threshold = float("{}")\n', "0.8", "0.9"),
+            ("threshold = float('{}')\n", "1.2e3", "1.3e3"),
+            ('if value == "{}":\n    raise SystemExit(1)\n', "1.5", "9.5"),
+            ('version = "{}"\n', "3.11", "3.12"),
+        ):
+            values = (original, original, changed)
+            sources = [template.format(value) for value in values]
+            repos = ("org/left", "org/right", "org/right")
+            scripts = [
+                model.units(repo, False, {path: source})[0]
+                for repo, source in zip(repos, sources, strict=True)
+            ]
+            jobs = [
+                job_unit(
+                    repo,
+                    {"steps": [{"run": f"python {path}"}]},
+                    files={path: source},
+                )
+                for repo, source in zip(repos, sources, strict=True)
+            ]
+            for left, same, right in (scripts, jobs):
+                with self.subTest(template=template, kind=left.kind):
+                    self.assertNotIn("<unresolved-", " ".join(left.shape))
+                    self.assertEqual(left.fingerprint, same.fingerprint)
+                    self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                    self.assertNotEqual(left.fingerprint, right.fingerprint)
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+
     def test_decimal_command_arguments(self) -> None:
         """Durations, thresholds and timeouts are behavior, even when quoted."""
         path = "scripts/check.sh"
@@ -174,14 +275,13 @@ class Cases(FixtureCase):
                     self.assertEqual(model.clusters([left, right], [], 0.8), [])
 
     def test_python_known_parameters(self) -> None:
-        """Path/version strings and safe workflow inputs still mask parameters."""
+        """Path strings and explicit workflow version inputs still normalize."""
         path = "scripts/check.py"
         source = (
             'from pathlib import Path\nversion = "3.11"\n'
             'output = Path("build/output")\nassert coverage >= 0.8\n'
         )
-        changed = source.replace('"3.11"', '"3.12"')
-        changed = changed.replace("build/output", "dist/result")
+        changed = source.replace("build/output", "dist/result")
         left, right = [
             model.units(repo, False, {path: text})[0]
             for repo, text in (("org/left", source), ("org/right", changed))
@@ -264,12 +364,24 @@ class Cases(FixtureCase):
             'import json,sys as rt\nif rt.argv:\n print(json.dumps("ok"))\n',
             "from json.tool import main as run\nif True:\n    run()\n",
             'from __future__ import annotations\nif True:\n    print("ok")\n',
+            'from decimal import Decimal\nif Decimal("1.5") > 0:\n    print("ok")\n',
+            'import json\nif True: print(json.dumps("runpy run_path run_module"))\n',
         ):
             with self.subTest(source=source):
                 left = model.file_units("org/left", False, path, source, {}, "")[0]
                 same = model.file_units("org/right", False, path, source, {}, "")[0]
                 self.assertEqual(left.fingerprint, same.fingerprint)
                 self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                jobs = [
+                    job_unit(
+                        repo,
+                        {"steps": [{"run": f"python {path}"}]},
+                        files={path: source},
+                    )
+                    for repo in ("org/left", "org/right")
+                ]
+                self.assertEqual(jobs[0].fingerprint, jobs[1].fingerprint)
+                self.assertEqual(len(model.clusters(jobs, [], 0.8)), 1)
                 changed = model.file_units(
                     "org/right", False, path, source.replace("if ", "if not "), {}, ""
                 )[0]

@@ -347,17 +347,14 @@ def reconcile(
             issue.get("state_reason") == "not_planned" and issue["state"] == "closed"
             for issue in matches
         )
-        if rejected:
-            counts["suppressed"] += 1
-            if decisions is not None:
-                decisions[fingerprint] = "suppressed"
-            continue
         issue = next(
             (item for item in matches if item["state"] == "open"),
             matches[0] if matches else None,
         )
         action = "unchanged"
-        if issue is None:
+        if rejected:
+            action = "suppressed"
+        elif issue is None:
             action = "created" if counts["created"] < cap else "deferred"
         elif issue["state"] == "closed":
             completed = issue.get("state_reason") == "completed"
@@ -371,6 +368,22 @@ def reconcile(
         counts[action] += 1
         if decisions is not None:
             decisions[fingerprint] = action
+        # Privacy cleanup applies to every match, including rejected/otherwise
+        # suppressed closures and accidental duplicates. Only the active issue
+        # may receive membership/title/state changes through the policy below.
+        for matched in matches:
+            if matched is issue and action in {"updated", "reopened"}:
+                continue
+            existing = matched.get("body") or ""
+            refreshed = refresh_public_source(existing, body)
+            if refreshed != existing:
+                counts["redacted"] += 1
+                if not dry_run:
+                    api.api(
+                        f"repos/{TARGET}/issues/{matched['number']}",
+                        read=False,
+                        payload={"_method": "PATCH", "body": refreshed},
+                    )
         if dry_run or action in {"unchanged", "suppressed", "deferred"}:
             continue
         if action == "created":

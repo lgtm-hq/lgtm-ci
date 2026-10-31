@@ -18,6 +18,18 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan cleans suppressed issue source without changing adoption decisions" {
+	check_case test_suppressed_source_privacy "$TRANSPORT_CHECKS"
+}
+
+@test "duplication scan keeps runpy file and module execution repository-specific" {
+	check_case test_python_runpy_execution "$PYTHON_CHECKS"
+}
+
+@test "duplication scan preserves Python numeric strings unless versions are explicit inputs" {
+	check_case test_python_numeric_strings "$PYTHON_CHECKS"
+}
+
 @test "duplication scan preserves decimal command durations thresholds and timeouts" {
 	check_case test_decimal_command_arguments "$PYTHON_CHECKS"
 }
@@ -30,7 +42,7 @@ check_case() {
 	check_case test_python_numeric_thresholds "$PYTHON_CHECKS"
 }
 
-@test "duplication scan still masks Python string parameters and safe version inputs" {
+@test "duplication scan still masks Python path parameters and safe version inputs" {
 	check_case test_python_known_parameters "$PYTHON_CHECKS"
 }
 

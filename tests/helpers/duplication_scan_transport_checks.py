@@ -25,6 +25,138 @@ from gha_expr import evaluate
 class Cases(FixtureCase):
     """Select one transport or workflow scenario by its BATS case name."""
 
+    # Exercise the synthetic CLI lifecycle, including duplicate matching issues.
+    # pylint: disable-next=too-many-locals,too-many-nested-blocks
+    def test_suppressed_source_privacy(self) -> None:
+        """Closed/rejected matches redact historical source without adoption writes."""
+        for reason in ("not_planned", None):
+            for visibility in ("all-private", "new-public", "still-public"):
+                for dry_run in (True, False):
+                    for crlf in (True, False):
+                        with self.subTest(
+                            reason=reason,
+                            visibility=visibility,
+                            dry_run=dry_run,
+                            crlf=crlf,
+                        ):
+                            repos = [
+                                {
+                                    **repo,
+                                    "archived": False,
+                                    "private": (
+                                        repo["private"]
+                                        if visibility == "still-public"
+                                        else visibility == "all-private"
+                                        or repo["full_name"] != "lgtm-hq/beta"
+                                    ),
+                                }
+                                for repo in self.repositories
+                            ]
+                            issues = []
+                            for _, _, body in self.findings:
+                                existing = "Owner triage before.\n\n" + body
+                                existing += "\nOwner notes after.\n"
+                                if crlf:
+                                    existing = existing.replace("\n", "\r\n")
+                                # A rejection must also suppress open/completed
+                                # duplicates, but privacy cleanup reaches all three.
+                                states = ("closed", "open", "closed")
+                                reasons = (reason, None, "completed")
+                                size = 3 if reason == "not_planned" else 1
+                                for state, state_reason in zip(
+                                    states[:size], reasons[:size], strict=True
+                                ):
+                                    issues.append(
+                                        {
+                                            "number": len(issues) + 1,
+                                            "state": state,
+                                            "state_reason": state_reason,
+                                            "title": "Owner's adoption plan",
+                                            "body": existing,
+                                        }
+                                    )
+                            api = FakeGitHub(issues, repositories=repos)
+                            argv = [
+                                "scan",
+                                f"--dry-run={str(dry_run).lower()}",
+                                "--exceptions",
+                                str(FIXTURES / "local-exceptions.yml"),
+                            ]
+                            output = io.StringIO()
+                            with (
+                                patch.object(sys, "argv", argv),
+                                patch.object(scan, "GitHub", return_value=api),
+                                patch.object(scan, "references", return_value=[]),
+                                # Keep both public fixtures available as controls.
+                                patch.object(scan, "load_exceptions", return_value=[]),
+                                patch.dict(
+                                    os.environ,
+                                    {
+                                        "GH_TOKEN": "synthetic-fixture",
+                                        "GITHUB_STEP_SUMMARY": "",
+                                    },
+                                ),
+                                redirect_stdout(output),
+                            ):
+                                self.assertEqual(scan.main(), 0)
+                            self.assertIn('"suppressed": 2', output.getvalue())
+                            self.assertNotIn("SECRET_", output.getvalue())
+                            self.assertEqual(len(api.issues), len(issues))
+                            if dry_run or visibility == "still-public":
+                                self.assertEqual(api.writes, [])
+                                self.assertEqual(api.issues, issues)
+                                continue
+                            self.assertEqual(len(api.writes), len(issues))
+                            for old, current, (endpoint, payload) in zip(
+                                issues, api.issues, api.writes, strict=True
+                            ):
+                                self.assertEqual(
+                                    endpoint,
+                                    f"repos/{scan.TARGET}/issues/{old['number']}",
+                                )
+                                self.assertEqual(set(payload), {"_method", "body"})
+                                self.assertEqual(payload["_method"], "PATCH")
+                                self.assertEqual(
+                                    {**current, "body": ""},
+                                    {**old, "body": ""},
+                                )
+                                body = current["body"].replace("\r\n", "\n")
+                                self.assertTrue(
+                                    body.startswith("Owner triage before.\n\n"),
+                                )
+                                self.assertTrue(body.endswith("\nOwner notes after.\n"))
+                                self.assertNotIn(
+                                    "Public example from `lgtm-hq/alpha`",
+                                    body,
+                                )
+                                self.assertNotIn("dist/alpha", body)
+                                self.assertNotIn("/users/alpha/packages", body)
+                                if visibility == "all-private":
+                                    self.assertNotIn("Public example from", body)
+                                    self.assertNotIn("Action input names:", body)
+                                else:
+                                    self.assertIn(
+                                        "Public example from `lgtm-hq/beta`",
+                                        body,
+                                    )
+                            # Recheck using the current generated bodies, rather
+                            # than the old public fixture, to verify idempotence.
+                            current_units = [
+                                unit
+                                for repo in repos
+                                for unit in model.units(
+                                    repo["full_name"], repo["private"], repo["files"]
+                                )
+                            ]
+                            findings = [
+                                (group[0][0].fingerprint, *model.render(group, 0.8))
+                                for group in model.clusters(current_units, [], 0.8)
+                            ]
+                            api.writes.clear()
+                            counts = scan.reconcile(api, findings, dry_run=False, cap=5)
+                            self.assertEqual(counts["suppressed"], 2)
+                            self.assertEqual(api.writes, [])
+
     def test_non_mapping_yaml_roots(self) -> None:
         """Invalid workflow/action roots count as omitted source, never complete."""
         for path in (".github/workflows/ci.yml", ".github/actions/check/action.yml"):

@@ -363,11 +363,7 @@ class SourceResolver:
                             (
                                 item.string
                                 if item.type in {tokenize.NUMBER, tokenize.OP}
-                                else normalize(
-                                    item.string,
-                                    self.repository,
-                                    version_parameter=item.type == tokenize.STRING,
-                                )
+                                else normalize(item.string, self.repository)
                             ),
                         )
                     )
@@ -375,9 +371,12 @@ class SourceResolver:
                 )
                 if self.uninspected_python_imports(source):
                     shape += (self.unknown("python-import", path),)
-                # Python strings are parameters, not shell command positions.
-                # Keep process-launching scripts opaque until their commands can
-                # be resolved safely, including aliases and computed arguments.
+                # Python strings are not shell command positions.
+                # Keep process launchers and runpy execution opaque until their
+                # dependencies can be resolved, including aliases/computed targets.
+                # Treat any runpy reference conservatively: indirect attribute
+                # access and imported aliases need no separate data-flow parser.
+                # Dynamic imports may load runpy under a computed name as well.
                 names = (
                     item.string  # Inspect code names, never string contents.
                     for item in tokens
@@ -386,7 +385,9 @@ class SourceResolver:
                 if any(
                     re.fullmatch(
                         r"subprocess|system|popen|exec\w*|spawn\w*|"
-                        r"posix_spawn\w*|create_subprocess_\w+",
+                        r"posix_spawn\w*|create_subprocess_\w+|"
+                        r"runpy|run_path|run_module|"
+                        r"__import__|importlib|import_module",
                         name,
                     )
                     for name in names

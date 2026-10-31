@@ -16,8 +16,10 @@ Step ordering, conditions, shell command boundaries, decimal command arguments
 (including quoted durations, thresholds and timeouts), and Python indentation and
 numeric tokens also remain significant. Python operators retain their exact text,
 including floor division `//` and augmented assignment `//=`. Python numeric tokens
-retain their exact text, including floating-point and exponential constants; Python path/version
-strings still normalize as parameters. Explicit local script paths resolve
+retain their exact text, including floating-point and exponential constants.
+Python path strings still normalize as parameters; numeric strings remain significant,
+including decimal values and version-like text outside explicit setup-action inputs.
+Explicit local script paths resolve
 exactly, including extensionless scripts and nested calls; cycles and unresolved
 calls retain their repository-qualified identity, so unknown implementations
 cannot match across repositories. Referenced programs outside the script directories and local
@@ -35,7 +37,9 @@ shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
 Shell blocks that change directories with `cd`, `pushd` or `popd` stay
 repository-specific; their control flow is not modeled. Python process launchers,
 including asyncio's subprocess helpers, also stay unknown until command
-identities can be compared. Local, relative and third-party Python imports
+identities can be compared. The same conservative rule covers runpy file/module
+execution and dynamic imports, including imported aliases and computed targets.
+Local, relative and third-party Python imports
 keep the entrypoint repository-specific, even when helper source is available:
 their implementations are not inspected. Standard-library imports remain
 comparable unless an inventoried Python module or package could shadow them.
@@ -85,8 +89,12 @@ remains the current public example; otherwise they are regenerated or removed.
 Human notes remain intact. Web-edited CRLF bodies compare identically. Updates and
 reopens refresh the count only on generated titles, preserving human titles.
 Catalog matches use "adopt … from lgtm-ci" and singular "1 repo" wording.
-Not-planned closures stay silent; completed closures reopen with a comment when
-the copy is found again. At most five new issues are created per run; deferred
+Privacy cleanup also applies to every matched closed or rejected issue and any
+duplicate matches, preserving their state, rejection decision and human notes.
+Suppressed matches receive only a body patch when cleanup is needed, counted as
+`redacted`; dry-runs count these without writing. Not-planned closures otherwise
+stay silent; completed closures reopen with a comment when the copy is found again.
+At most five new issues are created per run; deferred
 candidates remain in the summary. Untrusted identifiers and snippets cannot
 inject scanner markers. Removing an issue's identity marker makes it unseen;
 retain the marker when editing to avoid a duplicate candidate.
