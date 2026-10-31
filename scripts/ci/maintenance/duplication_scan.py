@@ -55,6 +55,27 @@ PUBLIC_EXAMPLE = re.compile(
 )
 
 
+def positive_integer(value: Any) -> bool:
+    """IDs and counts must be positive integers; bool is an int subclass."""
+    return isinstance(value, int) and not isinstance(value, bool) and value > 0
+
+
+def json_pages(output: str) -> list[Any]:
+    """Decode consecutive gh pagination values without the newer --slurp flag."""
+    decoder = json.JSONDecoder()
+    remaining = output.strip()
+    pages: list[Any] = []
+    while remaining:
+        page, end = decoder.raw_decode(remaining)
+        pages.append(page)
+        remaining = remaining[end:].strip()
+    if not pages:
+        raise RuntimeError("GitHub returned an empty response")
+    if any(isinstance(page, dict) and page.get("errors") for page in pages):
+        raise RuntimeError("GitHub GraphQL returned errors; refusing a partial scan")
+    return pages
+
+
 class GitHubError(RuntimeError):
     """Transport failure with a status, but no potentially private response text."""
 
@@ -112,21 +133,7 @@ class GitHub:
         if proc.returncode:
             status = re.search(r"HTTP (\d{3})", proc.stderr or "")
             raise GitHubError(read, int(status[1]) if status else None)
-        # gh --paginate emits consecutive JSON values; decode without relying
-        # on --slurp, which older workstation gh versions do not support.
-        decoder = json.JSONDecoder()
-        remaining = proc.stdout.strip()
-        pages: list[Any] = []
-        while remaining:
-            page, end = decoder.raw_decode(remaining)
-            pages.append(page)
-            remaining = remaining[end:].strip()
-        if not pages:
-            raise RuntimeError("GitHub returned an empty response")
-        if any(isinstance(page, dict) and page.get("errors") for page in pages):
-            raise RuntimeError(
-                "GitHub GraphQL returned errors; refusing a partial scan",
-            )
+        pages = json_pages(proc.stdout)
         if all_pages:
             return pages
         if payload is None and all(isinstance(page, list) for page in pages):
@@ -136,38 +143,65 @@ class GitHub:
         return pages[0]
 
     def verify_source_coverage(self, repositories: list[dict[str, Any]]) -> None:
-        """Require all-repository grants reported for this scan's source token.
-
-        A successful org listing alone proves only visibility. The installation
-        endpoint authenticates the actual source credential, independently of
-        optional readiness or the App JWT. Missing selection metadata is not
-        evidence of complete coverage. Check every page and compare inventories
-        so missing pages, narrowed grants and concurrent inventory changes fail.
-        """
+        """Compare actual source grants against independently verified full grants."""
         self.skipped["unverified repository coverage"] += 1
+        actual = self.installation_repositories()
+        app_id = os.environ.get("DUPLICATION_SCAN_APP_ID", "")
+        private_key = os.environ.get("DUPLICATION_SCAN_APP_PRIVATE_KEY", "")
+        if not app_id or not private_key:
+            raise RuntimeError("source coverage requires the read-only App credentials")
+        installation = verify_installation(app_id, private_key)
+        # Omitting repositories/repository_ids grants every installed repository.
+        # The source token may have been narrowed even if its App covers all repos.
+        grant = app_api(
+            f"app/installations/{installation['id']}/access_tokens",
+            app_id,
+            private_key,
+            payload={"permissions": {"contents": "read"}},
+        )
+        if (
+            not isinstance(grant, dict)
+            or grant.get("repository_selection", "all") != "all"
+            or not isinstance(grant.get("token"), str)
+            or not grant["token"]
+        ):
+            raise RuntimeError("invalid full-coverage source App token response")
+        if "permissions" in grant:
+            require_read_only_contents(grant["permissions"])
+        verifier = GitHub()
+        verifier.source_token = grant["token"]
+        expected = verifier.installation_repositories()
+        if (
+            actual != expected
+            or actual != repository_identities(repositories)
+            or any(owner != installation["account"]["id"] for _, _, owner in actual)
+        ):
+            raise RuntimeError(
+                "source grants and all-repository App inventory disagree",
+            )
+        del self.skipped["unverified repository coverage"]
+
+    def installation_repositories(self) -> set[tuple[int, str, int]]:
+        """Validate all pages of the repositories granted to this exact token."""
         pages = self.api("installation/repositories?per_page=100", all_pages=True)
         inventory: list[dict[str, Any]] = []
         total: int | None = None
         for page in pages:
             if (
                 not isinstance(page, dict)
-                or page.get("repository_selection") != "all"
-                or type(page.get("total_count")) is not int
-                or page["total_count"] <= 0
+                or not positive_integer(page.get("total_count"))
                 or not isinstance(page.get("repositories"), list)
                 or (total is not None and total != page["total_count"])
             ):
                 raise RuntimeError(
-                    "source credential lacks verified all-repository coverage",
+                    "invalid source installation repository page",
                 )
             total = page["total_count"]
             inventory.extend(page["repositories"])
         identities = repository_identities(inventory)
-        if len(inventory) != total or identities != repository_identities(repositories):
-            raise RuntimeError(
-                "source installation and organization inventories disagree",
-            )
-        del self.skipped["unverified repository coverage"]
+        if len(inventory) != total:
+            raise RuntimeError("incomplete source installation repository inventory")
+        return identities
 
     def files(self, repository: dict[str, Any]) -> dict[str, str]:
         """Pin the default-branch tree, then batch immutable blob reads."""
@@ -243,42 +277,54 @@ class GitHub:
         return found
 
 
+def organization_account(account: Any) -> bool:
+    """Recognize verified lgtm-hq organization ownership with a numeric ID."""
+    return (
+        isinstance(account, dict)
+        and positive_integer(account.get("id"))
+        and isinstance(account.get("login"), str)
+        and account["login"].casefold() == "lgtm-hq"
+        and account.get("type") == "Organization"
+    )
+
+
+def repository_identity(repo: Any) -> tuple[int, str, int]:
+    """Validate identity, ownership and the exact flags used to select sources."""
+    if (
+        not isinstance(repo, dict)
+        or not positive_integer(repo.get("id"))
+        or not isinstance(repo.get("full_name"), str)
+        or not re.fullmatch(r"lgtm-hq/[\w.-]+", repo["full_name"], re.IGNORECASE)
+    ):
+        raise RuntimeError("invalid source organization repository identity")
+    if not organization_account(repo.get("owner")):
+        raise RuntimeError("invalid source organization repository owner")
+    if not all(
+        isinstance(repo.get(flag, default), bool)
+        for flag, default in (("private", None), ("archived", None), ("fork", False))
+    ):
+        raise RuntimeError("invalid source organization repository flags")
+    if not isinstance(repo.get("default_branch"), str) or not repo["default_branch"]:
+        raise RuntimeError("invalid source organization repository default branch")
+    return repo["id"], repo["full_name"].casefold(), repo["owner"]["id"]
+
+
 def repository_identities(
     repositories: list[dict[str, Any]],
 ) -> set[tuple[int, str, int]]:
-    """Validate org ownership and reject duplicate or unusable inventory rows."""
+    """Reject duplicate IDs/names and inconsistent organization ownership."""
     identities: set[tuple[int, str, int]] = set()
     names: set[str] = set()
     identifiers: set[int] = set()
     owners: set[int] = set()
     for repo in repositories:
-        owner = repo.get("owner") if isinstance(repo, dict) else None
-        if (
-            not isinstance(repo, dict)
-            or type(repo.get("id")) is not int
-            or repo["id"] <= 0
-            or not isinstance(repo.get("full_name"), str)
-            or not re.fullmatch(r"lgtm-hq/[\w.-]+", repo["full_name"], re.IGNORECASE)
-            or not isinstance(owner, dict)
-            or type(owner.get("id")) is not int
-            or owner["id"] <= 0
-            or not isinstance(owner.get("login"), str)
-            or owner["login"].casefold() != "lgtm-hq"
-            or owner.get("type") != "Organization"
-            or type(repo.get("private")) is not bool
-            or type(repo.get("archived")) is not bool
-            or type(repo.get("fork", False)) is not bool
-            or not isinstance(repo.get("default_branch"), str)
-            or not repo["default_branch"]
-        ):
-            raise RuntimeError("invalid source organization repository metadata")
-        name = repo["full_name"].casefold()
-        if repo["id"] in identifiers or name in names:
+        identifier, name, owner = repository_identity(repo)
+        if identifier in identifiers or name in names:
             raise RuntimeError("duplicate source organization repository metadata")
-        identifiers.add(repo["id"])
+        identifiers.add(identifier)
         names.add(name)
-        owners.add(owner["id"])
-        identities.add((repo["id"], name, owner["id"]))
+        owners.add(owner)
+        identities.add((identifier, name, owner))
     if len(owners) != 1:
         raise RuntimeError("unverified source organization ownership")
     return identities
@@ -585,8 +631,14 @@ def encoded(value: bytes) -> bytes:
     return base64.urlsafe_b64encode(value).rstrip(b"=")
 
 
-def verify_installation(app_id: str, private_key: str) -> None:
-    """Read installation metadata with an App JWT; never log credential material."""
+def app_api(
+    endpoint: str,
+    app_id: str,
+    private_key: str,
+    *,
+    payload: dict[str, Any] | None = None,
+) -> Any:
+    """Authenticate App metadata/token requests without logging credential material."""
     now = int(time.time())
     header = encoded(b'{"alg":"RS256","typ":"JWT"}')
     claims = encoded(
@@ -607,32 +659,51 @@ def verify_installation(app_id: str, private_key: str) -> None:
     env = os.environ.copy()
     env.pop("GITHUB_TOKEN", None)
     env["GH_TOKEN"] = (message + b"." + encoded(signature.stdout)).decode()
+    args = [
+        "gh",
+        "api",
+        endpoint,
+        "--header",
+        "Authorization: Bearer " + env["GH_TOKEN"],
+    ]
+    if payload is not None:
+        args += ["--method", "POST", "--input", "-"]
     response = subprocess.run(
-        [
-            "gh",
-            "api",
-            "orgs/lgtm-hq/installation",
-            "--header",
-            "Authorization: Bearer " + env["GH_TOKEN"],
-        ],
+        args,
+        input=json.dumps(payload) if payload is not None else None,
         env=env,
         text=True,
         capture_output=True,
         check=False,
     )
     if response.returncode:
-        raise RuntimeError("could not verify the source App installation")
+        raise RuntimeError("source App request failed")
     try:
-        installation = json.loads(response.stdout)
+        return json.loads(response.stdout)
     except json.JSONDecodeError:
-        raise RuntimeError("invalid source App installation response") from None
-    if not isinstance(installation, dict):
+        raise RuntimeError("invalid source App response") from None
+
+
+def verify_installation(app_id: str, private_key: str) -> dict[str, Any]:
+    """Verify the organization's all-repository, read-only App installation."""
+    installation = app_api("orgs/lgtm-hq/installation", app_id, private_key)
+    if (
+        not isinstance(installation, dict)
+        or not positive_integer(installation.get("id"))
+        or not organization_account(installation.get("account"))
+        or installation.get("suspended_at") is not None
+    ):
         raise RuntimeError("invalid source App installation response")
     if installation.get("repository_selection") != "all":
         raise RuntimeError(
             "source App must be installed on all organization repositories",
         )
-    permissions = installation.get("permissions")
+    require_read_only_contents(installation.get("permissions"))
+    return installation
+
+
+def require_read_only_contents(permissions: Any) -> None:
+    """Reject malformed grants and every permission exceeding read access."""
     if not isinstance(permissions, dict) or any(
         not isinstance(name, str) or not name or level != "read"
         for name, level in permissions.items()

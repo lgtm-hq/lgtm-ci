@@ -35,6 +35,10 @@ check_case() {
 	check_case test_invalid_coverage_metadata "$COVERAGE_CHECKS"
 }
 
+@test "duplication scan requires independent all-repository App grant evidence" {
+	check_case test_independent_app_coverage "$COVERAGE_CHECKS"
+}
+
 @test "duplication scan verifies every installation and inventory page" {
 	check_case test_coverage_pagination "$COVERAGE_CHECKS"
 }
@@ -260,7 +264,7 @@ check_case() {
 }
 
 @test "duplication scan live transport uses the issue token and tolerates empty repos" {
-	check_case test_live_transport_end_to_end "$TRANSPORT_CHECKS"
+	check_case test_live_transport_end_to_end "$COVERAGE_CHECKS"
 }
 
 @test "duplication scan and other generated workflow preset maps stay in sync" {

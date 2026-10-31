@@ -163,15 +163,32 @@ partially installed App. The temporary signing key is deleted
 immediately after signing; credentials and installation responses are not logged.
 
 Every scan independently checks the **actual source credential**, including local
-dry-runs. `GET /installation/repositories` must report `repository_selection: all`
-on every page. All pages must agree on a positive integer `total_count`, contain
-unique repository IDs/names owned by the same lgtm-hq organization, and exactly
-match the organization listing. Missing/malformed metadata, unreadable pages,
-selected-repository credentials and inventory gaps fail closed before normal
-issue mutations. The source token is held fixed for coverage and blob reads.
-The optional readiness check, environment readiness flags and a different App's
-installation cannot substitute for this proof. Verification uses read endpoints
-only and requires no additional secrets or permissions.
+dry-runs. GitHub's documented
+[`GET /installation/repositories`](https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-app-installation)
+response requires `total_count` and `repositories`. Its
+[OpenAPI schema](https://github.com/github/rest-api-description/blob/main/descriptions/api.github.com/api.github.com.json)
+makes `repository_selection` optional, and the documented response example omits
+it. Token grants cannot establish all-organization coverage alone.
+
+The scan therefore rechecks the configured App's all-repository, read-only
+installation using its JWT. It independently
+[mints a Contents: read token](https://docs.github.com/en/rest/apps/apps#create-an-installation-access-token-for-an-app)
+for that installation, omitting both `repositories` and `repository_ids` so the
+token receives every installed repository. Conflicting optional selection or
+permission metadata in the mint response is rejected. Both tokens' full
+`/installation/repositories` inventories must match each other and the org listing,
+with ownership bound to the verified installation's organization ID. Each inventory
+must exhaust a consistent positive integer `total_count` across all pages and
+contain unique repository IDs/names. Boolean IDs/counts and nonboolean visibility,
+archive or fork flags are rejected.
+
+Missing App credentials, malformed metadata, unreadable pages, narrowed source
+grants and inventory gaps fail closed before normal issue mutations. Readiness
+flags or an unrelated App's metadata cannot substitute for comparing actual
+source grants with independently obtained full grants. The source token stays
+fixed for coverage and blob reads; the verification token remains only in memory
+and expires after one hour. This uses the existing App secrets and permissions;
+it creates a temporary read token without changing the App or its installation.
 
 `GH_READ_TOKEN` reads source. Issue reads and writes use the job's separate
 repository-scoped `GH_TOKEN` with Contents: read and Issues: write. Both jobs use
@@ -201,8 +218,10 @@ Before enabling it:
 
 Source reads use `GH_READ_TOKEN` or the local `gh` login, discarding `GH_TOKEN`
 and `GITHUB_TOKEN` so a repository-only Actions token cannot narrow the source
-inventory. That credential must pass the installation coverage check described
-above; a general local login cannot establish all-repository App coverage.
+inventory. Set the existing `DUPLICATION_SCAN_APP_ID` and
+`DUPLICATION_SCAN_APP_PRIVATE_KEY` credentials as well, for the independent
+coverage proof described above. A general local login alone cannot establish
+all-repository App coverage.
 Issue reads use `GH_TOKEN` or the local
 login. The system Python needs PyYAML, as do the catalog scripts. No scanned
 source is cached.

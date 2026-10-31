@@ -11,10 +11,24 @@ import subprocess
 import sys
 import unittest
 from contextlib import redirect_stdout
+from dataclasses import dataclass
+from dataclasses import field as data_field
 from typing import Any
 from unittest.mock import patch
 
-from duplication_scan_support import FakeGitHub, FixtureCase, model, scan
+from duplication_scan_support import FIXTURES, FakeGitHub, FixtureCase, model, scan
+
+
+@dataclass
+class CoverageResponses:
+    """Independent source grants, full grants and App metadata response state."""
+
+    org_pages: list[Any]
+    installation_pages: list[Any]
+    full_pages: list[Any]
+    installation: Any
+    grant: Any
+    raw: dict[str, str] = data_field(default_factory=dict)
 
 
 class Transport:
@@ -32,9 +46,22 @@ class Transport:
             }
             for index, name in enumerate(("alpha", "beta", "gamma"), start=1)
         ]
-        self.org_pages: list[Any] = [copy.deepcopy(self.repos)]
-        self.installation_pages: list[Any] = [self.page(self.repos)]
-        self.raw: dict[str, str] = {}
+        self.responses = CoverageResponses(
+            org_pages=[copy.deepcopy(self.repos)],
+            installation_pages=[self.page(self.repos)],
+            full_pages=[self.page(self.repos)],
+            installation={
+                "id": 123,
+                "account": copy.deepcopy(self.repos[0]["owner"]),
+                "repository_selection": "all",
+                "permissions": {"contents": "read", "metadata": "read"},
+            },
+            grant={
+                "token": "full-canary",
+                "repository_selection": "all",
+                "permissions": {"contents": "read", "metadata": "read"},
+            },
+        )
         self.unreadable = ""
         self.source_calls: list[str] = []
         self.rotate_token = False
@@ -45,24 +72,37 @@ class Transport:
         """Return the actual installation-repositories response envelope."""
         return {
             "total_count": len(repos) if total is None else total,
-            "repository_selection": "all",
             "repositories": copy.deepcopy(repos),
         }
+
+    def check_credentials(self, args: list[str], env: dict[str, str]) -> str:
+        """Check App, source and issue credentials separately on every request."""
+        assert args[:2] == ["gh", "api"]
+        endpoint = args[2]
+        token = env["GH_TOKEN"]
+        source = "/issues" not in endpoint
+        app = endpoint == "orgs/lgtm-hq/installation" or endpoint.startswith("app/")
+        if app:
+            assert args[3:5] == ["--header", "Authorization: Bearer " + token]
+            assert token not in ("source-canary", "full-canary", "write-canary")
+        else:
+            expected = {"source-canary", "full-canary"} if source else {"write-canary"}
+            assert token in expected
+        if source:
+            assert "GITHUB_TOKEN" not in env
+            self.source_calls.append(endpoint)
+        return token
 
     def __call__(
         self,
         args: list[str],
         **kwargs: Any,
-    ) -> subprocess.CompletedProcess[str]:
+    ) -> subprocess.CompletedProcess[Any]:
         """Route subprocess calls without network, signing or live writes."""
-        assert args[:2] == ["gh", "api"]
+        if args[0] == "openssl":
+            return subprocess.CompletedProcess(args, 0, b"signature", b"")
         endpoint = args[2]
-        source = "/issues" not in endpoint
-        expected_token = "source-canary" if source else "write-canary"
-        assert kwargs["env"].get("GH_TOKEN") == expected_token
-        if source:
-            assert "GITHUB_TOKEN" not in kwargs["env"]
-            self.source_calls.append(endpoint)
+        token = self.check_credentials(args, kwargs["env"])
         if endpoint.startswith(self.unreadable) and self.unreadable:
             return subprocess.CompletedProcess(
                 args,
@@ -70,14 +110,24 @@ class Transport:
                 "",
                 "PRIVATE_AUTH_CANARY (HTTP 403)",
             )
-        if endpoint.startswith("installation/repositories"):
+        if endpoint == "orgs/lgtm-hq/installation":
+            result = [self.responses.installation]
+        elif endpoint == "app/installations/123/access_tokens":
+            assert args[5:] == ["--method", "POST", "--input", "-"]
+            assert json.loads(kwargs["input"]) == {"permissions": {"contents": "read"}}
+            result = [self.responses.grant]
+        elif endpoint.startswith("installation/repositories"):
             assert "--paginate" in args
-            result = self.installation_pages
+            result = (
+                self.responses.full_pages
+                if token == "full-canary"
+                else self.responses.installation_pages
+            )
             if self.rotate_token:
                 os.environ["GH_READ_TOKEN"] = "different-source-canary"
         elif endpoint.startswith("orgs/lgtm-hq/repos"):
             assert "--paginate" in args
-            result = self.org_pages
+            result = self.responses.org_pages
         elif "git/trees" in endpoint:
             result = [
                 {
@@ -114,7 +164,7 @@ class Transport:
                     source=False,
                 )
             ]
-        matching = (v for k, v in self.raw.items() if endpoint.startswith(k))
+        matching = (v for k, v in self.responses.raw.items() if endpoint.startswith(k))
         raw = next(matching, None)
         stdout = "\n".join(json.dumps(page) for page in result) if raw is None else raw
         return subprocess.CompletedProcess(args, 0, stdout, "")
@@ -124,7 +174,11 @@ class Cases(FixtureCase):
     """Bind reconciliation to coverage proven by the source credential itself."""
 
     def invoke(
-        self, transport: Transport, dry_run: bool = False
+        self,
+        transport: Transport,
+        dry_run: bool = False,
+        *,
+        app_env: dict[str, str] | None = None,
     ) -> tuple[int | None, str, Exception | None]:
         """Run the real CLI twice against retained offline issue state."""
         output = io.StringIO()
@@ -140,9 +194,11 @@ class Cases(FixtureCase):
                     "GH_TOKEN": "write-canary",
                     "GITHUB_TOKEN": "must-be-discarded",
                     "GITHUB_STEP_SUMMARY": "",
-                    # Neither readiness assertions nor another App can prove coverage.
+                    # Readiness flags cannot replace independent source-grant proof.
                     "DUPLICATION_SCAN_READY": "true",
-                    "DUPLICATION_SCAN_APP_ID": "different-app",
+                    "DUPLICATION_SCAN_APP_ID": "source-app",
+                    "DUPLICATION_SCAN_APP_PRIVATE_KEY": "test-key",
+                    **(app_env or {}),
                 },
                 clear=True,
             ),
@@ -176,6 +232,7 @@ class Cases(FixtureCase):
         calls = transport.source_calls
         coverage_calls = [c for c in calls if c.startswith("installation/repositories")]
         self.assertTrue(coverage_calls)
+        self.assertEqual(len(coverage_calls), 2)
         transport.issues.writes.clear()
         self.assertEqual(self.invoke(transport)[0], 0)
         self.assertEqual(transport.issues.writes, [])
@@ -198,12 +255,55 @@ class Cases(FixtureCase):
             subset.issues.issues[1].update(state="closed", state_reason="completed")
             subset.issues.issues.pop()
             original = copy.deepcopy(subset.issues.issues)
-            subset.org_pages = [subset.repos[:2]]
-            subset.installation_pages = [
-                {**subset.page(subset.repos[:2]), "repository_selection": "selected"}
-            ]
+            subset.responses.org_pages = [subset.repos[:2]]
+            subset.responses.installation_pages = [subset.page(subset.repos[:2])]
             self.assert_blocked(subset, dry_run)
             self.assertEqual(subset.issues.issues, original)
+
+    def test_independent_app_coverage(self) -> None:
+        """Unknown App ownership, narrowing and invalid token grants block writes."""
+        minimal = Transport()
+        minimal.responses.grant = {"token": "full-canary", "expires_at": "future"}
+        self.assertEqual(self.invoke(minimal)[0], 0)
+        for field, value in (
+            ("id", True),
+            ("id", 0),
+            ("account", {"id": True, "login": "lgtm-hq", "type": "Organization"}),
+            ("account", {"id": 43, "login": "lgtm-hq", "type": "Organization"}),
+            ("account", {"id": 42, "login": "other-org", "type": "Organization"}),
+            ("repository_selection", "selected"),
+            ("repository_selection", None),
+            ("suspended_at", "2026-10-01T00:00:00Z"),
+            ("permissions", {"contents": "write"}),
+        ):
+            with self.subTest(field=field, value=value):
+                transport = Transport()
+                transport.responses.installation[field] = value
+                self.assert_blocked(transport)
+        invalid: list[Any] = [None, [], {}]
+        for field, value in (
+            ("token", None),
+            ("token", ""),
+            ("token", True),
+            ("repository_selection", "selected"),
+            ("repository_selection", None),
+            ("permissions", {"contents": "read", "issues": "write"}),
+            ("permissions", {"metadata": "read"}),
+            ("permissions", None),
+        ):
+            invalid.append({**Transport().responses.grant, field: value})
+        for response in invalid:
+            with self.subTest(response=response):
+                transport = Transport()
+                transport.responses.grant = response
+                self.assert_blocked(transport)
+        for name in ("DUPLICATION_SCAN_APP_ID", "DUPLICATION_SCAN_APP_PRIVATE_KEY"):
+            transport = Transport()
+            for dry_run in (True, False):
+                self.assertIsNotNone(
+                    self.invoke(transport, dry_run, app_env={name: ""})[2],
+                )
+                self.assertEqual(transport.issues.writes, [])
 
     def test_invalid_coverage_metadata(self) -> None:
         """Unknown grants, owners and unreadable or malformed metadata fail closed."""
@@ -211,16 +311,14 @@ class Cases(FixtureCase):
             None,
             [],
             {},
-            {"repository_selection": "all"},
-            {"repository_selection": "all", "total_count": True, "repositories": []},
-            {"repository_selection": "all", "total_count": -1, "repositories": []},
-            {"repository_selection": "all", "total_count": 0, "repositories": []},
+            {"total_count": True, "repositories": []},
+            {"total_count": False, "repositories": []},
+            {"total_count": -1, "repositories": []},
+            {"total_count": 0, "repositories": []},
         ]
         fixture = Transport()
         value: Any
         for field, value in (
-            ("repository_selection", None),
-            ("repository_selection", "selected"),
             ("total_count", "3"),
             ("total_count", 4),
             ("repositories", None),
@@ -229,13 +327,19 @@ class Cases(FixtureCase):
         for field, value in (
             ("id", None),
             ("id", True),
+            ("id", False),
+            ("id", 1.0),
             ("full_name", "other-org/PRIVATE_REPO_CANARY"),
             ("owner", {"id": 42, "login": "other-org", "type": "Organization"}),
             ("owner", {"id": 42, "login": "lgtm-hq", "type": "User"}),
             ("owner", None),
+            ("owner", {"id": True, "login": "lgtm-hq", "type": "Organization"}),
             ("private", None),
+            ("private", 0),
             ("archived", "false"),
+            ("archived", 0),
             ("fork", "false"),
+            ("fork", 0),
             ("default_branch", None),
         ):
             repos = copy.deepcopy(fixture.repos)
@@ -244,14 +348,19 @@ class Cases(FixtureCase):
         for page in invalid:
             with self.subTest(page=page):
                 transport = Transport()
-                transport.installation_pages = [page]
+                transport.responses.installation_pages = [page]
                 self.assert_blocked(transport)
         invalid_inventories: list[Any] = [None, {}, [None], [{}]]
         for inventory in invalid_inventories:
             transport = Transport()
-            transport.org_pages = [inventory]
+            transport.responses.org_pages = [inventory]
             self.assert_blocked(transport)
-        for endpoint in ("installation/repositories", "orgs/lgtm-hq/repos"):
+        for endpoint in (
+            "installation/repositories",
+            "orgs/lgtm-hq/repos",
+            "orgs/lgtm-hq/installation",
+            "app/installations/123/access_tokens",
+        ):
             malformed = (
                 "<html>PRIVATE_METADATA_CANARY</html>",
                 '{"PRIVATE_METADATA_CANARY":',
@@ -260,7 +369,7 @@ class Cases(FixtureCase):
             for raw in malformed:
                 with self.subTest(endpoint=endpoint, raw=raw):
                     transport = Transport()
-                    transport.raw[endpoint] = raw
+                    transport.responses.raw[endpoint] = raw
                     self.assert_blocked(transport)
             transport = Transport()
             transport.unreadable = endpoint
@@ -269,18 +378,23 @@ class Cases(FixtureCase):
     def test_coverage_pagination(self) -> None:
         """All object/list pages must agree, be unique and exhaust the total."""
         transport = Transport()
-        transport.org_pages = [transport.repos[:1], transport.repos[1:]]
-        transport.installation_pages = [
+        transport.responses.org_pages = [transport.repos[:1], transport.repos[1:]]
+        transport.responses.installation_pages = [
             transport.page(transport.repos[:1], 3),
             transport.page(transport.repos[1:], 3),
         ]
+        transport.responses.full_pages = copy.deepcopy(
+            transport.responses.installation_pages,
+        )
         self.assertEqual(self.invoke(transport)[0], 0)
         self.assertEqual(len(transport.issues.writes), 3)
         for reason in (
             "missing-page",
             "duplicate",
             "changed-total",
-            "changed-selection",
+            "full-grant-subset",
+            "full-grant-missing-page",
+            "full-grant-duplicate",
             "different-inventory",
             "malformed-tail",
             "org-duplicate",
@@ -288,28 +402,37 @@ class Cases(FixtureCase):
         ):
             with self.subTest(reason=reason):
                 broken = Transport()
-                broken.installation_pages = [
+                broken.responses.installation_pages = [
                     broken.page(broken.repos[:1], 3),
                     broken.page(broken.repos[1:], 3),
                 ]
                 if reason == "missing-page":
-                    broken.installation_pages.pop()
+                    broken.responses.installation_pages.pop()
                 elif reason == "duplicate":
-                    broken.installation_pages[1] = broken.page(broken.repos[:2], 3)
+                    broken.responses.installation_pages[1] = broken.page(
+                        broken.repos[:2],
+                        3,
+                    )
                 elif reason == "changed-total":
-                    broken.installation_pages[1]["total_count"] = 2
-                elif reason == "changed-selection":
-                    broken.installation_pages[1]["repository_selection"] = "selected"
+                    broken.responses.installation_pages[1]["total_count"] = 2
+                elif reason == "full-grant-subset":
+                    broken.responses.full_pages = [broken.page(broken.repos[:2])]
+                elif reason == "full-grant-missing-page":
+                    broken.responses.full_pages = [broken.page(broken.repos[:2], 3)]
+                elif reason == "full-grant-duplicate":
+                    broken.responses.full_pages = [
+                        broken.page([*broken.repos, broken.repos[0]]),
+                    ]
                 elif reason == "different-inventory":
-                    broken.org_pages = [broken.repos[:2]]
+                    broken.responses.org_pages = [broken.repos[:2]]
                 elif reason == "org-duplicate":
-                    broken.org_pages = [broken.repos, broken.repos[:1]]
+                    broken.responses.org_pages = [broken.repos, broken.repos[:1]]
                 elif reason == "org-malformed-page":
-                    broken.org_pages = [broken.repos, {}]
+                    broken.responses.org_pages = [broken.repos, {}]
                 else:
-                    first = json.dumps(broken.installation_pages[0])
+                    first = json.dumps(broken.responses.installation_pages[0])
                     malformed = first + "\nPRIVATE_TAIL_CANARY"
-                    broken.raw["installation/repositories"] = malformed
+                    broken.responses.raw["installation/repositories"] = malformed
                 self.assert_blocked(broken)
 
     def test_coverage_privacy_cleanup(self) -> None:
@@ -341,14 +464,16 @@ class Cases(FixtureCase):
                         ]
                     )
                     if visibility == "missing":
-                        transport.org_pages = [transport.repos[:2]]
+                        transport.responses.org_pages = [transport.repos[:2]]
                     else:
-                        transport.org_pages[0][2]["private"] = {
+                        transport.responses.org_pages[0][2]["private"] = {
                             "public": False,
                             "private": True,
                             "unverified": None,
                         }[visibility]
-                    transport.installation_pages[0]["repository_selection"] = "selected"
+                    transport.responses.installation_pages = [
+                        transport.page(transport.repos[:2]),
+                    ]
                     original = copy.deepcopy(transport.issues.issues)
                     _, output, error = self.invoke(transport, dry_run)
                     self.assertIsNotNone(error)
@@ -372,6 +497,123 @@ class Cases(FixtureCase):
                     writes = copy.deepcopy(transport.issues.writes)
                     self.assertIsNotNone(self.invoke(transport, dry_run)[2])
                     self.assertEqual(transport.issues.writes, writes)
+
+    def test_live_transport_end_to_end(self) -> None:
+        """Live transport end to end."""
+        repos = [
+            {
+                "id": 1,
+                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
+                "full_name": "lgtm-hq/left",
+                "private": False,
+                "archived": False,
+                "default_branch": "main",
+            },
+            {
+                "id": 2,
+                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
+                "full_name": "lgtm-hq/right",
+                "private": False,
+                "archived": False,
+                "default_branch": "main",
+            },
+            {
+                "id": 3,
+                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
+                "full_name": "lgtm-hq/empty",
+                "private": False,
+                "archived": False,
+                "default_branch": "main",
+                "size": 0,
+            },
+        ]
+        writes: list[dict[str, Any]] = []
+
+        def transport(
+            args: list[str],
+            **kwargs: Any,
+        ) -> subprocess.CompletedProcess[Any]:
+            if args[0] == "openssl":
+                return subprocess.CompletedProcess(args, 0, b"signature", b"")
+            result: Any
+            blob: dict[str, Any]
+            endpoint = args[2]
+            token = kwargs["env"].get("GH_TOKEN")
+            if endpoint == "orgs/lgtm-hq/installation":
+                result = {
+                    "id": 123,
+                    "account": repos[0]["owner"],
+                    "repository_selection": "all",
+                    "permissions": {"contents": "read"},
+                }
+            elif endpoint == "app/installations/123/access_tokens":
+                self.assertEqual(
+                    json.loads(kwargs["input"]),
+                    {"permissions": {"contents": "read"}},
+                )
+                result = {
+                    "token": "independent-read",
+                    "repository_selection": "all",
+                    "permissions": {"contents": "read"},
+                }
+            elif endpoint.startswith("orgs/"):
+                self.assertEqual(token, "read")
+                result = repos
+            elif endpoint.startswith("installation/repositories"):
+                self.assertIn(token, ("read", "independent-read"))
+                result = {
+                    "total_count": 3,
+                    "repositories": repos,
+                }
+            elif "git/trees" in endpoint:
+                self.assertEqual(token, "read")
+                if "lgtm-hq/empty/" in endpoint:
+                    return subprocess.CompletedProcess(
+                        args, 1, "", "Git Repository is empty (HTTP 409)"
+                    )
+                blob = {"type": "blob", "path": "scripts/check.sh", "sha": "a" * 40}
+                result = {"tree": [blob]}
+            elif endpoint == "graphql":
+                self.assertEqual(token, "read")
+                blob = {"text": "echo copied", "isBinary": False}
+                result = {"data": {"repository": {"f0": blob}}}
+            elif "state=all" in endpoint:
+                self.assertEqual(token, "write")
+                result = []
+            else:
+                self.assertEqual(token, "write")
+                writes.append(json.loads(kwargs["input"]))
+                result = {}
+            return subprocess.CompletedProcess(args, 0, json.dumps(result), "")
+
+        with (
+            patch.object(
+                sys,
+                "argv",
+                [
+                    "scan",
+                    "--dry-run=false",
+                    "--exceptions",
+                    str(FIXTURES / "local-exceptions.yml"),
+                ],
+            ),
+            patch.dict(
+                os.environ,
+                {
+                    "GH_READ_TOKEN": "read",
+                    "GH_TOKEN": "write",
+                    "DUPLICATION_SCAN_APP_ID": "app",
+                    "DUPLICATION_SCAN_APP_PRIVATE_KEY": "test-key",
+                    "GITHUB_STEP_SUMMARY": "",
+                },
+            ),
+            patch.object(subprocess, "run", side_effect=transport),
+            patch.object(scan, "references", return_value=[]),
+            redirect_stdout(io.StringIO()),
+        ):
+            self.assertEqual(scan.main(), 0)
+        self.assertEqual(len(writes), 1)
+        self.assertEqual(writes[0]["labels"], ["ci", "needs-triage"])
 
 
 if __name__ == "__main__":

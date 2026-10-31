@@ -200,6 +200,8 @@ jobs:
         env:
           GH_READ_TOKEN: ${{ steps.read-token.outputs.token }}
           GH_TOKEN: ${{ github.token }}
+          DUPLICATION_SCAN_APP_ID: ${{ secrets.DUPLICATION_SCAN_APP_ID }}
+          DUPLICATION_SCAN_APP_PRIVATE_KEY: ${{ secrets.DUPLICATION_SCAN_APP_PRIVATE_KEY }}
           SCAN_DRY_RUN: >-
             ${{ vars.DUPLICATION_SCAN_LIVE_ENABLED != 'true' ||
             (github.event_name == 'workflow_dispatch' && inputs.dry-run) }}

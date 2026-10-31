@@ -728,6 +728,11 @@ class Cases(FixtureCase):
             "DUPLICATION_SCAN_LIVE_ENABLED",
             job["steps"][-1]["env"]["SCAN_DRY_RUN"],
         )
+        for name in ("DUPLICATION_SCAN_APP_ID", "DUPLICATION_SCAN_APP_PRIVATE_KEY"):
+            self.assertEqual(
+                job["steps"][-1]["env"][name],
+                "${{ secrets." + name + " }}",
+            )
         self.assertTrue(
             workflow["on"]["workflow_dispatch"]["inputs"]["dry-run"]["default"],
         )
@@ -801,6 +806,12 @@ class Cases(FixtureCase):
                         0,
                         json.dumps(
                             {
+                                "id": 123,
+                                "account": {
+                                    "id": 42,
+                                    "login": "lgtm-hq",
+                                    "type": "Organization",
+                                },
                                 "repository_selection": selection,
                                 "permissions": permissions,
                             }
@@ -895,103 +906,6 @@ class Cases(FixtureCase):
             self.assertNotIn(repos[-1]["full_name"], report.read_text())
             self.assertNotIn("SECRET_", report.read_text())
             self.assertEqual(api.writes, [])
-
-    def test_live_transport_end_to_end(self) -> None:
-        """Live transport end to end."""
-        repos = [
-            {
-                "id": 1,
-                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
-                "full_name": "lgtm-hq/left",
-                "private": False,
-                "archived": False,
-                "default_branch": "main",
-            },
-            {
-                "id": 2,
-                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
-                "full_name": "lgtm-hq/right",
-                "private": False,
-                "archived": False,
-                "default_branch": "main",
-            },
-            {
-                "id": 3,
-                "owner": {"id": 42, "login": "lgtm-hq", "type": "Organization"},
-                "full_name": "lgtm-hq/empty",
-                "private": False,
-                "archived": False,
-                "default_branch": "main",
-                "size": 0,
-            },
-        ]
-        writes: list[dict[str, Any]] = []
-
-        def transport(
-            args: list[str],
-            **kwargs: Any,
-        ) -> subprocess.CompletedProcess[str]:
-            result: Any
-            blob: dict[str, Any]
-            endpoint = args[2]
-            token = kwargs["env"].get("GH_TOKEN")
-            if endpoint.startswith("orgs/"):
-                self.assertEqual(token, "read")
-                result = repos
-            elif endpoint.startswith("installation/repositories"):
-                self.assertEqual(token, "read")
-                result = {
-                    "repository_selection": "all",
-                    "total_count": 3,
-                    "repositories": repos,
-                }
-            elif "git/trees" in endpoint:
-                self.assertEqual(token, "read")
-                if "lgtm-hq/empty/" in endpoint:
-                    return subprocess.CompletedProcess(
-                        args, 1, "", "Git Repository is empty (HTTP 409)"
-                    )
-                blob = {"type": "blob", "path": "scripts/check.sh", "sha": "a" * 40}
-                result = {"tree": [blob]}
-            elif endpoint == "graphql":
-                self.assertEqual(token, "read")
-                blob = {"text": "echo copied", "isBinary": False}
-                result = {"data": {"repository": {"f0": blob}}}
-            elif "state=all" in endpoint:
-                self.assertEqual(token, "write")
-                result = []
-            else:
-                self.assertEqual(token, "write")
-                writes.append(json.loads(kwargs["input"]))
-                result = {}
-            return subprocess.CompletedProcess(args, 0, json.dumps(result), "")
-
-        with (
-            patch.object(
-                sys,
-                "argv",
-                [
-                    "scan",
-                    "--dry-run=false",
-                    "--exceptions",
-                    str(FIXTURES / "local-exceptions.yml"),
-                ],
-            ),
-            patch.dict(
-                os.environ,
-                {
-                    "GH_READ_TOKEN": "read",
-                    "GH_TOKEN": "write",
-                    "GITHUB_STEP_SUMMARY": "",
-                },
-            ),
-            patch.object(subprocess, "run", side_effect=transport),
-            patch.object(scan, "references", return_value=[]),
-            redirect_stdout(io.StringIO()),
-        ):
-            self.assertEqual(scan.main(), 0)
-        self.assertEqual(len(writes), 1)
-        self.assertEqual(writes[0]["labels"], ["ci", "needs-triage"])
 
 
 if __name__ == "__main__":

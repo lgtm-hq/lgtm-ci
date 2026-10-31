@@ -101,19 +101,22 @@ class FakeGitHub(scan.GitHub):
         payload: Any = None,
         read: bool = True,
         source: bool = True,
+        all_pages: bool = False,
     ) -> Any:
         """Record issue mutations and serve fixture repository/issue reads."""
         if read:
             self.reads.append((endpoint, source))
             if endpoint.startswith("orgs/") and self.repositories is not None:
-                return copy.deepcopy(self.repositories)
-            if "state=all" not in endpoint:
-                raise AssertionError("must include closed issues")
-            return copy.deepcopy(self.issues)
+                result = copy.deepcopy(self.repositories)
+            else:
+                if "state=all" not in endpoint:
+                    raise AssertionError("must include closed issues")
+                result = copy.deepcopy(self.issues)
+            return [result] if all_pages else result
         assert isinstance(payload, dict)
         self.writes.append((endpoint, copy.deepcopy(payload)))
         if endpoint.endswith("/comments"):
-            return {}
+            return [{}] if all_pages else {}
         if payload.get("_method") == "PATCH":
             number = int(endpoint.rsplit("/", 1)[1])
             issue = next(item for item in self.issues if item["number"] == number)
@@ -128,7 +131,7 @@ class FakeGitHub(scan.GitHub):
                     "number": len(self.issues) + 1,
                 },
             )
-        return {}
+        return [{}] if all_pages else {}
 
 
 @contextmanager
