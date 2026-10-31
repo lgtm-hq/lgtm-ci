@@ -131,6 +131,9 @@ EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
 SHELL_EXPRESSION = re.compile(r"\$\{[^{}]*\}|\$\(\(.*?\)\)", re.S)
 
 
+PYTHON_FSTRING = re.compile(r"(?i)(?:f|fr|rf)['\"]")
+
+
 SAFE_INPUTS = {
     "actions/setup-python": {"python-version"},
     "actions/setup-node": {"node-version"},
@@ -194,6 +197,20 @@ def concatenated_shell_word(source: str) -> bool:
     return False
 
 
+def unsupported_shell_expansion(lexeme: re.Match[str]) -> bool:
+    """Quoted tokens cannot conceal an expansion beyond the bounded form."""
+    if lexeme.lastgroup == "unsupported":
+        return True
+    text = lexeme.group()
+    if lexeme.lastgroup != "quoted" or not text.startswith('"'):
+        return False
+    return any(
+        not re.match(SHELL_PARAMETER, text[marker.start() :])
+        and not EXPRESSION.match(text, marker.start())
+        for marker in re.finditer(r"\$\{", text)
+    )
+
+
 def shell_opacity(source: str) -> str | None:
     """Identify unsupported syntax before transforming shell source."""
     # Continuation removal depends on quote/comment context. Until that is
@@ -201,13 +218,31 @@ def shell_opacity(source: str) -> str | None:
     if "\\\n" in source:
         return "shell-continuation"
     lexemes = SHELL_LEXEME.finditer(source)
-    if any(match.lastgroup == "unsupported" for match in lexemes):
+    if any(unsupported_shell_expansion(match) for match in lexemes):
         return "shell-expansion"
     # Heredoc payloads are literal data, even when they look like comments
     # or script calls. Delimiter parsing is outside this bounded scanner.
     if any(match["literal"] is None for match in HEREDOC.finditer(source)):
         return "heredoc"
     return None
+
+
+def shell_words(source: str) -> tuple[str, ...]:
+    """Rejoin adjacent lexemes when tokenizing an already normalized script."""
+    # The guard lexer isolates parameters so their whitespace-# stays literal.
+    # Those lexical boundaries are not shell word boundaries: ${dir}/* and
+    # ${a}${b} each remain one word. Only intervening spacing separates words.
+    words: list[str] = []
+    previous_end = -1
+    for match in SHELL_LEXEME.finditer(source):
+        if match.group().isspace():
+            continue
+        if match.start() == previous_end:
+            words[-1] += match.group()
+        else:
+            words.append(match.group())
+        previous_end = match.end()
+    return tuple(words)
 
 
 def normalize(
@@ -464,6 +499,16 @@ class SourceResolver:
                 for item in tokenize.generate_tokens(io.StringIO(source).readline)
                 if item.type not in ignored
             ]
+            # Python 3.11 hides replacement fields in a single STRING token;
+            # newer tokenizers expose FSTRING_START and expression tokens.
+            # Until replacement fields/format specs share a modeled grammar,
+            # neither family may normalize f-string code as path parameters.
+            if any(
+                tokenize.tok_name[item.type] == "FSTRING_START"
+                or (item.type == tokenize.STRING and PYTHON_FSTRING.match(item.string))
+                for item in tokens
+            ):
+                return (self.unknown("python-fstring", source),)
             # Constants and operators are logic, not parameters or comments.
             shape = tuple(
                 ":".join(
@@ -590,11 +635,7 @@ class SourceResolver:
             interpreter and SHELL_TEMPLATE.fullmatch(interpreter + " {0}")
         ):
             normalized = self.command(source, directory, visited)
-            shape = tuple(
-                match.group()
-                for match in SHELL_LEXEME.finditer(normalized)
-                if not match.group().isspace()
-            )
+            shape = shell_words(normalized)
         else:
             shape = (self.unknown("script-interpreter", str((path, interpreter))),)
         if shebang:

@@ -19,6 +19,10 @@ including floor division `//` and augmented assignment `//=`. Python numeric tok
 retain their exact text, including floating-point and exponential constants.
 Python path strings still normalize as parameters; numeric strings remain significant,
 including decimal values and version-like text outside explicit setup-action inputs.
+Python f-strings stay repository-specific: replacement expressions and format specs
+are not modeled, including when Python 3.11 exposes them as a single string token
+or newer tokenizers expose separate f-string tokens. This applies to standalone
+scripts, called scripts and inline Python run blocks; scanned source is never executed.
 Explicit local script paths resolve
 exactly, including extensionless scripts and nested calls; cycles and unresolved
 calls retain their repository-qualified identity, so unknown implementations
@@ -56,7 +60,9 @@ here-strings also stay opaque and repository-specific, preserving payloads that
 look like comments or commands. Simple arithmetic shifts inside `$((...))` remain
 comparable; bare `((...))` with `<<` stays opaque because POSIX sh can interpret
 it as nested subshells with a heredoc. Backslash-newline continuations and parameter
-expansions beyond the bounded data-only form stay repository-specific. Only shell
+expansions beyond the bounded data-only form stay repository-specific, including
+inside double quotes. Bounded expansions preserve shell word adjacency:
+`${dir}/*` and `${dir} /*` have different script shapes. Only shell
 comments hide subsequent shell text; `//` and `/*...*/` remain ordinary words.
 Python process launchers,
 including `os.startfile`, asyncio's subprocess helpers and event-loop

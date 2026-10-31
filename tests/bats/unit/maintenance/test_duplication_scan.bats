@@ -22,6 +22,34 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan revision preserves parameter word adjacency in standalone scripts" {
+	check_case test_parameter_word_script_adjacency "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan revision preserves parameter word adjacency in called scripts" {
+	check_case test_parameter_word_called_adjacency "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan revision guards incomplete double-quoted parameter expansions" {
+	check_case test_quoted_parameter_opacity "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan revision keeps hidden shell executables out of clusters" {
+	check_case test_quoted_parameter_inventory "$SHELL_CHECKS" ShellCases
+}
+
+@test "duplication scan revision keeps Python f-string expressions opaque" {
+	check_case test_python_fstring_expressions "$PYTHON_CHECKS"
+}
+
+@test "duplication scan revision guards Python f-string inventory paths" {
+	check_case test_python_fstring_inventory "$PYTHON_CHECKS"
+}
+
+@test "duplication scan revision guards Python f-string executable dependencies" {
+	check_case test_python_fstring_dependencies "$PYTHON_CHECKS"
+}
+
 @test "duplication scan regression validates visibility across coverage snapshots" {
 	check_case test_visibility_coverage_snapshots "$COVERAGE_CHECKS"
 }

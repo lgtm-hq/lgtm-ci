@@ -12,6 +12,68 @@ from duplication_scan_support import FixtureCase, model, syntax
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
 
+    def test_python_fstring_expressions(self) -> None:
+        """F-string expressions must never pass through path normalization."""
+        for source in (
+            'print(f"{a/b}")\n',
+            "print(F'{a/b}')\n",
+            'print(fr"{a/b}")\n',
+            'print(Rf"{a/b}")\n',
+            'print(f"""value\n{a/b}""")\n',
+            'print(f"{value:{a/b}}")\n',
+        ):
+            with self.subTest(source=source):
+                resolver = syntax.SourceResolver("org/left", {})
+                shape = resolver.python(source)
+                self.assertNotEqual(
+                    shape,
+                    resolver.python(source.replace("a/b", "a/c")),
+                )
+                self.assertNotEqual(
+                    shape,
+                    syntax.SourceResolver("org/right", {}).python(source),
+                )
+                self.assertIn("<unresolved-python-fstring:", " ".join(shape))
+
+    def test_python_fstring_inventory(self) -> None:
+        """Standalone, called and inline Python must share fail-closed handling."""
+        source = 'print(f"{a/b}")\n'
+        path = "scripts/check.py"
+        for changed in (source, source.replace("a/b", "a/c")):
+            for invocation in (None, f"python {path}", "python", "python3 -u {0}"):
+                units = []
+                for repo, text in (("org/left", source), ("org/right", changed)):
+                    if invocation is None:
+                        unit = model.file_units(repo, False, path, text, {}, "")[0]
+                    else:
+                        step = (
+                            {"run": invocation}
+                            if invocation.startswith("python scripts/")
+                            else {"run": text, "shell": invocation}
+                        )
+                        unit = job_unit(repo, {"steps": [step]}, files={path: text})
+                    units.append(unit)
+                with self.subTest(changed=changed, invocation=invocation):
+                    self.assertNotEqual(units[0].fingerprint, units[1].fingerprint)
+                    self.assertEqual(model.clusters(units, [], 0.8), [])
+
+    def test_python_fstring_dependencies(self) -> None:
+        """Launcher names hidden in legacy STRING tokens cannot bypass guards."""
+        path = "scripts/check.py"
+        source = "print(f\"{__import__('os').system('tools/release')}\")\n"
+        units = []
+        jobs = []
+        for repo, body in (
+            ("org/left", "echo release\n"),
+            ("org/right", "echo check\n"),
+        ):
+            files = {path: source, "tools/release": "#!/bin/sh\n" + body}
+            units.extend(model.file_units(repo, False, path, source, files, ""))
+            for step in ({"run": f"python {path}"}, {"run": source, "shell": "python"}):
+                jobs.append(job_unit(repo, {"steps": [step]}, files=files))
+        self.assertEqual(model.clusters(units, [], 0.8), [])
+        self.assertEqual(model.clusters(jobs, [], 0.8), [])
+
     def test_python_multiprocessing_executable_selection(self) -> None:
         """Spawn executable selection stays opaque through imports and aliases."""
         resolver = syntax.SourceResolver("org/left", {})
@@ -499,6 +561,8 @@ class Cases(FixtureCase):
         source = (
             'from pathlib import Path\nversion = "3.11"\n'
             'output = Path("build/output")\nassert coverage >= 0.8\n'
+            '# f"{hidden/call}"\n'
+            "print(\"f'{a/b}'\", r'build/output', b'build/output')\n"
         )
         changed = source.replace("build/output", "dist/result")
         left, right = [

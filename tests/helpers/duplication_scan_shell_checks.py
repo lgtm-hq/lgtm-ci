@@ -13,6 +13,95 @@ from duplication_scan_support import FixtureCase, model, syntax
 class ShellCases(FixtureCase):
     """Bounded shell recognition must preserve execution and word identities."""
 
+    @staticmethod
+    def parameter_word_pairs() -> tuple[tuple[str, str], ...]:
+        """Return inert scanner inputs; no shell source is ever executed."""
+        return (
+            ("rm -rf ${dir}/*", "rm -rf ${dir} /*"),
+            ("echo pre${x}", "echo pre ${x}"),
+            ("echo ${a}${b}", "echo ${a} ${b}"),
+            ("echo ${x}post", "echo ${x} post"),
+            ("echo pre${x}post", "echo pre ${x}post"),
+        )
+
+    def test_parameter_word_script_adjacency(self) -> None:
+        """Re-splitting normalized scripts must retain shell word boundaries."""
+        path = "scripts/check.sh"
+        for source, changed in self.parameter_word_pairs():
+            with self.subTest(source=source):
+                scripts = [
+                    model.file_units(repo, False, path, text, {}, "")[0]
+                    for repo, text in (("org/left", source), ("org/right", changed))
+                ]
+                self.assertEqual(model.clusters(scripts, [], 0.8), [])
+                self.assertNotEqual(
+                    syntax.script_shape(path, source, "org/left", {}),
+                    syntax.script_shape(path, changed, "org/left", {}),
+                )
+                self.assertNotEqual(scripts[0].fingerprint, scripts[1].fingerprint)
+                same = model.file_units("org/right", False, path, source, {}, "")[0]
+                self.assert_units_equivalent(scripts[0], same)
+
+    def test_parameter_word_called_adjacency(self) -> None:
+        """Called-script digests and workflow clusters preserve glued words."""
+        path = "scripts/check.sh"
+        for source, changed in self.parameter_word_pairs():
+            with self.subTest(source=source):
+                jobs = [
+                    job_unit(
+                        repo,
+                        {"steps": [{"run": f"sh {path}"}]},
+                        files={path: text},
+                    )
+                    for repo, text in (("org/left", source), ("org/right", changed))
+                ]
+                self.assertEqual(model.clusters(jobs, [], 0.8), [])
+                self.assertNotEqual(
+                    syntax.command_shape(f"sh {path}", "org/left", {path: source}),
+                    syntax.command_shape(f"sh {path}", "org/left", {path: changed}),
+                )
+                # Inline command shaping already preserved these boundaries.
+                self.assertNotEqual(
+                    syntax.command_shape(source, "org/left", {}),
+                    syntax.command_shape(changed, "org/left", {}),
+                )
+
+    def test_quoted_parameter_opacity(self) -> None:
+        """An incomplete expansion inside quotes cannot conceal executable text."""
+        source = 'echo "${x:-" a # "}"; ./tools/release'
+        changed = source.replace("tools/release", "tools/check")
+        left = {"tools/release": "#!/bin/sh\necho release\n"}
+        right = {"tools/check": "#!/bin/sh\necho check\n"}
+        self.assertNotEqual(
+            syntax.command_shape(source, "org/left", left),
+            syntax.command_shape(changed, "org/right", right),
+        )
+        for prefix in ('echo "${x:-" a # "}"', 'echo "${safe} ${x:-" a # "}"'):
+            with self.subTest(prefix=prefix):
+                self.assertEqual(syntax.shell_opacity(prefix), "shell-expansion")
+                self.assertNotEqual(
+                    syntax.command_shape(prefix, "org/left", {}),
+                    syntax.command_shape(prefix, "org/right", {}),
+                )
+
+    def test_quoted_parameter_inventory(self) -> None:
+        """Inline, called and standalone sources with hidden commands stay apart."""
+        source = 'echo "${x:-" a # "}"; ./tools/release'
+        left = {"tools/release": "#!/bin/sh\necho release\n"}
+        right = {"tools/check": "#!/bin/sh\necho check\n"}
+        self.assert_shell_inventory_distinct(
+            source,
+            source.replace("tools/release", "tools/check"),
+            files=left,
+            other_files=right,
+        )
+        self.assert_shell_inventory_distinct(
+            source,
+            source,
+            files=left,
+            other_files={"tools/release": right["tools/check"]},
+        )
+
     def assert_shell_inventory_distinct(
         self,
         source: str,
@@ -200,6 +289,11 @@ class ShellCases(FixtureCase):
         for source in (
             "echo ${x:- #}",
             "key=${line%% #*}; echo ok",
+            'echo "${x:- #}"',
+            'echo "${a}${b}"',
+            'echo "${{ github.repository }}"',
+            "echo '${x:-\" a # \"}'; echo done",
+            'echo ok # "${x:-" a # "}"',
             "echo $((1 << 2))",
             "echo ok // note; echo done",
             "echo ok /* note */; echo done",
