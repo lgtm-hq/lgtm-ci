@@ -2,8 +2,13 @@
 
 `scripts/ci/maintenance/measure-actions.py` makes GET requests through the existing
 `gh` authentication. It does not change workflows or create scheduled automation.
-Keep its output outside the checkout: checkpoints and API pages can contain
-private repository metadata. Do not publish raw responses or private source.
+The collector refuses output inside a Git checkout: checkpoints and API pages
+can contain private repository metadata. Output and cache directories use mode
+0700 and JSON files use 0600, including existing collector files. Do not publish
+raw responses or private source. This tooling is **Part of #1235**; completing
+the live measurement, publishing a reviewed public-safe report, and validating
+savings remain separate work. A bounded sample does not establish complete
+organization coverage.
 
 ```sh
 python3 scripts/ci/maintenance/measure-actions.py \
@@ -13,6 +18,8 @@ python3 scripts/ci/maintenance/measure-actions.py \
 ```
 
 The window is a half-open UTC **run creation cohort**, not an invoice period.
+Both bounds must use whole seconds and the end must be in the past; an open
+future window cannot provide stable pagination.
 Runs created before the start whose retries occur inside the window are excluded.
 Every attempt from 1 through the observed `run_attempt` is fetched through
 `/actions/runs/{id}/attempts/{attempt}/jobs`, with pagination. The default jobs
@@ -23,11 +30,19 @@ end, unfinished jobs, and missing timestamps are counted as unknown time.
 `checkpoint.json` records inventory and per-repository listing completeness,
 runs, fetched attempts, errors, and the last collection status. `cache/` retains
 each successful API page atomically, including pages from interrupted pagination.
-Re-run the same command to resume, add `--jobs-only` to use the existing run
-inventory, or add `--offline` to reaggregate without API access. Each invocation
-has its own maximum 12-minute budget; callers must budget
+Re-run the same command to resume. Normal resumes refresh all run listing
+pages to discover status changes and new retries, while retaining finished
+attempts. Unfinished or partially fetched attempts have their cached pages
+replaced. Add `--jobs-only` to use the existing run inventory; this cannot
+discover new retries or refresh an unfinished run's status, so use a normal
+resume to finish such runs. Add `--offline` to reaggregate without API access.
+Offline mode uses the entire stored checkpoint and ignores `--repo` and
+`--private-org` for scope; its completeness describes only that checkpoint.
+Each invocation has its own maximum 12-minute budget; callers must budget
 multiple invocations themselves. Exit code 2 means incomplete collection; zero
-means all listed runs have all observed attempts, including empty attempts.
+requires complete listings and finished runs with all observed attempts,
+including empty terminal attempts. Unknown timing and billing remain visible
+in the stdout summary even when API collection is complete.
 Inventory includes every private repository **visible to the credential**, even
 archived repositories; token visibility cannot prove organization-wide access.
 
@@ -36,17 +51,22 @@ ranges when GitHub's 1,000-result search cap is reached. Half the remaining
 budget is reserved for jobs; interrupted listings retain observed runs from
 cached pages and remain explicitly incomplete. Jobs are fetched round-robin
 across repositories and workflows, newest first within each workflow, using
-four workers at at most four
-requests per second. At fewer than 100 remaining primary requests, or any
+four workers and a global limit of four requests per second. At fewer than 100
+remaining primary requests, or any
 403/429, it stops network work instead of retrying. Other failed requests are
-recorded as coverage gaps. The deadline bounds each subprocess timeout as well.
+recorded as coverage gaps. Optional organization inventory failures preserve
+incomplete coverage while independently requested and checkpointed repositories
+continue within the remaining budget. A global 403/429 stop still applies to
+all repositories without automatic retry. The deadline bounds each subprocess
+timeout as well.
 
 `measurements.json` contains per-workflow and per-job aggregates, with first and
 retry counters separately. Workflow trigger counts describe **listed runs**;
 job metrics describe **fetched attempts**. A partial ranking is only a ranking of
 observed usage and cannot establish the organization's true top ten. No full
-window extrapolation is applied. Minutes per run are null unless all attempts
-were fetched; unknown intervals still need checking even then.
+window extrapolation is applied. Minutes per run are null unless the repository
+listing is complete, all observed runs and attempts have finished, and every
+relevant job duration is known.
 
 - `wall_seconds / 60`: summed elapsed job minutes, including parallel jobs.
   This is neither pipeline latency nor billed time.
