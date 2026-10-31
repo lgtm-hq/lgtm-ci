@@ -19,11 +19,29 @@ SCRIPT_CALL = re.compile(
 )
 
 
-COMMAND_PREFIX = (
-    r"(?P<prefix>(?:^|[;&|\n(])\s*"
-    r"(?:(?:env\s+)?(?:[A-Za-z_]\w*=\S+\s+)*)"
-    r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)"
-    r"\s+(?:-[\w-]+\s+)*)?)"
+# This is a bounded set of recognizable command positions, not a shell parser.
+# The same positions/wrappers must guard directory changes and executable paths.
+SHELL_POSITION = r"(?:^|[;&|\n(){}])\s*(?:(?:if|then|else|elif|do|while|until|!)\s+)*"
+COMMAND_START = (
+    SHELL_POSITION + r"(?:(?:sudo|nohup|command|builtin|env|exec|time)\s+"
+    r"|[A-Za-z_]\w*=[^\s;&|]+\s+)*"
+)
+RUNNER = r"(?:(?:uv|bun)\s+run\s+|timeout\s+\d+(?:\.\d+)?[smhd]?\s+)?"
+INTERPRETER = r"(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)\s+"
+INTERPRETER_FLAGS = (
+    r"(?:(?:-[efuvxn]*o\s+(?:pipefail|errexit|nounset)"
+    r"|-[efuvxnBIESO]+|--(?:noprofile|norc))\s+)*"
+)
+COMMAND_PREFIX = "".join(
+    (
+        r"(?P<prefix>",
+        COMMAND_START,
+        RUNNER,
+        r"(?:",
+        INTERPRETER,
+        INTERPRETER_FLAGS,
+        r")?)",
+    )
 )
 LOCAL_PROGRAM = re.compile(
     COMMAND_PREFIX + r"(?P<quote>['\"])?(?P<path>"
@@ -37,8 +55,7 @@ DYNAMIC_PROGRAM = re.compile(
 )
 
 INTERPRETED_PROGRAM = re.compile(
-    r"(?P<prefix>(?:^|[;&|\n(])\s*"
-    r"(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source|\.)\s+)"
+    r"(?P<prefix>" + COMMAND_START + RUNNER + INTERPRETER + INTERPRETER_FLAGS + r")"
     r"(?P<quote>['\"])?(?P<path>"
     r"(?(quote)[^'\"\n]+|[\w./][\w./-]*))(?(quote)(?P=quote))"
 )
@@ -53,15 +70,35 @@ SCRIPT_PROGRAM = re.compile(
     )
 )
 DIRECTORY_CHANGE = re.compile(
-    r"(?:^|[;&|\n(]|\b(?:if|then|else|elif|do|while|until)\s+)\s*"
-    r"(?:(?:command|builtin|env)\s+|[A-Za-z_]\w*=\S+\s+)*"
-    r"['\"]?(?:cd|pushd|popd)['\"]?(?=\s|$|[;&|)])"
+    COMMAND_START + r"(?:!\s*)?" r"['\"]?(?:cd|pushd|popd)['\"]?(?=\s|$|[;&|)])"
 )
 INLINE_PROGRAM = re.compile(
-    r"(?:^|[;&|\n(])\s*(?:env\s+)?(?:[A-Za-z_]\w*=\S+\s+)*"
-    r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
+    COMMAND_START + RUNNER + r"(?:(?:bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh)\s+"
     r"(?:-\w+\s+)*-\w*[ce]\b|eval\b)"
 )
+
+# Ignore proven data arguments only when checking for unresolved executables.
+# Quoted separators remain part of the argument, never new command positions.
+ARGUMENTS = r"""(?:[^\n;&|(){}'"#]|"(?:\\.|[^"\\])*"|'[^']*')*"""
+DATA_COMMAND = re.compile(
+    "".join(
+        (
+            COMMAND_START,
+            r"(?:echo|cat|printf|ls|test|\[|gh\s+api|python[\d.]*\s+-m\s+[\w.]+)",
+            r"(?=\s|$)",
+            ARGUMENTS,
+        )
+    )
+)
+RESOLVED_COMMAND = re.compile(
+    COMMAND_PREFIX + r"<(?:script|unresolved-script):[a-f0-9]+>" + ARGUMENTS
+)
+UNSUPPORTED_WRAPPER = re.compile(
+    SHELL_POSITION + r"(?:[A-Za-z_]\w*=[^\s;&|]+\s+)*"
+    r"(?:sudo|nohup|command|builtin|env|exec|time|uv|bun|timeout|xargs|"
+    r"bash|sh|zsh|python[\d.]*|node|ruby|perl|pwsh|source)(?=\s|$)"
+)
+UNRESOLVED_PATH = re.compile(SCRIPT_CALL.pattern + r"|[\w.${}/-]+/[\w.${}/-]+")
 
 
 EXPRESSION = re.compile(r"\$\{\{.*?\}\}", re.S)
@@ -96,6 +133,20 @@ def executable_matches(pattern: re.Pattern[str], source: str) -> list[re.Match[s
         for match in pattern.finditer(source)
         if not any(start < match.start() < end for start, end in literals)
     ]
+
+
+def ambiguous_executable(source: str) -> bool:
+    """Fail closed when bounded recognition leaves a possible executable path."""
+    source = "".join(
+        match.group()
+        for match in LEXEME.finditer(source)
+        if not match.group().startswith(("#", "/*", "//"))
+    )
+    for pattern in (DATA_COMMAND, RESOLVED_COMMAND):
+        for match in reversed(executable_matches(pattern, source)):
+            source = source[: match.start()] + "\n" + source[match.end() :]
+    wrappers = executable_matches(UNSUPPORTED_WRAPPER, source)
+    return bool(wrappers or UNRESOLVED_PATH.search(source))
 
 
 def normalize(source: str, repository: str) -> str:
@@ -241,6 +292,8 @@ class SourceResolver:
                     + replace(match["path"])
                     + source[match.end() :]
                 )
+        if ambiguous_executable(source):
+            return self.unknown("shell-command", source)
         return normalize(source, self.repository)
 
     def script(

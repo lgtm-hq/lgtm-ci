@@ -197,6 +197,18 @@ class Cases(FixtureCase):
             "builtin cd app; bash scripts/check.sh",
             "pushd app; bash scripts/check.sh; popd",
             "if true; then cd app; fi; bash scripts/check.sh",
+            "{ cd app; bash scripts/check.sh; }",
+            "{ cd app\nbash scripts/check.sh; }",
+            "f() { cd app; }; f; bash scripts/check.sh",
+            "! cd app || true; bash scripts/check.sh",
+            "time cd app; bash scripts/check.sh",
+            "sudo cd app; bash scripts/check.sh",
+            "nohup command env cd app; bash scripts/check.sh",
+            "if cd app; then bash scripts/check.sh; fi",
+            "while false; do cd app; done; bash scripts/check.sh",
+            "until cd app; do true; done; bash scripts/check.sh",
+            "env --chdir=app bash scripts/check.sh",
+            "sudo -u runner cd app; bash scripts/check.sh",
         ):
             with self.subTest(command=command):
                 files = {
@@ -224,6 +236,113 @@ class Cases(FixtureCase):
             syntax.command_shape(ordinary, "org/left", files),
             syntax.command_shape(ordinary, "org/right", files),
         )
+
+    def test_wrapped_script_identity(self) -> None:
+        """Supported wrappers and shell positions compare actual called bodies."""
+        commands = [
+            ("uv run {path}", "py"),
+            ("uv run python {path}", "py"),
+            ("bun run {path}", "ts"),
+            ("timeout 60 {path}", "sh"),
+            ("exec {path}", "sh"),
+            ("time bash {path}", "sh"),
+            ("bash -euo pipefail {path}", "sh"),
+            ("if {path}; then true; fi", "sh"),
+            ("if true; then {path}; fi", "sh"),
+            ("if false; then true; else {path}; fi", "sh"),
+            ("if false; then true; elif {path}; then true; fi", "sh"),
+            ("while false; do {path}; done", "sh"),
+            ("while {path}; do true; done", "sh"),
+            ("until {path}; do true; done", "sh"),
+            ("! {path}", "sh"),
+            ("{{ {path}; }}", "sh"),
+            ("sudo {path}", "sh"),
+            ("nohup {path}", "sh"),
+            ("command {path}", "sh"),
+            ("env MODE=test {path}", "sh"),
+            ("if true; then time env MODE=test bash {path}; fi", "sh"),
+            ('command bash "{path}"', "sh"),
+        ]
+        bodies = {
+            "py": ("print('check')", "raise RuntimeError('release')"),
+            "ts": ("console.log('check')", "throw Error('release')"),
+            "sh": ("echo check", "exit 7"),
+        }
+        for template, extension in commands:
+            path = f"scripts/check.{extension}"
+            command = template.format(path=path)
+            files = {path: bodies[extension][0], "scripts/wrapper.sh": command}
+            for run in (command, "bash scripts/wrapper.sh"):
+                with self.subTest(run=run, command=command):
+                    block = {"steps": [{"run": run}]}
+                    left = job_unit("org/left", block, files=files)
+                    same = job_unit("org/right", block, files=files)
+                    changed = job_unit(
+                        "org/right",
+                        block,
+                        files={**files, path: bodies[extension][1]},
+                    )
+                    self.assertEqual(left.fingerprint, same.fingerprint)
+                    self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                    self.assertNotEqual(left.fingerprint, changed.fingerprint)
+                    self.assertEqual(model.clusters([left, changed], [], 0.8), [])
+                    missing = job_unit(
+                        "org/right",
+                        block,
+                        files={"scripts/wrapper.sh": command},
+                    )
+                    self.assertEqual(model.clusters([left, missing], [], 0.8), [])
+
+    def test_ambiguous_wrapper_identity(self) -> None:
+        """Unmodeled wrapper options and executables cannot mask unknown logic."""
+        for template in (
+            "xargs -n1 bash {path}",
+            "custom-runner {path}",
+            'custom-runner "{path}"',
+            "sudo -u runner bash {path}",
+            "uv run --project app {path}",
+            "timeout --signal=TERM 60 {path}",
+            "env --chdir=app bash {path}",
+            "bash --rcfile config {path}",
+        ):
+            for path in ("scripts/check.sh", "tools/check"):
+                command = template.format(path=path)
+                for body in ("echo check", "exit 7"):
+                    files = {path: body, "scripts/wrapper.sh": command}
+                    for run in (command, "bash scripts/wrapper.sh"):
+                        with self.subTest(command=command, body=body, run=run):
+                            block = {"steps": [{"run": run}]}
+                            left = job_unit("org/left", block, files=files)
+                            for other in ("echo check", "exit 7"):
+                                right = job_unit(
+                                    "org/right",
+                                    block,
+                                    files={**files, path: other},
+                                )
+                                self.assertNotEqual(left.fingerprint, right.fingerprint)
+                                self.assertEqual(
+                                    model.clusters([left, right], [], 0.8),
+                                    [],
+                                )
+
+    def test_wrapped_script_data(self) -> None:
+        """Keywords, groups and wrapper words inside ordinary data stay data."""
+        path = "scripts/check.sh"
+        for command in (
+            f"if true; then echo {path}; fi",
+            f"{{ cat {path}; }}",
+            f"command printf '%s\\n' {path}",
+            f"env MODE=test echo {path}",
+            f'echo "{{ cd app; time bash {path}; }}"',
+            f"printf '%s' 'if uv run {path}; then xargs bash {path}; fi'",
+            f"echo ready # time cd app; bash {path}",
+            f"cat '{path}'",
+        ):
+            with self.subTest(command=command):
+                files = {path: "echo check"}
+                left = syntax.command_shape(command, "org/left", files)
+                right = syntax.command_shape(command, "org/right", {path: "exit 7"})
+                self.assertEqual(left, right)
 
     def test_working_directory_and_defaults(self) -> None:
         """Directory identity and inherited run defaults select the actual script."""

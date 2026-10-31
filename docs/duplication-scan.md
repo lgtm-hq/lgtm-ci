@@ -22,10 +22,16 @@ the blob inventory only; matching always resolves an exact execution path.
 Step `working-directory` and workflow/job `defaults.run` remain significant;
 relative script paths resolve against their effective directory. Quoted string
 whitespace also remains significant. Script-looking arguments such as
-`echo scripts/missing.sh` are data, not executable dependencies. Shell blocks
-that change directories with `cd`, `pushd` or `popd` stay repository-specific;
-their control flow is not modeled. Python process launchers, including asyncio's
-subprocess helpers, also stay unknown until command identities can be compared.
+`echo scripts/missing.sh` are data, not executable dependencies. The scanner
+recognizes common keyword/group positions, simple `uv run`, `bun run`, `timeout`,
+interpreter flags and option-free `sudo`, `nohup`, `command`, `env`, `exec` and
+`time` wrappers. Unrecognized wrappers or options with possible executable paths
+stay repository-specific; this bounded recognition does not parse arbitrary
+shell syntax. For example, `xargs -n1 bash scripts/check.sh` stays unknown.
+Shell blocks that change directories with `cd`, `pushd` or `popd` stay
+repository-specific; their control flow is not modeled. Python process launchers,
+including asyncio's subprocess helpers, also stay unknown until command
+identities can be compared.
 Local JavaScript/Docker actions, shell command substitutions, inline programs,
 unresolved dynamic paths and cycles stay unknown. Bare names never use basename fallback.
 Absence of findings does not establish absence of duplication.

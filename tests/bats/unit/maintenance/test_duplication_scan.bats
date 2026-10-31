@@ -190,6 +190,18 @@ check_case() {
 	check_case test_shell_directory_changes "$REGRESSION_CHECKS"
 }
 
+@test "duplication scan compares script bodies behind supported wrappers and shell keywords" {
+	check_case test_wrapped_script_identity "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan keeps ambiguous wrapper executables repository-specific" {
+	check_case test_ambiguous_wrapper_identity "$REGRESSION_CHECKS"
+}
+
+@test "duplication scan preserves script-like data around groups keywords and wrappers" {
+	check_case test_wrapped_script_data "$REGRESSION_CHECKS"
+}
+
 @test "duplication scan blocks all reconciliation mutations when source coverage is partial" {
 	check_case test_partial_inventory_blocks_reconciliation "$TRANSPORT_CHECKS"
 }
