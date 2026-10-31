@@ -1,5 +1,6 @@
 # SPDX-License-Identifier: MIT
 # In-memory fixture repositories: never contacted through GitHub.
+# Use a known data command for parameter-only jobs; Python modules stay opaque.
 repositories:
   - full_name: lgtm-hq/alpha
     private: false
@@ -13,7 +14,7 @@ repositories:
               - uses: actions/setup-python@bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
                 with:
                   python-version: '3.13'
-              - run: python -m build --outdir dist/alpha --image ghcr.io/lgtm-hq/alpha:1.0
+              - run: echo build --outdir dist/alpha --image ghcr.io/lgtm-hq/alpha:1.0
           local:
             runs-on: ubuntu-26.04
             steps:
@@ -35,7 +36,7 @@ repositories:
               - uses: actions/setup-python@dddddddddddddddddddddddddddddddddddddddd
                 with:
                   python-version: '3.14'
-              - run: python -m build --outdir dist/beta --image ghcr.io/lgtm-hq/beta:2.0
+              - run: echo build --outdir dist/beta --image ghcr.io/lgtm-hq/beta:2.0
       .github/scripts/cleanup.sh: |
         #!/usr/bin/env bash
         set -eu
@@ -52,4 +53,4 @@ repositories:
               - uses: actions/setup-python@ffffffffffffffffffffffffffffffffffffffff
                 with:
                   python-version: SECRET_INPUT_CANARY
-              - run: python -m build --outdir secret/SECRET_SOURCE_CANARY --image ghcr.io/lgtm-hq/private-project:3.0
+              - run: echo build --outdir secret/SECRET_SOURCE_CANARY --image ghcr.io/lgtm-hq/private-project:3.0

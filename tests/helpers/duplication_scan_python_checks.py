@@ -1,16 +1,110 @@
 # SPDX-License-Identifier: MIT
-"""Conservative Python source regressions driven by the scanner BATS suite."""
+"""Conservative executable source regressions driven by the scanner BATS suite."""
 
 from __future__ import annotations
 
 import unittest
 
 from duplication_scan_regression_checks import job_unit
-from duplication_scan_support import FixtureCase, model
+from duplication_scan_support import FixtureCase, model, syntax
 
 
 class Cases(FixtureCase):
     """Keep unknown imports isolated and executable constants significant."""
+
+    def test_decimal_command_arguments(self) -> None:
+        """Durations, thresholds and timeouts are behavior, even when quoted."""
+        path = "scripts/check.sh"
+        for original, changed in (
+            ("sleep 0.5", "sleep 30.0"),
+            ('sleep "0.5"', 'sleep "30.0"'),
+            ("sleep '0.5'", "sleep '30.0'"),
+            ("check --threshold 0.8", "check --threshold 0.9"),
+            ("check --timeout=1.5", "check --timeout=2.5"),
+            ("check --threshold -1.2e3", "check --threshold -1.3e3"),
+        ):
+            with self.subTest(original=original, changed=changed):
+                self.assertNotEqual(
+                    syntax.normalize(original, "org/left"),
+                    syntax.normalize(changed, "org/right"),
+                )
+                repos = ("org/left", "org/right", "org/right")
+                sources = (original, original, changed)
+                scripts = [
+                    model.units(repo, False, {path: source})[0]
+                    for repo, source in zip(repos, sources, strict=True)
+                ]
+                jobs = [
+                    job_unit(repo, {"steps": [{"run": source}]})
+                    for repo, source in zip(repos, sources, strict=True)
+                ]
+                callers = [
+                    job_unit(
+                        repo,
+                        {"steps": [{"run": f"bash {path}"}]},
+                        files={path: source},
+                    )
+                    for repo, source in zip(repos, sources, strict=True)
+                ]
+                for left, same, right in (scripts, jobs, callers):
+                    self.assertNotIn("<unresolved-", " ".join(left.shape))
+                    self.assertEqual(left.fingerprint, same.fingerprint)
+                    self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                    self.assertNotEqual(left.fingerprint, right.fingerprint)
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        self.assertEqual(
+            syntax.normalize(
+                "echo --outdir build/output --image ghcr.io/org/left:1.0", "org/left"
+            ),
+            syntax.normalize(
+                "echo --outdir dist/result --image ghcr.io/org/right:2.0", "org/right"
+            ),
+        )
+
+    def test_python_module_commands(self) -> None:
+        """Module invocations cannot establish equality from uninspected bodies."""
+        path = "scripts/check.sh"
+        for command, dependency in (
+            ("python -m tools.check", "tools/check.py"),
+            ("python3.13 -m tools.check", "tools/check/__main__.py"),
+            ("uv run python -m tools.check", "tools/check.py"),
+            ("env MODE=test python -m tools.check", "tools/check.py"),
+            ("python -m build", "build/__main__.py"),
+        ):
+            for implementation in ("print('check')\n", "raise SystemExit(7)\n", None):
+                with self.subTest(command=command, implementation=implementation):
+                    inventories = [{dependency: "print('check')\n"}]
+                    inventories.append(
+                        {dependency: implementation} if implementation is not None else {}
+                    )
+                    jobs = [
+                        job_unit(repo, {"steps": [{"run": command}]}, files=files)
+                        for repo, files in zip(
+                            ("org/left", "org/right"), inventories, strict=True
+                        )
+                    ]
+                    scripts = [
+                        model.file_units(repo, False, path, command, files, "")[0]
+                        for repo, files in zip(
+                            ("org/left", "org/right"), inventories, strict=True
+                        )
+                    ]
+                    for left, right in (jobs, scripts):
+                        self.assertIn("<unresolved-", " ".join(left.shape))
+                        self.assertNotEqual(left.fingerprint, right.fingerprint)
+                        self.assertEqual(model.clusters([left, right], [], 0.8), [])
+        # Explicit Python files are still inspected; module-like data stays data.
+        for command in ("python scripts/check.py", 'echo "python -m tools.check"'):
+            jobs = [
+                job_unit(
+                    repo,
+                    {"steps": [{"run": command}]},
+                    files={"scripts/check.py": "print('check')\n"},
+                )
+                for repo in ("org/left", "org/right")
+            ]
+            self.assertEqual(jobs[0].fingerprint, jobs[1].fingerprint)
+            self.assertEqual(len(model.clusters(jobs, [], 0.8)), 1)
 
     def test_python_operators(self) -> None:
         """Operators retain behavior in standalone and workflow-called scripts."""

@@ -18,6 +18,14 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan preserves decimal command durations thresholds and timeouts" {
+	check_case test_decimal_command_arguments "$PYTHON_CHECKS"
+}
+
+@test "duplication scan keeps uninspected Python module invocations repository-specific" {
+	check_case test_python_module_commands "$PYTHON_CHECKS"
+}
+
 @test "duplication scan preserves Python numeric thresholds in scripts and workflow calls" {
 	check_case test_python_numeric_thresholds "$PYTHON_CHECKS"
 }

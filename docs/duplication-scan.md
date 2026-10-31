@@ -12,7 +12,8 @@ spacing, action refs, repository/image names, paths and versions. Known version
 inputs to setup-python, setup-node and setup-uv are parameters. Unknown action
 inputs, executable programs, environment values and execution metadata
 (including dependencies, permissions and runner selection) remain significant.
-Step ordering, conditions, shell command boundaries, and Python indentation and
+Step ordering, conditions, shell command boundaries, decimal command arguments
+(including quoted durations, thresholds and timeouts), and Python indentation and
 numeric tokens also remain significant. Python operators retain their exact text,
 including floor division `//` and augmented assignment `//=`. Python numeric tokens
 retain their exact text, including floating-point and exponential constants; Python path/version
@@ -38,32 +39,13 @@ identities can be compared. Local, relative and third-party Python imports
 keep the entrypoint repository-specific, even when helper source is available:
 their implementations are not inspected. Standard-library imports remain
 comparable unless an inventoried Python module or package could shadow them.
+Python module invocations (`python -m`, including third-party tools such as
+`python -m build`) stay repository-specific: module implementations and their
+execution context are not resolved. Explicit Python file invocations still use
+the inspected script body.
 Local JavaScript/Docker actions, shell command substitutions, inline programs,
 unresolved dynamic paths and cycles stay unknown. Bare names never use basename fallback.
 Absence of findings does not establish absence of duplication.
-
-Known follow-up: the shared text normalizer still masks bare dotted numbers in
-non-Python scripts and workflow `run` blocks as versions. For example,
-`sleep 0.5` and `sleep 30.0` have identical fingerprints and can qualify an
-automatic issue. Distinguishing executable arguments from dependency/version
-parameters needs command context, including quoted arguments; a numeric regex
-alone cannot establish that distinction. Replace the blanket version mask in
-those contexts with bounded recognition of known dependency/version parameters,
-retaining executable decimal values and existing path/image normalization.
-This remains deferred rather than adding a language parser in this revision.
-Reproduce offline from the repository root (currently prints `True 1`):
-
-```sh
-PYTHONDONTWRITEBYTECODE=1 PYTHONPATH=scripts/ci/maintenance /usr/bin/python3 - <<'PY'
-import duplication_model as model
-units = [
-    model.units(repo, False, {"scripts/check.sh": source})[0]
-    for repo, source in (("org/left", "sleep 0.5"), ("org/right", "sleep 30.0"))
-]
-print(units[0].fingerprint == units[1].fingerprint,
-      len(model.clusters(units, [], 0.8)))
-PY
-```
 
 Two consumer repositories qualify a cluster; one consumer qualifies when it
 matches a catalog implementation. Automatic issues require identical normalized

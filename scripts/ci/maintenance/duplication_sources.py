@@ -81,12 +81,13 @@ INLINE_PROGRAM = re.compile(
 
 # Ignore proven data arguments only when checking for unresolved executables.
 # Quoted separators remain part of the argument, never new command positions.
+# Python -m executes uninspected modules and must reach the wrapper guard.
 ARGUMENTS = r"""(?:[^\n;&|(){}'"#]|"(?:\\.|[^"\\])*"|'[^']*')*"""
 DATA_COMMAND = re.compile(
     "".join(
         (
             COMMAND_START,
-            r"(?:echo|cat|printf|ls|test|\[|gh\s+api|python[\d.]*\s+-m\s+[\w.]+)",
+            r"(?:echo|cat|printf|ls|test|\[|gh\s+api)",
             r"(?=\s|$)",
             ARGUMENTS,
         )
@@ -151,12 +152,15 @@ def ambiguous_executable(source: str) -> bool:
     return bool(wrappers or UNRESOLVED_PATH.search(source))
 
 
-def normalize(source: str, repository: str) -> str:
+def normalize(
+    source: str, repository: str, *, version_parameter: bool = False
+) -> str:
     """Remove comments/spacing and mask repository, image, path and version literals.
 
     Keep command names, flags, operators, conditions and string contents unless
-    they are recognizable parameters. In particular, quoted shell programs are
-    not collapsed to a single placeholder.
+    they are recognizable parameters. Version masking requires an explicit
+    parameter context; decimal command arguments, including quoted ones, are
+    executable behavior. Quoted shell programs are not collapsed.
     """
     source = "".join(
         match.group()
@@ -185,12 +189,14 @@ def normalize(source: str, repository: str) -> str:
 
     source = EXPRESSION.sub(protect, source)
     source = SHELL_EXPRESSION.sub(protect, source)
+    # Mask image tags before repository placeholders break their literal syntax.
+    source = re.sub(r"\b(?:ghcr\.io|docker\.io)/[\w./:@-]+", "<image>", source)
     source = source.replace(repository, "<repository>")
     source = re.sub(r"([\w.-]+/[\w./-]+)@[a-fA-F0-9]{40}\b", r"\1", source)
-    source = re.sub(r"\b(?:ghcr\.io|docker\.io)/[\w./:@-]+", "<image>", source)
     source = re.sub(r"(?<![\w])(?:\./|\.\./|/)[\w./${}-]+", "<path>", source)
     source = re.sub(r"\b[\w.-]+/[\w./-]+(?:\.[\w-]+)?\b", "<path>", source)
-    source = re.sub(r"\b\d+(?:\.\d+)+(?:[\w.+-]*)\b", "<version>", source)
+    if version_parameter:
+        source = re.sub(r"\b\d+(?:\.\d+)+(?:[\w.+-]*)\b", "<version>", source)
     tokens: list[str] = []
     for match in LEXEME.finditer(source):
         lexeme = match.group()
@@ -359,7 +365,11 @@ class SourceResolver:
                             (
                                 item.string
                                 if item.type in {tokenize.NUMBER, tokenize.OP}
-                                else normalize(item.string, self.repository)
+                                else normalize(
+                                    item.string,
+                                    self.repository,
+                                    version_parameter=item.type == tokenize.STRING,
+                                )
                             ),
                         )
                     )
