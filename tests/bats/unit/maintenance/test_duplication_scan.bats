@@ -18,6 +18,14 @@ check_case() {
 	assert_success
 }
 
+@test "duplication scan preserves Python numeric thresholds in scripts and workflow calls" {
+	check_case test_python_numeric_thresholds "$PYTHON_CHECKS"
+}
+
+@test "duplication scan still masks Python string parameters and safe version inputs" {
+	check_case test_python_known_parameters "$PYTHON_CHECKS"
+}
+
 @test "duplication scan clusters parameter-only jobs and excludes product-specific logic" {
 	check_case test_near_identical_jobs
 }

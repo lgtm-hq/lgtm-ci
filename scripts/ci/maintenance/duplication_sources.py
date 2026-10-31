@@ -351,8 +351,18 @@ class SourceResolver:
                     for item in tokenize.generate_tokens(io.StringIO(source).readline)
                     if item.type not in ignored
                 ]
+                # Numeric constants are executable logic, not version parameters.
                 shape = tuple(
-                    ":".join((str(item.type), normalize(item.string, self.repository)))
+                    ":".join(
+                        (
+                            str(item.type),
+                            (
+                                item.string
+                                if item.type == tokenize.NUMBER
+                                else normalize(item.string, self.repository)
+                            ),
+                        )
+                    )
                     for item in tokens
                 )
                 if self.uninspected_python_imports(source):

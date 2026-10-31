@@ -1,5 +1,5 @@
 # SPDX-License-Identifier: MIT
-"""Conservative Python import regressions driven by the scanner BATS suite."""
+"""Conservative Python source regressions driven by the scanner BATS suite."""
 
 from __future__ import annotations
 
@@ -10,7 +10,82 @@ from duplication_scan_support import FixtureCase, model
 
 
 class Cases(FixtureCase):
-    """Keep imported implementations unknown and preserve known stdlib controls."""
+    """Keep unknown imports isolated and executable constants significant."""
+
+    def test_python_numeric_thresholds(self) -> None:
+        """Different numeric logic cannot qualify standalone or called scripts."""
+        path = "scripts/check.py"
+        for template, original, changed in (
+            ("assert coverage >= {}\n", "0.8", "0.9"),
+            ("threshold = {}\n", "1.5", "2.5"),
+            ("assert delta >= {}\n", "-0.8", "-0.9"),
+            ("assert coverage >= {}\n", "0.8", "1.2e3"),
+            ("assert elapsed < {}\n", "1.2e3", "1.3e3"),
+            ("if coverage < {}:\n    raise SystemExit(1)\n", "0.8", "0.9"),
+            ("while elapsed < {}:\n    elapsed += 1\n", "1.2e3", "1.3e3"),
+            ("threshold = {}\n", "1.2e3", "1.2E3"),
+        ):
+            values = (original, original, changed)
+            sources = [template.format(value) for value in values]
+            scripts = [
+                model.units(repo, False, {path: source})[0]
+                for repo, source in zip(
+                    ("org/left", "org/right", "org/right"), sources, strict=True
+                )
+            ]
+            jobs = [
+                job_unit(
+                    repo,
+                    {"steps": [{"run": f"python {path}"}]},
+                    files={path: source},
+                )
+                for repo, source in zip(
+                    ("org/left", "org/right", "org/right"), sources, strict=True
+                )
+            ]
+            for left, same, right in (scripts, jobs):
+                with self.subTest(
+                    template=template,
+                    values=(original, changed),
+                    kind=left.kind,
+                ):
+                    self.assertNotIn("<unresolved-", " ".join(left.shape))
+                    self.assertEqual(left.fingerprint, same.fingerprint)
+                    self.assertEqual(len(model.clusters([left, same], [], 0.8)), 1)
+                    self.assertNotEqual(left.fingerprint, right.fingerprint)
+                    self.assertEqual(model.clusters([left, right], [], 0.8), [])
+
+    def test_python_known_parameters(self) -> None:
+        """Path/version strings and safe workflow inputs still mask parameters."""
+        path = "scripts/check.py"
+        source = (
+            'from pathlib import Path\nversion = "3.11"\n'
+            'output = Path("build/output")\nassert coverage >= 0.8\n'
+        )
+        changed = source.replace('"3.11"', '"3.12"')
+        changed = changed.replace("build/output", "dist/result")
+        left, right = [
+            model.units(repo, False, {path: text})[0]
+            for repo, text in (("org/left", source), ("org/right", changed))
+        ]
+        self.assertEqual(left.fingerprint, right.fingerprint)
+        self.assertEqual(len(model.clusters([left, right], [], 0.8)), 1)
+        for action, name in (
+            ("actions/setup-python", "python-version"),
+            ("actions/setup-node", "node-version"),
+            ("astral-sh/setup-uv", "version"),
+            ("astral-sh/setup-uv", "python-version"),
+        ):
+            with self.subTest(action=action, name=name):
+                jobs = [
+                    job_unit(
+                        repo,
+                        {"steps": [{"uses": f"{action}@abc", "with": {name: version}}]},
+                    )
+                    for repo, version in (("org/left", "3.11"), ("org/right", "3.12"))
+                ]
+                self.assertEqual(jobs[0].fingerprint, jobs[1].fingerprint)
+                self.assertEqual(len(model.clusters(jobs, [], 0.8)), 1)
 
     def test_python_local_imports(self) -> None:
         """An identical entrypoint cannot hide different imported implementations."""
