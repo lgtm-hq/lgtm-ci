@@ -44,7 +44,12 @@ def check_schema(report: Report, schema: dict[str, Any]) -> bool:
         row = exceptions["items"]
         definitions = [
             (schema, where, "object", OBJECT_KEYWORDS),
-            (properties["schema-version"], f"{where}.schema-version", "integer", {"enum"}),
+            (
+                properties["schema-version"],
+                f"{where}.schema-version",
+                "integer",
+                {"enum"},
+            ),
             (exceptions, f"{where}.exceptions", "array", {"items"}),
             (row, f"{where}.exceptions.items", "object", OBJECT_KEYWORDS),
         ]
@@ -174,7 +179,9 @@ def check_local_exceptions(
         or version not in schema["properties"]["schema-version"]["enum"]
     ):
         allowed = schema["properties"]["schema-version"]["enum"]
-        report.error(where, f"`schema-version` must be {' or '.join(map(str, allowed))}")
+        report.error(
+            where, f"`schema-version` must be {' or '.join(map(str, allowed))}"
+        )
     rows = data.get("exceptions")
     if not isinstance(rows, list) or not all(isinstance(row, dict) for row in rows):
         report.error(where, "`exceptions` must be a list of mappings")
